@@ -1,0 +1,20 @@
+[MASTER]
+ignore-patterns=^test_.*
+
+[MESSAGES CONTROL]
+#disable = C0330, C0326
+
+[FORMAT]
+# Maximum number of characters on a single line.
+max-line-length=100
+
+[SIMILARITIES]
+# Minimum lines number of a similarity.
+min-similarity-lines=9
+
+[DESIGN]
+# Maximum number of arguments for function / method
+max-args=5
+
+# Maximum number of locals for function / method body
+max-locals=15

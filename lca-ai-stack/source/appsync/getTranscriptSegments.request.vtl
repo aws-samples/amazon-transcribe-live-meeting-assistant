@@ -1,0 +1,25 @@
+#set( $PK = "trs#${ctx.args.callId}" )
+#set( $isPartial = $util.defaultIfNull($ctx.args.isPartial, false) )
+
+{
+  "version" : "2018-05-29",
+  "operation" : "Query",
+  "query" : {
+    "expression": "#PK = :PK",
+    "expressionNames": {
+      "#PK": "PK",
+    },
+    "expressionValues": {
+      ":PK": $util.dynamodb.toDynamoDBJson($PK),
+    },
+  },
+  "filter": {
+    "expression": "#IsPartial = :isPartial",
+    "expressionNames": {
+      "#IsPartial": "IsPartial",
+    },
+    "expressionValues": {
+      ":isPartial": $util.dynamodb.toDynamoDBJson($isPartial),
+    },
+  },
+}

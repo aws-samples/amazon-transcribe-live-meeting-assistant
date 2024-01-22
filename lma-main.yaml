@@ -1,0 +1,1161 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License").
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.0)
+
+Parameters:
+
+  AgentAssistOption:
+    Type: String
+    Default: QnABot on AWS with new Kendra Index (Developer Edition)
+    AllowedValues:
+      - Disabled
+      - Bring your own LexV2 bot
+      - QnABot on AWS with existing Kendra Index
+      - QnABot on AWS with new Kendra Index (Developer Edition)
+      - QnABot on AWS with new Kendra Index (Enterprise Edition)
+      - Bring your own Lambda function
+    Description: >
+      Choose to enable optional Agent Assist capability, powered by a nested QnABot stack, or your own LexV2 bot. 
+      QnABot uses Amazon Lex and Amazon Kendra to provide real time agent assist messages based on intents, slots,
+      FAQs, and general search index that you configure using the included ContentDesigner UI. Now QnABot also uses 
+      text embeddings to provide additional options for matching FAQs - accept the defaults below, or customize and experiment.
+
+  AgentAssistExistingKendraIndexId:
+    Default: ''
+    Type: String
+    AllowedPattern: '^(|[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})$'
+    Description: >
+      Used only when AgentAssistOption is set to 'QnABot on AWS with existing Kendra Index'.
+      Provide the index *id* (not name) of an existing Kendra index to be used for Agent Assist bot."
+
+  AgentAssistExistingLexV2BotId:
+    Default: ''
+    Type: String
+    AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
+    Description: >
+      Used only when AgentAssistOption is set to 'Bring your own LexV2 bot'.
+      Provide the Lex V2 *Bot Id* (not name) of an existing LexV2 bot to be used for Agent Assist."
+
+  AgentAssistExistingLexV2BotAliasId:
+    Default: ''
+    Type: String
+    AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
+    Description: >
+      Used only when AgentAssistOption is set to 'Bring your own LexV2 bot'.
+      Provide the Lex V2 *Bot Alias Id* (not name) of an existing LexV2 bot alias to be used for Agent Assist."
+
+  AgentAssistExistingLambdaFunctionArn:
+    Default: ''
+    Type: String
+    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    Description: >
+      Used only when AgentAssistOption is set to 'Bring your own Lambda function'.
+      Provide the function ARN of an existing Lambda function to be used for Agent Assist."
+
+  AgentAssistQnABotKendraWebCrawlURLs:
+    Type: String
+    Default: https://en.wikipedia.org/wiki/Life_insurance, https://en.wikipedia.org/wiki/Mortgage_loan
+    Description: >-
+      Comma separated list of public web sites to crawl automatically - for Agent Assist Kendra knowledge store
+
+  AgentAssistQnABotKendraWebCrawlDepth:
+    Type: String
+    Default: 0
+    Description: >-
+      Number of levels from the above URLs that Amazon Kendra should crawl - restricted to same host domain
+
+  # Options for QnABot Embeddings
+  AgentAssistQnABotItemMatchingApi:
+    Type: String
+    Description: >
+      Method used by QnABot for semantic matching of caller utterances to stored agent assist configuration 
+      items and FAQs. 
+    AllowedValues:
+      - KENDRA FAQ
+      - EMBEDDINGS SAGEMAKER
+      - EMBEDDINGS BEDROCK
+      - EMBEDDINGS LAMBDA
+    Default: EMBEDDINGS BEDROCK
+  AgentAssistQnABotEmbeddingsSagemakerInitialInstanceCount:
+    Type: Number
+    MinValue: 0
+    Description:
+      "Optional: If Item Matching Api is EMBEDDINGS SAGEMAKER, provide initial instance
+      count (ml.m5.xlarge). Set to '0' to enable Serverless Inference (for cold-start delay tolerant
+      deployments only)."
+    Default: 1
+  AgentAssistQnABotEmbeddingsLambdaArn:
+    Type: String
+    AllowedPattern: ^(|arn:aws:lambda:.*)$
+    Description:
+      'Optional: If Item Matching Api is LAMBDA, provide ARN for a Lambda function
+      that takes JSON {"inputtext":"string"}, and returns JSON {"embedding":[...]}'
+    Default: ''
+  AgentAssistQnABotEmbeddingsLambdaDimensions2:
+    Type: Number
+    MinValue: 1
+    Description:
+      'Optional: If Item Matching Api is LAMBDA, provide number of dimensions
+      for embeddings returned by the EmbeddingsLambda function specified above.'
+    Default: 1536
+  AgentAssistQnABotLLMApi:
+    Type: String
+    Description:
+      Optionally enable (experimental) QnABot question disambiguation and
+      generative question answering using an LLM.
+      To use a custom LAMBDA function, provide additional
+      parameters below. To use ANTHROPIC third party service, enter the API key below. 
+    AllowedValues:
+      - DISABLED
+      - BEDROCK
+      - LAMBDA
+      - ANTHROPIC
+    Default: BEDROCK
+  AgentAssistQnABotLLMBedrockModelId:
+    Type: String
+    Default: anthropic.claude-instant-v1
+    AllowedValues:
+      - amazon.titan-text-express-v1
+      - ai21.j2-ultra-v1
+      - ai21.j2-mid-v1
+      - anthropic.claude-v1
+      - anthropic.claude-instant-v1
+      - anthropic.claude-v2
+    Description: 'Optional: If LLMApi is BEDROCK, Choose Bedrock modelId'
+  AgentAssistQnABotLLMLambdaArn:
+    Type: String
+    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    Description:
+      'Optional: If LLMApi is LAMBDA, provide ARN for a Lambda function that
+      takes JSON {"prompt":"string", "settings":{key:value,..}}, and returns JSON {"generated_text":"string"}'
+    Default: ''
+  AgentAssistQnABotLLMThirdPartyApiKey:
+    Type: String
+    Description: 'Optional: If LLMApi is ANTHROPIC, enter your Anthropic API Key. ** Data will leave your AWS account **'
+    Default: ''
+    NoEcho: true
+  S3BucketName:
+    Type: String
+    Description: >
+      (Optional) Existing bucket where call recording files will be stored.
+      Leave blank to automatically create new bucket.
+    # yamllint disable rule:line-length
+    AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
+    # yamllint enable rule:line-length
+
+  AudioFilePrefix:
+    Type: String
+    Default: lca-audio-recordings/
+    Description: The Amazon S3 prefix where the audio files will be saved (must end in "/")
+
+  CallAnalyticsPrefix:
+    Type: String
+    Default: lca-call-analytics/
+    Description: The Amazon S3 prefix where the post-call analytics files will be saved, when using analytics api mode (must end in "/")
+
+  IsPartialTranscriptEnabled:
+    Type: String
+    Default: 'true'
+    Description: >-
+      Enable partial transcripts to receive low latency evolving transcriptions for each conversation turn. Set to false to process only the
+      final version of each conversation turn.
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  IsContentRedactionEnabled:
+    Type: String
+    Default: 'false'
+    Description: >-
+      Enable content redaction from Amazon Transcribe transcription output. This is only used when
+      the 'en-US' language is selected in the TranscribeLanguageCode parameter.
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  TranscribeApiMode:
+    Type: String
+    Default: analytics
+    AllowedValues:
+      - standard
+      - analytics
+    Description: >-
+      Set the default API mode for Transcribe. 
+      Set to 'analytics' to use the Amazon Transcribe Real-time Call Analytics service, used to support 
+      call categories and alerts, call summarization, and PCA integration.
+
+  CategoryAlertRegEx:
+    Type: String
+    Default: .*
+    Description: >
+      If using the 'analytics' Transcribe API Mode, this regular expression will be used to show
+      an alert in red in the web user interface if it matches a call category. This defaults to 
+      matching all categories.
+
+  TranscribeContentRedactionType:
+    Type: String
+    Default: PII
+    Description: >-
+      Type of content redaction from Amazon Transcribe transcription output
+    AllowedValues:
+      - PII
+
+  TranscribeLanguageCode:
+    Type: String
+    Description: >-
+      Language code to be used for Amazon Transcribe
+    Default: en-US
+    AllowedValues:
+      - en-US
+      - es-US
+      - en-GB
+      - fr-CA
+      - fr-FR
+      - en-AU
+      - it-IT
+      - de-DE
+      - pt-BR
+      - ja-JP
+      - ko-KR
+      - zh-CN
+
+  TranscribePiiEntityTypes:
+    Type: String
+    Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
+    Description: >-
+      Select the PII entity types you want to identify or redact. Remove the values that you don't want to redact from the default. DO NOT ADD CUSTOM VALUES HERE.
+
+  CustomVocabularyName:
+    Type: String
+    Default: ''
+    Description: >-
+      The name of the vocabulary to use when processing the transcription job. Leave blank if no custom vocabulary to be used. If yes, the custom
+      vocabulary must pre-exist in your account.
+
+  CustomLanguageModelName:
+    Type: String
+    Default: ''
+    Description: >-
+      The name of the custom language model to use when processing the transcription job. Leave blank if no
+      custom language model is to be used. If specified, the custom language model must pre-exist in your account, 
+      match the Language Code selected above, and use the 'Narrow Band' base model.
+
+  IsSentimentAnalysisEnabled:
+    Type: String
+    Default: 'true'
+    Description: >-
+      Enable sentiment analysis
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  SentimentNegativeScoreThreshold:
+    Type: Number
+    Default: 0.9
+    MinValue: 0
+    MaxValue: 1
+    Description: >-
+      Minimum negative sentiment confidence required to declare a phrase as having negative sentiment, in the range 0-1. 
+      Not applicable when using Contact Lens or Transcribe Call Analytics (as sentiment is pre-calculated).
+
+  SentimentPositiveScoreThreshold:
+    Type: Number
+    Default: 0.4
+    MinValue: 0
+    MaxValue: 1
+    Description: >-
+      Minimum positive sentiment confidence required to declare a phrase as having positive sentiment, in the range 0-1.
+      Not applicable when using Contact Lens or Transcribe Call Analytics (as sentiment is pre-calculated).
+
+  TranscriptLambdaHookFunctionArn:
+    Default: ''
+    Type: String
+    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    Description: >
+      (Optional) If present, the specified Lambda function is invoked by the LCA Call Event Processor Lambda function for each completed 
+      (non-partial) transcript segment. The function can capture and/or modify the text of the transcript, for example to implement custom
+      redaction logic, profanity filtering, or custom rules to highlight patterns in the transcript.
+
+  TranscriptLambdaHookFunctionNonPartialOnly:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >
+      Specifies if Transcript Lambda Hook Function (if specified) is invoked for Non-Partial transcript segments only (true), or for
+      both Partial and Non-Partial transcript segments (false).
+
+  EndOfCallTranscriptSummary:
+    Default: 'BEDROCK'
+    Type: String
+    AllowedValues:
+      - 'DISABLED'
+      - 'SAGEMAKER'
+      - 'LAMBDA'
+      - 'ANTHROPIC'
+      - 'BEDROCK'
+
+    Description: >
+      Set to enable call summarization by a Large Language Model. The SAGEMAKER option uses a SageMaker endpoint with
+      the pretrained bart-large-cnn-samsum model with a ml.m5.xlarge instance type.  The LAMBDA option requires you 
+      to provide a function ARN below. The ANTHROPIC option is a third party service, and you must enter your Anthropic API key below.
+      BEDROCK option requires you to choose one of the supported model IDs from the 
+      provided list (BedrockModelId).
+
+  BedrockModelId:
+    Default: 'anthropic.claude-instant-v1'
+    Type: String
+    AllowedValues: 
+      - 'amazon.titan-text-express-v1'
+      - 'ai21.j2-grande-instruct'
+      - 'ai21.j2-jumbo-instruct'
+      - 'anthropic.claude-instant-v1'
+      - 'anthropic.claude-v1'
+      - 'anthropic.claude-v2'
+
+    Description: >
+      If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list of supported models. 
+      Defaults to 'anthropic.claude-instant-v1'
+   
+  SummarizationSageMakerInitialInstanceCount:
+    Type: Number
+    MinValue: 0
+    Default: 1
+    Description: >
+      (Optional) If 'End Of Call Transcript Summary' is SAGEMAKER, provide initial instance count. Set to '0' to enable Serverless Inference (for cold-start delay tolerant deployments only).
+
+  SummarizationLLMThirdPartyApiKey:
+    Type: String
+    Description: 'Optional: If EndOfCallTranscriptSummary is ANTHROPIC, enter the provider API Key. ** Data will leave your AWS account **'
+    Default: ''
+    NoEcho: true
+
+  EndOfCallLambdaHookFunctionArn:
+    Default: ''
+    Type: String
+    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    Description: >
+      (Optional) If 'End Of Call Transcript Summary' is LAMBDA, provide ARN for a Lambda function. The specified Lambda function is invoked by the LCA Call Event Processor Lambda function 
+      for end of call event. The function is passed en event with CallId as input.
+      This function can implement custom logic that is relevant to end of call processing, for example, creating a call summary.
+
+  StartOfCallLambdaHookFunctionArn:
+    Default: ''
+    Type: String
+    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    Description: >
+      (Optional) The specified Lambda function is invoked by the LCA Call Event Processor Lambda function for beginning or start of 
+      call event. This function can implement custom logic that is relevant to beginning of call processing, for example, retrieving
+      call summary details logged into a case in a CRM.
+
+  PostCallSummaryLambdaHookFunctionArn:
+    Default: ''
+    Type: String
+    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    Description: >
+      (Optional) The specified Lambda function is invoked by the LCA Call Event Processor Lambda function after the call summary is processed.
+      This function can implement custom logic that is relevant to post processing, for example, updating the call summary to a CRM system.
+
+  AdminEmail:
+    Type: String
+    Description: >-
+      Email address of admin user (e.g. jdoe@example.com) used for the API and web UI.
+      An initial temporary password will be automatically sent to this user via email.
+    AllowedPattern: '^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$'
+
+  AllowedSignUpEmailDomain:
+    Type: String
+    Default: ''
+    Description: >-
+      Email address domain (example.com) or comma separated list of email domains 
+      (example1.com, example2.com) allowed to signin and signup using the web UI.
+      If left empty, signup via the web UI is disabled and users will have to be created using
+      Cognito.
+    AllowedPattern: '^(|([\w-]+\.)+[\w-]{2,6}(, *([\w-]+\.)+[\w-]{2,6})*)$'
+
+  DemoAsteriskAgentAudioURL:
+    Type: String
+    Default: https://raw.githubusercontent.com/aws-samples/amazon-transcribe-live-call-analytics/main/lca-chimevc-stack/demo-audio/agent.wav
+    Description: URL for audio (agent.wav) file download for demo Asterisk server.
+
+  CloudFrontPriceClass:
+    Type: String
+    Default: PriceClass_100
+    Description: >-
+      Specify the CloudFront price class. See https://aws.amazon.com/cloudfront/pricing/ for a
+      description of each price class.
+    AllowedValues:
+      - PriceClass_100
+      - PriceClass_200
+      - PriceClass_All
+    ConstraintDescription: >-
+      Allowed Price Classes PriceClass_100 PriceClass_200 and PriceClass_All
+
+  CloudFrontAllowedGeos:
+    Type: String
+    Default: ''
+    Description: >-
+      Specify a comma separated list of two letter country codes (uppercase ISO 3166-1) that are
+      allowed to access the web user interface via CloudFront. For example: US,CA. Leave empty if
+      you do not want geo restrictions to be applied.
+    AllowedPattern: '^(|[A-Z]{2}(,[A-Z]{2})*)$'
+    ConstraintDescription: >-
+      Comma separated list of uppercase two letter country codes or empty
+
+  PcaS3BucketName:
+    Type: String
+    Description: >
+      (Optional) Value of PCA stack "InputBucket". Effective if Transcribe API Mode parameter is 'analytics'.
+    # yamllint disable rule:line-length
+    AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
+    # yamllint enable rule:line-length
+
+  PcaTranscriptsPrefix:
+    Type: String
+    Default: originalTranscripts/
+    Description: Value of PCA stack "InputBucketTranscriptPrefix".
+
+  PcaPlaybackAudioFilePrefix:
+    Type: String
+    Default: playbackAudio/
+    Description: Value of PCA stack "InputBucketPlaybackAudioPrefix".
+
+  PcaWebAppURL:
+    Type: String
+    AllowedPattern: '^(|https:\/\/.*)$'
+    Description: (Optional) Value of PCA stack "WebAppURL".
+
+  PcaWebAppCallPathPrefix:
+    Type: String
+    Default: dashboard/parsedFiles/
+    Description: PCA path prefix for call detail pages.
+
+  DynamoDbExpirationInDays:
+    Type: Number
+    Default: 90
+    Description: >-
+      Number of days to retain call records. Records will be automatically deleted from LCA after this time.
+
+  RecordingsBucketRetentionDays:
+    Type: Number
+    Description: 'Number of days after which bucket objects will be deleted from the Recordings bucket.'
+    Default: 30
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Web UI Authentication
+        Parameters:
+          - AdminEmail
+          - AllowedSignUpEmailDomain
+      - Label:
+          default: Agent Assist Options
+        Parameters:
+          - AgentAssistOption
+          - AgentAssistExistingKendraIndexId
+          - AgentAssistExistingLexV2BotId
+          - AgentAssistExistingLexV2BotAliasId
+          - AgentAssistExistingLambdaFunctionArn
+          - AgentAssistQnABotKendraWebCrawlURLs
+          - AgentAssistQnABotKendraWebCrawlDepth
+          - AgentAssistQnABotItemMatchingApi
+          - AgentAssistQnABotEmbeddingsSagemakerInitialInstanceCount
+          - AgentAssistQnABotEmbeddingsLambdaArn
+          - AgentAssistQnABotEmbeddingsLambdaDimensions2
+          - AgentAssistQnABotLLMApi
+          - AgentAssistQnABotLLMBedrockModelId
+          - AgentAssistQnABotLLMLambdaArn
+          - AgentAssistQnABotLLMThirdPartyApiKey
+      - Label:
+          default: Amazon S3 Configuration
+        Parameters:
+          - S3BucketName
+          - AudioFilePrefix
+          - CallAnalyticsPrefix
+      - Label:
+          default: Amazon Transcribe Configuration
+        Parameters:
+          - IsPartialTranscriptEnabled
+          - TranscribeApiMode
+          - IsContentRedactionEnabled
+          - TranscribeLanguageCode
+          - TranscribeContentRedactionType
+          - TranscribePiiEntityTypes
+          - CustomVocabularyName
+          - CustomLanguageModelName
+      - Label:
+          default: Transcript Event Processing Configuration
+        Parameters:
+          - IsSentimentAnalysisEnabled
+          - SentimentNegativeScoreThreshold
+          - SentimentPositiveScoreThreshold
+          - TranscriptLambdaHookFunctionArn
+          - TranscriptLambdaHookFunctionNonPartialOnly
+          - EndOfCallTranscriptSummary
+          - BedrockModelId
+          - SummarizationSageMakerInitialInstanceCount
+          - SummarizationLLMThirdPartyApiKey
+          - EndOfCallLambdaHookFunctionArn
+          - StartOfCallLambdaHookFunctionArn
+          - PostCallSummaryLambdaHookFunctionArn
+      - Label:
+          default: Download locations
+        Parameters:
+          - DemoAsteriskAgentAudioURL
+      - Label:
+          default: Amazon CloudFront Configuration
+        Parameters:
+          - CloudFrontPriceClass
+          - CloudFrontAllowedGeos
+      - Label:
+          default: Retention
+        Parameters:
+          - DynamoDbExpirationInDays
+          - RecordingsBucketRetentionDays
+      - Label:
+          default: User Experience
+        Parameters:
+          - CategoryAlertRegEx
+      - Label:
+          default: Post Call Analytics (PCA) Integration
+        Parameters:
+          - PcaS3BucketName
+          - PcaTranscriptsPrefix
+          - PcaPlaybackAudioFilePrefix
+          - PcaWebAppURL
+          - PcaWebAppCallPathPrefix
+
+    ParameterLabels:
+      CallAudioProcessor:
+        default: Call Audio Processor
+      ChimeVoiceToneAnalysis:
+        default: Chime Voice Tone Analysis
+      S3BucketName:
+        default: Call Audio Recordings Bucket Name
+      AudioFilePrefix:
+        default: Audio File Prefix
+      CallAnalyticsPrefix:
+        default: Call Analytics Output File Prefix
+      CustomVoiceConnectorId:
+        default: Amazon Chime SDK Voice Connector ID (existing)
+      AdminEmail:
+        default: Admin Email Address
+      AllowedSignUpEmailDomain:
+        default: Authorized Account Email Domain(s)
+      AgentAssistOption:
+        default: Enable Agent Assist
+      AgentAssistExistingKendraIndexId:
+        default: Agent Assist Kendra IndexId (existing)
+      AgentAssistExistingLexV2BotId:
+        default: Agent Assist LexV2 BotId (existing)
+      AgentAssistExistingLexV2BotAliasId:
+        default: Agent Assist LexV2 Bot AliasId (existing)
+      AgentAssistExistingLambdaFunctionArn:
+        default: Agent Assist Lambda Function ARN (existing)
+      AgentAssistQnABotKendraWebCrawlURLs:
+        default: Agent Assist QnABot Kendra Web Crawl URLs
+      AgentAssistQnABotKendraWebCrawlDepth:
+        default: Agent Assist QnABot Kendra Web Crawl Depth
+      AgentAssistQnABotItemMatchingApi:
+        default: Agent Assist QnABot Item Matching Api
+      AgentAssistQnABotEmbeddingsSagemakerInitialInstanceCount:
+        default: Agent Assist QnABot Embeddings SageMaker Instance Count
+      AgentAssistQnABotEmbeddingsLambdaArn:
+        default: Agent Assist QnABot Embeddings Lambda Function ARN (existing)
+      AgentAssistQnABotEmbeddingsLambdaDimensions2:
+        default: Agent Assist QnABot Lambda Function Embeddings Dimension Count
+      AgentAssistQnABotLLMApi:
+        default: Agent Assist QnABot LLM API
+      AgentAssistQnABotLLMBedrockModelId:
+        default: Agent Assist QnABot Bedrock ModelId
+      AgentAssistQnABotLLMLambdaArn:
+        default: Agent Assist QnABot LLM Lambda Function ARN (existing)
+      AgentAssistQnABotLLMThirdPartyApiKey:
+        default: Agent Assist QnABot LLM Third Party API Key
+      IsPartialTranscriptEnabled:
+        default: Enable Partial Transcripts
+      TranscribeApiMode:
+        default: Transcribe API mode
+      IsContentRedactionEnabled:
+        default: Enable Content Redaction for Transcripts
+      TranscribeLanguageCode:
+        default: Language for Transcription
+      TranscribeContentRedactionType:
+        default: Content Redaction Type for Transcription
+      TranscribePiiEntityTypes:
+        default: Transcription PII Redaction Entity Types
+      CustomVocabularyName:
+        default: Transcription Custom Vocabulary Name
+      CustomLanguageModelName:
+        default: Transcription Custom Language Model Name
+      DemoAsteriskAgentAudioURL:
+        default: Demo Asterisk Server Agent WAV File Download URL
+      IsSentimentAnalysisEnabled:
+        default: Enable Sentiment Analysis
+      SentimentNegativeScoreThreshold:
+        default: Sentiment Negative Score Threshold
+      SentimentPositiveScoreThreshold:
+        default: Sentiment Positive Score Threshold
+      TranscriptLambdaHookFunctionArn:
+        default: Lambda Hook Function ARN for Custom Transcript Segment Processing (existing)
+      TranscriptLambdaHookFunctionNonPartialOnly:
+        default: Lambda Hook Function Mode Non-Partial only
+      EndOfCallTranscriptSummary:
+        default: End of Call Transcript Summary
+      SummarizationSageMakerInitialInstanceCount:
+        default: Initial Instance Count for Summarization SageMaker Endpoint
+      SummarizationLLMThirdPartyApiKey:
+        default: End of Call Summarization LLM Third Party API Key
+      EndOfCallLambdaHookFunctionArn:
+        default: Lambda Hook Function ARN for Custom End of Call Processing (existing)
+      StartOfCallLambdaHookFunctionArn:
+        default: Lambda Hook Function ARN for Custom Start of Call Processing (existing)
+      PostCallSummaryLambdaHookFunctionArn:
+        default: Lambda Hook Function ARN for Custom Post Processing, after the Call Transcript Summary is processed (existing)
+      CloudFrontPriceClass:
+        default: CloudFront Price Class
+      CloudFrontAllowedGeos:
+        default: CloudFront Allowed Geographies
+      DynamoDbExpirationInDays:
+        default: Record Expiration In Days
+      RecordingsBucketRetentionDays:
+        default: Recording Expiration In Days
+      CategoryAlertRegEx:
+        default: Category Alert Regular Expression
+      PcaS3BucketName:
+        default: PCA InputBucket
+      PcaTranscriptsPrefix:
+        default: PCA InputBucket Transcript prefix
+      PcaPlaybackAudioFilePrefix:
+        default: PCA InputBucket Playback AudioFile prefix
+      PcaWebAppUrl:
+        default: PCA Web App URL
+      PcaWebAppCallPathPrefix:
+        default: PCA Web App Call Path Prefix
+
+Conditions:
+  ShouldEnableAgentAssist: !Not [!Equals [!Ref AgentAssistOption, 'Disabled']]
+  ShouldEnableLambdaAgentAssist:
+    !Equals [!Ref AgentAssistOption, 'Bring your own Lambda function']
+  ShouldEnableLexAgentAssist:
+    !And [
+      !Condition ShouldEnableAgentAssist,
+      !Not [!Condition ShouldEnableLambdaAgentAssist],
+    ]
+  ShouldBringYourOwnBot:
+    !Equals [!Ref AgentAssistOption, 'Bring your own LexV2 bot']
+  ShouldInstallAWSQnaBot:
+    !And [
+      !Condition ShouldEnableLexAgentAssist,
+      !Not [!Condition ShouldBringYourOwnBot],
+    ]
+  ShouldCreateKendraIndexDeveloperEdition:
+    !Equals [
+      !Ref AgentAssistOption,
+      'QnABot on AWS with new Kendra Index (Developer Edition)',
+    ]
+  ShouldCreateKendraIndexEnterpriseEdition:
+    !Equals [
+      !Ref AgentAssistOption,
+      'QnABot on AWS with new Kendra Index (Enterprise Edition)',
+    ]
+  ShouldCreateKendraIndex:
+    !Or [
+      !Condition ShouldCreateKendraIndexDeveloperEdition,
+      !Condition ShouldCreateKendraIndexEnterpriseEdition,
+    ]
+  ShouldUseExistingKendraIndex:
+    !Equals [!Ref AgentAssistOption, 'QnABot on AWS with existing Kendra Index']
+  QnABotEmbeddingsApiDisabled:
+    !Equals [!Ref AgentAssistQnABotItemMatchingApi, 'KENDRA FAQ']
+  QnABotEmbeddingsApiSageMaker:
+    !Equals [!Ref AgentAssistQnABotItemMatchingApi, 'EMBEDDINGS SAGEMAKER']
+  QnABotEmbeddingsApiLambda:
+    !Equals [!Ref AgentAssistQnABotItemMatchingApi, 'EMBEDDINGS LAMBDA']
+  QnABotEmbeddingsApiBedrock:
+    !Equals [!Ref AgentAssistQnABotItemMatchingApi, 'EMBEDDINGS BEDROCK']
+  QnABotLLMPluginLambda:
+    !Equals [!Ref AgentAssistQnABotLLMApi, 'LAMBDA']
+  QnABotLLMPluginAnthropic:
+    !Equals [!Ref AgentAssistQnABotLLMApi, 'ANTHROPIC']
+  QnABotLLMPluginBedrock:
+    !Equals [!Ref AgentAssistQnABotLLMApi, 'BEDROCK']
+  QnABotShouldDeloyPluginAnthropic:
+      !Condition QnABotLLMPluginAnthropic
+  QnABotShouldDeloyPluginBedrock:
+    !Or [
+      !Condition QnABotEmbeddingsApiBedrock,
+      !Condition QnABotLLMPluginBedrock,
+    ]
+
+Mappings:
+  TranscribeToComprehendLanguage:
+    en-US:
+      Value: en
+    es-US:
+      Value: es
+    en-GB:
+      Value: en
+    fr-CA:
+      Value: fr
+    fr-FR:
+      Value: fr
+    en-AU:
+      Value: en
+    it-IT:
+      Value: it
+    de-DE:
+      Value: de
+    pt-BR:
+      Value: pt
+    ja-JP:
+      Value: ja
+    ko-KR:
+      Value: ko
+    zh-CN:
+      Value: zh
+
+  TranscribeToLexLocaleId:
+    en-US:
+      Value: en_US
+    es-US:
+      Value: es_US
+    en-GB:
+      Value: en_GB
+    fr-CA:
+      Value: fr_CA
+    fr-FR:
+      Value: fr_FR
+    en-AU:
+      Value: en_AU
+    it-IT:
+      Value: it_IT
+    de-DE:
+      Value: de_DE
+    pt-BR:
+      Value: pt_BR
+    ja-JP:
+      Value: ja_JP
+    ko-KR:
+      Value: ko_KR
+    zh-CN:
+      Value: zh_CH
+
+Rules:
+  AgentAssistExistingKendraIndexId:
+    RuleCondition:
+      !Equals [
+        !Ref AgentAssistOption,
+        'QnABot on AWS with existing Kendra Index',
+      ]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AgentAssistExistingKendraIndexId, '']]
+        AssertDescription: AgentAssistExistingKendraIndexId is required when AgentAssistOption is 'QnABot on AWS with existing Kendra Index'
+
+  AgentAssistExistingLexV2Bot:
+    RuleCondition: !Equals [!Ref AgentAssistOption, 'Bring your own LexV2 bot']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AgentAssistExistingLexV2BotId, '']]
+        AssertDescription: AgentAssistExistingLexV2BotId is required when AgentAssistOption is 'Bring your own LexV2 bot'
+      - Assert: !Not [!Equals [!Ref AgentAssistExistingLexV2BotAliasId, '']]
+        AssertDescription: AgentAssistExistingLexV2BotAliasId is required when AgentAssistOption is 'Bring your own LexV2 bot'
+
+  AgentAssistExistingLambdaFunctionArn:
+    RuleCondition:
+      !Equals [!Ref AgentAssistOption, 'Bring your own Lambda function']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AgentAssistExistingLambdaFunctionArn, '']]
+        AssertDescription: AgentAssistExistingLambdaFunctionArn is required when AgentAssistOption is 'Bring your own Lambda function'
+
+  AgentAssistQnABotEmbeddingsExistingLambdaFunctionArn:
+    RuleCondition:
+      !Equals [!Ref AgentAssistQnABotItemMatchingApi, 'EMBEDDINGS LAMBDA']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AgentAssistQnABotEmbeddingsLambdaArn, '']]
+        AssertDescription: AgentAssistQnABotEmbeddingsLambdaArn is required when AgentAssistQnABotItemMatchingApi is 'EMBEDDINGS LAMBDA'
+
+Resources:
+  # Custom resource to enforce max length of StackName - prevent downstream failures
+  StacknameCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: python3.11
+      InlineCode: |
+        import cfnresponse
+        import time
+        import json
+        def handler(event, context):
+            print(json.dumps(event))
+            input = event['ResourceProperties'].get('InputString', '')
+            max_length = int(event['ResourceProperties'].get('MaxLength', 0))
+            status = cfnresponse.SUCCESS
+            reason = f"Stack Name Length under {max_length} - OK"
+            if event['RequestType'] == "Create":
+              if len(input) > max_length:
+                status = cfnresponse.FAILED
+                reason = f"Stack Name length too long - max length {max_length} - FAILED"
+            else:
+              print(f"Request type is {event['RequestType']} - skipping")
+            cfnresponse.send(event, context, status, {}, reason=reason)
+
+  IsStacknameLengthOK:
+    Type: Custom::StacknameCheck
+    Properties:
+      ServiceToken: !GetAtt StacknameCheckFunction.Arn
+      InputString: !Ref 'AWS::StackName'
+      MaxLength: 25
+  
+  ToJSONFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: python3.11
+      InlineCode: |
+        import cfnresponse
+        import json
+        def handler(event, context):
+            print(json.dumps(event))
+            status = cfnresponse.SUCCESS
+            reason = "Sucessful"
+            result = {}
+            if event['RequestType'] in ["Create", "Update"]:
+              output = {}
+              for k, v in event['ResourceProperties'].items():
+                if k != "ServiceToken":
+                  output[k] = v
+              outputJSON = json.dumps(output)
+              result = {"Output": outputJSON}
+            else:
+              print(f"Request type is {event['RequestType']} - skipping")
+            cfnresponse.send(event, context, status, result, reason=reason)
+
+  KENDRA:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateKendraIndex
+    DependsOn: IsStacknameLengthOK
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lca-kendra-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        IndexName: !Join ['', [!Ref 'AWS::StackName', '-Index']]
+        IndexEdition: !If
+          - ShouldCreateKendraIndexDeveloperEdition
+          - 'DEVELOPER_EDITION'
+          - 'ENTERPRISE_EDITION'
+
+  QNABOTPLUGINBEDROCK:
+    Type: AWS::CloudFormation::Stack
+    Condition: QnABotShouldDeloyPluginBedrock
+    DependsOn: IsStacknameLengthOK
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot-plugins/bedrock-embeddings-and-llm.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        EmbeddingsModelId: 'amazon.titan-embed-text-v1'
+        LLMModelId: !Ref AgentAssistQnABotLLMBedrockModelId
+
+  QNABOT:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldInstallAWSQnaBot
+    DependsOn: IsStacknameLengthOK
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot/templates/master.json
+      # yamllint enable rule:line-length
+      Parameters:
+        Email: !Ref AdminEmail
+        Username: 'Admin'
+        LexV2BotLocaleIds:
+          !FindInMap [
+            TranscribeToLexLocaleId,
+            !Ref TranscribeLanguageCode,
+            Value,
+          ]
+        BootstrapBucket: <ARTIFACT_BUCKET_TOKEN>
+        BootstrapPrefix: <ARTIFACT_PREFIX_TOKEN>/aws-qnabot
+        InstallLexResponseBots: 'false'
+        EmbeddingsApi: !If
+          - QnABotEmbeddingsApiDisabled
+          - 'DISABLED'
+          - !If
+            - QnABotEmbeddingsApiSageMaker
+            - 'SAGEMAKER'
+            - 'LAMBDA'
+        EmbeddingsLambdaArn: !If
+          - QnABotEmbeddingsApiBedrock
+          - !GetAtt QNABOTPLUGINBEDROCK.Outputs.EmbeddingsLambdaArn
+          - !Ref AgentAssistQnABotEmbeddingsLambdaArn
+        EmbeddingsLambdaDimensions: !Ref AgentAssistQnABotEmbeddingsLambdaDimensions2
+        LLMApi: !If
+          - QnABotLLMPluginAnthropic
+          - 'LAMBDA'
+          - !If 
+            - QnABotLLMPluginBedrock
+            - 'LAMBDA'
+            - !Ref AgentAssistQnABotLLMApi
+        LLMLambdaArn: !If
+          - QnABotLLMPluginAnthropic
+          - !GetAtt QNABOTPLUGINANTHROPIC.Outputs.LLMLambdaArn
+          - !If 
+            - QnABotLLMPluginBedrock
+            - !GetAtt QNABOTPLUGINBEDROCK.Outputs.LLMLambdaArn
+            - !Ref AgentAssistQnABotLLMLambdaArn
+
+  SSMSTACK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lca-ssm-stack/template.yaml
+      Parameters:
+        LCAStackName: !Ref AWS::StackName
+
+  AISTACK:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: IsStacknameLengthOK
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lca-ai-stack/<VERSION_TOKEN>/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        LCAStackName: !Ref AWS::StackName
+        RecordingsBucketRetentionDays: !Ref RecordingsBucketRetentionDays
+        EnableVoiceToneAnalysis: !If
+          - ShouldEnableVoiceToneAnalysis
+          - 'true'
+          - 'false'
+        CallAudioSource: 'Genesys Cloud Audiohook Web Socket'
+        S3BucketName: !Ref S3BucketName
+        AdminEmail: !Ref AdminEmail
+        AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
+        CategoryAlertRegEx: !Ref CategoryAlertRegEx
+        ComprehendLanguageCode:
+          !FindInMap [
+            TranscribeToComprehendLanguage,
+            !Ref TranscribeLanguageCode,
+            Value,
+          ]
+        IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
+        SentimentNegativeScoreThreshold: !Ref SentimentNegativeScoreThreshold
+        SentimentPositiveScoreThreshold: !Ref SentimentPositiveScoreThreshold
+        CloudFrontPriceClass: !Ref CloudFrontPriceClass
+        CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
+        IsLexAgentAssistEnabled: !If
+          - ShouldEnableLexAgentAssist
+          - true
+          - false
+        IsLambdaAgentAssistEnabled: !If
+          - ShouldEnableLambdaAgentAssist
+          - true
+          - false
+        AgentAssistExistingLambdaFunctionArn: !Ref AgentAssistExistingLambdaFunctionArn
+        DynamoDbExpirationInDays: !Ref DynamoDbExpirationInDays
+        TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
+        TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
+        EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
+        BedrockModelId: !Ref BedrockModelId
+        SummarizationSageMakerInitialInstanceCount: !Ref SummarizationSageMakerInitialInstanceCount
+        SummarizationLLMThirdPartyApiKey: !Ref SummarizationLLMThirdPartyApiKey
+        EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
+        StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
+        PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
+
+  # Format nested JSON strings before nesting them in QnABotSettings in AGENTASSISTSETUP
+  SettingsJSON:
+    Type: Custom::ToJSON
+    Properties:
+      ServiceToken: !GetAtt ToJSONFunction.Arn
+      EMBEDDINGS_SCORE_THRESHOLD: !If
+      - QnABotEmbeddingsApiBedrock
+      - !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsScoreThreshold
+      - '0.92'
+      EMBEDDINGS_SCORE_ANSWER_THRESHOLD: !If
+      - QnABotEmbeddingsApiBedrock
+      - !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsScoreAnswerThreshold
+      - '0.90'
+      EMBEDDINGS_TEXT_PASSAGE_SCORE_THRESHOLD: !If
+      - QnABotEmbeddingsApiBedrock
+      - !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsTextPassageScoreThreshold
+      - ''
+      LLM_GENERATE_QUERY_MODEL_PARAMS: !If
+      - QnABotLLMPluginAnthropic
+      - !GetAtt QNABOTPLUGINANTHROPIC.Outputs.QnABotSettingGenerateQueryModelParams
+      - !If 
+        - QnABotLLMPluginBedrock
+        - !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingGenerateQueryModelParams
+        - ''
+      LLM_QA_MODEL_PARAMS: !If
+        - QnABotLLMPluginAnthropic
+        - !GetAtt QNABOTPLUGINANTHROPIC.Outputs.QnABotSettingQAModelParams
+        - !If 
+          - QnABotLLMPluginBedrock
+          - !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingQAModelParams
+          - ''
+      LLM_GENERATE_QUERY_PROMPT_TEMPLATE: "<br><br>Human: Let's think carefully step by step. Here is the transcript of an ongoing phone call between a caller (Human) and an agent (AI) in <transcript> tags:<br><transcript>{history}</transcript><br>And here is a follow up question or statement from the caller in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the caller's follow up question or statement as a standalone question or statement that contains all the context and makes sense on its own without reading the transcript. If the caller is just engaging in small talk or saying thanks, respond with \"small talk\".<br><br>Assistant: Here is the rephrased follow up question or statement, or small talk: "
+      LLM_QA_PROMPT_TEMPLATE: "<br><br>Human: Let's think carefully step by step. You are a call center assistant. Your job is to advise a call center agent how best to respond to a caller query, based on the reference passages provided inside <references></reference> XML tags. The caller's query is below, inside <query></query> XML tags.<br><references><br>{context}<br></references><br><br><query><br>{query}<br></query><br><br>If the references contain the information needed to answer the query, then write a confident response in under 50 words, quoting the relevant references.<br>If you can make an informed guess on how to answer the query based on the reference passages, then write a tentative response in under 50 words, stating your assumptions.<br>If the reference passages do not have any information that you can use to answer the query, then respond saying \"Sorry, I don't know\".<br>If the query contains \"small talk\" then respond saying \"Sorry, I cannot respond to small talk\".<br>Think carefully, step by step.<br><br>Assistant:"
+      EMPTYMESSAGE: "No response from agent assist QnAbot"
+
+  AGENTASSISTSETUP:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldEnableLexAgentAssist
+    DependsOn: AISTACK
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lca-agentassist-setup-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        LCAStackName: !Ref AWS::StackName
+        AISTACK: !Ref AISTACK
+        QNABOTSTACK: !If
+          - ShouldInstallAWSQnaBot
+          - !Ref QNABOT
+          - ''
+        KendraIndexId: !If
+          - ShouldCreateKendraIndex
+          - !GetAtt KENDRA.Outputs.KendraIndexId
+          - !Ref AgentAssistExistingKendraIndexId
+        LexAgentAssistBotId: !If
+          - ShouldInstallAWSQnaBot
+          - !GetAtt QNABOT.Outputs.LexV2BotId
+          - !Ref AgentAssistExistingLexV2BotId
+        LexAgentAssistAliasId: !If
+          - ShouldInstallAWSQnaBot
+          - !GetAtt QNABOT.Outputs.LexV2BotAliasId
+          - !Ref AgentAssistExistingLexV2BotAliasId
+        LexAgentAssistLocaleId:
+          !FindInMap [
+            TranscribeToLexLocaleId,
+            !Ref TranscribeLanguageCode,
+            Value,
+          ]
+        WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
+        CloudFrontDistributionId: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
+        QnaAgentAssistDemoJson: <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lca-agentassist-setup-stack/qna-aa-demo.jsonl
+        # Changes to Params below force AgentAssist Setup to update.
+        CallAudioSource: 'N/A'
+        ComprehendLanguageCode:
+          !FindInMap [
+            TranscribeToComprehendLanguage,
+            !Ref TranscribeLanguageCode,
+            Value,
+          ]
+        AgentAssistOption: !Ref AgentAssistOption
+        AgentAssistExistingKendraIndexId: !Ref AgentAssistExistingKendraIndexId
+        AgentAssistExistingLexV2BotId: !Ref AgentAssistExistingLexV2BotId
+        AgentAssistExistingLexV2BotAliasId: !Ref AgentAssistExistingLexV2BotAliasId
+        AgentAssistExistingLambdaFunctionArn: !Ref AgentAssistExistingLambdaFunctionArn
+        AgentAssistQnABotEmbeddingsApi: !If
+          - QnABotEmbeddingsApiDisabled
+          - 'DISABLED'
+          - !If
+            - QnABotEmbeddingsApiSageMaker
+            - 'SAGEMAKER'
+            - 'LAMBDA'
+        AgentAssistQnABotKendraWebCrawlURLs: !Ref AgentAssistQnABotKendraWebCrawlURLs
+        AgentAssistQnABotKendraWebCrawlDepth: !Ref AgentAssistQnABotKendraWebCrawlDepth
+        AgentAssistQnABotLLMApi: !Ref AgentAssistQnABotLLMApi
+        AgentAssistQnABotLLMLambdaArn: !Ref AgentAssistQnABotLLMLambdaArn
+        TranscribeLanguageCode: !Ref TranscribeLanguageCode
+        IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
+        SentimentNegativeScoreThreshold: !Ref SentimentNegativeScoreThreshold
+        SentimentPositiveScoreThreshold: !Ref SentimentPositiveScoreThreshold
+        TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
+        TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
+        DynamoDbExpirationInDays: !Ref DynamoDbExpirationInDays
+        EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
+        SummarizationSageMakerInitialInstanceCount: !Ref SummarizationSageMakerInitialInstanceCount
+        EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
+        LexAgentAssistIdentityPoolId: !GetAtt AISTACK.Outputs.LexAgentAssistIdentityPoolId
+        CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
+        FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
+        TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
+        # QnaBotSettings - JSON param with new settings values based on options selected
+        QnaBotSettings: !GetAtt SettingsJSON.Output
+        Version: v0.8.8
+
+
+  WEBSOCKETSTACK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lca-websocket-stack/<VERSION_TOKEN>/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        S3BucketName: !GetAtt AISTACK.Outputs.S3BucketName
+        AudioFilePrefix: !Ref AudioFilePrefix
+        UserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
+        CallAnalyticsPrefix: !Ref CallAnalyticsPrefix
+        CallDataStreamName: !GetAtt AISTACK.Outputs.CallDataStreamName
+        CallDataStreamArn: !GetAtt AISTACK.Outputs.CallDataStreamArn
+        CloudFrontPriceClass: !Ref CloudFrontPriceClass
+        TranscribeApiMode: !Ref TranscribeApiMode
+        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
+        TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
+        TranscribeLanguageCode: !Ref TranscribeLanguageCode
+        TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
+        CustomVocabularyName: !Ref CustomVocabularyName
+        CustomLanguageModelName: !Ref CustomLanguageModelName
+        PcaS3BucketName: !Ref PcaS3BucketName
+        PcaTranscriptsPrefix: !Ref PcaTranscriptsPrefix
+        PcaPlaybackAudioFilePrefix: !Ref PcaPlaybackAudioFilePrefix
+        PcaWebAppURL: !Ref PcaWebAppURL
+        PcaWebAppCallPathPrefix: !Ref PcaWebAppCallPathPrefix
+        LCASettingsParameterName: !GetAtt AISTACK.Outputs.LCASettingsParameterName
+
+Outputs:
+  ApplicationCloudfrontEndpoint:
+    Description: LCA User Interface URL
+    Value: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
+
+  CallDataStreamArn:
+    Description: >-
+      The ARN of Kinesis Data Stream for sending Call and Transcription events.
+    Value: !GetAtt AISTACK.Outputs.CallDataStreamArn
+    Export:
+      Name:
+        'Fn::Sub': '${AWS::StackName}-CallDataStreamArn'
+
+  LCAWebsocketEndpoint:
+    Description: Websocket endpoint for websocket integration
+    Value: !GetAtt WEBSOCKETSTACK.Outputs.WebSocketEndpoint
+      
+  QnaBotContentDesigner:
+    Description: Agent Assist Content Designer URL (QnABot on AWS)
+    Value: !If
+      - ShouldInstallAWSQnaBot
+      - !GetAtt QNABOT.Outputs.ContentDesignerURL
+      - 'Agent Assist QnABot on AWS not enabled'
+
+  RecordingsS3Bucket:
+    Description: Bucket contains all the call recordings
+    Value: !GetAtt AISTACK.Outputs.S3BucketName
+
+  SNSCategoryTopicName:
+    Description: The name of the SNS Topic for matched category and alert notifications
+    Value: !GetAtt AISTACK.Outputs.SNSTopic
+
+  FetchTranscriptLambdaArn:
+    Description: The ARN of a Lambda function that will process and export a call transcript as a string.
+    Value: !GetAtt AISTACK.Outputs.FetchTranscriptArn
+
+  LLMPromptSummaryTemplateParameter:
+    Description: The LLM summary prompt template in SSM Parameter Store - open to customise call summary prompts.
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/systems-manager/parameters/${SSMSTACK.Outputs.LLMPromptSummaryTemplateParameter}"

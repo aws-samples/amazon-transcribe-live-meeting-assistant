@@ -1,0 +1,308 @@
+input AddTranscriptSegmentInput {
+	CallId: ID!
+	Status: CallStatus!
+	SegmentId: ID!
+	StartTime: Float!
+	EndTime: Float!
+	Transcript: String!
+	IsPartial: Boolean!
+	Channel: Channel!
+	CreatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	Sentiment: Sentiment
+	SentimentScore: SentimentScoreInput
+	SentimentWeighted: Float
+}
+
+type Call implements DynamoDbBase @aws_cognito_user_pools
+@aws_iam {
+	PK: ID!
+	SK: ID!
+	CreatedAt: AWSDateTime!
+	UpdatedAt: AWSDateTime!
+	ExpiresAfter: AWSTimestamp
+	CallId: ID!
+	CustomerPhoneNumber: String
+	Sentiment: SentimentAggregation
+	SystemPhoneNumber: String
+	Status: CallStatus
+	RecordingUrl: String
+	PcaUrl: String
+	TotalConversationDurationMillis: Float
+	AgentId: String
+	Metadatajson: String
+	CallCategories: [String]
+	IssuesDetected: String
+	CallSummaryText: String
+}
+
+type CallList @aws_cognito_user_pools
+@aws_iam {
+	Calls: [CallListItem]
+	nextToken: String
+}
+
+type CallListItem implements DynamoDbBase @aws_cognito_user_pools
+@aws_iam {
+	PK: ID!
+	SK: ID!
+	CreatedAt: AWSDateTime!
+	UpdatedAt: AWSDateTime!
+	ExpiresAfter: AWSTimestamp
+	CallId: ID!
+}
+
+enum CallStatus {
+	STARTED
+	TRANSCRIBING
+	ERRORED
+	ENDED
+}
+
+enum Channel {
+	CALLER
+	AGENT
+	AGENT_VOICETONE
+	CALLER_VOICETONE
+	AGENT_ASSISTANT
+	CATEGORY_MATCH
+}
+
+input CreateCallInput {
+	CallId: ID!
+	AgentId: String
+	CreatedAt: AWSDateTime
+	CustomerPhoneNumber: String
+	SystemPhoneNumber: String
+	Metadatajson: String
+	ExpiresAfter: AWSTimestamp
+}
+
+type CreateCallOutput @aws_iam {
+	CallId: ID!
+}
+
+interface DynamoDbBase {
+	PK: ID!
+	SK: ID!
+	CreatedAt: AWSDateTime!
+	UpdatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+}
+
+type Mutation @aws_iam {
+	createCall(input: CreateCallInput!): CreateCallOutput
+	updateCallStatus(input: UpdateCallStatusInput!): Call
+	updateCallAggregation(input: UpdateCallAggregationInput!): Call
+	updateRecordingUrl(input: UpdateRecordingUrlInput!): Call
+	updatePcaUrl(input: UpdatePcaUrlInput!): Call
+	updateAgent(input: UpdateAgentInput!): Call
+	addCallCategory(input: AddCallCategoryInput!): Call
+	addIssuesDetected(input: AddIssuesDetectedInput!): Call
+	addCallSummaryText(input: AddCallSummaryTextInput!): Call
+	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
+}
+
+type OverallSentiment @aws_cognito_user_pools
+@aws_iam {
+	AGENT: Float
+	CALLER: Float
+	AGENT_VOICETONE: Float
+	CALLER_VOICETONE: Float
+}
+
+input OverallSentimentInput {
+	AGENT: Float
+	CALLER: Float
+	AGENT_VOICETONE: Float
+	CALLER_VOICETONE: Float
+}
+
+type Query @aws_cognito_user_pools
+@aws_iam {
+	getCall(CallId: ID!): Call
+	getTranscriptSegments(callId: ID!, isPartial: Boolean): TranscriptSegmentList
+	getTranscriptSegmentsWithSentiment(callId: ID!): TranscriptSegmentsWithSentimentList
+	listCalls(endDateTime: AWSDateTime, startDateTime: AWSDateTime): CallList
+	listCallsDateHour(date: AWSDate, hour: Int): CallList
+	listCallsDateShard(date: AWSDate, shard: Int): CallList
+}
+
+enum Sentiment {
+	POSITIVE
+	NEGATIVE
+	NEUTRAL
+	MIXED
+}
+
+type SentimentAggregation @aws_cognito_user_pools
+@aws_iam {
+	OverallSentiment: OverallSentiment
+	SentimentByPeriod: SentimentByPeriod
+}
+
+input SentimentAggregationInput {
+	OverallSentiment: OverallSentimentInput
+	SentimentByPeriod: SentimentByPeriodInput
+}
+
+type SentimentByChannel @aws_cognito_user_pools
+@aws_iam {
+	AGENT: [SentimentByChannelEntry]
+	CALLER: [SentimentByChannelEntry]
+	AGENT_VOICETONE: [SentimentByChannelEntry]
+	CALLER_VOICETONE: [SentimentByChannelEntry]
+}
+
+type SentimentByChannelEntry @aws_cognito_user_pools
+@aws_iam {
+	BeginOffsetMillis: Float
+	EndOffsetMillis: Float
+	Score: Float
+}
+
+input SentimentByChannelEntryInput {
+	BeginOffsetMillis: Float
+	EndOffsetMillis: Float
+	Score: Float
+}
+
+input SentimentByChannelInput {
+	AGENT: [SentimentByChannelEntryInput]
+	CALLER: [SentimentByChannelEntryInput]
+	AGENT_VOICETONE: [SentimentByChannelEntryInput]
+	CALLER_VOICETONE: [SentimentByChannelEntryInput]
+}
+
+type SentimentByPeriod @aws_cognito_user_pools
+@aws_iam {
+	QUARTER: SentimentByChannel
+}
+
+input SentimentByPeriodInput {
+	QUARTER: SentimentByChannelInput
+}
+
+type SentimentScore @aws_cognito_user_pools
+@aws_iam {
+	Positive: Float!
+	Negative: Float!
+	Neutral: Float!
+	Mixed: Float!
+}
+
+input SentimentScoreInput {
+	Positive: Float!
+	Negative: Float!
+	Neutral: Float!
+	Mixed: Float!
+}
+
+type Subscription {
+	onCreateCall: CreateCallOutput
+		@aws_subscribe(mutations: ["createCall"])
+	onUpdateCall(CallId: ID): Call
+		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updatePcaUrl","updateAgent", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
+	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
+		@aws_subscribe(mutations: ["addTranscriptSegment"])
+}
+
+type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
+@aws_iam {
+	PK: ID!
+	SK: ID!
+	CreatedAt: AWSDateTime!
+	UpdatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	CallId: ID!
+	SegmentId: ID!
+	StartTime: Float!
+	EndTime: Float!
+	Transcript: String!
+	IsPartial: Boolean!
+	Channel: Channel!
+	Sentiment: Sentiment
+	SentimentScore: SentimentScore
+	SentimentWeighted: Float
+}
+
+type TranscriptSegmentList @aws_cognito_user_pools
+@aws_iam {
+	TranscriptSegments: [TranscriptSegment]
+	nextToken: String
+}
+
+type TranscriptSegmentWithSentiment implements DynamoDbBase @aws_cognito_user_pools
+@aws_iam {
+	PK: ID!
+	SK: ID!
+	CreatedAt: AWSDateTime!
+	UpdatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	CallId: ID!
+	SegmentId: ID!
+	StartTime: Float!
+	EndTime: Float!
+	Channel: Channel!
+	Sentiment: Sentiment
+	SentimentWeighted: Float
+}
+type TranscriptSegmentsWithSentimentList @aws_cognito_user_pools
+@aws_iam {
+	TranscriptSegmentsWithSentiment: [TranscriptSegmentWithSentiment]
+	nextToken: String
+}
+input UpdateAgentInput {
+	CallId: ID!
+	AgentId: String!
+	UpdatedAt: AWSDateTime
+}
+
+input AddCallCategoryInput {
+	CallId: ID!
+	CallCategories: [String]
+	UpdatedAt: AWSDateTime
+}
+
+input AddIssuesDetectedInput {
+	CallId: ID!
+	IssuesDetected: String!
+	UpdatedAt: AWSDateTime
+}
+
+input AddCallSummaryTextInput {
+	CallId: ID!
+	CallSummaryText: String!
+	UpdatedAt: AWSDateTime
+}
+
+input UpdateCallAggregationInput {
+	CallId: ID!
+	UpdatedAt: AWSDateTime
+	TotalConversationDurationMillis: Float
+	Sentiment: SentimentAggregationInput
+}
+
+input UpdateCallStatusInput {
+	CallId: ID!
+	Status: CallStatus!
+	UpdatedAt: AWSDateTime
+}
+
+input UpdateRecordingUrlInput {
+	CallId: ID!
+	RecordingUrl: String!
+	UpdatedAt: AWSDateTime
+}
+
+input UpdatePcaUrlInput {
+	CallId: ID!
+	PcaUrl: String!
+	UpdatedAt: AWSDateTime
+}
+
+schema {
+	query: Query
+	mutation: Mutation
+	subscription: Subscription
+}

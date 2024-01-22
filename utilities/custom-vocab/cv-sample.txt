@@ -1,0 +1,32 @@
+Phrase	SoundsLike	IPA	DisplayAs
+rewards-card			rewards card
+checking-account			checking account
+which-account			which account
+paid-in			paid-in
+endowment		ɛ n d aʊ m ə n t	Endowment
+babu		b ɑ b u	Babu
+babu	ba-boo		Babu
+universal-life			Universal life
+term-life			Term life
+whole-life			Whole life
+deductible			deductible
+liability			liability
+under-writing			underwriting
+insured			insured
+beneficiary			beneficiary
+endorsement			endorsement
+policy-holder			policyholder
+subrogation			subrogation
+actuary			actuary
+indemnity			indemnity
+adjuster			adjuster
+annuity			annuity
+term-insurance			term insurance
+whole-life-insurance			whole life insurance
+universal-life-insurance			universal life insurance
+annuitant			annuitant
+A.D.-and-D.			AD&D
+re-insurance			reinsurance
+under-insured			underinsured
+fiduciary			fiduciary
+un-insured			uninsured

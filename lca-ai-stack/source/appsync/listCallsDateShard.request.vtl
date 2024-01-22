@@ -1,0 +1,30 @@
+#set( $shardsInDay = 6 )
+#set( $shardDivider = 24 / $shardsInDay )
+#set( $Integer = 0 )
+#set( $now = $util.time.nowISO8601() )
+
+#set( $hourNow = $Integer.parseInt($now.substring(11, 13)) )
+#set( $shardNow = $hourNow / $shardDivider )
+
+#set( $date = $util.defaultIfNullOrBlank($ctx.args.date, $now.substring(0, 10)) )
+#set( $shard = $util.defaultIfNull($ctx.args.shard, $shardNow) )
+
+#if( $shard >= $shardsInDay )
+  $util.error("Invalid shard parameter value - must positive and less than ${shardsInDay}")
+#end
+
+#set( $hourShard = $hour / $shardDivider )
+#set( $shardPad = $date.format("%02d", $shard) )
+
+#set( $PK = "cls#${date}#s#${shardPad}" )
+
+{
+  "version" : "2018-05-29",
+  "operation" : "Query",
+  "query" : {
+    "expression": "PK = :PK",
+    "expressionValues": {
+      ":PK": $util.dynamodb.toDynamoDBJson($PK),
+    }
+  }
+}

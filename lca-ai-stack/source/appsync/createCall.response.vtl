@@ -1,0 +1,8 @@
+#if ( $ctx.error.type.equals("DynamoDB:TransactionCanceledException") )
+  #if ( $ctx.result.cancellationReasons[0].type.equals("ConditionalCheckFailed") )
+    $util.error("Item already exists")
+  #else
+    $util.error($ctx.error.message, $ctx.error.type)
+  #end
+#end
+$util.toJson({"CallId": $ctx.result.keys[0].PK.substring(2)})

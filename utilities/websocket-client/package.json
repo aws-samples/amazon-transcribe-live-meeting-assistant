@@ -1,0 +1,42 @@
+{
+  "name": "websocket-client",
+  "version": "1.0.0",
+  "private": true,
+  "author": "Babu Srinivasan",
+  "license": "Apache-2.0",
+  "description": "",
+  "main": "src/index.ts",
+  "scripts": {
+    "setup": "npm install",
+    "start": "ts-node src/index.ts",
+    "build": "tsc --project tsconfig.json --pretty && npm run lint",
+    "buildcheck": "tsc --project tsconfig.json --pretty --noEmit && npm run lint",
+    "lint": "eslint . --ext .ts --cache --max-warnings 0",
+    "update": "ncu -t minor -u && npm install",
+    "clean": "rm -r dist/"
+  },
+  "keywords": [],
+  "dependencies": {
+    "amazon-cognito-srp": "^1.0.1",
+    "commander": "^9.4.0",
+    "dotenv": "^16.3.1",
+    "stream-chain": "^2.2.5",
+    "@aws-sdk/client-kinesis": "^3.178.0",
+    "@aws-sdk/client-transcribe-streaming": "^3.226.0",
+    "uuid": "^8.3.2",
+    "wav": "^1.0.2",
+    "ws": "^8.8.1",
+    "wscat": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^16.18.54",
+    "@types/stream-chain": "^2.0.1",
+    "@types/uuid": "^8.3.4",
+    "@types/ws": "^8.5.3",
+    "@typescript-eslint/eslint-plugin": "^5.35.1",
+    "@typescript-eslint/parser": "^5.35.1",
+    "eslint": "^8.23.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^4.8.2"
+  }
+}

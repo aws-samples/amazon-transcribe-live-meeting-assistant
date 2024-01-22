@@ -1,0 +1,8 @@
+[submodule "submodule-aws-qnabot"]
+	path = submodule-aws-qnabot
+	url = https://github.com/aws-solutions/qnabot-on-aws.git
+	branch = main
+
+[submodule "submodule-aws-qnabot-plugins"]
+	path = submodule-aws-qnabot-plugins
+	url = https://github.com/aws-samples/qnabot-on-aws-plugin-samples.git

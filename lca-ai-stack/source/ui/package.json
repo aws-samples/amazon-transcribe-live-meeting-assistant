@@ -1,0 +1,80 @@
+{
+  "name": "lca-ui",
+  "version": "0.8.10",
+  "private": true,
+  "dependencies": {
+    "@aws-amplify/ui-components": "^1.9.6",
+    "@aws-amplify/ui-react": "^1.2.26",
+    "@aws-crypto/sha256-browser": "^2.0.1",
+    "@aws-sdk/client-ssm": "^3.215.0",
+    "@aws-sdk/client-translate": "^3.245.0",
+    "@aws-sdk/hash-node": "^3.78.0",
+    "@aws-sdk/middleware-retry": "^3.254.0",
+    "@aws-sdk/protocol-http": "^3.78.0",
+    "@aws-sdk/s3-request-presigner": "^3.88.0",
+    "@aws-sdk/url-parser": "^3.78.0",
+    "@aws-sdk/util-format-url": "^3.78.0",
+    "@awsui/collection-hooks": "^1.0.25",
+    "@awsui/components-react": "^3.0.496",
+    "@awsui/global-styles": "^1.0.14",
+    "@testing-library/jest-dom": "^5.16.4",
+    "@testing-library/react": "^12.1.5",
+    "@testing-library/user-event": "^13.5.0",
+    "aws-amplify": "^4.3.21",
+    "graphql-tag": "^2.12.6",
+    "prop-types": "^15.8.1",
+    "react": "^17.0.2",
+    "react-audio-player": "^0.17.0",
+    "react-dom": "^17.0.2",
+    "react-icons": "^4.3.1",
+    "react-markdown": "^8.0.3",
+    "react-router-dom": "^5.3.0",
+    "react-scripts": "5.0.1",
+    "react-use-websocket": "^3.0.0",
+    "rehype-raw": "^6.1.1",
+    "vuera": "^0.2.7",
+    "xlsx": "^0.18.5"
+  },
+  "scripts": {
+    "start": "./download-lexwebui.sh && ./generate-lexwebui-json.sh && react-scripts start",
+    "build": "./download-lexwebui.sh && react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "lint": "npx eslint 'src/**/*.{js,jsx}'"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "eslint": "^8.14.0",
+    "eslint-config-airbnb": "^19.0.4",
+    "eslint-config-prettier": "^8.5.0",
+    "eslint-plugin-import": "^2.26.0",
+    "eslint-plugin-jest": "^26.1.5",
+    "eslint-plugin-jsx-a11y": "^6.5.1",
+    "eslint-plugin-prettier": "^4.0.0",
+    "eslint-plugin-react": "^7.29.4",
+    "eslint-plugin-react-hooks": "^4.4.0",
+    "prettier": "^2.6.2"
+  },
+  "jest": {
+    "transformIgnorePatterns": [
+      "<roodDir>/node_modules/(?!@awsui)"
+    ]
+  }
+}

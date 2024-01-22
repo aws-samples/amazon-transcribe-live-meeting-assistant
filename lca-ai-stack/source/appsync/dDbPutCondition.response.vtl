@@ -1,0 +1,8 @@
+#if ( $ctx.error )
+  #if ( $ctx.error.type.equals("DynamoDB:ConditionalCheckFailedException") )
+    $util.error("item put condition failure")
+  #else
+    $util.error($ctx.error.message, $ctx.error.type)
+  #end
+#end
+$utils.toJson($context.result)

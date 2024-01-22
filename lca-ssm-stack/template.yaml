@@ -1,0 +1,40 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Amazon Transcribe Live Call Analytics - LCA SSM Parameters
+
+Parameters:
+  # Required
+  LCAStackName:
+    Type: String
+    Description: LCA Stack Name
+
+  LLMPromptSummaryTemplate:
+    Type: String
+    Description: >-
+      Prompt to use to generate insights for a call. This can be a single string where an LLM returns a string,
+      or a single string where the LLM returns a JSON object with key/value pairs, or a string that contains
+      a JSON Object with key/value pairs, where the LLM will run one inference on each key/value pair with the value
+      containing the prompt. Use {transcript} as a placeholder for where the call transcript will be injected.
+    Default: >-
+      {
+        "Summary":"<br><br>Human: Answer the questions below, defined in <question></question> based on the transcript defined in <transcript></transcript>. If you cannot answer the question, reply with 'n/a'. Use gender neutral pronouns. When you reply, only respond with the answer.<br><br><question>What is a summary of the transcript?</question><br><br><transcript><br>{transcript}<br></transcript><br><br>Assistant:",
+        "Topic":"<br><br>Human: Answer the questions below, defined in <question></question> based on the transcript defined in <transcript></transcript>. If you cannot answer the question, reply with 'n/a'. Use gender neutral pronouns. When you reply, only respond with the answer.<br><br><question>What is the topic of the call? For example, iphone issue, billing issue, cancellation. Only reply with the topic, nothing more.</question><br><br><transcript><br>{transcript}<br></transcript><br><br>Assistant:",
+        "Follow-Up Actions":"<br><br>Human: Answer the question below, defined in <question></question> based on the transcript defined in <transcript></transcript>. If you cannot answer the question, reply with 'n/a'. Use gender neutral pronouns. When you reply, only respond with the answer.<br><br><question>What follow-up actions did the agent say they are going to take? </question><br><br><transcript><br>{transcript}<br></transcript><br><br>Assistant:"
+      }
+
+Resources:
+  LLMPromptSummaryTemplateParameter:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Sub "${LCAStackName}-LLMPromptSummaryTemplate"
+      Type: String
+      Description: >
+        Prompt to use to generate insights for a call. This can be a single string where an LLM returns a string,
+        or a single string where the LLM returns a JSON object with key/value pairs, or a string that contains
+        a JSON Object with key/value pairs, where the LLM will run one inference on each key/value pair with the value
+        containing the prompt. Use {transcript} as a placeholder for where the call transcript will be injected.
+      Value: !Ref LLMPromptSummaryTemplate
+
+Outputs:
+  LLMPromptSummaryTemplateParameter:
+    Value: !Ref LLMPromptSummaryTemplateParameter

@@ -1,0 +1,34 @@
+
+.category-pill  {
+  background-color: lavender;
+  border-radius: 2em;
+  padding-left: 0.5em;
+  padding-right: 0.5em;
+  padding-bottom: 0.0em;
+  line-height: 1.5em !important;
+}
+.category-pill-alert-icon  {
+  background-color: red;
+  border-radius: 2em;
+  padding-left: 0.5em;
+  padding-right: 0.5em;
+  padding-bottom: 0.0em;
+  line-height: 1.5em !important;
+  color: white;
+  font-weight: bold;
+}
+
+.category-pill-alert  {
+  background-color: rgb(255, 147, 147);
+  border-radius: 2em;
+  padding-left: 0.5em;
+  padding-right: 0.5em;
+  padding-bottom: 0.0em;
+  line-height: 1.5em !important;
+  color: black;
+}
+
+
+.category-pill-alert-icon:hover {
+  cursor: pointer;
+}

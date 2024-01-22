@@ -1,0 +1,32 @@
+#set( $shardsInDay = 6 )
+#set( $shardDivider = 24 / $shardsInDay )
+#set( $Integer = 0 )
+#set( $now = $util.time.nowISO8601() )
+
+#set( $hourNow = $Integer.parseInt($now.substring(11, 13)) )
+
+#set( $date = $util.defaultIfNullOrBlank($ctx.args.date, $now.substring(0, 10)) )
+#set( $hour = $util.defaultIfNull($ctx.args.hour, $hourNow) )
+
+#if( $hour < 0 || $hour > 23 )
+  $util.error("Invalid hour parameter - value should be between 0 and 23")
+#end
+
+#set( $hourPad = $date.format("%02d", $hour) )
+#set( $hourShard = $hour / $shardDivider )
+#set( $shardPad = $date.format("%02d", $hourShard) )
+
+#set( $PK = "cls#${date}#s#${shardPad}" )
+#set( $skPrefix = "ts#${date}T${hourPad}" )
+
+{
+  "version" : "2018-05-29",
+  "operation" : "Query",
+  "query" : {
+    "expression": "PK = :PK and begins_with(SK, :prefix)",
+    "expressionValues": {
+      ":PK": $util.dynamodb.toDynamoDBJson($PK),
+      ":prefix": $util.dynamodb.toDynamoDBJson($skPrefix),
+    },
+  },
+}

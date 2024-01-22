@@ -1,0 +1,25 @@
+#set( $PK = "trs#${ctx.args.input.CallId}" )
+#set( $SK = "s#${ctx.args.input.SegmentId}" )
+
+#set( $CreatedAt = $util.defaultIfNullOrBlank($ctx.args.input.CreatedAt, $util.time.nowISO8601()) )
+$util.qr($ctx.args.input.put("CreatedAt", ${CreatedAt}))
+
+{
+  "version" : "2018-05-29",
+  "operation": "PutItem",
+  "key" : {
+    "PK": $util.dynamodb.toDynamoDBJson($PK),
+    "SK": $util.dynamodb.toDynamoDBJson($SK),
+  },
+  "attributeValues": $util.dynamodb.toMapValuesJson($ctx.args.input),
+
+## Conditional block to prevent partial segments from overwriting final segments if they are mutated out of sequence.
+#if(${ctx.args.input.IsPartial})
+  "condition": {
+      "expression" : "attribute_not_exists(IsPartial) OR IsPartial = :true",
+      "expressionValues" : {
+          ":true" : { "BOOL" : true }
+      },
+  },
+#end
+}
