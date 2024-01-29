@@ -60,7 +60,7 @@ const getPanelContentMultiple = ({ items, setToolsOpen, callTranscriptPerCallId 
       <ColumnLayout columns="4" variant="text-grid">
         <div>
           <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            Live calls
+            Live meetings
           </Box>
           <Link fontSize="display-l" href={`#${CALLS_PATH}`}>
             <span className="custom-link-font-weight-light">
@@ -82,7 +82,7 @@ const getPanelContentComparison = ({ items }) => {
   if (!items.length) {
     return {
       header: '0 calls selected',
-      body: 'Select a call to see its details. Select multiple calls to compare.',
+      body: 'Select a meeting to see its details. Select multiple meetings to compare.',
     };
   }
 
@@ -90,7 +90,7 @@ const getPanelContentComparison = ({ items }) => {
     return getPanelContentSingle({ items });
   }
   const keyHeaderMap = {
-    callId: 'Call ID',
+    callId: 'Meeting ID',
     initiationTimeStamp: 'Initiation Timestramp',
   };
   const transformedData = ['callId', 'initiationTimeStamp'].map((key) => {

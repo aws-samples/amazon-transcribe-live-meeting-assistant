@@ -862,6 +862,18 @@ Resources:
           - 'DEVELOPER_EDITION'
           - 'ENTERPRISE_EDITION'
 
+  QNABOTPLUGINANTHROPIC:
+    Type: AWS::CloudFormation::Stack
+    Condition: QnABotShouldDeloyPluginAnthropic
+    DependsOn: IsStacknameLengthOK
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot-plugins/anthropic-llm.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        APIKey: !Ref AgentAssistQnABotLLMThirdPartyApiKey
+        LLMModel: 'claude-instant-1'
+
   QNABOTPLUGINBEDROCK:
     Type: AWS::CloudFormation::Stack
     Condition: QnABotShouldDeloyPluginBedrock
@@ -938,10 +950,7 @@ Resources:
       Parameters:
         LCAStackName: !Ref AWS::StackName
         RecordingsBucketRetentionDays: !Ref RecordingsBucketRetentionDays
-        EnableVoiceToneAnalysis: !If
-          - ShouldEnableVoiceToneAnalysis
-          - 'true'
-          - 'false'
+        EnableVoiceToneAnalysis: 'false'
         CallAudioSource: 'Genesys Cloud Audiohook Web Socket'
         S3BucketName: !Ref S3BucketName
         AdminEmail: !Ref AdminEmail

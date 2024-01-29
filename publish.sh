@@ -150,12 +150,12 @@ echo "Applying patch files to simplify UX by removing some QnABot options not ne
 cp -v ./patches/qnabot/lambda_schema_qna.js $dir/lambda/schema/qna.js
 cp -v ./patches/qnabot/website_js_admin.vue $dir/website/js/admin.vue
 cp -v ./patches/qnabot/Makefile $dir/Makefile
-echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lca'"
+echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lma'"
 # Detection of differences. sed varies betwen GNU sed and BSD sed
 if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
-  sed -i 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lca"/' $dir/package.json
+  sed -i 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/package.json
 else # BSD like sed
-  sed -i '' 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lca"/' $dir/package.json
+  sed -i '' 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/package.json
 fi
 pushd $dir
 rm -fr ./ml_model/llm-qa-summarize # remove deleted folder if left over from previous build.

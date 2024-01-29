@@ -11,7 +11,7 @@ const dismissedInitialNotificationsStorageKey = 'dismissedInitialNotifications';
 const initialNotifications = [
   {
     type: 'info',
-    content: 'Welcome to Live Call Analytics with Agent Assist',
+    content: 'Welcome to Live Meeting Assist',
     dismissible: true,
     dismissLabel: 'Dismiss message',
     id: 'welcome-1',

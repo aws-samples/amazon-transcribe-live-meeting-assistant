@@ -52,7 +52,7 @@ const CallAnalyticsTopNavigation = () => {
     <>
       <div id="top-navigation" style={{ position: 'sticky', top: 0, zIndex: 1002 }}>
         <TopNavigation
-          identity={{ href: '#', title: 'Live Call Analytics with Agent Assist' }}
+          identity={{ href: '#', title: 'Live Meeting Assist' }}
           i18nStrings={{ overflowMenuTriggerText: 'More' }}
           utilities={[
             {

@@ -22,12 +22,12 @@ const UnauthRoutes = ({ location }) => (
       <AmplifyAuthContainer>
         <AmplifyAuthenticator>
           <AmplifySignIn
-            headerText="Welcome to Live Call Analytics!"
+            headerText="Welcome to Live Meeting Analytics!"
             hideSignUp={REACT_APP_SHOULD_HIDE_SIGN_UP}
             slot="sign-in"
           />
           <AmplifySignUp
-            headerText="Welcome to Live Call Analytics!"
+            headerText="Welcome to Live Meeting Analytics!"
             slot="sign-up"
             h
             usernameAlias="email"
