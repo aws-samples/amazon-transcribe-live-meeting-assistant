@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Amazon Live Meeting Assistant with Q",
+  "description": "Test Extension",
+  "version": "1.0",
+  "action": {
+    "default_title": "Click to open Amazon Live Meeting Assistant with Q",
+    "default_icon": "icon.png"
+  },
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "tabCapture",
+    "desktopCapture",
+    "sidePanel",
+    "scripting",
+    "identity",
+    "storage"
+  ],
+
+  "host_permissions": [
+    "*://*.cloudfront.net/*",
+    "*://*.youtube.com/*"
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.zoom.us/*"],
+      "js": ["mutation-summary.js", "providers/zoom.js"],
+      "all_frames": true
+    }, {
+      "matches": ["<all_urls>"],
+      "js": ["inject-recorder.js"]
+    }
+  ] ,
+  "web_accessible_resources": [
+    {
+      "resources": ["recorder.html", "recorder.js", "audio-worklet.js", "lma_config.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

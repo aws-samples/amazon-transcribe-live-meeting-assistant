@@ -81,6 +81,7 @@ export type CallMetaData = {
     agentId?: string,
     samplingRate: number,
     callEvent: string,
+    activeSpeaker: string,
 };
 
 const kinesisClient = new KinesisClient({ region: AWS_REGION });
@@ -105,7 +106,7 @@ export const writeCallEvent = async (callEvent: CallStartEvent | CallEndEvent | 
     }
 };
 
-export const writeTranscriptionSegment = async function(transcribeMessageJson:TranscriptEvent, callId: Uuid) {
+export const writeTranscriptionSegment = async function(transcribeMessageJson:TranscriptEvent, callId: Uuid, activeSpeaker: string) {
     if (transcribeMessageJson.Transcript?.Results && transcribeMessageJson.Transcript?.Results.length > 0) {
         if (transcribeMessageJson.Transcript?.Results[0].Alternatives && transcribeMessageJson.Transcript?.Results[0].Alternatives?.length > 0) {
 
@@ -131,7 +132,9 @@ export const writeTranscriptionSegment = async function(transcribeMessageJson:Tr
                 Sentiment: undefined,
                 TranscriptEvent: undefined,
                 UtteranceEvent: undefined,
+                Speaker: activeSpeaker
             };
+            console.log('ACTIVE SPEAKER', activeSpeaker);
 
             const putParams = {
                 StreamName: kdsStreamName,
@@ -142,9 +145,9 @@ export const writeTranscriptionSegment = async function(transcribeMessageJson:Tr
             const putCmd = new PutRecordCommand(putParams);
             try {
                 await kinesisClient.send(putCmd);
-                // console.info('Written ADD_TRANSCRIPT_SEGMENT event to KDS');
-                // console.info(JSON.stringify(kdsObject));
-                // console.info(kdsObject.Transcript);
+                console.info('Written ADD_TRANSCRIPT_SEGMENT event to KDS');
+                console.info(JSON.stringify(kdsObject));
+                console.info(kdsObject.Transcript);
             } catch (error) {
                 console.error('Error writing transcription segment (TRANSCRIBE) to KDS', error);
                 console.debug(JSON.stringify(kdsObject));
@@ -154,7 +157,7 @@ export const writeTranscriptionSegment = async function(transcribeMessageJson:Tr
 };
 
 export const writeAddTranscriptSegmentEvent = async function(utteranceEvent:UtteranceEvent | undefined , 
-    transcriptEvent:TranscriptEvent | undefined,  callId: Uuid) {
+    transcriptEvent:TranscriptEvent | undefined,  callId: Uuid, activeSpeaker: string) {
     
     if (transcriptEvent) {
         if (transcriptEvent.Transcript?.Results && transcriptEvent.Transcript?.Results.length > 0) {
@@ -183,7 +186,10 @@ export const writeAddTranscriptSegmentEvent = async function(utteranceEvent:Utte
         UtteranceEvent: utteranceEvent,
         CreatedAt: now,
         UpdatedAt: now,
+        Speaker: activeSpeaker
     };
+
+    console.log('ACTIVE SPEAKER', activeSpeaker);
 
     const putParams = {
         StreamName: kdsStreamName,
@@ -194,8 +200,9 @@ export const writeAddTranscriptSegmentEvent = async function(utteranceEvent:Utte
     const putCmd = new PutRecordCommand(putParams);
     try {
         await kinesisClient.send(putCmd);
-        // console.info('Written ADD_TRANSCRIPT_SEGMENT event to KDS');
-        // console.info(JSON.stringify(kdsObject));
+        console.info('Written ADD_TRANSCRIPT_SEGMENT event to KDS');
+        console.info(JSON.stringify(kdsObject));
+        console.info(kdsObject.Transcript);
     } catch (error) {
         console.error('Error writing transcription segment to KDS', error);
         console.debug(JSON.stringify(kdsObject));
@@ -339,13 +346,13 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
                 // console.log('Event ', event);
                 if (event.TranscriptEvent) {
                     const message: TranscriptEvent = event.TranscriptEvent;
-                    await writeTranscriptionSegment(message, callMetaData.callId);
+                    await writeTranscriptionSegment(message, callMetaData.callId, callMetaData.activeSpeaker);
                 }
                 if (event.CategoryEvent && event.CategoryEvent.MatchedCategories) {
                     await writeAddCallCategoryEvent(event.CategoryEvent, callMetaData.callId);
                 }
                 if (event.UtteranceEvent && event.UtteranceEvent.UtteranceId) {
-                    await writeAddTranscriptSegmentEvent(event.UtteranceEvent, undefined, callMetaData.callId);
+                    await writeAddTranscriptSegmentEvent(event.UtteranceEvent, undefined, callMetaData.callId, callMetaData.activeSpeaker);
                 }
             }
 

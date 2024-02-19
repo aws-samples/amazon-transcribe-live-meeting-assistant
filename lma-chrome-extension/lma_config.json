@@ -1,0 +1,5 @@
+{  
+  "wssEndpoint": "ws://localhost:8080/api/v1/ws",
+  "clientId": "1sp17loeg9n3nnje3g5heki7pa",
+  "cognitoDomain": "chris-lma-test-domain.auth.us-east-1.amazoncognito.com"
+}

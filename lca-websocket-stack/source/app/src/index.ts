@@ -44,6 +44,8 @@ const s3Client = new S3Client({ region: AWS_REGION });
 
 const isDev = process.env['NODE_ENV'] !== 'PROD';
 
+const socketMetadataMap = new Map();
+
 // create fastify server (with logging enabled for non-PROD environments)
 const server = fastify({
     logger: {
@@ -111,6 +113,7 @@ const registerHandlers = (ws: WebSocket): void => {
                 onTextMessage(ws, Buffer.from(data as Uint8Array).toString('utf8'));
             }
         } catch (err) {
+            console.error(err);
             server.log.error(`Error processing message: ${err}`);
             process.exit(1);
         }
@@ -149,13 +152,14 @@ const onTextMessage = (ws: WebSocket, data: string): void => {
         callMetaData.callId = randomUUID();
     }
     
-    callMetaData.callId = callMetaData.callId || randomUUID();
-    callMetaData.fromNumber = callMetaData.fromNumber || 'Customer Phone';
-    callMetaData.toNumber = callMetaData.toNumber || 'System Phone';
-    callMetaData.shouldRecordCall = callMetaData.shouldRecordCall || false;
-    callMetaData.agentId = callMetaData.agentId || randomUUID();  
-    
-    if (callMetaData.callEvent === 'START') {        
+    if (callMetaData.callEvent === 'START') {
+        // generate random metadata if none is provided
+        callMetaData.callId = callMetaData.callId || randomUUID();
+        callMetaData.fromNumber = callMetaData.fromNumber || 'Customer Phone';
+        callMetaData.toNumber = callMetaData.toNumber || 'System Phone';
+        callMetaData.shouldRecordCall = callMetaData.shouldRecordCall || false;
+        callMetaData.agentId = callMetaData.agentId || randomUUID();  
+
         (async () => {
             await writeCallStartEvent(callMetaData);
             tempRecordingFilename = `${callMetaData.callId}.raw`;
@@ -165,6 +169,11 @@ const onTextMessage = (ws: WebSocket, data: string): void => {
         })();
         audioInputStream = new stream.PassThrough();
         startTranscribe(callMetaData, audioInputStream);
+        socketMetadataMap.set(ws, callMetaData);
+    } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
+        console.log('speaker change', callMetaData);
+        const callData = socketMetadataMap.get(ws);
+        callData.activeSpeaker = callMetaData.activeSpeaker;
     } else if (callMetaData.callEvent === 'END') {
         (async () => {
             await writeCallEndEvent(callMetaData);
@@ -204,6 +213,7 @@ const onTextMessage = (ws: WebSocket, data: string): void => {
 
 const onWsClose = (ws:WebSocket, code: number): void => {
     ws.close(code);
+    socketMetadataMap.delete(ws);
     if (audioInputStream) {
         audioInputStream.end();
     }
