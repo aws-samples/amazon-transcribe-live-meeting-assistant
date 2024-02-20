@@ -15,14 +15,14 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Call Analytics with Agent Assist - Agent Assist Setup
+Description: Amazon Transcribe and Q Business Live Meeting Assist - Meeting Assist Setup
 
 Parameters:
 
   # Required
-  LCAStackName:
+  LMAStackName:
     Type: String
-    Description: LCA Stack Name
+    Description: LMA Stack Name
     
   # Required
   AISTACK:
@@ -36,31 +36,24 @@ Parameters:
     Description: QNABOT Stack ARN  
 
   # Required
-  KendraIndexId:
-    Type: String
-    AllowedPattern: '^(|[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})$'
-    Description: >
-      Provide the index *id* (not name) of an existing Kendra index to be used for Agent Assist bot.
-
-  # Required
-  LexAgentAssistBotId:
+  LexMeetingAssistBotId:
     Type: String
     Description: >-
-      Lex Bot Id used for Agent Assist. 
+      Lex Bot Id used for Meeting Assist. 
     AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
 
   # Required
-  LexAgentAssistAliasId:
+  LexMeetingAssistAliasId:
     Type: String
     Description: >-
-      Lex Bot Alias ID used for Agent Assist.
+      Lex Bot Alias ID used for Meeting Assist.
     AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
 
   # Required
-  LexAgentAssistLocaleId:
+  LexMeetingAssistLocaleId:
     Type: String
     Description: >-
-      Lex Bot Locale ID used for Agent Assist.
+      Lex Bot Locale ID used for Meeting Assist.
     AllowedValues:
         - ca_ES
         - de_AT
@@ -83,34 +76,10 @@ Parameters:
         - zh_CN
 
   # Required
-  QnaAgentAssistDemoJson:
+  QnaMeetingAssistDemoJson:
     Type: String
     Description: >-
-      Location of QnABot agent assist sample/demo file (in JSON lines format) 
-
-  AgentAssistQnABotKendraWebCrawlURLs:
-    Type: String
-    Default: https://en.wikipedia.org/wiki/Life_insurance, https://en.wikipedia.org/wiki/Mortgage_loan
-    Description: >-
-      Comma separated list of public web sites to crawl automatically - for Agent Assist Kendra knowledge store
-  
-  AgentAssistQnABotKendraWebCrawlDepth:
-    Type: String
-    Default: 0
-    Description: >-
-      Number of levels from the above URLs that Amazon Kendra should crawl - restricted to same host domain
-  
-  AgentAssistQnABotEmbeddingsApi:
-    Type: String
-    Description: Optionally enable QnABot Semantics Search using Embeddings
-      from a pre-trained Large Language Model. If set to SAGEMAKER, an ml.m5.xlarge
-      Sagemaker endpoint is automatically provisioned with Hugging Face e5-large model.
-      To use a custom LAMBDA function, provide additional parameters below.
-    AllowedValues:
-      - DISABLED
-      - SAGEMAKER
-      - LAMBDA
-    Default: SAGEMAKER
+      Location of QnABot meeting assist sample/demo file (in JSON lines format) 
 
   QnaBotSettings:
     Type: String
@@ -118,19 +87,19 @@ Parameters:
 
   WebAppBucket:
     Type: String
-    Description: The LCA Web App Bucket Name.
+    Description: The LMA Web App Bucket Name.
 
   CloudFrontDistributionId:
     Type: String
-    Description: The LCA web app CloudFront distribution id
+    Description: The LMA web app CloudFront distribution id
 
-  LexAgentAssistIdentityPoolId:
+  LexMeetingAssistIdentityPoolId:
     Type: String
-    Description: The LCA Agent Assist Identity Pool ID
+    Description: The LMA Meeting Assist Identity Pool ID
 
   CloudFrontDomainName:
     Type: String
-    Description: The domain name of the LCA CloudFront distribution
+    Description: The domain name of the LMA CloudFront distribution
 
   FetchTranscriptFunctionArn:
     Type: String
@@ -140,24 +109,8 @@ Parameters:
     Type: String
     Description: ARN of Transcript Summary function (if defined)
 
-  # Changes to Params below force AgentAssist Setup to update.
-  CallAudioSource:
-    Type: String
+  # Changes to Params below force MeetingAssist Setup to update.
   ComprehendLanguageCode:
-    Type: String
-  AgentAssistOption:
-    Type: String
-  AgentAssistExistingKendraIndexId:
-    Type: String
-  AgentAssistExistingLexV2BotId:
-    Type: String
-  AgentAssistExistingLexV2BotAliasId:
-    Type: String
-  AgentAssistExistingLambdaFunctionArn:
-    Type: String
-  AgentAssistQnABotLLMApi:
-    Type: String
-  AgentAssistQnABotLLMLambdaArn:
     Type: String
   TranscribeLanguageCode:
     Type: String
@@ -174,8 +127,6 @@ Parameters:
   DynamoDbExpirationInDays:
     Type: String
   EndOfCallTranscriptSummary:
-    Type: String
-  SummarizationSageMakerInitialInstanceCount:
     Type: String
   EndOfCallLambdaHookFunctionArn:
     Type: String
@@ -207,7 +158,7 @@ Resources:
     Type: Custom::GetLowercase
     Properties:
       ServiceToken: !GetAtt GetLowercaseFunction.Arn
-      InputString: !Ref LCAStackName
+      InputString: !Ref LMAStackName
 
   QNAFetchTranscriptFunctionRole:
     Type: "AWS::IAM::Role"
@@ -234,7 +185,7 @@ Resources:
     Type: "AWS::Lambda::Function"
     Properties:
       # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
-      FunctionName: !Sub "QNA-FetchTranscript-${LCAStackName}"
+      FunctionName: !Sub "QNA-FetchTranscript-${LMAStackName}"
       Role: !GetAtt QNAFetchTranscriptFunctionRole.Arn
       Handler: index.handler
       Runtime: python3.11
@@ -328,7 +279,7 @@ Resources:
     Type: "AWS::Lambda::Function"
     Properties:
       # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
-      FunctionName: !Sub "QNA-SummarizeCall-${LCAStackName}"
+      FunctionName: !Sub "QNA-SummarizeCall-${LMAStackName}"
       Role: !GetAtt LambdaHookSummarizeCallRole.Arn
       Handler: index.handler
       Runtime: python3.11
@@ -416,7 +367,7 @@ Resources:
                   - lambda:UpdateFunctionConfiguration
                 Effect: Allow
                 Resource:
-                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LCAStackName}*"
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}*"
               - Action:
                   - iam:ListRolePolicies
                   - iam:PutRolePolicy
@@ -442,7 +393,7 @@ Resources:
                     - cloudformation:DescribeStackResource
                   Effect: Allow
                   Resource:
-                    - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LCAStackName}-QNABOT*"
+                    - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LMAStackName}-QNABOT*"
                 - !Ref AWS::NoValue
               - !If
                 - ShouldConfigureQnabot
@@ -461,7 +412,7 @@ Resources:
                   Effect: Allow
                   Resource:
                     - !Sub "arn:aws:s3:::${LowercaseStackName.OutputString}*"
-                    - !Sub "arn:aws:s3:::${QnaAgentAssistDemoJson}"
+                    - !Sub "arn:aws:s3:::${QnaMeetingAssistDemoJson}"
                 - !Ref AWS::NoValue
               - !If 
                 - ShouldConfigureQnabot
@@ -469,7 +420,7 @@ Resources:
                     - lambda:InvokeFunction
                   Effect: Allow
                   Resource:
-                    - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LCAStackName}*"
+                    - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}*"
                 - !Ref AWS::NoValue
 
   SetupFunction:
@@ -514,9 +465,9 @@ Resources:
             asyncAgentAssistOrchestratorFunction = getStackResource(props["AISTACK"], "AsyncAgentAssistOrchestrator")
             response = lam.get_function_configuration(FunctionName=asyncAgentAssistOrchestratorFunction)
             envVars = response["Environment"]["Variables"]
-            envVars["LEX_BOT_ID"] = props["LexAgentAssistBotId"]
-            envVars["LEX_BOT_ALIAS_ID"] = props["LexAgentAssistAliasId"]
-            envVars["LEX_BOT_LOCALE_ID"] = props["LexAgentAssistLocaleId"]
+            envVars["LEX_BOT_ID"] = props["LexMeetingAssistBotId"]
+            envVars["LEX_BOT_ALIAS_ID"] = props["LexMeetingAssistAliasId"]
+            envVars["LEX_BOT_LOCALE_ID"] = props["LexMeetingAssistLocaleId"]
             response = lam.update_function_configuration(
               FunctionName=asyncAgentAssistOrchestratorFunction,
               Environment={"Variables":envVars}
@@ -525,7 +476,7 @@ Resources:
 
             print("Updating updating Cognito Unauthenticated Role for Agent Assist...")
             agentAssistBotUnauthRole = getStackResource(props["AISTACK"], "AgentAssistBotUnauthRole")
-            newArn = f'arn:{aws_partition}:lex:{AWS_REGION}:{aws_account_id}:bot-alias/{props["LexAgentAssistBotId"]}/{props["LexAgentAssistAliasId"]}'
+            newArn = f'arn:{aws_partition}:lex:{AWS_REGION}:{aws_account_id}:bot-alias/{props["LexMeetingAssistBotId"]}/{props["LexMeetingAssistAliasId"]}'
             newPolicy = {'Version': '2012-10-17', 'Statement': [{'Action': ['lex:RecognizeText', 'lex:RecognizeUtterance', 'lex:DeleteSession', 'lex:PutSession'], 'Resource': newArn, 'Effect': 'Allow'}]}
             print('New Policy:')
             print(newPolicy)
@@ -543,11 +494,11 @@ Resources:
             configTemplateKey = 'lex-web-ui-loader-config-template.json'
             response = s3.get_object(Bucket=webAppBucket, Key=configTemplateKey)
             contents = response["Body"].read().decode("utf-8")
-            contents = contents.replace('${REACT_APP_LEX_BOT_ID}', props["LexAgentAssistBotId"])
-            contents = contents.replace('${REACT_APP_LEX_BOT_ALIAS_ID}', props["LexAgentAssistAliasId"])
-            contents = contents.replace('${REACT_APP_LEX_BOT_LOCALE_ID}', props["LexAgentAssistLocaleId"])
+            contents = contents.replace('${REACT_APP_LEX_BOT_ID}', props["LexMeetingAssistBotId"])
+            contents = contents.replace('${REACT_APP_LEX_BOT_ALIAS_ID}', props["LexMeetingAssistAliasId"])
+            contents = contents.replace('${REACT_APP_LEX_BOT_LOCALE_ID}', props["LexMeetingAssistLocaleId"])
             contents = contents.replace('${REACT_APP_AWS_REGION}', AWS_REGION)
-            contents = contents.replace('${REACT_APP_LEX_IDENTITY_POOL_ID}', props["LexAgentAssistIdentityPoolId"])
+            contents = contents.replace('${REACT_APP_LEX_IDENTITY_POOL_ID}', props["LexMeetingAssistIdentityPoolId"])
             contents = contents.replace('${CLOUDFRONT_DOMAIN}', props["CloudFrontDomainName"])
             print("New LexWebUI Config: ", json.dumps(contents))
             s3.put_object(Bucket=webAppBucket, Key=configKey, Body=contents)
@@ -569,47 +520,17 @@ Resources:
 
           def setupQnABot(props, oldprops):
             configureQnabotSettings(props)
-            if propsChanged(props, oldprops, ["QNABOTSTACK", "QnaAgentAssistDemoJson", "QNASummarizeCallFunction"]):
+            if propsChanged(props, oldprops, ["QNABOTSTACK", "QnaMeetingAssistDemoJson", "QNASummarizeCallFunction"]):
               loadQnABotSamplePackage(props)
               buildQnABotLexBot(props)
             else:
               print("QnaBot demo data unchanged - skipping QnABot sample data update.")
-            if propsChanged(props, oldprops, ["QNABOTSTACK", "QnaAgentAssistDemoJson", "AgentAssistQnABotEmbeddingsApi"]):
-                if props["AgentAssistQnABotEmbeddingsApi"] == "DISABLED":
-                  # Stack configured to not use embeddings - sync FAQs to Kendra
-                  syncQnABotSamplePackageToKendra(props)
-                else:
-                  print("QnABot stack configured to use embeddings - skipping Kendra FAQ sync")
-            if propsChanged(props, oldprops, ["QNABOTSTACK", "AgentAssistQnABotKendraWebCrawlURLs", "AgentAssistQnABotKendraWebCrawlDepth"]):
-              if props["AgentAssistQnABotKendraWebCrawlURLs"]:
-                startKendraCrawler(props)
-            else:
-              print("Kendra web crawl URLs and Depth unchanged - skipping web crawler update.")
 
           def configureQnabotSettings(props):
             ssmParamName = getStackResource(props["QNABOTSTACK"], "DefaultQnABotSettings")
             value = ssm.get_parameter(Name=ssmParamName)
             settings = json.loads(value["Parameter"]["Value"])
             # modify settings
-            # Enable Kendra Fallback
-            settings["ALT_SEARCH_KENDRA_INDEXES"] = props["KendraIndexId"]
-            if props["AgentAssistQnABotEmbeddingsApi"] == "DISABLED":
-              # Embeddings disabled.. Use Kendra FAQ instead
-              settings["KENDRA_FAQ_INDEX"] = props["KendraIndexId"]
-            else:
-              # Embeddings enabled - disable Kendra FAQ
-              settings["KENDRA_FAQ_INDEX"] = ""
-            settings["ALT_SEARCH_KENDRA_FALLBACK_CONFIDENCE_SCORE"] = "MEDIUM"
-            settings["KENDRA_FAQ_ES_FALLBACK"] = "false"
-            settings["ALT_SEARCH_KENDRA_ANSWER_MESSAGE"] = "Amazon Kendra suggestions."
-            settings["KENDRA_WEB_PAGE_INDEX"] = props["KendraIndexId"]
-            settings["KENDRA_INDEXER_CRAWL_DEPTH"] = props["AgentAssistQnABotKendraWebCrawlDepth"]
-            settings["KENDRA_INDEXER_CRAWL_MODE"] = "HOST_ONLY"
-            settings["KENDRA_INDEXER_URLS"] = props["AgentAssistQnABotKendraWebCrawlURLs"]
-            if props["AgentAssistQnABotKendraWebCrawlURLs"]:
-              settings["ENABLE_KENDRA_WEB_INDEXER"] = "true"
-            else:
-              settings["ENABLE_KENDRA_WEB_INDEXER"] = "false"
             # Set LLM params
             settings["LLM_QA_NO_HITS_REGEX"] = "Sorry,"
             # Set preprocessing hook to pull callid transcript into bot chatMessageHistory
@@ -629,7 +550,7 @@ Resources:
 
           def loadQnABotSamplePackage(props):
             importBucket = getStackResource(props["QNABOTSTACK"], "ImportBucket")
-            demoPath = props["QnaAgentAssistDemoJson"]
+            demoPath = props["QnaMeetingAssistDemoJson"]
             demoparts = demoPath.split('/', 1)
             demobucket = demoparts[0]
             demokey = demoparts[1]
@@ -670,38 +591,6 @@ Resources:
                 print(f'Bot Status: {status}')
                 if status.startswith("FAILED"):
                   raise ValueError(status)
-
-          def syncQnABotSamplePackageToKendra(props):
-            exportBucket = getStackResource(props["QNABOTSTACK"], "ExportBucket")
-            index = getStackResource(props["QNABOTSTACK"], "Index")
-            demoPath = props["QnaAgentAssistDemoJson"]
-            demoFile = "kendraFAQ-" + os.path.basename(demoPath)
-            statusFile = f'status/qna-kendra-faq.txt'
-            statusBody = {
-              "bucket":exportBucket,
-              "index":index,
-              "tmp":f"tmp/{demoFile}",
-              "key":f"kendra-data/{demoFile}",
-              "filter":"",
-              "status":"Started"
-            }
-            print(statusBody)
-            s3.put_object(Bucket=exportBucket, Key=f'{statusFile}', Body=json.dumps(statusBody))
-            print(f"...waiting for kendra FAQ sync for {demoFile} to be complete...")
-            status = "Starting"
-            while status != "Sync Complete":
-                time.sleep(5)
-                status = get_status(bucket=exportBucket, statusFile=statusFile)
-                print(f'Import Status: {status}')
-                if status.startswith("FAILED") or status.startswith("Error"):
-                  raise ValueError(status)
-            print("Import complete")
-
-          def startKendraCrawler(props):
-            exportStack = getStackResource(props["QNABOTSTACK"], "ExportStack")
-            kendraNativeCrawlerLambda	 = getStackResource(exportStack, "KendraNativeCrawlerLambda")
-            response = lam.invoke(FunctionName=kendraNativeCrawlerLambda)
-            print("Kendra crawler setup complete")
 
           def getStackResource(stackName, logicaResourceId):
             print(f"LogicalResourceId={logicaResourceId}")
@@ -753,35 +642,22 @@ Resources:
       ServiceToken: !GetAtt SetupFunction.Arn
       AISTACK: !Ref AISTACK
       QNABOTSTACK: !Ref QNABOTSTACK
-      LexAgentAssistBotId: !Ref LexAgentAssistBotId
-      LexAgentAssistAliasId: !Ref LexAgentAssistAliasId
-      LexAgentAssistLocaleId: !Ref LexAgentAssistLocaleId
-      LexAgentAssistIdentityPoolId: !Ref LexAgentAssistIdentityPoolId
-      KendraIndexId: !Ref KendraIndexId
-      QnaAgentAssistDemoJson: !Ref QnaAgentAssistDemoJson
-      AgentAssistQnABotKendraWebCrawlURLs: !Ref AgentAssistQnABotKendraWebCrawlURLs
-      AgentAssistQnABotKendraWebCrawlDepth: !Ref AgentAssistQnABotKendraWebCrawlDepth
-      AgentAssistQnABotEmbeddingsApi: !Ref AgentAssistQnABotEmbeddingsApi
+      LexMeetingAssistBotId: !Ref LexMeetingAssistBotId
+      LexMeetingAssistAliasId: !Ref LexMeetingAssistAliasId
+      LexMeetingAssistLocaleId: !Ref LexMeetingAssistLocaleId
+      LexMeetingAssistIdentityPoolId: !Ref LexMeetingAssistIdentityPoolId
+      QnaMeetingAssistDemoJson: !Ref QnaMeetingAssistDemoJson
       QNASummarizeCallFunction: !Ref QNASummarizeCallFunction
       QNAFetchTranscriptFunction: !Ref QNAFetchTranscriptFunction
       QnaBotSettings: !Ref QnaBotSettings
-      # Changes to Params below force AgentAssist Setup to execute.
-      CallAudioSource: !Ref CallAudioSource
+      # Changes to Params below force MeetingAssist Setup to execute.
       ComprehendLanguageCode: !Ref ComprehendLanguageCode
-      AgentAssistOption: !Ref AgentAssistOption
-      AgentAssistExistingKendraIndexId: !Ref AgentAssistExistingKendraIndexId
-      AgentAssistExistingLexV2BotId: !Ref AgentAssistExistingLexV2BotId
-      AgentAssistExistingLexV2BotAliasId: !Ref AgentAssistExistingLexV2BotAliasId
-      AgentAssistExistingLambdaFunctionArn: !Ref AgentAssistExistingLambdaFunctionArn
-      AgentAssistQnABotLLMApi: !Ref AgentAssistQnABotLLMApi
-      AgentAssistQnABotLLMLambdaArn: !Ref AgentAssistQnABotLLMLambdaArn
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
       IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
       TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
       TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
       DynamoDbExpirationInDays: !Ref DynamoDbExpirationInDays
       EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
-      SummarizationSageMakerInitialInstanceCount: !Ref SummarizationSageMakerInitialInstanceCount
       EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
       CloudFrontDomainName: !Sub "https://${CloudFrontDomainName}/"
       Version: !Ref Version
