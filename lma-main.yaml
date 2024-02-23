@@ -28,7 +28,7 @@ Parameters:
 
   AssistantWakePhraseRegEx:
     Type: String
-    Default: [Hey,A,OK][ .,!]+Q[.,! ]+
+    Default: "[Hey,A,OK][ .,!]+Q[.,! ]+"
     Description: >
       A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'Hey Q' or 'OK Q'
 
@@ -364,7 +364,7 @@ Metadata:
         default: Authorized Account Email Domain(s)
       MeetingAssistExistingQApplicationId:
         default: Meeting Assist Amazon Q Business Application Id (existing)
-      MeetingAssistWakePhraseRegEx:
+      AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
       IsPartialTranscriptEnabled:
         default: Enable Partial Transcripts
@@ -583,7 +583,7 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         LCAStackName: !Ref AWS::StackName
-        MeetingAssistWakePhraseRegEx: !Ref MeetingAssistWakePhraseRegEx
+        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         RecordingsBucketRetentionDays: !Ref RecordingsBucketRetentionDays
         EnableVoiceToneAnalysis: 'false'
         CallAudioSource: 'Genesys Cloud Audiohook Web Socket'
