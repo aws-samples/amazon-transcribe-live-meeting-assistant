@@ -296,6 +296,12 @@ Parameters:
     Description: >
       A regular expression that will be used to show an alert in the UI if a category matches
 
+  AssistantWakePhraseRegEx:
+    Type: String
+    Default: [Hey,A,OK][ .,!]+Q[.,! ]+
+    Description: >
+      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'Hey Q' or 'OK Q'
+
   EnableVoiceToneAnalysis:
     Type: String
     Default: 'false'
@@ -549,11 +555,11 @@ Resources:
   # ParameterStore
   ##########################################################################
 
-  LCASettingsParameter:
+  LMASettingsParameter:
     Type: AWS::SSM::Parameter
     Properties:
       Type: String
-      Value: !Sub '{ "CategoryAlertRegex":"${CategoryAlertRegEx}", "EnableVoiceToneAnalysis":"${EnableVoiceToneAnalysis}", "WSEndpoint":"" }'
+      Value: !Sub '{ "CategoryAlertRegex":"${CategoryAlertRegEx}", "EnableVoiceToneAnalysis":"${EnableVoiceToneAnalysis}", "WSEndpoint":"", "AssistantWakePhraseRegEx":${AssistantWakePhraseRegEx} }'
 
   ##########################################################################
   # CodeBuild

@@ -1243,6 +1243,15 @@ def send_call_session_mapping_event(call_id, session_id):
     )
     LOGGER.debug("Send CALL_SESSION_MAPPING Response: ", extra=event_response)
 
+##########################################################################
+# check for agent assist wake phrase
+##########################################################################
+def isAssistantWakePhrase(transcript):
+    if (SETTINGS['AssistantWakePhraseRegEx'].match(transcript.lower())):
+        LOGGER.debug("Assistant Wake Phrase Detected: %s", transcript)
+        return True
+    return False
+
 
 ##########################################################################
 # Main event processing
@@ -1465,7 +1474,7 @@ async def execute_process_event_api_mutation(
                         appsync_session=appsync_session,
                     )
                 )
-            if (IS_LEX_AGENT_ASSIST_ENABLED or IS_LAMBDA_AGENT_ASSIST_ENABLED) and (normalized_message["Channel"] == "CALLER" and (not normalized_message["IsPartial"] or 'ContactId' in normalized_message.keys())):
+            if (IS_LEX_AGENT_ASSIST_ENABLED or IS_LAMBDA_AGENT_ASSIST_ENABLED) and isAssistantWakePhrase(normalized_message["Transcript"]) and (not normalized_message["IsPartial"] or 'ContactId' in normalized_message.keys()):
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN,
                     InvocationType='Event',
