@@ -1247,7 +1247,7 @@ def send_call_session_mapping_event(call_id, session_id):
 # check for agent assist wake phrase
 ##########################################################################
 def isAssistantWakePhrase(transcript):
-    if (SETTINGS['AssistantWakePhraseRegEx'].match(transcript.lower())):
+    if (SETTINGS['AssistantWakePhraseRegEx'].match(transcript)):
         LOGGER.debug("Assistant Wake Phrase Detected: %s", transcript)
         return True
     return False
