@@ -1,4 +1,4 @@
-chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
+chrome.runtime.onMessage.addListener(async function (request, sender, sendResponse) {
   if (request.action === "StartTranscription") {
     console.log("Received recorder start streaming message", request);
     startStreaming();
@@ -6,10 +6,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     console.log("Received recorder stop streaming message", request);
     stopStreaming();
   }
-});
+}); 
 
 /* globals */
 let audioProcessor = undefined;
+let samplingRate = 44100;
+let audioContext;
+let displayStream;
+let micStream;
 
 /* Helper funcs */
 const bytesToBase64DataUrl = async (bytes, type = "application/octet-stream") => {
@@ -32,21 +36,13 @@ const pcmEncode = (input) => {
   return buffer;
 };
 
-const interleave = (lbuffer, rbuffer) => {
-  const leftAudioBuffer = pcmEncode(lbuffer);
-  const leftView = new DataView(leftAudioBuffer);
-
-  const rightAudioBuffer = pcmEncode(rbuffer);
-  const rightView = new DataView(rightAudioBuffer);
-
-  const buffer = new ArrayBuffer(leftAudioBuffer.byteLength * 2);
-  const view = new DataView(buffer);
-
-  for (let i = 0, j = 0; i < leftAudioBuffer.byteLength; i += 2, j += 4) {
-    view.setInt16(j, leftView.getInt16(i, true), true);
-    view.setInt16(j + 2, rightView.getInt16(i, true), true);
-  }
-  return buffer;
+const convertToMono = (audioSource) => {
+  const splitter = audioContext.createChannelSplitter(2);
+  const merger = audioContext.createChannelMerger(1);
+  audioSource.connect(splitter);
+  splitter.connect(merger, 0, 0);
+  splitter.connect(merger, 1, 0);
+  return merger;
 };
 
 const stopStreaming = async () => {
@@ -58,14 +54,33 @@ const stopStreaming = async () => {
     });
     audioProcessor.port.close();
     audioProcessor.disconnect();
+    audioProcessor = null;
+
+    displayStream.getTracks().forEach((track) => {
+      track.stop();
+    });
+
+    micStream.getTracks().forEach((track) => {
+      track.stop();
+    });
+
+    if (audioContext) {
+      audioContext.close().then(() => {
+        console.log('AudioContext closed.');
+        audioContext = null;
+      });
+    }    
+
   }
+
+  chrome.runtime.sendMessage({ action: "TranscriptionStopped" });
 }
 
-const startStreaming = async () => {
+const startStreaming = async (sendResponse) => {
   try {
-    let audioContext = new window.AudioContext();
+    audioContext = new window.AudioContext();
     /* Get display media works */
-    let displayStream = await navigator.mediaDevices.getDisplayMedia({
+    displayStream = await navigator.mediaDevices.getDisplayMedia({
       preferCurrentTab: true,
       video: true,
       audio: {
@@ -77,10 +92,10 @@ const startStreaming = async () => {
 
     // hook up the stop streaming event
     displayStream.getAudioTracks()[0].onended = () => {
-      chrome.runtime.sendMessage({ action: "UserStoppedRecording" });
+      stopStreaming();
     };
 
-    let micStream = await navigator.mediaDevices.getUserMedia({
+    micStream = await navigator.mediaDevices.getUserMedia({
       video: false,
       audio: {
         noiseSuppression: true,
@@ -89,19 +104,19 @@ const startStreaming = async () => {
       }
     });
 
-    let samplingRate = audioContext.sampleRate;
-    chrome.runtime.sendMessage({action: "SamplingRate", samplingRate: samplingRate});
+    samplingRate = audioContext.sampleRate;
+    console.log("Sending sampling rate");
+    chrome.runtime.sendMessage({ action: "SamplingRate", samplingRate: samplingRate });
 
-    let displayAudioSource = audioContext.createMediaStreamSource(
-      new MediaStream([displayStream.getAudioTracks()[0]]),
-    );
-    let micAudioSource = audioContext.createMediaStreamSource(
-      new MediaStream([micStream.getAudioTracks()[0]]),
-    );
+    let displayAudioSource = audioContext.createMediaStreamSource(displayStream);
+    let micAudioSource = audioContext.createMediaStreamSource(micStream);
 
-    channelMerger = audioContext.createChannelMerger(2);
-    displayAudioSource.connect(channelMerger, 0, 0);
-    micAudioSource.connect(channelMerger, 0, 1);
+    let monoDisplaySource = convertToMono(displayAudioSource);
+    let monoMicSource = convertToMono(micAudioSource);
+
+    let channelMerger = audioContext.createChannelMerger(2);
+    monoMicSource.connect(channelMerger, 0, 0);
+    monoDisplaySource.connect(channelMerger, 0, 1);
 
     try {
       await audioContext.audioWorklet.addModule('audio-worklet.js');
@@ -109,28 +124,23 @@ const startStreaming = async () => {
       console.log(`Add module error ${error}`);
     }
 
-    audioProcessor = new AudioWorkletNode(audioContext, 'recording-processor', {
-      processorOptions: {
-        numberOfChannels: 2,
-        sampleRate: samplingRate,
-        maxFrameCount: (audioContext.sampleRate * 1) / 10,
-      },
-    });
-
-    audioProcessor.port.postMessage({
-      message: 'UPDATE_RECORDING_STATE',
-      setRecording: true,
-    });
-
-    let destination = audioContext.createMediaStreamDestination();
-    channelMerger.connect(audioProcessor).connect(destination);
-
+    audioProcessor = new AudioWorkletNode(audioContext, 'recording-processor');
     audioProcessor.port.onmessageerror = (error) => {
       console.log(`Error receving message from worklet ${error}`);
     };
 
-    // buffer[0] - display stream,  buffer[1] - mic stream
     audioProcessor.port.onmessage = async (event) => {
+      // this is pcm audio
+      //sendMessage(event.data);
+      let base64AudioData = await bytesToBase64DataUrl(event.data);
+      let payload = { action: "AudioData", audio: base64AudioData };
+      chrome.runtime.sendMessage(payload);
+    };
+    channelMerger.connect(audioProcessor);
+    
+
+    // buffer[0] - display stream,  buffer[1] - mic stream
+    /*audioProcessor.port.onmessage = async (event) => {
       let audioData = new Uint8Array(
         interleave(event.data.buffer[0], event.data.buffer[1]),
       );
@@ -138,12 +148,11 @@ const startStreaming = async () => {
       // send audio to service worker:
       let payload = { action: "AudioData", audio: base64AudioData };
       chrome.runtime.sendMessage(payload);
-    };
+    };*/
   } catch (error) {
     // console.error("Error in recorder", error);
     await stopStreaming();
   }
-  
 };
 
 console.log("Inside the recorder.js");
