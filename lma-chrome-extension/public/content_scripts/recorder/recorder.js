@@ -66,19 +66,19 @@ const stopStreaming = async () => {
 
     if (audioContext) {
       audioContext.close().then(() => {
+        chrome.runtime.sendMessage({ action: "TranscriptionStopped" });
         console.log('AudioContext closed.');
         audioContext = null;
       });
-    }    
-
+    }
   }
-
-  chrome.runtime.sendMessage({ action: "TranscriptionStopped" });
 }
 
 const startStreaming = async (sendResponse) => {
   try {
-    audioContext = new window.AudioContext();
+    audioContext = new window.AudioContext({
+      sampleRate: 32000
+    });
     /* Get display media works */
     displayStream = await navigator.mediaDevices.getDisplayMedia({
       preferCurrentTab: true,

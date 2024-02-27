@@ -127,7 +127,7 @@ function IntegrationProvider({ children }: any) {
     if (chrome.runtime) {
       const handleRuntimeMessage = async (request:any, sender:any, sendResponse:any) => {
         if (request.action === "TranscriptionStopped") {
-          setIsTranscribing(false);
+          await stopTranscription();
         } else if (request.action === "UpdateMetadata") {
           if (request.metadata.baseUrl && request.metadata.baseUrl === "https://app.zoom.us") {
             setPlatform("Zoom");
