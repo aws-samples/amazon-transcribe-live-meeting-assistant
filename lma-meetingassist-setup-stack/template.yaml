@@ -192,69 +192,13 @@ Resources:
       # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
       FunctionName: !Sub "QNA-FetchTranscript-${LMAStackName}"
       Role: !GetAtt QNAFetchTranscriptFunctionRole.Arn
-      Handler: index.handler
+      Handler: qna_fetch_transcript_function.handler
       Runtime: python3.11
       Timeout: 900
       Environment:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
-      Code:
-        ZipFile: |
-          import json
-          import boto3
-          import os
-          FETCH_TRANSCRIPT_FUNCTION_ARN = os.environ['FETCH_TRANSCRIPT_FUNCTION_ARN']
-          LAMBDA_CLIENT = boto3.client("lambda")
-
-          def get_call_transcript(callId):
-              payload = {
-                  'CallId': callId, 
-                  'ProcessTranscript': True
-              }
-              lambda_response = LAMBDA_CLIENT.invoke(
-                  FunctionName=FETCH_TRANSCRIPT_FUNCTION_ARN,
-                  InvocationType='RequestResponse',
-                  Payload=json.dumps(payload)
-              )
-              result = json.loads(lambda_response.get("Payload").read().decode("utf-8"))
-              return result["transcript"]
-
-          def format_response(event, transcript):
-              maxMessages = int(event["req"]["_settings"].get("LLM_CHAT_HISTORY_MAX_MESSAGES", 20))
-              print(f"Using last {maxMessages} conversation turns (LLM_CHAT_HISTORY_MAX_MESSAGES)")
-              transcriptSegments = transcript.strip().split('\n')
-              # remove final segment if it matches the current utterance
-              lastMessageRole, lastMessageText = transcriptSegments[-1].split(":")
-              if lastMessageText.strip() == event["req"].get("question").strip():
-                transcriptSegments.pop()
-              transcriptSegments = transcriptSegments[-maxMessages:]
-              chatHistory = []
-              role, text = None, None
-              for transcriptSegment in transcriptSegments:
-                role, text = transcriptSegment.split(":")
-                if role == "CALLER":
-                  chatHistory.append({"Human": text.strip()})
-                else:
-                  chatHistory.append({"AI": text.strip()})
-              event.setdefault("req",{}).setdefault("_userInfo",{})["chatMessageHistory"] = json.dumps(chatHistory)
-              return event
-
-          def handler(event, context):
-              print("Received event: %s" % json.dumps(event))
-              # get callId from Request attributes.. set by LCA agentassist orchestrator
-              callId = event["req"]["_event"].get("requestAttributes",{}).get("callId")
-              if callId:
-                print(f"Replacing chat history with call transcript for callId {callId}.")
-                transcript = get_call_transcript(callId)
-                event = format_response(event, transcript)
-                # set callId sessionAttribute for possible later use in QnABot / Handlebars, etc.
-                event["req"]["session"]["callId"] = callId
-                event["res"]["session"]["callId"] = callId
-              else:
-                print("No callId session attribute - nothing to do")
-              print("Returning response: %s" % json.dumps(event))
-              return event
-
+      Code: ./src
 
   LambdaHookSummarizeCallRole:
     Type: "AWS::IAM::Role"
@@ -286,63 +230,21 @@ Resources:
       # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
       FunctionName: !Sub "QNA-SummarizeCall-${LMAStackName}"
       Role: !GetAtt LambdaHookSummarizeCallRole.Arn
-      Handler: index.handler
+      Handler: qna_summarize_call_function.handler
       Runtime: python3.11
       Timeout: 900
       Environment:
         Variables:
           TRANSCRIPT_SUMMARY_FUNCTION_ARN: !Ref TranscriptSummaryFunctionArn
-      Code:
-        ZipFile: |
-          import json
-          import boto3
-          import os
-          TRANSCRIPT_SUMMARY_FUNCTION_ARN = os.environ.get("TRANSCRIPT_SUMMARY_FUNCTION_ARN")
-          LAMBDA_CLIENT = boto3.client("lambda")
+      Code: ./src
 
-          def get_call_summary(callId, prompt):
-              event={"CallId": callId}
-              if prompt:
-                event["Prompt"] = prompt
-              lambda_response = LAMBDA_CLIENT.invoke(
-                  FunctionName=TRANSCRIPT_SUMMARY_FUNCTION_ARN,
-                  InvocationType='RequestResponse',
-                  Payload=json.dumps(event)
-              )
-              result = json.loads(lambda_response.get("Payload").read().decode("utf-8"))
-              return result["summary"]
 
-          def format_response(event, summary):
-              # set plaintext, & markdown
-              plainttext = summary
-              markdown = summary
-              ssml = summary
-              # add plaintext, markdown, and ssml fields to event.res
-              event["res"]["message"] = plainttext
-              event["res"]["session"]["appContext"] = {
-                  "altMessages": {
-                      "markdown": markdown,
-                      "ssml": ssml
-                  }
-              }
-              return event
-
-          def get_prompt_from_lambdahook_args(event):
-              prompt=None
-              lambdahook_args_list = event["res"]["result"].get("args",[])
-              print("LambdaHook args: ", lambdahook_args_list)
-              if len(lambdahook_args_list):
-                prompt = lambdahook_args_list[0]
-              return prompt
-
-          def handler(event, context):
-              print("Received event: %s" % json.dumps(event))
-              callId = event["req"]["session"].get("callId",{})
-              prompt = get_prompt_from_lambdahook_args(event)
-              summary = get_call_summary(callId, prompt)
-              event = format_response(event, summary)
-              print("Returning response: %s" % json.dumps(event))
-              return event
+  QBusinessModelLayer:
+    Type: "AWS::Lambda::LayerVersion"
+    Properties:
+      Content: ./qbusiness_boto3_model
+      CompatibleRuntimes:
+        - python3.11
 
   QNAQBusinessFunctionRole:
     Type: AWS::IAM::Role
@@ -378,192 +280,19 @@ Resources:
     Type: "AWS::Lambda::Function"
     Properties:
       # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
-      FunctionName: !Sub "QNA-QBusiness-${LMAStackName}"
+      FunctionName: !Sub "QNA-${LMAStackName}-QBusiness-LambdaHook"
       Role: !GetAtt QNAQBusinessFunctionRole.Arn
-      Handler: index.handler
+      Handler: qna_qbusiness_lambdahook_function.handler
       Runtime: python3.11
+      Layers: 
+        - !Ref QBusinessModelLayer
       Timeout: 900
       Environment:
         Variables:
+          AWS_DATA_PATH: /opt/model
           AMAZONQ_APP_ID: !Ref AmazonQAppId
           AMAZONQ_USER_ID: !Ref AmazonQUserId
-      Code:
-        ZipFile: |
-          import json
-          import os
-          import uuid
-          import boto3
-
-          AMAZONQ_APP_ID = os.environ.get("AMAZONQ_APP_ID")
-          AMAZONQ_REGION = os.environ.get("AMAZONQ_REGION") or os.environ["AWS_REGION"]
-          AMAZONQ_ENDPOINT_URL = os.environ.get("AMAZONQ_ENDPOINT_URL") or f'https://qbusiness.{AMAZONQ_REGION}.api.aws'  
-          print("AMAZONQ_ENDPOINT_URL:", AMAZONQ_ENDPOINT_URL)
-
-          qbusiness_client = boto3.client(
-              service_name="qbusiness", 
-              region_name=AMAZONQ_REGION,
-              endpoint_url=AMAZONQ_ENDPOINT_URL
-          )
-
-          def get_amazonq_response(prompt, context, amazonq_userid, attachments):
-              print(f"get_amazonq_response: prompt={prompt}, app_id={AMAZONQ_APP_ID}, context={context}")
-              input = {
-                  "applicationId": AMAZONQ_APP_ID,
-                  "userMessage": prompt,
-                  "userId": amazonq_userid
-              }
-              if context:
-                  if context["conversationId"]:
-                      input["conversationId"] = context["conversationId"]
-                  if context["parentMessageId"]:
-                      input["parentMessageId"] = context["parentMessageId"]
-              else:
-                  input["clientToken"] = str(uuid.uuid4())
-              
-              if attachments:
-                  input["attachments"] = attachments
-
-              print("Amazon Q Input: ", input)
-              try:
-                  resp = qbusiness_client.chat_sync(**input)
-              except Exception as e:
-                  print("Amazon Q Exception: ", e)
-                  resp = {
-                      "systemMessage": "Amazon Q Error: " + str(e)
-                  }
-              print("Amazon Q Response: ", json.dumps(resp))
-              return resp
-
-          def get_settings_from_lambdahook_args(event):
-              lambdahook_settings = {}
-              lambdahook_args_list = event["res"]["result"].get("args",[])
-              print("LambdaHook args: ", lambdahook_args_list)
-              if len(lambdahook_args_list):
-                  try:
-                      lambdahook_settings = json.loads(lambdahook_args_list[0])
-                  except Exception as e:
-                      print(f"Failed to parse JSON:", lambdahook_args_list[0], e)
-                      print("..continuing")
-              return lambdahook_settings
-
-          def get_user_email(event):
-              isVerifiedIdentity = event["req"]["_userInfo"].get("isVerifiedIdentity")
-              if not isVerifiedIdentity:
-                  print("User is not verified identity")
-                  return "Bot_user_not_verified"
-              user_email = event["req"]["_userInfo"].get("Email")
-              print(f"using verified bot user email as user id: {user_email}")
-              return user_email
-
-          def get_args_from_lambdahook_args(event):
-              parameters = {}
-              lambdahook_args_list = event["res"]["result"].get("args",[])
-              print("LambdaHook args: ", lambdahook_args_list)
-              if len(lambdahook_args_list):
-                  try:
-                      parameters = json.loads(lambdahook_args_list[0])
-                  except Exception as e:
-                      print(f"Failed to parse JSON:", lambdahook_args_list[0], e)
-                      print("..continuing")
-              return parameters
-
-          def getS3File(s3Path):
-              if s3Path.startswith("s3://"):
-                  s3Path = s3Path[5:]
-              s3 = boto3.resource('s3')
-              bucket, key = s3Path.split("/", 1)
-              obj = s3.Object(bucket, key)
-              return obj.get()['Body'].read()
-
-          def getAttachments(event):
-              userFilesUploaded = event["req"]["session"].get("userFilesUploaded",[])
-              attachments = []
-              for userFile in userFilesUploaded:
-                  print(f"getAttachments: userFile={userFile}")
-                  attachments.append({
-                      "data": getS3File(userFile["s3Path"]),
-                      "name": userFile["fileName"]
-                  })
-              # delete userFilesUploaded from session
-              event["res"]["session"].pop("userFilesUploaded",None)
-              return attachments
-
-          def format_response(event, amazonq_response):
-              # get settings, if any, from lambda hook args
-              # e.g: {"Prefix":"<custom prefix heading>", "ShowContext": False}
-              lambdahook_settings = get_settings_from_lambdahook_args(event)
-              prefix = lambdahook_settings.get("Prefix","Amazon Q Answer:")
-              showContextText = lambdahook_settings.get("ShowContextText",True)
-              showSourceLinks = lambdahook_settings.get("ShowSourceLinks",True)
-              # set plaintext, markdown, & ssml response
-              if prefix in ["None", "N/A", "Empty"]:
-                  prefix = None
-              plainttext = amazonq_response["systemMessage"]
-              markdown = amazonq_response["systemMessage"]
-              ssml = amazonq_response["systemMessage"]
-              if prefix:
-                  plainttext = f"{prefix}\n\n{plainttext}"
-                  markdown = f"**{prefix}**\n\n{markdown}"
-              if showContextText:
-                  contextText = ""
-                  for source in amazonq_response.get("sourceAttributions",[]):
-                      title = source.get("title","title missing")
-                      snippet = source.get("snippet","snippet missing")
-                      url = source.get("url")
-                      if url:
-                          contextText = f'{contextText}<br><a href="{url}">{title}</a>'
-                      else:
-                          contextText = f'{contextText}<br><u><b>{title}</b></u>'
-                      contextText = f"{contextText}<br>{snippet}\n"
-                  if contextText:
-                      markdown = f'{markdown}\n<details><summary>Context</summary><p style="white-space: pre-line;">{contextText}</p></details>'
-              if showSourceLinks:
-                  sourceLinks = []
-                  for source in amazonq_response.get("sourceAttribution",[]):
-                      title = source.get("title","link (no title)")
-                      url = source.get("url")
-                      if url:
-                          sourceLinks.append(f'<a href="{url}">{title}</a>')
-                  if len(sourceLinks):
-                      markdown = f'{markdown}<br>Sources: ' + ", ".join(sourceLinks)
-
-              # add plaintext, markdown, and ssml fields to event.res
-              event["res"]["message"] = plainttext
-              event["res"]["session"]["appContext"] = {
-                  "altMessages": {
-                      "markdown": markdown,
-                      "ssml": ssml
-                  }
-              }
-              # preserve conversation context in session
-              amazonq_context = {
-                  "conversationId": amazonq_response.get("conversationId"),
-                  "parentMessageId": amazonq_response.get("systemMessageId")
-              }
-              event["res"]["session"]["qnabotcontext"]["amazonq_context"] = amazonq_context
-              #TODO - can we determine when Amazon Q has a good answer or not?
-              #For now, always assume it's a good answer.
-              #QnAbot sets session attribute qnabot_gotanswer True when got_hits > 0
-              event["res"]["got_hits"] = 1
-              return event
-
-          def lambda_handler(event, context):
-              print("Received event: %s" % json.dumps(event))
-              args = get_args_from_lambdahook_args(event)
-              # prompt set from args, or from req.question if not specified in args.
-              userInput = args.get("Prompt", event["req"]["question"])
-              qnabotcontext = event["req"]["session"].get("qnabotcontext",{})
-              amazonq_context = qnabotcontext.get("amazonq_context",{})
-              attachments = getAttachments(event)
-              amazonq_userid = os.environ.get("AMAZONQ_USER_ID")
-              if not amazonq_userid:
-                  amazonq_userid = get_user_email(event)
-              else:
-                  print(f"using configured default user id: {amazonq_userid}")
-              amazonq_response = get_amazonq_response(userInput, amazonq_context, amazonq_userid, attachments)
-              event = format_response(event, amazonq_response)
-              print("Returning response: %s" % json.dumps(event))
-              return event
+      Code: ./src
 
   LambdaRole:
     Type: "AWS::IAM::Role"
@@ -653,213 +382,10 @@ Resources:
     Type: "AWS::Lambda::Function"
     Properties:
       Role: !GetAtt LambdaRole.Arn
-      Handler: index.handler
+      Handler: setup_function.handler
       Runtime: python3.11
       Timeout: 900
-      Code:
-        ZipFile: |
-          import boto3
-          import botocore
-          import cfnresponse
-          import json
-          import datetime
-          import time
-          import os
-          import re
-          from botocore.exceptions import ClientError
-
-          AWS_REGION = os.environ['AWS_REGION']
-          aws_account_id = ''
-          aws_partition = 'aws'
-
-          dt = datetime.datetime.utcnow()
-          cf = boto3.client('cloudformation')
-          ssm = boto3.client('ssm')
-          s3 = boto3.client('s3')
-          lam = boto3.client('lambda')
-          iam = boto3.client('iam')
-          cloudfront = boto3.client('cloudfront')
-
-          def propsChanged(props, oldprops, fields):
-            for field in fields:
-              if props.get(field) != oldprops.get(field):
-                print(f"Prop {field} value changed. Old: {oldprops.get(field)}, New: {props.get(field)}")
-                return True
-            return False
-            
-          def addBotToAistack(props, oldprops):
-            asyncAgentAssistOrchestratorFunction = getStackResource(props["AISTACK"], "AsyncAgentAssistOrchestrator")
-            response = lam.get_function_configuration(FunctionName=asyncAgentAssistOrchestratorFunction)
-            envVars = response["Environment"]["Variables"]
-            envVars["LEX_BOT_ID"] = props["LexMeetingAssistBotId"]
-            envVars["LEX_BOT_ALIAS_ID"] = props["LexMeetingAssistAliasId"]
-            envVars["LEX_BOT_LOCALE_ID"] = props["LexMeetingAssistLocaleId"]
-            response = lam.update_function_configuration(
-              FunctionName=asyncAgentAssistOrchestratorFunction,
-              Environment={"Variables":envVars}
-              )
-            print("Updated AsyncAgentAssistOrchestratorFunction Environment variable to add Lex bot.")
-
-            print("Updating updating Cognito Unauthenticated Role for Agent Assist...")
-            agentAssistBotUnauthRole = getStackResource(props["AISTACK"], "AgentAssistBotUnauthRole")
-            newArn = f'arn:{aws_partition}:lex:{AWS_REGION}:{aws_account_id}:bot-alias/{props["LexMeetingAssistBotId"]}/{props["LexMeetingAssistAliasId"]}'
-            newPolicy = {'Version': '2012-10-17', 'Statement': [{'Action': ['lex:RecognizeText', 'lex:RecognizeUtterance', 'lex:DeleteSession', 'lex:PutSession'], 'Resource': newArn, 'Effect': 'Allow'}]}
-            print('New Policy:')
-            print(newPolicy)
-            iam.put_role_policy(
-              RoleName=agentAssistBotUnauthRole,
-              PolicyName='AgentAssistBotUnauthPolicy',
-              PolicyDocument=json.dumps(newPolicy)
-              )
-            print("Done updating Cognito Unauthenticated Role for Agent Assist")
-
-            # update config file and invalidate CF
-            print("Updating lex-web-ui-loader-config.json...")
-            webAppBucket = getStackResource(props["AISTACK"], "WebAppBucket")
-            configKey = 'lex-web-ui-loader-config.json'
-            configTemplateKey = 'lex-web-ui-loader-config-template.json'
-            response = s3.get_object(Bucket=webAppBucket, Key=configTemplateKey)
-            contents = response["Body"].read().decode("utf-8")
-            contents = contents.replace('${REACT_APP_LEX_BOT_ID}', props["LexMeetingAssistBotId"])
-            contents = contents.replace('${REACT_APP_LEX_BOT_ALIAS_ID}', props["LexMeetingAssistAliasId"])
-            contents = contents.replace('${REACT_APP_LEX_BOT_LOCALE_ID}', props["LexMeetingAssistLocaleId"])
-            contents = contents.replace('${REACT_APP_AWS_REGION}', AWS_REGION)
-            contents = contents.replace('${REACT_APP_LEX_IDENTITY_POOL_ID}', props["LexMeetingAssistIdentityPoolId"])
-            contents = contents.replace('${CLOUDFRONT_DOMAIN}', props["CloudFrontDomainName"])
-            print("New LexWebUI Config: ", json.dumps(contents))
-            s3.put_object(Bucket=webAppBucket, Key=configKey, Body=contents)
-            print("Done updating lex-web-ui-loader-config.json. Invalidating CloudFront...")
-
-            cloudFrontDistro = getStackResource(props["AISTACK"], "WebAppCloudFrontDistribution")
-            response = cloudfront.create_invalidation(
-              DistributionId=cloudFrontDistro,
-              InvalidationBatch={
-                'Paths': {
-                  'Quantity': 1,
-                  'Items': [
-                      '/lex-web-ui-loader-config.json'
-                  ]
-                },
-                'CallerReference': str(time.time()).replace(".", "")
-              }
-            )
-
-          def setupQnABot(props, oldprops):
-            configureQnabotSettings(props)
-            if propsChanged(props, oldprops, ["QNABOTSTACK", "QnaMeetingAssistDemoJson", "QNASummarizeCallFunction", "QNAQBusinessFunction"]):
-              loadQnABotSamplePackage(props)
-              buildQnABotLexBot(props)
-            else:
-              print("QnaBot demo data unchanged - skipping QnABot sample data update.")
-
-          def configureQnabotSettings(props):
-            ssmParamName = getStackResource(props["QNABOTSTACK"], "DefaultQnABotSettings")
-            value = ssm.get_parameter(Name=ssmParamName)
-            settings = json.loads(value["Parameter"]["Value"])
-            # modify settings
-            # Set LLM params
-            settings["LLM_QA_NO_HITS_REGEX"] = "Sorry,"
-            # Set preprocessing hook to pull callid transcript into bot chatMessageHistory
-            settings["LAMBDA_PREPROCESS_HOOK"] = props["QNAFetchTranscriptFunction"]
-            # Additional settings provided by param QnaBotSettings
-            additional_QnaBotSettings = json.loads(props.get("QnaBotSettings","{}").replace('\n',''))
-            for k, v in additional_QnaBotSettings.items():
-              settings[k] = v
-            # save back to SSM
-            response = ssm.put_parameter(
-              Name=ssmParamName,
-              Value=json.dumps(settings),
-              Type='String',
-              Overwrite=True
-            )
-            print(f"Updated SSM parameter: {ssmParamName}")
-
-          def loadQnABotSamplePackage(props):
-            importBucket = getStackResource(props["QNABOTSTACK"], "ImportBucket")
-            demoPath = props["QnaMeetingAssistDemoJson"]
-            demoparts = demoPath.split('/', 1)
-            demobucket = demoparts[0]
-            demokey = demoparts[1]
-            demoFile = os.path.basename(demoPath)
-            demoFileTmp = f'/tmp/{demoFile}'
-            print(f"Processing {demoFile} import...")
-            # Download demo file from S3 
-            s3.download_file(demobucket, demokey, demoFileTmp)
-            # Replace Summarize Lambda Hook placeholder with function ARN
-            with open(demoFileTmp, 'r') as f:
-              filedata = f.read()
-            filedata = re.sub('<LCASummarizeCallFunctionName>', props["QNASummarizeCallFunction"], filedata)
-            filedata = re.sub('<QNAQBusinessFunctionName>', props["QNAQBusinessFunction"], filedata)
-            with open(demoFileTmp, 'w') as f:
-              f.write(filedata)
-            # Upload edited file to import bucket to trigger import  
-            statusFile = f'status/{demoFile}'
-            s3.put_object(Bucket=importBucket, Key=f'{statusFile}', Body='{"status":"Starting"}')
-            s3.upload_file(demoFileTmp, importBucket, f'data/{demoFile}')
-            print(f"...waiting for {demoFile} import to be complete...")
-            status = "Starting"
-            while status != "Complete":
-                time.sleep(2)
-                status = get_status(bucket=importBucket, statusFile=statusFile)
-                print(f'Import Status: {status}')
-                if status.startswith("FAILED"):
-                  raise ValueError(status)
-            print("Import complete")
-
-          def buildQnABotLexBot(props):
-            lexBuildLambdaStart = getStackResource(props["QNABOTSTACK"], "LexBuildLambdaStart")
-            buildStatusBucket = getStackResource(props["QNABOTSTACK"], "BuildStatusBucket")
-            statusFile = f'lexV2status.json'
-            s3.put_object(Bucket=buildStatusBucket, Key=f'{statusFile}', Body='{"status":"Starting"}')
-            response = lam.invoke(FunctionName=lexBuildLambdaStart)
-            status = "Starting"
-            while status not in ["READY", "FAILED"]:
-                time.sleep(5)
-                status = get_status(bucket=buildStatusBucket, statusFile=statusFile)
-                print(f'Bot Status: {status}')
-
-          def getStackResource(stackName, logicaResourceId):
-            print(f"LogicalResourceId={logicaResourceId}")
-            physicalResourceId = cf.describe_stack_resource(
-              StackName=stackName,
-              LogicalResourceId=logicaResourceId
-            )["StackResourceDetail"]["PhysicalResourceId"]
-            print(f"PhysicalResourceId={physicalResourceId}")
-            return(physicalResourceId)
-
-          def get_status(bucket, statusFile):
-            try:
-              response = s3.get_object(Bucket=bucket, Key=statusFile, IfModifiedSince=dt)
-            except ClientError as e:
-                  if e.response["Error"]["Code"] in ("304", "NoSuchKey"):
-                    return f'{e.response["Error"]["Code"]} - {e.response["Error"]["Message"]}'
-                  else:
-                    raise e
-            obj_status_details = json.loads(response["Body"].read().decode("utf-8"))
-            return obj_status_details["status"]
-
-          def handler(event, context):
-            global aws_account_id
-            global aws_partition
-            aws_account_id = context.invoked_function_arn.split(":")[4]
-            aws_partition = context.invoked_function_arn.split(":")[1]
-            print(json.dumps(event))
-            status = cfnresponse.SUCCESS
-            reason = "Success"
-            responseData = {}
-            responseData['Data'] = "Success"
-            if event['RequestType'] != 'Delete':
-              props = event["ResourceProperties"]
-              oldprops = event.get("OldResourceProperties",{})
-              try:
-                addBotToAistack(props, oldprops)
-                if props["QNABOTSTACK"]:
-                  setupQnABot(props, oldprops)
-              except Exception as e:
-                print(e)
-                reason = f"Exception thrown: {e}"
-                status = cfnresponse.FAILED
-            cfnresponse.send(event, context, status, responseData, reason=reason)
+      Code: ./src
 
   # Trigger Lambda function
   SetupFunctionResource:

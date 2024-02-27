@@ -98,10 +98,28 @@ fi
 
 echo -n "Make temp dir: "
 timestamp=$(date "+%Y%m%d_%H%M")
-tmpdir=/tmp/lca
+tmpdir=/tmp/lma
 [ -d $tmpdir ] && rm -fr $tmpdir
 mkdir -p $tmpdir
 pwd
+
+dir=lma-meetingassist-setup-stack
+echo "PACKAGING $dir"
+pushd $dir
+template=template.yaml
+s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/template.yaml"
+https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/template.yaml"
+aws cloudformation package \
+--template-file ${template} \
+--output-template-file ${tmpdir}/${template} \
+--s3-bucket $BUCKET --s3-prefix ${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack \
+--region ${REGION} || exit 1
+echo "Uploading template file to: ${s3_template}"
+aws s3 cp ${tmpdir}/${template} ${s3_template}
+echo "Validating template"
+aws cloudformation validate-template --template-url ${https_template} > /dev/null || exit 1
+aws s3 cp ./qna-ma-demo.jsonl s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
+popd
 
 dir=lca-websocket-stack
 echo "PACKAGING $dir"
@@ -171,13 +189,6 @@ _EOF
 npm install
 npm run build || exit 1
 aws s3 sync ./build/ s3://${BUCKET}/${PREFIX_AND_VERSION}/aws-qnabot/ --delete 
-popd
-
-dir=lma-meetingassist-setup-stack
-echo "PACKAGING $dir"
-pushd $dir
-aws s3 cp ./template.yaml s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/template.yaml
-aws s3 cp ./qna-ma-demo.jsonl s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
 popd
 
 echo "PACKAGING Main Stack Cfn artifacts"
