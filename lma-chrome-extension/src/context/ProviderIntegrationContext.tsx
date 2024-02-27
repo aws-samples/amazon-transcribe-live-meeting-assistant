@@ -1,5 +1,5 @@
 import React, { createContext, startTransition, useContext, useEffect, useRef, useState } from 'react';
-import useWebSocket from 'react-use-websocket';
+import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { useSettings } from './SettingsContext';
 import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
@@ -111,7 +111,14 @@ function IntegrationProvider({ children }: any) {
     if (chrome.runtime) {
       chrome.runtime.sendMessage({ action: "StopTranscription" });
     }
-    getWebSocket()?.close();
+    if (readyState === ReadyState.OPEN) {
+      setCurrentCall((callState) => {
+        callState.callEvent = 'END';
+        sendMessage(JSON.stringify(callState));
+        return callState;
+      });
+      getWebSocket()?.close();
+    }
     setShouldConnect(false);
     setIsTranscribing(false);
   }
