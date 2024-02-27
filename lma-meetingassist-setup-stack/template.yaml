@@ -35,6 +35,19 @@ Parameters:
     Type: String
     Description: QNABOT Stack ARN  
 
+  AmazonQAppId:
+    Type: String
+    AllowedPattern: '^(|[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})$'
+    Description: >
+      Provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot."
+
+  AmazonQUserId:
+    Type: String
+    Description: >-
+      Email address of admin user (e.g. jdoe@example.com) used for the API and web UI.
+      An initial temporary password will be automatically sent to this user via email.
+    AllowedPattern: '^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$'
+
   # Required
   LexMeetingAssistBotId:
     Type: String
@@ -110,15 +123,7 @@ Parameters:
     Description: ARN of Transcript Summary function (if defined)
 
   # Changes to Params below force MeetingAssist Setup to update.
-  ComprehendLanguageCode:
-    Type: String
   TranscribeLanguageCode:
-    Type: String
-  IsSentimentAnalysisEnabled:
-    Type: String
-  SentimentNegativeScoreThreshold:
-    Type: String
-  SentimentPositiveScoreThreshold:
     Type: String
   TranscriptLambdaHookFunctionArn:
     Type: String
@@ -339,6 +344,227 @@ Resources:
               print("Returning response: %s" % json.dumps(event))
               return event
 
+  QNAQBusinessFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "qbusiness:ChatSync"
+                Resource: !Sub "arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${AmazonQAppId}"
+          PolicyName: QBusinessPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: "arn:aws:s3:::*-importbucket-*/*"
+          PolicyName: S3ImportBucketPolicy
+
+  QNAQBusinessFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
+      FunctionName: !Sub "QNA-QBusiness-${LMAStackName}"
+      Role: !GetAtt QNAQBusinessFunctionRole.Arn
+      Handler: index.handler
+      Runtime: python3.11
+      Timeout: 900
+      Environment:
+        Variables:
+          AMAZONQ_APP_ID: !Ref AmazonQAppId
+          AMAZONQ_USER_ID: !Ref AmazonQUserId
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import uuid
+          import boto3
+
+          AMAZONQ_APP_ID = os.environ.get("AMAZONQ_APP_ID")
+          AMAZONQ_REGION = os.environ.get("AMAZONQ_REGION") or os.environ["AWS_REGION"]
+          AMAZONQ_ENDPOINT_URL = os.environ.get("AMAZONQ_ENDPOINT_URL") or f'https://qbusiness.{AMAZONQ_REGION}.api.aws'  
+          print("AMAZONQ_ENDPOINT_URL:", AMAZONQ_ENDPOINT_URL)
+
+          qbusiness_client = boto3.client(
+              service_name="qbusiness", 
+              region_name=AMAZONQ_REGION,
+              endpoint_url=AMAZONQ_ENDPOINT_URL
+          )
+
+          def get_amazonq_response(prompt, context, amazonq_userid, attachments):
+              print(f"get_amazonq_response: prompt={prompt}, app_id={AMAZONQ_APP_ID}, context={context}")
+              input = {
+                  "applicationId": AMAZONQ_APP_ID,
+                  "userMessage": prompt,
+                  "userId": amazonq_userid
+              }
+              if context:
+                  if context["conversationId"]:
+                      input["conversationId"] = context["conversationId"]
+                  if context["parentMessageId"]:
+                      input["parentMessageId"] = context["parentMessageId"]
+              else:
+                  input["clientToken"] = str(uuid.uuid4())
+              
+              if attachments:
+                  input["attachments"] = attachments
+
+              print("Amazon Q Input: ", input)
+              try:
+                  resp = qbusiness_client.chat_sync(**input)
+              except Exception as e:
+                  print("Amazon Q Exception: ", e)
+                  resp = {
+                      "systemMessage": "Amazon Q Error: " + str(e)
+                  }
+              print("Amazon Q Response: ", json.dumps(resp))
+              return resp
+
+          def get_settings_from_lambdahook_args(event):
+              lambdahook_settings = {}
+              lambdahook_args_list = event["res"]["result"].get("args",[])
+              print("LambdaHook args: ", lambdahook_args_list)
+              if len(lambdahook_args_list):
+                  try:
+                      lambdahook_settings = json.loads(lambdahook_args_list[0])
+                  except Exception as e:
+                      print(f"Failed to parse JSON:", lambdahook_args_list[0], e)
+                      print("..continuing")
+              return lambdahook_settings
+
+          def get_user_email(event):
+              isVerifiedIdentity = event["req"]["_userInfo"].get("isVerifiedIdentity")
+              if not isVerifiedIdentity:
+                  print("User is not verified identity")
+                  return "Bot_user_not_verified"
+              user_email = event["req"]["_userInfo"].get("Email")
+              print(f"using verified bot user email as user id: {user_email}")
+              return user_email
+
+          def get_args_from_lambdahook_args(event):
+              parameters = {}
+              lambdahook_args_list = event["res"]["result"].get("args",[])
+              print("LambdaHook args: ", lambdahook_args_list)
+              if len(lambdahook_args_list):
+                  try:
+                      parameters = json.loads(lambdahook_args_list[0])
+                  except Exception as e:
+                      print(f"Failed to parse JSON:", lambdahook_args_list[0], e)
+                      print("..continuing")
+              return parameters
+
+          def getS3File(s3Path):
+              if s3Path.startswith("s3://"):
+                  s3Path = s3Path[5:]
+              s3 = boto3.resource('s3')
+              bucket, key = s3Path.split("/", 1)
+              obj = s3.Object(bucket, key)
+              return obj.get()['Body'].read()
+
+          def getAttachments(event):
+              userFilesUploaded = event["req"]["session"].get("userFilesUploaded",[])
+              attachments = []
+              for userFile in userFilesUploaded:
+                  print(f"getAttachments: userFile={userFile}")
+                  attachments.append({
+                      "data": getS3File(userFile["s3Path"]),
+                      "name": userFile["fileName"]
+                  })
+              # delete userFilesUploaded from session
+              event["res"]["session"].pop("userFilesUploaded",None)
+              return attachments
+
+          def format_response(event, amazonq_response):
+              # get settings, if any, from lambda hook args
+              # e.g: {"Prefix":"<custom prefix heading>", "ShowContext": False}
+              lambdahook_settings = get_settings_from_lambdahook_args(event)
+              prefix = lambdahook_settings.get("Prefix","Amazon Q Answer:")
+              showContextText = lambdahook_settings.get("ShowContextText",True)
+              showSourceLinks = lambdahook_settings.get("ShowSourceLinks",True)
+              # set plaintext, markdown, & ssml response
+              if prefix in ["None", "N/A", "Empty"]:
+                  prefix = None
+              plainttext = amazonq_response["systemMessage"]
+              markdown = amazonq_response["systemMessage"]
+              ssml = amazonq_response["systemMessage"]
+              if prefix:
+                  plainttext = f"{prefix}\n\n{plainttext}"
+                  markdown = f"**{prefix}**\n\n{markdown}"
+              if showContextText:
+                  contextText = ""
+                  for source in amazonq_response.get("sourceAttributions",[]):
+                      title = source.get("title","title missing")
+                      snippet = source.get("snippet","snippet missing")
+                      url = source.get("url")
+                      if url:
+                          contextText = f'{contextText}<br><a href="{url}">{title}</a>'
+                      else:
+                          contextText = f'{contextText}<br><u><b>{title}</b></u>'
+                      contextText = f"{contextText}<br>{snippet}\n"
+                  if contextText:
+                      markdown = f'{markdown}\n<details><summary>Context</summary><p style="white-space: pre-line;">{contextText}</p></details>'
+              if showSourceLinks:
+                  sourceLinks = []
+                  for source in amazonq_response.get("sourceAttribution",[]):
+                      title = source.get("title","link (no title)")
+                      url = source.get("url")
+                      if url:
+                          sourceLinks.append(f'<a href="{url}">{title}</a>')
+                  if len(sourceLinks):
+                      markdown = f'{markdown}<br>Sources: ' + ", ".join(sourceLinks)
+
+              # add plaintext, markdown, and ssml fields to event.res
+              event["res"]["message"] = plainttext
+              event["res"]["session"]["appContext"] = {
+                  "altMessages": {
+                      "markdown": markdown,
+                      "ssml": ssml
+                  }
+              }
+              # preserve conversation context in session
+              amazonq_context = {
+                  "conversationId": amazonq_response.get("conversationId"),
+                  "parentMessageId": amazonq_response.get("systemMessageId")
+              }
+              event["res"]["session"]["qnabotcontext"]["amazonq_context"] = amazonq_context
+              #TODO - can we determine when Amazon Q has a good answer or not?
+              #For now, always assume it's a good answer.
+              #QnAbot sets session attribute qnabot_gotanswer True when got_hits > 0
+              event["res"]["got_hits"] = 1
+              return event
+
+          def lambda_handler(event, context):
+              print("Received event: %s" % json.dumps(event))
+              args = get_args_from_lambdahook_args(event)
+              # prompt set from args, or from req.question if not specified in args.
+              userInput = args.get("Prompt", event["req"]["question"])
+              qnabotcontext = event["req"]["session"].get("qnabotcontext",{})
+              amazonq_context = qnabotcontext.get("amazonq_context",{})
+              attachments = getAttachments(event)
+              amazonq_userid = os.environ.get("AMAZONQ_USER_ID")
+              if not amazonq_userid:
+                  amazonq_userid = get_user_email(event)
+              else:
+                  print(f"using configured default user id: {amazonq_userid}")
+              amazonq_response = get_amazonq_response(userInput, amazonq_context, amazonq_userid, attachments)
+              event = format_response(event, amazonq_response)
+              print("Returning response: %s" % json.dumps(event))
+              return event
+
   LambdaRole:
     Type: "AWS::IAM::Role"
     Properties:
@@ -520,7 +746,7 @@ Resources:
 
           def setupQnABot(props, oldprops):
             configureQnabotSettings(props)
-            if propsChanged(props, oldprops, ["QNABOTSTACK", "QnaMeetingAssistDemoJson", "QNASummarizeCallFunction"]):
+            if propsChanged(props, oldprops, ["QNABOTSTACK", "QnaMeetingAssistDemoJson", "QNASummarizeCallFunction", "QNAQBusinessFunction"]):
               loadQnABotSamplePackage(props)
               buildQnABotLexBot(props)
             else:
@@ -556,12 +782,14 @@ Resources:
             demokey = demoparts[1]
             demoFile = os.path.basename(demoPath)
             demoFileTmp = f'/tmp/{demoFile}'
+            print(f"Processing {demoFile} import...")
             # Download demo file from S3 
             s3.download_file(demobucket, demokey, demoFileTmp)
             # Replace Summarize Lambda Hook placeholder with function ARN
             with open(demoFileTmp, 'r') as f:
               filedata = f.read()
-            filedata = re.sub('<LCASummarizeCallFunctionName>', props["QNASummarizeCallFunction"], filedata) 
+            filedata = re.sub('<LCASummarizeCallFunctionName>', props["QNASummarizeCallFunction"], filedata)
+            filedata = re.sub('<QNAQBusinessFunctionName>', props["QNAQBusinessFunction"], filedata)
             with open(demoFileTmp, 'w') as f:
               f.write(filedata)
             # Upload edited file to import bucket to trigger import  
@@ -585,12 +813,10 @@ Resources:
             s3.put_object(Bucket=buildStatusBucket, Key=f'{statusFile}', Body='{"status":"Starting"}')
             response = lam.invoke(FunctionName=lexBuildLambdaStart)
             status = "Starting"
-            while status != "READY":
+            while status not in ["READY", "FAILED"]:
                 time.sleep(5)
                 status = get_status(bucket=buildStatusBucket, statusFile=statusFile)
                 print(f'Bot Status: {status}')
-                if status.startswith("FAILED"):
-                  raise ValueError(status)
 
           def getStackResource(stackName, logicaResourceId):
             print(f"LogicalResourceId={logicaResourceId}")
@@ -648,12 +874,11 @@ Resources:
       LexMeetingAssistIdentityPoolId: !Ref LexMeetingAssistIdentityPoolId
       QnaMeetingAssistDemoJson: !Ref QnaMeetingAssistDemoJson
       QNASummarizeCallFunction: !Ref QNASummarizeCallFunction
+      QNAQBusinessFunction: !Ref QNAQBusinessFunction
       QNAFetchTranscriptFunction: !Ref QNAFetchTranscriptFunction
       QnaBotSettings: !Ref QnaBotSettings
       # Changes to Params below force MeetingAssist Setup to execute.
-      ComprehendLanguageCode: !Ref ComprehendLanguageCode
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
-      IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
       TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
       TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
       DynamoDbExpirationInDays: !Ref DynamoDbExpirationInDays

@@ -46,8 +46,9 @@ def preprocess_transcripts(transcripts, condense ):
     for row in transcripts:
         transcript = row['Transcript']
         if condense == True:
-          if row['Channel'] == 'AGENT_ASSISTANT':
-              continue
+          # For LMA 'Hey Q' questions, we should keep assistant replies as part of the transcript for any contextual followup 'Hey Q' questions.
+          #if row['Channel'] == 'AGENT_ASSISTANT':
+          #    continue
           transcript = remove_issues(transcript)
           transcript = remove_html(transcript)
           transcript = remove_filler_words(transcript).strip()
