@@ -70,3 +70,39 @@ const meetingApp = document.getElementById("root");
 meetingApp.addEventListener("DOMNodeInserted", function(e) {
   console.log(e.target);
 }, false);*/
+
+chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
+  if (request.action === "FetchMetadata") {
+    if (window.MeetingConfig) {
+      sendResponse(MeetingConfig);
+    }
+  }
+});
+
+function injectScript(file) {
+  const script = document.createElement('script');
+  script.src = chrome.runtime.getURL(file);
+  script.onload = function () {
+    script.remove();
+  }
+    
+  const target = document.head || document.Element;
+  if (target) {
+    target.appendChild(script);
+  } else {
+    document.addEventListener("DOMContentLoaded", () => {
+      (document.head || document.documentElement).appendChild(script);
+    });
+  }  
+}
+
+injectScript('content_scripts/providers/zoom-injection.js');
+
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+
+  if (event.data.type && (event.data.type == "MeetingConfig")) {
+    console.log("received value from page: ", event.data.value);
+    chrome.runtime.sendMessage({ action: "UpdateMetadata", metadata: event.data.value });
+  }
+});

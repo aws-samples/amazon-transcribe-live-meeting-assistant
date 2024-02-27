@@ -1,29 +1,22 @@
 {
+  "name": "Amazon Live Meeting Assistant",
+  "description": "Amazon Live Meeting Assistant, powered by Amazon Transcribe and Amazon Q",
+  "version": "0.0.1",
   "manifest_version": 3,
-  "name": "Amazon Live Meeting Assistant with Q",
-  "description": "Test Extension",
-  "version": "1.0",
   "action": {
-    "default_title": "Click to open Amazon Live Meeting Assistant with Q",
+    "default_title": "Click to open Amazon Live Meeting Assistant",
     "default_icon": "icon.png"
   },
   "permissions": [
-    "activeTab",
-    "tabs",
-    "tabCapture",
-    "desktopCapture",
+    "storage", 
     "sidePanel",
-    "scripting",
     "identity",
-    "storage"
-  ],
-
-  "host_permissions": [
-    "*://*.cloudfront.net/*",
-    "*://*.youtube.com/*"
+    "tabs",
+    "scripting",
+    "activeTab"
   ],
   "side_panel": {
-    "default_path": "sidepanel.html"
+    "default_path": "index.html"
   },
   "background": {
     "service_worker": "service-worker.js"
@@ -31,18 +24,23 @@
   "content_scripts": [
     {
       "matches": ["https://*.zoom.us/*"],
-      "js": ["mutation-summary.js", "providers/zoom.js"],
-      "all_frames": true
+      "js": ["content_scripts/mutation-summary.js", "content_scripts/providers/zoom.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
     }, {
       "matches": ["<all_urls>"],
-      "js": ["inject-recorder.js"]
+      "js": ["content_scripts/recorder/inject-recorder.js"]
     }
-  ] ,
+  ], 
   "web_accessible_resources": [
     {
-      "resources": ["recorder.html", "recorder.js", "audio-worklet.js", "lma_config.json"],
+      "resources": ["content_scripts/recorder/recorder.html", "content_scripts/recorder/recorder.js", "content_scripts/recorder/audio-worklet.js", "content_scripts/providers/zoom-injection.js"],
       "matches": ["<all_urls>"]
     }
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
   ],
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzjjofDn/rOq+a1mZANbQKiThKxJdakcxh8UTRGL3pPUSJH4HBqRrsAlZnq5Ip8lxBgMI+Iy5s8RzpLhhIbWEH3WlZ3HuOyB/1TGl9eRFZ9aSh9m0yApGjzIoc1QTqDlV3LddCxoCTDfe5PMv+muqdMqByQ+YG1SO9k/JtOE1PPLNQ5X36rsVfD437elJW4tmGk6M2SDPeZUQxgLLm5yq34gj4O1R/uEf1/lWjPghr/Rbx7u4VHsRgkIolz7ekK7w1h2c29L+1ARtY/q0YJNzWDiX6/xJ11QDBxnEyTUS79pbeT0B5ZvEwbiLtTDCdlmyUUvFZxRsIi9ASQoQsDkpVQIDAQAB"
 }
