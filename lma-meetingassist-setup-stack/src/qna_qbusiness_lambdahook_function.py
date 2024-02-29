@@ -3,16 +3,42 @@ import os
 import uuid
 import boto3
 
+FETCH_TRANSCRIPT_FUNCTION_ARN = os.environ['FETCH_TRANSCRIPT_FUNCTION_ARN']
+
 AMAZONQ_APP_ID = os.environ.get("AMAZONQ_APP_ID")
 AMAZONQ_REGION = os.environ.get("AMAZONQ_REGION") or os.environ["AWS_REGION"]
 AMAZONQ_ENDPOINT_URL = os.environ.get("AMAZONQ_ENDPOINT_URL") or f'https://qbusiness.{AMAZONQ_REGION}.api.aws'  
 print("AMAZONQ_ENDPOINT_URL:", AMAZONQ_ENDPOINT_URL)
 
-qbusiness_client = boto3.client(
+LAMBDA_CLIENT = boto3.client("lambda")
+QBUSINESS_CLIENT = boto3.client(
     service_name="qbusiness", 
     region_name=AMAZONQ_REGION,
     endpoint_url=AMAZONQ_ENDPOINT_URL
 )
+
+def get_call_transcript(currentsegment, callId):
+    payload = {
+        'CallId': callId, 
+        'ProcessTranscript': True
+    }
+    lambda_response = LAMBDA_CLIENT.invoke(
+        FunctionName=FETCH_TRANSCRIPT_FUNCTION_ARN,
+        InvocationType='RequestResponse',
+        Payload=json.dumps(payload)
+    )
+    result = json.loads(lambda_response.get("Payload").read().decode("utf-8"))
+    transcriptSegments = result["transcript"].strip().split('\n')
+
+    # TDB Assign speaker name instead of role
+    transcript = []
+    role, text = None, None
+    for transcriptSegment in transcriptSegments:
+      role, text = transcriptSegment.split(":")
+      transcript.append({"name": role, "transcript": text.strip()})
+
+    print(f"Transcript: {json.dumps(transcript)}")
+    return transcript
 
 def get_amazonq_response(prompt, context, amazonq_userid, attachments):
     print(f"get_amazonq_response: prompt={prompt}, app_id={AMAZONQ_APP_ID}, context={context}")
@@ -34,7 +60,7 @@ def get_amazonq_response(prompt, context, amazonq_userid, attachments):
 
     print("Amazon Q Input: ", input)
     try:
-        resp = qbusiness_client.chat_sync(**input)
+        resp = QBUSINESS_CLIENT.chat_sync(**input)
     except Exception as e:
         print("Amazon Q Exception: ", e)
         resp = {
@@ -160,16 +186,38 @@ def handler(event, context):
     print("Received event: %s" % json.dumps(event))
     args = get_args_from_lambdahook_args(event)
     # prompt set from args, or from req.question if not specified in args.
-    userInput = args.get("Prompt", event["req"]["question"])
+    userInput = event["req"]["question"]
+    prompt = args.get("Prompt", userInput)
     qnabotcontext = event["req"]["session"].get("qnabotcontext",{})
     amazonq_context = qnabotcontext.get("amazonq_context",{})
+    # get any attachments via Lex Web UI
     attachments = getAttachments(event)
+    # get transcript of current call and update prompt - callId set by agent orchestrator OR Lex Web UI
+    callId = event["req"]["session"].get("callId") or event["req"]["_event"].get("requestAttributes",{}).get("callId")
+    if callId:
+        transcript = get_call_transcript(userInput, callId)
+        if transcript:
+            # remove final segment if it matches the current input
+            lastMessageText = transcript[-1]["transcript"]
+            if lastMessageText == currentsegment:
+                print("removing final segment as it matches the current input")
+                transcript.pop()
+        if transcript:
+            prompt = f'You are assisting a human during a meeting. Here is the meeting transcript: {json.dumps(transcript)}.'
+            prompt = f'{prompt}\nPlease respond to the following request from the human, using the transcript and any additional information as context.\n{userInput}'
+            if amazonq_context:
+                # since we're passing transcript afresh, Q does not need previous conversation context.
+                amazonq_context = {}
+        else:
+            print(f'No transcript for callId {callId}')
+    else:
+        print("no callId in request or session attributes")
     amazonq_userid = os.environ.get("AMAZONQ_USER_ID")
     if not amazonq_userid:
         amazonq_userid = get_user_email(event)
     else:
         print(f"using configured default user id: {amazonq_userid}")
-    amazonq_response = get_amazonq_response(userInput, amazonq_context, amazonq_userid, attachments)
+    amazonq_response = get_amazonq_response(prompt, amazonq_context, amazonq_userid, attachments)
     event = format_response(event, amazonq_response)
     print("Returning response: %s" % json.dumps(event))
     return event

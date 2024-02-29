@@ -96,12 +96,11 @@ else
   echo "Using existing bucket: $BUCKET"
 fi
 
-echo -n "Make temp dir: "
 timestamp=$(date "+%Y%m%d_%H%M")
 tmpdir=/tmp/lma
+echo "Make temp dir: $tmpdir"
 [ -d $tmpdir ] && rm -fr $tmpdir
 mkdir -p $tmpdir
-pwd
 
 dir=lma-meetingassist-setup-stack
 echo "PACKAGING $dir"

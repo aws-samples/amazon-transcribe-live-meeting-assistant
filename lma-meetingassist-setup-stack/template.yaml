@@ -275,6 +275,13 @@ Resources:
                   - "s3:GetObject"
                 Resource: "arn:aws:s3:::*-importbucket-*/*"
           PolicyName: S3ImportBucketPolicy
+        - PolicyName: InlinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: lambda:InvokeFunction
+                Effect: Allow
+                Resource: !Ref FetchTranscriptFunctionArn
 
   QNAQBusinessFunction:
     Type: "AWS::Lambda::Function"
@@ -290,6 +297,7 @@ Resources:
       Environment:
         Variables:
           AWS_DATA_PATH: /opt/model
+          FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
           AMAZONQ_APP_ID: !Ref AmazonQAppId
           AMAZONQ_USER_ID: !Ref AmazonQUserId
       Code: ./src
