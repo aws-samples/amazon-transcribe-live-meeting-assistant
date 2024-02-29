@@ -77,7 +77,7 @@ const stopStreaming = async () => {
 const startStreaming = async (sendResponse) => {
   try {
     audioContext = new window.AudioContext({
-      sampleRate: 32000
+      sampleRate: 8000
     });
     /* Get display media works */
     displayStream = await navigator.mediaDevices.getDisplayMedia({

@@ -106,7 +106,7 @@ export const writeCallEvent = async (callEvent: CallStartEvent | CallEndEvent | 
     }
 };
 
-export const writeTranscriptionSegment = async function(transcribeMessageJson:TranscriptEvent, callId: Uuid, activeSpeaker: string) {
+export const writeTranscriptionSegment = async function(transcribeMessageJson:TranscriptEvent, callMetadata: CallMetaData) {
     if (transcribeMessageJson.Transcript?.Results && transcribeMessageJson.Transcript?.Results.length > 0) {
         if (transcribeMessageJson.Transcript?.Results[0].Alternatives && transcribeMessageJson.Transcript?.Results[0].Alternatives?.length > 0) {
 
@@ -120,7 +120,7 @@ export const writeTranscriptionSegment = async function(transcribeMessageJson:Tr
 
             const kdsObject:AddTranscriptSegmentEvent = {
                 EventType: 'ADD_TRANSCRIPT_SEGMENT',
-                CallId: callId,
+                CallId: callMetadata.callId,
                 Channel: (result.ChannelId ==='ch_0' ? 'CALLER' : 'AGENT'),
                 SegmentId: result.ResultId || '',
                 StartTime: result.StartTime || 0,
@@ -132,13 +132,12 @@ export const writeTranscriptionSegment = async function(transcribeMessageJson:Tr
                 Sentiment: undefined,
                 TranscriptEvent: undefined,
                 UtteranceEvent: undefined,
-                Speaker: activeSpeaker
+                Speaker: (result.ChannelId ==='ch_0' ? callMetadata.activeSpeaker : (callMetadata?.agentId ?? 'n/a'))
             };
-            console.log('ACTIVE SPEAKER', activeSpeaker);
 
             const putParams = {
                 StreamName: kdsStreamName,
-                PartitionKey: callId,
+                PartitionKey: callMetadata.callId,
                 Data: Buffer.from(JSON.stringify(kdsObject)),
             };
 
@@ -157,21 +156,30 @@ export const writeTranscriptionSegment = async function(transcribeMessageJson:Tr
 };
 
 export const writeAddTranscriptSegmentEvent = async function(utteranceEvent:UtteranceEvent | undefined , 
-    transcriptEvent:TranscriptEvent | undefined,  callId: Uuid, activeSpeaker: string) {
-    
+    transcriptEvent:TranscriptEvent | undefined, callMetadata: CallMetaData) {
+    let isCustomer = false;
     if (transcriptEvent) {
         if (transcriptEvent.Transcript?.Results && transcriptEvent.Transcript?.Results.length > 0) {
             if (transcriptEvent.Transcript?.Results[0].Alternatives && transcriptEvent.Transcript?.Results[0].Alternatives?.length > 0) {
-            
                 const result = transcriptEvent.Transcript?.Results[0];
+                if (result.ChannelId === 'ch_0') {
+                    isCustomer = true;
+                } else {
+                    isCustomer = false;
+                }                
                 if (result.IsPartial == undefined || (result.IsPartial == true && !savePartial)) {
                     return;
                 }
             }
         }
     }
-                
+
     if (utteranceEvent) {
+        if (utteranceEvent.ParticipantRole === ParticipantRole.CUSTOMER) {
+            isCustomer = true;
+        } else {
+            isCustomer = false;
+        }
         if (utteranceEvent.IsPartial == undefined || (utteranceEvent.IsPartial == true && !savePartial)) {
             return;
         }
@@ -181,19 +189,17 @@ export const writeAddTranscriptSegmentEvent = async function(utteranceEvent:Utte
 
     const kdsObject:AddTranscriptSegmentEvent = {
         EventType: 'ADD_TRANSCRIPT_SEGMENT',
-        CallId: callId,
+        CallId: callMetadata.callId,
         TranscriptEvent: transcriptEvent,
         UtteranceEvent: utteranceEvent,
         CreatedAt: now,
         UpdatedAt: now,
-        Speaker: activeSpeaker
+        Speaker: (isCustomer ? callMetadata.activeSpeaker : (callMetadata?.agentId ?? 'n/a') )
     };
-
-    console.log('ACTIVE SPEAKER', activeSpeaker);
 
     const putParams = {
         StreamName: kdsStreamName,
-        PartitionKey: callId,
+        PartitionKey: callMetadata.callId,
         Data: Buffer.from(JSON.stringify(kdsObject)),
     };
 
@@ -346,13 +352,13 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
                 // console.log('Event ', event);
                 if (event.TranscriptEvent) {
                     const message: TranscriptEvent = event.TranscriptEvent;
-                    await writeTranscriptionSegment(message, callMetaData.callId, callMetaData.activeSpeaker);
+                    await writeTranscriptionSegment(message, callMetaData);
                 }
                 if (event.CategoryEvent && event.CategoryEvent.MatchedCategories) {
                     await writeAddCallCategoryEvent(event.CategoryEvent, callMetaData.callId);
                 }
                 if (event.UtteranceEvent && event.UtteranceEvent.UtteranceId) {
-                    await writeAddTranscriptSegmentEvent(event.UtteranceEvent, undefined, callMetaData.callId, callMetaData.activeSpeaker);
+                    await writeAddTranscriptSegmentEvent(event.UtteranceEvent, undefined, callMetaData);
                 }
             }
 

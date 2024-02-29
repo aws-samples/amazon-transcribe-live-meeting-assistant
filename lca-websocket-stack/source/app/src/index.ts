@@ -26,13 +26,13 @@ import { CallRecordingEvent } from './entities-lca';
 
 import { jwtVerifier } from './jwt-verifier';
 
-let callMetaData: CallMetaData;  // Type structure for call metadata sent by the client
-let audioInputStream: stream.PassThrough; // audio chunks are written to this stream for Transcribe SDK to consume
+// let callMetaData: CallMetaData;  // Type structure for call metadata sent by the client
+// let audioInputStream: stream.PassThrough; // audio chunks are written to this stream for Transcribe SDK to consume
 
-let tempRecordingFilename: string;
-let wavFileName: string;
-let recordingFileSize = 0;
-let writeRecordingStream: fs.WriteStream;
+// let tempRecordingFilename: string;
+// let wavFileName: string;
+// let recordingFileSize = 0;
+// let writeRecordingStream: fs.WriteStream;
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || undefined;
@@ -45,6 +45,9 @@ const s3Client = new S3Client({ region: AWS_REGION });
 const isDev = process.env['NODE_ENV'] !== 'PROD';
 
 const socketMetadataMap = new Map();
+const socketAudioInputStreamMap = new Map();
+const socketWriteRecordingStreamMap = new Map();
+const socketRecordingFileSizeMap = new Map();
 
 // create fastify server (with logging enabled for non-PROD environments)
 const server = fastify({
@@ -104,13 +107,13 @@ server.listen(
 
 // Setup handlers for websocket events - 'message', 'close', 'error'
 const registerHandlers = (ws: WebSocket): void => {
-    ws.on('message', (data, isBinary): void => {
+    ws.on('message', async (data, isBinary): Promise<void> => {
         try {
             if (isBinary) {
                 const audioinput = Buffer.from(data as Uint8Array);
-                onBinaryMessage(audioinput);
+                await onBinaryMessage(ws, audioinput);
             } else {
-                onTextMessage(ws, Buffer.from(data as Uint8Array).toString('utf8'));
+                await onTextMessage(ws, Buffer.from(data as Uint8Array).toString('utf8'));
             }
         } catch (err) {
             console.error(err);
@@ -133,19 +136,33 @@ const registerHandlers = (ws: WebSocket): void => {
     });
 };
 
-const onBinaryMessage = (data: Uint8Array): void => {
-    if (audioInputStream) {
+const getTempRecordingFileName = (callMetaData: CallMetaData): string => {
+    return `${callMetaData.callId}.raw`;
+};
+
+const getWavRecordingFileName = (callMetaData: CallMetaData): string => {
+    return `${callMetaData.callId}.wav`;
+};
+
+const onBinaryMessage = async (ws: WebSocket, data: Uint8Array): Promise<void> => {
+    const audioInputStream = socketAudioInputStreamMap.get(ws);
+    const writeRecordingStream = socketWriteRecordingStreamMap.get(ws);
+    let recordingFileSize = socketRecordingFileSizeMap.get(ws);
+
+    if (audioInputStream && writeRecordingStream) {
         audioInputStream.write(data);
         writeRecordingStream.write(data);
         recordingFileSize += data.length;
+        socketRecordingFileSizeMap.set(ws, recordingFileSize);
     } else {
         server.log.error('Error: received audio data before metadata');
     }
 };
 
-const onTextMessage = (ws: WebSocket, data: string): void => {
+const onTextMessage = async (ws: WebSocket, data: string): Promise<void> => {
+
+    const callMetaData:CallMetaData = JSON.parse(data);
     try {
-        callMetaData = JSON.parse(data);
         server.log.info(`Call Metadata received from client :  ${data}`);
     } catch (error) {
         server.log.error('Error parsing call metadata: ', data);
@@ -160,28 +177,44 @@ const onTextMessage = (ws: WebSocket, data: string): void => {
         callMetaData.shouldRecordCall = callMetaData.shouldRecordCall || false;
         callMetaData.agentId = callMetaData.agentId || randomUUID();  
 
-        (async () => {
-            await writeCallStartEvent(callMetaData);
-            tempRecordingFilename = `${callMetaData.callId}.raw`;
-            wavFileName = `${callMetaData.callId}.wav`;
-            writeRecordingStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR, tempRecordingFilename));
-            recordingFileSize = 0;
-        })();
-        audioInputStream = new stream.PassThrough();
+        await writeCallStartEvent(callMetaData);
+        const tempRecordingFilename = getTempRecordingFileName(callMetaData);
+        // wavFileName = `${callMetaData.callId}.wav`;
+        const writeRecordingStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR, tempRecordingFilename));
+        socketWriteRecordingStreamMap.set(ws, writeRecordingStream);
+        const recordingFileSize = 0;
+        socketRecordingFileSizeMap.set(ws, recordingFileSize);
+
+        const audioInputStream = new stream.PassThrough();
+        socketAudioInputStreamMap.set(ws, audioInputStream);
         startTranscribe(callMetaData, audioInputStream);
         socketMetadataMap.set(ws, callMetaData);
     } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
         console.log('speaker change', callMetaData);
         const callData = socketMetadataMap.get(ws);
-        callData.activeSpeaker = callMetaData.activeSpeaker;
+        if (callData) {
+            callData.activeSpeaker = callMetaData.activeSpeaker;
+        } else {
+            // this is not a valid call
+            console.log('invalid call');
+        }
     } else if (callMetaData.callEvent === 'END') {
-        (async () => {
-            await writeCallEndEvent(callMetaData);
+ 
+        const callMetaData = socketMetadataMap.get(ws);
+        if (!callMetaData) {
+            console.log('Received END without having a call');
+            return;
+        }
+        await writeCallEndEvent(callMetaData);
+        const writeRecordingStream = socketWriteRecordingStreamMap.get(ws);
+        const recordingFileSize = socketRecordingFileSizeMap.get(ws); 
+        if (writeRecordingStream) {
             writeRecordingStream.end();
-
-            const header = createHeader(recordingFileSize);
+            const header = createHeader(callMetaData, recordingFileSize);
+            const tempRecordingFilename = getTempRecordingFileName(callMetaData);
+            const wavRecordingFilename = getWavRecordingFileName(callMetaData);
             const readStream = fs.createReadStream(path.join(LOCAL_TEMP_DIR,tempRecordingFilename));
-            const writeStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR, wavFileName));
+            const writeStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR,wavRecordingFilename ));
             writeStream.write(header);
             for await (const chunk of readStream) {
                 writeStream.write(chunk);
@@ -189,11 +222,11 @@ const onTextMessage = (ws: WebSocket, data: string): void => {
             writeStream.end();
 
             await writeToS3(tempRecordingFilename);
-            await writeToS3(wavFileName);
+            await writeToS3(wavRecordingFilename);
             await deleteTempFile(path.join(LOCAL_TEMP_DIR,tempRecordingFilename));
-            await deleteTempFile(path.join(LOCAL_TEMP_DIR, wavFileName));
+            await deleteTempFile(path.join(LOCAL_TEMP_DIR, wavRecordingFilename));
 
-            const url = new URL(RECORDING_FILE_PREFIX+wavFileName, `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com`);
+            const url = new URL(RECORDING_FILE_PREFIX+wavRecordingFilename, `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com`);
             const recordingUrl = url.href;
             
             const callEvent: CallRecordingEvent = {
@@ -202,11 +235,13 @@ const onTextMessage = (ws: WebSocket, data: string): void => {
                 RecordingUrl: recordingUrl
             };
             await writeCallEvent(callEvent);
-        })();
+        }
         // onWsClose(ws, 1000);
+        const audioInputStream = socketAudioInputStreamMap.get(ws);
         if (audioInputStream) {
             audioInputStream.end();
             audioInputStream.destroy();
+            socketAudioInputStreamMap.delete(ws);
         }
     }
 };
@@ -214,8 +249,11 @@ const onTextMessage = (ws: WebSocket, data: string): void => {
 const onWsClose = (ws:WebSocket, code: number): void => {
     ws.close(code);
     socketMetadataMap.delete(ws);
+    const audioInputStream = socketAudioInputStreamMap.get(ws);
     if (audioInputStream) {
         audioInputStream.end();
+        audioInputStream.destroy();
+        socketAudioInputStreamMap.delete(ws);
     }
 };
 
@@ -250,7 +288,7 @@ const deleteTempFile = async(sourceFile:string) => {
     }
 };
 
-const createHeader = function createHeader(length:number) {
+const createHeader = function createHeader(callMetaData:CallMetaData, length:number) {
     const buffer = Buffer.alloc(44);
   
     // RIFF identifier 'RIFF'
