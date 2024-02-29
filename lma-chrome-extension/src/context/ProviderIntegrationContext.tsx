@@ -1,4 +1,4 @@
-import React, { createContext, startTransition, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, startTransition, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { useSettings } from './SettingsContext';
 import { useUserContext } from './UserContext';
@@ -10,10 +10,12 @@ type Call = {
   fromNumber: string,
   toNumber: string,
   callId: string,
-  samplingRate: number
+  samplingRate: number,
+  activeSpeaker: string,
 }
 
 const initialIntegration = {
+  currentCall: {} as Call,
   isTranscribing: false,
   fetchMetadata: () => {},
   startTranscription: (userName:string, meetingTopic:string) => {},
@@ -22,7 +24,7 @@ const initialIntegration = {
     userName: "",
     meetingTopic: ""
   },
-  platform: "n/a"
+  platform: "n/a",
 };
 const IntegrationContext = createContext(initialIntegration);
 
@@ -56,6 +58,14 @@ function IntegrationProvider({ children }: any) {
     },
   }, shouldConnect);
 
+  const connectionStatus = {
+    [ReadyState.CONNECTING]: 'Connecting',
+    [ReadyState.OPEN]: 'Open',
+    [ReadyState.CLOSING]: 'Closing',
+    [ReadyState.CLOSED]: 'Closed',
+    [ReadyState.UNINSTANTIATED]: 'Uninstantiated',
+  }[readyState];
+
   const dataUrlToBytes = async (dataUrl:string) => {
     const res = await fetch(dataUrl);
     return new Uint8Array(await res.arrayBuffer());
@@ -72,29 +82,27 @@ function IntegrationProvider({ children }: any) {
   const getTimestampStr = () => {
     const now = new Date();
     const year = now.getFullYear();
-    const month = now.getMonth() + 1; // JavaScript months start at 0
-    const day = now.getDate();
-    const hour = now.getHours();
-    const minute = now.getMinutes();
-    const second = now.getSeconds();
-    const millisecond = now.getMilliseconds();
-
+    const month = String(now.getMonth() + 1).padStart(2, '0'); // JavaScript months start at 0
+    const day = String(now.getDate()).padStart(2, '0');
+    const hour = String(now.getHours()).padStart(2, '0');
+    const minute = String(now.getMinutes()).padStart(2, '0');
+    const second = String(now.getSeconds()).padStart(2, '0');
+    const millisecond = String(now.getMilliseconds()).padStart(3, '0');
     const formattedDate = `${year}-${month}-${day}-${hour}:${minute}:${second}.${millisecond}`;
-
-    console.log(formattedDate);
     return formattedDate;
   }
 
-  const startTranscription = async (userName:string, meetingTopic:string) => {
+  const startTranscription = useCallback(async (userName: string, meetingTopic: string) => {
     setShouldConnect(true);
     let callMetadata = {
       callEvent: 'START',
       agentId: userName,
       fromNumber: '+9165551234',
       toNumber: '+8001112222',
-      callId: `${meetingTopic}-${getTimestampStr()}`,
+      callId: `${meetingTopic} - ${getTimestampStr()}`,
       samplingRate: 8000,
-    };
+      activeSpeaker: userName
+    }
     
     setCurrentCall(callMetadata);
    
@@ -105,54 +113,57 @@ function IntegrationProvider({ children }: any) {
         // We send a message here, but not actually start the stream until we receive a new message with the sample rate.
       }
     }
-  }
+  }, [setShouldConnect, setCurrentCall]);
 
-  const stopTranscription = () => {
+  const stopTranscription = useCallback(() => {
     if (chrome.runtime) {
       chrome.runtime.sendMessage({ action: "StopTranscription" });
     }
     if (readyState === ReadyState.OPEN) {
-      setCurrentCall((callState) => {
-        callState.callEvent = 'END';
-        sendMessage(JSON.stringify(callState));
-        return callState;
-      });
+      currentCall.callEvent = 'END';
+      sendMessage(JSON.stringify(currentCall));
       getWebSocket()?.close();
     }
     setShouldConnect(false);
     setIsTranscribing(false);
-  }
+  }, [readyState, getWebSocket, sendMessage]);
 
   useEffect(() => {
     if (chrome.runtime) {
       const handleRuntimeMessage = async (request:any, sender:any, sendResponse:any) => {
         if (request.action === "TranscriptionStopped") {
-          await stopTranscription();
+          stopTranscription();
         } else if (request.action === "UpdateMetadata") {
           if (request.metadata.baseUrl && request.metadata.baseUrl === "https://app.zoom.us") {
             setPlatform("Zoom");
           }
           setMetadata(request.metadata);
         } else if (request.action === "SamplingRate") {
-          setCurrentCall((callState) => {
-            callState.samplingRate = request.samplingRate;
-            sendMessage(JSON.stringify(callState));
-            return callState;
-          });
+          // This event should only bubble up once at the start of recording in the injected code
+          currentCall.samplingRate = request.samplingRate;
+          currentCall.callEvent = 'START';
+          sendMessage(JSON.stringify(currentCall));
           setIsTranscribing(true);
         } else if (request.action === "AudioData") {
-          let audioData = await dataUrlToBytes(request.audio);
-          sendMessage(audioData);
+          if (readyState === ReadyState.OPEN)
+          {
+            let audioData = await dataUrlToBytes(request.audio);
+            sendMessage(audioData);
+          }
+        } else if (request.action === "ActiveSpeakerChange") {
+          currentCall.callEvent = 'SPEAKER_CHANGE';
+          currentCall.activeSpeaker = request.active_speaker;
+          sendMessage(JSON.stringify(currentCall));
         }
       };
       chrome.runtime.onMessage.addListener(handleRuntimeMessage); 
       // Clean up the listener when the component unmounts
       return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     }
-  }, []);
+  }, [currentCall, readyState, sendMessage, setMetadata, setPlatform, setIsTranscribing]);
 
   return (
-    <IntegrationContext.Provider value={{ isTranscribing, fetchMetadata, startTranscription, stopTranscription, metadata, platform }}>
+    <IntegrationContext.Provider value={{ currentCall, isTranscribing, fetchMetadata, startTranscription, stopTranscription, metadata, platform }}>
       {children}
     </IntegrationContext.Provider>
   );

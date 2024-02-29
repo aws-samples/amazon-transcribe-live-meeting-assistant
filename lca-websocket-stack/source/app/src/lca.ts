@@ -106,7 +106,7 @@ export const writeCallEvent = async (callEvent: CallStartEvent | CallEndEvent | 
     }
 };
 
-export const writeTranscriptionSegment = async function(transcribeMessageJson:TranscriptEvent, callId: Uuid, activeSpeaker: string) {
+export const writeTranscriptionSegment = async function(transcribeMessageJson:TranscriptEvent, callMetadata: CallMetaData) {
     if (transcribeMessageJson.Transcript?.Results && transcribeMessageJson.Transcript?.Results.length > 0) {
         if (transcribeMessageJson.Transcript?.Results[0].Alternatives && transcribeMessageJson.Transcript?.Results[0].Alternatives?.length > 0) {
 
@@ -120,7 +120,7 @@ export const writeTranscriptionSegment = async function(transcribeMessageJson:Tr
 
             const kdsObject:AddTranscriptSegmentEvent = {
                 EventType: 'ADD_TRANSCRIPT_SEGMENT',
-                CallId: callId,
+                CallId: callMetadata.callId,
                 Channel: (result.ChannelId ==='ch_0' ? 'CALLER' : 'AGENT'),
                 SegmentId: result.ResultId || '',
                 StartTime: result.StartTime || 0,
@@ -132,13 +132,12 @@ export const writeTranscriptionSegment = async function(transcribeMessageJson:Tr
                 Sentiment: undefined,
                 TranscriptEvent: undefined,
                 UtteranceEvent: undefined,
-                Speaker: activeSpeaker
+                Speaker: callMetadata.activeSpeaker
             };
-            console.log('ACTIVE SPEAKER', activeSpeaker);
 
             const putParams = {
                 StreamName: kdsStreamName,
-                PartitionKey: callId,
+                PartitionKey: callMetadata.callId,
                 Data: Buffer.from(JSON.stringify(kdsObject)),
             };
 
@@ -346,7 +345,7 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
                 // console.log('Event ', event);
                 if (event.TranscriptEvent) {
                     const message: TranscriptEvent = event.TranscriptEvent;
-                    await writeTranscriptionSegment(message, callMetaData.callId, callMetaData.activeSpeaker);
+                    await writeTranscriptionSegment(message, callMetaData);
                 }
                 if (event.CategoryEvent && event.CategoryEvent.MatchedCategories) {
                     await writeAddCallCategoryEvent(event.CategoryEvent, callMetaData.callId);

@@ -1,7 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import logo from './logo.svg';
 import './Capture.css'
-import { Box, Button, Container, ContentLayout, CopyToClipboard, Grid, Header, Input, Link, SpaceBetween } from '@cloudscape-design/components';
+import { Box, Button, Container, ContentLayout, CopyToClipboard, FormField, Grid, Header, Input, Link, SpaceBetween } from '@cloudscape-design/components';
 import UserMessage from '../views/UserMessage';
 import OtherMessage from '../views/OtherMessage';
 import { useNavigation } from '../../context/NavigationContext';
@@ -9,29 +9,49 @@ import AssistantMessage from '../views/AssistantMessage';
 import ValueWithLabel from '../views/ValueWithLabel';
 import { useUserContext } from '../../context/UserContext';
 import { useIntegration } from '../../context/ProviderIntegrationContext';
+import { useSettings } from '../../context/SettingsContext';
 
 function Capture() {
   const { navigate } = useNavigation();
   const { logout } = useUserContext();
-  const { metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
+  const settings = useSettings();
+  const { currentCall, metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
 
   const [topic, setTopic] = React.useState("");
   const [agentName, setAgentName] = React.useState("");
+  const [nameErrorText, setNameErrorText] = React.useState("");
+  const [meetingTopicErrorText, setMeetingTopicErrorText] = React.useState("");
 
   useEffect(() => {
     console.log("Metadata changed");
     setTopic(metadata.meetingTopic);
     setAgentName(metadata.userName);
+  }, [setTopic, setAgentName]);
 
-  }, [metadata]);
+  const startListening = useCallback(() => {
+    let foundError = false;
+    if (agentName.length < 2) {
+      setNameErrorText("Name required");
+      foundError = true;
+    }
+    if (topic.length < 2) {
+      setMeetingTopicErrorText("Meeting topic required");
+    }
+    if (foundError) {
+      return;
+    } else {
+      startTranscription(agentName, topic);
+    }
+  }, [startTranscription]);
 
-  const startListening = () => {
-    startTranscription(agentName, topic);
-  }
-
-  const stopListening = () => {
+  const stopListening = useCallback(() => {
     stopTranscription();
-  }
+  }, [stopTranscription]);
+
+  const openInLMA = useCallback(async () => {
+    const url = `${settings.cloudfrontEndpoint}/#/calls/${currentCall.callId}`;
+    window.open(url, '_blank', 'noreferrer');
+  }, [currentCall, settings])
 
   return (
     <ContentLayout
@@ -58,6 +78,7 @@ function Capture() {
           <ValueWithLabel label="Platform Detected:">{platform}</ValueWithLabel>
           {(isTranscribing === true ?
             <>
+            <Button fullWidth={true} onClick={async () => openInLMA()}>Open in LMA</Button>
               <ValueWithLabel label="Name:">{agentName}</ValueWithLabel>
               <ValueWithLabel label="Meeting Topic:">{topic}</ValueWithLabel>
               <ValueWithLabel label="Active Speaker:">n/a</ValueWithLabel>
@@ -66,12 +87,20 @@ function Capture() {
             </>
             :
             <>
-              <ValueWithLabel label="Name:">
-                <Input value={agentName} onChange={({ detail }) => setAgentName(detail.value)} placeholder='Your Name'></Input>
-              </ValueWithLabel>
-              <ValueWithLabel label="Meeting Topic:">
-              <Input value={topic} onChange={({ detail }) => setTopic(detail.value)} placeholder='Meeting room topic'></Input>
-              </ValueWithLabel>
+              <FormField
+                  constraintText="Minimum length is 2 characters."
+                  errorText={nameErrorText}
+                  label="Your name:"
+                >
+                <Input value={agentName} onChange={({ detail }) => setAgentName(detail.value)} placeholder='Your name' ></Input>
+              </FormField>
+              <FormField
+                  constraintText="Minimum length is 2 characters."
+                  errorText={meetingTopicErrorText}
+                  label="Meeting Topic:"
+                >
+                <Input value={topic} onChange={({ detail }) => setTopic(detail.value)} placeholder='Meeting room topic' inputMode='text'></Input>
+              </FormField>
               <Button fullWidth={true} variant='primary'  onClick={() => startListening()}>Start Listening</Button>
             </>
           )}
