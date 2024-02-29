@@ -101,7 +101,7 @@ function IntegrationProvider({ children }: any) {
       toNumber: '+8001112222',
       callId: `${meetingTopic} - ${getTimestampStr()}`,
       samplingRate: 8000,
-      activeSpeaker: userName
+      activeSpeaker: 'n/a'
     }
     
     setCurrentCall(callMetadata);

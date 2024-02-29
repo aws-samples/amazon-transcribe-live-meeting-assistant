@@ -21,6 +21,7 @@ function Capture() {
   const [agentName, setAgentName] = React.useState("");
   const [nameErrorText, setNameErrorText] = React.useState("");
   const [meetingTopicErrorText, setMeetingTopicErrorText] = React.useState("");
+  const [formError, setFormError] = React.useState(false);
 
   useEffect(() => {
     console.log("Metadata changed");
@@ -28,8 +29,12 @@ function Capture() {
     setAgentName(metadata.userName);
   }, [setTopic, setAgentName]);
 
+  const validateForm = useEffect(() => {
+
+  }, [topic, agentName]);
+
   const startListening = useCallback(() => {
-    let foundError = false;
+    /*let foundError = false;
     if (agentName.length < 2) {
       setNameErrorText("Name required");
       foundError = true;
@@ -39,10 +44,10 @@ function Capture() {
     }
     if (foundError) {
       return;
-    } else {
+    } else {*/
       startTranscription(agentName, topic);
-    }
-  }, [startTranscription]);
+    //}
+  }, [agentName, topic, startTranscription]);
 
   const stopListening = useCallback(() => {
     stopTranscription();
@@ -88,14 +93,14 @@ function Capture() {
             :
             <>
               <FormField
-                  constraintText="Minimum length is 2 characters."
+                  constraintText=""
                   errorText={nameErrorText}
                   label="Your name:"
                 >
                 <Input value={agentName} onChange={({ detail }) => setAgentName(detail.value)} placeholder='Your name' ></Input>
               </FormField>
               <FormField
-                  constraintText="Minimum length is 2 characters."
+                  constraintText=""
                   errorText={meetingTopicErrorText}
                   label="Meeting Topic:"
                 >
