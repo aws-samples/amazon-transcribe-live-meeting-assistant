@@ -6,6 +6,9 @@ import {
     UtteranceEvent,
     CategoryEvent,
 } from '@aws-sdk/client-transcribe-streaming';
+import stream from 'stream';
+import { CallMetaData } from './lca';
+import { WriteStream } from 'fs';
 
 export type Uuid = string;             // UUID as defined by RFC#4122
 
@@ -55,3 +58,10 @@ export type AddTranscriptSegmentEvent = CallEventBase<'ADD_TRANSCRIPT_SEGMENT'> 
 export type AddCallCategoryEvent = CallEventBase<'ADD_CALL_CATEGORY'> & {
     CategoryEvent: CategoryEvent,
 };
+
+export type SocketCallData = {
+    callMetadata: CallMetaData,
+    audioInputStream?: stream.PassThrough,
+    writeRecordingStream?: WriteStream,
+    recordingFileSize?: number
+}
