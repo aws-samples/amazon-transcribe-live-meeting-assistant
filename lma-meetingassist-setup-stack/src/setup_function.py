@@ -99,8 +99,6 @@ def configureQnabotSettings(props):
   # modify settings
   # Set LLM params
   settings["LLM_QA_NO_HITS_REGEX"] = "Sorry,"
-  # Set preprocessing hook to pull callid transcript into bot chatMessageHistory
-  settings["LAMBDA_PREPROCESS_HOOK"] = props["QNAFetchTranscriptFunction"]
   # Additional settings provided by param QnaBotSettings
   additional_QnaBotSettings = json.loads(props.get("QnaBotSettings","{}").replace('\n',''))
   for k, v in additional_QnaBotSettings.items():

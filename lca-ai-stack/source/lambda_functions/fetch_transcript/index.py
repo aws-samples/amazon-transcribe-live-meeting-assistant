@@ -53,11 +53,8 @@ def preprocess_transcripts(transcripts, condense ):
           transcript = remove_html(transcript)
           transcript = remove_filler_words(transcript).strip()
 
-          if row['Channel'] == last_channel:
-              transcript = ' ' + transcript
-          elif len(transcript) > 1:
+          if len(transcript) > 1:
               transcript = '\n' + row['Channel'] + ": " + transcript
-              last_channel = row['Channel']
         else:
           transcript = '\n' + row['Channel'] + ": " + transcript
   

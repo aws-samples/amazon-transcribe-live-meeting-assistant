@@ -33,8 +33,7 @@ def get_call_transcript(callId):
     # TDB Assign speaker name instead of role
     transcript = []
     for transcriptSegment in transcriptSegments:
-      role, text = transcriptSegment.split(":")
-      speaker, text = text.split(":")
+      role, speaker, text = transcriptSegment.split(":", 2)
       transcript.append({"name": speaker, "transcript": text.strip()})
 
     print(f"Transcript: {json.dumps(transcript)}")
@@ -203,6 +202,9 @@ def handler(event, context):
                 print("removing final segment as it matches the current input")
                 transcript.pop()
         if transcript:
+            maxMessages = int(event["req"]["_settings"].get("LLM_CHAT_HISTORY_MAX_MESSAGES", 20))
+            print(f"Using last {maxMessages} conversation turns (LLM_CHAT_HISTORY_MAX_MESSAGES)")
+            transcript = transcript[-maxMessages:]
             prompt = f'Your name is "Q". You are an AI assistant helping a human during a meeting. Here is the meeting transcript: {json.dumps(transcript)}.'
             prompt = f'{prompt}\nPlease respond to the following request from the human, using the transcript and any additional information as context.\n{userInput}'
             if amazonq_context:
