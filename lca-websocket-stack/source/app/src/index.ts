@@ -132,13 +132,21 @@ const registerHandlers = (ws: WebSocket): void => {
         ws.close();
     });
 };
-
+const posixifyFilename = function (filename:string) {
+    // Replace all invalid characters with underscores.
+    const regex = /[^a-zA-Z0-9_.]/g;
+    const posixFilename = filename.replace(regex, '_');
+  
+    // Remove leading and trailing underscores.
+    return posixFilename.replace(/^_+/g, '').replace(/_+$/g, '');
+}
+  
 const getTempRecordingFileName = (callMetaData: CallMetaData): string => {
-    return `${callMetaData.callId}.raw`;
+    return `${posixifyFilename(callMetaData.callId)}.raw`;
 };
 
 const getWavRecordingFileName = (callMetaData: CallMetaData): string => {
-    return `${callMetaData.callId}.wav`;
+    return `${posixifyFilename(callMetaData.callId)}.wav`;
 };
 
 const onBinaryMessage = async (ws: WebSocket, data: Uint8Array): Promise<void> => {
