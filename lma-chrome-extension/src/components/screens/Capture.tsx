@@ -27,7 +27,7 @@ function Capture() {
     console.log("Metadata changed");
     setTopic(metadata.meetingTopic);
     setAgentName(metadata.userName);
-  }, [setTopic, setAgentName]);
+  }, [metadata, setTopic, setAgentName]);
 
   const validateForm = useEffect(() => {
 

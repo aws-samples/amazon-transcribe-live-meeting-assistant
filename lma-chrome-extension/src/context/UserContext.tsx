@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useSettings } from './SettingsContext';
 import { isToken } from 'typescript';
 
@@ -13,7 +13,8 @@ const initialUserContext = {
   login: () => {},
   logout: () => { },
   exchangeCodeForToken: (code:string) => {},
-  loggedIn: false
+  loggedIn: false,
+  checkTokenExpired: (): boolean => { return true; }
 };
 const UserContext = createContext(initialUserContext);
 
@@ -33,6 +34,13 @@ function UserProvider({ children }: any) {
     }
     return true;
   }
+
+  const checkTokenExpired = useCallback((): boolean => {
+    if (user.access_token) {
+      return isTokenExpired(user.access_token);
+    }
+    return false
+  }, [user]);
 
   // Load user
   useEffect(() => {
@@ -139,7 +147,7 @@ function UserProvider({ children }: any) {
   }
 
   return (
-    <UserContext.Provider value={{ user, login, logout, exchangeCodeForToken, loggedIn }}>
+    <UserContext.Provider value={{ user, login, logout, exchangeCodeForToken, loggedIn, checkTokenExpired }}>
       {children}
     </UserContext.Provider>
   );
