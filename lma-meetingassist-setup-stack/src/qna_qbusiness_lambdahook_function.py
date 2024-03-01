@@ -199,11 +199,11 @@ def handler(event, context):
         if transcript:
             # remove final segment if it matches the current input
             lastMessageText = transcript[-1]["transcript"]
-            if lastMessageText == currentsegment:
+            if lastMessageText == userInput:
                 print("removing final segment as it matches the current input")
                 transcript.pop()
         if transcript:
-            prompt = f'You are assisting a human during a meeting. Here is the meeting transcript: {json.dumps(transcript)}.'
+            prompt = f'Your name is "Q". You are an AI assistant helping a human during a meeting. Here is the meeting transcript: {json.dumps(transcript)}.'
             prompt = f'{prompt}\nPlease respond to the following request from the human, using the transcript and any additional information as context.\n{userInput}'
             if amazonq_context:
                 # since we're passing transcript afresh, Q does not need previous conversation context.
