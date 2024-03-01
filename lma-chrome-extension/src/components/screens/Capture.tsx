@@ -15,7 +15,7 @@ function Capture() {
   const { navigate } = useNavigation();
   const { logout } = useUserContext();
   const settings = useSettings();
-  const { currentCall, metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
+  const { currentCall, muted, setMuted, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
 
   const [topic, setTopic] = React.useState("");
   const [agentName, setAgentName] = React.useState("");
@@ -58,6 +58,14 @@ function Capture() {
     window.open(url, '_blank', 'noreferrer');
   }, [currentCall, settings])
 
+  const mute = useCallback(() => {
+    setMuted(true);
+  }, [muted, setMuted]);
+
+  const unmute = useCallback(() => {
+    setMuted(false);
+  }, [muted, setMuted]);
+
   return (
     <ContentLayout
       header={
@@ -86,7 +94,7 @@ function Capture() {
             <Button fullWidth={true} onClick={async () => openInLMA()}>Open in LMA</Button>
               <ValueWithLabel label="Name:">{agentName}</ValueWithLabel>
               <ValueWithLabel label="Meeting Topic:">{topic}</ValueWithLabel>
-              <ValueWithLabel label="Active Speaker:">n/a</ValueWithLabel>
+              <ValueWithLabel label="Active Speaker:">{activeSpeaker}</ValueWithLabel>
               <Button fullWidth={true} variant='primary'  onClick={() => stopListening()}>Stop Listening</Button>
 
             </>
@@ -109,7 +117,14 @@ function Capture() {
               <Button fullWidth={true} variant='primary'  onClick={() => startListening()}>Start Listening</Button>
             </>
           )}
-          <Button fullWidth={true} onClick={() => logout()}>Log out</Button>
+          <Grid gridDefinition={[{ colspan: 6 }, { colspan:6}]}>
+            {muted === true ? 
+              <Button  iconAlign="left" iconName="microphone-off" fullWidth={true} onClick={() => unmute()}>Unmute</Button>
+              : 
+              <Button  iconAlign="left" iconName="microphone" fullWidth={true} onClick={() => mute()}>Mute</Button>
+            }
+            <Button fullWidth={true} onClick={() => logout()}>Log out</Button>
+          </Grid>         
         </SpaceBetween>
       </Container>
     </ContentLayout>
