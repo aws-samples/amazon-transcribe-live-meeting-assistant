@@ -17,6 +17,8 @@ type Call = {
 const initialIntegration = {
   currentCall: {} as Call,
   isTranscribing: false,
+  muted: false,
+  setMuted: (muteValue:boolean) => {},
   fetchMetadata: () => {},
   startTranscription: (userName:string, meetingTopic:string) => {},
   stopTranscription: () => {},
@@ -25,6 +27,7 @@ const initialIntegration = {
     meetingTopic: ""
   },
   platform: "n/a",
+  activeSpeaker: "n/a"
 };
 const IntegrationContext = createContext(initialIntegration);
 
@@ -38,8 +41,10 @@ function IntegrationProvider({ children }: any) {
     meetingTopic: ""
   });
   const [platform, setPlatform] = useState("n/a");
+  const [activeSpeaker, setActiveSpeaker] = useState("n/a");
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [shouldConnect, setShouldConnect] = useState(false); 
+  const [muted, setMuted] = useState(false);
 
   const { sendMessage, readyState, getWebSocket } = useWebSocket(settings.wssEndpoint as string, {
     queryParams: {
@@ -66,9 +71,16 @@ function IntegrationProvider({ children }: any) {
     [ReadyState.UNINSTANTIATED]: 'Uninstantiated',
   }[readyState];
 
-  const dataUrlToBytes = async (dataUrl:string) => {
+  const dataUrlToBytes = async (dataUrl:string, isMuted:boolean) => {
     const res = await fetch(dataUrl);
-    return new Uint8Array(await res.arrayBuffer());
+    const dataArray = new Uint8Array(await res.arrayBuffer());
+    if (isMuted) {
+      for (let i = 2; i < dataArray.length; i += 4) {
+        dataArray[i] = 0;
+        dataArray[i + 1] = 0;
+      }
+    }
+    return dataArray;
   }
   
   const fetchMetadata = async () => {
@@ -151,12 +163,13 @@ function IntegrationProvider({ children }: any) {
         } else if (request.action === "AudioData") {
           if (readyState === ReadyState.OPEN)
           {
-            let audioData = await dataUrlToBytes(request.audio);
+            let audioData = await dataUrlToBytes(request.audio, muted);
             sendMessage(audioData);
           }
         } else if (request.action === "ActiveSpeakerChange") {
           currentCall.callEvent = 'SPEAKER_CHANGE';
           currentCall.activeSpeaker = request.active_speaker;
+          setActiveSpeaker(request.active_speaker);
           sendMessage(JSON.stringify(currentCall));
         }
       };
@@ -164,10 +177,10 @@ function IntegrationProvider({ children }: any) {
       // Clean up the listener when the component unmounts
       return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     }
-  }, [currentCall, metadata, readyState, sendMessage, setMetadata, setPlatform, setIsTranscribing]);
+  }, [currentCall, metadata, readyState,muted,activeSpeaker, setActiveSpeaker, sendMessage, setMetadata, setPlatform, setIsTranscribing]);
 
   return (
-    <IntegrationContext.Provider value={{ currentCall, isTranscribing, fetchMetadata, startTranscription, stopTranscription, metadata, platform }}>
+    <IntegrationContext.Provider value={{ currentCall, isTranscribing, muted, setMuted, fetchMetadata, startTranscription, stopTranscription, metadata, platform, activeSpeaker }}>
       {children}
     </IntegrationContext.Provider>
   );
