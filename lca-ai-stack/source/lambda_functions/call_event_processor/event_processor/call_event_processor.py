@@ -168,6 +168,7 @@ def add_transcript_segments(
         transcript = message["Transcript"]
         if "OriginalTranscript" not in message:
             message["OriginalTranscript"] = transcript
+
         if issues_detected and len(issues_detected) > 0:
             LOGGER.debug("issue detected in add transcript segment")
             offsets = issues_detected[0].get("CharacterOffsets")
@@ -1411,6 +1412,9 @@ async def execute_process_event_api_mutation(
         LOGGER.debug("ADD_AGENT_ASSIST MUTATION ")
         normalized_message = normalize_transcript_segments({**message})
 
+        # Prepend speaker name ("Q") to agent assist transript
+        normalized_message["Transcript"] = "Q" + ": " + normalized_message["Transcript"]
+
         response = await execute_add_agent_assist_mutation(
             message=normalized_message[0],
             appsync_session=appsync_session
@@ -1436,7 +1440,6 @@ async def execute_process_event_api_mutation(
             participantRole = utteranceEvent.get("ParticipantRole", None)
             if not participantRole:
                 return return_value
-        # Invoke custom lambda hook (if any) and use returned version of message.
 
         normalized_messages = normalize_transcript_segments({**message})
 
@@ -1444,6 +1447,15 @@ async def execute_process_event_api_mutation(
         add_transcript_sentiment_tasks = []
 
         for normalized_message in normalized_messages:
+
+            # fix any transcription errors in wake phrase (e.g A Q, etc.) - always replace regex with "Hey Q! "
+            normalized_message["Transcript"] = re.sub(SETTINGS['AssistantWakePhraseRegEx'], "Hey Q! ", normalized_message["Transcript"])
+
+            # Prepend speaker name to transript
+            if normalized_message["Speaker"] != "":
+                normalized_message["Transcript"] = normalized_message["Speaker"] + ": " + normalized_message["Transcript"]
+
+            # Invoke custom lambda hook (if any) and use returned version of message.
             if (TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN):
                 normalized_message = invoke_transcript_lambda_hook(normalized_message)
 
@@ -1476,8 +1488,6 @@ async def execute_process_event_api_mutation(
                     )
                 )
             if (IS_LEX_AGENT_ASSIST_ENABLED or IS_LAMBDA_AGENT_ASSIST_ENABLED) and (not normalized_message["IsPartial"] or 'ContactId' in normalized_message.keys()) and isAssistantWakePhrase(normalized_message["Transcript"]):
-                # fix any transcription errors in "Hey Q" (e.g A Q, etc.)
-                normalized_message["Transcript"] = re.sub(SETTINGS['AssistantWakePhraseRegEx'], "Hey Q!", normalized_message["Transcript"])
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN,
                     InvocationType='Event',

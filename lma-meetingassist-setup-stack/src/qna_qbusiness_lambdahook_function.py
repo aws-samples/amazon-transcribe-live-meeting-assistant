@@ -17,7 +17,7 @@ QBUSINESS_CLIENT = boto3.client(
     endpoint_url=AMAZONQ_ENDPOINT_URL
 )
 
-def get_call_transcript(currentsegment, callId):
+def get_call_transcript(callId):
     payload = {
         'CallId': callId, 
         'ProcessTranscript': True
@@ -32,10 +32,10 @@ def get_call_transcript(currentsegment, callId):
 
     # TDB Assign speaker name instead of role
     transcript = []
-    role, text = None, None
     for transcriptSegment in transcriptSegments:
       role, text = transcriptSegment.split(":")
-      transcript.append({"name": role, "transcript": text.strip()})
+      speaker, text = text.split(":")
+      transcript.append({"name": speaker, "transcript": text.strip()})
 
     print(f"Transcript: {json.dumps(transcript)}")
     return transcript
@@ -195,7 +195,7 @@ def handler(event, context):
     # get transcript of current call and update prompt - callId set by agent orchestrator OR Lex Web UI
     callId = event["req"]["session"].get("callId") or event["req"]["_event"].get("requestAttributes",{}).get("callId")
     if callId:
-        transcript = get_call_transcript(userInput, callId)
+        transcript = get_call_transcript(callId)
         if transcript:
             # remove final segment if it matches the current input
             lastMessageText = transcript[-1]["transcript"]
