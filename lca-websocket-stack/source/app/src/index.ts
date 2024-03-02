@@ -12,7 +12,7 @@ import {
     PutObjectCommand
 } from '@aws-sdk/client-s3';
 
-import fs, { write } from 'fs';
+import fs from 'fs';
 import { randomUUID } from 'crypto';
 
 import {  
