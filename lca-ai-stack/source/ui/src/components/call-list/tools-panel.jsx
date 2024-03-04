@@ -3,15 +3,14 @@
 import React from 'react';
 import { HelpPanel } from '@awsui/components-react';
 
-const header = <h2>Calls</h2>;
+const header = <h2>Meetings</h2>;
 const content = (
   <>
     <p>
-      View a list of calls and related information such as phone number, initiation time, sentiment
-      and duration.
+      View a list of meetings and related information.
     </p>
     <p>Use the search bar to filter on any field.</p>
-    <p>To drill down even further into the details, select an individual call.</p>
+    <p>To drill down even further into the details, select an individual meeting.</p>
   </>
 );
 

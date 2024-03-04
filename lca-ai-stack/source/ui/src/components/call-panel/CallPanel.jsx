@@ -148,7 +148,7 @@ const CallAttributes = ({ item, setToolsOpen }) => (
   <Container
     header={
       <Header variant="h4" info={<InfoLink onFollow={() => setToolsOpen(true)} />}>
-        Call Attributes
+        Meeting Attributes
       </Header>
     }
   >
@@ -156,7 +156,7 @@ const CallAttributes = ({ item, setToolsOpen }) => (
       <SpaceBetween size="xs">
         <div>
           <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>Call ID</strong>
+            <strong>Meeting ID</strong>
           </Box>
           <div>{item.callId}</div>
         </div>
@@ -201,24 +201,6 @@ const CallAttributes = ({ item, setToolsOpen }) => (
       <SpaceBetween size="xs">
         <div>
           <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>Caller Phone Number</strong>
-          </Box>
-          <div>{item.callerPhoneNumber}</div>
-        </div>
-      </SpaceBetween>
-
-      <SpaceBetween size="xs">
-        <div>
-          <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>System Phone Number</strong>
-          </Box>
-          <div>{item.systemPhoneNumber}</div>
-        </div>
-      </SpaceBetween>
-
-      <SpaceBetween size="xs">
-        <div>
-          <Box margin={{ bottom: 'xxxs' }} color="text-label">
             <strong>Status</strong>
           </Box>
           <StatusIndicator type={item.recordingStatusIcon}>
@@ -230,7 +212,7 @@ const CallAttributes = ({ item, setToolsOpen }) => (
         <SpaceBetween size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Post Call Analytics</strong>
+              <strong>Post Meeting Analytics</strong>
             </Box>
             <Button
               variant="normal"
@@ -298,7 +280,7 @@ const CallCategories = ({ item }) => {
             </Link>
           }
         >
-          Call Categories
+          Meeting Categories
         </Header>
       }
     >
@@ -326,7 +308,7 @@ const CallSummary = ({ item }) => {
             </Link>
           }
         >
-          Call Summary
+          Meeting Summary
         </Header>
       }
     >
@@ -708,7 +690,7 @@ const CallInProgressTranscript = ({
           s?.segmentId
           && s?.createdAt
           && (s.agentTranscript === undefined
-              || s.agentTranscript || s.channel !== 'AGENT')
+            || s.agentTranscript || s.channel !== 'AGENT')
           && (s.channel !== 'AGENT_VOICETONE')
           && (s.channel !== 'CALLER_VOICETONE')
           && <TranscriptSegment key={`${s.segmentId}-${s.createdAt}`} segment={s} translateCache={translateCache} />
@@ -915,7 +897,7 @@ const CallTranscriptContainer = ({
               </SpaceBetween>
             }
           >
-            Call Transcript
+            Meeting Transcript
           </Header>
         }
       >
@@ -1007,7 +989,7 @@ const CallStatsContainer = ({
             </SpaceBetween>
           }
         >
-          Call Sentiment Analysis
+          Meeting Sentiment Analysis
         </Header>
       }
     >

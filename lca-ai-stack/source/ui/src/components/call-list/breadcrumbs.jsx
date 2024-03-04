@@ -7,8 +7,8 @@ import { BreadcrumbGroup } from '@awsui/components-react';
 import { CALLS_PATH, DEFAULT_PATH } from '../../routes/constants';
 
 export const callListBreadcrumbItems = [
-  { text: 'Call Analytics', href: `#${DEFAULT_PATH}` },
-  { text: 'Calls', href: `#${CALLS_PATH}` },
+  { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` },
+  { text: 'Meetings', href: `#${CALLS_PATH}` },
 ];
 
 const Breadcrumbs = () => (
