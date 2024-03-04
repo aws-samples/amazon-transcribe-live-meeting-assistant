@@ -809,11 +809,6 @@ const CallTranscriptContainer = ({
                   onChange={({ detail }) => setAgentTranscript(detail.checked)}
                   checked={agentTranscript}
                 />
-                <span>Show Agent Transcripts?</span>
-                <Toggle
-                  onChange={({ detail }) => setTranslateOn(detail.checked)}
-                  checked={translateOn}
-                />
                 <span>Enable Translation</span>
                 {languageChoices()}
               </SpaceBetween>
