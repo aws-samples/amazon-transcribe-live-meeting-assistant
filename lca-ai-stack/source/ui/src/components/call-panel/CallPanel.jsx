@@ -165,15 +165,6 @@ const CallAttributes = ({ item, setToolsOpen }) => (
       <SpaceBetween size="xs">
         <div>
           <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>Agent</strong>
-          </Box>
-          <div>{item.agentId}</div>
-        </div>
-      </SpaceBetween>
-
-      <SpaceBetween size="xs">
-        <div>
-          <Box margin={{ bottom: 'xxxs' }} color="text-label">
             <strong>Initiation Timestamp</strong>
           </Box>
           <div>{item.initiationTimeStamp}</div>
@@ -240,57 +231,6 @@ const CallAttributes = ({ item, setToolsOpen }) => (
   </Container>
 );
 
-const CallCategories = ({ item }) => {
-  const { settings } = useSettingsContext();
-  const regex = settings?.CategoryAlertRegex ?? '.*';
-
-  const categories = item.callCategories || [];
-
-  const categoryComponents = categories.map((t, i) => {
-    const className = t.match(regex)
-      ? 'transcript-segment-category-match-alert'
-      : 'transcript-segment-category-match';
-
-    return (
-      /* eslint-disable-next-line react/no-array-index-key */
-      <SpaceBetween size="xs" key={`call-category-${i}`}>
-        <div>
-          {/* eslint-disable-next-line react/no-array-index-key */}
-          <TextContent key={`call-category-${i}`} className={className}>
-            <ReactMarkdown rehypePlugins={[rehypeRaw]}>{t.trim()}</ReactMarkdown>
-          </TextContent>
-        </div>
-      </SpaceBetween>
-    );
-  });
-
-  return (
-    <Container
-      fitHeight="true"
-      header={
-        <Header
-          variant="h4"
-          info={
-            <Link
-              variant="info"
-              target="_blank"
-              href="https://docs.aws.amazon.com/transcribe/latest/dg/call-analytics-create-categories.html"
-            >
-              Info
-            </Link>
-          }
-        >
-          Meeting Categories
-        </Header>
-      }
-    >
-      <ColumnLayout columns={6} variant="text-grid">
-        {categoryComponents}
-      </ColumnLayout>
-    </Container>
-  );
-};
-
 // eslint-disable-next-line arrow-body-style
 const CallSummary = ({ item }) => {
   return (
@@ -326,24 +266,6 @@ const CallSummary = ({ item }) => {
                   <TextContent color="gray">
                     <ReactMarkdown rehypePlugins={[rehypeRaw]}>
                       {getMarkdownSummary(item.callSummaryText) ?? 'No summary available'}
-                    </ReactMarkdown>
-                  </TextContent>
-                </div>
-              ),
-            },
-          ]}
-        />
-        <Tabs
-          tabs={[
-            {
-              label: 'Issues',
-              id: 'issues',
-              content: (
-                <div>
-                  {/* eslint-disable-next-line react/no-array-index-key */}
-                  <TextContent color="gray" className="issue-detected">
-                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                      {item.issuesDetected ?? 'No issue detected'}
                     </ReactMarkdown>
                   </TextContent>
                 </div>
@@ -1067,6 +989,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen }) => {
   const [collapseSentiment, setCollapseSentiment] = useState(false);
 
   const enableVoiceTone = settings?.EnableVoiceToneAnalysis === 'true';
+  const enableSentimentAnalysis = settings?.IsSentimentAnalysisEnabled === 'true';
 
   // prettier-ignore
   const customRetryStrategy = new StandardRetryStrategy(
@@ -1103,33 +1026,35 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen }) => {
     <SpaceBetween size="s">
       <CallAttributes item={item} setToolsOpen={setToolsOpen} />
       <Grid
-        gridDefinition={[{ colspan: { default: 12, xs: 8 } }, { colspan: { default: 12, xs: 4 } }]}
+        gridDefinition={[{ colspan: { default: 12, xs: 8 } }]}
       >
         <CallSummary item={item} />
-        <CallCategories item={item} />
       </Grid>
-      <Grid
-        gridDefinition={[
-          { colspan: { default: 12, xs: enableVoiceTone ? 8 : 12 } },
-          { colspan: { default: 12, xs: enableVoiceTone ? 4 : 0 } },
-        ]}
-      >
-        <CallStatsContainer
-          item={item}
-          callTranscriptPerCallId={callTranscriptPerCallId}
-          collapseSentiment={collapseSentiment}
-          setCollapseSentiment={setCollapseSentiment}
-        />
-        {enableVoiceTone && (
-          <VoiceToneContainer
-            item={item}
-            callTranscriptPerCallId={callTranscriptPerCallId}
-            collapseSentiment={collapseSentiment}
-            setCollapseSentiment={setCollapseSentiment}
-          />
-        )}
-      </Grid>
-
+      {(enableSentimentAnalysis || enableVoiceTone) && (
+        <Grid
+          gridDefinition={[
+            { colspan: { default: 12, xs: (enableVoiceTone && enableSentimentAnalysis) ? 8 : 12 } },
+            { colspan: { default: 12, xs: (enableVoiceTone && enableSentimentAnalysis) ? 4 : 0 } },
+          ]}
+        >
+          {enableSentimentAnalysis && (
+            <CallStatsContainer
+              item={item}
+              callTranscriptPerCallId={callTranscriptPerCallId}
+              collapseSentiment={collapseSentiment}
+              setCollapseSentiment={setCollapseSentiment}
+            />
+          )}
+          {enableVoiceTone && (
+            <VoiceToneContainer
+              item={item}
+              callTranscriptPerCallId={callTranscriptPerCallId}
+              collapseSentiment={collapseSentiment}
+              setCollapseSentiment={setCollapseSentiment}
+            />
+          )}
+        </Grid>
+      )}
       <CallTranscriptContainer
         item={item}
         setToolsOpen={setToolsOpen}
