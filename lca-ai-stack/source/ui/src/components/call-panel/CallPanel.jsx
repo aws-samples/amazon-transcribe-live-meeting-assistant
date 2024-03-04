@@ -395,7 +395,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
   );
 };
 
-const TranscriptSegment = ({ segment, translateCache }) => {
+const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis }) => {
   const { channel } = segment;
 
   if (channel === 'CATEGORY_MATCH') {
@@ -423,7 +423,7 @@ const TranscriptSegment = ({ segment, translateCache }) => {
   if (channel in ['AGENT', 'CALLER']) {
     const { transcript } = segment;
     displayChannel = transcript.substring(0, transcript.indexOf(':')).trim() || channel;
-  };
+  }
 
   return (
     <Grid
@@ -457,6 +457,7 @@ const CallInProgressTranscript = ({
   agentTranscript,
   translateOn,
   collapseSentiment,
+  enableSentimentAnalysis,
 }) => {
   const bottomRef = useRef();
   const [turnByTurnSegments, setTurnByTurnSegments] = useState([]);
@@ -622,7 +623,7 @@ const CallInProgressTranscript = ({
             || s.agentTranscript || s.channel !== 'AGENT')
           && (s.channel !== 'AGENT_VOICETONE')
           && (s.channel !== 'CALLER_VOICETONE')
-          && <TranscriptSegment key={`${s.segmentId}-${s.createdAt}`} segment={s} translateCache={translateCache} />
+          && <TranscriptSegment key={`${s.segmentId}-${s.createdAt}`} segment={s} translateCache={translateCache} enableSentimentAnalysis={enableSentimentAnalysis} />
         ),
       );
 
@@ -717,6 +718,7 @@ const getTranscriptContent = ({
   agentTranscript,
   translateOn,
   collapseSentiment,
+  enableSentimentAnalysis,
 }) => {
   switch (item.recordingStatusLabel) {
     case DONE_STATUS:
@@ -732,6 +734,7 @@ const getTranscriptContent = ({
           agentTranscript={agentTranscript}
           translateOn={translateOn}
           collapseSentiment={collapseSentiment}
+          enableSentimentAnalysis={enableSentimentAnalysis}
         />
       );
   }
@@ -743,6 +746,7 @@ const CallTranscriptContainer = ({
   callTranscriptPerCallId,
   translateClient,
   collapseSentiment,
+  enableSentimentAnalysis,
 }) => {
   // defaults to auto scroll when call is in progress
   const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
@@ -754,7 +758,7 @@ const CallTranscriptContainer = ({
   const [targetLanguage, setTargetLanguage] = useState(
     localStorage.getItem('targetLanguage') || '',
   );
-  const [agentTranscript, setAgentTranscript] = useState(true);
+  const [agentTranscript] = useState(true);
 
   const handleLanguageSelect = (event) => {
     setTargetLanguage(event.target.value);
@@ -813,8 +817,8 @@ const CallTranscriptContainer = ({
                 />
                 <span>Auto Scroll</span>
                 <Toggle
-                  onChange={({ detail }) => setAgentTranscript(detail.checked)}
-                  checked={agentTranscript}
+                  onChange={({ detail }) => setTranslateOn(detail.checked)}
+                  checked={translateOn}
                 />
                 <span>Enable Translation</span>
                 {languageChoices()}
@@ -834,6 +838,7 @@ const CallTranscriptContainer = ({
           agentTranscript,
           translateOn,
           collapseSentiment,
+          enableSentimentAnalysis,
         })}
       </Container>
       {getAgentAssistPanel(item, collapseSentiment)}
@@ -1027,16 +1032,14 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen }) => {
   return (
     <SpaceBetween size="s">
       <CallAttributes item={item} setToolsOpen={setToolsOpen} />
-      <Grid
-        gridDefinition={[{ colspan: { default: 12, xs: 8 } }]}
-      >
+      <Grid gridDefinition={[{ colspan: { default: 12, xs: 8 } }]}>
         <CallSummary item={item} />
       </Grid>
       {(enableSentimentAnalysis || enableVoiceTone) && (
         <Grid
           gridDefinition={[
-            { colspan: { default: 12, xs: (enableVoiceTone && enableSentimentAnalysis) ? 8 : 12 } },
-            { colspan: { default: 12, xs: (enableVoiceTone && enableSentimentAnalysis) ? 4 : 0 } },
+            { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 8 : 12 } },
+            { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 4 : 0 } },
           ]}
         >
           {enableSentimentAnalysis && (
@@ -1063,6 +1066,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen }) => {
         callTranscriptPerCallId={callTranscriptPerCallId}
         translateClient={translateClient}
         collapseSentiment={collapseSentiment}
+        enableSentimentAnalysis={enableSentimentAnalysis}
       />
     </SpaceBetween>
   );
