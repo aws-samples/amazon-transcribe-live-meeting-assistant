@@ -409,7 +409,7 @@ const TranscriptSegment = ({ segment, translateCache }) => {
         disableGutters
         gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}
       >
-        {getSentimentImage(segment)}
+        {enableSentimentAnalysis && getSentimentImage(segment)}
         <SpaceBetween direction="vertical" size="xxs">
           <TranscriptContent segment={newSegment} translateCache={translateCache} />
         </SpaceBetween>
@@ -424,7 +424,7 @@ const TranscriptSegment = ({ segment, translateCache }) => {
       disableGutters
       gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}
     >
-      {getSentimentImage(segment)}
+      {enableSentimentAnalysis && getSentimentImage(segment)}
       <SpaceBetween direction="vertical" size="xxs" className={channelClass}>
         <SpaceBetween direction="horizontal" size="xs">
           <TextContent>
