@@ -37,7 +37,7 @@
   },
   "ui": {
     "parentOrigin": "${CLOUDFRONT_DOMAIN}",
-    "toolbarTitle": "LCA Agent Assist",
+    "toolbarTitle": "Live Meeting Assist",
     "toolbarLogo": "",
     "toolbarStartLiveChatLabel": "Start Live Chat",
     "toolbarEndLiveChatLabel": "End Live Chat",

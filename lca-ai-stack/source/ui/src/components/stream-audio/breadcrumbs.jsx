@@ -7,7 +7,7 @@ import { BreadcrumbGroup } from '@awsui/components-react';
 import { STREAM_AUDIO_PATH, DEFAULT_PATH } from '../../routes/constants';
 
 export const callListBreadcrumbItems = [
-  { text: 'Call Analytics', href: `#${DEFAULT_PATH}` },
+  { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` },
   { text: 'Stream Audio', href: `#${STREAM_AUDIO_PATH}` },
 ];
 
