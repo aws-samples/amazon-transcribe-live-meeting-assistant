@@ -559,7 +559,7 @@ Resources:
     Type: AWS::SSM::Parameter
     Properties:
       Type: String
-      Value: !Sub '{ "CategoryAlertRegex":"${CategoryAlertRegEx}", "EnableVoiceToneAnalysis":"${EnableVoiceToneAnalysis}", "WSEndpoint":"", "AssistantWakePhraseRegEx":"${AssistantWakePhraseRegEx}"}'
+      Value: !Sub '{ "CategoryAlertRegex":"${CategoryAlertRegEx}", "EnableVoiceToneAnalysis":"${EnableVoiceToneAnalysis}",  "IsSentimentAnalysisEnabled":"${IsSentimentAnalysisEnabled}", "WSEndpoint":"", "AssistantWakePhraseRegEx":"${AssistantWakePhraseRegEx}"}'
 
   ##########################################################################
   # CodeBuild
@@ -785,6 +785,7 @@ Resources:
       BuildProjectName: !Ref TranscriberCodeBuildProject
       IsLexAgentAssistEnabled: !Ref IsLexAgentAssistEnabled
       EnableVoiceToneAnalysis: !Ref EnableVoiceToneAnalysis
+      IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
       # pass code location to support upgrades
       CodeLocation:
         !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/\

@@ -6,9 +6,9 @@ import { SideNavigation } from '@awsui/components-react';
 
 import { CALLS_PATH, DEFAULT_PATH, STREAM_AUDIO_PATH } from '../../routes/constants';
 
-export const callsNavHeader = { text: 'Call Analytics', href: `#${DEFAULT_PATH}` };
+export const callsNavHeader = { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` };
 export const callsNavItems = [
-  { type: 'link', text: 'Calls', href: `#${CALLS_PATH}` },
+  { type: 'link', text: 'Meetings', href: `#${CALLS_PATH}` },
   { type: 'link', text: 'Stream Audio', href: `#${STREAM_AUDIO_PATH}` },
   {
     type: 'section',
