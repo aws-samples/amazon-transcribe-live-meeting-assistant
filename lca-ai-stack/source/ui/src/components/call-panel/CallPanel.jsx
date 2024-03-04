@@ -418,6 +418,13 @@ const TranscriptSegment = ({ segment, translateCache }) => {
   }
 
   const channelClass = channel === 'AGENT_ASSISTANT' ? 'transcript-segment-agent-assist' : '';
+  let displayChannel = channel;
+
+  if (channel in ['AGENT', 'CALLER']) {
+    const { transcript } = segment;
+    displayChannel = transcript.substring(0, transcript.indexOf(':')).trim() || channel;
+  };
+
   return (
     <Grid
       className="transcript-segment"
@@ -428,7 +435,7 @@ const TranscriptSegment = ({ segment, translateCache }) => {
       <SpaceBetween direction="vertical" size="xxs" className={channelClass}>
         <SpaceBetween direction="horizontal" size="xs">
           <TextContent>
-            <strong>{segment.channel}</strong>
+            <strong>{displayChannel}</strong>
           </TextContent>
           <TextContent>
             {`${getTimestampFromSeconds(segment.startTime)} -
