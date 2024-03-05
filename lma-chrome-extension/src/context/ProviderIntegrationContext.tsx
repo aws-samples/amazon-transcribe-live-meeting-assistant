@@ -19,6 +19,8 @@ const initialIntegration = {
   isTranscribing: false,
   muted: false,
   setMuted: (muteValue:boolean) => {},
+  paused: false,
+  setPaused: (pauseValue:boolean) => {},
   fetchMetadata: () => {},
   startTranscription: (userName:string, meetingTopic:string) => {},
   stopTranscription: () => {},
@@ -45,6 +47,7 @@ function IntegrationProvider({ children }: any) {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [shouldConnect, setShouldConnect] = useState(false); 
   const [muted, setMuted] = useState(false);
+  const [paused, setPaused] = useState(false);
 
   const { sendMessage, readyState, getWebSocket } = useWebSocket(settings.wssEndpoint as string, {
     queryParams: {
@@ -71,10 +74,14 @@ function IntegrationProvider({ children }: any) {
     [ReadyState.UNINSTANTIATED]: 'Uninstantiated',
   }[readyState];
 
-  const dataUrlToBytes = async (dataUrl:string, isMuted:boolean) => {
+  const dataUrlToBytes = async (dataUrl:string, isMuted:boolean, isPaused:boolean) => {
     const res = await fetch(dataUrl);
     const dataArray = new Uint8Array(await res.arrayBuffer());
-    if (isMuted) {
+    if (isPaused) {
+      // mute all channels by sending just zeroes
+      return new Uint8Array(dataArray.length);
+    } else if (isMuted) {
+      // mute only the one channel by mutating the zeroes of only one channel (channel 1)
       for (let i = 2; i < dataArray.length; i += 4) {
         dataArray[i] = 0;
         dataArray[i + 1] = 0;
@@ -142,7 +149,8 @@ function IntegrationProvider({ children }: any) {
     }
     setShouldConnect(false);
     setIsTranscribing(false);
-  }, [readyState, getWebSocket, sendMessage]);
+    setPaused(false);
+  }, [readyState,shouldConnect, isTranscribing, paused, getWebSocket, sendMessage, setPaused]);
 
   useEffect(() => {
     if (chrome.runtime) {
@@ -163,7 +171,7 @@ function IntegrationProvider({ children }: any) {
         } else if (request.action === "AudioData") {
           if (readyState === ReadyState.OPEN)
           {
-            let audioData = await dataUrlToBytes(request.audio, muted);
+            let audioData = await dataUrlToBytes(request.audio, muted, paused);
             sendMessage(audioData);
           }
         } else if (request.action === "ActiveSpeakerChange") {
@@ -177,10 +185,10 @@ function IntegrationProvider({ children }: any) {
       // Clean up the listener when the component unmounts
       return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     }
-  }, [currentCall, metadata, readyState,muted,activeSpeaker, setActiveSpeaker, sendMessage, setMetadata, setPlatform, setIsTranscribing]);
+  }, [currentCall, metadata, readyState,muted, paused, activeSpeaker, setActiveSpeaker, sendMessage, setMetadata, setPlatform, setIsTranscribing]);
 
   return (
-    <IntegrationContext.Provider value={{ currentCall, isTranscribing, muted, setMuted, fetchMetadata, startTranscription, stopTranscription, metadata, platform, activeSpeaker }}>
+    <IntegrationContext.Provider value={{ currentCall, isTranscribing, muted, setMuted,paused, setPaused, fetchMetadata, startTranscription, stopTranscription, metadata, platform, activeSpeaker }}>
       {children}
     </IntegrationContext.Provider>
   );
