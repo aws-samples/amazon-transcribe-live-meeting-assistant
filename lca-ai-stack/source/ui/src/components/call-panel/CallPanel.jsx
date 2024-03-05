@@ -252,9 +252,7 @@ const CallSummary = ({ item }) => {
         </Header>
       }
     >
-      <Grid
-        gridDefinition={[{ colspan: { default: 12, xs: 6 } }, { colspan: { default: 12, xs: 6 } }]}
-      >
+      <Grid gridDefinition={[{ colspan: { default: 12, xs: 6 } }]}>
         <Tabs
           tabs={[
             {
@@ -278,9 +276,9 @@ const CallSummary = ({ item }) => {
   );
 };
 
-const getSentimentImage = (segment) => {
+const getSentimentImage = (segment, enableSentimentAnalysis) => {
   const { sentiment, sentimentScore, sentimentWeighted } = segment;
-  if (!sentiment) {
+  if (!sentiment || !enableSentimentAnalysis) {
     // returns an empty div to maintain spacing
     return <div className="sentiment-image" />;
   }
@@ -409,7 +407,7 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
         disableGutters
         gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}
       >
-        {enableSentimentAnalysis && getSentimentImage(segment)}
+        {getSentimentImage(segment, enableSentimentAnalysis)}
         <SpaceBetween direction="vertical" size="xxs">
           <TranscriptContent segment={newSegment} translateCache={translateCache} />
         </SpaceBetween>
@@ -418,11 +416,15 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
   }
 
   const channelClass = channel === 'AGENT_ASSISTANT' ? 'transcript-segment-agent-assist' : '';
-  let displayChannel = channel;
 
-  if (channel in ['AGENT', 'CALLER']) {
+  const newSegment = segment;
+
+  if (channel === 'AGENT' || channel === 'CALLER') {
     const { transcript } = segment;
-    displayChannel = transcript.substring(0, transcript.indexOf(':')).trim() || channel;
+    newSegment.channel = transcript.substring(0, transcript.indexOf(':')).trim();
+    newSegment.transcript = transcript.substring(transcript.indexOf(':') + 1).trim();
+  } else if (channel === 'AGENT_ASSISTANT') {
+    newSegment.channel = 'MEETING_ASSISTANT';
   }
 
   return (
@@ -431,18 +433,18 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
       disableGutters
       gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}
     >
-      {enableSentimentAnalysis && getSentimentImage(segment)}
+      {getSentimentImage(segment, enableSentimentAnalysis)}
       <SpaceBetween direction="vertical" size="xxs" className={channelClass}>
         <SpaceBetween direction="horizontal" size="xs">
           <TextContent>
-            <strong>{displayChannel}</strong>
+            <strong>{newSegment.channel}</strong>
           </TextContent>
           <TextContent>
             {`${getTimestampFromSeconds(segment.startTime)} -
               ${getTimestampFromSeconds(segment.endTime)}`}
           </TextContent>
         </SpaceBetween>
-        <TranscriptContent segment={segment} translateCache={translateCache} />
+        <TranscriptContent segment={newSegment} translateCache={translateCache} />
       </SpaceBetween>
     </Grid>
   );
@@ -692,14 +694,14 @@ const getAgentAssistPanel = (item, collapseSentiment) => {
               </Link>
             }
           >
-            Agent Assist Bot
+            Meeting Assist Bot
           </Header>
         }
       >
         <Box style={{ height: collapseSentiment ? '34vh' : '68vh' }}>
           <iframe
             style={{ border: '0px', height: collapseSentiment ? '34vh' : '68vh', margin: '0' }}
-            title="Agent Assist"
+            title="Meeting Assist"
             src={`/index-lexwebui.html?callId=${item.callId}`}
             width="100%"
           />
@@ -1032,9 +1034,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen }) => {
   return (
     <SpaceBetween size="s">
       <CallAttributes item={item} setToolsOpen={setToolsOpen} />
-      <Grid gridDefinition={[{ colspan: { default: 12, xs: 8 } }]}>
-        <CallSummary item={item} />
-      </Grid>
+      <CallSummary item={item} />
       {(enableSentimentAnalysis || enableVoiceTone) && (
         <Grid
           gridDefinition={[
