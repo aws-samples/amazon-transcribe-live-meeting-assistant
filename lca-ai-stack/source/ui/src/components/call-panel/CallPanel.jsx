@@ -330,7 +330,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
   const { settings } = useSettingsContext();
   const regex = settings?.CategoryAlertRegex ?? '.*';
 
-  const { transcript, segmentId, channel, targetLanguage, agentTranscript, translateOn } = segment;
+  const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
 
   const k = segmentId.concat('-', targetLanguage);
 
@@ -362,8 +362,9 @@ const TranscriptContent = ({ segment, translateCache }) => {
         className = 'transcript-segment-agent-assist';
         break;
       case 'AGENT':
-        text = agentTranscript !== undefined && agentTranscript ? text : '';
-        translatedText = agentTranscript !== undefined && agentTranscript ? translatedText : '';
+      case 'CALLER':
+        text = text.substring(text.indexOf(':') + 1).trim();
+        translatedText = translatedText.substring(translatedText.indexOf(':') + 1).trim();
         break;
       case 'CATEGORY_MATCH':
         if (text.match(regex)) {
@@ -417,18 +418,12 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
     );
   }
 
-  const newSegment = segment;
   let displayChannel = `${segment.channel}`;
   let channelClass = '';
 
   if (channel === 'AGENT' || channel === 'CALLER') {
     const originalTranscript = `${segment.transcript}`;
-
     displayChannel = originalTranscript.substring(0, originalTranscript.indexOf(':')).trim();
-
-    newSegment.transcript = originalTranscript
-      .substring(originalTranscript.indexOf(':') + 1)
-      .trim();
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
     channelClass = 'transcript-segment-agent-assist';
@@ -451,7 +446,7 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
               ${getTimestampFromSeconds(segment.endTime)}`}
           </TextContent>
         </SpaceBetween>
-        <TranscriptContent segment={newSegment} translateCache={translateCache} />
+        <TranscriptContent segment={segment} translateCache={translateCache} />
       </SpaceBetween>
     </Grid>
   );
