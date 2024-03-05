@@ -43,7 +43,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
   },
   {
     id: 'agentId',
-    header: 'Agent',
+    header: 'Name',
     cell: (item) => item.agentId,
     sortingField: 'agentId',
   },
@@ -171,7 +171,7 @@ const VISIBLE_CONTENT_OPTIONS = [
     label: 'Meeting list properties',
     options: [
       { id: 'callId', label: 'Meeting ID', editable: false },
-      { id: 'agentId', label: 'Agent ID' },
+      { id: 'agentId', label: 'Name' },
       { id: 'initiationTimeStamp', label: 'Initiation Timestamp' },
       { id: 'recordingStatus', label: 'Status' },
       { id: 'summary', label: 'Summary' },

@@ -314,7 +314,7 @@ const StreamAudio = () => {
             >
               <Input value={callMetaData.callId} onChange={handleCallIdChange} />
             </FormField>
-            <FormField label="Agent ID" stretch required description="Agent ID">
+            <FormField label="Name" stretch required description="Name">
               <Input value={callMetaData.agentId} onChange={handleAgentIdChange} />
             </FormField>
             <FormField label="Customer Phone" stretch required description="Customer Phone">
