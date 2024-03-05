@@ -1447,9 +1447,9 @@ async def execute_process_event_api_mutation(
 
         for normalized_message in normalized_messages:
 
-            # fix any transcription errors in wake phrase (e.g A Q, etc.) - always replace regex with "Hey Q! "
-            normalized_message["Transcript"] = re.sub(SETTINGS['AssistantWakePhraseRegEx'], "Hey Q! ", normalized_message["Transcript"])
-            normalized_message["OriginalTranscript"] = re.sub(SETTINGS['AssistantWakePhraseRegEx'], "Hey Q! ", normalized_message["OriginalTranscript"])
+            # fix any transcription errors in wake phrase (e.g A Q, etc.) - always replace regex with "OK Q! "
+            normalized_message["Transcript"] = re.sub(SETTINGS['AssistantWakePhraseRegEx'], "OK Q! ", normalized_message["Transcript"])
+            normalized_message["OriginalTranscript"] = re.sub(SETTINGS['AssistantWakePhraseRegEx'], "OK Q! ", normalized_message["OriginalTranscript"])
 
             # Prepend speaker name to transcript
             if message.get("Speaker"):

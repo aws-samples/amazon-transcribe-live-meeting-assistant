@@ -298,9 +298,9 @@ Parameters:
 
   AssistantWakePhraseRegEx:
     Type: String
-    Default: "(Hey|OK|A)[.,! ]*Q[.,! ]+"
+    Default: "(OK|Okay)[.,! ]*Q[.,! ]+"
     Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'Hey Q' or 'OK Q'
+      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Q'.
 
   EnableVoiceToneAnalysis:
     Type: String
