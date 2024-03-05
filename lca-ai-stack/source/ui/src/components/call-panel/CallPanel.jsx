@@ -425,7 +425,7 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
     const originalTranscript = `${segment.transcript}`;
 
     displayChannel = originalTranscript.substring(0, originalTranscript.indexOf(':')).trim();
-    if (displayChannel === '') displayChannel = channel;
+
     newSegment.transcript = originalTranscript
       .substring(originalTranscript.indexOf(':') + 1)
       .trim();
