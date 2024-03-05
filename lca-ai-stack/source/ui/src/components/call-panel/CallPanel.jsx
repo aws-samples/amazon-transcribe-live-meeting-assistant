@@ -355,6 +355,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
     let className = '';
     let text = t;
     let translatedText = result;
+    console.log(`channel in transcript components  ${channel}`);
     switch (channel) {
       case 'AGENT_ASSISTANT':
         className = 'transcript-segment-agent-assist';
@@ -422,14 +423,16 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
 
   if (channel === 'AGENT' || channel === 'CALLER') {
     const originalTranscript = `${segment.transcript}`;
+    console.log(`original transcript ${originalTranscript}`);
     displayChannel = originalTranscript.substring(0, originalTranscript.indexOf(':')).trim();
+    if (displayChannel === '') displayChannel = channel;
     newSegment.transcript = originalTranscript
       .substring(originalTranscript.indexOf(':') + 1)
       .trim();
   } else if (channel === 'AGENT_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
   }
-
+  console.log(`display channel in segment ${displayChannel}`);
   return (
     <Grid
       className="transcript-segment"
