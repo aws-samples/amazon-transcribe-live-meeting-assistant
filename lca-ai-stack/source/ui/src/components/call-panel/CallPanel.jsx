@@ -355,8 +355,10 @@ const TranscriptContent = ({ segment, translateCache }) => {
     let className = '';
     let text = t;
     let translatedText = result;
+
     switch (channel) {
       case 'AGENT_ASSISTANT':
+      case 'MEETING_ASSISTANT':
         className = 'transcript-segment-agent-assist';
         break;
       case 'AGENT':
@@ -415,16 +417,21 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
     );
   }
 
-  const channelClass = channel === 'AGENT_ASSISTANT' ? 'transcript-segment-agent-assist' : '';
-
   const newSegment = segment;
+  let displayChannel = `${segment.channel}`;
+  let channelClass = '';
 
   if (channel === 'AGENT' || channel === 'CALLER') {
-    const { transcript } = segment;
-    newSegment.channel = transcript.substring(0, transcript.indexOf(':')).trim();
-    newSegment.transcript = transcript.substring(transcript.indexOf(':') + 1).trim();
-  } else if (channel === 'AGENT_ASSISTANT') {
-    newSegment.channel = 'MEETING_ASSISTANT';
+    const originalTranscript = `${segment.transcript}`;
+
+    displayChannel = originalTranscript.substring(0, originalTranscript.indexOf(':')).trim();
+
+    newSegment.transcript = originalTranscript
+      .substring(originalTranscript.indexOf(':') + 1)
+      .trim();
+  } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
+    displayChannel = 'MEETING_ASSISTANT';
+    channelClass = 'transcript-segment-agent-assist';
   }
 
   return (
@@ -437,7 +444,7 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
       <SpaceBetween direction="vertical" size="xxs" className={channelClass}>
         <SpaceBetween direction="horizontal" size="xs">
           <TextContent>
-            <strong>{newSegment.channel}</strong>
+            <strong>{displayChannel}</strong>
           </TextContent>
           <TextContent>
             {`${getTimestampFromSeconds(segment.startTime)} -
