@@ -193,8 +193,13 @@ Resources:
                   summaryText = ""
           
               return {"summary": summaryText}
-        
-        
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
   
   LambdaRole:
     Type: AWS::IAM::Role

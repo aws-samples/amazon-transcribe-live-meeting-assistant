@@ -806,6 +806,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   ##########################################################################
   # Kinesis Data Stream
@@ -868,6 +870,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   LambdaFetchTranscriptExecutionRole:
     Type: AWS::IAM::Role
@@ -917,7 +921,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
-  
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+
   LLMAnthropicSummaryLambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -971,7 +977,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
-  
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+
   BedrockSummaryLambdaExecutionRole:
     Type: AWS::IAM::Role
     Condition: ShouldEnableBedrockSummarizer
@@ -1041,6 +1049,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   AsyncAgentAssistOrchestratorExecutionRole:
     Type: AWS::IAM::Role
@@ -1113,6 +1123,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   AsyncTranscriptSummaryOrchestratorExecutionRole:
     Type: AWS::IAM::Role
@@ -1174,6 +1186,11 @@ Resources:
 
   AgentAssistBotIdentityPool:
     Type: AWS::Cognito::IdentityPool
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W57
+            reason: Using cognito assume role with web identity and scoped permissions.
     Properties:
       IdentityPoolName: !Sub "${AWS::StackName}-AgentAssistBot-IdentityPool"
       AllowUnauthenticatedIdentities: true
@@ -1228,6 +1245,10 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W11
+            reason: comprehend does not support resource-level permissions
     Properties:
       Architectures:
         - arm64
@@ -1843,11 +1864,10 @@ Resources:
                   - translate:TranslateText
                   - comprehend:DetectDominantLanguage
                 Resource: "*"
-
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W12
+          - id: W11
             reason: comprehend, translate, and connect do not support resource-level permissions
 
   AdminUser:
@@ -1917,6 +1937,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   CognitoUserPoolEmailDomainVerifyPermission:
     Type: AWS::Lambda::Permission
@@ -1968,6 +1990,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
     Type: AWS::Lambda::Function
     Properties:
       Handler: "index.lambda_handler"

@@ -6,6 +6,11 @@ Resources:
 
   BedrockBoto3Bucket:
     Type: AWS::S3::Bucket
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W51
+            reason: Bucket has identity based policy.
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration: 
