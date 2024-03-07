@@ -36,7 +36,7 @@ const IntegrationContext = createContext(initialIntegration);
 function IntegrationProvider({ children }: any) {
 
   const [currentCall, setCurrentCall] = useState({} as Call);
-  const { user, checkTokenExpired } = useUserContext();
+  const { user, checkTokenExpired, login } = useUserContext();
   const settings = useSettings();
   const [metadata, setMetadata] = useState({
     userName: "",
@@ -113,6 +113,7 @@ function IntegrationProvider({ children }: any) {
 
   const startTranscription = useCallback(async (userName: string, meetingTopic: string) => {
     if (checkTokenExpired()) {
+      login();
       return;
     }
 
@@ -179,13 +180,15 @@ function IntegrationProvider({ children }: any) {
           currentCall.activeSpeaker = request.active_speaker;
           setActiveSpeaker(request.active_speaker);
           sendMessage(JSON.stringify(currentCall));
+        } else if (request.action === "MuteChange") {
+          setMuted(request.mute);
         }
       };
       chrome.runtime.onMessage.addListener(handleRuntimeMessage); 
       // Clean up the listener when the component unmounts
       return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     }
-  }, [currentCall, metadata, readyState,muted, paused, activeSpeaker, setActiveSpeaker, sendMessage, setMetadata, setPlatform, setIsTranscribing]);
+  }, [currentCall, metadata, readyState,muted, paused, activeSpeaker, setMuted, setActiveSpeaker, sendMessage, setMetadata, setPlatform, setIsTranscribing]);
 
   return (
     <IntegrationContext.Provider value={{ currentCall, isTranscribing, muted, setMuted,paused, setPaused, fetchMetadata, startTranscription, stopTranscription, metadata, platform, activeSpeaker }}>
