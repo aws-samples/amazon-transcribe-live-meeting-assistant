@@ -31,7 +31,8 @@ import {
     CallRecordingEvent,
     AddTranscriptSegmentEvent,
     AddCallCategoryEvent,
-    Uuid
+    Uuid,
+    SocketCallData
 } from './entities-lca';
 
 import stream from 'stream';
@@ -45,6 +46,7 @@ const formatPath = function(path:string) {
 };
 
 import dotenv from 'dotenv';
+import {  splitTranscriptEventBySpeaker } from './utils';
 dotenv.config();
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
@@ -145,7 +147,7 @@ export const writeTranscriptionSegment = async function(transcribeMessageJson:Tr
             try {
                 await kinesisClient.send(putCmd);
                 console.info('Written ADD_TRANSCRIPT_SEGMENT event to KDS');
-                console.info(JSON.stringify(kdsObject));
+                // console.info(JSON.stringify(kdsObject));
                 console.info(kdsObject.Transcript);
             } catch (error) {
                 console.error('Error writing transcription segment (TRANSCRIBE) to KDS', error);
@@ -268,7 +270,7 @@ export const writeCallEndEvent = async (callMetaData: CallMetaData): Promise<voi
     await writeCallEvent(callEndEvent);  
 };
 
-export const startTranscribe = async (callMetaData: CallMetaData, audioInputStream: stream.PassThrough) => {
+export const startTranscribe = async (callMetaData: CallMetaData, audioInputStream: stream.PassThrough, socketCallMap: SocketCallData) => {
 
     const transcribeInput = async function* () {
         if (isTCAEnabled) {
@@ -331,6 +333,8 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
     } else {
         (tsParams as StartStreamTranscriptionCommandInput).EnableChannelIdentification = true;
         (tsParams as StartStreamTranscriptionCommandInput).NumberOfChannels = 2;
+        tsParams.ShowSpeakerLabel = true;
+
         const response = await transcribeClient.send(
             new StartStreamTranscriptionCommand(tsParams)
         );
@@ -339,6 +343,7 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
         );
         outputTranscriptStream = response.TranscriptResultStream;
     }
+    socketCallMap.startStreamTime = new Date();
     
     if (outputCallAnalyticsStream) {
         tsStream = stream.Readable.from(outputCallAnalyticsStream);
@@ -349,10 +354,13 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
     try {
         if (tsStream) {
             for await (const event of tsStream) {
-                // console.log('Event ', event);
+                console.log('Event ', JSON.stringify(event));
                 if (event.TranscriptEvent) {
-                    const message: TranscriptEvent = event.TranscriptEvent;
-                    await writeTranscriptionSegment(message, callMetaData);
+                    // const message: TranscriptEvent = event.TranscriptEvent;                    
+                    const events = splitTranscriptEventBySpeaker(event.TranscriptEvent);
+                    for (const transcriptEvent of events) {
+                        await writeTranscriptionSegment(transcriptEvent, callMetaData);
+                    }
                 }
                 if (event.CategoryEvent && event.CategoryEvent.MatchedCategories) {
                     await writeAddCallCategoryEvent(event.CategoryEvent, callMetaData.callId);
