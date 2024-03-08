@@ -137,11 +137,12 @@ Parameters:
     Type: String
     AllowedValues:
       - 'BEDROCK'
+      - 'LAMBDA'
 
     Description: >
-      Set to enable call summarization by a Large Language Model. Currently only BEDROCK is supported.
+      Set to enable call summarization by a Large Language Model. Currently only BEDROCK and LAMBDA are supported.
       BEDROCK option requires you to choose one of the supported model IDs from the 
-      provided list (BedrockModelId).
+      provided list (BedrockModelId). The LAMBDA option requires you to provide a function ARN below.
 
   BedrockModelId:
     Default: 'anthropic.claude-instant-v1'

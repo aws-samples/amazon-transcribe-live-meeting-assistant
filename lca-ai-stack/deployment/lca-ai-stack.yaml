@@ -119,20 +119,16 @@ Parameters:
       both Partial and Non-Partial transcript segments (false).
 
   EndOfCallTranscriptSummary:
-    Default: 'DISABLED'
+    Default: 'BEDROCK'
     Type: String
     AllowedValues:
-      - 'DISABLED'
-      - 'SAGEMAKER'
       - 'LAMBDA'
-      - 'ANTHROPIC'
       - 'BEDROCK'
 
     Description: >
-      Set to enable call summarization by a Large Language Model. The SAGEMAKER option uses a SageMaker endpoint with
-      the pretrained bart-large-cnn-samsum model with a ml.m5.xlarge instance type.  The LAMBDA option requires you 
-      to provide a function ARN below. The ANTHROPIC option is a third party service, and you must enter your Anthropic API key below.
-      BEDROCK option requires you to choose a model ID from a list of models supported by Bedrock (BedrockModelId).
+      Set to enable call summarization by a Large Language Model. Currently only BEDROCK and LAMBDA are supported.
+      BEDROCK option requires you to choose one of the supported model IDs from the 
+      provided list (BedrockModelId). The LAMBDA option requires you to provide a function ARN below.
 
   BedrockModelId:
     Default: 'amazon.titan-tg1-large'
@@ -149,19 +145,6 @@ Parameters:
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list of supported models. 
       Defaults to 'amazon.titan-tg1-large'
-
-  SummarizationSageMakerInitialInstanceCount:
-    Type: Number
-    MinValue: 0
-    Default: 1
-    Description: >
-      (Optional) If "End Of Call Transcript Summary" is SAGEMAKER, provide initial instance count. Set to '0' to enable Serverless Inference (for cold-start delay tolerant deployments only).
-
-  SummarizationLLMThirdPartyApiKey:
-    Type: String
-    Description: 'Optional: If EndOfCallTranscriptSummary is ANTHROPIC, enter the provider API Key. ** Data will leave your AWS account **'
-    Default: ''
-    NoEcho: true
 
   EndOfCallLambdaHookFunctionArn:
     Default: ''
@@ -188,7 +171,6 @@ Parameters:
     Description: >
       (Optional) The specified Lambda function is invoked by the LCA Call Event Processor Lambda function after the call summary is processed.
       This function can implement custom logic that is relevant to post processing, for example, updating the call summary to a CRM system.
-
 
   CloudFrontPriceClass:
     Type: String
@@ -338,8 +320,6 @@ Metadata:
         default: Lambda Hook Function ARN for Custom Transcript Segment Processing (existing)
       TranscriptLambdaHookFunctionNonPartialOnly:
         default: Lambda Hook Function Mode Non-Partial only
-      SummarizationSageMakerInitialInstanceCount:
-        default: Initial Instance Count for Summarization SageMaker Endpoint
       EndOfCallLambdaHookFunctionArn:
         default: Lambda Hook Function ARN for Custom End of Call Processing (existing)
       EndOfCallTranscriptSummary:
@@ -359,15 +339,11 @@ Conditions:
   ShouldEnableTranscriptLambdaHookFunction: !Not [!Equals [!Ref TranscriptLambdaHookFunctionArn, ""]]
   ShouldEnableStartOfCallLambdaHookFunction: !Not [!Equals [!Ref StartOfCallLambdaHookFunctionArn, ""]]
   ShouldEnablePostCallSummaryLambdaHookFunction: !Not [!Equals [!Ref PostCallSummaryLambdaHookFunctionArn, ""]]
-  ShouldEnableAnthropicSummarizer: !Equals [!Ref EndOfCallTranscriptSummary, "ANTHROPIC"]
   ShouldEnableEndOfCallLambdaHookFunction: !Equals [!Ref EndOfCallTranscriptSummary, "LAMBDA"]
-  ShouldDeploySageMakerSummarizer: !Equals [!Ref EndOfCallTranscriptSummary, "SAGEMAKER"]
   ShouldEnableBedrockSummarizer: !Equals [!Ref EndOfCallTranscriptSummary, "BEDROCK"]
 
   IsTranscriptSummaryEnabled: !Or
     - !Condition ShouldEnableEndOfCallLambdaHookFunction
-    - !Condition ShouldDeploySageMakerSummarizer
-    - !Condition ShouldEnableAnthropicSummarizer
     - !Condition ShouldEnableBedrockSummarizer
 
 Outputs:
@@ -431,18 +407,10 @@ Outputs:
   TranscriptSummaryFunctionArn:
     Description: Call Summarizer Lambda function ARN
     Value: !If [
-            ShouldDeploySageMakerSummarizer, 
-            !GetAtt [SageMakerTranscriptSummaryStack, Outputs.InvokeLambdaArn],
-            !If [
-              ShouldEnableAnthropicSummarizer,
-              !GetAtt LLMAnthropicSummaryLambda.Arn,
-              !If [
-                ShouldEnableBedrockSummarizer,
-                !GetAtt BedrockSummaryLambda.Arn,
-                !Ref EndOfCallLambdaHookFunctionArn
-              ]
+              ShouldEnableBedrockSummarizer,
+              !GetAtt BedrockSummaryLambda.Arn,
+              !Ref EndOfCallLambdaHookFunctionArn
             ]
-          ]
 
 Resources:
   ## BUCKET TO STORE STEREO RECORDINGS
@@ -829,21 +797,6 @@ Resources:
             StreamARN: !GetAtt CallDataStream.Arn
             ConsumerName: DataStreamConsumer
 
-  ##########################################################################
-  # Transcript Summary
-  ##########################################################################
-  SageMakerTranscriptSummaryStack:
-    Type: AWS::CloudFormation::Stack
-    Condition: ShouldDeploySageMakerSummarizer
-    Properties:
-      # yamllint disable rule:line-length
-      TemplateURL: !Sub https://s3.${AWS::Region}.amazonaws.com/${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/sagemaker-summary-stack.yaml
-      # yamllint enable rule:line-length
-      Parameters:
-        CallEventsTable: !Ref EventSourcingTable
-        InitialInstanceCount: !Ref SummarizationSageMakerInitialInstanceCount
-        FetchTranscriptArn: !GetAtt FetchTranscript.Arn
-
   BedrockPreviewBoto3Stack:
     Type: AWS::CloudFormation::Stack
     Condition: ShouldEnableBedrockSummarizer
@@ -895,62 +848,6 @@ Resources:
               - Effect: "Allow"
                 Action: "dynamodb:Query"
                 Resource: !GetAtt EventSourcingTable.Arn
-  
-  LLMAnthropicSummaryLambda:
-    Type: AWS::Serverless::Function
-    Properties:
-      Role: !GetAtt LLMAnthropicSummaryLambdaExecutionRole.Arn
-      Runtime: python3.11
-      Environment:
-        Variables:
-          LCA_CALL_EVENTS_TABLE: !Ref EventSourcingTable
-          ANTHROPIC_MODEL_IDENTIFIER: "claude-2"
-          ANTHROPIC_API_KEY: !Ref SummarizationLLMThirdPartyApiKey
-          ENDPOINT_URL: "https://api.anthropic.com/v1/complete"
-          FETCH_TRANSCRIPT_LAMBDA_ARN: !GetAtt FetchTranscript.Arn
-          PROCESS_TRANSCRIPT: "True"
-          TOKEN_COUNT: "0"  # using v2 model - do not truncate transcript
-          SUMMARY_PROMPT_SSM_PARAMETER: !Sub "${LCAStackName}-LLMPromptSummaryTemplate"
-      Timeout: 900
-      MemorySize: 128
-      Handler: index.handler
-      CodeUri: ../source/lambda_functions/llm_anthropic_summary_lambda
-      Description: This AWS Lambda Function runs a transcript summary inference on the call transcript.
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-
-  LLMAnthropicSummaryLambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: LLM Anthropic Summary Lambda Role
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-        - Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-          Action:
-          - 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-AnthropicSummary
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: "Allow"
-                Action: "lambda:InvokeFunction"
-                Resource: !GetAtt FetchTranscript.Arn
-              - Effect: Allow
-                Action:
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LCAStackName}-*"
 
   BedrockSummaryLambda:
     Type: AWS::Serverless::Function
@@ -1097,18 +994,10 @@ Resources:
       Environment:
         Variables:
           TRANSCRIPT_SUMMARY_FUNCTION_ARN: !If [
-            ShouldDeploySageMakerSummarizer, 
-            !GetAtt [SageMakerTranscriptSummaryStack, Outputs.InvokeLambdaArn],
-            !If [
-              ShouldEnableAnthropicSummarizer,
-              !GetAtt LLMAnthropicSummaryLambda.Arn,
-              !If [
                 ShouldEnableBedrockSummarizer,
                 !GetAtt BedrockSummaryLambda.Arn,
                 !Ref EndOfCallLambdaHookFunctionArn
               ]
-            ]
-          ]
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           BOTO_READ_TIMEOUT: 60
       Timeout: 240
@@ -1154,22 +1043,6 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: !Sub "${EndOfCallLambdaHookFunctionArn}"
-              - Ref: AWS::NoValue
-            - !If 
-              - ShouldDeploySageMakerSummarizer
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource:
-                  - !GetAtt SageMakerTranscriptSummaryStack.Outputs.InvokeLambdaArn
-              - Ref: AWS::NoValue
-            - !If 
-              - ShouldEnableAnthropicSummarizer
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource:
-                  - !GetAtt LLMAnthropicSummaryLambda.Arn
               - Ref: AWS::NoValue
             - !If
               - ShouldEnableBedrockSummarizer
