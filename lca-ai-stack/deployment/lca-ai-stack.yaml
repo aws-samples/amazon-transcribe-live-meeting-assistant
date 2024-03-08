@@ -365,6 +365,10 @@ Conditions:
     - !Condition ShouldEnableBedrockSummarizer
 
 Outputs:
+  CognitoLoginUrl:
+    Value: !Sub https://${LMAUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
+  CognitoClientId:
+    Value: !Ref UserPoolClient
   CallDataStreamName:
     Description: >-
       The Name of Kinesis Data Stream to write the call data to.
@@ -1703,18 +1707,18 @@ Resources:
           - false
           - true
         InviteMessageTemplate:
-          EmailSubject: Welcome to Live Call Analytics with Agent Assist!
+          EmailSubject: Welcome to Live Meeting Assistant!
           EmailMessage: !Sub |-
             <p>Hello {username},
-            <p>Welcome to Live Call Analytics with Agent Assist! Your temporary password is:
+            <p>Welcome to Live Meeting Assistant! Your temporary password is:
             <p>     {####}
             <p>
             <p>When the CloudFormation stack is COMPLETE, use the link below to log in to
-            the Live Call Analytics web interface and set your permanent password.
+            the Live Meeting Assistant web interface and set your permanent password.
             <p>     https://${WebAppCloudFrontDistribution.DomainName}/
             <p>
             <p>Good luck!
-            <p>Live Call Analytics with Agent Assist (amazon.com/live-call-analytics)
+            <p>Live Meeting Assistant (amazon.com/live-call-analytics)
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
@@ -1744,9 +1748,65 @@ Resources:
       UsernameAttributes:
         - email
 
+  GetDomainLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetDomainLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: Returns the lowercase version of a string
+      MemorySize: 256
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt GetDomainLambdaRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import cfnresponse
+          import time
+          def lambda_handler(event, context):                                                    
+              output = event['ResourceProperties'].get('InputString', '').lower()
+              output = f"{output}-{time.time_ns()}" # make unique
+              responseData = {'OutputString': output}                                            
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData) 
+
+  GetDomain:
+    Type: Custom::GetDomain
+    Properties:
+      ServiceToken: !GetAtt GetDomainLambda.Arn
+      InputString: !Ref LCAStackName
+
+
+  LMAUserPoolDomain:
+    Type: "AWS::Cognito::UserPoolDomain"
+    Properties:
+      Domain: !GetAtt GetDomain.OutputString
+      UserPoolId: !Ref UserPool
+
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - phone
+        - profile
+      CallbackURLs:
+        - http://localhost:3000/
+        - https://bmpfinegchjaiocjnfjfcgeohdiblomp.chromiumapp.org/
       AccessTokenValidity: 1
       ClientName: !Sub "${AWS::StackName}-Client"
       EnableTokenRevocation: true
