@@ -157,7 +157,14 @@ Resources:
           def handler(event, context):                                                    
               output = event['ResourceProperties'].get('InputString', '').lower()
               responseData = {'OutputString': output}                                            
-              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData) 
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   LowercaseStackName:
     Type: Custom::GetLowercase
@@ -202,7 +209,15 @@ Resources:
         Variables:
           TRANSCRIPT_SUMMARY_FUNCTION_ARN: !Ref TranscriptSummaryFunctionArn
       Code: ./src
-
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W58
+            reason: Managed policy already provides access to CloudWatch logs.
 
   QBusinessModelLayer:
     Type: "AWS::Lambda::LayerVersion"
@@ -266,6 +281,13 @@ Resources:
           AMAZONQ_APP_ID: !Ref AmazonQAppId
           AMAZONQ_USER_ID: !Ref AmazonQUserId
       Code: ./src
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   LambdaRole:
     Type: "AWS::IAM::Role"
@@ -359,6 +381,15 @@ Resources:
       Runtime: python3.11
       Timeout: 900
       Code: ./src
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W58
+            reason: Managed policy already provides access to CloudWatch logs.
 
   # Trigger Lambda function
   SetupFunctionResource:

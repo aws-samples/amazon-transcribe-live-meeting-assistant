@@ -137,11 +137,12 @@ Parameters:
     Type: String
     AllowedValues:
       - 'BEDROCK'
+      - 'LAMBDA'
 
     Description: >
-      Set to enable call summarization by a Large Language Model. Currently only BEDROCK is supported.
+      Set to enable call summarization by a Large Language Model. Currently only BEDROCK and LAMBDA are supported.
       BEDROCK option requires you to choose one of the supported model IDs from the 
-      provided list (BedrockModelId).
+      provided list (BedrockModelId). The LAMBDA option requires you to provide a function ARN below.
 
   BedrockModelId:
     Default: 'anthropic.claude-instant-v1'
@@ -418,6 +419,13 @@ Resources:
             else:
               print(f"Request type is {event['RequestType']} - skipping")
             cfnresponse.send(event, context, status, {}, reason=reason)
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   IsStacknameLengthOK:
     Type: Custom::StacknameCheck
@@ -449,7 +457,14 @@ Resources:
             else:
               print(f"Request type is {event['RequestType']} - skipping")
             cfnresponse.send(event, context, status, result, reason=reason)
- 
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+
   QNABOTPLUGINBEDROCK:
     Type: AWS::CloudFormation::Stack
     DependsOn: IsStacknameLengthOK
