@@ -695,6 +695,20 @@ Outputs:
   ApplicationCloudfrontEndpoint:
     Description: LCA User Interface URL
     Value: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
+  
+  ChromeExtensionConfigJson:
+    Description: The contents of the Chrome Extension's lma_config.json.
+    Value: !Sub
+      - '{  
+          "wssEndpoint": "${wssEndpoint}",
+          "clientId": "${clientId}",
+          "cognitoDomain": "${cognitoDomain}",
+          "cloudfrontEndpoint": "${cloudfrontEndpoint}"
+        }'
+      - wssEndpoint: !GetAtt WEBSOCKETSTACK.Outputs.WebSocketEndpoint
+        clientId: !GetAtt AISTACK.Outputs.CognitoClientId
+        cognitoDomain: !GetAtt AISTACK.Outputs.CognitoLoginUrl
+        cloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
 
   CallDataStreamArn:
     Description: >-
