@@ -1,6 +1,6 @@
-# How to run LCA UI Locally:
+# How to run LMA UI Locally:
 
-1. To get the LCA UI to run locally, you will need to configure a `.env` file in the `/lca-ai-stack/source/ui/` folder. The contents of the `.env` file must contain the environment variables listed below along with their values. The values may be found in the resources tab of the LCA AI Stack, except for the GraphQL URL, which can be found in the AWS AppSync management console, either in the main list
+1. To get the LMA UI to run locally, you will need to configure a `.env` file in the `/lca-ai-stack/source/ui/` folder. The contents of the `.env` file must contain the environment variables listed below along with their values. The values may be found in the resources tab of the LMA AI Stack, except for the GraphQL URL, which can be found in the AWS AppSync management console, either in the main list
 
 Example contents of `.env` file:
 

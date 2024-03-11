@@ -334,6 +334,13 @@ Resources:
                       reason = f"Exception thrown: {e}"
                       status = cfnresponse.FAILED
               cfnresponse.send(event, context, status, response_data, reason=reason)
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   EcrImagesDelete:
     Type: Custom::EcrImagesDelete
@@ -555,6 +562,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   TranscriberCallEventTable:
     Type: AWS::DynamoDB::Table
@@ -1436,6 +1445,15 @@ Resources:
                 reason = f"Exception thrown: {e}"
                 status = cfnresponse.FAILED              
             cfnresponse.send(event, context, status, responseData, reason=reason)
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W58
+            reason: Managed policy already provides access to CloudWatch logs.
 
   UpdateWSEndpointSettingsExec:
     Type: AWS::CloudFormation::CustomResource
@@ -1480,6 +1498,13 @@ Resources:
           PCA_WEB_APP_CALL_PATH_PREFIX: !Ref PcaWebAppCallPathPrefix
           IS_CONTENT_REDACTION_ENABLED: !Ref IsContentRedactionEnabled
       CodeUri: ../source/lambda_functions/pca_integration
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   PCAIntegrationFunctionRole:
     Type: AWS::IAM::Role

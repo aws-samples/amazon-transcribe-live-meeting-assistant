@@ -148,7 +148,7 @@ const CallAttributes = ({ item, setToolsOpen }) => (
   <Container
     header={
       <Header variant="h4" info={<InfoLink onFollow={() => setToolsOpen(true)} />}>
-        Call Attributes
+        Meeting Attributes
       </Header>
     }
   >
@@ -156,18 +156,9 @@ const CallAttributes = ({ item, setToolsOpen }) => (
       <SpaceBetween size="xs">
         <div>
           <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>Call ID</strong>
+            <strong>Meeting ID</strong>
           </Box>
           <div>{item.callId}</div>
-        </div>
-      </SpaceBetween>
-
-      <SpaceBetween size="xs">
-        <div>
-          <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>Agent</strong>
-          </Box>
-          <div>{item.agentId}</div>
         </div>
       </SpaceBetween>
 
@@ -201,24 +192,6 @@ const CallAttributes = ({ item, setToolsOpen }) => (
       <SpaceBetween size="xs">
         <div>
           <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>Caller Phone Number</strong>
-          </Box>
-          <div>{item.callerPhoneNumber}</div>
-        </div>
-      </SpaceBetween>
-
-      <SpaceBetween size="xs">
-        <div>
-          <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>System Phone Number</strong>
-          </Box>
-          <div>{item.systemPhoneNumber}</div>
-        </div>
-      </SpaceBetween>
-
-      <SpaceBetween size="xs">
-        <div>
-          <Box margin={{ bottom: 'xxxs' }} color="text-label">
             <strong>Status</strong>
           </Box>
           <StatusIndicator type={item.recordingStatusIcon}>
@@ -230,7 +203,7 @@ const CallAttributes = ({ item, setToolsOpen }) => (
         <SpaceBetween size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Post Call Analytics</strong>
+              <strong>Post Meeting Analytics</strong>
             </Box>
             <Button
               variant="normal"
@@ -258,57 +231,6 @@ const CallAttributes = ({ item, setToolsOpen }) => (
   </Container>
 );
 
-const CallCategories = ({ item }) => {
-  const { settings } = useSettingsContext();
-  const regex = settings?.CategoryAlertRegex ?? '.*';
-
-  const categories = item.callCategories || [];
-
-  const categoryComponents = categories.map((t, i) => {
-    const className = t.match(regex)
-      ? 'transcript-segment-category-match-alert'
-      : 'transcript-segment-category-match';
-
-    return (
-      /* eslint-disable-next-line react/no-array-index-key */
-      <SpaceBetween size="xs" key={`call-category-${i}`}>
-        <div>
-          {/* eslint-disable-next-line react/no-array-index-key */}
-          <TextContent key={`call-category-${i}`} className={className}>
-            <ReactMarkdown rehypePlugins={[rehypeRaw]}>{t.trim()}</ReactMarkdown>
-          </TextContent>
-        </div>
-      </SpaceBetween>
-    );
-  });
-
-  return (
-    <Container
-      fitHeight="true"
-      header={
-        <Header
-          variant="h4"
-          info={
-            <Link
-              variant="info"
-              target="_blank"
-              href="https://docs.aws.amazon.com/transcribe/latest/dg/call-analytics-create-categories.html"
-            >
-              Info
-            </Link>
-          }
-        >
-          Call Categories
-        </Header>
-      }
-    >
-      <ColumnLayout columns={6} variant="text-grid">
-        {categoryComponents}
-      </ColumnLayout>
-    </Container>
-  );
-};
-
 // eslint-disable-next-line arrow-body-style
 const CallSummary = ({ item }) => {
   return (
@@ -326,13 +248,11 @@ const CallSummary = ({ item }) => {
             </Link>
           }
         >
-          Call Summary
+          Meeting Summary
         </Header>
       }
     >
-      <Grid
-        gridDefinition={[{ colspan: { default: 12, xs: 6 } }, { colspan: { default: 12, xs: 6 } }]}
-      >
+      <Grid gridDefinition={[{ colspan: { default: 12, xs: 6 } }]}>
         <Tabs
           tabs={[
             {
@@ -351,32 +271,14 @@ const CallSummary = ({ item }) => {
             },
           ]}
         />
-        <Tabs
-          tabs={[
-            {
-              label: 'Issues',
-              id: 'issues',
-              content: (
-                <div>
-                  {/* eslint-disable-next-line react/no-array-index-key */}
-                  <TextContent color="gray" className="issue-detected">
-                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                      {item.issuesDetected ?? 'No issue detected'}
-                    </ReactMarkdown>
-                  </TextContent>
-                </div>
-              ),
-            },
-          ]}
-        />
       </Grid>
     </Container>
   );
 };
 
-const getSentimentImage = (segment) => {
+const getSentimentImage = (segment, enableSentimentAnalysis) => {
   const { sentiment, sentimentScore, sentimentWeighted } = segment;
-  if (!sentiment) {
+  if (!sentiment || !enableSentimentAnalysis) {
     // returns an empty div to maintain spacing
     return <div className="sentiment-image" />;
   }
@@ -428,7 +330,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
   const { settings } = useSettingsContext();
   const regex = settings?.CategoryAlertRegex ?? '.*';
 
-  const { transcript, segmentId, channel, targetLanguage, agentTranscript, translateOn } = segment;
+  const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
 
   const k = segmentId.concat('-', targetLanguage);
 
@@ -453,13 +355,16 @@ const TranscriptContent = ({ segment, translateCache }) => {
     let className = '';
     let text = t;
     let translatedText = result;
+
     switch (channel) {
       case 'AGENT_ASSISTANT':
+      case 'MEETING_ASSISTANT':
         className = 'transcript-segment-agent-assist';
         break;
       case 'AGENT':
-        text = agentTranscript !== undefined && agentTranscript ? text : '';
-        translatedText = agentTranscript !== undefined && agentTranscript ? translatedText : '';
+      case 'CALLER':
+        text = text.substring(text.indexOf(':') + 1).trim();
+        translatedText = translatedText.substring(translatedText.indexOf(':') + 1).trim();
         break;
       case 'CATEGORY_MATCH':
         if (text.match(regex)) {
@@ -491,7 +396,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
   );
 };
 
-const TranscriptSegment = ({ segment, translateCache }) => {
+const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis }) => {
   const { channel } = segment;
 
   if (channel === 'CATEGORY_MATCH') {
@@ -505,7 +410,7 @@ const TranscriptSegment = ({ segment, translateCache }) => {
         disableGutters
         gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}
       >
-        {getSentimentImage(segment)}
+        {getSentimentImage(segment, enableSentimentAnalysis)}
         <SpaceBetween direction="vertical" size="xxs">
           <TranscriptContent segment={newSegment} translateCache={translateCache} />
         </SpaceBetween>
@@ -513,18 +418,28 @@ const TranscriptSegment = ({ segment, translateCache }) => {
     );
   }
 
-  const channelClass = channel === 'AGENT_ASSISTANT' ? 'transcript-segment-agent-assist' : '';
+  let displayChannel = `${segment.channel}`;
+  let channelClass = '';
+
+  if (channel === 'AGENT' || channel === 'CALLER') {
+    const originalTranscript = `${segment.transcript}`;
+    displayChannel = originalTranscript.substring(0, originalTranscript.indexOf(':')).trim();
+  } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
+    displayChannel = 'MEETING_ASSISTANT';
+    channelClass = 'transcript-segment-agent-assist';
+  }
+
   return (
     <Grid
       className="transcript-segment"
       disableGutters
       gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}
     >
-      {getSentimentImage(segment)}
+      {getSentimentImage(segment, enableSentimentAnalysis)}
       <SpaceBetween direction="vertical" size="xxs" className={channelClass}>
         <SpaceBetween direction="horizontal" size="xs">
           <TextContent>
-            <strong>{segment.channel}</strong>
+            <strong>{displayChannel}</strong>
           </TextContent>
           <TextContent>
             {`${getTimestampFromSeconds(segment.startTime)} -
@@ -546,6 +461,7 @@ const CallInProgressTranscript = ({
   agentTranscript,
   translateOn,
   collapseSentiment,
+  enableSentimentAnalysis,
 }) => {
   const bottomRef = useRef();
   const [turnByTurnSegments, setTurnByTurnSegments] = useState([]);
@@ -708,10 +624,10 @@ const CallInProgressTranscript = ({
           s?.segmentId
           && s?.createdAt
           && (s.agentTranscript === undefined
-              || s.agentTranscript || s.channel !== 'AGENT')
+            || s.agentTranscript || s.channel !== 'AGENT')
           && (s.channel !== 'AGENT_VOICETONE')
           && (s.channel !== 'CALLER_VOICETONE')
-          && <TranscriptSegment key={`${s.segmentId}-${s.createdAt}`} segment={s} translateCache={translateCache} />
+          && <TranscriptSegment key={`${s.segmentId}-${s.createdAt}`} segment={s} translateCache={translateCache} enableSentimentAnalysis={enableSentimentAnalysis} />
         ),
       );
 
@@ -780,14 +696,14 @@ const getAgentAssistPanel = (item, collapseSentiment) => {
               </Link>
             }
           >
-            Agent Assist Bot
+            Meeting Assist Bot
           </Header>
         }
       >
         <Box style={{ height: collapseSentiment ? '34vh' : '68vh' }}>
           <iframe
             style={{ border: '0px', height: collapseSentiment ? '34vh' : '68vh', margin: '0' }}
-            title="Agent Assist"
+            title="Meeting Assist"
             src={`/index-lexwebui.html?callId=${item.callId}`}
             width="100%"
           />
@@ -806,6 +722,7 @@ const getTranscriptContent = ({
   agentTranscript,
   translateOn,
   collapseSentiment,
+  enableSentimentAnalysis,
 }) => {
   switch (item.recordingStatusLabel) {
     case DONE_STATUS:
@@ -821,6 +738,7 @@ const getTranscriptContent = ({
           agentTranscript={agentTranscript}
           translateOn={translateOn}
           collapseSentiment={collapseSentiment}
+          enableSentimentAnalysis={enableSentimentAnalysis}
         />
       );
   }
@@ -832,6 +750,7 @@ const CallTranscriptContainer = ({
   callTranscriptPerCallId,
   translateClient,
   collapseSentiment,
+  enableSentimentAnalysis,
 }) => {
   // defaults to auto scroll when call is in progress
   const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
@@ -843,7 +762,7 @@ const CallTranscriptContainer = ({
   const [targetLanguage, setTargetLanguage] = useState(
     localStorage.getItem('targetLanguage') || '',
   );
-  const [agentTranscript, setAgentTranscript] = useState(true);
+  const [agentTranscript] = useState(true);
 
   const handleLanguageSelect = (event) => {
     setTargetLanguage(event.target.value);
@@ -902,11 +821,6 @@ const CallTranscriptContainer = ({
                 />
                 <span>Auto Scroll</span>
                 <Toggle
-                  onChange={({ detail }) => setAgentTranscript(detail.checked)}
-                  checked={agentTranscript}
-                />
-                <span>Show Agent Transcripts?</span>
-                <Toggle
                   onChange={({ detail }) => setTranslateOn(detail.checked)}
                   checked={translateOn}
                 />
@@ -915,7 +829,7 @@ const CallTranscriptContainer = ({
               </SpaceBetween>
             }
           >
-            Call Transcript
+            Meeting Transcript
           </Header>
         }
       >
@@ -928,6 +842,7 @@ const CallTranscriptContainer = ({
           agentTranscript,
           translateOn,
           collapseSentiment,
+          enableSentimentAnalysis,
         })}
       </Container>
       {getAgentAssistPanel(item, collapseSentiment)}
@@ -1007,7 +922,7 @@ const CallStatsContainer = ({
             </SpaceBetween>
           }
         >
-          Call Sentiment Analysis
+          Meeting Sentiment Analysis
         </Header>
       }
     >
@@ -1085,6 +1000,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen }) => {
   const [collapseSentiment, setCollapseSentiment] = useState(false);
 
   const enableVoiceTone = settings?.EnableVoiceToneAnalysis === 'true';
+  const enableSentimentAnalysis = settings?.IsSentimentAnalysisEnabled === 'true';
 
   // prettier-ignore
   const customRetryStrategy = new StandardRetryStrategy(
@@ -1120,40 +1036,39 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen }) => {
   return (
     <SpaceBetween size="s">
       <CallAttributes item={item} setToolsOpen={setToolsOpen} />
-      <Grid
-        gridDefinition={[{ colspan: { default: 12, xs: 8 } }, { colspan: { default: 12, xs: 4 } }]}
-      >
-        <CallSummary item={item} />
-        <CallCategories item={item} />
-      </Grid>
-      <Grid
-        gridDefinition={[
-          { colspan: { default: 12, xs: enableVoiceTone ? 8 : 12 } },
-          { colspan: { default: 12, xs: enableVoiceTone ? 4 : 0 } },
-        ]}
-      >
-        <CallStatsContainer
-          item={item}
-          callTranscriptPerCallId={callTranscriptPerCallId}
-          collapseSentiment={collapseSentiment}
-          setCollapseSentiment={setCollapseSentiment}
-        />
-        {enableVoiceTone && (
-          <VoiceToneContainer
-            item={item}
-            callTranscriptPerCallId={callTranscriptPerCallId}
-            collapseSentiment={collapseSentiment}
-            setCollapseSentiment={setCollapseSentiment}
-          />
-        )}
-      </Grid>
-
+      <CallSummary item={item} />
+      {(enableSentimentAnalysis || enableVoiceTone) && (
+        <Grid
+          gridDefinition={[
+            { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 8 : 12 } },
+            { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 4 : 0 } },
+          ]}
+        >
+          {enableSentimentAnalysis && (
+            <CallStatsContainer
+              item={item}
+              callTranscriptPerCallId={callTranscriptPerCallId}
+              collapseSentiment={collapseSentiment}
+              setCollapseSentiment={setCollapseSentiment}
+            />
+          )}
+          {enableVoiceTone && (
+            <VoiceToneContainer
+              item={item}
+              callTranscriptPerCallId={callTranscriptPerCallId}
+              collapseSentiment={collapseSentiment}
+              setCollapseSentiment={setCollapseSentiment}
+            />
+          )}
+        </Grid>
+      )}
       <CallTranscriptContainer
         item={item}
         setToolsOpen={setToolsOpen}
         callTranscriptPerCallId={callTranscriptPerCallId}
         translateClient={translateClient}
         collapseSentiment={collapseSentiment}
+        enableSentimentAnalysis={enableSentimentAnalysis}
       />
     </SpaceBetween>
   );

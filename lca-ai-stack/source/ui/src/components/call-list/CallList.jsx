@@ -53,7 +53,7 @@ const CallList = () => {
     items, actions, filteredItemsCount, collectionProps, filterProps, paginationProps,
   } = useCollection(callList, {
     filtering: {
-      empty: <TableEmptyState resourceName="Call" />,
+      empty: <TableEmptyState resourceName="Meeting" />,
       noMatch: <TableNoMatchState onClearFilter={() => actions.setFiltering('')} />,
     },
     pagination: { pageSize: preferences.pageSize },
@@ -66,10 +66,10 @@ const CallList = () => {
 
   useEffect(() => {
     if (!isCallsListLoading) {
-      logger.debug('setting call list', calls);
+      logger.debug('setting meeting list', calls);
       setCallList(mapCallsAttributes(calls, settings));
     } else {
-      logger.debug('call list is loading');
+      logger.debug('meeting list is loading');
     }
   }, [isCallsListLoading, calls]);
 
@@ -84,7 +84,7 @@ const CallList = () => {
       {...collectionProps}
       header={
         <CallsCommonHeader
-          resourceName="Calls"
+          resourceName="Meetings"
           selectedItems={collectionProps.selectedItems}
           totalItems={callList}
           updateTools={() => setToolsOpen(true)}
@@ -92,20 +92,20 @@ const CallList = () => {
           setIsLoading={setIsCallsListLoading}
           periodsToLoad={periodsToLoad}
           setPeriodsToLoad={setPeriodsToLoad}
-          downloadToExcel={() => exportToExcel(callList, 'Call-List')}
+          downloadToExcel={() => exportToExcel(callList, 'Meeting-List')}
         />
       }
       columnDefinitions={COLUMN_DEFINITIONS_MAIN}
       items={items}
       loading={isCallsListLoading}
-      loadingText="Loading calls"
+      loadingText="Loading meetings"
       selectionType="multi"
       ariaLabels={SELECTION_LABELS}
       filter={
         <TextFilter
           {...filterProps}
-          filteringAriaLabel="Filter calls"
-          filteringPlaceholder="Find calls"
+          filteringAriaLabel="Filter meetings"
+          filteringPlaceholder="Find meetings"
           countText={getFilterCounterText(filteredItemsCount)}
         />
       }

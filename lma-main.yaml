@@ -20,11 +20,16 @@ Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.0)
 Parameters:
 
   MeetingAssistExistingQApplicationId:
-    Default: ''
     Type: String
     AllowedPattern: '^(|[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})$'
     Description: >
       Provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot."
+
+  AssistantWakePhraseRegEx:
+    Type: String
+    Default: "(OK|Okay)[.,! ]*Q[.,! ]+"
+    Description: >
+      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'Hey Q' or 'OK Q'
 
   S3BucketName:
     Type: String
@@ -39,11 +44,6 @@ Parameters:
     Type: String
     Default: lca-audio-recordings/
     Description: The Amazon S3 prefix where the audio files will be saved (must end in "/")
-
-  CallAnalyticsPrefix:
-    Type: String
-    Default: lca-call-analytics/
-    Description: The Amazon S3 prefix where the post-call analytics files will be saved, when using analytics api mode (must end in "/")
 
   IsPartialTranscriptEnabled:
     Type: String
@@ -64,14 +64,6 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
-
-  CategoryAlertRegEx:
-    Type: String
-    Default: .*
-    Description: >
-      If using the 'analytics' Transcribe API Mode, this regular expression will be used to show
-      an alert in red in the web user interface if it matches a call category. This defaults to 
-      matching all categories.
 
   TranscribeContentRedactionType:
     Type: String
@@ -121,33 +113,6 @@ Parameters:
       custom language model is to be used. If specified, the custom language model must pre-exist in your account, 
       match the Language Code selected above, and use the 'Narrow Band' base model.
 
-  IsSentimentAnalysisEnabled:
-    Type: String
-    Default: 'true'
-    Description: >-
-      Enable sentiment analysis
-    AllowedValues:
-      - 'true'
-      - 'false'
-
-  SentimentNegativeScoreThreshold:
-    Type: Number
-    Default: 0.9
-    MinValue: 0
-    MaxValue: 1
-    Description: >-
-      Minimum negative sentiment confidence required to declare a phrase as having negative sentiment, in the range 0-1. 
-      Not applicable when using Contact Lens or Transcribe Call Analytics (as sentiment is pre-calculated).
-
-  SentimentPositiveScoreThreshold:
-    Type: Number
-    Default: 0.4
-    MinValue: 0
-    MaxValue: 1
-    Description: >-
-      Minimum positive sentiment confidence required to declare a phrase as having positive sentiment, in the range 0-1.
-      Not applicable when using Contact Lens or Transcribe Call Analytics (as sentiment is pre-calculated).
-
   TranscriptLambdaHookFunctionArn:
     Default: ''
     Type: String
@@ -172,13 +137,12 @@ Parameters:
     Type: String
     AllowedValues:
       - 'BEDROCK'
+      - 'LAMBDA'
 
     Description: >
-      Set to enable call summarization by a Large Language Model. The SAGEMAKER option uses a SageMaker endpoint with
-      the pretrained bart-large-cnn-samsum model with a ml.m5.xlarge instance type.  The LAMBDA option requires you 
-      to provide a function ARN below. The ANTHROPIC option is a third party service, and you must enter your Anthropic API key below.
+      Set to enable call summarization by a Large Language Model. Currently only BEDROCK and LAMBDA are supported.
       BEDROCK option requires you to choose one of the supported model IDs from the 
-      provided list (BedrockModelId).
+      provided list (BedrockModelId). The LAMBDA option requires you to provide a function ARN below.
 
   BedrockModelId:
     Default: 'anthropic.claude-instant-v1'
@@ -238,11 +202,6 @@ Parameters:
       Cognito.
     AllowedPattern: '^(|([\w-]+\.)+[\w-]{2,6}(, *([\w-]+\.)+[\w-]{2,6})*)$'
 
-  DemoAsteriskAgentAudioURL:
-    Type: String
-    Default: https://raw.githubusercontent.com/aws-samples/amazon-transcribe-live-call-analytics/main/lca-chimevc-stack/demo-audio/agent.wav
-    Description: URL for audio (agent.wav) file download for demo Asterisk server.
-
   CloudFrontPriceClass:
     Type: String
     Default: PriceClass_100
@@ -290,12 +249,12 @@ Metadata:
           default: Meeting Assist Options
         Parameters:
           - MeetingAssistExistingQApplicationId
+          - AssistantWakePhraseRegEx
       - Label:
           default: Amazon S3 Configuration
         Parameters:
           - S3BucketName
           - AudioFilePrefix
-          - CallAnalyticsPrefix
       - Label:
           default: Amazon Transcribe Configuration
         Parameters:
@@ -309,9 +268,6 @@ Metadata:
       - Label:
           default: Transcript Event Processing Configuration
         Parameters:
-          - IsSentimentAnalysisEnabled
-          - SentimentNegativeScoreThreshold
-          - SentimentPositiveScoreThreshold
           - TranscriptLambdaHookFunctionArn
           - TranscriptLambdaHookFunctionNonPartialOnly
           - EndOfCallTranscriptSummary
@@ -321,8 +277,6 @@ Metadata:
           - PostCallSummaryLambdaHookFunctionArn
       - Label:
           default: Download locations
-        Parameters:
-          - DemoAsteriskAgentAudioURL
       - Label:
           default: Amazon CloudFront Configuration
         Parameters:
@@ -333,10 +287,6 @@ Metadata:
         Parameters:
           - DynamoDbExpirationInDays
           - RecordingsBucketRetentionDays
-      - Label:
-          default: User Experience
-        Parameters:
-          - CategoryAlertRegEx
 
     ParameterLabels:
       CallAudioProcessor:
@@ -347,8 +297,6 @@ Metadata:
         default: Call Audio Recordings Bucket Name
       AudioFilePrefix:
         default: Audio File Prefix
-      CallAnalyticsPrefix:
-        default: Call Analytics Output File Prefix
       CustomVoiceConnectorId:
         default: Amazon Chime SDK Voice Connector ID (existing)
       AdminEmail:
@@ -357,6 +305,8 @@ Metadata:
         default: Authorized Account Email Domain(s)
       MeetingAssistExistingQApplicationId:
         default: Meeting Assist Amazon Q Business Application Id (existing)
+      AssistantWakePhraseRegEx:
+        default: Meeting Assist Wake Phrase Regular Expression
       IsPartialTranscriptEnabled:
         default: Enable Partial Transcripts
       IsContentRedactionEnabled:
@@ -371,14 +321,6 @@ Metadata:
         default: Transcription Custom Vocabulary Name
       CustomLanguageModelName:
         default: Transcription Custom Language Model Name
-      DemoAsteriskAgentAudioURL:
-        default: Demo Asterisk Server Agent WAV File Download URL
-      IsSentimentAnalysisEnabled:
-        default: Enable Sentiment Analysis
-      SentimentNegativeScoreThreshold:
-        default: Sentiment Negative Score Threshold
-      SentimentPositiveScoreThreshold:
-        default: Sentiment Positive Score Threshold
       TranscriptLambdaHookFunctionArn:
         default: Lambda Hook Function ARN for Custom Transcript Segment Processing (existing)
       TranscriptLambdaHookFunctionNonPartialOnly:
@@ -399,8 +341,6 @@ Metadata:
         default: Record Expiration In Days
       RecordingsBucketRetentionDays:
         default: Recording Expiration In Days
-      CategoryAlertRegEx:
-        default: Category Alert Regular Expression
 
 Mappings:
   TranscribeToComprehendLanguage:
@@ -479,6 +419,13 @@ Resources:
             else:
               print(f"Request type is {event['RequestType']} - skipping")
             cfnresponse.send(event, context, status, {}, reason=reason)
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   IsStacknameLengthOK:
     Type: Custom::StacknameCheck
@@ -510,18 +457,14 @@ Resources:
             else:
               print(f"Request type is {event['RequestType']} - skipping")
             cfnresponse.send(event, context, status, result, reason=reason)
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
-  QNABOTPLUGINQBUSINESS:
-    Type: AWS::CloudFormation::Stack
-    DependsOn: IsStacknameLengthOK
-    Properties:
-      # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot-plugins/qna_bot_qbusiness_lambdahook.yaml
-      # yamllint enable rule:line-length
-      Parameters:
-        AmazonQAppId: !Ref MeetingAssistExistingQApplicationId
-        AmazonQUserId: !Ref AdminEmail
-  
   QNABOTPLUGINBEDROCK:
     Type: AWS::CloudFormation::Stack
     DependsOn: IsStacknameLengthOK
@@ -531,7 +474,7 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         EmbeddingsModelId: 'amazon.titan-embed-text-v1'
-        LLMModelId: 'amazon.titan-text-lite-v1'
+        LLMModelId: 'anthropic.claude-v2:1'
 
   QNABOT:
     Type: AWS::CloudFormation::Stack
@@ -574,22 +517,14 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         LCAStackName: !Ref AWS::StackName
+        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         RecordingsBucketRetentionDays: !Ref RecordingsBucketRetentionDays
         EnableVoiceToneAnalysis: 'false'
         CallAudioSource: 'Genesys Cloud Audiohook Web Socket'
         S3BucketName: !Ref S3BucketName
         AdminEmail: !Ref AdminEmail
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
-        CategoryAlertRegEx: !Ref CategoryAlertRegEx
-        ComprehendLanguageCode:
-          !FindInMap [
-            TranscribeToComprehendLanguage,
-            !Ref TranscribeLanguageCode,
-            Value,
-          ]
-        IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
-        SentimentNegativeScoreThreshold: !Ref SentimentNegativeScoreThreshold
-        SentimentPositiveScoreThreshold: !Ref SentimentPositiveScoreThreshold
+        IsSentimentAnalysisEnabled: 'false'
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
         IsLexAgentAssistEnabled: true
@@ -627,6 +562,8 @@ Resources:
         LMAStackName: !Ref AWS::StackName
         AISTACK: !Ref AISTACK
         QNABOTSTACK: !Ref QNABOT
+        AmazonQAppId: !Ref MeetingAssistExistingQApplicationId
+        AmazonQUserId: !Ref AdminEmail
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
         LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
         LexMeetingAssistLocaleId:
@@ -639,16 +576,7 @@ Resources:
         CloudFrontDistributionId: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         QnaMeetingAssistDemoJson: <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
         # Changes to Params below force AgentAssist Setup to update.
-        ComprehendLanguageCode:
-          !FindInMap [
-            TranscribeToComprehendLanguage,
-            !Ref TranscribeLanguageCode,
-            Value,
-          ]
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
-        IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
-        SentimentNegativeScoreThreshold: !Ref SentimentNegativeScoreThreshold
-        SentimentPositiveScoreThreshold: !Ref SentimentPositiveScoreThreshold
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         DynamoDbExpirationInDays: !Ref DynamoDbExpirationInDays
@@ -673,7 +601,6 @@ Resources:
         S3BucketName: !GetAtt AISTACK.Outputs.S3BucketName
         AudioFilePrefix: !Ref AudioFilePrefix
         UserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
-        CallAnalyticsPrefix: !Ref CallAnalyticsPrefix
         CallDataStreamName: !GetAtt AISTACK.Outputs.CallDataStreamName
         CallDataStreamArn: !GetAtt AISTACK.Outputs.CallDataStreamArn
         CloudFrontPriceClass: !Ref CloudFrontPriceClass

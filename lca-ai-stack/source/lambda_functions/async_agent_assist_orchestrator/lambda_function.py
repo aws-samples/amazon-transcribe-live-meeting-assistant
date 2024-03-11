@@ -111,20 +111,25 @@ def publish_lex_agent_assist_transcript_segment(
     created_at = datetime.utcnow().astimezone().isoformat()
     status: str = message["Status"]
 
+    transcript_segment_args=dict(
+            CallId=call_id,
+            Channel="AGENT_ASSISTANT",
+            CreatedAt=created_at,
+            EndTime=end_time,
+            ExpiresAfter=get_ttl(),
+            IsPartial=is_partial,
+            SegmentId=str(uuid.uuid4()),
+            StartTime=start_time,
+            Status="TRANSCRIBING",
+        )
     lex_agent_assist_input = dict(
             content=transcript,
-            transcript_segment_args=dict(
-                CallId=call_id,
-                Channel="AGENT_ASSISTANT",
-                CreatedAt=created_at,
-                EndTime=end_time,
-                ExpiresAfter=get_ttl(),
-                IsPartial=is_partial,
-                SegmentId=str(uuid.uuid4()),
-                StartTime=start_time,
-                Status="TRANSCRIBING",
-            ),
+            transcript_segment_args=transcript_segment_args
         )
+    
+    # write initial message to indicate that wake word was detected and request submitted.
+    transcript_segment = {**transcript_segment_args, "Transcript": "Checking...", "IsPartial":True}
+    write_agent_assist_to_kds(transcript_segment)
 
     transcript_segment = get_lex_agent_assist_transcript(
         **lex_agent_assist_input,
@@ -143,7 +148,7 @@ def get_lex_agent_assist_transcript(
 
     bot_response: RecognizeTextResponseTypeDef = recognize_text_lex(
         text=content,
-        session_id=call_id,
+        session_id=str(hash(call_id)),
         lex_client=LEXV2_CLIENT,
         bot_id=LEX_BOT_ID,
         bot_alias_id=LEX_BOT_ALIAS_ID,
@@ -173,12 +178,6 @@ def process_lex_bot_response(bot_response):
     # otherwise use bot message
     if not message and "messages" in bot_response and bot_response["messages"]:
         message = bot_response["messages"][0]["content"]
-    # suppress bot response if response is no_hits (noanswer) response, and does not contain debug.
-    if is_qnabot_noanswer(bot_response):
-        if not is_qnabot_debug_response(message):
-            # ignore 'noanswer' responses from QnABot
-            LOGGER.info("QnABot \"Dont't know\" response - no debug info - ignoring")
-            return ""
     return message
 
 def is_qnabot_debug_response(message):

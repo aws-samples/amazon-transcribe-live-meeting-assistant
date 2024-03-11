@@ -1,4 +1,4 @@
-# Live Meeting Analytics (LMA) eith Amazon Transcribe And Amazon Q Business 
+# Live Meeting Assistant (LMA) with Amazon Transcribe And Amazon Q Business 
 
 _Companion AWS blog post: [Live meeting assist with Amazon language AI services](http://www.amazon.com/live-meeting-assist)_
 

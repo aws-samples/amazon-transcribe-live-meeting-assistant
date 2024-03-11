@@ -304,12 +304,17 @@ const StreamAudio = () => {
           </SpaceBetween>
         }
       >
-        <Container header={<Header variant="h2">Call Meta data</Header>}>
+        <Container header={<Header variant="h2">Meeting Meta data</Header>}>
           <ColumnLayout columns={2}>
-            <FormField label="Call ID" stretch required description="Auto-generated Unique call ID">
+            <FormField
+              label="Meeting ID"
+              stretch
+              required
+              description="Auto-generated Unique meeting ID"
+            >
               <Input value={callMetaData.callId} onChange={handleCallIdChange} />
             </FormField>
-            <FormField label="Agent ID" stretch required description="Agent ID">
+            <FormField label="Name" stretch required description="Name">
               <Input value={callMetaData.agentId} onChange={handleAgentIdChange} />
             </FormField>
             <FormField label="Customer Phone" stretch required description="Customer Phone">

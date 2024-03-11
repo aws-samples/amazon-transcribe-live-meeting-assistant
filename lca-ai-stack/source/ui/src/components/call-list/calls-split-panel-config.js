@@ -22,8 +22,8 @@ export const SPLIT_PANEL_I18NSTRINGS = {
 };
 
 const EMPTY_PANEL_CONTENT = {
-  header: '0 calls selected',
-  body: 'Select a call to see its details.',
+  header: '0 meetings selected',
+  body: 'Select a meeting to see its details.',
 };
 
 const getPanelContentSingle = ({ items, setToolsOpen, callTranscriptPerCallId }) => {
@@ -34,7 +34,7 @@ const getPanelContentSingle = ({ items, setToolsOpen, callTranscriptPerCallId })
   const item = items[0];
 
   return {
-    header: 'Call Details',
+    header: 'Meeting Details',
     body: (
       <CallPanel
         item={item}
@@ -55,7 +55,7 @@ const getPanelContentMultiple = ({ items, setToolsOpen, callTranscriptPerCallId 
   }
 
   return {
-    header: `${items.length} calls selected`,
+    header: `${items.length} meetings selected`,
     body: (
       <ColumnLayout columns="4" variant="text-grid">
         <div>
@@ -81,7 +81,7 @@ const getPanelContentMultiple = ({ items, setToolsOpen, callTranscriptPerCallId 
 const getPanelContentComparison = ({ items }) => {
   if (!items.length) {
     return {
-      header: '0 calls selected',
+      header: '0 meetings selected',
       body: 'Select a meeting to see its details. Select multiple meetings to compare.',
     };
   }
@@ -117,7 +117,7 @@ const getPanelContentComparison = ({ items }) => {
   ];
 
   return {
-    header: `${items.length} calls selected`,
+    header: `${items.length} meetings selected`,
     body: (
       <Box padding={{ bottom: 'l' }}>
         <Table

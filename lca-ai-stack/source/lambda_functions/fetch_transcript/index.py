@@ -46,17 +46,15 @@ def preprocess_transcripts(transcripts, condense ):
     for row in transcripts:
         transcript = row['Transcript']
         if condense == True:
+          # For LMA 'Hey Q' answers, we should keep assistant replies as part of the transcript for any contextual followup 'Hey Q' questions.
           if row['Channel'] == 'AGENT_ASSISTANT':
-              continue
+              transcript = "MeetingAssistant: " + transcript
           transcript = remove_issues(transcript)
           transcript = remove_html(transcript)
           transcript = remove_filler_words(transcript).strip()
 
-          if row['Channel'] == last_channel:
-              transcript = ' ' + transcript
-          elif len(transcript) > 1:
+          if len(transcript) > 1:
               transcript = '\n' + row['Channel'] + ": " + transcript
-              last_channel = row['Channel']
         else:
           transcript = '\n' + row['Channel'] + ": " + transcript
   

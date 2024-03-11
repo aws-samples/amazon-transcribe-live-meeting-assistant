@@ -27,7 +27,7 @@ export const KEY_COLUMN_ID = 'callId';
 export const COLUMN_DEFINITIONS_MAIN = [
   {
     id: KEY_COLUMN_ID,
-    header: 'Call ID',
+    header: 'Meeting ID',
     cell: (item) => <Link href={`#${CALLS_PATH}/${item.callId}`}>{item.callId}</Link>,
     sortingField: 'callId',
     width: 325,
@@ -43,7 +43,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
   },
   {
     id: 'agentId',
-    header: 'Agent',
+    header: 'Name',
     cell: (item) => item.agentId,
     sortingField: 'agentId',
   },
@@ -157,48 +157,35 @@ export const DEFAULT_SORT_COLUMN = COLUMN_DEFINITIONS_MAIN[3];
 export const SELECTION_LABELS = {
   itemSelectionLabel: (data, row) => `select ${row.callId}`,
   allItemsSelectionLabel: () => 'select all',
-  selectionGroupLabel: 'Call selection',
+  selectionGroupLabel: 'Meeting selection',
 };
 
 const PAGE_SIZE_OPTIONS = [
-  { value: 10, label: '10 Calls' },
-  { value: 30, label: '30 Calls' },
-  { value: 50, label: '50 Calls' },
+  { value: 10, label: '10 Meetings' },
+  { value: 30, label: '30 Meetings' },
+  { value: 50, label: '50 Meetings' },
 ];
 
 const VISIBLE_CONTENT_OPTIONS = [
   {
-    label: 'Call list properties',
+    label: 'Meeting list properties',
     options: [
-      { id: 'callId', label: 'Call ID', editable: false },
-      { id: 'alerts', label: 'Alerts' },
-      { id: 'agentId', label: 'Agent' },
+      { id: 'callId', label: 'Meeting ID', editable: false },
+      { id: 'agentId', label: 'Name' },
       { id: 'initiationTimeStamp', label: 'Initiation Timestamp' },
-      { id: 'callerPhoneNumber', label: 'Caller Phone Number' },
       { id: 'recordingStatus', label: 'Status' },
       { id: 'summary', label: 'Summary' },
-      { id: 'callerSentiment', label: 'Caller Sentiment' },
-      { id: 'callerSentimentTrend', label: 'Caller Sentiment Trend' },
-      { id: 'agentSentiment', label: 'Agent Sentiment' },
-      { id: 'agentSentimentTrend', label: 'Agent Sentiment Trend' },
       { id: 'conversationDuration', label: 'Duration' },
-      { id: 'menu', label: 'Menu' },
-      { id: 'callCategories', label: 'Categories' },
     ],
   },
 ];
 
 const VISIBLE_CONTENT = [
-  'alerts',
   'agentId',
   'initiationTimeStamp',
-  'callerPhoneNumber',
   'recordingStatus',
   'summary',
-  'callerSentiment',
-  'callerSentimentTrend',
   'conversationDuration',
-  'menu',
 ];
 
 export const DEFAULT_PREFERENCES = {
@@ -257,7 +244,7 @@ const TIME_PERIOD_DROPDOWN_ITEMS = Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map(
 // local storage key to persist the last periods to load
 export const PERIODS_TO_LOAD_STORAGE_KEY = 'periodsToLoad';
 
-export const CallsCommonHeader = ({ resourceName = 'Calls', ...props }) => {
+export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
   const onPeriodToLoadChange = ({ detail }) => {
     const { id } = detail;
     const shardCount = TIME_PERIOD_DROPDOWN_CONFIG[id].count;
