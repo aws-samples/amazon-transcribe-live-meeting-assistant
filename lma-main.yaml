@@ -699,7 +699,7 @@ Outputs:
   ChromeExtensionConfigJson:
     Description: The contents of the Chrome Extension's lma_config.json.
     Value: !Sub
-      - '{  
+      - '{
           "wssEndpoint": "${wssEndpoint}",
           "clientId": "${clientId}",
           "cognitoDomain": "${cognitoDomain}",
