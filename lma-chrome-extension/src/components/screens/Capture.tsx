@@ -15,7 +15,7 @@ function Capture() {
   const { navigate } = useNavigation();
   const { logout } = useUserContext();
   const settings = useSettings();
-  const { currentCall, muted, setMuted, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
+  const { currentCall, muted, setMuted, paused,setPaused, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
 
   const [topic, setTopic] = React.useState("");
   const [agentName, setAgentName] = React.useState("");
@@ -95,6 +95,16 @@ function Capture() {
               <ValueWithLabel label="Name:">{agentName}</ValueWithLabel>
               <ValueWithLabel label="Meeting Topic:">{topic}</ValueWithLabel>
               <ValueWithLabel label="Active Speaker:">{activeSpeaker}</ValueWithLabel>
+              {
+                paused === true ?
+                  <>
+                    <Button fullWidth={true} iconName="microphone-off" onClick={() => setPaused(false)}>Resume</Button>
+                  </>
+                  :
+                  <>
+                  <Button fullWidth={true} iconName="microphone" onClick={() => setPaused(true)}>Pause</Button>
+                  </>
+              }
               <Button fullWidth={true} variant='primary'  onClick={() => stopListening()}>Stop Listening</Button>
 
             </>

@@ -80,7 +80,7 @@ function UserProvider({ children }: any) {
     
   }, []);
 
-  const exchangeCodeForToken = async (code: string) => {
+  const exchangeCodeForToken = useCallback(async (code: string) => {
     const tokenEndpoint = `${settings.cognitoDomain}/oauth2/token`
     const params = new URLSearchParams();
     params.append('grant_type', 'authorization_code');
@@ -116,9 +116,9 @@ function UserProvider({ children }: any) {
       console.error('error exchanging code for token', error);
       //throw error;
     }
-  }
+  }, [user, setUser, loggedIn, setLoggedIn]);
 
-  const login = async () => {
+  const login = useCallback(async () => {
     console.log("start auth flow");
 
     if (chrome.identity) {
@@ -139,12 +139,12 @@ function UserProvider({ children }: any) {
       const cognitoUrl = `${settings.cognitoDomain}/login?response_type=code&client_id=${settings.clientId}&redirect_uri=http://localhost:3000/&scope=email+openid+profile`;
       window.location.href = cognitoUrl;
     }
-  }
+  }, [exchangeCodeForToken]);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     setUser({});
     setLoggedIn(false);
-  }
+  }, [user, loggedIn]);
 
   return (
     <UserContext.Provider value={{ user, login, logout, exchangeCodeForToken, loggedIn, checkTokenExpired }}>

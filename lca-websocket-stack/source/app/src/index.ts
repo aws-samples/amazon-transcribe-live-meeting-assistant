@@ -186,15 +186,17 @@ const onTextMessage = async (ws: WebSocket, data: string): Promise<void> => {
         const writeRecordingStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR, tempRecordingFilename));
         const recordingFileSize = 0;
         const audioInputStream = new stream.PassThrough();
-        startTranscribe(callMetaData, audioInputStream);
-
         const socketCallMap:SocketCallData = {
             callMetadata: callMetaData,
             audioInputStream: audioInputStream,
             writeRecordingStream: writeRecordingStream,
-            recordingFileSize: recordingFileSize
+            recordingFileSize: recordingFileSize,
+            startStreamTime: new Date(),
+            speakerEvents: []
         };
-        socketMap.set(ws, socketCallMap);        
+        socketMap.set(ws, socketCallMap);
+        startTranscribe(callMetaData, audioInputStream, socketCallMap);
+
     } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
         console.log('speaker change', callMetaData);
         const socketData = socketMap.get(ws);

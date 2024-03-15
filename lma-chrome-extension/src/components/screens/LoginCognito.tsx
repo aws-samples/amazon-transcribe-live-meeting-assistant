@@ -8,13 +8,13 @@ import { useUserContext } from '../../context/UserContext';
 function LoginCognito() {
 
   const { navigate } = useNavigation();
-  const { login, exchangeCodeForToken } = useUserContext();
+  const { login,loggedIn, exchangeCodeForToken } = useUserContext();
 
   const queryParameters = new URLSearchParams(window.location.search);
   const code = queryParameters.get("code");
 
-  if (code) {
-    exchangeCodeForToken(code);
+  if (code && !loggedIn) {
+    exchangeCodeForToken(code)
   }
 
   return (

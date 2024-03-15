@@ -1,11 +1,4 @@
-console.log("inside zoom script");
-
-/*********** Messaging **************/
-// chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-//   console.log("Received toggle to start or stop messaging", request);
-//   speakerSearchEnabled = request.toggle_speaker;
-//   sendResponse({});
-// });
+console.log("Inside LMA Zoom script");
 
 /************** Helper functions ***************/
 const getNameForVideoAvatar = function (element) {
@@ -46,7 +39,6 @@ var observer = new MutationSummary({
 /************ This is for detecting active speaker **************/
 const handleActiveSpeakerChanges = function (summaries) {
   console.log("Participant change detected");
-  console.log(summaries);
   summaries.forEach(function (summary) {
     summary.added.forEach(function (newEl) {
       const speakerName = getNameForVideoAvatar(newEl);
@@ -65,11 +57,27 @@ var observer = new MutationSummary({
   ]
 });
 
-/*
-const meetingApp = document.getElementById("root");
-meetingApp.addEventListener("DOMNodeInserted", function(e) {
-  console.log(e.target);
-}, false);*/
+/*********** Detecting mute or unmute *************/
+const handleMuteChanges = function (summaries) {
+  console.log("Mute change detected");
+
+  let isMuted = false;
+  for (let element of document.getElementsByClassName('footer-button-base__button-label')) {
+    if (element.innerText === "Unmute") {
+      isMuted = true;
+    }
+  }
+  chrome.runtime.sendMessage({action: "MuteChange", mute: isMuted});
+};
+
+var muteObserver = new MutationSummary({
+  callback: handleMuteChanges,
+  queries: [
+    { element: '.video-avatar__avatar-footer--view-mute-computer' },
+    { element: '.footer-button-base__img-layer' },
+    { element: '.footer-button-base__button-label' }
+  ]
+});
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.action === "FetchMetadata") {
