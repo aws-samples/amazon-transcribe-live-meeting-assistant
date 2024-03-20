@@ -608,9 +608,10 @@ Resources:
       Artifacts:
         Type: NO_ARTIFACTS
       Source:
+        # Makefile calculates and substitute code hash in the filename here during package build
         Location:
           !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/\
-          ${BootstrapVersion}/src.zip"
+          ${BootstrapVersion}/src-hash.zip"
         Type: S3
         BuildSpec: |
           version: 0.2
@@ -758,10 +759,13 @@ Resources:
       IsLexAgentAssistEnabled: !Ref IsLexAgentAssistEnabled
       EnableVoiceToneAnalysis: !Ref EnableVoiceToneAnalysis
       IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
-      # pass code location to support upgrades
+      # Makefile calculates and substitute code hash in the filename here during package build
+      # to force codebuild to rerun when source code changes, and to correctly roll back to 
+      # previous version if build fails.
       CodeLocation:
         !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/\
-        ${BootstrapVersion}/src.zip"
+        ${BootstrapVersion}/src-hash.zip"
+
 
   LambdaCodeBuildStartBuild:
     Type: AWS::Serverless::Function
