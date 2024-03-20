@@ -12,7 +12,10 @@ To download the Chrome browser extension zip file, either:
   <p align="center"><img src="../images/lma-cf-extension-download.png" alt="Download from Stack Outputs" width="300"/></p>
 
 
-- OR Open the LMA web application and choose **TO BE CONTINUED**
+- OR Open the LMA web application and choose **Download Chrome Extension**
+
+  <p align="center"><img src="../images/lma-app-extension-download.png" alt="Download from App" width="300"/></p>
+
 
 After downloading `lma-chrome-extension.zip`, right click and expand the zip file to create a local folder named `lma-chrome-extension`.
 
