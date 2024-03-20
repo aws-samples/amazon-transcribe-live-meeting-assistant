@@ -278,6 +278,7 @@ $(PACKAGE_RELEASE_REPLACE_OUT_FILE): $(TEMPLATE_FILE) | $(OUT_DIR)
 		/^ {2,}BootstrapBucketBaseName:/ , /^ {2,}Default:/ s@^(.*Default: {1,})(.*)@\1 $(RELEASE_S3_BUCKET_BASE)@ ; \
 		/^ {2,}BootstrapS3Prefix:/ , /^ {2,}Default:/ s@^(.*Default: {1,})(.*)@\1 $(RELEASE_S3_PREFIX)@ ; \
 		/^ {2,}BootstrapVersion:/ , /^ {2,}Default:/ s@^(.*Default: {1,})(.*)@\1 $(RELEASE_VERSION)@ ; \
+		s@src-hash.zip@$(shell basename $(BUNDLE_RELEASE_FILE))@g ; \
 		" \
 		'$(<)' > '$(@)'
 
@@ -304,7 +305,15 @@ $(PACKAGE_RELEASE_OUT_FILE): $(PACKAGE_RELEASE_REPLACE_OUT_FILE) | $(OUT_DIR)
 		--s3-prefix '$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)' \
 		--output-template-file '$(@)' \
 
-BUNDLE_RELEASE_FILE := $(OUT_DIR)/src.zip
+BUNDLE_RELEASE_FILE := $(OUT_DIR)/src-$(shell \
+  git ls-files |\
+  tr '\n' '\0' |\
+  sort -z |\
+  xargs -0 sha256sum |\
+  sha256sum |\
+  cut -d" " -f1 |\
+  cut -c1-16 \
+  ).zip
 BUNDLE_SRC_FILES := $(shell git ls-files)
 $(BUNDLE_RELEASE_FILE): $(BUNDLE_SRC_FILES) | $(OUT_DIR)
 	@echo '[INFO] creating source bundle from git staged files - [$(@)]'
@@ -312,7 +321,7 @@ $(BUNDLE_RELEASE_FILE): $(BUNDLE_SRC_FILES) | $(OUT_DIR)
 
 RELEASE_UPLOAD_FILE := $(OUT_DIR)/release-upload-$(PACKAGE_RELEASE_FILE_NAME).txt
 RELEASE_TEMPLATE_S3_URL := s3://$(RELEASE_S3_BUCKET)/$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)/template.yaml
-RELEASE_BUNDLE_S3_URL := s3://$(RELEASE_S3_BUCKET)/$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)/src.zip
+RELEASE_BUNDLE_S3_URL := s3://$(RELEASE_S3_BUCKET)/$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)/$(shell basename $(BUNDLE_RELEASE_FILE))
 $(RELEASE_UPLOAD_FILE): $(PACKAGE_RELEASE_OUT_FILE) $(BUNDLE_RELEASE_FILE) | $(OUT_DIR)
 	@echo '[INFO] uploading $(PACKAGE_RELEASE_OUT_FILE) to $(RELEASE_TEMPLATE_S3_URL)'
 	aws s3 cp '$(PACKAGE_RELEASE_OUT_FILE)' '$(RELEASE_TEMPLATE_S3_URL)' \
