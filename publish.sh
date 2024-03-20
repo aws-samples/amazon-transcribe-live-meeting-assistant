@@ -102,6 +102,33 @@ echo "Make temp dir: $tmpdir"
 [ -d $tmpdir ] && rm -fr $tmpdir
 mkdir -p $tmpdir
 
+dir=lma-browser-extension-stack
+echo "PACKAGING $dir"
+pushd $dir
+# by hashing the contents of the extension folder, we can create a zipfile name that 
+# changes when the extension folder contents change.
+# This allows us to force codebuild to re-run when the extension folder contents change.
+echo "Computing hash of extension folder contents"
+HASH=$(
+  find . \( -name node_modules -o -name build \) -prune -o -type f -print0 | 
+  sort -z |
+  xargs -0 sha256sum |
+  sha256sum |
+  cut -d" " -f1 | 
+  cut -c1-16
+  )
+zipfile=src-${HASH}.zip
+echo "Zipping source to ${tmpdir}/${zipfile}"
+zip -r ${tmpdir}/$zipfile . -x "node_modules/*" -x "build/*"
+echo "Upload source and template to S3"
+BROWSER_EXTENSION_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${dir}/${zipfile}
+aws s3 cp ${tmpdir}/${zipfile} s3://${BROWSER_EXTENSION_SRC_S3_LOCATION}
+s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
+https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
+aws s3 cp ./template.yaml ${s3_template}
+aws cloudformation validate-template --template-url ${https_template} > /dev/null || exit 1
+popd
+
 dir=lma-meetingassist-setup-stack
 echo "PACKAGING $dir"
 pushd $dir
@@ -198,11 +225,13 @@ echo "   <ARTIFACT_BUCKET_TOKEN> with bucket name: $BUCKET"
 echo "   <ARTIFACT_PREFIX_TOKEN> with prefix: $PREFIX_AND_VERSION"
 echo "   <VERSION_TOKEN> with version: $VERSION"
 echo "   <REGION_TOKEN> with region: $REGION"
+echo "   <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN> with public: $BROWSER_EXTENSION_SRC_S3_LOCATION"
 cat ./$MAIN_TEMPLATE | 
 sed -e "s%<ARTIFACT_BUCKET_TOKEN>%$BUCKET%g" | 
 sed -e "s%<ARTIFACT_PREFIX_TOKEN>%$PREFIX_AND_VERSION%g" |
 sed -e "s%<VERSION_TOKEN>%$VERSION%g" |
-sed -e "s%<REGION_TOKEN>%$REGION%g" > $tmpdir/$MAIN_TEMPLATE
+sed -e "s%<REGION_TOKEN>%$REGION%g" |
+sed -e "s%<BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>%$BROWSER_EXTENSION_SRC_S3_LOCATION%g" > $tmpdir/$MAIN_TEMPLATE
 # upload main template
 aws s3 cp $tmpdir/$MAIN_TEMPLATE s3://${BUCKET}/${PREFIX}/$MAIN_TEMPLATE || exit 1
 

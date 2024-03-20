@@ -618,24 +618,30 @@ Resources:
         PcaWebAppCallPathPrefix: ''
         LCASettingsParameterName: !GetAtt AISTACK.Outputs.LCASettingsParameterName
 
+  BROWSEREXTENSIONSTACK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-browser-extension-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        LMAStackName: !Ref AWS::StackName
+        WebSocketEndpoint: !GetAtt WEBSOCKETSTACK.Outputs.WebSocketEndpoint
+        CognitoClientId: !GetAtt AISTACK.Outputs.CognitoClientId
+        CognitoLoginUrl: !GetAtt AISTACK.Outputs.CognitoLoginUrl
+        CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
+        WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
+        WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
+        SourceCodeLocation: <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>
+
 Outputs:
   ApplicationCloudfrontEndpoint:
     Description: LCA User Interface URL
     Value: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
   
-  ChromeExtensionConfigJson:
-    Description: The contents of the Chrome Extension's lma_config.json.
-    Value: !Sub
-      - '{
-          "wssEndpoint": "${wssEndpoint}",
-          "clientId": "${clientId}",
-          "cognitoDomain": "${cognitoDomain}",
-          "cloudfrontEndpoint": "${cloudfrontEndpoint}"
-        }'
-      - wssEndpoint: !GetAtt WEBSOCKETSTACK.Outputs.WebSocketEndpoint
-        clientId: !GetAtt AISTACK.Outputs.CognitoClientId
-        cognitoDomain: !GetAtt AISTACK.Outputs.CognitoLoginUrl
-        cloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
+  ChromeExtensionDownloadUrl:
+    Description: LMA Chrome Browser extension download link
+    Value: !GetAtt BROWSEREXTENSIONSTACK.Outputs.ExtensionDownloadLocation
 
   CallDataStreamArn:
     Description: >-
