@@ -947,6 +947,9 @@ Resources:
  
   TranscribingWebsocketLoadBalancerListenerRule1:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DependsOn:
+      - CustomHeaderNameSecret
+      - CustomHeaderValueSecret
     Properties:
       Actions:
         - TargetGroupArn:
@@ -957,6 +960,11 @@ Resources:
           HostHeaderConfig:
             Values:
               - !GetAtt WebSocketCloudFrontDistribution.DomainName
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: !Sub "{{resolve:secretsmanager:${CustomHeaderNameSecret}::headersecret}}"
+            Values:
+              - !Sub "{{resolve:secretsmanager:${CustomHeaderValueSecret}::headersecret}}"
         - Field: path-pattern
           PathPatternConfig:
             Values:
@@ -1308,6 +1316,28 @@ Resources:
           - GroupId
       ToPort: 8080
 
+  CustomHeaderNameSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Description: Generates a random value for custom header name and stores it in secrets manager
+      GenerateSecretString:
+        SecretStringTemplate: '{"header_name": "custom_header"}'
+        GenerateStringKey: headersecret
+        PasswordLength: 10
+        ExcludeCharacters: "\"@/\\;.:+' %"
+        ExcludePunctuation: True
+
+  CustomHeaderValueSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Description: Generates a random value for custom header value and stores it in secrets manager
+      GenerateSecretString:
+        SecretStringTemplate: '{"header_value": "custom_header_value"}'
+        GenerateStringKey: headersecret
+        PasswordLength: 20
+        ExcludeCharacters: "\"@/\\;.:+' %"
+        ExcludePunctuation: True
+
   CloudFrontOriginAccessIdentity:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
     Properties:
@@ -1337,6 +1367,9 @@ Resources:
 
   WebSocketCloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
+    DependsOn:
+      - CustomHeaderNameSecret
+      - CustomHeaderValueSecret
     Properties:
       DistributionConfig:
         Comment: !Sub "Web Socket Websocket proxy cloudfront distribution ${AWS::StackName}"
@@ -1346,6 +1379,9 @@ Resources:
             CustomOriginConfig: 
               HTTPPort: '80'
               OriginProtocolPolicy: http-only
+            OriginCustomHeaders:
+              - HeaderName: !Sub "{{resolve:secretsmanager:${CustomHeaderNameSecret}::headersecret}}"
+                HeaderValue: !Sub "{{resolve:secretsmanager:${CustomHeaderValueSecret}::headersecret}}"
         DefaultCacheBehavior:
           AllowedMethods:
             - GET
