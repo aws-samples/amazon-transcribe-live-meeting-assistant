@@ -202,6 +202,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
     
     call_id: str = None
     channel: str = None
+    speaker: str = None
     segment_id: str = None
     start_time: float = None
     end_time: float = None

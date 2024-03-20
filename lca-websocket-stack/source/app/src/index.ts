@@ -26,14 +26,6 @@ import { CallRecordingEvent, SocketCallData } from './entities-lca';
 
 import { jwtVerifier } from './jwt-verifier';
 
-// let callMetaData: CallMetaData;  // Type structure for call metadata sent by the client
-// let audioInputStream: stream.PassThrough; // audio chunks are written to this stream for Transcribe SDK to consume
-
-// let tempRecordingFilename: string;
-// let wavFileName: string;
-// let recordingFileSize = 0;
-// let writeRecordingStream: fs.WriteStream;
-
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || undefined;
 const RECORDING_FILE_PREFIX = process.env['RECORDING_FILE_PREFIX'] || 'lca-audio-wav/';
