@@ -330,7 +330,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
   const { settings } = useSettingsContext();
   const regex = settings?.CategoryAlertRegex ?? '.*';
 
-  const { transcript, segmentId, channel, targetLanguage, agentTranscript, translateOn } = segment;
+  const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
 
   const k = segmentId.concat('-', targetLanguage);
 
@@ -355,13 +355,16 @@ const TranscriptContent = ({ segment, translateCache }) => {
     let className = '';
     let text = t;
     let translatedText = result;
+
     switch (channel) {
       case 'AGENT_ASSISTANT':
+      case 'MEETING_ASSISTANT':
         className = 'transcript-segment-agent-assist';
         break;
       case 'AGENT':
-        text = agentTranscript !== undefined && agentTranscript ? text : '';
-        translatedText = agentTranscript !== undefined && agentTranscript ? translatedText : '';
+      case 'CALLER':
+        text = text.substring(text.indexOf(':') + 1).trim();
+        translatedText = translatedText.substring(translatedText.indexOf(':') + 1).trim();
         break;
       case 'CATEGORY_MATCH':
         if (text.match(regex)) {
@@ -393,7 +396,12 @@ const TranscriptContent = ({ segment, translateCache }) => {
   );
 };
 
-const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis }) => {
+const TranscriptSegment = ({
+  segment,
+  translateCache,
+  enableSentimentAnalysis,
+  participantName,
+}) => {
   const { channel } = segment;
 
   if (channel === 'CATEGORY_MATCH') {
@@ -415,16 +423,18 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
     );
   }
 
-  const channelClass = channel === 'AGENT_ASSISTANT' ? 'transcript-segment-agent-assist' : '';
-
-  const newSegment = segment;
+  let displayChannel = `${segment.channel}`;
+  let channelClass = '';
 
   if (channel === 'AGENT' || channel === 'CALLER') {
-    const { transcript } = segment;
-    newSegment.channel = transcript.substring(0, transcript.indexOf(':')).trim();
-    newSegment.transcript = transcript.substring(transcript.indexOf(':') + 1).trim();
-  } else if (channel === 'AGENT_ASSISTANT') {
-    newSegment.channel = 'MEETING_ASSISTANT';
+    const originalTranscript = `${segment.transcript}`;
+    displayChannel = originalTranscript.substring(0, originalTranscript.indexOf(':')).trim();
+  } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
+    displayChannel = 'MEETING_ASSISTANT';
+    channelClass = 'transcript-segment-agent-assist';
+  }
+  if (displayChannel === '') {
+    displayChannel = participantName;
   }
 
   return (
@@ -437,14 +447,14 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
       <SpaceBetween direction="vertical" size="xxs" className={channelClass}>
         <SpaceBetween direction="horizontal" size="xs">
           <TextContent>
-            <strong>{newSegment.channel}</strong>
+            <strong>{displayChannel}</strong>
           </TextContent>
           <TextContent>
             {`${getTimestampFromSeconds(segment.startTime)} -
               ${getTimestampFromSeconds(segment.endTime)}`}
           </TextContent>
         </SpaceBetween>
-        <TranscriptContent segment={newSegment} translateCache={translateCache} />
+        <TranscriptContent segment={segment} translateCache={translateCache} />
       </SpaceBetween>
     </Grid>
   );
@@ -625,7 +635,7 @@ const CallInProgressTranscript = ({
             || s.agentTranscript || s.channel !== 'AGENT')
           && (s.channel !== 'AGENT_VOICETONE')
           && (s.channel !== 'CALLER_VOICETONE')
-          && <TranscriptSegment key={`${s.segmentId}-${s.createdAt}`} segment={s} translateCache={translateCache} enableSentimentAnalysis={enableSentimentAnalysis} />
+          && <TranscriptSegment key={`${s.segmentId}-${s.createdAt}`} segment={s} translateCache={translateCache} enableSentimentAnalysis={enableSentimentAnalysis} participantName={item.callerPhoneNumber} />
         ),
       );
 

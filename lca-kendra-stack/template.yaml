@@ -32,6 +32,12 @@ Resources:
 
   KendraIndexRole:
     Type: 'AWS::IAM::Role'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: >-
+              Using condition key to restrict access to specific namespace.
     Properties:
       AssumeRolePolicyDocument:
         Version: 2012-10-17
@@ -71,6 +77,7 @@ Resources:
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
           PolicyName: KendraMediaIndexPolicy
+
       
   KendraIndex:
     Type: 'AWS::Kendra::Index'
@@ -78,6 +85,13 @@ Resources:
       Name: !Ref IndexName
       Edition: !Ref IndexEdition
       RoleArn: !GetAtt KendraIndexRole.Arn
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W80
+            reason: >-
+              Kendra encrypts indexed data by default using AWS owned KMS key. Customer can choose to use a different 
+              KMS Key if desired.
 
 Outputs:
 

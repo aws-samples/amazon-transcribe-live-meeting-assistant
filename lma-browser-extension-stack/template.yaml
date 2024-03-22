@@ -1,0 +1,255 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License").
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Amazon Transcribe and Q Business Live Meeting Assist - Browser extension
+
+Parameters:
+
+  # Required
+  LMAStackName:
+    Type: String
+    Description: LMA Stack Name
+    
+  WebSocketEndpoint:
+    Type: String
+    Description: WebSocket Endpoint
+
+  CognitoClientId:
+    Type: String
+    Description: Cognito ClientId
+
+  CognitoLoginUrl:
+    Type: String
+    Description: Cognito Login Url
+
+  CloudfrontEndpoint:
+    Type: String
+    Description: Cloudfront Endpoint
+
+  WebAppCloudFrontDistribution:
+    Type: String
+    Description: WebApp CloudFront Distribution
+
+  WebAppBucket:
+    Type: String
+    Description: Web App Bucket
+
+  SourceCodeLocation:
+    Type: String
+    Description: S3 location of the browser extension source code zipfile
+
+Resources:
+
+  BrowserExtensionCodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource:
+                  - !Sub "arn:aws:s3:::${SourceCodeLocation}"
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${WebAppBucket}/*"
+              - Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:\
+                    /aws/codebuild/*:*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+              - Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:\
+                    distribution/${WebAppCloudFrontDistribution}"
+
+  BrowserExtensionCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Description: !Sub >-
+        Builds preconfigured browser extension for stack: ${AWS::StackName}
+      ServiceRole: !Ref BrowserExtensionCodeBuildServiceRole
+      EncryptionKey: alias/aws/s3
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: SOURCE_CODE_LOCATION
+            Value: !Sub "${SourceCodeLocation}"
+          - Name: WEBSOCKET_ENDPOINT
+            Value: !Ref WebSocketEndpoint
+          - Name: COGNITO_CLIENT_ID
+            Value: !Ref CognitoClientId
+          - Name: COGNITO_LOGIN_URL 
+            Value: !Ref CognitoLoginUrl
+          - Name: CLOUDFRONT_ENDPOINT
+            Value: !Ref CloudfrontEndpoint
+          - Name: CLOUDFRONT_DISTRIBUTION_ID
+            Value: !Ref WebAppCloudFrontDistribution
+          - Name: WEBAPP_BUCKET
+            Value: !Ref WebAppBucket
+      Source:
+        Location:
+          !Sub "arn:aws:s3:::${SourceCodeLocation}"
+        Type: S3
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                nodejs: 18
+            pre_build:
+              commands:
+                - echo Source code from s3://${SOURCE_CODE_LOCATION}
+            build:
+              commands:
+                - echo Build started on `date`
+                - echo `pwd`
+                - echo `ls -altr`
+                - npm install
+                - npm run build
+                - >
+                  printf '{
+                    "wssEndpoint":"%s",
+                    "clientId": "%s",
+                    "cognitoDomain": "%s",
+                    "cloudfrontEndpoint": "%s"
+                  }'
+                  $WEBSOCKET_ENDPOINT $COGNITO_CLIENT_ID $COGNITO_LOGIN_URL $CLOUDFRONT_ENDPOINT > ./build/lma_config.json
+                - echo Packaging extension for Chrome - other browsers to come later
+                - zipfile=lma-chrome-extension.zip
+                - (cd ./build && zip -r ../${zipfile} .)
+                - aws s3 cp ${zipfile} s3://${WEBAPP_BUCKET}/
+                - echo Artifact Location - s3://${WEBAPP_BUCKET}/${zipfile}
+            post_build:
+              commands:
+                - echo Invalidating CloudFront Distribution
+                - >
+                  aws cloudfront create-invalidation
+                  --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths '/*'
+                - echo Build completed on `date`
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource: !GetAtt BrowserExtensionCodeBuildProject.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:\
+                    /aws/lambda/*"
+
+  CodeBuildTriggerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.11
+      Timeout: 300
+      MemorySize: 128
+      Handler: index.handler
+      Description: This AWS Lambda Function kicks off a code build job.
+      Code:
+        ZipFile: |
+          import boto3
+          import time
+          import json
+          import cfnresponse
+
+          def handler(event, context):
+              print("Event",json.dumps(event))
+              if event['RequestType'] == 'Delete':
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              client = boto3.client('codebuild')
+              try:
+                  project_name = event['ResourceProperties']['BuildProjectName']
+                  response = client.start_build(projectName=project_name)
+                  buildId = response['build']['id']
+                  while True:
+                      build_response = client.batch_get_builds(ids=[buildId])
+                      build_status = build_response['builds'][0]['buildStatus']
+                      print(f'Build status: {build_status}')
+                      if build_status in ['SUCCEEDED', 'FAILED', 'FAULT', 'TIMED_OUT', 'STOPPED']:
+                          print(f'Build completed with status {build_status}.')
+                          break
+                      time.sleep(10) # Poll every 10 seconds
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})      
+
+  CodeBuildRun:
+    Type: Custom::CodeBuildRun
+    Properties:
+      ServiceToken: !GetAtt CodeBuildTriggerFunction.Arn
+      BuildProjectName: !Ref BrowserExtensionCodeBuildProject
+      # pass additional properties, which, if changed, will trigger a new build during updates
+      WebSocketEndpoint: !Ref WebSocketEndpoint
+      CognitoClientId: !Ref CognitoClientId
+      CognitoLoginUrl: !Ref CognitoLoginUrl
+      CloudfrontEndpoint: !Ref CloudfrontEndpoint
+      WebAppCloudFrontDistribution: !Ref WebAppCloudFrontDistribution
+      WebAppBucket: !Ref WebAppBucket
+      SourceCodeLocation: !Ref SourceCodeLocation
+
+
+Outputs:
+  ExtensionDownloadLocation:
+    Description: LCA Chrome Browser Extension Download Location
+    Value: !Sub '${CloudfrontEndpoint}lma-chrome-extension.zip'

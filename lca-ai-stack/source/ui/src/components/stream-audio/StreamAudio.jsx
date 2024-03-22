@@ -56,14 +56,14 @@ const StreamAudio = () => {
 
   const [callMetaData, setCallMetaData] = useState({
     callId: crypto.randomUUID(),
-    agentId: 'AudioStream',
-    fromNumber: '+9165551234',
-    toNumber: '+8001112222',
+    agentId: 'Me',
+    fromNumber: 'Other Participant',
+    toNumber: 'System',
   });
 
   const [recording, setRecording] = useState(false);
   const [streamingStarted, setStreamingStarted] = useState(false);
-  const [micInputOption, setMicInputOption] = useState({ label: 'AGENT', value: 'agent' });
+  const [micInputOption, setMicInputOption] = useState({ label: 'Me', value: 'agent' });
 
   const getSocketUrl = useCallback(() => {
     console.log('Trying to resolve websocket url...');
@@ -304,7 +304,7 @@ const StreamAudio = () => {
           </SpaceBetween>
         }
       >
-        <Container header={<Header variant="h2">Meeting Meta data</Header>}>
+        <Container header={<Header variant="h2">Meeting Information</Header>}>
           <ColumnLayout columns={2}>
             <FormField
               label="Meeting ID"
@@ -317,10 +317,15 @@ const StreamAudio = () => {
             <FormField label="Name" stretch required description="Name">
               <Input value={callMetaData.agentId} onChange={handleAgentIdChange} />
             </FormField>
-            <FormField label="Customer Phone" stretch required description="Customer Phone">
+            <FormField
+              label="Participant Names(s)"
+              stretch
+              required
+              description="Participant Names(s)"
+            >
               <Input value={callMetaData.fromNumber} onChange={handlefromNumberChange} />
             </FormField>
-            <FormField label="System Phone" stretch required description="System Phone">
+            <FormField label="System" stretch required description="System">
               <Input value={callMetaData.toNumber} onChange={handletoNumberChange} />
             </FormField>
             <FormField label="Microphone Role" stretch required description="Mic input">
@@ -328,8 +333,8 @@ const StreamAudio = () => {
                 selectedOption={micInputOption}
                 onChange={handleMicInputOptionSelection}
                 options={[
-                  { label: 'CALLER', value: 'caller' },
-                  { label: 'AGENT', value: 'agent' },
+                  { label: 'Others', value: 'caller' },
+                  { label: 'Me', value: 'agent' },
                 ]}
               />
             </FormField>

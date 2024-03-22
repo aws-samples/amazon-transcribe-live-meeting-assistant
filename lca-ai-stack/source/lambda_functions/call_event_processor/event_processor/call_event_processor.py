@@ -1412,8 +1412,6 @@ async def execute_process_event_api_mutation(
         LOGGER.debug("ADD_AGENT_ASSIST MUTATION ")
         normalized_message = normalize_transcript_segments({**message})
 
-        # Prepend speaker name ("Q") to agent assist transript
-        normalized_message[0]["Transcript"] = "Q" + ": " + normalized_message[0]["Transcript"]
         response = await execute_add_agent_assist_mutation(
             message=normalized_message[0],
             appsync_session=appsync_session

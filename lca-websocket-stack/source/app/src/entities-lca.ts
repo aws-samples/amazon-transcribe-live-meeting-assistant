@@ -65,4 +65,6 @@ export type SocketCallData = {
     audioInputStream?: stream.PassThrough,
     writeRecordingStream?: WriteStream,
     recordingFileSize?: number
+    startStreamTime: Date,
+    speakerEvents: []
 }

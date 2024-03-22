@@ -119,20 +119,16 @@ Parameters:
       both Partial and Non-Partial transcript segments (false).
 
   EndOfCallTranscriptSummary:
-    Default: 'DISABLED'
+    Default: 'BEDROCK'
     Type: String
     AllowedValues:
-      - 'DISABLED'
-      - 'SAGEMAKER'
       - 'LAMBDA'
-      - 'ANTHROPIC'
       - 'BEDROCK'
 
     Description: >
-      Set to enable call summarization by a Large Language Model. The SAGEMAKER option uses a SageMaker endpoint with
-      the pretrained bart-large-cnn-samsum model with a ml.m5.xlarge instance type.  The LAMBDA option requires you 
-      to provide a function ARN below. The ANTHROPIC option is a third party service, and you must enter your Anthropic API key below.
-      BEDROCK option requires you to choose a model ID from a list of models supported by Bedrock (BedrockModelId).
+      Set to enable call summarization by a Large Language Model. Currently only BEDROCK and LAMBDA are supported.
+      BEDROCK option requires you to choose one of the supported model IDs from the 
+      provided list (BedrockModelId). The LAMBDA option requires you to provide a function ARN below.
 
   BedrockModelId:
     Default: 'amazon.titan-tg1-large'
@@ -149,19 +145,6 @@ Parameters:
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list of supported models. 
       Defaults to 'amazon.titan-tg1-large'
-
-  SummarizationSageMakerInitialInstanceCount:
-    Type: Number
-    MinValue: 0
-    Default: 1
-    Description: >
-      (Optional) If "End Of Call Transcript Summary" is SAGEMAKER, provide initial instance count. Set to '0' to enable Serverless Inference (for cold-start delay tolerant deployments only).
-
-  SummarizationLLMThirdPartyApiKey:
-    Type: String
-    Description: 'Optional: If EndOfCallTranscriptSummary is ANTHROPIC, enter the provider API Key. ** Data will leave your AWS account **'
-    Default: ''
-    NoEcho: true
 
   EndOfCallLambdaHookFunctionArn:
     Default: ''
@@ -188,7 +171,6 @@ Parameters:
     Description: >
       (Optional) The specified Lambda function is invoked by the LCA Call Event Processor Lambda function after the call summary is processed.
       This function can implement custom logic that is relevant to post processing, for example, updating the call summary to a CRM system.
-
 
   CloudFrontPriceClass:
     Type: String
@@ -338,8 +320,6 @@ Metadata:
         default: Lambda Hook Function ARN for Custom Transcript Segment Processing (existing)
       TranscriptLambdaHookFunctionNonPartialOnly:
         default: Lambda Hook Function Mode Non-Partial only
-      SummarizationSageMakerInitialInstanceCount:
-        default: Initial Instance Count for Summarization SageMaker Endpoint
       EndOfCallLambdaHookFunctionArn:
         default: Lambda Hook Function ARN for Custom End of Call Processing (existing)
       EndOfCallTranscriptSummary:
@@ -359,18 +339,18 @@ Conditions:
   ShouldEnableTranscriptLambdaHookFunction: !Not [!Equals [!Ref TranscriptLambdaHookFunctionArn, ""]]
   ShouldEnableStartOfCallLambdaHookFunction: !Not [!Equals [!Ref StartOfCallLambdaHookFunctionArn, ""]]
   ShouldEnablePostCallSummaryLambdaHookFunction: !Not [!Equals [!Ref PostCallSummaryLambdaHookFunctionArn, ""]]
-  ShouldEnableAnthropicSummarizer: !Equals [!Ref EndOfCallTranscriptSummary, "ANTHROPIC"]
   ShouldEnableEndOfCallLambdaHookFunction: !Equals [!Ref EndOfCallTranscriptSummary, "LAMBDA"]
-  ShouldDeploySageMakerSummarizer: !Equals [!Ref EndOfCallTranscriptSummary, "SAGEMAKER"]
   ShouldEnableBedrockSummarizer: !Equals [!Ref EndOfCallTranscriptSummary, "BEDROCK"]
 
   IsTranscriptSummaryEnabled: !Or
     - !Condition ShouldEnableEndOfCallLambdaHookFunction
-    - !Condition ShouldDeploySageMakerSummarizer
-    - !Condition ShouldEnableAnthropicSummarizer
     - !Condition ShouldEnableBedrockSummarizer
 
 Outputs:
+  CognitoLoginUrl:
+    Value: !Sub https://${LMAUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
+  CognitoClientId:
+    Value: !Ref UserPoolClient
   CallDataStreamName:
     Description: >-
       The Name of Kinesis Data Stream to write the call data to.
@@ -431,18 +411,10 @@ Outputs:
   TranscriptSummaryFunctionArn:
     Description: Call Summarizer Lambda function ARN
     Value: !If [
-            ShouldDeploySageMakerSummarizer, 
-            !GetAtt [SageMakerTranscriptSummaryStack, Outputs.InvokeLambdaArn],
-            !If [
-              ShouldEnableAnthropicSummarizer,
-              !GetAtt LLMAnthropicSummaryLambda.Arn,
-              !If [
-                ShouldEnableBedrockSummarizer,
-                !GetAtt BedrockSummaryLambda.Arn,
-                !Ref EndOfCallLambdaHookFunctionArn
-              ]
+              ShouldEnableBedrockSummarizer,
+              !GetAtt BedrockSummaryLambda.Arn,
+              !Ref EndOfCallLambdaHookFunctionArn
             ]
-          ]
 
 Resources:
   ## BUCKET TO STORE STEREO RECORDINGS
@@ -636,9 +608,10 @@ Resources:
       Artifacts:
         Type: NO_ARTIFACTS
       Source:
+        # Makefile calculates and substitute code hash in the filename here during package build
         Location:
           !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/\
-          ${BootstrapVersion}/src.zip"
+          ${BootstrapVersion}/src-hash.zip"
         Type: S3
         BuildSpec: |
           version: 0.2
@@ -786,10 +759,13 @@ Resources:
       IsLexAgentAssistEnabled: !Ref IsLexAgentAssistEnabled
       EnableVoiceToneAnalysis: !Ref EnableVoiceToneAnalysis
       IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
-      # pass code location to support upgrades
+      # Makefile calculates and substitute code hash in the filename here during package build
+      # to force codebuild to rerun when source code changes, and to correctly roll back to 
+      # previous version if build fails.
       CodeLocation:
         !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/\
-        ${BootstrapVersion}/src.zip"
+        ${BootstrapVersion}/src-hash.zip"
+
 
   LambdaCodeBuildStartBuild:
     Type: AWS::Serverless::Function
@@ -806,6 +782,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   ##########################################################################
   # Kinesis Data Stream
@@ -826,21 +804,6 @@ Resources:
         Properties: 
             StreamARN: !GetAtt CallDataStream.Arn
             ConsumerName: DataStreamConsumer
-
-  ##########################################################################
-  # Transcript Summary
-  ##########################################################################
-  SageMakerTranscriptSummaryStack:
-    Type: AWS::CloudFormation::Stack
-    Condition: ShouldDeploySageMakerSummarizer
-    Properties:
-      # yamllint disable rule:line-length
-      TemplateURL: !Sub https://s3.${AWS::Region}.amazonaws.com/${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/sagemaker-summary-stack.yaml
-      # yamllint enable rule:line-length
-      Parameters:
-        CallEventsTable: !Ref EventSourcingTable
-        InitialInstanceCount: !Ref SummarizationSageMakerInitialInstanceCount
-        FetchTranscriptArn: !GetAtt FetchTranscript.Arn
 
   BedrockPreviewBoto3Stack:
     Type: AWS::CloudFormation::Stack
@@ -868,6 +831,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   LambdaFetchTranscriptExecutionRole:
     Type: AWS::IAM::Role
@@ -891,60 +856,6 @@ Resources:
               - Effect: "Allow"
                 Action: "dynamodb:Query"
                 Resource: !GetAtt EventSourcingTable.Arn
-  
-  LLMAnthropicSummaryLambda:
-    Type: AWS::Serverless::Function
-    Properties:
-      Role: !GetAtt LLMAnthropicSummaryLambdaExecutionRole.Arn
-      Runtime: python3.11
-      Environment:
-        Variables:
-          LCA_CALL_EVENTS_TABLE: !Ref EventSourcingTable
-          ANTHROPIC_MODEL_IDENTIFIER: "claude-2"
-          ANTHROPIC_API_KEY: !Ref SummarizationLLMThirdPartyApiKey
-          ENDPOINT_URL: "https://api.anthropic.com/v1/complete"
-          FETCH_TRANSCRIPT_LAMBDA_ARN: !GetAtt FetchTranscript.Arn
-          PROCESS_TRANSCRIPT: "True"
-          TOKEN_COUNT: "0"  # using v2 model - do not truncate transcript
-          SUMMARY_PROMPT_SSM_PARAMETER: !Sub "${LCAStackName}-LLMPromptSummaryTemplate"
-      Timeout: 900
-      MemorySize: 128
-      Handler: index.handler
-      CodeUri: ../source/lambda_functions/llm_anthropic_summary_lambda
-      Description: This AWS Lambda Function runs a transcript summary inference on the call transcript.
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-  
-  LLMAnthropicSummaryLambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Description: LLM Anthropic Summary Lambda Role
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-        - Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-          Action:
-          - 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: !Sub ${AWS::StackName}-AnthropicSummary
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: "Allow"
-                Action: "lambda:InvokeFunction"
-                Resource: !GetAtt FetchTranscript.Arn
-              - Effect: Allow
-                Action:
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LCAStackName}-*"
 
   BedrockSummaryLambda:
     Type: AWS::Serverless::Function
@@ -971,7 +882,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
-  
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+
   BedrockSummaryLambdaExecutionRole:
     Type: AWS::IAM::Role
     Condition: ShouldEnableBedrockSummarizer
@@ -1041,6 +954,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   AsyncAgentAssistOrchestratorExecutionRole:
     Type: AWS::IAM::Role
@@ -1087,18 +1002,10 @@ Resources:
       Environment:
         Variables:
           TRANSCRIPT_SUMMARY_FUNCTION_ARN: !If [
-            ShouldDeploySageMakerSummarizer, 
-            !GetAtt [SageMakerTranscriptSummaryStack, Outputs.InvokeLambdaArn],
-            !If [
-              ShouldEnableAnthropicSummarizer,
-              !GetAtt LLMAnthropicSummaryLambda.Arn,
-              !If [
                 ShouldEnableBedrockSummarizer,
                 !GetAtt BedrockSummaryLambda.Arn,
                 !Ref EndOfCallLambdaHookFunctionArn
               ]
-            ]
-          ]
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           BOTO_READ_TIMEOUT: 60
       Timeout: 240
@@ -1113,6 +1020,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   AsyncTranscriptSummaryOrchestratorExecutionRole:
     Type: AWS::IAM::Role
@@ -1143,22 +1052,6 @@ Resources:
                   - lambda:InvokeFunction
                 Resource: !Sub "${EndOfCallLambdaHookFunctionArn}"
               - Ref: AWS::NoValue
-            - !If 
-              - ShouldDeploySageMakerSummarizer
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource:
-                  - !GetAtt SageMakerTranscriptSummaryStack.Outputs.InvokeLambdaArn
-              - Ref: AWS::NoValue
-            - !If 
-              - ShouldEnableAnthropicSummarizer
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource:
-                  - !GetAtt LLMAnthropicSummaryLambda.Arn
-              - Ref: AWS::NoValue
             - !If
               - ShouldEnableBedrockSummarizer
               - Effect: Allow
@@ -1174,6 +1067,11 @@ Resources:
 
   AgentAssistBotIdentityPool:
     Type: AWS::Cognito::IdentityPool
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W57
+            reason: Using cognito assume role with web identity and scoped permissions.
     Properties:
       IdentityPoolName: !Sub "${AWS::StackName}-AgentAssistBot-IdentityPool"
       AllowUnauthenticatedIdentities: true
@@ -1228,6 +1126,10 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W11
+            reason: comprehend does not support resource-level permissions
     Properties:
       Architectures:
         - arm64
@@ -1710,18 +1612,18 @@ Resources:
           - false
           - true
         InviteMessageTemplate:
-          EmailSubject: Welcome to Live Call Analytics with Agent Assist!
+          EmailSubject: Welcome to Live Meeting Assistant!
           EmailMessage: !Sub |-
             <p>Hello {username},
-            <p>Welcome to Live Call Analytics with Agent Assist! Your temporary password is:
+            <p>Welcome to Live Meeting Assistant! Your temporary password is:
             <p>     {####}
             <p>
             <p>When the CloudFormation stack is COMPLETE, use the link below to log in to
-            the Live Call Analytics web interface and set your permanent password.
+            the Live Meeting Assistant web interface and set your permanent password.
             <p>     https://${WebAppCloudFrontDistribution.DomainName}/
             <p>
             <p>Good luck!
-            <p>Live Call Analytics with Agent Assist (amazon.com/live-call-analytics)
+            <p>Live Meeting Assistant (amazon.com/live-call-analytics)
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
@@ -1751,9 +1653,65 @@ Resources:
       UsernameAttributes:
         - email
 
+  GetDomainLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetDomainLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: Returns the lowercase version of a string
+      MemorySize: 256
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt GetDomainLambdaRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import cfnresponse
+          import time
+          def lambda_handler(event, context):                                                    
+              output = event['ResourceProperties'].get('InputString', '').lower()
+              output = f"{output}-{time.time_ns()}" # make unique
+              responseData = {'OutputString': output}                                            
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData) 
+
+  GetDomain:
+    Type: Custom::GetDomain
+    Properties:
+      ServiceToken: !GetAtt GetDomainLambda.Arn
+      InputString: !Ref LCAStackName
+
+
+  LMAUserPoolDomain:
+    Type: "AWS::Cognito::UserPoolDomain"
+    Properties:
+      Domain: !GetAtt GetDomain.OutputString
+      UserPoolId: !Ref UserPool
+
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - phone
+        - profile
+      CallbackURLs:
+        - http://localhost:3000/
+        - https://bmpfinegchjaiocjnfjfcgeohdiblomp.chromiumapp.org/
       AccessTokenValidity: 1
       ClientName: !Sub "${AWS::StackName}-Client"
       EnableTokenRevocation: true
@@ -1843,11 +1801,10 @@ Resources:
                   - translate:TranslateText
                   - comprehend:DetectDominantLanguage
                 Resource: "*"
-
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W12
+          - id: W11
             reason: comprehend, translate, and connect do not support resource-level permissions
 
   AdminUser:
@@ -1917,6 +1874,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
 
   CognitoUserPoolEmailDomainVerifyPermission:
     Type: AWS::Lambda::Permission
@@ -1968,6 +1927,8 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
     Type: AWS::Lambda::Function
     Properties:
       Handler: "index.lambda_handler"

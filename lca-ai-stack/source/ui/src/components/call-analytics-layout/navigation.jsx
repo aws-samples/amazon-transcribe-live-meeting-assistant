@@ -9,7 +9,23 @@ import { CALLS_PATH, STREAM_AUDIO_PATH, DEFAULT_PATH } from '../../routes/consta
 export const callsNavHeader = { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` };
 export const callsNavItems = [
   { type: 'link', text: 'Meetings', href: `#${CALLS_PATH}` },
-  { type: 'link', text: 'Stream Audio', href: `#${STREAM_AUDIO_PATH}` },
+  {
+    type: 'section',
+    text: 'Sources',
+    items: [
+      {
+        type: 'link',
+        text: 'Download Chrome Extension',
+        href: '/lma-chrome-extension.zip',
+      },
+      {
+        type: 'link',
+        text: 'Stream Audio (no extension)',
+        href: `#${STREAM_AUDIO_PATH}`,
+        external: true,
+      },
+    ],
+  },
   {
     type: 'section',
     text: 'Resources',
