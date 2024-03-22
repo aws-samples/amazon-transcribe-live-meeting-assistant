@@ -268,6 +268,9 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
         segment_id = transcriptEvent["ResultId"]
         start_time = transcriptEvent["StartTime"]
         end_time = transcriptEvent["EndTime"]
+        speaker = transcriptEvent.get("Speaker", None)
+        if (not speaker):
+            speaker = "Other Participant"
         transcript = transcriptEvent["Transcript"]
         is_partial = transcriptEvent["IsPartial"]
         sentiment = None
@@ -279,6 +282,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                     SegmentId=segment_id,
                     StartTime=start_time,
                     EndTime=end_time,
+                    Speaker=speaker,
                     Transcript=transcript,
                     OriginalTranscript=transcript,
                     IsPartial=is_partial,

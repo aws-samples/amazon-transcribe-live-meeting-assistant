@@ -15,6 +15,7 @@ export default gql`
         SK
         SegmentId
         StartTime
+        Speaker
         Transcript
         Sentiment
         SentimentScore {
