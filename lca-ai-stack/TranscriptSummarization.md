@@ -1,8 +1,6 @@
-# Transcript Summarization (Experimental Feature)
+# Transcript Summarization
 
-LCA can now generate and display an abstractive call transcript summary (rendered in markdown) in addition to the existing extractive summarization from Real Time Transcribe Call Analytics. 
-
-Currently the transcript summarization feature is 'experimental'. In later releases we may adopt different techniques and add capabilities based on feedback from early adoption. We encourage experimentation, and feedback!
+LMA can now generate and display an abstractive call transcript summary (rendered in markdown) in addition to the existing extractive summarization from Real Time Transcribe Call Analytics. 
   
 Example Transcript Summary:
    
@@ -10,7 +8,7 @@ Example Transcript Summary:
    
 Transcript Summaries are generated after the call has ended, and can take 20-30 seconds to appear on the UI.
 
-Configure Transcript Summarization by choosing a value for the `EndOfCallTranscriptSummary` CloudFormation parameter when deploying or updating your LCA stack. Valid values are 
+Configure Transcript Summarization by choosing a value for the `EndOfCallTranscriptSummary` CloudFormation parameter when deploying or updating your LMA stack. Valid values are 
 `BEDROCK` and `LAMBDA`.
 If `BEDROCK` option is chosen, select a supported model ID from the list (`BedrockModelId` parameter)
 
@@ -18,11 +16,11 @@ If `BEDROCK` option is chosen, select a supported model ID from the list (`Bedro
 
 The `BEDROCK` option is enabled by default. You must [request model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) for the model selected in the `BedrockModelId` parameter. By default, the selected model is `anthropic.claude-instant-v1`.  
 
-When `BEDROCK` option is enabled, LCA can run one or more LLM inferences against Amazon Bedrock after the call is complete. The prompt used to generate the insights is configured in a [AWS Systems Manager Parameter Store](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html). The name of the parameter is `{LCA-Stack-Name}-LLMPromptSummaryTemplate`. You can find a link to the parameter in the LCA main stack's CloudFormation outputs.
+When `BEDROCK` option is enabled, LMA can run one or more LLM inferences against Amazon Bedrock after the call is complete. The prompt used to generate the insights is configured in a [AWS Systems Manager Parameter Store](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html). The name of the parameter is `{LMA-Stack-Name}-LLMPromptSummaryTemplate`. You can find a link to the parameter in the LMA main stack's CloudFormation outputs.
 
-The parameter's value is a JSON object with key/value pairs, each pair representing the label (key) and the prompt (value). After the call ends, LCA will iterate through the keys and run each prompt. In the prompt, LCA replaces `<br>` tags with newlines, and  `{transcript}` is replaced with the call transcript. The key will be used as a header for the section in the "Transcript Summary" section in the LCA UI.  You can learn more about how each of the prompts are designed in Anthropic's [Introduction to Prompt Design](https://docs.anthropic.com/claude/docs/introduction-to-prompt-design).
+The parameter's value is a JSON object with key/value pairs, each pair representing the label (key) and the prompt (value). After the call ends, LMA will iterate through the keys and run each prompt. In the prompt, LMA replaces `<br>` tags with newlines, and  `{transcript}` is replaced with the call transcript. The key will be used as a header for the section in the "Transcript Summary" section in the LMA UI.  You can learn more about how each of the prompts are designed in Anthropic's [Introduction to Prompt Design](https://docs.anthropic.com/claude/docs/introduction-to-prompt-design).
 
-Below is the default value of `[LCA-Stack-Name]-LLMPromptSummaryTemplate`: 
+Below is the default value of `[LMA-Stack-Name]-LLMPromptSummaryTemplate`: 
 
 ```
 {
