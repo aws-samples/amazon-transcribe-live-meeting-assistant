@@ -12,6 +12,7 @@ export default gql`
       SegmentId
       StartTime
       EndTime
+      Speaker
       Transcript
       IsPartial
       Channel
