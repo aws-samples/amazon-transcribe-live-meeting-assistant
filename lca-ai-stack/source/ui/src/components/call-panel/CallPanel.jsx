@@ -396,7 +396,12 @@ const TranscriptContent = ({ segment, translateCache }) => {
   );
 };
 
-const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis }) => {
+const TranscriptSegment = ({
+  segment,
+  translateCache,
+  enableSentimentAnalysis,
+  participantName,
+}) => {
   const { channel } = segment;
 
   if (channel === 'CATEGORY_MATCH') {
@@ -427,6 +432,9 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
     channelClass = 'transcript-segment-agent-assist';
+  }
+  if (displayChannel === '') {
+    displayChannel = participantName;
   }
 
   return (
@@ -627,7 +635,7 @@ const CallInProgressTranscript = ({
             || s.agentTranscript || s.channel !== 'AGENT')
           && (s.channel !== 'AGENT_VOICETONE')
           && (s.channel !== 'CALLER_VOICETONE')
-          && <TranscriptSegment key={`${s.segmentId}-${s.createdAt}`} segment={s} translateCache={translateCache} enableSentimentAnalysis={enableSentimentAnalysis} />
+          && <TranscriptSegment key={`${s.segmentId}-${s.createdAt}`} segment={s} translateCache={translateCache} enableSentimentAnalysis={enableSentimentAnalysis} participantName={item.callerPhoneNumber} />
         ),
       );
 
