@@ -191,7 +191,26 @@ How did LMA transcribe and analyze your meeting? Let’s take a quick look at ho
 
 The following diagram shows the main architectural components and how they fit together at a high level.
 
-TBC
+   <img src="./images/lma-architecture.png" alt="LMA Architecture"/>
+
+The LMA user joins a meeting in their browser, and then enables the LMA Browser extension, and authenticates using their LMA credentials. If the meeting app is supported by the LMA extension, the user's name, the meeting name, and active speaker names are automatically detected by the extension. If the meeting app is not supported by the extension, then the LMA user can manually type their name and the meeting topic - active speakers names will not be detected. 
+
+The LMA user chooses **Start Listening** on the LMA extension panel, and a secure web socket connection is established to the pre-configured LMA stack websocket URL, and the user's authentication token is validated. The LMA browser extension sends a START message to the websocket containing the meeting matadata (name, topic, etc), and starts streaming 2-channel audio from (1) the user's microphone, and (2) the incoming audio channel containing the voices of the other meeting participants. The extension monitors the meeting app to detect active speaker changes during the call, and sends that metadata also to the websocket, enabling LMA to label speech segments with the speaker's name.
+
+The websocket server running in AWS Fargate starts consuming the real time 2-channel audio fragments from the incoming websocket stream. The  audio is streamed to an Amazon Transcribe streaming session, and the transcription results are written in real time to Kinesis Data Streams.
+
+Each meeting processing session runs until the user chooses **Stop Listening** on the LMA extension panel, or ends the meeting and closes the tab. At the end of the call the function creates a stereo recording file in Amazon S3.
+
+An AWS Lambda function, the Call Event Processor, fed by Kinesis Data Streams, processes and optionally enriches meeting metadata and transcription segments. The Call Event Processor integrates with the Meeting Assist services. LMA agent assist is powered by Amazon Lex, Amazon Q Business, and Amazon Bedrock using the open source QnABot on AWS solution. The Call Event Processor also invokes the Transcript Summarization lambda when the call ends, to generate a summary of the call from the full transcript.
+
+The Call Event Processor function interfaces with AWS AppSync to persist changes (mutations) in DynamoDB and to send real-time updates to the LMA user's logged in web clients (conveniently opened by choosing the **Open in LMA** option shown in the browser extension.)
+
+The LMA web UI assets are hosted on Amazon S3 and served via CloudFront. Authentication is provided by Amazon Cognito. 
+
+When the user is authenticated, the web application establishes a secure GraphQL connection to the AWS AppSync API, and subscribes to receive real-time events such as new calls and call status changes for the meetings list page, and new or updated transcription segments and computed analytics for the meeting details page. When translation is enabled, the web application also interacts securely with Amazon Translate to translate the meeting transcription into the selected language.
+
+The entire processing flow, from ingested speech to live webpage updates, is event driven, and so the end-to-end latency is small—typically just a few seconds.
+
 
 ## Monitoring and troubleshooting
 
