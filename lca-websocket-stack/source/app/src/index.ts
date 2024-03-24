@@ -204,55 +204,60 @@ const onTextMessage = async (ws: WebSocket, data: string): Promise<void> => {
             console.log('Received END without having a call');
             return;
         }
-        await writeCallEndEvent(callMetaData);
-        if (socketData.writeRecordingStream && socketData.recordingFileSize) {
-            socketData.writeRecordingStream.end();
-            const header = createHeader(callMetaData, socketData.recordingFileSize);
-            const tempRecordingFilename = getTempRecordingFileName(callMetaData);
-            const wavRecordingFilename = getWavRecordingFileName(callMetaData);
-            const readStream = fs.createReadStream(path.join(LOCAL_TEMP_DIR,tempRecordingFilename));
-            const writeStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR,wavRecordingFilename ));
-            writeStream.write(header);
-            for await (const chunk of readStream) {
-                writeStream.write(chunk);
-            }
-            writeStream.end();
-
-            await writeToS3(tempRecordingFilename);
-            await writeToS3(wavRecordingFilename);
-            await deleteTempFile(path.join(LOCAL_TEMP_DIR,tempRecordingFilename));
-            await deleteTempFile(path.join(LOCAL_TEMP_DIR, wavRecordingFilename));
-
-            const url = new URL(RECORDING_FILE_PREFIX+wavRecordingFilename, `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com`);
-            const recordingUrl = url.href;
-            
-            const callEvent: CallRecordingEvent = {
-                EventType: 'ADD_S3_RECORDING_URL',
-                CallId: callMetaData.callId,
-                RecordingUrl: recordingUrl
-            };
-            await writeCallEvent(callEvent);
-        }
-        // onWsClose(ws, 1000);
-        if (socketData.audioInputStream) {
-            socketData.audioInputStream.end();
-            socketData.audioInputStream.destroy();
-        }
-        if (socketData) {
-            socketMap.delete(ws);
-        }
+        await endCall(ws, callMetaData, socketData);
     }
 };
 
-const onWsClose = (ws:WebSocket, code: number): void => {
+const onWsClose = async (ws:WebSocket, code: number): Promise<void> => {
     ws.close(code);
     const socketData = socketMap.get(ws);
     if (socketData) {
-        socketMap.delete(ws);
-        if (socketData.audioInputStream) {
-            socketData.audioInputStream.end();
-            socketData.audioInputStream.destroy();
+        await endCall(ws, undefined, socketData);
+    }
+};
+
+const endCall = async (ws: WebSocket, callMetaData: any, socketData: SocketCallData): Promise<void> => {
+    
+    if (callMetaData === undefined) {
+        callMetaData = socketData.callMetadata;
+    }
+
+    await writeCallEndEvent(callMetaData);
+    if (socketData.writeRecordingStream && socketData.recordingFileSize) {
+        socketData.writeRecordingStream.end();
+        const header = createHeader(callMetaData, socketData.recordingFileSize);
+        const tempRecordingFilename = getTempRecordingFileName(callMetaData);
+        const wavRecordingFilename = getWavRecordingFileName(callMetaData);
+        const readStream = fs.createReadStream(path.join(LOCAL_TEMP_DIR, tempRecordingFilename));
+        const writeStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR, wavRecordingFilename));
+        writeStream.write(header);
+        for await (const chunk of readStream) {
+            writeStream.write(chunk);
         }
+        writeStream.end();
+
+        await writeToS3(tempRecordingFilename);
+        await writeToS3(wavRecordingFilename);
+        await deleteTempFile(path.join(LOCAL_TEMP_DIR, tempRecordingFilename));
+        await deleteTempFile(path.join(LOCAL_TEMP_DIR, wavRecordingFilename));
+
+        const url = new URL(RECORDING_FILE_PREFIX + wavRecordingFilename, `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com`);
+        const recordingUrl = url.href;
+        
+        const callEvent: CallRecordingEvent = {
+            EventType: 'ADD_S3_RECORDING_URL',
+            CallId: callMetaData.callId,
+            RecordingUrl: recordingUrl
+        };
+        await writeCallEvent(callEvent);
+    }
+    // onWsClose(ws, 1000);
+    if (socketData.audioInputStream) {
+        socketData.audioInputStream.end();
+        socketData.audioInputStream.destroy();
+    }
+    if (socketData) {
+        socketMap.delete(ws);
     }
 };
 
