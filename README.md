@@ -27,21 +27,21 @@ Everything you need is provided as open source in our [GitHub repo TBD](link). A
 Here are some of the things it can do:
 
 - **Live transcription with speaker attribution** - powered by Amazon Transcribe's world class ASR models for low latency, high accuracy speech to text. You can easily teach it new vocabulary and domain specific language if needed using Transcribe's Custom Vocabulary and Custom Language model features - though the base models are so good that this is rarely needed.
-   <p align="left"><img src="./images/readme-transcription.png" alt="Transcription" width="200"/></p>
+   <p align="left"><img src="./images/readme-transcription.png" alt="Transcription" /></p>
 - **Live translation** - uses Amazon Translate to optionally show each segment of the conversation translated into your choice language from a selection of around 75 languages.
-  <p align="left"><img src="./images/readme-translation.png" alt="Translation" width="250"/></p>
+  <p align="left"><img src="./images/readme-translation.png" alt="Translation" /></p>
 - **Context aware meeting assistant "Q"** - uses Amazon Q business expert to provide answers from your trusted sources, using the live transcript as context for fact checking and follow-up questions. Saying *OK Q!*, or click the *Ask Q* button, or type your own question in the UI.
-  <p align="left"><img src="./images/readme-OK-Q.png" alt="OK Q" width="200"/></p>
+  <p align="left"><img src="./images/readme-OK-Q.png" alt="OK Q" /></p>
 - **Ad Hoc summaries of the meeting** - click a button on the UI to generate a summary on demand - very handy when someone joins late and needs to get caught up. The summaries are generated from the transcript by Amazon Bedrock. You can easily try different models and prompts. LMA also provides easy buttons for identifying the current meeting topic, and for generating a list of action items with owners and due dates. You can easily create your own custom prompts and corresponding buttons.
-  <p align="left"><img src="./images/readme-action-items.png" alt="Action Items" width="120"/></p>
+  <p align="left"><img src="./images/readme-action-items.png" alt="Action Items" /></p>
 - **Automated summary and insights** - when the meeting has ended, LMA automatically runs a set of LLM prompts on bedrock to summarize the meeting transcript and extract insights. Of course you can also easily customize these prompts too.
-  <p align="left"><img src="./images/readme-post-meeting-summaries.png" alt="Post Meeting Summaries" width="200"/></p>
+  <p align="left"><img src="./images/readme-post-meeting-summaries.png" alt="Post Meeting Summaries" /></p>
 - **Meeting Recording** - the audio is (optionally) stored for you so you can replay important sections on the meeting later.
-  <p align="left"><img src="./images/readme-recording.png" alt="recording" width="120"/></p>
+  <p align="left"><img src="./images/readme-recording.png" alt="recording" /></p>
 - **Inventory list of meetings** - LMA keeps track of all your meetings in a handy searchable list
-  <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" width="350"/></p>
+  <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" /></p>
 - **Browser extension captures audio and meeting metadata from popular meeting apps** - an easy to install browser extension captures meeting metadata and audio from you (your microphone) and others (from the meeting browser tab). Browsers supported: Chrome (Firefox coming soon). Meeting Apps supported: Zoom (Chime and Teams coming soon). *Standalone meeting apps don't work with LMA - instead launch your meetings in the browser.*
-  <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" width="150"/></p>
+  <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" /></p>
 
 ## Prerequisites
 
@@ -100,7 +100,7 @@ After you deploy the stack, you need to open the LMA web user interface and set 
 1. Open your web browser to the URL shown as CloudfrontEndpoint in the outputs.  
    You’re directed to the login page.
 
-     <img src="./images/readme-app-login.png" alt="App Login" width="150"/>
+     <img src="./images/readme-app-login.png" alt="App Login" />
 
 1. Open the email your received, at the email address you provided, with the subject “Welcome to Live Call Analytics!”  
 This email contains a generated temporary password that you can use to log in and create your own password. Your username is your email address.
