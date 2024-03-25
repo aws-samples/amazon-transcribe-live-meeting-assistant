@@ -177,7 +177,7 @@ The browser extension is the most convenient way to stream metadata and audio fr
 
    <img src="./images/readme-stream-audio.png" alt="Stream Audio" width="400"/>
 
-1. Choose the LMA UI tab again - your new meeting ID is listed showing the meeting 'In Progress'. Choose the meeting Id to open the details page, and watch the transcript of the incoming audio, attributed to the 'Other Participants' name that you entered. If you speak, you'll see the transcription of your own voice.
+1. Choose the LMA UI tab again - your new meeting ID is listed showing the meeting `In Progress`. Choose the meeting Id to open the details page, and watch the transcript of the incoming audio, attributed to the **Participant Name(s)** that you entered. If you speak, you'll see the transcription of your own voice.
 
    <img src="./images/readme-meetings-transcribe-video.png" alt="Meetings" width="400"/>
 
@@ -195,7 +195,7 @@ The following diagram shows the main architectural components and how they fit t
 
 The LMA user joins a meeting in their browser, and then enables the LMA Browser extension, and authenticates using their LMA credentials. If the meeting app is supported by the LMA extension, the user's name, the meeting name, and active speaker names are automatically detected by the extension. If the meeting app is not supported by the extension, then the LMA user can manually type their name and the meeting topic - active speakers names will not be detected. 
 
-The LMA user chooses **Start Listening** on the LMA extension panel, and a secure web socket connection is established to the pre-configured LMA stack websocket URL, and the user's authentication token is validated. The LMA browser extension sends a START message to the websocket containing the meeting matadata (name, topic, etc), and starts streaming 2-channel audio from (1) the user's microphone, and (2) the incoming audio channel containing the voices of the other meeting participants. The extension monitors the meeting app to detect active speaker changes during the call, and sends that metadata also to the websocket, enabling LMA to label speech segments with the speaker's name.
+The LMA user chooses **Start Listening** on the LMA extension panel, and a secure web socket connection is established to the pre-configured LMA stack websocket URL, and the user's authentication token is validated. The LMA browser extension sends a START message to the websocket containing the meeting metadata (name, topic, etc.), and starts streaming 2-channel audio from (1) the user's microphone, and (2) the incoming audio channel containing the voices of the other meeting participants. The extension monitors the meeting app to detect active speaker changes during the call, and sends that metadata also to the websocket, enabling LMA to label speech segments with the speaker's name.
 
 The websocket server running in AWS Fargate starts consuming the real time 2-channel audio fragments from the incoming websocket stream. The  audio is streamed to an Amazon Transcribe streaming session, and the transcription results are written in real time to Kinesis Data Streams.
 
@@ -221,8 +221,8 @@ Amazon Transcribe has a default limit of 25 concurrent transcription streams, wh
 LMA provides runtime monitoring and logs for each component using CloudWatch:
 
 - Websocket processing and transcribing Fargate task – On the [ECS Clusters console](https://us-east-1.console.aws.amazon.com/ecs/v2/clusters), open the `LMA-WEBSOCKETSTACK-xxxx-TranscribingCluster` function. Choose the **Tasks** tab and open the task page. Choose **Logs** and **View in CloudWatch** to inspect the websocket transcriber task logs.
-- Call Event Processor Lambda function – On the Lambda console, open the LCA-AISTACK-CallEventProcessor function. Choose the Monitor tab to see function metrics. Choose View logs in CloudWatch to inspect function logs.
-- AWS AppSync API – On the AWS AppSync console, open the CallAnalytics-LCAAPI. Choose Monitoring in the navigation pane to see API metrics. Choose View logs in CloudWatch to inspect AppSyncAPI logs.
+- Call Event Processor Lambda function – On the Lambda console, open the `LCA-AISTACK-CallEventProcessor` function. Choose the Monitor tab to see function metrics. Choose View logs in CloudWatch to inspect function logs.
+- AWS AppSync API – On the AWS AppSync console, open the `CallAnalytics-LCA` API. Choose Monitoring in the navigation pane to see API metrics. Choose View logs in CloudWatch to inspect AppSyncAPI logs.
 - For QnABot on AWS with Amazon Q for Meeting Assist, refer to the [Meeting Assist README](./lma-meetingassist-setup-stack/README.md), the [QnABot solution implementation guide](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/welcome.html) and the [QnaBot Amazon Q Business Expert Plugin README](https://github.com/aws-samples/qnabot-on-aws-plugin-samples/blob/develop/lambdas/qna_bot_qbusiness_lambdahook/README.md) for additional information.
 
 ## Cost assessment
