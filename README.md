@@ -6,11 +6,11 @@ _See [CHANGELOG](./CHANGELOG.md) for latest features and fixes._
 
 ## Introduction
 
-I'm sure you've experienced the challenge of taking notes during a meeting while still paying attention to the conversation. And the need to quickly fact-check something that's been said, or look up information to answer a question that's just been asked in the call. And sometimes your boss joins the meeting late, and pings you on chat for a quick 'catchup' summary. 
+I'm sure you've experienced the challenge of taking notes during a meeting while trying to keep paying attention to the conversation. And you've also experienced the need to quickly fact-check something that's been said, or to look up information to answer a question that's just been asked in the call. And sometimes your boss joins the meeting late, and pings you on chat for a quick 'catchup' summary. 
 
-Then are the times that everyone is talking in a language that's not your first language, and you'd love to have a live translation of what people are saying to make sure you're understanding correctly.
+Then there are the times that everyone is talking in a language that's not your first language, and you'd love to have a live translation of what people are saying to make sure you're understanding correctly.
 
-And, after the call is over, you usually want to capture a summary for your records, or to email to the participants, with a list of all the action items, owners, and due dates. 
+And, after the call is over, you usually want to capture a summary for your records or to email to the participants, with a list of all the action items, owners, and due dates. 
 
 All of this, and more, is now possible with our newest sample solution, Live Meeting Assistant (LMA). 
 
@@ -20,25 +20,25 @@ Here's a demo to whet your appetite: *(currently internal, on Broadcast)*
 
 ## Solution overview
 
-The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom for now, Chime, Teams coming), and uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, [Amazon Q business expert](https://aws.amazon.com/q/business-expert/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries. 
+The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom for now, Chime & Teams coming), and uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, [Amazon Q business expert](https://aws.amazon.com/q/business-expert/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries. 
 
 Everything you need is provided as open source in our [GitHub repo TBD](link). And it's easy to deploy in your AWS account - we will show you how. When you’re done, you’ll wonder how you ever managed without it!
 
 Here are some of the things it can do:
 
-- **Live transcription with speaker attribution** - powered by Amazon Transcribe's world class ASR models for low latency, high accuracy speech to text. You can easily teach it new vocabulary and domain specific language if needed using Transcribe's Custom Vocabulary and Custom Language model features - though the base models are so good that this is rarely needed.
+- **Live transcription with speaker attribution** - powered by Amazon Transcribe's world class ASR models for low latency, high accuracy speech to text. You can easily teach it new vocabulary and domain specific language if needed using Transcribe's Custom Vocabulary and Custom Language model features.
    <p align="left"><img src="./images/readme-transcription.png" alt="Transcription" /></p>
-- **Live translation** - uses Amazon Translate to optionally show each segment of the conversation translated into your choice language from a selection of around 75 languages.
+- **Live translation** - uses Amazon Translate to optionally show each segment of the conversation translated into your choice of language from a selection of around 75 languages.
   <p align="left"><img src="./images/readme-translation.png" alt="Translation" /></p>
-- **Context aware meeting assistant "Q"** - uses Amazon Q business expert to provide answers from your trusted sources, using the live transcript as context for fact checking and follow-up questions. Saying *OK Q!*, or click the *Ask Q* button, or type your own question in the UI.
+- **Context aware meeting assistant "Q"** - uses Amazon Q business expert to provide answers from your trusted sources, using the live transcript as context for fact checking and follow-up questions. Say *OK Q!*, or click the *Ask Q* button, or type your own question in the UI.
   <p align="left"><img src="./images/readme-OK-Q.png" alt="OK Q" /></p>
-- **Ad Hoc summaries of the meeting** - click a button on the UI to generate a summary on demand - very handy when someone joins late and needs to get caught up. The summaries are generated from the transcript by Amazon Bedrock. You can easily try different models and prompts. LMA also provides easy buttons for identifying the current meeting topic, and for generating a list of action items with owners and due dates. You can easily create your own custom prompts and corresponding buttons.
+- **Ad Hoc summaries of the meeting** - click a button on the UI to generate a summary on demand - very handy when someone joins late and needs to get caught up. The summaries are generated from the transcript by Amazon Bedrock. LMA also provides easy buttons for identifying the current meeting topic, and for generating a list of action items with owners and due dates. You can easily create your own custom prompts and corresponding buttons.
   <p align="left"><img src="./images/readme-action-items.png" alt="Action Items" /></p>
-- **Automated summary and insights** - when the meeting has ended, LMA automatically runs a set of LLM prompts on bedrock to summarize the meeting transcript and extract insights. Of course you can also easily customize these prompts too.
+- **Automated summary and insights** - when the meeting has ended, LMA automatically runs a set of LLM prompts on Amazon Bedrock to summarize the meeting transcript and extract insights. Of course, you can also easily customize these prompts too.
   <p align="left"><img src="./images/readme-post-meeting-summaries.png" alt="Post Meeting Summaries" /></p>
 - **Meeting Recording** - the audio is (optionally) stored for you so you can replay important sections on the meeting later.
   <p align="left"><img src="./images/readme-recording.png" alt="recording" /></p>
-- **Inventory list of meetings** - LMA keeps track of all your meetings in a handy searchable list
+- **Inventory list of meetings** - LMA keeps track of all your meetings in a handy searchable list.
   <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" /></p>
 - **Browser extension captures audio and meeting metadata from popular meeting apps** - an easy to install browser extension captures meeting metadata and audio from you (your microphone) and others (from the meeting browser tab). Browsers supported: Chrome (Firefox coming soon). Meeting Apps supported: Zoom (Chime and Teams coming soon). *Standalone meeting apps don't work with LMA - instead launch your meetings in the browser.*
   <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" /></p>
