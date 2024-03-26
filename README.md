@@ -6,13 +6,13 @@ _See [CHANGELOG](./CHANGELOG.md) for latest features and fixes._
 
 ## Introduction
 
-I'm sure you've experienced the challenge of taking notes during a meeting while trying to keep paying attention to the conversation. And you've also experienced the need to quickly fact-check something that's been said, or to look up information to answer a question that's just been asked in the call. And sometimes your boss joins the meeting late, and pings you on chat for a quick 'catchup' summary. 
+I’m sure you’ve experienced the challenge of taking notes during a meeting while trying to pay attention to the conversation. And you’ve also wanted to quickly fact-check something that’s been said, or look up the answer to a question that’s just been asked in the call. And sometimes your boss joins the meeting late, and pings you on chat for a quick ‘catchup’ summary. 
 
-Then there are the times that everyone is talking in a language that's not your first language, and you'd love to have a live translation of what people are saying to make sure you're understanding correctly.
+Then there are the times that others are talking in a language that’s not your first language, and you’d love to have a live translation of what people are saying to make sure you understand correctly.
 
-And, after the call is over, you usually want to capture a summary for your records or to email to the participants, with a list of all the action items, owners, and due dates. 
+And after the call is over you usually want to capture a summary for your records, or to send to the participants, with a list of all the action items, owners, and due dates.
 
-All of this, and more, is now possible with our newest sample solution, Live Meeting Assistant (LMA). 
+All of this, and more, is now possible with our newest sample solution, Live Meeting Assistant (LMA).
 
 Here's a demo to whet your appetite: *(currently internal, on Broadcast)*
 
@@ -20,7 +20,7 @@ Here's a demo to whet your appetite: *(currently internal, on Broadcast)*
 
 ## Solution overview
 
-The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom for now, Chime & Teams coming), and uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, [Amazon Q business expert](https://aws.amazon.com/q/business-expert/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries. 
+The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom for now, Chime & Teams coming soon), and uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, [Amazon Q business expert](https://aws.amazon.com/q/business-expert/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries. 
 
 Everything you need is provided as open source in our [GitHub repo TBD](link). And it's easy to deploy in your AWS account - we will show you how. When you’re done, you’ll wonder how you ever managed without it!
 
@@ -42,6 +42,8 @@ Here are some of the things it can do:
   <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" /></p>
 - **Browser extension captures audio and meeting metadata from popular meeting apps** - an easy to install browser extension captures meeting metadata and audio from you (your microphone) and others (from the meeting browser tab). Browsers supported: Chrome (Firefox coming soon). Meeting Apps supported: Zoom (Chime and Teams coming soon). *Standalone meeting apps don't work with LMA - instead launch your meetings in the browser.*
   <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" /></p>
+
+*Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited. Notify all other meeting participants and obtain their permission before starting LMA meeting streaming.*
 
 ## Prerequisites
 
@@ -65,9 +67,9 @@ Complete the following steps to launch the CloudFormation stack:
 1. Log in to the [AWS Management Console](https://console.aws.amazon.com/).
 1. Choose one of the following **Launch Stack** buttons for your desired AWS Region to open the AWS CloudFormation console and create a new stack.  
 
-   Region | Easy Deploy Button | Template URL - use to upgrade existing stack to a new release  
-   --- | --- | ---
-   N. Virginia (us-east-1) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/bobs-artifacts-us-east-1/lma-prerelease-share/lma-main.yaml&stackName=LMA) | https://s3.us-east-1.amazonaws.com/bobs-artifacts-us-east-1/lma-prerelease-share/lma-main.yaml
+   Region | Easy Deploy Button  
+   --- | --- 
+   N. Virginia (us-east-1) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/bobs-artifacts-us-east-1/lma-prerelease-share/lma-main.yaml&stackName=LMA) 
 
 
 1. For **Stack name**, use the default value, `LMA`.
@@ -150,7 +152,9 @@ For the best meeting streaming experience, install the LMA browser plugin - curr
    The LMA extension automatically detects that Zoom is running in the browser tab, and populates your name and the meeting name. 
 
    <img src="./images/readme-browser-extension-start.png" alt="Browser Extension Start" width="500"/>
-   
+
+1.	*Tell others on the call that you are about to start recording the call using LMA and obtain their permission. Do not proceed if participants object.*
+
 1. Select **Start Listening**.  Choose **Allow** on the popup asking you to share the browser tab.
 
     The LMA extension automatically detects and displays the active speaker on the call. If you are alone in the meeting, invite some friends to join, and observe that the names they used to join the call are displayed in the extension when they speak, and attributed to their words in the LMA transcript.
@@ -183,7 +187,7 @@ The browser extension is the most convenient way to stream metadata and audio fr
 
    <img src="./images/readme-video-transcript.png" alt="Transript" width="300"/>
 
-Use the **Stream Audio** feature to stream from any softphone app, meeting app, or any other streaming audio playing in the browser, along with your own audio captured from your selected microphone.
+Use the **Stream Audio** feature to stream from any softphone app, meeting app, or any other streaming audio playing in the browser, along with your own audio captured from your selected microphone. *Always obtain permission from others before recording them using LMA, or any other recording application.*
 
 ## Processing flow overview
 
@@ -195,7 +199,7 @@ The following diagram shows the main architectural components and how they fit t
 
 The LMA user joins a meeting in their browser, and then enables the LMA Browser extension, and authenticates using their LMA credentials. If the meeting app is supported by the LMA extension, the user's name, the meeting name, and active speaker names are automatically detected by the extension. If the meeting app is not supported by the extension, then the LMA user can manually type their name and the meeting topic - active speakers names will not be detected. 
 
-The LMA user chooses **Start Listening** on the LMA extension panel, and a secure web socket connection is established to the pre-configured LMA stack websocket URL, and the user's authentication token is validated. The LMA browser extension sends a START message to the websocket containing the meeting metadata (name, topic, etc.), and starts streaming 2-channel audio from (1) the user's microphone, and (2) the incoming audio channel containing the voices of the other meeting participants. The extension monitors the meeting app to detect active speaker changes during the call, and sends that metadata also to the websocket, enabling LMA to label speech segments with the speaker's name.
+After getting permission from other participants, the LMA user chooses **Start Listening** on the LMA extension panel, and a secure web socket connection is established to the pre-configured LMA stack websocket URL, and the user's authentication token is validated. The LMA browser extension sends a START message to the websocket containing the meeting metadata (name, topic, etc.), and starts streaming 2-channel audio from (1) the user's microphone, and (2) the incoming audio channel containing the voices of the other meeting participants. The extension monitors the meeting app to detect active speaker changes during the call, and sends that metadata also to the websocket, enabling LMA to label speech segments with the speaker's name.
 
 The websocket server running in AWS Fargate starts consuming the real time 2-channel audio fragments from the incoming websocket stream. The  audio is streamed to an Amazon Transcribe streaming session, and the transcription results are written in real time to Kinesis Data Streams.
 
