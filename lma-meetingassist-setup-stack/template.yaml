@@ -29,24 +29,48 @@ Parameters:
     Type: String
     Description: AISTACK Stack ARN
 
-  # Optional: empty if user configured 'Bring your own bot' in main stack
   QNABOTSTACK:
     Default: ''
     Type: String
     Description: QNABOT Stack ARN  
 
+  MeetingAssistService:
+    Default: 'BEDROCK_KNOWLEDGE_BASE'
+    Type: String
+    AllowedValues:
+      - 'BEDROCK_KNOWLEDGE_BASE'
+      - 'AMAZON_Q_BUSINESS_EXPERT'
+    Description: Choose which knowledge base / LLM service to use 
+
+  BedrockKnowledgeBaseID:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
+    Description: >
+      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the *id* (not name) of an existing Bedrock Knowledge Base to be used for Meeting Assist bot."
+
+  BedrockKnowledgeBaseModelID:
+    Type: String
+    Default: 'anthropic.claude-3-sonnet-20240229-v1:0'
+    AllowedValues: 
+      - 'anthropic.claude-instant-v1'
+      - 'anthropic.claude-3-sonnet-20240229-v1:0'
+    Description: >-
+      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, select a Bedrock LLM model from the list."
+
   AmazonQAppId:
     Type: String
+    Default: ''
     AllowedPattern: '^(|[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})$'
     Description: >
-      Provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot."
+      If MeetingAssistService is AMAZON_Q_BUSINESS_EXPERT, provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot."
 
   AmazonQUserId:
     Type: String
+    Default: ''
     Description: >-
-      Email address of admin user (e.g. jdoe@example.com) used for the API and web UI.
-      An initial temporary password will be automatically sent to this user via email.
-    AllowedPattern: '^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$'
+      If ASSISTANT is AMAZON_Q_BUSINESS_EXPERT, provide an email address to use as the proxy user (e.g. jdoe@example.com)
+    AllowedPattern: '^(|[\w.+-]+@([\w-]+\.)+[\w-]{2,6})$'
 
   # Required
   LexMeetingAssistBotId:
@@ -141,6 +165,8 @@ Parameters:
 Conditions:
   ShouldConfigureQnabot: !Not [!Equals [!Ref QNABOTSTACK, '']]
   HasSummaryLambdaFunction: !Not [!Equals [!Ref TranscriptSummaryFunctionArn, '']]
+  ShouldConfigureBedrockKB: !Equals [!Ref MeetingAssistService, 'BEDROCK_KNOWLEDGE_BASE']
+  ShouldConfigureQBusiness: !Equals [!Ref MeetingAssistService, 'AMAZON_Q_BUSINESS_EXPERT']
 
 Resources:
 
@@ -220,6 +246,7 @@ Resources:
             reason: Managed policy already provides access to CloudWatch logs.
 
   QNAQBusinessFunctionRole:
+    Condition: ShouldConfigureQBusiness
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -257,6 +284,7 @@ Resources:
                 Resource: !Ref FetchTranscriptFunctionArn
 
   QNAQBusinessFunction:
+    Condition: ShouldConfigureQBusiness
     Type: "AWS::Lambda::Function"
     Properties:
       # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
@@ -279,7 +307,74 @@ Resources:
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
 
-  LambdaRole:
+  QNABedrockKnowledgeBaseFunctionRole:
+    Condition: ShouldConfigureBedrockKB
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:Retrieve"
+                  - "bedrock:RetrieveAndGenerate"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:912625584728:knowledge-base/${BedrockKnowledgeBaseID}"
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockKnowledgeBaseModelID}"
+          PolicyName: QBusinessPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: "arn:aws:s3:::*-importbucket-*/*"
+          PolicyName: S3ImportBucketPolicy
+        - PolicyName: InlinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: lambda:InvokeFunction
+                Effect: Allow
+                Resource: !Ref FetchTranscriptFunctionArn
+
+  QNABedrockKnowledgeBaseFunction:
+    Condition: ShouldConfigureBedrockKB
+    Type: "AWS::Lambda::Function"
+    Properties:
+      # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
+      FunctionName: !Sub "QNA-${LMAStackName}-BedrockKB-LambdaHook"
+      Role: !GetAtt QNABedrockKnowledgeBaseFunctionRole.Arn
+      Handler: qna_bedrockkb_lambdahook_function.handler
+      Runtime: python3.11
+      Timeout: 900
+      Environment:
+        Variables:
+          FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
+          KB_ID: !Ref BedrockKnowledgeBaseID
+          MODEL_ARN: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockKnowledgeBaseModelID}"
+      Code: ./src
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+
+  SetupFunctionRole:
     Type: "AWS::IAM::Role"
     Properties:
       AssumeRolePolicyDocument:
@@ -366,7 +461,7 @@ Resources:
   SetupFunction:
     Type: "AWS::Lambda::Function"
     Properties:
-      Role: !GetAtt LambdaRole.Arn
+      Role: !GetAtt SetupFunctionRole.Arn
       Handler: setup_function.handler
       Runtime: python3.11
       Timeout: 900
@@ -394,7 +489,10 @@ Resources:
       LexMeetingAssistIdentityPoolId: !Ref LexMeetingAssistIdentityPoolId
       QnaMeetingAssistDemoJson: !Ref QnaMeetingAssistDemoJson
       QNASummarizeCallFunction: !Ref QNASummarizeCallFunction
-      QNAQBusinessFunction: !Ref QNAQBusinessFunction
+      QNAMeetingAssistLambdaHookFunction: !If
+      - ShouldConfigureQBusiness
+      - !Ref QNAQBusinessFunction
+      - !Ref QNABedrockKnowledgeBaseFunction
       QnaBotSettings: !Ref QnaBotSettings
       # Changes to Params below force MeetingAssist Setup to execute.
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
