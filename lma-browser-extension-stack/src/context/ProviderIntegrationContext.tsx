@@ -130,12 +130,16 @@ function IntegrationProvider({ children }: any) {
     
     setCurrentCall(callMetadata);
    
-    if (chrome.runtime) {
-      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-      if (tab.id) {
-        chrome.tabs.sendMessage(tab.id, { action: "StartTranscription" });
-        // We send a message here, but not actually start the stream until we receive a new message with the sample rate.
+    try {
+      if (chrome.runtime) {
+        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        if (tab.id) {
+          const response = await chrome.tabs.sendMessage(tab.id, { action: "StartTranscription" });
+          // We send a message here, but not actually start the stream until we receive a new message with the sample rate.
+        }
       }
+    } catch (exception) {
+      alert("If you recently installed or update LMA, please refresh the browser's page and try again.");
     }
   }, [setShouldConnect, setCurrentCall]);
 

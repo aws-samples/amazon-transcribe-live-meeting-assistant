@@ -34,6 +34,13 @@ function Capture() {
   }, [topic, agentName]);
 
   const startListening = useCallback(() => {
+
+    const shouldStart = confirm(settings.recordingDisclaimer);
+
+    if (shouldStart) {
+      startTranscription(agentName, topic);
+    }
+
     /*let foundError = false;
     if (agentName.length < 2) {
       setNameErrorText("Name required");
@@ -44,10 +51,10 @@ function Capture() {
     }
     if (foundError) {
       return;
-    } else {*/
+    } else {
       startTranscription(agentName, topic);
-    //}
-  }, [agentName, topic, startTranscription]);
+    }*/
+  }, [agentName, topic, startTranscription, settings]);
 
   const stopListening = useCallback(() => {
     stopTranscription();

@@ -31,6 +31,13 @@ Parameters:
     Description: >
       A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'Hey Q' or 'OK Q'
 
+  RecordingDisclaimer:
+    Type: String
+    Default: >
+      Disclaimer: By clicking the 'Start Listening' button, you acknowledge that you are responsible for ensuring compliance with all applicable laws and regulations regarding the recording and/or transcribing of conversations. This includes obtaining consent from all participants, where required. The use of this software for unlawful or unethical purposes is strictly prohibited. Recordings may capture sensitive or confidential information, which you are solely responsible for handling and protecting appropriately.
+    Description: >
+      Disclaimer used for the extension message popup
+
   S3BucketName:
     Type: String
     Description: >
@@ -250,6 +257,7 @@ Metadata:
         Parameters:
           - MeetingAssistExistingQApplicationId
           - AssistantWakePhraseRegEx
+          - RecordingDisclaimer
       - Label:
           default: Amazon S3 Configuration
         Parameters:
@@ -633,6 +641,7 @@ Resources:
         WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         SourceCodeLocation: <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>
+        RecordingDisclaimer: !Ref RecordingDisclaimer
 
 Outputs:
   ApplicationCloudfrontEndpoint:

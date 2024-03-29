@@ -1,10 +1,11 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 
 type Settings = {
   wssEndpoint: string,
   clientId: string,
   cognitoDomain: string,
-  cloudfrontEndpoint:string
+  cloudfrontEndpoint: string,
+  recordingDisclaimer: string
 }
 
 const initialSettings = {} as Settings;
