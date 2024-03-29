@@ -34,7 +34,7 @@ Parameters:
   RecordingDisclaimer:
     Type: String
     Default: >
-      Disclaimer: By clicking the 'Start Listening' button, you acknowledge that you are responsible for ensuring compliance with all applicable laws and regulations regarding the recording and/or transcribing of conversations. This includes obtaining consent from all participants, where required. The use of this software for unlawful or unethical purposes is strictly prohibited. Recordings may capture sensitive or confidential information, which you are solely responsible for handling and protecting appropriately.
+      Disclaimer: By clicking the 'Start Listening' button, you acknowledge that you are responsible for ensuring compliance with all applicable laws and regulations regarding the recording and/or transcribing of conversations. This includes obtaining consent from all participants, where required. Recordings may capture sensitive or confidential information, which you are solely responsible for handling and protecting appropriately.
     Description: >
       Disclaimer used for the extension message popup
 
@@ -526,6 +526,7 @@ Resources:
       Parameters:
         LCAStackName: !Ref AWS::StackName
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
+        RecordingDisclaimer: !Ref RecordingDisclaimer
         RecordingsBucketRetentionDays: !Ref RecordingsBucketRetentionDays
         EnableVoiceToneAnalysis: 'false'
         CallAudioSource: 'Genesys Cloud Audiohook Web Socket'
