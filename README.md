@@ -6,13 +6,13 @@ _See [CHANGELOG](./CHANGELOG.md) for latest features and fixes._
 
 ## Introduction
 
-I'm sure you've experienced the challenge of taking notes during a meeting while still paying attention to the conversation. And the need to quickly fact-check something that's been said, or look up information to answer a question that's just been asked in the call. And sometimes your boss joins the meeting late, and pings you on chat for a quick 'catchup' summary. 
+I’m sure you’ve experienced the challenge of taking notes during a meeting while trying to pay attention to the conversation. And you’ve also wanted to quickly fact-check something that’s been said, or look up the answer to a question that’s just been asked in the call. And sometimes your boss joins the meeting late, and pings you on chat for a quick ‘catchup’ summary. 
 
-Then are the times that everyone is talking in a language that's not your first language, and you'd love to have a live translation of what people are saying to make sure you're understanding correctly.
+Then there are the times that others are talking in a language that’s not your first language, and you’d love to have a live translation of what people are saying to make sure you understand correctly.
 
-And, after the call is over, you usually want to capture a summary for your records, or to email to the participants, with a list of all the action items, owners, and due dates. 
+And after the call is over you usually want to capture a summary for your records, or to send to the participants, with a list of all the action items, owners, and due dates.
 
-All of this, and more, is now possible with our newest sample solution, Live Meeting Assistant (LMA). 
+All of this, and more, is now possible with our newest sample solution, Live Meeting Assistant (LMA).
 
 Here's a demo to whet your appetite: *(currently internal, on Broadcast)*
 
@@ -20,28 +20,30 @@ Here's a demo to whet your appetite: *(currently internal, on Broadcast)*
 
 ## Solution overview
 
-The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom for now, Chime, Teams coming), and uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, [Amazon Q business expert](https://aws.amazon.com/q/business-expert/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries. 
+The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom for now, Chime & Teams coming soon), and uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, [Amazon Q business expert](https://aws.amazon.com/q/business-expert/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries. 
 
 Everything you need is provided as open source in our [GitHub repo TBD](link). And it's easy to deploy in your AWS account - we will show you how. When you’re done, you’ll wonder how you ever managed without it!
 
 Here are some of the things it can do:
 
-- **Live transcription with speaker attribution** - powered by Amazon Transcribe's world class ASR models for low latency, high accuracy speech to text. You can easily teach it new vocabulary and domain specific language if needed using Transcribe's Custom Vocabulary and Custom Language model features - though the base models are so good that this is rarely needed.
-   <p align="left"><img src="./images/readme-transcription.png" alt="Transcription" width="200"/></p>
-- **Live translation** - uses Amazon Translate to optionally show each segment of the conversation translated into your choice language from a selection of around 75 languages.
-  <p align="left"><img src="./images/readme-translation.png" alt="Translation" width="250"/></p>
-- **Context aware meeting assistant "Q"** - uses Amazon Q business expert to provide answers from your trusted sources, using the live transcript as context for fact checking and follow-up questions. Saying *OK Q!*, or click the *Ask Q* button, or type your own question in the UI.
-  <p align="left"><img src="./images/readme-OK-Q.png" alt="OK Q" width="200"/></p>
-- **Ad Hoc summaries of the meeting** - click a button on the UI to generate a summary on demand - very handy when someone joins late and needs to get caught up. The summaries are generated from the transcript by Amazon Bedrock. You can easily try different models and prompts. LMA also provides easy buttons for identifying the current meeting topic, and for generating a list of action items with owners and due dates. You can easily create your own custom prompts and corresponding buttons.
-  <p align="left"><img src="./images/readme-action-items.png" alt="Action Items" width="120"/></p>
-- **Automated summary and insights** - when the meeting has ended, LMA automatically runs a set of LLM prompts on bedrock to summarize the meeting transcript and extract insights. Of course you can also easily customize these prompts too.
-  <p align="left"><img src="./images/readme-post-meeting-summaries.png" alt="Post Meeting Summaries" width="200"/></p>
+- **Live transcription with speaker attribution** - powered by Amazon Transcribe's world class ASR models for low latency, high accuracy speech to text. You can easily teach it new vocabulary and domain specific language if needed using Transcribe's Custom Vocabulary and Custom Language model features.
+   <p align="left"><img src="./images/readme-transcription.png" alt="Transcription" /></p>
+- **Live translation** - uses Amazon Translate to optionally show each segment of the conversation translated into your choice of language from a selection of around 75 languages.
+  <p align="left"><img src="./images/readme-translation.png" alt="Translation" /></p>
+- **Context aware meeting assistant "Q"** - uses Amazon Q business expert to provide answers from your trusted sources, using the live transcript as context for fact checking and follow-up questions. Say *OK Q!*, or click the *Ask Q* button, or type your own question in the UI.
+  <p align="left"><img src="./images/readme-OK-Q.png" alt="OK Q" /></p>
+- **Ad Hoc summaries of the meeting** - click a button on the UI to generate a summary on demand - very handy when someone joins late and needs to get caught up. The summaries are generated from the transcript by Amazon Bedrock. LMA also provides easy buttons for identifying the current meeting topic, and for generating a list of action items with owners and due dates. You can easily create your own custom prompts and corresponding buttons.
+  <p align="left"><img src="./images/readme-action-items.png" alt="Action Items" /></p>
+- **Automated summary and insights** - when the meeting has ended, LMA automatically runs a set of LLM prompts on Amazon Bedrock to summarize the meeting transcript and extract insights. Of course, you can also easily customize these prompts too.
+  <p align="left"><img src="./images/readme-post-meeting-summaries.png" alt="Post Meeting Summaries" /></p>
 - **Meeting Recording** - the audio is (optionally) stored for you so you can replay important sections on the meeting later.
-  <p align="left"><img src="./images/readme-recording.png" alt="recording" width="120"/></p>
-- **Inventory list of meetings** - LMA keeps track of all your meetings in a handy searchable list
-  <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" width="350"/></p>
+  <p align="left"><img src="./images/readme-recording.png" alt="recording" /></p>
+- **Inventory list of meetings** - LMA keeps track of all your meetings in a handy searchable list.
+  <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" /></p>
 - **Browser extension captures audio and meeting metadata from popular meeting apps** - an easy to install browser extension captures meeting metadata and audio from you (your microphone) and others (from the meeting browser tab). Browsers supported: Chrome (Firefox coming soon). Meeting Apps supported: Zoom (Chime and Teams coming soon). *Standalone meeting apps don't work with LMA - instead launch your meetings in the browser.*
-  <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" width="150"/></p>
+  <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" /></p>
+
+*Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited. Notify all other meeting participants and obtain their permission before starting LMA meeting streaming.*
 
 ## Prerequisites
 
@@ -65,9 +67,9 @@ Complete the following steps to launch the CloudFormation stack:
 1. Log in to the [AWS Management Console](https://console.aws.amazon.com/).
 1. Choose one of the following **Launch Stack** buttons for your desired AWS Region to open the AWS CloudFormation console and create a new stack.  
 
-   Region | Easy Deploy Button | Template URL - use to upgrade existing stack to a new release  
-   --- | --- | ---
-   N. Virginia (us-east-1) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/bobs-artifacts-us-east-1/lma-prerelease-share/lma-main.yaml&stackName=LMA) | https://s3.us-east-1.amazonaws.com/bobs-artifacts-us-east-1/lma-prerelease-share/lma-main.yaml
+   Region | Easy Deploy Button  
+   --- | --- 
+   N. Virginia (us-east-1) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/bobs-artifacts-us-east-1/lma-prerelease-share/lma-main.yaml&stackName=LMA) 
 
 
 1. For **Stack name**, use the default value, `LMA`.
@@ -100,7 +102,7 @@ After you deploy the stack, you need to open the LMA web user interface and set 
 1. Open your web browser to the URL shown as CloudfrontEndpoint in the outputs.  
    You’re directed to the login page.
 
-     <img src="./images/readme-app-login.png" alt="App Login" width="150"/>
+     <img src="./images/readme-app-login.png" alt="App Login" />
 
 1. Open the email your received, at the email address you provided, with the subject “Welcome to Live Call Analytics!”  
 This email contains a generated temporary password that you can use to log in and create your own password. Your username is your email address.
@@ -150,7 +152,9 @@ For the best meeting streaming experience, install the LMA browser plugin - curr
    The LMA extension automatically detects that Zoom is running in the browser tab, and populates your name and the meeting name. 
 
    <img src="./images/readme-browser-extension-start.png" alt="Browser Extension Start" width="500"/>
-   
+
+1.	*Tell others on the call that you are about to start recording the call using LMA and obtain their permission. Do not proceed if participants object.*
+
 1. Select **Start Listening**.  Choose **Allow** on the popup asking you to share the browser tab.
 
     The LMA extension automatically detects and displays the active speaker on the call. If you are alone in the meeting, invite some friends to join, and observe that the names they used to join the call are displayed in the extension when they speak, and attributed to their words in the LMA transcript.
@@ -177,13 +181,13 @@ The browser extension is the most convenient way to stream metadata and audio fr
 
    <img src="./images/readme-stream-audio.png" alt="Stream Audio" width="400"/>
 
-1. Choose the LMA UI tab again - your new meeting ID is listed showing the meeting 'In Progress'. Choose the meeting Id to open the details page, and watch the transcript of the incoming audio, attributed to the 'Other Participants' name that you entered. If you speak, you'll see the transcription of your own voice.
+1. Choose the LMA UI tab again - your new meeting ID is listed showing the meeting `In Progress`. Choose the meeting Id to open the details page, and watch the transcript of the incoming audio, attributed to the **Participant Name(s)** that you entered. If you speak, you'll see the transcription of your own voice.
 
    <img src="./images/readme-meetings-transcribe-video.png" alt="Meetings" width="400"/>
 
    <img src="./images/readme-video-transcript.png" alt="Transript" width="300"/>
 
-Use the **Stream Audio** feature to stream from any softphone app, meeting app, or any other streaming audio playing in the browser, along with your own audio captured from your selected microphone.
+Use the **Stream Audio** feature to stream from any softphone app, meeting app, or any other streaming audio playing in the browser, along with your own audio captured from your selected microphone. *Always obtain permission from others before recording them using LMA, or any other recording application.*
 
 ## Processing flow overview
 
@@ -191,7 +195,26 @@ How did LMA transcribe and analyze your meeting? Let’s take a quick look at ho
 
 The following diagram shows the main architectural components and how they fit together at a high level.
 
-TBC
+   <img src="./images/lma-architecture.png" alt="LMA Architecture"/>
+
+The LMA user joins a meeting in their browser, and then enables the LMA Browser extension, and authenticates using their LMA credentials. If the meeting app is supported by the LMA extension, the user's name, the meeting name, and active speaker names are automatically detected by the extension. If the meeting app is not supported by the extension, then the LMA user can manually type their name and the meeting topic - active speakers names will not be detected. 
+
+After getting permission from other participants, the LMA user chooses **Start Listening** on the LMA extension panel, and a secure web socket connection is established to the pre-configured LMA stack websocket URL, and the user's authentication token is validated. The LMA browser extension sends a START message to the websocket containing the meeting metadata (name, topic, etc.), and starts streaming 2-channel audio from (1) the user's microphone, and (2) the incoming audio channel containing the voices of the other meeting participants. The extension monitors the meeting app to detect active speaker changes during the call, and sends that metadata also to the websocket, enabling LMA to label speech segments with the speaker's name.
+
+The websocket server running in AWS Fargate starts consuming the real time 2-channel audio fragments from the incoming websocket stream. The  audio is streamed to an Amazon Transcribe streaming session, and the transcription results are written in real time to Kinesis Data Streams.
+
+Each meeting processing session runs until the user chooses **Stop Listening** on the LMA extension panel, or ends the meeting and closes the tab. At the end of the call the function creates a stereo recording file in Amazon S3.
+
+An AWS Lambda function, the Call Event Processor, fed by Kinesis Data Streams, processes and optionally enriches meeting metadata and transcription segments. The Call Event Processor integrates with the Meeting Assist services. LMA agent assist is powered by Amazon Lex, Amazon Q Business, and Amazon Bedrock using the open source QnABot on AWS solution. The Call Event Processor also invokes the Transcript Summarization lambda when the call ends, to generate a summary of the call from the full transcript.
+
+The Call Event Processor function interfaces with AWS AppSync to persist changes (mutations) in DynamoDB and to send real-time updates to the LMA user's logged in web clients (conveniently opened by choosing the **Open in LMA** option shown in the browser extension.)
+
+The LMA web UI assets are hosted on Amazon S3 and served via CloudFront. Authentication is provided by Amazon Cognito. 
+
+When the user is authenticated, the web application establishes a secure GraphQL connection to the AWS AppSync API, and subscribes to receive real-time events such as new calls and call status changes for the meetings list page, and new or updated transcription segments and computed analytics for the meeting details page. When translation is enabled, the web application also interacts securely with Amazon Translate to translate the meeting transcription into the selected language.
+
+The entire processing flow, from ingested speech to live webpage updates, is event driven, and so the end-to-end latency is small—typically just a few seconds.
+
 
 ## Monitoring and troubleshooting
 
@@ -202,8 +225,8 @@ Amazon Transcribe has a default limit of 25 concurrent transcription streams, wh
 LMA provides runtime monitoring and logs for each component using CloudWatch:
 
 - Websocket processing and transcribing Fargate task – On the [ECS Clusters console](https://us-east-1.console.aws.amazon.com/ecs/v2/clusters), open the `LMA-WEBSOCKETSTACK-xxxx-TranscribingCluster` function. Choose the **Tasks** tab and open the task page. Choose **Logs** and **View in CloudWatch** to inspect the websocket transcriber task logs.
-- Call Event Processor Lambda function – On the Lambda console, open the LCA-AISTACK-CallEventProcessor function. Choose the Monitor tab to see function metrics. Choose View logs in CloudWatch to inspect function logs.
-- AWS AppSync API – On the AWS AppSync console, open the CallAnalytics-LCAAPI. Choose Monitoring in the navigation pane to see API metrics. Choose View logs in CloudWatch to inspect AppSyncAPI logs.
+- Call Event Processor Lambda function – On the Lambda console, open the `LCA-AISTACK-CallEventProcessor` function. Choose the Monitor tab to see function metrics. Choose View logs in CloudWatch to inspect function logs.
+- AWS AppSync API – On the AWS AppSync console, open the `CallAnalytics-LCA` API. Choose Monitoring in the navigation pane to see API metrics. Choose View logs in CloudWatch to inspect AppSyncAPI logs.
 - For QnABot on AWS with Amazon Q for Meeting Assist, refer to the [Meeting Assist README](./lma-meetingassist-setup-stack/README.md), the [QnABot solution implementation guide](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/welcome.html) and the [QnaBot Amazon Q Business Expert Plugin README](https://github.com/aws-samples/qnabot-on-aws-plugin-samples/blob/develop/lambdas/qna_bot_qbusiness_lambdahook/README.md) for additional information.
 
 ## Cost assessment
