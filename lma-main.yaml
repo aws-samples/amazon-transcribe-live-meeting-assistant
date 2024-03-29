@@ -36,9 +36,9 @@ Parameters:
 
   BedrockKnowledgeBaseModelID:
     Type: String
-    Default: 'anthropic.claude-instant-v1'
+    Default: 'anthropic.claude-3-sonnet-20240229-v1:0'
     AllowedValues: 
-      - 'anthropic.claude-instant-v1'
+      - 'anthropic.claude-haiku-coming-soon'
       - 'anthropic.claude-3-sonnet-20240229-v1:0'
     Description: >-
       If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, select a Bedrock LLM model from the list."
@@ -53,7 +53,7 @@ Parameters:
     Type: String
     Default: "(OK|Okay)[.,! ]*Assistant[.,! ]+"
     Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Q'
+      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant!'
 
   S3BucketName:
     Type: String
@@ -570,6 +570,8 @@ Resources:
       EMBEDDINGS_TEXT_PASSAGE_SCORE_THRESHOLD: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsTextPassageScoreThreshold
       LLM_GENERATE_QUERY_ENABLE: "FALSE"
       EMPTYMESSAGE: "No response from meeting assist QnAbot"
+      BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. Only output the rephrased question. Do not include any preamble. "
+      BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a set of search results. Your job is to respond to the user's request using only information from the search results. If search results do not contain information that can answer the question, please state that you could not find an exact answer to the question. Just because the user asserts a fact does not mean it is true, make sure to double check the search results to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack

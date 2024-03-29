@@ -19,7 +19,7 @@ QBUSINESS_CLIENT = boto3.client(
 )
 
 
-def get_call_transcript(callId):
+def get_call_transcript(callId, userInput, maxMessages):
     payload = {
         'CallId': callId,
         'ProcessTranscript': True
@@ -32,13 +32,26 @@ def get_call_transcript(callId):
     result = json.loads(lambda_response.get("Payload").read().decode("utf-8"))
     transcriptSegments = result["transcript"].strip().split('\n')
 
-    # TDB Assign speaker name instead of role
     transcript = []
     for transcriptSegment in transcriptSegments:
         speaker, text = transcriptSegment.split(":", 1)
         transcript.append({"name": speaker, "transcript": text.strip()})
 
-    print(f"Transcript: {json.dumps(transcript)}")
+    if transcript:
+        # remove final segment if it matches the current input
+        lastMessageText = transcript[-1]["transcript"]
+        if lastMessageText == userInput:
+            print("removing final segment as it matches the current input")
+            transcript.pop()
+
+    if transcript:
+        print(
+            f"Using last {maxMessages} conversation turns (LLM_CHAT_HISTORY_MAX_MESSAGES)")
+        transcript = transcript[-maxMessages:]
+        print(f"Transcript: {json.dumps(transcript)}")
+    else:
+        print(f'No transcript for callId {callId}')
+
     return transcript
 
 
@@ -195,12 +208,17 @@ def format_response(event, amazonq_response):
 def handler(event, context):
     print("Received event: %s" % json.dumps(event))
     args = get_args_from_lambdahook_args(event)
-    # prompt set from args, or from user input if not specified in args.
-    if event["req"].get("llm_generated_query"):
-        userInput = event["req"]["llm_generated_query"]["orig"]
-    else:
-        userInput = event["req"]["question"]
-    prompt = args.get("Prompt", userInput)
+    # Any prompt value defined in the lambdahook args is used as UserInput, e.g used by
+    # 'easy button' QIDs like 'Ask Assistant' where user didn't type a question, and we
+    # just want a suggested reponse based on the transcript so far..
+    # Otherwise we take the userInput from the users question in the request.
+    userInput = args.get("Prompt")
+    if not userInput:
+        if event["req"].get("llm_generated_query"):
+            userInput = event["req"]["llm_generated_query"]["orig"]
+        else:
+            userInput = event["req"]["question"]
+    prompt = userInput
     qnabotcontext = event["req"]["session"].get("qnabotcontext", {})
     amazonq_context = qnabotcontext.get("amazonq_context", {})
     # get any attachments via Lex Web UI
@@ -209,19 +227,10 @@ def handler(event, context):
     callId = event["req"]["session"].get("callId") or event["req"]["_event"].get(
         "requestAttributes", {}).get("callId")
     if callId:
-        transcript = get_call_transcript(callId)
+        maxMessages = int(event["req"]["_settings"].get(
+            "LLM_CHAT_HISTORY_MAX_MESSAGES", 20))
+        transcript = get_call_transcript(callId, userInput, maxMessages)
         if transcript:
-            # remove final segment if it matches the current input
-            lastMessageText = transcript[-1]["transcript"]
-            if lastMessageText == userInput:
-                print("removing final segment as it matches the current input")
-                transcript.pop()
-        if transcript:
-            maxMessages = int(event["req"]["_settings"].get(
-                "LLM_CHAT_HISTORY_MAX_MESSAGES", 20))
-            print(
-                f"Using last {maxMessages} conversation turns (LLM_CHAT_HISTORY_MAX_MESSAGES)")
-            transcript = transcript[-maxMessages:]
             prompt = f'You are an AI assistant helping a human during a meeting. Here is the meeting transcript: {json.dumps(transcript)}.'
             prompt = f'{prompt}\nPlease respond to the following request from the human, using the transcript and any additional information as context.\n{userInput}'
             if amazonq_context:

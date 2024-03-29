@@ -245,6 +245,13 @@ Resources:
           - id: W58
             reason: Managed policy already provides access to CloudWatch logs.
 
+  Boto3Layer:
+    Type: "AWS::Lambda::LayerVersion"
+    Properties:
+      Content: ./boto3_layer
+      CompatibleRuntimes:
+        - python3.11
+
   QNAQBusinessFunctionRole:
     Condition: ShouldConfigureQBusiness
     Type: AWS::IAM::Role
@@ -292,6 +299,8 @@ Resources:
       Role: !GetAtt QNAQBusinessFunctionRole.Arn
       Handler: qna_qbusiness_lambdahook_function.handler
       Runtime: python3.11
+      Layers: 
+        - !Ref Boto3Layer
       Timeout: 900
       Environment:
         Variables:
@@ -359,12 +368,14 @@ Resources:
       Role: !GetAtt QNABedrockKnowledgeBaseFunctionRole.Arn
       Handler: qna_bedrockkb_lambdahook_function.handler
       Runtime: python3.11
+      Layers: 
+        - !Ref Boto3Layer
       Timeout: 900
       Environment:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
           KB_ID: !Ref BedrockKnowledgeBaseID
-          MODEL_ARN: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockKnowledgeBaseModelID}"
+          MODEL_ID: !Ref BedrockKnowledgeBaseModelID
       Code: ./src
     Metadata:
       cfn_nag:
@@ -483,6 +494,7 @@ Resources:
       ServiceToken: !GetAtt SetupFunction.Arn
       AISTACK: !Ref AISTACK
       QNABOTSTACK: !Ref QNABOTSTACK
+      MeetingAssistService: !Ref MeetingAssistService
       LexMeetingAssistBotId: !Ref LexMeetingAssistBotId
       LexMeetingAssistAliasId: !Ref LexMeetingAssistAliasId
       LexMeetingAssistLocaleId: !Ref LexMeetingAssistLocaleId
