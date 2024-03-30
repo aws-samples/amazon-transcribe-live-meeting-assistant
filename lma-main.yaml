@@ -19,17 +19,41 @@ Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.0)
 
 Parameters:
 
-  MeetingAssistExistingQApplicationId:
+  MeetingAssistService:
+    Default: 'BEDROCK_KNOWLEDGE_BASE'
+    Type: String
+    AllowedValues:
+      - 'BEDROCK_KNOWLEDGE_BASE'
+      - 'AMAZON_Q_BUSINESS_EXPERT'
+    Description: Choose which knowledge base / LLM service to use 
+
+  BedrockKnowledgeBaseId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
+    Description: >
+      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the Knowledge Base *Id* (not name) of an existing Bedrock Knowledge Base to be used for Meeting Assist bot."
+
+  BedrockKnowledgeBaseModelID:
+    Type: String
+    Default: 'anthropic.claude-3-sonnet-20240229-v1:0'
+    AllowedValues: 
+      - 'anthropic.claude-haiku-coming-soon'
+      - 'anthropic.claude-3-sonnet-20240229-v1:0'
+    Description: >-
+      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, select a Bedrock LLM model from the list."
+
+  AmazonQAppId:
     Type: String
     AllowedPattern: '^(|[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})$'
     Description: >
-      Provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot."
+      If MeetingAssistService is AMAZON_Q_BUSINESS_EXPERT,  provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot."
 
   AssistantWakePhraseRegEx:
     Type: String
-    Default: "(OK|Okay)[.,! ]*Q[.,! ]+"
+    Default: "(OK|Okay)[.,! ]*Assistant[.,! ]+"
     Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'Hey Q' or 'OK Q'
+      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant!'
 
   RecordingDisclaimer:
     Type: String
@@ -145,7 +169,6 @@ Parameters:
     AllowedValues:
       - 'BEDROCK'
       - 'LAMBDA'
-
     Description: >
       Set to enable call summarization by a Large Language Model. Currently only BEDROCK and LAMBDA are supported.
       BEDROCK option requires you to choose one of the supported model IDs from the 
@@ -155,13 +178,8 @@ Parameters:
     Default: 'anthropic.claude-instant-v1'
     Type: String
     AllowedValues: 
-      - 'amazon.titan-text-express-v1'
-      - 'ai21.j2-grande-instruct'
-      - 'ai21.j2-jumbo-instruct'
       - 'anthropic.claude-instant-v1'
-      - 'anthropic.claude-v1'
-      - 'anthropic.claude-v2'
-
+      - 'anthropic.claude-3-sonnet-20240229-v1:0'
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list of supported models. 
       Defaults to 'anthropic.claude-instant-v1'
@@ -255,7 +273,10 @@ Metadata:
       - Label:
           default: Meeting Assist Options
         Parameters:
-          - MeetingAssistExistingQApplicationId
+          - MeetingAssistService
+          - BedrockKnowledgeBaseId
+          - BedrockKnowledgeBaseModelID
+          - AmazonQAppId
           - AssistantWakePhraseRegEx
           - RecordingDisclaimer
       - Label:
@@ -311,7 +332,9 @@ Metadata:
         default: Admin Email Address
       AllowedSignUpEmailDomain:
         default: Authorized Account Email Domain(s)
-      MeetingAssistExistingQApplicationId:
+      BedrockKnowledgeBaseId:
+        default: Meeting Assist Bedrock Knowledge Base Id (existing)
+      AmazonQAppId:
         default: Meeting Assist Amazon Q Business Application Id (existing)
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
@@ -482,7 +505,7 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         EmbeddingsModelId: 'amazon.titan-embed-text-v1'
-        LLMModelId: 'anthropic.claude-v2:1'
+        LLMModelId: 'anthropic.claude-instant-v1'
 
   QNABOT:
     Type: AWS::CloudFormation::Stack
@@ -554,11 +577,10 @@ Resources:
       EMBEDDINGS_SCORE_THRESHOLD: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsScoreThreshold
       EMBEDDINGS_SCORE_ANSWER_THRESHOLD: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsScoreAnswerThreshold
       EMBEDDINGS_TEXT_PASSAGE_SCORE_THRESHOLD: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsTextPassageScoreThreshold
-      LLM_GENERATE_QUERY_MODEL_PARAMS: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingGenerateQueryModelParams
-      LLM_QA_MODEL_PARAMS: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingQAModelParams
-      LLM_GENERATE_QUERY_PROMPT_TEMPLATE: "<br><br>Human: Let's think carefully step by step. Here is the transcript of an ongoing phone call between a caller (Human) and an agent (AI) in <transcript> tags:<br><transcript>{history}</transcript><br>And here is a follow up question or statement from the caller in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the caller's follow up question or statement as a standalone question or statement that contains all the context and makes sense on its own without reading the transcript. If the caller is just engaging in small talk or saying thanks, respond with \"small talk\".<br><br>Assistant: Here is the rephrased follow up question or statement, or small talk: "
-      LLM_QA_PROMPT_TEMPLATE: "<br><br>Human: Let's think carefully step by step. You are a call center assistant. Your job is to advise a call center agent how best to respond to a caller query, based on the reference passages provided inside <references></reference> XML tags. The caller's query is below, inside <query></query> XML tags.<br><references><br>{context}<br></references><br><br><query><br>{query}<br></query><br><br>If the references contain the information needed to answer the query, then write a confident response in under 50 words, quoting the relevant references.<br>If you can make an informed guess on how to answer the query based on the reference passages, then write a tentative response in under 50 words, stating your assumptions.<br>If the reference passages do not have any information that you can use to answer the query, then respond saying \"Sorry, I don't know\".<br>If the query contains \"small talk\" then respond saying \"Sorry, I cannot respond to small talk\".<br>Think carefully, step by step.<br><br>Assistant:"
-      EMPTYMESSAGE: "No response from agent assist QnAbot"
+      LLM_GENERATE_QUERY_ENABLE: "FALSE"
+      EMPTYMESSAGE: "No response from meeting assist QnAbot"
+      BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. Only output the rephrased question. Do not include any preamble. "
+      BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a set of search results. Your job is to respond to the user's request using only information from the search results. If search results do not contain information that can answer the question, please state that you could not find an exact answer to the question. Just because the user asserts a fact does not mean it is true, make sure to double check the search results to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
@@ -571,7 +593,10 @@ Resources:
         LMAStackName: !Ref AWS::StackName
         AISTACK: !Ref AISTACK
         QNABOTSTACK: !Ref QNABOT
-        AmazonQAppId: !Ref MeetingAssistExistingQApplicationId
+        MeetingAssistService: !Ref MeetingAssistService
+        BedrockKnowledgeBaseID: !Ref BedrockKnowledgeBaseId
+        BedrockKnowledgeBaseModelID: !Ref BedrockKnowledgeBaseModelID
+        AmazonQAppId: !Ref AmazonQAppId
         AmazonQUserId: !Ref AdminEmail
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
         LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
