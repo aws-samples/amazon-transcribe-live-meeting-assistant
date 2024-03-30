@@ -165,6 +165,8 @@ function IntegrationProvider({ children }: any) {
         } else if (request.action === "UpdateMetadata") {
           if (request.metadata.baseUrl && request.metadata.baseUrl === "https://app.zoom.us") {
             setPlatform("Zoom");
+          } else if (request.metadata.baseUrl && request.metadata.baseUrl === "https://app.chime.aws") {
+            setPlatform("Amazon Chime");
           }
           setMetadata(request.metadata);
         } else if (request.action === "SamplingRate") {
