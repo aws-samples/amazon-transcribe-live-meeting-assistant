@@ -216,7 +216,7 @@ const onWsClose = async (ws:WebSocket, code: number): Promise<void> => {
     }
 };
 
-const endCall = async (ws: WebSocket, callMetaData: any, socketData: SocketCallData): Promise<void> => {
+const endCall = async (ws: WebSocket, callMetaData: CallMetaData|undefined, socketData: SocketCallData): Promise<void> => {
     
     if (callMetaData === undefined) {
         callMetaData = socketData.callMetadata;
