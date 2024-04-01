@@ -55,13 +55,6 @@ Parameters:
     Description: >
       A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant!'
 
-  RecordingDisclaimer:
-    Type: String
-    Default: >
-      Disclaimer: By clicking the 'Start Listening' button, you acknowledge that you are responsible for ensuring compliance with all applicable laws and regulations regarding the recording and/or transcribing of conversations. This includes obtaining consent from all participants, where required. Recordings may capture sensitive or confidential information, which you are solely responsible for handling and protecting appropriately.
-    Description: >
-      Disclaimer used for the extension message popup
-
   S3BucketName:
     Type: String
     Description: >
@@ -278,7 +271,6 @@ Metadata:
           - BedrockKnowledgeBaseModelID
           - AmazonQAppId
           - AssistantWakePhraseRegEx
-          - RecordingDisclaimer
       - Label:
           default: Amazon S3 Configuration
         Parameters:
@@ -549,7 +541,6 @@ Resources:
       Parameters:
         LCAStackName: !Ref AWS::StackName
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
-        RecordingDisclaimer: !Ref RecordingDisclaimer
         RecordingsBucketRetentionDays: !Ref RecordingsBucketRetentionDays
         EnableVoiceToneAnalysis: 'false'
         CallAudioSource: 'Genesys Cloud Audiohook Web Socket'
@@ -667,7 +658,6 @@ Resources:
         WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         SourceCodeLocation: <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>
-        RecordingDisclaimer: !Ref RecordingDisclaimer
 
 Outputs:
   ApplicationCloudfrontEndpoint:
