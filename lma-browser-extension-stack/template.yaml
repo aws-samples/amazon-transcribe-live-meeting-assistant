@@ -160,7 +160,7 @@ Resources:
                     "cloudfrontEndpoint": "%s",
                     "recordingDisclaimer": "%s"
                   }'
-                  $WEBSOCKET_ENDPOINT $COGNITO_CLIENT_ID $COGNITO_LOGIN_URL $CLOUDFRONT_ENDPOINT $RECORDING_DISCLAIMER > ./build/lma_config.json
+                  $WEBSOCKET_ENDPOINT $COGNITO_CLIENT_ID $COGNITO_LOGIN_URL $CLOUDFRONT_ENDPOINT "$RECORDING_DISCLAIMER" > ./build/lma_config.json
                 - echo Packaging extension for Chrome - other browsers to come later
                 - zipfile=lma-chrome-extension.zip
                 - (cd ./build && zip -r ../${zipfile} .)
