@@ -356,9 +356,11 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
     try {
         if (tsStream) {
             for await (const event of tsStream) {
-                console.log('Event ', JSON.stringify(event));
                 if (event.TranscriptEvent) {
-                    // const message: TranscriptEvent = event.TranscriptEvent;                    
+                    if (event.TranscriptEvent.Transcript.Results.length > 0) {
+                        console.log('Event ', JSON.stringify(event));
+                    }
+                    // const message: TranscriptEvent = event.TranscriptEvent;
                     const events = splitTranscriptEventBySpeaker(event.TranscriptEvent);
                     for (const transcriptEvent of events) {
                         //await writeAddTranscriptSegmentEvent(undefined, transcriptEvent, callMetaData);
