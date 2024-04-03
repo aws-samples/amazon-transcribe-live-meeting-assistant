@@ -359,6 +359,7 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
                     // const message: TranscriptEvent = event.TranscriptEvent;                    
                     const events = splitTranscriptEventBySpeaker(event.TranscriptEvent);
                     for (const transcriptEvent of events) {
+                        //await writeAddTranscriptSegmentEvent(undefined, transcriptEvent, callMetaData);
                         await writeTranscriptionSegment(transcriptEvent, callMetaData);
                     }
                 }
