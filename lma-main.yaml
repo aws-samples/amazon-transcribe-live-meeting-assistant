@@ -32,7 +32,7 @@ Parameters:
     Default: ''
     AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
     Description: >
-      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the Knowledge Base *Id* (not name) of an existing Bedrock Knowledge Base to be used for Meeting Assist bot."
+      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the knowledge base *Id* (not name) of an existing Bedrock knowledge base to be used for Meeting Assist bot.
 
   BedrockKnowledgeBaseModelID:
     Type: String
@@ -47,7 +47,7 @@ Parameters:
     Type: String
     AllowedPattern: '^(|[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})$'
     Description: >
-      If MeetingAssistService is AMAZON_Q_BUSINESS_EXPERT,  provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot."
+      If MeetingAssistService is AMAZON_Q_BUSINESS_EXPERT, provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot.
 
   AssistantWakePhraseRegEx:
     Type: String
