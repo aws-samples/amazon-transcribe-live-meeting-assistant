@@ -1615,15 +1615,14 @@ Resources:
           EmailSubject: Welcome to Live Meeting Assistant!
           EmailMessage: !Sub |-
             <p>Hello {username},
-            <p>Welcome to Live Meeting Assistant! Your temporary password is:
+            <p>Welcome to Live Meeting Assistant (LMA)! Your temporary password is:
             <p>     {####}
             <p>
             <p>When the CloudFormation stack is COMPLETE, use the link below to log in to
-            the Live Meeting Assistant web interface and set your permanent password.
+            the LMA web interface and set your permanent password.
             <p>     https://${WebAppCloudFrontDistribution.DomainName}/
             <p>
-            <p>Good luck!
-            <p>Live Meeting Assistant (amazon.com/live-call-analytics)
+            <p>Live Meeting Assistant (amazon.com/live-meeting-assistant)
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:

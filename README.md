@@ -31,7 +31,7 @@ Here are some of the things it can do:
 - **Live translation** - uses Amazon Translate to optionally show each segment of the conversation translated into your choice of language from a selection of around 75 languages.
   <p align="left"><img src="./images/readme-translation.png" alt="Translation" /></p>
 - **Context aware meeting assistant "Q"** - uses Amazon Q business expert to provide answers from your trusted sources, using the live transcript as context for fact checking and follow-up questions. Say *OK Q!*, or click the *Ask Q* button, or type your own question in the UI.
-  <p align="left"><img src="./images/readme-OK-Q.png" alt="OK Q" /></p>
+  <p align="left"><img src="./images/readme-OK-Assistant.png" alt="OK Q" /></p>
 - **Ad Hoc summaries of the meeting** - click a button on the UI to generate a summary on demand - very handy when someone joins late and needs to get caught up. The summaries are generated from the transcript by Amazon Bedrock. LMA also provides easy buttons for identifying the current meeting topic, and for generating a list of action items with owners and due dates. You can easily create your own custom prompts and corresponding buttons.
   <p align="left"><img src="./images/readme-action-items.png" alt="Action Items" /></p>
 - **Automated summary and insights** - when the meeting has ended, LMA automatically runs a set of LLM prompts on Amazon Bedrock to summarize the meeting transcript and extract insights. Of course, you can also easily customize these prompts too.
