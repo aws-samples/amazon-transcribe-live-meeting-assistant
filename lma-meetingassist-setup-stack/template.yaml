@@ -337,7 +337,7 @@ Resources:
                 Action:
                   - "bedrock:Retrieve"
                   - "bedrock:RetrieveAndGenerate"
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:912625584728:knowledge-base/${BedrockKnowledgeBaseID}"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::knowledge-base/${BedrockKnowledgeBaseID}"
               - Effect: Allow
                 Action:
                   - "bedrock:InvokeModel"
