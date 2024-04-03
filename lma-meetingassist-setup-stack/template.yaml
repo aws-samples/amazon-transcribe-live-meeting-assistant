@@ -39,7 +39,7 @@ Parameters:
     Type: String
     AllowedValues:
       - 'BEDROCK_KNOWLEDGE_BASE'
-      - 'AMAZON_Q_BUSINESS_EXPERT'
+      - 'Q_BUSINESS'
     Description: Choose which knowledge base / LLM service to use 
 
   BedrockKnowledgeBaseID:
@@ -47,7 +47,7 @@ Parameters:
     Default: ''
     AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
     Description: >
-      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the *id* (not name) of an existing Bedrock Knowledge Base to be used for Meeting Assist bot."
+      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the *id* (not name) of an existing Bedrock Knowledge Base to be used for Meeting Assist bot.
 
   BedrockKnowledgeBaseModelID:
     Type: String
@@ -63,13 +63,13 @@ Parameters:
     Default: ''
     AllowedPattern: '^(|[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})$'
     Description: >
-      If MeetingAssistService is AMAZON_Q_BUSINESS_EXPERT, provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot."
+      If MeetingAssistService is Q_BUSINESS, provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot.
 
   AmazonQUserId:
     Type: String
     Default: ''
     Description: >-
-      If ASSISTANT is AMAZON_Q_BUSINESS_EXPERT, provide an email address to use as the proxy user (e.g. jdoe@example.com)
+      If ASSISTANT is Q_BUSINESS, provide an email address to use as the proxy user (e.g. jdoe@example.com)
     AllowedPattern: '^(|[\w.+-]+@([\w-]+\.)+[\w-]{2,6})$'
 
   # Required
@@ -166,7 +166,7 @@ Conditions:
   ShouldConfigureQnabot: !Not [!Equals [!Ref QNABOTSTACK, '']]
   HasSummaryLambdaFunction: !Not [!Equals [!Ref TranscriptSummaryFunctionArn, '']]
   ShouldConfigureBedrockKB: !Equals [!Ref MeetingAssistService, 'BEDROCK_KNOWLEDGE_BASE']
-  ShouldConfigureQBusiness: !Equals [!Ref MeetingAssistService, 'AMAZON_Q_BUSINESS_EXPERT']
+  ShouldConfigureQBusiness: !Equals [!Ref MeetingAssistService, 'Q_BUSINESS']
 
 Resources:
 
