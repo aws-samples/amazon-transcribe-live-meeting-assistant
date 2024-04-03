@@ -1,4 +1,4 @@
-# Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Q Business Expert, and Amazon Bedrock 
+# Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Q Business, and Amazon Bedrock 
 
 _Companion AWS blog post: [Live meeting assist with Amazon language AI services](http://www.amazon.com/live-meeting-assist)_
 
@@ -29,7 +29,7 @@ Here are some of the things it can do:
    <p align="left"><img src="./images/readme-transcription.png" alt="Transcription" /></p>
 - **Live translation** - uses Amazon Translate to optionally show each segment of the conversation translated into your choice of language from a selection of around 75 languages.
   <p align="left"><img src="./images/readme-translation.png" alt="Translation" width=400/></p>
-- **Context aware meeting assistant** - uses Knowledge Bases for Amazon Bedrock or Amazon Q business expert to provide answers from your trusted sources, using the live transcript as context for fact checking and follow-up questions. Say *OK Assistant!*, or click the *ASK ASSISTANT!* button, or type your own question in the UI.
+- **Context aware meeting assistant** - uses Knowledge Bases for Amazon Bedrock or Amazon Q Business to provide answers from your trusted sources, using the live transcript as context for fact checking and follow-up questions. Say *OK Assistant!*, or click the *ASK ASSISTANT!* button, or type your own question in the UI.
   <p align="left"><img src="./images/readme-OK-Assistant.png" alt="OK Q" width=400/></p>
 - **Ad Hoc summaries of the meeting** - click a button on the UI to generate a summary on demand - very handy when someone joins late and needs to get caught up. The summaries are generated from the transcript by Amazon Bedrock. LMA also provides easy buttons for identifying the current meeting topic, and for generating a list of action items with owners and due dates. You can easily create your own custom prompts and corresponding buttons.
   <p align="left"><img src="./images/readme-action-items.png" alt="Action Items" /></p>
@@ -52,7 +52,7 @@ You also need to have *either*:
 
 1.	An existing, working, Knowledge Base of Amazon Bedrock. If you haven’t set one up yet, see [Create a knowledge base](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-create.html). Populate your knowledge base with content to fuel LMA’s context aware meeting assistant, “OK Assistant!”
 
-2. Or an existing, working Amazon Q business expert application. If you haven’t set one up yet, see [Creating an Amazon Q application](https://docs.aws.amazon.com/amazonq/latest/business-use-dg/create-app.html). Populate your Amazon Q business expert knowledgebase with content to fuel LMA's context aware meeting assistant, "OK Assistant!". Note that Amazon Q Business integration involves manual steps (documented in AMAZON_Q_COGNITO_FEDERATION_README - PENDING) to configure end-user identity federation. It is simpler to get started with option (a), which is the option we focus on for this blog post.  
+2. Or an existing, working Amazon Q Business application. If you haven’t set one up yet, see [Creating an Amazon Q application](https://docs.aws.amazon.com/amazonq/latest/business-use-dg/create-app.html). Populate your Amazon Q Business knowledgebase with content to fuel LMA's context aware meeting assistant, "OK Assistant!". Note that Amazon Q Business integration involves manual steps (documented in AMAZON_Q_COGNITO_FEDERATION_README - PENDING) to configure end-user identity federation. It is simpler to get started with option (a), which is the option we focus on for this blog post.  
 
 Finally, LMA uses Amazon Bedrock LLM models for its meeting summarization features. Before proceeding, if you have not previously done so, you must request access to the following Amazon Bedrock models – see [Amazon Bedrock Model Access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html):
 - Titan Embeddings G1 – Text
@@ -89,7 +89,7 @@ The main CloudFormation stack uses nested stacks to create the following resourc
 - S3 buckets to hold build artifacts and call recordings
 - An [AWS Fargate](https://aws.amazon.com/fargate/) task with an [Application Load Balancer](https://aws.amazon.com/elasticloadbalancing/application-load-balancer/) providing a websocket server running code to consume stereo audio streams and relay to Amazon Transcribe, publish transcription segments in Kinesis Data Streams, and create and store stereo call recordings.
 - [Amazon Kinesis Data Stream](https://aws.amazon.com/kinesis/data-streams/) to relay call events and transcription segments to the enrichment processing function.
-- Meeting assist resources including the [QnABot on AWS solution](https://aws.amazon.com/solutions/implementations/aws-qnabot/) stack which interacts with [Amazon OpenSearch service](https://aws.amazon.com/opensearch-service/), Amazon Q business expert and Amazon Bedrock.
+- Meeting assist resources including the [QnABot on AWS solution](https://aws.amazon.com/solutions/implementations/aws-qnabot/) stack which interacts with [Amazon OpenSearch service](https://aws.amazon.com/opensearch-service/), Amazon Q Business and Amazon Bedrock.
 - [AWS AppSync API](https://aws.amazon.com/appsync), which provides a GraphQL endpoint to support queries and real-time updates
 - Website components including S3 bucket, [Amazon CloudFront](https://aws.amazon.com/cloudfront/) distribution, and [Amazon Cognito](https://aws.amazon.com/cognito) user pool
 - A downloadable pre-configured browser extension application for Chrome browsers.
@@ -236,7 +236,7 @@ LMA provides runtime monitoring and logs for each component using CloudWatch:
 - Websocket processing and transcribing Fargate task – On the [ECS Clusters console](https://us-east-1.console.aws.amazon.com/ecs/v2/clusters), open the `LMA-WEBSOCKETSTACK-xxxx-TranscribingCluster` function. Choose the **Tasks** tab and open the task page. Choose **Logs** and **View in CloudWatch** to inspect the websocket transcriber task logs.
 - Call Event Processor Lambda function – On the Lambda console, open the `LCA-AISTACK-CallEventProcessor` function. Choose the Monitor tab to see function metrics. Choose View logs in CloudWatch to inspect function logs.
 - AWS AppSync API – On the AWS AppSync console, open the `CallAnalytics-LCA` API. Choose Monitoring in the navigation pane to see API metrics. Choose View logs in CloudWatch to inspect AppSyncAPI logs.
-- For QnABot on AWS with Amazon Q for Meeting Assist, refer to the [Meeting Assist README](./lma-meetingassist-setup-stack/README.md), the [QnABot solution implementation guide](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/welcome.html) and the [QnaBot Amazon Q Business Expert Plugin README](https://github.com/aws-samples/qnabot-on-aws-plugin-samples/blob/develop/lambdas/qna_bot_qbusiness_lambdahook/README.md) for additional information.
+- For QnABot on AWS with Amazon Q for Meeting Assist, refer to the [Meeting Assist README](./lma-meetingassist-setup-stack/README.md), the [QnABot solution implementation guide](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/welcome.html) and the [QnaBot Amazon Q Business Plugin README](https://github.com/aws-samples/qnabot-on-aws-plugin-samples/blob/develop/lambdas/qna_bot_qbusiness_lambdahook/README.md) for additional information.
 
 ## Cost assessment
 
@@ -312,7 +312,7 @@ Our companion solution, [Live Call Analytics and Agent Assist](https://www.amazo
 
 ## Conclusion
 
-The Live Meeting Assist (LMA) sample solution offers a flexible, feature-rich, and customizable approach to provide live meeting assistance to improve your productivity during and after meetings. It uses Amazon AI/ML services like Amazon Transcribe, Amazon Lex, Amazon Q Business Expert, and Amazon Bedrock to transcribe and extract real-time insights from your meeting audio.
+The Live Meeting Assist (LMA) sample solution offers a flexible, feature-rich, and customizable approach to provide live meeting assistance to improve your productivity during and after meetings. It uses Amazon AI/ML services like Amazon Transcribe, Amazon Lex, Amazon Q Business, and Amazon Bedrock to transcribe and extract real-time insights from your meeting audio.
 
 The sample LMA application is provided as open source—use it as a starting point for your own solution, and help us make it better by contributing back fixes and features via GitHub pull requests. Browse to the [LMA GitHub repository](github URL here) to explore the code, choose **Watch** to be notified of new releases, and check the [README](./README.md) for the latest documentation updates.
 
