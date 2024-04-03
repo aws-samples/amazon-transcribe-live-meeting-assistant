@@ -66,5 +66,6 @@ export type SocketCallData = {
     writeRecordingStream?: WriteStream,
     recordingFileSize?: number
     startStreamTime: Date,
-    speakerEvents: []
+    speakerEvents: [],
+    ended: boolean
 }

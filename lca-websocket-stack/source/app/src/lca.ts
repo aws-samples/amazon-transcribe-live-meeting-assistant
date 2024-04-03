@@ -350,6 +350,8 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
     } else if (outputTranscriptStream) {
         tsStream = stream.Readable.from(outputTranscriptStream);
     }
+    
+
 
     try {
         if (tsStream) {
@@ -376,8 +378,7 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
         }
     } catch (error) {
         console.log('Error processing Transcribe results stream', error);
-        
     } finally {
-        writeCallEndEvent(callMetaData);
+        // writeCallEndEvent(callMetaData);
     }
 };
