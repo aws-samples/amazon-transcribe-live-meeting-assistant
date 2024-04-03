@@ -341,8 +341,8 @@ Resources:
               - Effect: Allow
                 Action:
                   - "bedrock:InvokeModel"
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:foundation-model/${BedrockKnowledgeBaseModelID}"
-          PolicyName: QBusinessPolicy
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockKnowledgeBaseModelID}"
+          PolicyName: BedrockPolicy
         - PolicyDocument:
             Version: 2012-10-17
             Statement:
