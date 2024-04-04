@@ -21,6 +21,13 @@ Parameters:
   LMAStackName:
     Type: String
     Description: LMA Stack Name
+
+  RecordingDisclaimer:
+    Type: String
+    Description: Disclaimer used for the extension message popup
+    Default: >
+      Disclaimer: By clicking the 'Start Listening' button, you acknowledge that you are responsible for ensuring compliance with all applicable laws and regulations regarding the recording and/or transcribing of conversations. This includes obtaining consent from all participants, where required. Recordings may capture sensitive or confidential information, which you are solely responsible for handling and protecting appropriately.
+
     
   WebSocketEndpoint:
     Type: String
@@ -123,6 +130,8 @@ Resources:
             Value: !Ref WebAppCloudFrontDistribution
           - Name: WEBAPP_BUCKET
             Value: !Ref WebAppBucket
+          - Name: RECORDING_DISCLAIMER
+            Value: !Ref RecordingDisclaimer
       Source:
         Location:
           !Sub "arn:aws:s3:::${SourceCodeLocation}"
@@ -148,9 +157,10 @@ Resources:
                     "wssEndpoint":"%s",
                     "clientId": "%s",
                     "cognitoDomain": "%s",
-                    "cloudfrontEndpoint": "%s"
+                    "cloudfrontEndpoint": "%s",
+                    "recordingDisclaimer": "%s"
                   }'
-                  $WEBSOCKET_ENDPOINT $COGNITO_CLIENT_ID $COGNITO_LOGIN_URL $CLOUDFRONT_ENDPOINT > ./build/lma_config.json
+                  $WEBSOCKET_ENDPOINT $COGNITO_CLIENT_ID $COGNITO_LOGIN_URL $CLOUDFRONT_ENDPOINT "$RECORDING_DISCLAIMER" > ./build/lma_config.json
                 - echo Packaging extension for Chrome - other browsers to come later
                 - zipfile=lma-chrome-extension.zip
                 - (cd ./build && zip -r ../${zipfile} .)

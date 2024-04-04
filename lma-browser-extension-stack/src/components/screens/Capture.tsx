@@ -29,11 +29,25 @@ function Capture() {
     setAgentName(metadata.userName);
   }, [metadata, setTopic, setAgentName]);
 
-  const validateForm = useEffect(() => {
-
+  const validateForm = useCallback(() => {
+    if (topic.length === 0 || agentName.length === 0) {
+      return false;
+    }
+    return true;
   }, [topic, agentName]);
 
   const startListening = useCallback(() => {
+    if (validateForm() === false) {
+      alert("Please fill out name and topic");
+      return;
+    }
+
+    const shouldStart = confirm(settings.recordingDisclaimer);
+
+    if (shouldStart) {
+      startTranscription(agentName, topic);
+    }
+
     /*let foundError = false;
     if (agentName.length < 2) {
       setNameErrorText("Name required");
@@ -44,10 +58,10 @@ function Capture() {
     }
     if (foundError) {
       return;
-    } else {*/
+    } else {
       startTranscription(agentName, topic);
-    //}
-  }, [agentName, topic, startTranscription]);
+    }*/
+  }, [agentName, topic, startTranscription, settings, validateForm]);
 
   const stopListening = useCallback(() => {
     stopTranscription();

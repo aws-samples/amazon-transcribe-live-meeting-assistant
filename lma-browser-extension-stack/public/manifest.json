@@ -24,17 +24,34 @@
   "content_scripts": [
     {
       "matches": ["https://*.zoom.us/*"],
-      "js": ["content_scripts/mutation-summary.js", "content_scripts/providers/zoom.js"],
+      "js": [
+        "content_scripts/mutation-summary.js", 
+        "content_scripts/providers/zoom.js"
+      ],
       "all_frames": true,
       "run_at": "document_idle"
     }, {
+      "matches": ["https://*.chime.aws/meetings/*"],
+      "js": [
+        "content_scripts/mutation-summary.js", 
+        "content_scripts/providers/chime.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },{
       "matches": ["<all_urls>"],
       "js": ["content_scripts/recorder/inject-recorder.js"]
     }
   ], 
   "web_accessible_resources": [
     {
-      "resources": ["content_scripts/recorder/recorder.html", "content_scripts/recorder/recorder.js", "content_scripts/recorder/audio-worklet.js", "content_scripts/providers/zoom-injection.js"],
+      "resources": [
+        "content_scripts/recorder/recorder.html", 
+        "content_scripts/recorder/recorder.js", 
+        "content_scripts/recorder/audio-worklet.js", 
+        "content_scripts/providers/chime-injection.js",
+        "content_scripts/providers/zoom-injection.js"
+      ],
       "matches": ["<all_urls>"]
     }
   ],

@@ -105,7 +105,7 @@ const startStreaming = async (sendResponse) => {
     });
 
     samplingRate = audioContext.sampleRate;
-    console.log("Sending sampling rate");
+    console.log("Sending sampling rate:", samplingRate);
     chrome.runtime.sendMessage({ action: "SamplingRate", samplingRate: samplingRate });
 
     let displayAudioSource = audioContext.createMediaStreamSource(displayStream);

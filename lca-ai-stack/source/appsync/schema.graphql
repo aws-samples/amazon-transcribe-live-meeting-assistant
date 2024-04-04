@@ -7,6 +7,7 @@ input AddTranscriptSegmentInput {
 	Transcript: String!
 	IsPartial: Boolean!
 	Channel: Channel!
+	Speaker: String!
 	CreatedAt: AWSDateTime
 	ExpiresAfter: AWSTimestamp
 	Sentiment: Sentiment
@@ -221,6 +222,7 @@ type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
 	Transcript: String!
 	IsPartial: Boolean!
 	Channel: Channel!
+	Speaker: String!
 	Sentiment: Sentiment
 	SentimentScore: SentimentScore
 	SentimentWeighted: Float
@@ -244,6 +246,7 @@ type TranscriptSegmentWithSentiment implements DynamoDbBase @aws_cognito_user_po
 	StartTime: Float!
 	EndTime: Float!
 	Channel: Channel!
+	Speaker: String!
 	Sentiment: Sentiment
 	SentimentWeighted: Float
 }

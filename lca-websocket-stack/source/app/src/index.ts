@@ -26,14 +26,6 @@ import { CallRecordingEvent, SocketCallData } from './entities-lca';
 
 import { jwtVerifier } from './jwt-verifier';
 
-// let callMetaData: CallMetaData;  // Type structure for call metadata sent by the client
-// let audioInputStream: stream.PassThrough; // audio chunks are written to this stream for Transcribe SDK to consume
-
-// let tempRecordingFilename: string;
-// let wavFileName: string;
-// let recordingFileSize = 0;
-// let writeRecordingStream: fs.WriteStream;
-
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || undefined;
 const RECORDING_FILE_PREFIX = process.env['RECORDING_FILE_PREFIX'] || 'lca-audio-wav/';
@@ -192,7 +184,8 @@ const onTextMessage = async (ws: WebSocket, data: string): Promise<void> => {
             writeRecordingStream: writeRecordingStream,
             recordingFileSize: recordingFileSize,
             startStreamTime: new Date(),
-            speakerEvents: []
+            speakerEvents: [],
+            ended: false
         };
         socketMap.set(ws, socketCallMap);
         startTranscribe(callMetaData, audioInputStream, socketCallMap);
@@ -212,26 +205,49 @@ const onTextMessage = async (ws: WebSocket, data: string): Promise<void> => {
             console.log('Received END without having a call');
             return;
         }
+        console.log('Received call end event from client, writing it to KDS');
+        await endCall(ws, callMetaData, socketData);
+    }
+};
+
+const onWsClose = async (ws:WebSocket, code: number): Promise<void> => {
+    ws.close(code);
+    const socketData = socketMap.get(ws);
+    if (socketData) {
+        console.log('Writing call end event due to websocket close event');
+        await endCall(ws, undefined, socketData);
+    }
+};
+
+const endCall = async (ws: WebSocket, callMetaData: CallMetaData|undefined, socketData: SocketCallData): Promise<void> => {
+    
+    if (callMetaData === undefined) {
+        callMetaData = socketData.callMetadata;
+    }
+
+    if (socketData !== undefined && socketData.ended === false) {
+        socketData.ended = true;
+
         await writeCallEndEvent(callMetaData);
         if (socketData.writeRecordingStream && socketData.recordingFileSize) {
             socketData.writeRecordingStream.end();
             const header = createHeader(callMetaData, socketData.recordingFileSize);
             const tempRecordingFilename = getTempRecordingFileName(callMetaData);
             const wavRecordingFilename = getWavRecordingFileName(callMetaData);
-            const readStream = fs.createReadStream(path.join(LOCAL_TEMP_DIR,tempRecordingFilename));
-            const writeStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR,wavRecordingFilename ));
+            const readStream = fs.createReadStream(path.join(LOCAL_TEMP_DIR, tempRecordingFilename));
+            const writeStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR, wavRecordingFilename));
             writeStream.write(header);
             for await (const chunk of readStream) {
                 writeStream.write(chunk);
             }
             writeStream.end();
-
+    
             await writeToS3(tempRecordingFilename);
             await writeToS3(wavRecordingFilename);
-            await deleteTempFile(path.join(LOCAL_TEMP_DIR,tempRecordingFilename));
+            await deleteTempFile(path.join(LOCAL_TEMP_DIR, tempRecordingFilename));
             await deleteTempFile(path.join(LOCAL_TEMP_DIR, wavRecordingFilename));
-
-            const url = new URL(RECORDING_FILE_PREFIX+wavRecordingFilename, `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com`);
+    
+            const url = new URL(RECORDING_FILE_PREFIX + wavRecordingFilename, `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com`);
             const recordingUrl = url.href;
             
             const callEvent: CallRecordingEvent = {
@@ -243,24 +259,16 @@ const onTextMessage = async (ws: WebSocket, data: string): Promise<void> => {
         }
         // onWsClose(ws, 1000);
         if (socketData.audioInputStream) {
+            console.log('Closing audio input stream');
             socketData.audioInputStream.end();
             socketData.audioInputStream.destroy();
         }
         if (socketData) {
+            console.log('deleting websocket from map');
             socketMap.delete(ws);
         }
-    }
-};
-
-const onWsClose = (ws:WebSocket, code: number): void => {
-    ws.close(code);
-    const socketData = socketMap.get(ws);
-    if (socketData) {
-        socketMap.delete(ws);
-        if (socketData.audioInputStream) {
-            socketData.audioInputStream.end();
-            socketData.audioInputStream.destroy();
-        }
+    } else {
+        console.log('Already received the end call event.');
     }
 };
 

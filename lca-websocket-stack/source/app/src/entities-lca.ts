@@ -44,6 +44,7 @@ export type CallRecordingEvent = CallEventBase<'ADD_S3_RECORDING_URL'> & {
 
 export type AddTranscriptSegmentEvent = CallEventBase<'ADD_TRANSCRIPT_SEGMENT'> & {
     Channel?: string,
+    ParticipantName?: string,
     SegmentId?: string,
     StartTime?: number,
     EndTime?: number,
@@ -65,5 +66,6 @@ export type SocketCallData = {
     writeRecordingStream?: WriteStream,
     recordingFileSize?: number
     startStreamTime: Date,
-    speakerEvents: []
+    speakerEvents: [],
+    ended: boolean
 }
