@@ -427,14 +427,13 @@ const TranscriptSegment = ({
   let channelClass = '';
 
   if (channel === 'AGENT' || channel === 'CALLER') {
-    const originalTranscript = `${segment.transcript}`;
-    displayChannel = originalTranscript.substring(0, originalTranscript.indexOf(':')).trim();
+    displayChannel = `${segment.speaker}`.trim();
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
     channelClass = 'transcript-segment-agent-assist';
   }
   if (displayChannel === '') {
-    displayChannel = participantName;
+    displayChannel = participantName || 'Other Participant';
   }
 
   return (

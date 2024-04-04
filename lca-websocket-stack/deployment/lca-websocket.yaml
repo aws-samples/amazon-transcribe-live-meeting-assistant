@@ -426,7 +426,7 @@ Resources:
       Source:
         Location:
           !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/\
-          ${BootstrapVersion}/lca-websocket.zip"
+          ${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
         Type: S3
         BuildSpec: |
           version: 0.2
@@ -545,7 +545,7 @@ Resources:
       # pass code location to support upgrades
       CodeLocation:
         !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/\
-        ${BootstrapVersion}/lca-websocket.zip"
+        ${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
 
   LambdaCodeBuildStartBuild:
     Type: AWS::Serverless::Function

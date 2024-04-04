@@ -1,6 +1,7 @@
 {  
-  "wssEndpoint": "wss://d2cr57kb2mrjq9.cloudfront.net/api/v1/ws",
-  "clientId": "1sp17loeg9n3nnje3g5heki7pa",
-  "cognitoDomain": "https://chris-lma-test-domain.auth.us-east-1.amazoncognito.com",
-  "cloudfrontEndpoint": "https://d1k7zjbi33z254.cloudfront.net/"
+  "wssEndpoint": "[placeholder]",
+  "clientId": "[placeholder]",
+  "cognitoDomain": "[placeholder]",
+  "cloudfrontEndpoint": "[placeholder]",
+  "recordingDisclaimer": "Disclaimer: By clicking the 'Start Listening' button, you acknowledge that you are responsible for ensuring compliance with all applicable laws and regulations regarding the recording and/or transcribing of conversations. This includes obtaining consent from all participants, where required. Recordings may capture sensitive or confidential information, which you are solely responsible for handling and protecting appropriately."
 }

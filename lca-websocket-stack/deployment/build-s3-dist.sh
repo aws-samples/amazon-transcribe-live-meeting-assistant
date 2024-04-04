@@ -45,12 +45,24 @@ fi
 mkdir -p ${OUT_DIR}
 
 cd ..
-zip -r out/lca-websocket.zip source/ -x source/app/node_modules/**\* source/app/dist/**\*
+
+HASH=$(
+  find . \( -name node_modules -o -name build \) -prune -o -type f -print0 | 
+  sort -z |
+  xargs -0 sha256sum |
+  sha256sum |
+  cut -d" " -f1 | 
+  cut -c1-16
+  )
+ZIPFILE=lca-websocket-${HASH}.zip
+
+
+zip -r out/${ZIPFILE} source/ -x source/app/node_modules/**\* source/app/dist/**\*
 cd deployment
 
 # git ls-files .. | xargs zip -@ --filesync ${OUT_DIR}/audiohooksrc.zip
 export RELEASE_S3_BUCKET=${RELEASE_S3_BUCKET_BASE}-${AWS_REGION}
-aws s3 cp ${OUT_DIR}/lca-websocket.zip s3://${RELEASE_S3_BUCKET}/${RELEASE_S3_PREFIX}/${RELEASE_VERSION}/lca-websocket.zip
+aws s3 cp ${OUT_DIR}/${ZIPFILE} s3://${RELEASE_S3_BUCKET}/${RELEASE_S3_PREFIX}/${RELEASE_VERSION}/${ZIPFILE}
 
 TEMPLATE_FILE="./lca-websocket.yaml"
 RELEASE_S3_PREFIX_SUB=${RELEASE_S3_PREFIX////_}
@@ -61,7 +73,8 @@ sed -E \
 		/^ {2,}BootstrapS3Prefix:/ , /^ {2,}Default:/ s@^(.*Default: {1,})(.*)@\1 ${RELEASE_S3_PREFIX}@ ; \
 		/^ {2,}BootstrapVersion:/ , /^ {2,}Default:/ s@^(.*Default: {1,})(.*)@\1 ${RELEASE_VERSION}@ ; \
 		" \
-		${TEMPLATE_FILE} > ${PACKAGE_RELEASE_REPLACE_OUT_FILE}
+		${TEMPLATE_FILE} |
+sed -e "s%<LMA_WEBSOCKET_ZIP_FILENAME>%$ZIPFILE%g"  > ${PACKAGE_RELEASE_REPLACE_OUT_FILE}
 
 PACKAGE_RELEASE_FILE_NAME=template-packaged-${RELEASE_S3_BUCKET}-${RELEASE_S3_PREFIX_SUB}-${RELEASE_VERSION}.yaml
 PACKAGE_RELEASE_OUT_FILE=${OUT_DIR}/${PACKAGE_RELEASE_FILE_NAME}

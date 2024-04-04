@@ -18,6 +18,7 @@ def transcript_segment_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:
         schema.TranscriptSegment.SegmentId,
         schema.TranscriptSegment.StartTime,
         schema.TranscriptSegment.EndTime,
+        schema.TranscriptSegment.Speaker,
         schema.TranscriptSegment.Transcript,
         schema.TranscriptSegment.IsPartial,
     )
