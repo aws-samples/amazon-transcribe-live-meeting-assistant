@@ -1,8 +1,8 @@
-# LCA Agent Assist
+# LMA Meeting Assist
 
 ## Table of Contents
 
-1. [Introduction to Agent Assist](#introduction)  
+1. [Introduction to Meeting Assist](#introduction)  
   a. [Amazon Lex and Amazon Kendra using QnABot](#amazon-lex-and-amazon-kendra-using-qnabot)  
   b. [Option: Bring your own Lex Bot](#option-bring-your-own-lex-bot)  
   c. [Option: Bring your own Lambda function](#option-bring-your-own-lambda-function)  
@@ -20,14 +20,18 @@
 
 ## Introduction
 
-Live Call Analytics with Agent Assist is a solution for contact centers, providing in-line messages to help agents respond to callers’ needs.  
+Live Meeting Assist (LMA) is a solution which provides users with real-time multi-participant audio transcription, optionally translated into their preferred language, and an integrated AI meeting assistant that uses trusted enterprise data and meeting context to fact-check, look up relevant information, and propose responses. It creates succinct on-demand recaps, insights, and action item lists during and after meetings, securely maintaining an inventory of meeting records. Enterprises can use LMA with an existing Amazon Q Business application or Amazon Bedrock Agent/Knowledgebase. LMA integrates with popular meeting platforms and offers improved participant focus, understanding, accuracy, time-saving, and record-keeping efficiency, while supporting enterprise security, compliance, and availability. 
 
-Before continuing, please read the blog post [Live call analytics and agent assist for your contact center with Amazon language AI services](https://amazon.com/live-call-analytics), deploy LCA, and follow the tutorial to experience the Agent Assist demo. This is prerequisite context for the rest of this document.
+Before continuing, please read the blog post [Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Bedrock, and either Knowledge Bases for Bedrock or Amazon Q Business](https://amazon.com/live-meeting-assistant), deploy LMA, and follow the tutorial to experience the Meeting Assist demo. This is prerequisite context for the rest of this document.
 
 
-### Amazon Lex and Amazon Kendra using QnABot
+### Amazon Bedrock Knowledge base, Amazon Q Business, and Amazon Bedrock LLMs using QnABot
 
-The default agent assist configuration works by sending the transcription of a caller’s utterances to a chatbot, powered by Amazon Lex and Amazon Kendra, using the [QnABot on AWS solution](https://aws.amazon.com/solutions/implementations/aws-qnabot/) to simplify configuration and orchestration. Lex tracks the callers' intents and can advise the agent to elicit additional information as needed to fulfil an intent, QnABot uses either Amazon Kendra FAQ or 9optionally) OpenSearch with text embeddings to match stored frequently asked questions (FAQs), and Kendra is also used to query indexed knowledge base documents. Bot responses are shown in real time to the agent, along with the transcription of the conversation. It is easily configured to support customized intents, FAQs, and knowledgebase content.
+The meeting assistant is invoked in one of two ways:
+1. A meeting participant says the wake phrase (defined by the **Meeting Assist Wake Phrase Regular Expression** parameter in the LMA Cloudformation stack). The wake phrase defaults to *Ask Assistant!*
+2. The LMA user invokes the meeting assistant using the **Meeting Assist Bot** on the LMA User Interface, by typing a question, or by using one of the built-in 'easy button' options.
+
+works by sending a transcription of a caller’s utterances to a chatbot, powered by Amazon Lex and Amazon Kendra, using the [QnABot on AWS solution](https://aws.amazon.com/solutions/implementations/aws-qnabot/) to simplify configuration and orchestration. Lex tracks the callers' intents and can advise the agent to elicit additional information as needed to fulfil an intent, QnABot uses either Amazon Kendra FAQ or 9optionally) OpenSearch with text embeddings to match stored frequently asked questions (FAQs), and Kendra is also used to query indexed knowledge base documents. Bot responses are shown in real time to the agent, along with the transcription of the conversation. It is easily configured to support customized intents, FAQs, and knowledgebase content.
 
 Agents and supervisors can also directly interact with the Agent Assist bot using the Agent Assist Bot interactive chat UI. Ask knowledge base questions directly by typing in the question. When End of Call Summarization is enabled, Supervisors or agents can also use the Agent Assist UI to generate a summary of the current live call at any point during the call - useful for supervisors join in to a call in progress, or for agents picking up a transferred call in progress. 
 
