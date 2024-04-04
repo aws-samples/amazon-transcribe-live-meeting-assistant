@@ -20,9 +20,7 @@ window.onload = function () {
     console.log('checking for mute button');
     if (muteButton) {
       console.log('mute button found');
-      // muteObserver.disconnect();
       muteObserver.observe(muteButton, { attributes: true, subtree: false, childList: false });
-      clearInterval(muteInterval);
     }
   }, 2000);
 
@@ -44,8 +42,7 @@ window.onload = function () {
 
   const activeSpeakerObserver = new MutationObserver((mutationList) => {
     console.log("activeSpeaker changed");
-    console.log(mutationList);
-  
+    console.log(mutationList);  
     mutationList.forEach((mutation) => {
       if (mutation.addedNodes && mutation.addedNodes.length > 0) {
         const activeSpeaker = mutation.addedNodes[0].parentNode.parentNode.childNodes[1].innerText;
@@ -63,8 +60,16 @@ window.onload = function () {
     if (speakers && speakers.length > 0) {
       console.log('active speaker div found');
       // activeSpeakerObserver.disconnect();
-      activeSpeakerObserver.observe(speakers[0], { attributes: true, childList: true, subtree: true });
-      clearInterval(activeSpeaker);
+      if (!speakers[0].hasOwnProperty('MutationObserver')) {
+        activeSpeakerObserver.observe(speakers[0], { attributes: true, childList: true, subtree: true });
+      }
+      //clearInterval(activeSpeaker); // I don't see any degredation if we dont stop every 2 seconds...
+    } else {
+      // we do not see any active speaker box. Find the open attendee button:
+      const chatPanelButtons = document.querySelectorAll('[aria-label*="Open attendees"]');
+      if (chatPanelButtons.length > 0) {
+        chatPanelButtons[0].click(); // open the attendee panel
+      }
     }
   }, 2000);
 };
