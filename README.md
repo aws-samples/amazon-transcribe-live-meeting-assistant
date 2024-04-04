@@ -78,7 +78,7 @@ Complete the following steps to launch the CloudFormation stack:
 1. For **Stack name**, use the default value, `LMA`.
 1. For **Admin Email Address**, use a valid email address—your temporary password is emailed to this address during the deployment.
 1. For **Authorized Account Email Domain**, use the domain name part of your corporate email address to allow users with email addresses in the same domain to create their own new UI accounts, or leave blank to prevent users from directly creating their own accounts. You can enter multiple domains as a comma separated list.
-1. For **MeetingAssistService** choose BEDROCK_KNOWLEDGE_BASE. Later you can choose AMAZON_Q_BUSINESS and execute the additional steps needed to set up end-user authentication.  
+1. For **MeetingAssistService** choose BEDROCK_KNOWLEDGE_BASE. Later you can choose Q_BUSINESS and execute the additional steps needed to set up end-user authentication.  
 1. For **Meeting Assist Bedrock Knowledge Base Id (existing)**, enter your existing Knowledge base ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Knowledge bases console.
     <p align="left"><img src="./images/readme-knowledgebase-id.png" alt="KB ID" width=350/></p>
 1. For **all other parameters**, use the default values. If you want to customize the settings later, for example to switch to using Amazon Q Business instead of Knowledge bases for Bedrock, to add your own lambda functions, to use  custom vocabularies and language models to improve accuracy, enable PII redaction, and more, you can update the stack for these parameters.

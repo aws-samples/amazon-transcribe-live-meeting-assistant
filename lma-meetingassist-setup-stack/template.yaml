@@ -337,12 +337,12 @@ Resources:
                 Action:
                   - "bedrock:Retrieve"
                   - "bedrock:RetrieveAndGenerate"
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::knowledge-base/${BedrockKnowledgeBaseID}"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseID}"
               - Effect: Allow
                 Action:
                   - "bedrock:InvokeModel"
                 Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockKnowledgeBaseModelID}"
-          PolicyName: QBusinessPolicy
+          PolicyName: BedrockPolicy
         - PolicyDocument:
             Version: 2012-10-17
             Statement:
