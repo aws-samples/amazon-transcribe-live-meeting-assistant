@@ -30,15 +30,24 @@ function Capture() {
   }, [metadata, setTopic, setAgentName]);
 
   const validateForm = useCallback(() => {
-    if (topic.length === 0 || agentName.length === 0) {
-      return false;
+    let isValid = true;
+    if (agentName === undefined || agentName.trim().length === 0) {
+      setNameErrorText("Name required.")
+      isValid = false
+    } else {
+      setNameErrorText("");
     }
-    return true;
-  }, [topic, agentName]);
+    if (topic === undefined || topic.trim().length === 0) {
+      setMeetingTopicErrorText("Topic required.")
+      isValid = false;
+    } else {
+      setMeetingTopicErrorText("");
+    }
+    return isValid;
+  }, [topic, agentName, nameErrorText, setNameErrorText, meetingTopicErrorText, setMeetingTopicErrorText ]);
 
   const startListening = useCallback(() => {
     if (validateForm() === false) {
-      alert("Please fill out name and topic");
       return;
     }
 
@@ -120,11 +129,11 @@ function Capture() {
                   </>
               }
               <Button fullWidth={true} variant='primary'  onClick={() => stopListening()}>Stop Listening</Button>
-
             </>
             :
             <>
               <FormField
+                  stretch={true}
                   constraintText=""
                   errorText={nameErrorText}
                   label="Your name:"
@@ -132,6 +141,7 @@ function Capture() {
                 <Input value={agentName} onChange={({ detail }) => setAgentName(detail.value)} placeholder='Your name' ></Input>
               </FormField>
               <FormField
+                  stretch={true}
                   constraintText=""
                   errorText={meetingTopicErrorText}
                   label="Meeting Topic:"
