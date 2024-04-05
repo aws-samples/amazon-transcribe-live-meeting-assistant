@@ -114,7 +114,7 @@ Select CustomNoMatches item in Designer:
 
   <p align="left"><img src="../images/meetingassist-qnabot-designer-no_hits_qid.png" alt="Bot No_hits" /></p>
 
-This item, too, has a LambdaHook function. It also uses the 'BedrockKB-LambdaHook' function, but note that here, unlike in the previous 'AA.AskAssistant' item, there is no value for "Prompt" in the LambdaHook Argument JSON value.  Rather than using a predefined value for Prompt, instead, the prompt is the actual question that you typed or spoke.  You question is used in the context of the meeting transcription, so it can refer to recent statements and topics being discussed. 
+This item, too, has a LambdaHook function. It also uses the 'BedrockKB-LambdaHook' function, but note that here, unlike in the previous 'AA.AskAssistant' item, there is no value for "Prompt" in the LambdaHook Argument JSON value.  Rather than using a predefined value for Prompt, instead, the prompt is the actual question that you typed or spoke.  Your question is used in the context of the meeting transcription, so it can refer to recent statements and topics being discussed. 
 
 
 
