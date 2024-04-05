@@ -13,9 +13,9 @@
 
 ## Introduction
 
-Live Meeting Assist (LMA) is a solution which provides users with real-time multi-participant audio transcription, optionally translated into their preferred language, and an integrated AI meeting assistant that uses trusted enterprise data and meeting context to fact-check, look up relevant information, and propose responses. It creates succinct on-demand recaps, insights, and action item lists during and after meetings, securely maintaining an inventory of meeting records. Enterprises can use LMA with an existing Amazon Q Business application or Amazon Bedrock Agent/Knowledgebase. LMA integrates with popular meeting platforms and offers improved participant focus, understanding, accuracy, time-saving, and record-keeping efficiency, while supporting enterprise security, compliance, and availability. 
+Live Meeting Assist (LMA) is a solution which provides users with real-time multi-participant audio transcription, optionally translated into their preferred language, and an integrated AI meeting assistant that uses trusted enterprise data and meeting context to fact-check, look up relevant information, and propose responses. It creates succinct on-demand recaps, insights, and action item lists during and after meetings, securely maintaining an inventory of meeting records. Enterprises can use LMA with an existing Amazon Bedrock Agent/Knowledgebase. LMA integrates with popular meeting platforms and offers improved participant focus, understanding, accuracy, time-saving, and record-keeping efficiency, while supporting enterprise security, compliance, and availability. 
 
-Before continuing, please read the blog post [Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Bedrock, and either Knowledge Bases for Bedrock or Amazon Q Business](https://amazon.com/live-meeting-assistant), deploy LMA, and follow the tutorial to experience the Meeting Assist demo. This is prerequisite context for the rest of this document.
+Before continuing, please read the blog post [Live Meeting Assistant (LMA)](https://amazon.com/live-meeting-assistant), deploy LMA, and follow the tutorial to experience the Meeting Assist demo. This is prerequisite context for the rest of this document.
 
 
 In LMA, the meeting assistant is invoked in one of two ways:
@@ -78,7 +78,7 @@ The **SUMMARIZE** and **TOPIC** buttons work the same way as **ACTIONS**. They a
 
 The **ASK ASSISTANT!** button works similarly, but it uses a different Lambda Hook function than the Summarize, Topic, and Actions items. 
 
-n QnAbot Designer, select the `AA.AskAssistant` item to see its definition. Note that it has a different **Lambda Hook** function. Here we use the 'BedrockKB-LambdaHook' function that was also deployed with LMA - this function interacts with Knowledge bases for Bedrock.  (If you configured LMA - during deployment - to use Amazon Q Business instead, you'd see a different Lambda Hook function, 'QBusiness-LambdaHook', configured here instead.)
+n QnAbot Designer, select the `AA.AskAssistant` item to see its definition. Note that it has a different **Lambda Hook** function. Here we use the 'BedrockKB-LambdaHook' function that was also deployed with LMA - this function interacts with Knowledge bases for Bedrock.
 
 The LambaHook function retrieves the meeting transcript, and truncates it if needed to represent the last N turns, where N is the value of the QnABot Setting `LLM_CHAT_HISTORY_MAX_MESSAGES` (default is 20, but you can change it in QnABot designer Settings page). The transcript is used to provide context for the prompt.
 
@@ -151,7 +151,7 @@ Add one or more **Questions/Utterances** to your item to enable semantic search 
 
 You can configure a static reponse by entering plain text in the **Answer** field, or (better) choose **Advanced** and enter rich text in the form of Markdown or HTML in the **Alternate Answers / Markdown Answer** field. Your static answer can optionally use Handlebars to enable consitions and substitutions - see [Handlerbars README](https://github.com/aws-solutions/qnabot-on-aws/blob/main/docs/handlebars/README.md). 
 
-Or you can configure a Lambda Hook for completely dynamic answers based on any logic you choose. Use one of the Lambda Hook functions discussed above (`SummarizeCall` or `BedrockKB-LambdaHook`) with your own Argument values. Or use a new LambdaHook function that you create yourself, to do whatever you want it to do - query your databases, retrieve information or perform actions using API, integrate with other LLMs - you provide the function, and LMA will run it and returns its reponse to the LMA user. 
+Or you can configure a Lambda Hook for completely dynamic answers based on any logic you choose. Use one of the Lambda Hook functions discussed above (`SummarizeCall` or `BedrockKB-LambdaHook`) with your own Argument values. Or use a new LambdaHook function that you create yourself, to do whatever you want it to do - query your databases, retrieve information or perform actions using API, integrate with other LLMs - you provide the function, and LMA will run it and return its reponse to the LMA user. 
 
 
 
