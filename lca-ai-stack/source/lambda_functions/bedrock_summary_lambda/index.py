@@ -85,17 +85,31 @@ def get_request_body(modelId, prompt, max_tokens, temperature):
         raise Exception("Unsupported provider: ", provider)
     return request_body
 
+def get_generated_text(modelId, response):
+    provider = modelId.split(".")[0]
+    generated_text = None
+    response_body = json.loads(response.get("body").read())
+    print("Response body: ", json.dumps(response_body))
+    if provider == "anthropic":
+        # claude-3 models use new messages format
+        if modelId.startswith("anthropic.claude-3"):
+            generated_text = response_body.get("content")[0].get("text")
+        else:
+            generated_text = response_body.get("completion")
+    else:
+        raise Exception("Unsupported provider: ", provider)
+    return generated_text
+
 def call_bedrock(prompt_data):
     modelId = BEDROCK_MODEL_ID
     accept = 'application/json'
     contentType = 'application/json'
-    summary_text = "Unsupported Bedrock model ID "+modelId+". Unable to generate call summary"
     body = get_request_body(modelId, prompt_data, max_tokens=512, temperature=0)
+    print("Bedrock request - ModelId", modelId, "-  Body: ", body)
     response = bedrock.invoke_model(body=json.dumps(body), modelId=modelId, accept=accept, contentType=contentType)
-    response_body = json.loads(response.get('body').read())
-    summary_text = response_body.get('completion')
-    return summary_text
-
+    generated_text = get_generated_text(modelId, response)
+    print("Bedrock response: ", json.dumps(generated_text))
+    return generated_text
 
 def generate_summary(transcript, prompt_override):
     # first check to see if this is one prompt, or many prompts as a json
@@ -105,9 +119,7 @@ def generate_summary(transcript, prompt_override):
         key = list(item.keys())[0]
         prompt = item[key]
         prompt = prompt.replace("{transcript}", transcript)
-        print("Bedrock Prompt:", prompt)
         response = call_bedrock(prompt)
-        print("Bedrock Response:", response)
         result[key] = response
     if len(result.keys()) == 1:
         # there's only one summary in here, so let's return just that.
@@ -128,14 +140,11 @@ def handler(event, context):
     prompt_override = None
     if 'Prompt' in event:
         prompt_override = event['Prompt']
-
     try:
         summary = generate_summary(transcript, prompt_override)
     except Exception as e:
         print(e)
         summary = 'An error occurred generating summary.'
-
-    print("Summary: ", summary)
     return {"summary": summary}
     
 # for testing on terminal
