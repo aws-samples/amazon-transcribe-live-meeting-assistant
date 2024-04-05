@@ -108,7 +108,7 @@ OR, you can use the wake phrase, **OK Assistant!** to ask the meeting assistant 
 
   <p align="left"><img src="../images/readme-OK-Assistant.png" alt="OK Assistant" width=300 /></p>
 
-In both these cases, when QnABot receives your message, it cannot immediately locate a matching ID in it's list of items, since your question is free form (not a pre-confired QID). So instead, it will perform a semantic search to see if there is an item with stored questions that is a "good match" - if so it will use that item to formulate a response - but if there is no good match, it falls back to matching the item with the question `no_hits` with the ID `CustomNoMatches`. 
+In both these cases, when QnABot receives your message, it cannot immediately locate a matching ID in its list of items, since your question is free form (not a pre-confired QID). So instead, it will perform a semantic search to see if there is an item with stored questions that is a "good match" - if so it will use that item to formulate a response - but if there is no good match, it falls back to matching the item with the question `no_hits` with the ID `CustomNoMatches`. 
 
 Select CustomNoMatches item in Designer:
 
