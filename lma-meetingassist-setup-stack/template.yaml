@@ -39,8 +39,7 @@ Parameters:
     Type: String
     AllowedValues:
       - 'BEDROCK_KNOWLEDGE_BASE'
-      - 'Q_BUSINESS'
-    Description: Choose which knowledge base / LLM service to use 
+    Description: Choose which knowledge base / LLM service to use (Currently only BEDROCK_KNOWLEDGE_BASE is supported)
 
   BedrockKnowledgeBaseID:
     Type: String
@@ -53,7 +52,7 @@ Parameters:
     Type: String
     Default: 'anthropic.claude-3-sonnet-20240229-v1:0'
     AllowedValues: 
-      - 'anthropic.claude-instant-v1'
+      - 'anthropic.claude-3-haiku-20240307-v1:0'
       - 'anthropic.claude-3-sonnet-20240229-v1:0'
     Description: >-
       If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, select a Bedrock LLM model from the list."
@@ -61,7 +60,6 @@ Parameters:
   AmazonQAppId:
     Type: String
     Default: ''
-    AllowedPattern: '^(|[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})$'
     Description: >
       If MeetingAssistService is Q_BUSINESS, provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot.
 
@@ -70,7 +68,6 @@ Parameters:
     Default: ''
     Description: >-
       If ASSISTANT is Q_BUSINESS, provide an email address to use as the proxy user (e.g. jdoe@example.com)
-    AllowedPattern: '^(|[\w.+-]+@([\w-]+\.)+[\w-]{2,6})$'
 
   # Required
   LexMeetingAssistBotId:

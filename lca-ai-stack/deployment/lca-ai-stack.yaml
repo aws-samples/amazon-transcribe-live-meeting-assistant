@@ -131,20 +131,14 @@ Parameters:
       provided list (BedrockModelId). The LAMBDA option requires you to provide a function ARN below.
 
   BedrockModelId:
-    Default: 'amazon.titan-tg1-large'
+    Default: 'anthropic.claude-3-haiku-20240307-v1:0'
     Type: String
     AllowedValues: 
-      - 'amazon.titan-tg1-large'
-      - 'amazon.titan-e1t-medium'
-      - 'ai21.j2-grande-instruct'
-      - 'ai21.j2-jumbo-instruct'
-      - 'anthropic.claude-instant-v1'
-      - 'anthropic.claude-v1'
-      - 'anthropic.claude-v2'
-
+      - 'anthropic.claude-3-haiku-20240307-v1:0'
+      - 'anthropic.claude-3-sonnet-20240229-v1:0'
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list of supported models. 
-      Defaults to 'amazon.titan-tg1-large'
+      Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ''
