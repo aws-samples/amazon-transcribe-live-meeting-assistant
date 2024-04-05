@@ -2,8 +2,14 @@
 
 ## Table of Contents
 
-1. [Introduction to Meeting Assist](#introduction)  
-  
+1. [Introduction](#introduction)  
+1. [Generate Action Items](#generate-action-items) 
+1. [Summarize, and Identify Topic](#summarize-and-identify-topic) 
+1. [Ask Assistant](#ask-assistant)
+1. [Freeform questions](#freeform-questions)
+1. [Start Message](#start-message)
+1. [Buttons](#buttons)
+1. [Create your own items](#create-your-own-items)
 
 ## Introduction
 
@@ -36,7 +42,7 @@ Choose the **ACTIONS** button to ask the meeting assistant to generate an action
 
 When you click **ACTIONS** the bot UI sends a request to QnABot (using Amazon Lex) that identified the ID of the item that deals with Action Items, `AA.ActionItems`.  
 
-In QnAbot Designer, select the `AA.ActionItems` item to see its definition. Note that it has a **LambdaHook** function defined. You can read about [LambdaHooks in the QnAbot Implementation Guide](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/specifying-lambda-hook-functions.html), but for now, just know that this configures QnABot to invoke the specified function everytime the user requests ActionItems. Here we use the 'SummarizeCall' function that was deployed with LMA, and we specify the LLM prompt it should use, in the **Argument** field. 
+In QnAbot Designer, select the `AA.ActionItems` item to see its definition. Note that it has a **Lambda Hook** function defined. You can read about [Lambda Hooks in the QnAbot Implementation Guide](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/specifying-lambda-hook-functions.html), but for now, just know that this configures QnABot to invoke the specified function everytime the user requests ActionItems. Here we use the 'SummarizeCall' function that was deployed with LMA, and we specify the LLM prompt it should use, in the **Argument** field. 
 
   <p align="left"><img src="../images/meetingassist-bot-actions-qid.png" alt="ActionItemsQID" /></p>
 
@@ -60,19 +66,19 @@ Carefully review the above meeting transcript, and create a numbered list of act
 Assistant:
 ```
 
-You may be able to improve on this default prompt to get better results. Please, have a go. First make a copy of the original prompt so you can easily restore it if needed, and then use QnAbot Designer to edit the `AA.ActionItems` item, open the 'advanced' pane, and find and edit the LambdaHook **Argument**.  Then choose **UPDATE** to save your changes, and try clicking the **ACTION ITEMS** button in the LMA Meeting Assist Bot pane again, and see how your new prompt works.
+You may be able to improve on this default prompt to get better results. Please, have a go. First make a copy of the original prompt so you can easily restore it if needed, and then use QnAbot Designer to edit the `AA.ActionItems` item, open the 'advanced' pane, and find and edit the Lambda Hook **Argument**.  Then choose **UPDATE** to save your changes, and try clicking the **ACTION ITEMS** button in the LMA Meeting Assist Bot pane again, and see how your new prompt works.
 
 For extra 'behind the scenes' visibility, go to the QNA-SummarizeCall Lambda function in the AWS Lambda console, inspect the code, and and view its logs in CloudWatch. This will help you to understand how it works, and to troubleshoot any issues.
 
 ## Summarize, and Identify Topic
 
-The **SUMMARIZE** and **TOPIC** buttons work the same way as **ACTIONS**. They also use the QNA-SummarizeCall LambdaHook function, but they use different prompts defined in the LambdaHook Argument field of items `AA.SummarizeCall` and `AA.CurrentTopic` respectively. You can customize these prompts too, as described above.
+The **SUMMARIZE** and **TOPIC** buttons work the same way as **ACTIONS**. They also use the QNA-SummarizeCall Lambda Hook function, but they use different prompts defined in the Lambda Hook Argument field of items `AA.SummarizeCall` and `AA.CurrentTopic` respectively. You can customize these prompts too, as described above.
 
 ## Ask Assistant
 
-The **ASK ASSISTANT!** button works similarly, but it uses a different LambdaHook function than the Summarize, Topic, and Actions items. 
+The **ASK ASSISTANT!** button works similarly, but it uses a different Lambda Hook function than the Summarize, Topic, and Actions items. 
 
-n QnAbot Designer, select the `AA.AskAssistant` item to see its definition. Note that it has a different **LambdaHook** function. Here we use the 'BedrockKB-LambdaHook' function that was also deployed with LMA - this function interacts with Knowledge bases for Bedrock.  (If you configured LMA - during deployment - to use Amazon Q Business instead, you'd see a different Lambdahook function, 'QBusiness-LambdaHook', configured here instead.)
+n QnAbot Designer, select the `AA.AskAssistant` item to see its definition. Note that it has a different **Lambda Hook** function. Here we use the 'BedrockKB-LambdaHook' function that was also deployed with LMA - this function interacts with Knowledge bases for Bedrock.  (If you configured LMA - during deployment - to use Amazon Q Business instead, you'd see a different Lambda Hook function, 'QBusiness-LambdaHook', configured here instead.)
 
 The LambaHook function retrieves the meeting transcript, and truncates it if needed to represent the last N turns, where N is the value of the QnABot Setting `LLM_CHAT_HISTORY_MAX_MESSAGES` (default is 20, but you can change it in QnABot designer Settings page). The transcript is used to provide context for the prompt.
 
@@ -96,9 +102,9 @@ The fields are:
 - Key: "ShowSourceLinks": Value: true
     - include URLs to the relevant source documents from your Knowledge Base.
 
-As before, you are empowered to tinker with the values to customize or improve on the responses you get from **ASK ASSISTANT!**. For extra 'behind the scenes' visibility, go to the  LambdaHook function in the AWS Lambda console, inspect the code, and and view its logs in CloudWatch. This will help you to understand how it works, and to troubleshoot any issues.
+As before, you are empowered to tinker with the values to customize or improve on the responses you get from **ASK ASSISTANT!**. For extra 'behind the scenes' visibility, go to the  Lambda Hook function in the AWS Lambda console, inspect the code, and and view its logs in CloudWatch. This will help you to understand how it works, and to troubleshoot any issues.
 
-## Freeform questions in the bot UI, and 'OK Assistant!' voice questions
+## Freeform questions
 
 Instead of choosing one of the 'easy buttons' in the Meeting assist bot UI, you can type a freeform question..
 
@@ -108,15 +114,44 @@ OR, you can use the wake phrase, **OK Assistant!** to ask the meeting assistant 
 
   <p align="left"><img src="../images/readme-OK-Assistant.png" alt="OK Assistant" width=300 /></p>
 
-In both these cases, when QnABot receives your message, it cannot immediately locate a matching ID in its list of items, since your question is free form (not a pre-confired QID). So instead, it will perform a semantic search to see if there is an item with stored questions that is a "good match" - if so it will use that item to formulate a response - but if there is no good match, it falls back to matching the item with the question `no_hits` with the ID `CustomNoMatches`. 
+In both these cases, when QnABot receives your message, it cannot immediately locate a matching ID in its list of items, since your question is free form (not a pre-confired QID). So instead, it will perform a semantic search to see if there is an item with stored questions that is a "good match" - if so it will use that item to formulate a response - but if there is no good match, it falls back to matching the item with ID `CustomNoMatches` (and the question `no_hits`). 
 
-Select CustomNoMatches item in Designer:
+Select `CustomNoMatches` item in Designer:
 
   <p align="left"><img src="../images/meetingassist-qnabot-designer-no_hits_qid.png" alt="Bot No_hits" /></p>
 
-This item, too, has a LambdaHook function. It also uses the 'BedrockKB-LambdaHook' function, but note that here, unlike in the previous 'AA.AskAssistant' item, there is no value for "Prompt" in the LambdaHook Argument JSON value.  Rather than using a predefined value for Prompt, instead, the prompt is the actual question that you typed or spoke.  Your question is used in the context of the meeting transcription, so it can refer to recent statements and topics being discussed. 
+This item, too, has a Lambda Hook function. It also uses the 'BedrockKB-LambdaHook' function, but note that here, unlike in the previous 'AA.AskAssistant' item, there is no value for "Prompt" in the Lambda Hook Argument JSON value.  Rather than using a predefined value for Prompt, instead, the prompt is the actual question that you typed or spoke.  Your question is used in the context of the meeting transcription, so it can refer to recent statements and topics being discussed. 
+
+## Start Message
+
+When you first load the LMA Meeting detail page, the Meeting Assist bot displays a welcome message. 
+
+  <p align="left"><img src="../images/meetingassist-bot-start.png" alt="start message" /></p>
 
 
+Select `AA.StartMessage` item in Designer and edit the 'Markdown Answer' to change the start message.
+
+  <p align="left"><img src="../images/meetingassist-qnabot-designer-start-item.png" alt="start item" /></p>
+
+## Buttons
+
+Buttons are defined in each item in Designer, as part of the response generated for that item. To add, delete, or modify buttons, you edit each item where buttons are defined, make your changes, and then choose **UPDATE** to save the changed item. By default, all the built-in items return similar button values, so no matter which button is chosen, the response presents consistent options for the next selection.
+
+  <p align="left"><img src="../images/meetingassist-qnabot-designer-buttons.png" alt="buttons" /></p>
+
+Use the `QID::` syntax (as shown) if you have an explicit item that you want to match with your button press. Your item can return a static response like the `AA.StartMessage` item) or it can use a Lambda Hook to return dynamic answers, like the examples above. 
+
+## Create your own items
+
+Create new items in QnABot designer to add capabilities to LMA.  
+
+Give you new item an `Item ID`. Use this ID in any button values (`QID::<Item ID>`) as you've seen in the examples above, when you want a button press to explicitly match the item.
+
+Add one or more **Questions/Utterances** to your item to enable semantic search for free form questions. When an LMA user says `OK Assistant, Why is the sky blue?` or types `Why is the sky blue?` in the bot, QnAbot first tries to find a 'good answer' from the set of items, before invoking the no_hits fallback when it asks Knowledge base (see [Freeform questions](#freeform-questions)). By configuring one or more questions that are a "good match" (eg `Why is the sky blue`) then QnAbot will match the question to your item instead of the no_hits item, and your item will determine the response that is given by the meeting assistant.
+
+You can configure a static reponse by entering plain text in the **Answer** field, or (better) choose **Advanced** and enter rich text in the form of Markdown or HTML in the **Alternate Answers / Markdown Answer** field. Your static answer can optionally use Handlebars to enable consitions and substitutions - see [Handlerbars README](https://github.com/aws-solutions/qnabot-on-aws/blob/main/docs/handlebars/README.md). 
+
+Or you can configure a Lambda Hook for completely dynamic answers based on any logic you choose. Use one of the Lambda Hook functions discussed above (`SummarizeCall` or `BedrockKB-LambdaHook`) with your own Argument values. Or use a new LambdaHook function that you create yourself, to do whatever you want it to do - query your databases, retrieve information or perform actions using API, integrate with other LLMs - you provide the function, and LMA will run it and returns its reponse to the LMA user. 
 
 
 
