@@ -39,7 +39,7 @@ Here are some of the things it can do:
   <p align="left"><img src="./images/readme-recording.png" alt="recording" /></p>
 - **Inventory list of meetings** - LMA keeps track of all your meetings in a handy searchable list.
   <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" /></p>
-- **Browser extension captures audio and meeting metadata from popular meeting apps** - an easy to install browser extension captures meeting metadata and audio from you (your microphone) and others (from the meeting browser tab). Browsers supported: Chrome (Firefox coming soon). Meeting Apps supported: Zoom (Chime and Teams coming soon). *Standalone meeting apps don't work with LMA - instead launch your meetings in the browser.*
+- **Browser extension captures audio and meeting metadata from popular meeting apps** - an easy to install browser extension captures meeting metadata and audio from you (your microphone) and others (from the meeting browser tab). Browsers supported: Chrome. Meeting Apps supported: Zoom and Chime (Teams and/or WebEx coming soon). *Standalone meeting apps don't work with LMA - instead launch your meetings in the browser.*
   <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" /></p>
 
 *Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited. Notify all other meeting participants and obtain their permission before starting LMA meeting streaming.*
@@ -160,7 +160,9 @@ For the best meeting streaming experience, install the LMA browser plugin - curr
 
 1.	*Tell others on the call that you are about to start recording the call using LMA and obtain their permission. Do not proceed if participants object.*
 
-1. Select **Start Listening**.  Choose **Allow** on the popup asking you to share the browser tab.
+1. Select **Start Listening**.  Read and accept the disclaimer. Choose **Allow** on the popup asking you to share the browser tab.
+
+   <img src="./images/readme-stream-disclaimer.png" alt="Browser Extension Start" width=250/>
 
     The LMA extension automatically detects and displays the active speaker on the call. If you are alone in the meeting, invite some friends to join, and observe that the names they used to join the call are displayed in the extension when they speak, and attributed to their words in the LMA transcript.
 
