@@ -26,9 +26,9 @@ Parameters:
     Type: String
     Description: Disclaimer used for the extension message popup
     Default: >
-      Disclaimer: By clicking the 'Start Listening' button, you acknowledge that you are responsible for ensuring compliance with all applicable laws and regulations regarding the recording and/or transcribing of conversations. This includes obtaining consent from all participants, where required. Recordings may capture sensitive or confidential information, which you are solely responsible for handling and protecting appropriately.
+      Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.
 
-    
+
   WebSocketEndpoint:
     Type: String
     Description: WebSocket Endpoint

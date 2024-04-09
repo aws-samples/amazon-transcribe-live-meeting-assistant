@@ -42,7 +42,7 @@ Here are some of the things it can do:
 - **Browser extension captures audio and meeting metadata from popular meeting apps** - an easy to install browser extension captures meeting metadata and audio from you (your microphone) and others (from the meeting browser tab). Browsers supported: Chrome. Meeting Apps supported: Zoom and Chime (Teams and/or WebEx coming soon). *Standalone meeting apps don't work with LMA - instead launch your meetings in the browser.*
   <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" /></p>
 
-*Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited. Notify all other meeting participants and obtain their permission before starting LMA meeting streaming.*
+*Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.*
 
 ## Prerequisites
 
