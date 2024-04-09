@@ -19,7 +19,7 @@ Here’s a demo to whet your appetite:  *(currently internal, on Broadcast)*
 
 ## Solution overview
 
-The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom for now, Chime & Teams coming soon), and uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries. 
+The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom and Chime currently), or audio only from any other browser-based meeting app, softphone or audio source. It uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries. 
 
 Everything you need is provided as open source in our [GitHub repo TBD](link). And it's easy to deploy in your AWS account - we will show you how. When you’re done, you’ll wonder how you ever managed without it!
 
@@ -144,7 +144,13 @@ For the best meeting streaming experience, install the LMA browser plugin - curr
 
 ## Start using LMA!
 
-### Use the Chrome browser extension to stream a Zoom call
+LMA provides two streaming options:
+
+1. Use the **Chrome browser extension** to stream audio and speaker metadata from your meeting browser app. It currently works with Zoom and Chime, but we hope to add more meeting apps.
+1. Use the **LMA Stream Audio tab** to stream audio from your microphone and any Chrome browser-based meeting app, softphone, or audio application.
+We show you how to use both options in the following sections.
+
+### Option 1: Use the Chrome browser extension to stream a Zoom call
 
 1. Open the LMA extension and login with your LMA credentials.
 
@@ -176,7 +182,7 @@ For the best meeting streaming experience, install the LMA browser plugin - curr
 
    <img src="./images/readme-call-ended.png" alt="Call Ended" width="400"/>
 
-### Use the LMA UI Stream Audio tab to stream from your microphone and any browser based audio application
+### Option 2: Use the LMA UI Stream Audio tab to stream from your microphone and any browser based audio application
 
 The browser extension is the most convenient way to stream metadata and audio from the supported meeting web apps. But you can also use LMA to stream from any browser based softphone, meeting app, or any other audio source playing in your browser, using the very convenient **Stream Audio** tab that is built into the LMA UI. Try it!
 
