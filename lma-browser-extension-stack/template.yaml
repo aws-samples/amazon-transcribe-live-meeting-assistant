@@ -28,7 +28,12 @@ Parameters:
     Default: >
       Disclaimer: By clicking the 'Start Listening' button, you acknowledge that you are responsible for ensuring compliance with all applicable laws and regulations regarding the recording and/or transcribing of conversations. This includes obtaining consent from all participants, where required. Recordings may capture sensitive or confidential information, which you are solely responsible for handling and protecting appropriately.
 
-    
+  RecordingMessage:
+    Type: String
+    Description: Message used for the extension to notify speakers this meeting is being recorded.
+    Default: >
+      This meeting is being recorded with Amazon Live Meeting Assistant (amazon.com/live-meeting-assistant).
+        
   WebSocketEndpoint:
     Type: String
     Description: WebSocket Endpoint
@@ -132,6 +137,8 @@ Resources:
             Value: !Ref WebAppBucket
           - Name: RECORDING_DISCLAIMER
             Value: !Ref RecordingDisclaimer
+          - Name: RECORDING_MESSAGE
+            Value: !Ref RecordingMessage
       Source:
         Location:
           !Sub "arn:aws:s3:::${SourceCodeLocation}"
@@ -158,9 +165,10 @@ Resources:
                     "clientId": "%s",
                     "cognitoDomain": "%s",
                     "cloudfrontEndpoint": "%s",
-                    "recordingDisclaimer": "%s"
+                    "recordingDisclaimer": "%s",
+                    "recordingMessage": "%s"
                   }'
-                  $WEBSOCKET_ENDPOINT $COGNITO_CLIENT_ID $COGNITO_LOGIN_URL $CLOUDFRONT_ENDPOINT "$RECORDING_DISCLAIMER" > ./build/lma_config.json
+                  $WEBSOCKET_ENDPOINT $COGNITO_CLIENT_ID $COGNITO_LOGIN_URL $CLOUDFRONT_ENDPOINT "$RECORDING_DISCLAIMER" "$RECORDING_MESSAGE" > ./build/lma_config.json
                 - echo Packaging extension for Chrome - other browsers to come later
                 - zipfile=lma-chrome-extension.zip
                 - (cd ./build && zip -r ../${zipfile} .)

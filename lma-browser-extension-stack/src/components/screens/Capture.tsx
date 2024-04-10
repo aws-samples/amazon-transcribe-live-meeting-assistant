@@ -15,7 +15,7 @@ function Capture() {
   const { navigate } = useNavigation();
   const { logout } = useUserContext();
   const settings = useSettings();
-  const { currentCall, muted, setMuted, paused,setPaused, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
+  const { currentCall, muted, setMuted, paused,setPaused, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform, sendRecordingMessage } = useIntegration();
 
   const [topic, setTopic] = React.useState("");
   const [agentName, setAgentName] = React.useState("");
@@ -51,26 +51,13 @@ function Capture() {
       return;
     }
 
-    const shouldStart = confirm(settings.recordingDisclaimer);
+    sendRecordingMessage();
 
+    const shouldStart = confirm(settings.recordingDisclaimer);
     if (shouldStart) {
       startTranscription(agentName, topic);
     }
-
-    /*let foundError = false;
-    if (agentName.length < 2) {
-      setNameErrorText("Name required");
-      foundError = true;
-    }
-    if (topic.length < 2) {
-      setMeetingTopicErrorText("Meeting topic required");
-    }
-    if (foundError) {
-      return;
-    } else {
-      startTranscription(agentName, topic);
-    }*/
-  }, [agentName, topic, startTranscription, settings, validateForm]);
+  }, [agentName, topic, startTranscription, settings, validateForm, sendRecordingMessage]);
 
   const stopListening = useCallback(() => {
     stopTranscription();
