@@ -49,7 +49,8 @@ def get_templates_from_ssm(prompt_override):
     return templates
 
 def get_transcripts(callId):
-    payload = {PROCESS_TRANSCRIPT
+    
+    payload = {
         'CallId': callId, 
         'ProcessTranscript': PROCESS_TRANSCRIPT, 
         'TokenCount': TOKEN_COUNT,
