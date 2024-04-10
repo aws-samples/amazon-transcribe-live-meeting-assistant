@@ -40,7 +40,7 @@ def get_transcripts(callid):
         return response['Items']
 
 
-def preprocess_transcripts(transcripts, condense):
+def preprocess_transcripts(transcripts, condense, includeSpeaker):
     data = []
 
     transcripts.sort(key=lambda x: x['EndTime'])
@@ -116,7 +116,7 @@ def lambda_handler(event, context):
         includeSpeaker = data['IncludeSpeaker']
         
     transcripts = get_transcripts(callid)
-    transcripts = preprocess_transcripts(transcripts, preProcess)
+    transcripts = preprocess_transcripts(transcripts, preProcess, includeSpeaker)
     transcript_string = ''.join(transcripts)
     transcript_string = truncate_number_of_words(transcript_string, tokenCount)
     response = {'transcript': transcript_string}
