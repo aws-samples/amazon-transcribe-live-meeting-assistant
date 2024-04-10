@@ -29,7 +29,8 @@ const initialIntegration = {
     meetingTopic: ""
   },
   platform: "n/a",
-  activeSpeaker: "n/a"
+  activeSpeaker: "n/a",
+  sendRecordingMessage: () => {}
 };
 const IntegrationContext = createContext(initialIntegration);
 
@@ -94,6 +95,14 @@ function IntegrationProvider({ children }: any) {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (tab.id) {
       const response = await chrome.tabs.sendMessage(tab.id, { action: "FetchMetadata" });
+    }
+    return {};
+  }
+
+  const sendRecordingMessage = async () => {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (tab.id) {
+      const response = await chrome.tabs.sendMessage(tab.id, { action: "SendRecordingMessage", message: settings.recordingMessage });
     }
     return {};
   }
@@ -194,10 +203,16 @@ function IntegrationProvider({ children }: any) {
       // Clean up the listener when the component unmounts
       return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     }
-  }, [currentCall, metadata, readyState,muted, paused, activeSpeaker, setMuted, setActiveSpeaker, sendMessage, setMetadata, setPlatform, setIsTranscribing]);
+  }, [currentCall, metadata, readyState, muted, paused, activeSpeaker, setMuted,
+    setActiveSpeaker, sendMessage, setMetadata, setPlatform, setIsTranscribing
+  ]);
 
   return (
-    <IntegrationContext.Provider value={{ currentCall, isTranscribing, muted, setMuted,paused, setPaused, fetchMetadata, startTranscription, stopTranscription, metadata, platform, activeSpeaker }}>
+    <IntegrationContext.Provider value={{
+      currentCall, isTranscribing, muted, setMuted, paused, setPaused,
+      fetchMetadata, startTranscription, stopTranscription, metadata, platform,
+      activeSpeaker, sendRecordingMessage
+    }}>
       {children}
     </IntegrationContext.Provider>
   );

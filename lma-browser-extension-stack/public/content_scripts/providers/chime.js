@@ -4,33 +4,85 @@ let metadata = {
   baseUrl: window.location.origin
 }
 
+const openChatPanel = function () {
+    const chatPanelButtons = document.querySelectorAll('[aria-label*="Open chat panel"]');
+    if (chatPanelButtons.length > 0) {
+      chatPanelButtons[0].click(); // open the attendee panel
+    }
+}
+
+const sendRecordingMessage = function (message) {
+  /*const titles = document.querySelectorAll('[data-testid="meetingChatInput"] textarea');
+  if (titles.length > 0) {
+    titles[0].value = message;
+    titles[0].dispatchEvent(new Event('input', { bubbles: true }));
+  }*/
+
+  const chatPanelButtons = document.querySelectorAll('[aria-label*="Send message"]');
+  if (chatPanelButtons.length > 0) {
+    //document.querySelectorAll('[data-testid="meetingChatInput"] textarea')[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'H', bubbles: true }));
+    var input = document.querySelectorAll('[data-testid="meetingChatInput"] textarea')[0];
+    var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+    nativeInputValueSetter.call(input, message);
+
+    var inputEvent = new Event('input', { bubbles: true});
+    input.dispatchEvent(inputEvent);
+    
+    chatPanelButtons[0].click();
+  }
+}
+
+chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
+  if (request.action === "SendRecordingMessage") {
+    console.log("received request to send a start recording message");
+    console.log("message:", request.message);
+    let titles = document.querySelectorAll('[data-testid="meetingChatInput"] textarea');
+    if (titles.length === 0) {
+      openChatPanel();
+    }
+    sendRecordingMessage(request.message);
+  }
+});
+
+
 window.onload = function () {
 
   const muteObserver = new MutationObserver((mutationList) => {
-    console.log("mute changed");
     if (mutationList[0].target.textContent.indexOf('Unmute') >= 0) {
-      chrome.runtime.sendMessage({action: "MuteChange", mute: true});
+      chrome.runtime.sendMessage({ action: "MuteChange", mute: true });
+      console.log("Mute detected");
     } else {
       chrome.runtime.sendMessage({action: "MuteChange", mute: false});
+      console.log("Unmute detected");
     }
   });
   
   const muteInterval = setInterval(() => {
     const muteButton = document.getElementById('audio');
-    console.log('checking for mute button');
+    //console.log('checking for mute button');
     if (muteButton) {
-      console.log('mute button found');
+      //console.log('mute button found');
       muteObserver.observe(muteButton, { attributes: true, subtree: false, childList: false });
     }
   }, 2000);
 
   const titleInterval = setInterval(() => {
-    console.log('Checking for title');
+    //console.log('Checking for title');
+    let sessionData = undefined;
+    try {
+      sessionData = JSON.parse(JSON.parse(localStorage.getItem("AmazonChimeExpressSession")));
+    } catch (error) {
+      console.log("Unable to read chime session data", error);
+    }
+    
     const titles = document.querySelectorAll('[data-test-id="meetingTitle"]');
     if (titles.length > 0) {
-      console.log('Title found');
+      //console.log('Title found');
       let title = titles[0].innerText;
       metadata.meetingTopic = title;
+      if (sessionData !== undefined && sessionData.fullName) {
+        metadata.userName = sessionData.fullName;
+      }      
       chrome.runtime.sendMessage({
         action: "UpdateMetadata",
         metadata: metadata
@@ -44,27 +96,49 @@ window.onload = function () {
     console.log("activeSpeaker changed");
     console.log(mutationList);  
     mutationList.forEach((mutation) => {
-      if (mutation.addedNodes && mutation.addedNodes.length > 0) {
-        const activeSpeaker = mutation.addedNodes[0].parentNode.parentNode.childNodes[1].innerText;
-        console.log("Speaker:", activeSpeaker);
-        if (activeSpeaker !== 'No one') {
-          chrome.runtime.sendMessage({action: "ActiveSpeakerChange", active_speaker: activeSpeaker});
+      /*if (mutation.addedNodes && mutation.addedNodes.length > 0) {
+        try {
+          const activeSpeaker = mutation.addedNodes[0].parentNode.parentNode.childNodes[1].innerText;
+          console.log("Speaker:", activeSpeaker);
+          if (activeSpeaker !== 'No one') {
+            chrome.runtime.sendMessage({action: "ActiveSpeakerChange", active_speaker: activeSpeaker});
+          }
+        } catch (error) {
+          console.log('error detecting speaker', error);
         }
+      } else */
+      if (mutation.type === "characterData") {
+        // this is a changed record
+        if (!mutation.target.data.includes("Mute") && !mutation.target.data.includes("Only they may unmute themselves.")) {
+          const activeSpeaker = mutation.target.data;
+          if (activeSpeaker !== 'No one') {
+            chrome.runtime.sendMessage({action: "ActiveSpeakerChange", active_speaker: activeSpeaker});
+          }
+        }
+        /*if (mutation.target.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode) {
+          
+        }
+        const activeSpeaker = mutation.target.parentNode.parentNode.childNodes[1].innerText;
+        console.log("CHanged innerText:", activeSpeaker);
+        console.log("Changed:", mutation.target.data);*/
       }
     });
   });
 
   const activeSpeaker = setInterval(() => {
-    console.log('checking for active speaker div');
+    //console.log('checking for active speaker div');
     const speakers = document.getElementsByClassName('activeSpeakerCell');
     if (speakers && speakers.length > 0) {
-      console.log('active speaker div found');
-      // activeSpeakerObserver.disconnect();
-      if (!speakers[0].hasOwnProperty('MutationObserver')) {
-        activeSpeakerObserver.observe(speakers[0], { attributes: true, childList: true, subtree: true });
+      //console.log('active speaker div found');
+
+      if (!speakers[0].parentElement.hasAttribute("LMAAttached")) {
+        console.log("UL does not have LMA attached yet, attaching.");
+        activeSpeakerObserver.observe(speakers[0].parentElement, {childList: true, subtree: true, characterData:true });
+        speakers[0].parentElement.setAttribute("LMAAttached", "True");
       }
-      //clearInterval(activeSpeaker); // I don't see any degredation if we dont stop every 2 seconds...
+            // clearInterval(activeSpeaker);
     } else {
+      console.log("Speaker panel not seen. Opening up.")
       // we do not see any active speaker box. Find the open attendee button:
       const chatPanelButtons = document.querySelectorAll('[aria-label*="Open attendees"]');
       if (chatPanelButtons.length > 0) {
