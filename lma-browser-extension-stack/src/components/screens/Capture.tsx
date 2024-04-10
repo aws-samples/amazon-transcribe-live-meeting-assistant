@@ -15,7 +15,7 @@ function Capture() {
   const { navigate } = useNavigation();
   const { logout } = useUserContext();
   const settings = useSettings();
-  const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
+  const { currentCall, muted, setMuted, paused,setPaused, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform, sendRecordingMessage } = useIntegration();
 
   const [topic, setTopic] = React.useState("");
   const [agentName, setAgentName] = React.useState("");
@@ -30,38 +30,34 @@ function Capture() {
   }, [metadata, setTopic, setAgentName]);
 
   const validateForm = useCallback(() => {
-    if (topic.length === 0 || agentName.length === 0) {
-      return false;
+    let isValid = true;
+    if (agentName === undefined || agentName.trim().length === 0) {
+      setNameErrorText("Name required.")
+      isValid = false
+    } else {
+      setNameErrorText("");
     }
-    return true;
-  }, [topic, agentName]);
+    if (topic === undefined || topic.trim().length === 0) {
+      setMeetingTopicErrorText("Topic required.")
+      isValid = false;
+    } else {
+      setMeetingTopicErrorText("");
+    }
+    return isValid;
+  }, [topic, agentName, nameErrorText, setNameErrorText, meetingTopicErrorText, setMeetingTopicErrorText ]);
 
   const startListening = useCallback(() => {
     if (validateForm() === false) {
-      alert("Please fill out name and topic");
       return;
     }
 
-    const shouldStart = confirm(settings.recordingDisclaimer);
+    sendRecordingMessage();
 
+    const shouldStart = confirm(settings.recordingDisclaimer);
     if (shouldStart) {
       startTranscription(agentName, topic);
     }
-
-    /*let foundError = false;
-    if (agentName.length < 2) {
-      setNameErrorText("Name required");
-      foundError = true;
-    }
-    if (topic.length < 2) {
-      setMeetingTopicErrorText("Meeting topic required");
-    }
-    if (foundError) {
-      return;
-    } else {
-      startTranscription(agentName, topic);
-    }*/
-  }, [agentName, topic, startTranscription, settings, validateForm]);
+  }, [agentName, topic, startTranscription, settings, validateForm, sendRecordingMessage]);
 
   const stopListening = useCallback(() => {
     stopTranscription();
@@ -119,23 +115,24 @@ function Capture() {
                     <Button fullWidth={true} iconName="microphone" onClick={() => setPaused(true)}>Pause</Button>
                   </>
               }
-              <Button fullWidth={true} variant='primary' onClick={() => stopListening()}>Stop Listening</Button>
-
+              <Button fullWidth={true} variant='primary'  onClick={() => stopListening()}>Stop Listening</Button>
             </>
             :
             <>
               <FormField
-                constraintText=""
-                errorText={nameErrorText}
-                label="Your name:"
-              >
+                  stretch={true}
+                  constraintText=""
+                  errorText={nameErrorText}
+                  label="Your name:"
+                >
                 <Input value={agentName} onChange={({ detail }) => setAgentName(detail.value)} placeholder='Your name' ></Input>
               </FormField>
               <FormField
-                constraintText=""
-                errorText={meetingTopicErrorText}
-                label="Meeting Topic:"
-              >
+                  stretch={true}
+                  constraintText=""
+                  errorText={meetingTopicErrorText}
+                  label="Meeting Topic:"
+                >
                 <Input value={topic} onChange={({ detail }) => setTopic(detail.value)} placeholder='Meeting room topic' inputMode='text'></Input>
               </FormField>
               <Button fullWidth={true} variant='primary' onClick={() => startListening()}>Start Listening</Button>

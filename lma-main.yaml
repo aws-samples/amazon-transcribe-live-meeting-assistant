@@ -48,6 +48,16 @@ Parameters:
     Description: >
       A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant!'
 
+  MeetingAssistQnABotOpenSearchNodeCount:
+    Type: String
+    Default: '1'
+    AllowedValues:
+      - 1
+      - 2
+      - 4
+    Description: >
+      Number of nodes in Meeting Assistant QnABot OpenSearch domain - '4' is recommended for fault tolerant production deployments.
+
   S3BucketName:
     Type: String
     Description: >
@@ -263,6 +273,7 @@ Metadata:
           - BedrockKnowledgeBaseId
           - BedrockKnowledgeBaseModelID
           - AssistantWakePhraseRegEx
+          - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
           default: Amazon S3 Configuration
         Parameters:
@@ -320,6 +331,8 @@ Metadata:
         default: Meeting Assist Bedrock Knowledge Base Id (existing)
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
+      MeetingAssistQnABotOpenSearchNodeCount:
+        default: Meeting Assist QnABot OpenSearch Node Count
       IsPartialTranscriptEnabled:
         default: Enable Partial Transcripts
       IsContentRedactionEnabled:
@@ -499,6 +512,7 @@ Resources:
       Parameters:
         Email: !Ref AdminEmail
         Username: 'Admin'
+        ElasticSearchNodeCount: !Ref MeetingAssistQnABotOpenSearchNodeCount
         LexV2BotLocaleIds:
           !FindInMap [
             TranscribeToLexLocaleId,

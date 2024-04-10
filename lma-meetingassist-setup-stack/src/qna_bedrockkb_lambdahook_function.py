@@ -165,24 +165,28 @@ def get_args_from_lambdahook_args(event):
     return parameters
 
 
-def format_response(event, kb_response):
+def format_response(event, kb_response, query):
     # get settings, if any, from lambda hook args
-    # e.g: {"Prefix":"<custom prefix heading>", "ShowContext": False}
+    # e.g: {"AnswerPrefix":"<custom prefix heading>", "ShowContext": False}
     lambdahook_settings = get_settings_from_lambdahook_args(event)
-    prefix = lambdahook_settings.get("Prefix", "Amazon Bedrock KB Answer:")
+    answerprefix = lambdahook_settings.get("AnswerPrefix", "Assistant Answer:")
     showContextText = lambdahook_settings.get("ShowContextText", True)
     showSourceLinks = lambdahook_settings.get("ShowSourceLinks", True)
+    queryprefix = lambdahook_settings.get("QueryPrefix")
     message = kb_response.get("output").get("text") or kb_response.get(
         "systemMessage") or "No answer found"
     # set plaintext, markdown, & ssml response
-    if prefix in ["None", "N/A", "Empty"]:
-        prefix = None
+    if answerprefix in ["None", "N/A", "Empty"]:
+        answerprefix = None
     plainttext = message
     markdown = message
     ssml = message
-    if prefix:
-        plainttext = f"{prefix}\n\n{plainttext}"
-        markdown = f"**{prefix}**\n\n{markdown}"
+    if answerprefix:
+        plainttext = f"{answerprefix}\n\n{plainttext}"
+        markdown = f"**{answerprefix}**\n\n{markdown}"
+    if queryprefix:
+        plainttext = f"{queryprefix} {query}\n\n{plainttext}"
+        markdown = f"**{queryprefix}** *{query}*\n\n{markdown}"
     if showContextText:
         contextText = ""
         for source in kb_response.get("citations", []):
@@ -272,6 +276,6 @@ def handler(event, context):
     kb_response = get_kb_response(
         generatePromptTemplate, transcript, query)
 
-    event = format_response(event, kb_response)
+    event = format_response(event, kb_response, query)
     print("Returning response: %s" % json.dumps(event))
     return event
