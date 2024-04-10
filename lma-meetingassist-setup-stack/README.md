@@ -89,14 +89,16 @@ A JSON object with several parameters is in the **Argument** field.
 The default Argument value string is the following JSON:
 
 ```
-{"Prompt":"Assistant, what is a good response?", "Prefix":"Assistant Answer:", "ShowContextText":true, "ShowSourceLinks":true}
+{"Prompt":"Assistant, what is a good response?", "AnswerPrefix":"Assistant Answer:", "QueryPrefix":"Assistant Query:", "ShowContextText":true, "ShowSourceLinks":true}
 ```
 
 The fields are:
 - Key: "Prompt", Value: "Assistant, what is a good response?"
     - This is the default prompt for 'Ask Assistant', it is interpreted (by an LLM inference) in the context of the meeting transcript. The intention of this prompt is to simply advise the LMA user what might be a good thing to say next, given the topics being discussed and how the meeting is going. 
-- Key: "Prefix", Value: "Assistant Answer:"
-    - This is a message to prefix to the response returned by Knowledge base. 
+- Key: "AnswerPrefix", Value: "Assistant Answer:"
+    - This is a message to prefix to the response returned by Knowledge base.
+- Key: "QueryPrefix", Value: "Assistant Query:"
+    - If set, the *Assistant Query* is prefixed to the answer, clearly showing the question that the assistant answers. Remove this key to disable the *Assistant Query* prefix.
 - Key: "ShowContextText": Value: true
     - Include relevant passage snippets from your Knowledge Base, used to generate the response. 
 - Key: "ShowSourceLinks": Value: true
