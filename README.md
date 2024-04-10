@@ -25,21 +25,21 @@ Everything you need is provided as open source in our [GitHub repo TBD](link). A
 
 Here are some of the things it can do:
 
-- **Live transcription with speaker attribution** - powered by Amazon Transcribe's world class ASR models for low latency, high accuracy speech to text. You can easily teach it new vocabulary and domain specific language if needed using Transcribe's Custom Vocabulary and Custom Language model features.
+- **Live transcription with speaker attribution** - powered by Amazon Transcribe's world class ASR models for low latency, high accuracy speech to text. You can easily teach it brand names and domain specific language if needed using Transcribe's custom vocabulary and custom language model features.
    <p align="left"><img src="./images/readme-transcription.png" alt="Transcription" /></p>
-- **Live translation** - uses Amazon Translate to optionally show each segment of the conversation translated into your choice of language from a selection of around 75 languages.
+- **Live translation** - uses Amazon Translate to optionally show each segment of the conversation translated into your language of choice from a selection of around 75 languages.
   <p align="left"><img src="./images/readme-translation.png" alt="Translation" width=400/></p>
-- **Context aware meeting assistant** - uses Knowledge Bases for Amazon Bedrock to provide answers from your trusted sources, using the live transcript as context for fact checking and follow-up questions. Say *OK Assistant!*, or click the *ASK ASSISTANT!* button, or type your own question in the UI.
+- **Context aware meeting assistant** - uses Knowledge Bases for Amazon Bedrock to provide answers from your trusted sources, using the live transcript as context for fact checking and follow-up questions. To activate the assistant, just say *OK Assistant!*, or click the *ASK ASSISTANT!* button, or type your own question in the UI.
   <p align="left"><img src="./images/readme-OK-Assistant.png" alt="OK Q" width=400/></p>
-- **Ad Hoc summaries of the meeting** - click a button on the UI to generate a summary on demand - very handy when someone joins late and needs to get caught up. The summaries are generated from the transcript by Amazon Bedrock. LMA also provides easy buttons for identifying the current meeting topic, and for generating a list of action items with owners and due dates. You can easily create your own custom prompts and corresponding buttons.
+- **On demand summaries of the meeting** - click a button on the UI to generate an ad-hoc summary - very handy when someone joins late and needs to get caught up. The summaries are generated from the transcript by Amazon Bedrock. LMA also provides easy buttons for identifying the current meeting topic, and for generating a list of action items with owners and due dates. You can easily create your own custom prompts and corresponding buttons.
   <p align="left"><img src="./images/readme-action-items.png" alt="Action Items" /></p>
 - **Automated summary and insights** - when the meeting has ended, LMA automatically runs a set of LLM prompts on Amazon Bedrock to summarize the meeting transcript and extract insights. Of course, you can also easily customize these prompts too.
   <p align="left"><img src="./images/readme-post-meeting-summaries.png" alt="Post Meeting Summaries" /></p>
-- **Meeting Recording** - the audio is (optionally) stored for you so you can replay important sections on the meeting later.
+- **Meeting Recording** - the audio is (optionally) stored for you, so you can replay important sections on the meeting later.
   <p align="left"><img src="./images/readme-recording.png" alt="recording" /></p>
 - **Inventory list of meetings** - LMA keeps track of all your meetings in a handy searchable list.
   <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" /></p>
-- **Browser extension captures audio and meeting metadata from popular meeting apps** - an easy to install browser extension captures meeting metadata and audio from you (your microphone) and others (from the meeting browser tab). Browsers supported: Chrome. Meeting Apps supported: Zoom and Chime (Teams and/or WebEx coming soon). *Standalone meeting apps don't work with LMA - instead launch your meetings in the browser.*
+- **Browser extension captures audio and meeting metadata (title and speaker names) from popular meeting apps** - an easy to install browser extension captures meeting metadata – the meeting title and names of active speakers - and audio from you (your microphone) and others (from the meeting browser tab). Browsers supported: Chrome. Meeting Apps supported: Zoom and Chime (Teams and/or WebEx coming soon). *Standalone meeting apps don't work with LMA - instead launch your meetings in the browser.*
   <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" /></p>
 
 *Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.*
@@ -100,7 +100,7 @@ After you deploy the stack, you need to open the LMA web user interface and set 
 
     <p align="left"><img src="./images/readme-cloudfront-endpoint.png" alt="Cloudfront Endpoint" width="450"/></p>
   
-1. Open the email you received, at the email address you provided, with the subject “Welcome to Live Meeting Analytics!” 
+1. Open the email you received, at the email address you provided, with the subject “Welcome to Live Meeting Assistant!” 
 
 1. Open your web browser to the URL shown in the email. You’re directed to the login page.
 
@@ -316,7 +316,7 @@ Our companion solution, [Live Call Analytics and Agent Assist](https://www.amazo
 
 ## Conclusion
 
-The Live Meeting Assist (LMA) sample solution offers a flexible, feature-rich, and customizable approach to provide live meeting assistance to improve your productivity during and after meetings. It uses Amazon AI/ML services like Amazon Transcribe, Amazon Lex,  Knowledge Bases for Amazon Bedrock  and Amazon Bedrock large language models to transcribe and extract real-time insights from your meeting audio.
+The Live Meeting Assist (LMA) sample solution offers a flexible, feature-rich, and customizable approach to provide live meeting assistance to improve your productivity during and after meetings. It uses Amazon AI/ML services like Amazon Transcribe, Amazon Lex,  Knowledge Bases for Amazon Bedrock, and Amazon Bedrock large language models to transcribe and extract real-time insights from your meeting audio.
 
 The sample LMA application is provided as open source—use it as a starting point for your own solution, and help us make it better by contributing back fixes and features via GitHub pull requests. Browse to the [LMA GitHub repository](github URL here) to explore the code, choose **Watch** to be notified of new releases, and check the [README](./README.md) for the latest documentation updates.
 
