@@ -12,15 +12,21 @@ const openChatPanel = function () {
 }
 
 const sendRecordingMessage = function (message) {
-  const titles = document.querySelectorAll('[data-testid="meetingChatInput"] textarea');
+  /*const titles = document.querySelectorAll('[data-testid="meetingChatInput"] textarea');
   if (titles.length > 0) {
     titles[0].value = message;
     titles[0].dispatchEvent(new Event('input', { bubbles: true }));
-  }
+  }*/
 
   const chatPanelButtons = document.querySelectorAll('[aria-label*="Send message"]');
   if (chatPanelButtons.length > 0) {
-    document.querySelectorAll('[data-testid="meetingChatInput"] textarea')[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'H', bubbles: true }));
+    //document.querySelectorAll('[data-testid="meetingChatInput"] textarea')[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'H', bubbles: true }));
+    var input = document.querySelectorAll('[data-testid="meetingChatInput"] textarea')[0];
+    var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+    nativeInputValueSetter.call(input, message);
+
+    var inputEvent = new Event('input', { bubbles: true});
+    input.dispatchEvent(inputEvent);
     
     chatPanelButtons[0].click();
   }

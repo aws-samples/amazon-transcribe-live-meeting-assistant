@@ -102,7 +102,7 @@ function IntegrationProvider({ children }: any) {
   const sendRecordingMessage = async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (tab.id) {
-      const response = await chrome.tabs.sendMessage(tab.id, { action: "SendRecordingMessage", message: settings.recordingDisclaimer });
+      const response = await chrome.tabs.sendMessage(tab.id, { action: "SendRecordingMessage", message: settings.recordingMessage });
     }
     return {};
   }
