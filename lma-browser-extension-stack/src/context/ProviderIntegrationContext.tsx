@@ -99,13 +99,13 @@ function IntegrationProvider({ children }: any) {
     return {};
   }
 
-  const sendRecordingMessage = async () => {
+  const sendRecordingMessage = useCallback(async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (tab.id) {
       const response = await chrome.tabs.sendMessage(tab.id, { action: "SendRecordingMessage", message: settings.recordingMessage });
     }
     return {};
-  }
+  }, [settings]);
 
   const getTimestampStr = () => {
     const now = new Date();
@@ -184,6 +184,7 @@ function IntegrationProvider({ children }: any) {
           currentCall.callEvent = 'START';
           sendMessage(JSON.stringify(currentCall));
           setIsTranscribing(true);
+          sendRecordingMessage();
         } else if (request.action === "AudioData") {
           if (readyState === ReadyState.OPEN)
           {
@@ -204,7 +205,7 @@ function IntegrationProvider({ children }: any) {
       return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     }
   }, [currentCall, metadata, readyState, muted, paused, activeSpeaker, setMuted,
-    setActiveSpeaker, sendMessage, setMetadata, setPlatform, setIsTranscribing
+    setActiveSpeaker, sendMessage, setMetadata, setPlatform, setIsTranscribing, sendRecordingMessage
   ]);
 
   return (

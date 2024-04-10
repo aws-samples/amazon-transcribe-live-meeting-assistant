@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect } from 'react';
 import logo from './logo.svg';
 import './Capture.css'
-import { Box, Button, Container, ContentLayout, CopyToClipboard, FormField, Grid, Header, Input, Link, SpaceBetween } from '@cloudscape-design/components';
+import { Box, Button, Container, ContentLayout, CopyToClipboard, FormField, Grid, Header, Icon, Input, Link, Modal, SpaceBetween } from '@cloudscape-design/components';
 import UserMessage from '../views/UserMessage';
 import OtherMessage from '../views/OtherMessage';
 import { useNavigation } from '../../context/NavigationContext';
@@ -15,13 +15,14 @@ function Capture() {
   const { navigate } = useNavigation();
   const { logout } = useUserContext();
   const settings = useSettings();
-  const { currentCall, muted, setMuted, paused,setPaused, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform, sendRecordingMessage } = useIntegration();
+  const { currentCall, muted, setMuted, paused,setPaused, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
 
   const [topic, setTopic] = React.useState("");
   const [agentName, setAgentName] = React.useState("");
   const [nameErrorText, setNameErrorText] = React.useState("");
   const [meetingTopicErrorText, setMeetingTopicErrorText] = React.useState("");
   const [formError, setFormError] = React.useState(false);
+  const [showDisclaimer, setShowDisclaimer] = React.useState(false);
 
   useEffect(() => {
     console.log("Metadata changed");
@@ -50,14 +51,12 @@ function Capture() {
     if (validateForm() === false) {
       return;
     }
+    setShowDisclaimer(true);
+  }, [ settings, validateForm, showDisclaimer]);
 
-    sendRecordingMessage();
-
-    const shouldStart = confirm(settings.recordingDisclaimer);
-    if (shouldStart) {
-      startTranscription(agentName, topic);
-    }
-  }, [agentName, topic, startTranscription, settings, validateForm, sendRecordingMessage]);
+  const disclaimerConfirmed = useCallback(() => {
+    startTranscription(agentName, topic);
+  }, [agentName, topic, startTranscription])
 
   const stopListening = useCallback(() => {
     stopTranscription();
@@ -97,6 +96,27 @@ function Capture() {
           </Header>
         }
       >
+    <Modal
+      onDismiss={() => setShowDisclaimer(false)}
+      visible={showDisclaimer}
+      footer={
+        <Box float="right">
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={async () => {
+              setShowDisclaimer(false);
+            }}>Cancel</Button>
+            <Button variant="primary" onClick={async () => {
+              setShowDisclaimer(false);
+              disclaimerConfirmed();
+            }}>Agree</Button>
+          </SpaceBetween>
+        </Box>
+      }
+      header="Important:"
+        >
+        <Icon name="status-warning"></Icon>&nbsp;
+        {settings.recordingDisclaimer}
+    </Modal>
         <SpaceBetween size="l">
           <ValueWithLabel label="Platform Detected:">{platform}</ValueWithLabel>
           {(isTranscribing === true ?
