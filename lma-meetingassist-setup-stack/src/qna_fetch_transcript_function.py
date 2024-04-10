@@ -7,7 +7,8 @@ LAMBDA_CLIENT = boto3.client("lambda")
 def get_call_transcript(callId):
     payload = {
         'CallId': callId, 
-        'ProcessTranscript': True
+        'ProcessTranscript': True,
+        'IncludeSpeaker': True
     }
     lambda_response = LAMBDA_CLIENT.invoke(
         FunctionName=FETCH_TRANSCRIPT_FUNCTION_ARN,

@@ -22,7 +22,8 @@ QBUSINESS_CLIENT = boto3.client(
 def get_call_transcript(callId, userInput, maxMessages):
     payload = {
         'CallId': callId,
-        'ProcessTranscript': True
+        'ProcessTranscript': True,
+        'IncludeSpeaker': True
     }
     lambda_response = LAMBDA_CLIENT.invoke(
         FunctionName=FETCH_TRANSCRIPT_FUNCTION_ARN,

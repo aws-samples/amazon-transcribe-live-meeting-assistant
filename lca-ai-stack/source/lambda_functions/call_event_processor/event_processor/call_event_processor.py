@@ -1445,10 +1445,6 @@ async def execute_process_event_api_mutation(
 
         for normalized_message in normalized_messages:
 
-            # Prepend speaker name to transcript
-            if message.get("Speaker"):
-                normalized_message["Transcript"] = message["Speaker"] + ": " + normalized_message["Transcript"]
-
             # Invoke custom lambda hook (if any) and use returned version of message.
             if (TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN):
                 normalized_message = invoke_transcript_lambda_hook(normalized_message)

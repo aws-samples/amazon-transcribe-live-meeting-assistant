@@ -49,10 +49,11 @@ def get_templates_from_ssm(prompt_override):
     return templates
 
 def get_transcripts(callId):
-    payload = {
+    payload = {PROCESS_TRANSCRIPT
         'CallId': callId, 
         'ProcessTranscript': PROCESS_TRANSCRIPT, 
-        'TokenCount': TOKEN_COUNT 
+        'TokenCount': TOKEN_COUNT,
+        'IncludeSpeaker': True
     }
     print("Invoking lambda", payload)
     response = lambda_client.invoke(
