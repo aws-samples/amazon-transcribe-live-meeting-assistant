@@ -16,7 +16,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Call Analytics with Agent Assist - LCA AI Stack
+Description: Amazon Transcribe Live Meeting Assist - AI Stack
 
 Parameters:
   # Required

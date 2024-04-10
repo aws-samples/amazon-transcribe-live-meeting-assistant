@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
-Description: Amazon Transcribe Live Call Analytics - LCA SSM Parameters
+Description: Amazon Transcribe Live Meeting Assist - SSM Parameters
 
 Parameters:
   # Required
