@@ -24,8 +24,7 @@ Parameters:
     Type: String
     AllowedValues:
       - 'BEDROCK_KNOWLEDGE_BASE'
-      - 'Q_BUSINESS'
-    Description: Choose which knowledge base / LLM service to use 
+    Description: Choose which knowledge base / LLM service to use (Currently only BEDROCK_KNOWLEDGE_BASE is supported)
 
   BedrockKnowledgeBaseId:
     Type: String
@@ -38,16 +37,10 @@ Parameters:
     Type: String
     Default: 'anthropic.claude-3-sonnet-20240229-v1:0'
     AllowedValues: 
-      - 'anthropic.claude-haiku-coming-soon'
+      - 'anthropic.claude-3-haiku-20240307-v1:0'
       - 'anthropic.claude-3-sonnet-20240229-v1:0'
     Description: >-
       If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, select a Bedrock LLM model from the list."
-
-  AmazonQAppId:
-    Type: String
-    AllowedPattern: '^(|[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})$'
-    Description: >
-      If MeetingAssistService is Q_BUSINESS, provide the application *id* (not name) of an existing Q Business index to be used for Meeting Assist bot.
 
   AssistantWakePhraseRegEx:
     Type: String
@@ -168,14 +161,14 @@ Parameters:
       provided list (BedrockModelId). The LAMBDA option requires you to provide a function ARN below.
 
   BedrockModelId:
-    Default: 'anthropic.claude-instant-v1'
+    Default: 'anthropic.claude-3-haiku-20240307-v1:0'
     Type: String
     AllowedValues: 
-      - 'anthropic.claude-instant-v1'
+      - 'anthropic.claude-3-haiku-20240307-v1:0'
       - 'anthropic.claude-3-sonnet-20240229-v1:0'
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list of supported models. 
-      Defaults to 'anthropic.claude-instant-v1'
+      Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ''
@@ -269,7 +262,6 @@ Metadata:
           - MeetingAssistService
           - BedrockKnowledgeBaseId
           - BedrockKnowledgeBaseModelID
-          - AmazonQAppId
           - AssistantWakePhraseRegEx
       - Label:
           default: Amazon S3 Configuration
@@ -326,8 +318,6 @@ Metadata:
         default: Authorized Account Email Domain(s)
       BedrockKnowledgeBaseId:
         default: Meeting Assist Bedrock Knowledge Base Id (existing)
-      AmazonQAppId:
-        default: Meeting Assist Amazon Q Business Application Id (existing)
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
       IsPartialTranscriptEnabled:
@@ -587,8 +577,8 @@ Resources:
         MeetingAssistService: !Ref MeetingAssistService
         BedrockKnowledgeBaseID: !Ref BedrockKnowledgeBaseId
         BedrockKnowledgeBaseModelID: !Ref BedrockKnowledgeBaseModelID
-        AmazonQAppId: !Ref AmazonQAppId
-        AmazonQUserId: !Ref AdminEmail
+        AmazonQAppId: 'NOT CURRENTLY USED'
+        AmazonQUserId: 'NOT CURRENTLY USED'
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
         LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
         LexMeetingAssistLocaleId:
