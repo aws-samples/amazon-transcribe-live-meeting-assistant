@@ -167,12 +167,6 @@ chmod +x ./build-s3-dist.sh
 ./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lca-ai-stack $VERSION $REGION || exit 1
 popd
 
-dir=lca-kendra-stack
-echo "PACKAGING $dir"
-pushd $dir
-aws s3 cp ./template.yaml s3://${BUCKET}/${PREFIX_AND_VERSION}/lca-kendra-stack/template.yaml
-popd
-
 dir=lca-ssm-stack
 echo "PACKAGING $dir"
 pushd $dir
