@@ -15,7 +15,7 @@ function Capture() {
   const { navigate } = useNavigation();
   const { logout } = useUserContext();
   const settings = useSettings();
-  const { currentCall, muted, setMuted, paused,setPaused, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
+  const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
 
   const [topic, setTopic] = React.useState("");
   const [agentName, setAgentName] = React.useState("");
@@ -83,12 +83,12 @@ function Capture() {
   return (
     <ContentLayout
       header={
-          <SpaceBetween size={'xs'}>
-            <Header
-              variant="h1"
-              description="Powered by Amazon Transcribe and Q"
-            >
-              Amazon Live Meeting Assistant
+        <SpaceBetween size={'xs'}>
+          <Header
+            variant="h1"
+            description="Powered by Amazon Transcribe and Amazon Bedrock"
+          >
+            Amazon Live Meeting Assistant
           </Header>
         </SpaceBetween>
       }
@@ -105,7 +105,7 @@ function Capture() {
           <ValueWithLabel label="Platform Detected:">{platform}</ValueWithLabel>
           {(isTranscribing === true ?
             <>
-            <Button fullWidth={true} onClick={async () => openInLMA()}>Open in LMA</Button>
+              <Button fullWidth={true} onClick={async () => openInLMA()}>Open in LMA</Button>
               <ValueWithLabel label="Name:">{agentName}</ValueWithLabel>
               <ValueWithLabel label="Meeting Topic:">{topic}</ValueWithLabel>
               <ValueWithLabel label="Active Speaker:">{activeSpeaker}</ValueWithLabel>
@@ -116,39 +116,39 @@ function Capture() {
                   </>
                   :
                   <>
-                  <Button fullWidth={true} iconName="microphone" onClick={() => setPaused(true)}>Pause</Button>
+                    <Button fullWidth={true} iconName="microphone" onClick={() => setPaused(true)}>Pause</Button>
                   </>
               }
-              <Button fullWidth={true} variant='primary'  onClick={() => stopListening()}>Stop Listening</Button>
+              <Button fullWidth={true} variant='primary' onClick={() => stopListening()}>Stop Listening</Button>
 
             </>
             :
             <>
               <FormField
-                  constraintText=""
-                  errorText={nameErrorText}
-                  label="Your name:"
-                >
+                constraintText=""
+                errorText={nameErrorText}
+                label="Your name:"
+              >
                 <Input value={agentName} onChange={({ detail }) => setAgentName(detail.value)} placeholder='Your name' ></Input>
               </FormField>
               <FormField
-                  constraintText=""
-                  errorText={meetingTopicErrorText}
-                  label="Meeting Topic:"
-                >
+                constraintText=""
+                errorText={meetingTopicErrorText}
+                label="Meeting Topic:"
+              >
                 <Input value={topic} onChange={({ detail }) => setTopic(detail.value)} placeholder='Meeting room topic' inputMode='text'></Input>
               </FormField>
-              <Button fullWidth={true} variant='primary'  onClick={() => startListening()}>Start Listening</Button>
+              <Button fullWidth={true} variant='primary' onClick={() => startListening()}>Start Listening</Button>
             </>
           )}
-          <Grid gridDefinition={[{ colspan: 6 }, { colspan:6}]}>
-            {muted === true ? 
-              <Button  iconAlign="left" iconName="microphone-off" fullWidth={true} onClick={() => unmute()}>Unmute</Button>
-              : 
-              <Button  iconAlign="left" iconName="microphone" fullWidth={true} onClick={() => mute()}>Mute</Button>
+          <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+            {muted === true ?
+              <Button iconAlign="left" iconName="microphone-off" fullWidth={true} onClick={() => unmute()}>Unmute</Button>
+              :
+              <Button iconAlign="left" iconName="microphone" fullWidth={true} onClick={() => mute()}>Mute</Button>
             }
             <Button fullWidth={true} onClick={() => logout()}>Log out</Button>
-          </Grid>         
+          </Grid>
         </SpaceBetween>
       </Container>
     </ContentLayout>
