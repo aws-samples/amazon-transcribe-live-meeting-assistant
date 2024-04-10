@@ -62,11 +62,21 @@ window.onload = function () {
 
   const titleInterval = setInterval(() => {
     //console.log('Checking for title');
+    let sessionData = undefined;
+    try {
+      sessionData = JSON.parse(JSON.parse(localStorage.getItem("AmazonChimeExpressSession")));
+    } catch (error) {
+      console.log("Unable to read chime session data", error);
+    }
+    
     const titles = document.querySelectorAll('[data-test-id="meetingTitle"]');
     if (titles.length > 0) {
       //console.log('Title found');
       let title = titles[0].innerText;
       metadata.meetingTopic = title;
+      if (sessionData !== undefined && sessionData.fullName) {
+        metadata.userName = sessionData.fullName;
+      }      
       chrome.runtime.sendMessage({
         action: "UpdateMetadata",
         metadata: metadata
