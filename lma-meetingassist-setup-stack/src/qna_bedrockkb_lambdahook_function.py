@@ -171,7 +171,7 @@ def format_response(event, kb_response, query):
     answerprefix = lambdahook_settings.get("AnswerPrefix", "Assistant Answer:")
     showContextText = lambdahook_settings.get("ShowContextText", True)
     showSourceLinks = lambdahook_settings.get("ShowSourceLinks", True)
-    queryprefix = lambdahook_settings.get("QueryPrefix", "Assistant Query:")
+    queryprefix = lambdahook_settings.get("QueryPrefix")
     message = kb_response.get("output").get("text") or kb_response.get(
         "systemMessage") or "No answer found"
     # set plaintext, markdown, & ssml response
