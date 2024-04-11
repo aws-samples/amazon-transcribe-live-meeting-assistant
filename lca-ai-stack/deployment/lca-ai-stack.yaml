@@ -287,6 +287,12 @@ Parameters:
     Description: >
       Whether or not to show the voice tone analysis panel in the UI 
 
+  RecordingDisclaimer:
+    Type: String
+    Description: Disclaimer used for the extension message popup
+    Default: >
+      Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.
+
 Metadata:
   "AWS::CloudFormation::Interface":
     ParameterGroups:
@@ -525,7 +531,7 @@ Resources:
     Type: AWS::SSM::Parameter
     Properties:
       Type: String
-      Value: !Sub '{ "CategoryAlertRegex":"${CategoryAlertRegEx}", "EnableVoiceToneAnalysis":"${EnableVoiceToneAnalysis}",  "IsSentimentAnalysisEnabled":"${IsSentimentAnalysisEnabled}", "WSEndpoint":"", "AssistantWakePhraseRegEx":"${AssistantWakePhraseRegEx}"}'
+      Value: !Sub '{ "CategoryAlertRegex":"${CategoryAlertRegEx}", "EnableVoiceToneAnalysis":"${EnableVoiceToneAnalysis}",  "IsSentimentAnalysisEnabled":"${IsSentimentAnalysisEnabled}", "WSEndpoint":"", "AssistantWakePhraseRegEx":"${AssistantWakePhraseRegEx}", "recordingDisclaimer":"${RecordingDisclaimer}"}'
 
   ##########################################################################
   # CodeBuild
