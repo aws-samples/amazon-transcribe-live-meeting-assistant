@@ -190,6 +190,12 @@ Parameters:
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket
 
+  RecordingDisclaimer:
+    Type: String
+    Description: Disclaimer used for the extension message popup
+    Default: >
+      Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.
+
 Metadata:
   "AWS::CloudFormation::Interface":
     ParameterGroups:
@@ -1464,6 +1470,7 @@ Resources:
             settings = response['Parameter']['Value']
             settingsJSON = json.loads(settings)
             settingsJSON['WSEndpoint'] = props['WSEndpoint']
+            settingsJSON['recordingDisclaimer'] = props['recordingDisclaimer']
             updatedsettings = json.dumps(settingsJSON)
             ssm.put_parameter(Name=parameterName, Value=updatedsettings, Overwrite=True)
                         
@@ -1501,6 +1508,7 @@ Resources:
                       - - 'wss://'
                         - !GetAtt WebSocketCloudFrontDistribution.DomainName
                         - '/api/v1/ws'
+      recordingDisclaimer: !Ref RecordingDisclaimer
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
