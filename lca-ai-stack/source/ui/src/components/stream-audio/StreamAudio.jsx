@@ -285,6 +285,7 @@ const StreamAudio = () => {
   }, [recording]);
 
   const handleRecording = () => {
+    // eslint-disable-next-line no-restricted-globals
     const shouldStart = confirm(settings.recordingDisclaimer);
 
     if (shouldStart) {
