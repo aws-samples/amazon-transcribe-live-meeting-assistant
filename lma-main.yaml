@@ -44,9 +44,9 @@ Parameters:
 
   AssistantWakePhraseRegEx:
     Type: String
-    Default: "(OK|Okay)[.,! ]*Assistant[.,! ]+"
+    Default: "(OK|Okay)[.,! ]*Assistant"
     Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant!'
+      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant'
 
   MeetingAssistQnABotOpenSearchNodeCount:
     Type: String
