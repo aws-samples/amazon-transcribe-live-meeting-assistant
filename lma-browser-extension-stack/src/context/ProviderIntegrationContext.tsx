@@ -102,7 +102,16 @@ function IntegrationProvider({ children }: any) {
   const sendRecordingMessage = useCallback(async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (tab.id) {
-      const response = await chrome.tabs.sendMessage(tab.id, { action: "SendRecordingMessage", message: settings.recordingMessage });
+      const response = await chrome.tabs.sendMessage(tab.id, { action: "SendChatMessage", message: settings.recordingMessage });
+    }
+    return {};
+  }, [settings]);
+
+
+  const sendStopMessage = useCallback(async () => {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (tab.id) {
+      const response = await chrome.tabs.sendMessage(tab.id, { action: "SendChatMessage", message: settings.stopRecordingMessage });
     }
     return {};
   }, [settings]);
@@ -153,18 +162,21 @@ function IntegrationProvider({ children }: any) {
   }, [setShouldConnect, setCurrentCall]);
 
   const stopTranscription = useCallback(() => {
-    if (chrome.runtime) {
-      chrome.runtime.sendMessage({ action: "StopTranscription" });
+    if (isTranscribing) {
+      if (chrome.runtime) {
+        chrome.runtime.sendMessage({ action: "StopTranscription" });
+      }
+      if (readyState === ReadyState.OPEN) {
+        currentCall.callEvent = 'END';
+        sendMessage(JSON.stringify(currentCall));
+        getWebSocket()?.close();
+      }
+      setShouldConnect(false);
+      setIsTranscribing(false);
+      setPaused(false);
+      sendStopMessage();
     }
-    if (readyState === ReadyState.OPEN) {
-      currentCall.callEvent = 'END';
-      sendMessage(JSON.stringify(currentCall));
-      getWebSocket()?.close();
-    }
-    setShouldConnect(false);
-    setIsTranscribing(false);
-    setPaused(false);
-  }, [readyState,shouldConnect, isTranscribing, paused, getWebSocket, sendMessage, setPaused]);
+  }, [readyState,shouldConnect, isTranscribing, paused, setIsTranscribing, getWebSocket, sendMessage, setPaused, sendStopMessage, sendRecordingMessage]);
 
   useEffect(() => {
     if (chrome.runtime) {
@@ -204,7 +216,7 @@ function IntegrationProvider({ children }: any) {
       // Clean up the listener when the component unmounts
       return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     }
-  }, [currentCall, metadata, readyState, muted, paused, activeSpeaker, setMuted,
+  }, [currentCall, metadata, readyState, muted, paused, activeSpeaker, isTranscribing, setMuted,
     setActiveSpeaker, sendMessage, setMetadata, setPlatform, setIsTranscribing, sendRecordingMessage
   ]);
 

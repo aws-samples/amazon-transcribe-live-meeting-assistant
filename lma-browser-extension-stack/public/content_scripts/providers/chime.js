@@ -11,7 +11,7 @@ const openChatPanel = function () {
     }
 }
 
-const sendRecordingMessage = function (message) {
+const sendChatMessage = function (message) {
   /*const titles = document.querySelectorAll('[data-testid="meetingChatInput"] textarea');
   if (titles.length > 0) {
     titles[0].value = message;
@@ -33,14 +33,14 @@ const sendRecordingMessage = function (message) {
 }
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
-  if (request.action === "SendRecordingMessage") {
-    console.log("received request to send a start recording message");
+  if (request.action === "SendChatMessage") {
+    console.log("received request to send a chat message");
     console.log("message:", request.message);
     let titles = document.querySelectorAll('[data-testid="meetingChatInput"] textarea');
     if (titles.length === 0) {
       openChatPanel();
     }
-    sendRecordingMessage(request.message);
+    sendChatMessage(request.message);
   }
 });
 

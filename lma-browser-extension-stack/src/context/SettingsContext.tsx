@@ -6,7 +6,8 @@ type Settings = {
   cognitoDomain: string,
   cloudfrontEndpoint: string,
   recordingDisclaimer: string,
-  recordingMessage: string
+  recordingMessage: string,
+  stopRecordingMessage: string
 }
 
 const initialSettings = {} as Settings;
