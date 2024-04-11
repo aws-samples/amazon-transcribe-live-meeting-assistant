@@ -285,10 +285,14 @@ const StreamAudio = () => {
   }, [recording]);
 
   const handleRecording = () => {
-    if (settings.WSEndpoint) {
-      setRecording(!recording);
-    } else {
-      alert('Enable Websocket Audio input to use this feature');
+    const shouldStart = confirm(settings.recordingDisclaimer);
+
+    if (shouldStart) {
+      if (settings.WSEndpoint) {
+        setRecording(!recording);
+      } else {
+        alert('Enable Websocket Audio input to use this feature');
+      }
     }
     return recording;
   };
