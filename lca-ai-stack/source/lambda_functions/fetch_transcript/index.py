@@ -40,7 +40,7 @@ def get_transcripts(callid):
         return response['Items']
 
 
-def preprocess_transcripts(transcripts, condense):
+def preprocess_transcripts(transcripts, condense, includeSpeaker):
     data = []
 
     transcripts.sort(key=lambda x: x['EndTime'])
@@ -48,12 +48,20 @@ def preprocess_transcripts(transcripts, condense):
     last_channel = 'start'
     for row in transcripts:
         transcript = row['Transcript']
-        if condense == True:
-            # In LMA, each user transcript is prefixed currently by "<speakername>:"
+        
+        # prefix Speaker name to transcript segments if "IncludeSpeaker" parameter is set to True. 
+        if includeSpeaker == True:
             # For LMA 'Hey Q' answers, we should keep assistant replies as part of the transcript for any contextual followup 'Hey Q' questions.
             if row['Channel'] == 'AGENT_ASSISTANT':
-                # Add the 'speaker' prefix for assistant messages
+                # Add the 'MeetingAssistant:' prefix for assistant messages
                 transcript = "MeetingAssistant: " + transcript
+            else: 
+                # Add the 'Speaker:' prefix for Transcript segments if "Speaker" field is present
+                speakerName = row.get('Speaker', None)
+                if speakerName:
+                    transcript = speakerName.strip() + ': ' + transcript
+                    
+        if condense == True:
             transcript = remove_issues(transcript)
             transcript = remove_html(transcript)
             transcript = remove_filler_words(transcript).strip()
@@ -103,8 +111,12 @@ def lambda_handler(event, context):
     if 'ProcessTranscript' in data:
         preProcess = data['ProcessTranscript']
 
+    includeSpeaker = False
+    if 'IncludeSpeaker' in data:
+        includeSpeaker = data['IncludeSpeaker']
+        
     transcripts = get_transcripts(callid)
-    transcripts = preprocess_transcripts(transcripts, preProcess)
+    transcripts = preprocess_transcripts(transcripts, preProcess, includeSpeaker)
     transcript_string = ''.join(transcripts)
     transcript_string = truncate_number_of_words(transcript_string, tokenCount)
     response = {'transcript': transcript_string}
