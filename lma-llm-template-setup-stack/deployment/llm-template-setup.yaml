@@ -63,7 +63,6 @@ Resources:
         Variables:
           StackName: !Ref AWS::StackName
           TableName: !Ref LLMPromptTable
-          LLMPromptSummaryTemplate: !Ref LLMPromptSummaryTemplate
 
   ConfigureDynamoDB:
     Type: "AWS::CloudFormation::CustomResource"
@@ -71,7 +70,6 @@ Resources:
       ServiceToken: !GetAtt ConfigureDynamoDBFunction.Arn
       TableName: !Ref LLMPromptTable
       StackName: !Ref AWS::StackName
-      LLMPromptSummaryTemplate: !Ref LLMPromptSummaryTemplate
 
 Outputs:
     LLMTableName:
