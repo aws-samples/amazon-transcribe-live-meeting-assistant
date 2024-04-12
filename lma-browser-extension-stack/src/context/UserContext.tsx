@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-empty-function */
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useSettings } from './SettingsContext';
-import { isToken } from 'typescript';
 
 type User = {
   id_token?: string,
@@ -21,7 +20,6 @@ const UserContext = createContext(initialUserContext);
 
 function UserProvider({ children }: any) {
   const [user, setUser] = useState<User>({});
-  const [userName, setUserName] = useState("");
   const settings = useSettings();
   const [loggedIn, setLoggedIn] = useState(false);
 
@@ -86,7 +84,7 @@ function UserProvider({ children }: any) {
     }
     
   }, []);
-  
+
   const exchangeCodeForToken = useCallback(async (codeOrToken: string, grantType:string) => {
     const tokenEndpoint = `${settings.cognitoDomain}/oauth2/token`
     const params = new URLSearchParams();
