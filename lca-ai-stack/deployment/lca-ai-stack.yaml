@@ -909,9 +909,8 @@ Resources:
                 Resource: !GetAtt FetchTranscript.Arn
               - Effect: Allow
                 Action:
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LCAStackName}-*"
+                  - 'dynamodb:GetItem'
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptSummaryTemplateTableName}"
 
         - PolicyName: !Sub ${AWS::StackName}-BedrockSummary
           PolicyDocument:
