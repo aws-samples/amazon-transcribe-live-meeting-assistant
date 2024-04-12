@@ -288,9 +288,13 @@ Parameters:
     Description: >
       Whether or not to show the voice tone analysis panel in the UI 
 
-  LLMPromptSummaryTemplateTableName:
+  LLMDefaultPromptTableName:
     Type: String
-    Description: The DynamoDB table name where the summary and prompt template is stored.
+    Description: The DynamoDB table name where the default summary prompt templates are stored.
+
+  LLMCustomPromptTableName:
+    Type: String
+    Description: The DynamoDB table name where the custom summary prompt templates are stored.
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -868,7 +872,9 @@ Resources:
           FETCH_TRANSCRIPT_LAMBDA_ARN: !GetAtt FetchTranscript.Arn
           TOKEN_COUNT: "0"
           PROCESS_TRANSCRIPT: "True"
-          SUMMARY_PROMPT_TABLE_NAME: !Ref LLMPromptSummaryTemplateTableName
+          LLM_DEFAULT_PROMPT_TABLE_NAME: !Ref LLMDefaultPromptTableName
+          LLM_CUSTOM_PROMPT_TABLE_NAME: !Ref LLMCustomPromptTableName
+
       Timeout: 900
       MemorySize: 512
       Handler: index.handler

@@ -5,7 +5,22 @@ Description: Amazon Transcribe Live Meeting Assistant - LLM Prompts
 Transform: AWS::Serverless-2016-10-31
 
 Resources:
-  LLMPromptTable:
+  LLMDefaultPromptTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      KeySchema:
+        - AttributeName: LLMPromptTemplateId
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: LLMPromptTemplateId
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: True
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+  
+  LLMCustomPromptTable:
     Type: "AWS::DynamoDB::Table"
     Properties:
       KeySchema:
@@ -37,7 +52,9 @@ Resources:
           PolicyDocument:
             Statement:
               Effect: Allow
-              Resource: !GetAtt LLMPromptTable.Arn
+              Resource: 
+                - !GetAtt LLMDefaultPromptTable.Arn
+                - !GetAtt LLMCustomPromptTable.Arn
               Action:
                 - 'dynamodb:PutItem'
                 - 'dynamodb:UpdateItem'
@@ -59,20 +76,18 @@ Resources:
       Runtime: python3.11
       MemorySize: 128
       Timeout: 60
-      Environment:
-        Variables:
-          StackName: !Ref AWS::StackName
-          TableName: !Ref LLMPromptTable
-          LLMPromptSummaryTemplate: !Ref LLMPromptSummaryTemplate
 
   ConfigureDynamoDB:
     Type: "AWS::CloudFormation::CustomResource"
     Properties:
       ServiceToken: !GetAtt ConfigureDynamoDBFunction.Arn
-      TableName: !Ref LLMPromptTable
-      StackName: !Ref AWS::StackName
-      LLMPromptSummaryTemplate: !Ref LLMPromptSummaryTemplate
+      LLMDefaultPromptTableName: !Ref LLMDefaultPromptTable
+      LLMCustomPromptTableName: !Ref LLMCustomPromptTable
 
 Outputs:
-    LLMTableName:
-      Value: !Ref LLMPromptTable
+
+    LLMDefaultPromptTableName:
+      Value: !Ref LLMDefaultPromptTable
+
+    LLMCustomPromptTableName:
+      Value: !Ref LLMCustomPromptTable

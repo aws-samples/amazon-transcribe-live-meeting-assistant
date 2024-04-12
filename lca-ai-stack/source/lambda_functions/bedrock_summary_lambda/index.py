@@ -17,7 +17,8 @@ BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
 FETCH_TRANSCRIPT_LAMBDA_ARN = os.environ['FETCH_TRANSCRIPT_LAMBDA_ARN']
 PROCESS_TRANSCRIPT = (os.getenv('PROCESS_TRANSCRIPT', 'False') == 'True')
 TOKEN_COUNT = int(os.getenv('TOKEN_COUNT', '0')) # default 0 - do not truncate.
-SUMMARY_PROMPT_TABLE_NAME = os.environ["SUMMARY_PROMPT_TABLE_NAME"]
+LLM_DEFAULT_PROMPT_TABLE_NAME = os.environ["LLM_DEFAULT_PROMPT_TABLE_NAME"]
+LLM_CUSTOM_PROMPT_TABLE_NAME = os.environ["LLM_CUSTOM_PROMPT_TABLE_NAME"]
 
 # Optional environment variables allow region / endpoint override for bedrock Boto3
 BEDROCK_REGION = os.environ["BEDROCK_REGION_OVERRIDE"] if "BEDROCK_REGION_OVERRIDE" in os.environ else os.environ["AWS_REGION"]
@@ -47,15 +48,22 @@ def get_templates_from_dynamodb(prompt_override):
 
     if prompt_template_str is None:
         try:
-            SUMMARY_PROMPT_TEMPLATE = dynamodb_client.get_item(Key={'LLMPromptTemplateId': {'S': 'LLMPromptSummaryTemplate'}},
-                                                               TableName=SUMMARY_PROMPT_TABLE_NAME)
-            print ("Prompt Template:", SUMMARY_PROMPT_TEMPLATE['Item'])
+            defaultPromptTemplatesResponse = dynamodb_client.get_item(Key={'LLMPromptTemplateId': {'S': 'LLMPromptSummaryTemplate'}},
+                                                               TableName=LLM_DEFAULT_PROMPT_TABLE_NAME)
+            customPromptTemplatesResponse = dynamodb_client.get_item(Key={'LLMPromptTemplateId': {'S': 'LLMPromptSummaryTemplate'}},
+                                                               TableName=LLM_CUSTOM_PROMPT_TABLE_NAME)
 
-            prompt_templates = SUMMARY_PROMPT_TEMPLATE["Item"]
+            defaultPromptTemplates = defaultPromptTemplatesResponse["Item"]
+            customPromptTemplates = customPromptTemplatesResponse["Item"]
+            print("Default Prompt Template:", defaultPromptTemplates)
+            print("Custom Template:", customPromptTemplates)
 
-            for k in sorted(prompt_templates):
+            mergedPromptTemplates = {**defaultPromptTemplates, **customPromptTemplates}
+            print("Merged Prompt Template:", mergedPromptTemplates)
+
+            for k in sorted(mergedPromptTemplates):
                 if (k != "LLMPromptTemplateId"):
-                    prompt = prompt_templates[k]['S'].replace("<br>", "\n")
+                    prompt = mergedPromptTemplates[k]['S'].replace("<br>", "\n")
                     index = k.find('#')
                     k_stripped = k[index+1:]
                     templates.append({ k_stripped:prompt })

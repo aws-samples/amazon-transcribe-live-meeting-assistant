@@ -5,23 +5,24 @@ import os
 
 def lambda_handler(event, context):
     print(event)
-    # Init ...
     the_event = event['RequestType']
     print("The event is: ", str(the_event))
 
-    table_name = event['ResourceProperties']['TableName']
+    defaultPromptTableName = event['ResourceProperties']['LLMDefaultPromptTableName']
+    customPromptTableName = event['ResourceProperties']['LLMCustomPromptTableName']
+
     llm_prompt_summary_template_file = os.environ['LAMBDA_TASK_ROOT'] + "/LLMPromptSummaryTemplate.json"
     llm_prompt_summary_template = open(llm_prompt_summary_template_file).read()
 
     response_data = {}
     dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(table_name)
-    ssm_client = boto3.client('ssm')
+    defaultPromptTable = dynamodb.Table(defaultPromptTableName)
+    customPromptTable = dynamodb.Table(customPromptTableName)
 
     try:
-        if the_event in ('Create'):
+        if the_event in ('Create', 'Update'):
+            print("Populating / updating default prompt table (for Create or Update event):", defaultPromptTableName)
             summary_prompt_template_str = llm_prompt_summary_template
-            
             try:
                 summary_prompt_template = json.loads(summary_prompt_template_str)
             except Exception as e:
@@ -41,12 +42,23 @@ def lambda_handler(event, context):
 
             update_expression = update_expression[:-1] # remove last comma
 
-            response = table.update_item(
+            response = defaultPromptTable.update_item(
                   Key={'LLMPromptTemplateId': 'LLMPromptSummaryTemplate'},
                   UpdateExpression=update_expression,
                   ExpressionAttributeValues=expression_attribute_values,
                   ExpressionAttributeNames=expression_attribute_names
                 )
+            print("DDB response", response)
+
+        if the_event in ('Create'):
+            print("Populating Custom Prompt table with default prompts (for Create event):", customPromptTableName)
+            response = customPromptTable.update_item(
+                  Key={'LLMPromptTemplateId': 'LLMPromptSummaryTemplate'},
+                  UpdateExpression=update_expression,
+                  ExpressionAttributeValues=expression_attribute_values,
+                  ExpressionAttributeNames=expression_attribute_names
+                )
+            print("DDB response", response)
 
         # Everything OK... send the signal back
         print("Operation successful!")
