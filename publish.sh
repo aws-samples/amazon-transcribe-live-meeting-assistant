@@ -167,15 +167,15 @@ chmod +x ./build-s3-dist.sh
 ./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lca-ai-stack $VERSION $REGION || exit 1
 popd
 
-dir=lma-llm-stack
+dir=lma-llm-template-setup-stack
 echo "PACKAGING $dir/deployment"
 pushd $dir/deployment
-template=llm.yaml
-s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-llm-stack/llm.yaml"
+template=llm-template-setup.yaml
+s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-llm-template-setup-stack/llm-template-setup.yaml"
 aws cloudformation package \
 --template-file ${template} \
 --output-template-file ${tmpdir}/${template} \
---s3-bucket $BUCKET --s3-prefix ${PREFIX_AND_VERSION}/lma-llm-stack \
+--s3-bucket $BUCKET --s3-prefix ${PREFIX_AND_VERSION}/lma-llm-template-setup-stack \
 --region ${REGION} || exit 1
 echo "Uploading template file to: ${s3_template}"
 aws s3 cp ${tmpdir}/${template} ${s3_template}

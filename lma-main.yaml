@@ -529,10 +529,10 @@ Resources:
         LLMApi: 'LAMBDA'
         LLMLambdaArn: !GetAtt QNABOTPLUGINBEDROCK.Outputs.LLMLambdaArn
 
-  LLMStack:
+  LLMTemplateSetupStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-stack/llm.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
 
   AISTACK:
     Type: AWS::CloudFormation::Stack
@@ -562,7 +562,7 @@ Resources:
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
-        LLMPromptSummaryTemplateTableName: !GetAtt LLMStack.Outputs.LLMTableName
+        LLMPromptSummaryTemplateTableName: !GetAtt LLMTemplateSetupStack.Outputs.LLMTableName
 
 
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
@@ -703,4 +703,4 @@ Outputs:
 
   LLMPromptSummaryTemplate:
     Description: The LLM summary prompt template in DynamoDB Table - open to customise summary prompts.
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=LLMPromptSummaryTemplate&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMStack.Outputs.LLMTableName}"
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=LLMPromptSummaryTemplate&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTemplateSetupStack.Outputs.LLMTableName}"

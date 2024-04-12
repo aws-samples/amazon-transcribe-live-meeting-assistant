@@ -29,6 +29,8 @@ bedrock = boto3.client(service_name='bedrock-runtime', region_name=BEDROCK_REGIO
 
 def get_templates_from_dynamodb(prompt_override):
     templates = []
+    prompt_template_str = None
+
     if prompt_override is not None:
         print ("Prompt Template String override:", prompt_override)
         prompt_template_str = prompt_override
@@ -42,7 +44,8 @@ def get_templates_from_dynamodb(prompt_override):
             templates.append({
                 "Summary": prompt
             })
-    else:
+
+    if prompt_template_str is None:
         try:
             SUMMARY_PROMPT_TEMPLATE = dynamodb_client.get_item(Key={'LLMPromptTemplateId': {'S': 'LLMPromptSummaryTemplate'}},
                                                                TableName=SUMMARY_PROMPT_TABLE_NAME)
@@ -140,19 +143,9 @@ def generate_summary(transcript, prompt_override):
         print("API Response:", response)
         result[key] = response
     if len(result.keys()) == 1:
-        # This is a single node JSON with value that can be either:
-        # A single inference that returns a string value
-        # OR
-        # A single inference that returns a JSON, enclosed in a string.
-        # Refer to https://github.com/aws-samples/amazon-transcribe-post-call-analytics/blob/develop/docs/generative_ai.md#generative-ai-insights
-        # for more details.
-        try:
-            parsed_json = json.loads(result[list(result.keys())[0]])
-            print("Nested JSON...")
-            return json.dumps(parsed_json)
-        except:
-            print("Not nested JSON...")
-            return json.dumps(result)
+        # there's only one summary in here, so let's return just that.
+        # this may contain json or a string.
+        return result[list(result.keys())[0]]
     return json.dumps(result)
 
 def handler(event, context):
