@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-empty-function */
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useSettings } from './SettingsContext';
 import { isToken } from 'typescript';
@@ -28,7 +29,7 @@ function UserProvider({ children }: any) {
     const [, payload] = jwtToken.split('.');
     const { exp: expires } = JSON.parse(atob(payload));
     if (typeof expires === 'number') {
-      let expiryDate = new Date(expires * 1000);
+      const expiryDate = new Date(expires * 1000);
       console.log("expiry:", expiryDate);
       return (expiryDate < new Date());
     }
@@ -142,8 +143,8 @@ function UserProvider({ children }: any) {
         interactive: true
       });
       if (redirectURL) {
-        let url = new URL(redirectURL);
-        let authorizationCode = url.searchParams.get("code");
+        const url = new URL(redirectURL);
+        const authorizationCode = url.searchParams.get("code");
         if (authorizationCode) exchangeCodeForToken(authorizationCode, 'authorization_code');
         else console.error("No authorization code in redirect url.");
       } else {

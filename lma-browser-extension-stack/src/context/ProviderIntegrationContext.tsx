@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-empty-function */
 import React, { createContext, startTransition, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { useSettings } from './SettingsContext';
@@ -136,7 +137,7 @@ function IntegrationProvider({ children }: any) {
     }
 
     setShouldConnect(true);
-    let callMetadata = {
+    const callMetadata = {
       callEvent: 'START',
       agentId: userName,
       fromNumber: '+9165551234',
@@ -200,7 +201,7 @@ function IntegrationProvider({ children }: any) {
         } else if (request.action === "AudioData") {
           if (readyState === ReadyState.OPEN)
           {
-            let audioData = await dataUrlToBytes(request.audio, muted, paused);
+            const audioData = await dataUrlToBytes(request.audio, muted, paused);
             sendMessage(audioData);
           }
         } else if (request.action === "ActiveSpeakerChange") {
