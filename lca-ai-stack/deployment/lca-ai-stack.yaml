@@ -16,7 +16,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Call Analytics with Agent Assist - LCA AI Stack
+Description: Amazon Transcribe Live Meeting Assist - AI Stack
 
 Parameters:
   # Required
@@ -133,9 +133,10 @@ Parameters:
   BedrockModelId:
     Default: 'anthropic.claude-3-haiku-20240307-v1:0'
     Type: String
-    AllowedValues: 
+    AllowedValues:
       - 'anthropic.claude-3-haiku-20240307-v1:0'
       - 'anthropic.claude-3-sonnet-20240229-v1:0'
+
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list of supported models. 
       Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
@@ -274,9 +275,9 @@ Parameters:
 
   AssistantWakePhraseRegEx:
     Type: String
-    Default: "(OK|Okay)[.,! ]*Q[.,! ]+"
+    Default: "(OK|Okay)[.,! ]*Assistant"
     Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Q'.
+      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant'.
 
   EnableVoiceToneAnalysis:
     Type: String
@@ -286,6 +287,10 @@ Parameters:
       - 'false'
     Description: >
       Whether or not to show the voice tone analysis panel in the UI 
+
+  LLMPromptSummaryTemplateTableName:
+    Type: String
+    Description: The DynamoDB table name where the summary and prompt template is stored.
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -863,7 +868,7 @@ Resources:
           FETCH_TRANSCRIPT_LAMBDA_ARN: !GetAtt FetchTranscript.Arn
           TOKEN_COUNT: "0"
           PROCESS_TRANSCRIPT: "True"
-          SUMMARY_PROMPT_SSM_PARAMETER: !Sub "${LCAStackName}-LLMPromptSummaryTemplate"
+          SUMMARY_PROMPT_TABLE_NAME: !Ref LLMPromptSummaryTemplateTableName
       Timeout: 900
       MemorySize: 512
       Handler: index.handler
@@ -904,9 +909,8 @@ Resources:
                 Resource: !GetAtt FetchTranscript.Arn
               - Effect: Allow
                 Action:
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LCAStackName}-*"
+                  - 'dynamodb:GetItem'
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptSummaryTemplateTableName}"
 
         - PolicyName: !Sub ${AWS::StackName}-BedrockSummary
           PolicyDocument:
@@ -1616,7 +1620,7 @@ Resources:
             the LMA web interface and set your permanent password.
             <p>     https://${WebAppCloudFrontDistribution.DomainName}/
             <p>
-            <p>Live Meeting Assistant (amazon.com/live-meeting-assistant)
+            <p>Live Meeting Assistant (amazon.com/live-call-analytics)
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:

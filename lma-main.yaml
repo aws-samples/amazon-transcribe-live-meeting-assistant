@@ -36,7 +36,7 @@ Parameters:
   BedrockKnowledgeBaseModelID:
     Type: String
     Default: 'anthropic.claude-3-sonnet-20240229-v1:0'
-    AllowedValues: 
+    AllowedValues:
       - 'anthropic.claude-3-haiku-20240307-v1:0'
       - 'anthropic.claude-3-sonnet-20240229-v1:0'
     Description: >-
@@ -44,9 +44,19 @@ Parameters:
 
   AssistantWakePhraseRegEx:
     Type: String
-    Default: "(OK|Okay)[.,! ]*Assistant[.,! ]+"
+    Default: "(OK|Okay)[.,! ]*Assistant"
     Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant!'
+      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant'
+
+  MeetingAssistQnABotOpenSearchNodeCount:
+    Type: String
+    Default: '1'
+    AllowedValues:
+      - 1
+      - 2
+      - 4
+    Description: >
+      Number of nodes in Meeting Assistant QnABot OpenSearch domain - '4' is recommended for fault tolerant production deployments.
 
   S3BucketName:
     Type: String
@@ -155,6 +165,7 @@ Parameters:
     AllowedValues:
       - 'BEDROCK'
       - 'LAMBDA'
+
     Description: >
       Set to enable call summarization by a Large Language Model. Currently only BEDROCK and LAMBDA are supported.
       BEDROCK option requires you to choose one of the supported model IDs from the 
@@ -163,7 +174,7 @@ Parameters:
   BedrockModelId:
     Default: 'anthropic.claude-3-haiku-20240307-v1:0'
     Type: String
-    AllowedValues: 
+    AllowedValues:
       - 'anthropic.claude-3-haiku-20240307-v1:0'
       - 'anthropic.claude-3-sonnet-20240229-v1:0'
     Description: >
@@ -263,6 +274,7 @@ Metadata:
           - BedrockKnowledgeBaseId
           - BedrockKnowledgeBaseModelID
           - AssistantWakePhraseRegEx
+          - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
           default: Amazon S3 Configuration
         Parameters:
@@ -320,6 +332,8 @@ Metadata:
         default: Meeting Assist Bedrock Knowledge Base Id (existing)
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
+      MeetingAssistQnABotOpenSearchNodeCount:
+        default: Meeting Assist QnABot OpenSearch Node Count
       IsPartialTranscriptEnabled:
         default: Enable Partial Transcripts
       IsContentRedactionEnabled:
@@ -499,6 +513,7 @@ Resources:
       Parameters:
         Email: !Ref AdminEmail
         Username: 'Admin'
+        ElasticSearchNodeCount: !Ref MeetingAssistQnABotOpenSearchNodeCount
         LexV2BotLocaleIds:
           !FindInMap [
             TranscribeToLexLocaleId,
@@ -514,12 +529,10 @@ Resources:
         LLMApi: 'LAMBDA'
         LLMLambdaArn: !GetAtt QNABOTPLUGINBEDROCK.Outputs.LLMLambdaArn
 
-  SSMSTACK:
+  LLMTemplateSetupStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lca-ssm-stack/template.yaml
-      Parameters:
-        LCAStackName: !Ref AWS::StackName
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
 
   AISTACK:
     Type: AWS::CloudFormation::Stack
@@ -549,6 +562,8 @@ Resources:
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
+        LLMPromptSummaryTemplateTableName: !GetAtt LLMTemplateSetupStack.Outputs.LLMTableName
+
 
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
   SettingsJSON:
@@ -686,6 +701,6 @@ Outputs:
     Description: The ARN of a Lambda function that will process and export a call transcript as a string.
     Value: !GetAtt AISTACK.Outputs.FetchTranscriptArn
 
-  LLMPromptSummaryTemplateParameter:
-    Description: The LLM summary prompt template in SSM Parameter Store - open to customise call summary prompts.
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/systems-manager/parameters/${SSMSTACK.Outputs.LLMPromptSummaryTemplateParameter}"
+  LLMPromptSummaryTemplate:
+    Description: The LLM summary prompt template in DynamoDB Table - open to customise summary prompts.
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=LLMPromptSummaryTemplate&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTemplateSetupStack.Outputs.LLMTableName}"

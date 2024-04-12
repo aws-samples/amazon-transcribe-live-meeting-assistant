@@ -85,12 +85,12 @@ function Capture() {
   return (
     <ContentLayout
       header={
-          <SpaceBetween size={'xs'}>
-            <Header
-              variant="h1"
-              description="Powered by Amazon Transcribe and Q"
-            >
-              Amazon Live Meeting Assistant
+        <SpaceBetween size={'xs'}>
+          <Header
+            variant="h1"
+            description="Powered by Amazon Transcribe and Amazon Bedrock"
+          >
+            Amazon Live Meeting Assistant
           </Header>
         </SpaceBetween>
       }
@@ -128,7 +128,7 @@ function Capture() {
           <ValueWithLabel label="Platform Detected:">{platform}</ValueWithLabel>
           {(isTranscribing === true ?
             <>
-            <Button fullWidth={true} onClick={async () => openInLMA()}>Open in LMA</Button>
+              <Button fullWidth={true} onClick={async () => openInLMA()}>Open in LMA</Button>
               <ValueWithLabel label="Name:">{agentName}</ValueWithLabel>
               <ValueWithLabel label="Meeting Topic:">{topic}</ValueWithLabel>
               <ValueWithLabel label="Active Speaker:">{activeSpeaker}</ValueWithLabel>
@@ -162,7 +162,7 @@ function Capture() {
                 >
                 <Input value={topic} onChange={({ detail }) => setTopic(detail.value)} placeholder='Meeting room topic' inputMode='text'></Input>
               </FormField>
-              <Button fullWidth={true} variant='primary'  onClick={() => startListening()}>Start Listening</Button>
+              <Button fullWidth={true} variant='primary' onClick={() => startListening()}>Start Listening</Button>
             </>
           )}
           <Grid gridDefinition={[{ colspan: 6 }, { colspan:6}]}>
@@ -172,7 +172,7 @@ function Capture() {
               <Button  iconAlign="left" iconName="microphone" fullWidth={true} onClick={() => mute()}>Mute Me</Button>
             }
             <Button fullWidth={true} onClick={() => logout()}>Log out</Button>
-          </Grid>         
+          </Grid>
         </SpaceBetween>
       </Container>
     </ContentLayout>

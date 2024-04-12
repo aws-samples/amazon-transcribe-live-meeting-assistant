@@ -29,11 +29,11 @@
     "react-icons": "^4.3.1",
     "react-markdown": "^8.0.3",
     "react-router-dom": "^5.3.0",
-    "react-scripts": "5.0.1",
+    "react-scripts": "^5.0.1",
     "react-use-websocket": "^3.0.0",
     "rehype-raw": "^6.1.1",
     "vuera": "^0.2.7",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.19.3/xlsx-0.19.3.tgz",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-latest/xlsx-latest.tgz",
     "axios": "^0.28.0"
   },
   "scripts": {

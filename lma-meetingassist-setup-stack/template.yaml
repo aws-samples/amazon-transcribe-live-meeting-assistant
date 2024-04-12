@@ -15,7 +15,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe and Q Business Live Meeting Assist - Meeting Assist Setup
+Description: Amazon Transcribe Live Meeting Assist - Meeting Assist Setup
 
 Parameters:
 

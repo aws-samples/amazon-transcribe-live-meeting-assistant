@@ -131,6 +131,7 @@ const StreamAudio = () => {
   const channelMerger = useRef();
   const destination = useRef();
   const audioData = useRef();
+  const agreeToRecord = useRef();
 
   const pcmEncode = (input) => {
     const buffer = new ArrayBuffer(input.length * 2);
@@ -285,10 +286,19 @@ const StreamAudio = () => {
   }, [recording]);
 
   const handleRecording = () => {
-    if (settings.WSEndpoint) {
-      setRecording(!recording);
+    if (!recording) {
+      // eslint-disable-next-line no-restricted-globals
+      agreeToRecord.current = confirm(settings.recordingDisclaimer);
+
+      if (agreeToRecord.current) {
+        if (settings.WSEndpoint) {
+          setRecording(!recording);
+        } else {
+          alert('Enable Websocket Audio input to use this feature');
+        }
+      }
     } else {
-      alert('Enable Websocket Audio input to use this feature');
+      setRecording(!recording);
     }
     return recording;
   };
