@@ -130,7 +130,7 @@ function IntegrationProvider({ children }: any) {
   }
 
   const startTranscription = useCallback(async (userName: string, meetingTopic: string) => {
-    if (checkTokenExpired()) {
+    if (await checkTokenExpired()) {
       login();
       return;
     }
