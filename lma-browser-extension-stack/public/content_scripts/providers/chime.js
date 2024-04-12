@@ -53,6 +53,9 @@ const checkForMeetingMetadata = function() {
     let sessionData = undefined;
     try {
       sessionData = JSON.parse(JSON.parse(localStorage.getItem("AmazonChimeExpressSession")));
+      if (sessionData !== undefined && sessionData.fullName) {
+        metadata.userName = sessionData.fullName;
+      }
     } catch (error) {
       console.log("Unable to read chime session data", error);
     }
@@ -62,15 +65,16 @@ const checkForMeetingMetadata = function() {
       //console.log('Title found');
       let title = titles[0].innerText;
       metadata.meetingTopic = title;
-      if (sessionData !== undefined && sessionData.fullName) {
-        metadata.userName = sessionData.fullName;
-      }      
-      chrome.runtime.sendMessage({
-        action: "UpdateMetadata",
-        metadata: metadata
-      });
       clearInterval(titleInterval);
+    } else {
+      const title = document.title.replace("Amazon Chime: ", "");
+      metadata.meetingTopic = title;
     }
+
+    chrome.runtime.sendMessage({
+      action: "UpdateMetadata",
+      metadata: metadata
+    });
   }, 2000);
 }
 
