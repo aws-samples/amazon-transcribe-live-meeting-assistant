@@ -167,10 +167,18 @@ chmod +x ./build-s3-dist.sh
 ./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lca-ai-stack $VERSION $REGION || exit 1
 popd
 
-dir=lca-ssm-stack
-echo "PACKAGING $dir"
-pushd $dir
-aws s3 cp ./template.yaml s3://${BUCKET}/${PREFIX_AND_VERSION}/lca-ssm-stack/template.yaml
+dir=lma-llm-stack
+echo "PACKAGING $dir/deployment"
+pushd $dir/deployment
+template=llm.yaml
+s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-llm-stack/llm.yaml"
+aws cloudformation package \
+--template-file ${template} \
+--output-template-file ${tmpdir}/${template} \
+--s3-bucket $BUCKET --s3-prefix ${PREFIX_AND_VERSION}/lma-llm-stack \
+--region ${REGION} || exit 1
+echo "Uploading template file to: ${s3_template}"
+aws s3 cp ${tmpdir}/${template} ${s3_template}
 popd
 
 echo "Initialize and update git submodules"
