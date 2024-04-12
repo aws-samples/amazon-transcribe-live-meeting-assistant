@@ -66,7 +66,8 @@ def get_transcripts(callId):
     payload = {
         'CallId': callId, 
         'ProcessTranscript': PROCESS_TRANSCRIPT, 
-        'TokenCount': TOKEN_COUNT 
+        'TokenCount': TOKEN_COUNT,
+        'IncludeSpeaker': True
     }
     print("Invoking lambda", payload)
     response = lambda_client.invoke(
@@ -77,34 +78,54 @@ def get_transcripts(callId):
     print("Lambda response:", response)
     return response
 
+def get_request_body(modelId, prompt, max_tokens, temperature):
+    provider = modelId.split(".")[0]
+    request_body = None
+    if provider == "anthropic":
+        # claude-3 models use new messages format
+        if modelId.startswith("anthropic.claude-3"):
+            request_body = {
+                "anthropic_version": "bedrock-2023-05-31",
+                "messages": [{"role": "user", "content": [{'type': 'text', 'text': prompt}]}],
+                "max_tokens": max_tokens,
+                "temperature": temperature
+            }
+        else:
+            request_body = {
+                "prompt": prompt,
+                "max_tokens_to_sample": max_tokens,
+                "temperature": temperature
+            }
+    else:
+        raise Exception("Unsupported provider: ", provider)
+    return request_body
+
+def get_generated_text(modelId, response):
+    provider = modelId.split(".")[0]
+    generated_text = None
+    response_body = json.loads(response.get("body").read())
+    print("Response body: ", json.dumps(response_body))
+    if provider == "anthropic":
+        # claude-3 models use new messages format
+        if modelId.startswith("anthropic.claude-3"):
+            generated_text = response_body.get("content")[0].get("text")
+        else:
+            generated_text = response_body.get("completion")
+    else:
+        raise Exception("Unsupported provider: ", provider)
+    return generated_text
+
 def call_bedrock(prompt_data):
     modelId = BEDROCK_MODEL_ID
     accept = 'application/json'
     contentType = 'application/json'
 
-    summary_text = "Unsupported Bedrock model ID "+modelId+". Unable to generate call summary"
-    provider = modelId.split(".")[0]
-
-    if provider == "amazon":
-        body = json.dumps({"inputText": prompt_data, "temperature":0 }) 
-        response = bedrock.invoke_model(body=body, modelId=modelId, accept=accept, contentType=contentType)
-        response_body = json.loads(response.get('body').read())
-        summary_text = response_body.get('results')[0].get('outputText')
-
-    elif provider == "ai21":
-        body = json.dumps({"prompt": prompt_data, "temperature":0 })
-        response = bedrock.invoke_model(body=body, modelId=modelId, accept=accept, contentType=contentType)
-        response_body = json.loads(response.get('body').read())
-        summary_text = response_body.get('completions')[0].get('data').get('text')
-
-    elif provider == "anthropic":
-        body = json.dumps({"prompt": prompt_data, "max_tokens_to_sample": 512, "temperature":0 })
-        response = bedrock.invoke_model(body=body, modelId=modelId, accept=accept, contentType=contentType)
-        response_body = json.loads(response.get('body').read())
-        summary_text = response_body.get('completion')
-
-    return summary_text
-
+    body = get_request_body(modelId, prompt_data, max_tokens=512, temperature=0)
+    print("Bedrock request - ModelId", modelId, "-  Body: ", body)
+    response = bedrock.invoke_model(body=json.dumps(body), modelId=modelId, accept=accept, contentType=contentType)
+    generated_text = get_generated_text(modelId, response)
+    print("Bedrock response: ", json.dumps(generated_text))
+    return generated_text
 
 def generate_summary(transcript, prompt_override):
     # first check to see if this is one prompt, or many prompts as a json

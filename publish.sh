@@ -132,6 +132,10 @@ popd
 dir=lma-meetingassist-setup-stack
 echo "PACKAGING $dir"
 pushd $dir
+echo "Packaging boto3_layer"
+pushd boto3_layer
+pip3 install --requirement ./requirements.txt --target=./python
+popd
 template=template.yaml
 s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/template.yaml"
 https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/template.yaml"
