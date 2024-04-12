@@ -15,6 +15,12 @@
   ],
   "overrides": [
     {
+      "files": ["public/**"],
+      "env": {
+        "browser": true
+      }
+    },
+    {
       "files": ["**/*.ts", "**/*.tsx"],
       "plugins": [
         "@typescript-eslint"
