@@ -916,7 +916,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - 'dynamodb:GetItem'
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptSummaryTemplateTableName}"
+                Resource: 
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMDefaultPromptTableName}"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMCustomPromptTableName}"
 
         - PolicyName: !Sub ${AWS::StackName}-BedrockSummary
           PolicyDocument:
