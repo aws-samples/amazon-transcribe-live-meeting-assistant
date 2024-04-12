@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Amazon Transcribe Live Meeting Assistant - LLM Prompts
+
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+
+  LLMPromptSummaryTemplate:
+    Type: String
+    Description: >-
+      Prompt to use to generate insights for a call. This can be a single string where an LLM returns a string,
+      or a single string where the LLM returns a JSON object with key/value pairs, or a string that contains
+      a JSON Object with key/value pairs, where the LLM will run one inference on each key/value pair with the value
+      containing the prompt. Use {transcript} as a placeholder for where the call transcript will be injected.
+    Default: >-
+      {
+        "Summary":"<br><br>Human: Answer the questions below, defined in <question></question> based on the transcript defined in <transcript></transcript>. If you cannot answer the question, reply with 'n/a'. Use gender neutral pronouns. When you reply, only respond with the answer.<br><br><question>What is a summary of the transcript?</question><br><br><transcript><br>{transcript}<br></transcript><br><br>Assistant:",
+        "Topic":"<br><br>Human: Answer the questions below, defined in <question></question> based on the transcript defined in <transcript></transcript>. If you cannot answer the question, reply with 'n/a'. Use gender neutral pronouns. When you reply, only respond with the answer.<br><br><question>What is the topic of the call? For example, iphone issue, billing issue, cancellation. Only reply with the topic, nothing more.</question><br><br><transcript><br>{transcript}<br></transcript><br><br>Assistant:",
+        "Follow-Up Actions":"<br><br>Human: Answer the question below, defined in <question></question> based on the transcript defined in <transcript></transcript>. If you cannot answer the question, reply with 'n/a'. Use gender neutral pronouns. When you reply, only respond with the answer.<br><br><question>What follow-up actions did the agent say they are going to take? </question><br><br><transcript><br>{transcript}<br></transcript><br><br>Assistant:"
+      }
+
+Resources:
+  LLMPromptTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      KeySchema:
+        - AttributeName: LLMPromptTemplateId
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: LLMPromptTemplateId
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: True
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  ConfigureDynamoDBRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: allow-s3-notification-config
+          PolicyDocument:
+            Statement:
+              Effect: Allow
+              Resource: !GetAtt LLMPromptTable.Arn
+              Action:
+                - 'dynamodb:PutItem'
+                - 'dynamodb:UpdateItem'
+        - PolicyName: SSMGetParameterPolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*
+
+  ConfigureDynamoDBFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Code:  ../source/lambda_functions
+      Handler: llm_prompt_upload.lambda_handler
+      Role: !GetAtt ConfigureDynamoDBRole.Arn
+      Runtime: python3.11
+      MemorySize: 128
+      Timeout: 60
+      Environment:
+        Variables:
+          StackName: !Ref AWS::StackName
+          TableName: !Ref LLMPromptTable
+          LLMPromptSummaryTemplate: !Ref LLMPromptSummaryTemplate
+
+  ConfigureDynamoDB:
+    Type: "AWS::CloudFormation::CustomResource"
+    Properties:
+      ServiceToken: !GetAtt ConfigureDynamoDBFunction.Arn
+      TableName: !Ref LLMPromptTable
+      StackName: !Ref AWS::StackName
+      LLMPromptSummaryTemplate: !Ref LLMPromptSummaryTemplate
+
+Outputs:
+    LLMTableName:
+      Value: !Ref LLMPromptTable

@@ -16,7 +16,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Meeting Assist - AI Stack
+Description: Amazon Transcribe Live Call Analytics with Agent Assist - LCA AI Stack
 
 Parameters:
   # Required
@@ -131,14 +131,20 @@ Parameters:
       provided list (BedrockModelId). The LAMBDA option requires you to provide a function ARN below.
 
   BedrockModelId:
-    Default: 'anthropic.claude-3-haiku-20240307-v1:0'
+    Default: 'amazon.titan-tg1-large'
     Type: String
     AllowedValues: 
-      - 'anthropic.claude-3-haiku-20240307-v1:0'
-      - 'anthropic.claude-3-sonnet-20240229-v1:0'
+      - 'amazon.titan-tg1-large'
+      - 'amazon.titan-e1t-medium'
+      - 'ai21.j2-grande-instruct'
+      - 'ai21.j2-jumbo-instruct'
+      - 'anthropic.claude-instant-v1'
+      - 'anthropic.claude-v1'
+      - 'anthropic.claude-v2'
+
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list of supported models. 
-      Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
+      Defaults to 'amazon.titan-tg1-large'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ''
@@ -274,7 +280,7 @@ Parameters:
 
   AssistantWakePhraseRegEx:
     Type: String
-    Default: "(OK|Okay)[.,! ]*Assistant"
+    Default: "(OK|Okay)[.,! ]*Q[.,! ]+"
     Description: >
       A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Q'.
 
@@ -286,6 +292,10 @@ Parameters:
       - 'false'
     Description: >
       Whether or not to show the voice tone analysis panel in the UI 
+
+  LLMPromptSummaryTemplateTableName:
+    Type: String
+    Description: The DynamoDB table name where the summary and prompt template is stored.
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -863,7 +873,7 @@ Resources:
           FETCH_TRANSCRIPT_LAMBDA_ARN: !GetAtt FetchTranscript.Arn
           TOKEN_COUNT: "0"
           PROCESS_TRANSCRIPT: "True"
-          SUMMARY_PROMPT_SSM_PARAMETER: !Sub "${LCAStackName}-LLMPromptSummaryTemplate"
+          SUMMARY_PROMPT_TABLE_NAME: !Ref LLMPromptSummaryTemplateTableName
       Timeout: 900
       MemorySize: 512
       Handler: index.handler
@@ -1609,14 +1619,15 @@ Resources:
           EmailSubject: Welcome to Live Meeting Assistant!
           EmailMessage: !Sub |-
             <p>Hello {username},
-            <p>Welcome to Live Meeting Assistant (LMA)! Your temporary password is:
+            <p>Welcome to Live Meeting Assistant! Your temporary password is:
             <p>     {####}
             <p>
             <p>When the CloudFormation stack is COMPLETE, use the link below to log in to
-            the LMA web interface and set your permanent password.
+            the Live Meeting Assistant web interface and set your permanent password.
             <p>     https://${WebAppCloudFrontDistribution.DomainName}/
             <p>
-            <p>Live Meeting Assistant (amazon.com/live-meeting-assistant)
+            <p>Good luck!
+            <p>Live Meeting Assistant (amazon.com/live-call-analytics)
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
