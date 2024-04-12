@@ -68,6 +68,7 @@ const POST_CALL_CONTENT_REDACTION_OUTPUT = process.env['POST_CALL_CONTENT_REDACT
 
 const savePartial = (process.env['SAVE_PARTIAL_TRANSCRIPTS'] || 'true') === 'true';
 const kdsStreamName = process.env['KINESIS_STREAM_NAME'] || '';
+const showSpeakerLabel = (process.env['SHOW_SPEAKER_LABEL'] || 'true') === 'true';
 
 const tcaOutputLocation = `s3://${RECORDINGS_BUCKET_NAME}/${CALL_ANALYTICS_FILE_PREFIX}`;
 
@@ -333,7 +334,9 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
     } else {
         (tsParams as StartStreamTranscriptionCommandInput).EnableChannelIdentification = true;
         (tsParams as StartStreamTranscriptionCommandInput).NumberOfChannels = 2;
-        tsParams.ShowSpeakerLabel = true;
+        if (showSpeakerLabel) {
+            tsParams.ShowSpeakerLabel = true;
+        }
 
         const response = await transcribeClient.send(
             new StartStreamTranscriptionCommand(tsParams)
@@ -360,11 +363,15 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
                     if (event.TranscriptEvent.Transcript.Results.length > 0) {
                         console.log('Event ', JSON.stringify(event));
                     }
-                    // const message: TranscriptEvent = event.TranscriptEvent;
-                    const events = splitTranscriptEventBySpeaker(event.TranscriptEvent);
-                    for (const transcriptEvent of events) {
-                        //await writeAddTranscriptSegmentEvent(undefined, transcriptEvent, callMetaData);
-                        await writeTranscriptionSegment(transcriptEvent, callMetaData);
+                    if (showSpeakerLabel) {
+                        // const message: TranscriptEvent = event.TranscriptEvent;
+                        const events = splitTranscriptEventBySpeaker(event.TranscriptEvent);
+                        for (const transcriptEvent of events) {
+                            //await writeAddTranscriptSegmentEvent(undefined, transcriptEvent, callMetaData);
+                            await writeTranscriptionSegment(transcriptEvent, callMetaData);
+                        }
+                    } else {
+                        await writeTranscriptionSegment(event.TranscriptEvent, callMetaData);
                     }
                 }
                 if (event.CategoryEvent && event.CategoryEvent.MatchedCategories) {
