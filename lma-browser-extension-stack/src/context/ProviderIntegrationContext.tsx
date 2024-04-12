@@ -92,10 +92,21 @@ function IntegrationProvider({ children }: any) {
     return dataArray;
   }
   
+  const updateMetadata = useCallback((newMetadata:any) => {
+    if (newMetadata.baseUrl && newMetadata.baseUrl === "https://app.zoom.us") {
+      setPlatform("Zoom");
+    } else if (newMetadata.baseUrl && newMetadata.baseUrl === "https://app.chime.aws") {
+      setPlatform("Amazon Chime");
+    }
+    setMetadata(newMetadata);
+  }, [metadata, setMetadata, platform, setPlatform]);
+
   const fetchMetadata = async () => {
-    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const [tab] = await chrome.tabs.query({ active: true});
     if (tab.id) {
       const response = await chrome.tabs.sendMessage(tab.id, { action: "FetchMetadata" });
+      console.log("Received response from Metadata query!", response);
+      updateMetadata(response);
     }
     return {};
   }
@@ -185,12 +196,7 @@ function IntegrationProvider({ children }: any) {
         if (request.action === "TranscriptionStopped") {
           stopTranscription();
         } else if (request.action === "UpdateMetadata") {
-          if (request.metadata.baseUrl && request.metadata.baseUrl === "https://app.zoom.us") {
-            setPlatform("Zoom");
-          } else if (request.metadata.baseUrl && request.metadata.baseUrl === "https://app.chime.aws") {
-            setPlatform("Amazon Chime");
-          }
-          setMetadata(request.metadata);
+          updateMetadata(request.metadata);
         } else if (request.action === "SamplingRate") {
           // This event should only bubble up once at the start of recording in the injected code
           currentCall.samplingRate = request.samplingRate;
@@ -218,7 +224,7 @@ function IntegrationProvider({ children }: any) {
       return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     }
   }, [currentCall, metadata, readyState, muted, paused, activeSpeaker, isTranscribing, setMuted,
-    setActiveSpeaker, sendMessage, setMetadata, setPlatform, setIsTranscribing, sendRecordingMessage
+    setActiveSpeaker, sendMessage, setPlatform, setIsTranscribing, sendRecordingMessage, updateMetadata
   ]);
 
   return (

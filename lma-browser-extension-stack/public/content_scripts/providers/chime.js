@@ -33,6 +33,9 @@ const sendChatMessage = function (message) {
 }
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
+  if (request.action === "FetchMetadata") {
+    checkForMeetingMetadata();
+  }
   if (request.action === "SendChatMessage") {
     console.log("received request to send a chat message");
     console.log("message:", request.message);
@@ -44,28 +47,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   }
 });
 
-
-window.onload = function () {
-
-  const muteObserver = new MutationObserver((mutationList) => {
-    if (mutationList[0].target.textContent.indexOf('Unmute') >= 0) {
-      chrome.runtime.sendMessage({ action: "MuteChange", mute: true });
-      console.log("Mute detected");
-    } else {
-      chrome.runtime.sendMessage({action: "MuteChange", mute: false});
-      console.log("Unmute detected");
-    }
-  });
-  
-  const muteInterval = setInterval(() => {
-    const muteButton = document.getElementById('audio');
-    //console.log('checking for mute button');
-    if (muteButton) {
-      //console.log('mute button found');
-      muteObserver.observe(muteButton, { attributes: true, subtree: false, childList: false });
-    }
-  }, 2000);
-
+const checkForMeetingMetadata = function() {
   const titleInterval = setInterval(() => {
     //console.log('Checking for title');
     let sessionData = undefined;
@@ -90,7 +72,31 @@ window.onload = function () {
       clearInterval(titleInterval);
     }
   }, 2000);
+}
+
+
+window.onload = function () {
+
+  const muteObserver = new MutationObserver((mutationList) => {
+    if (mutationList[0].target.textContent.indexOf('Unmute') >= 0) {
+      chrome.runtime.sendMessage({ action: "MuteChange", mute: true });
+      console.log("Mute detected");
+    } else {
+      chrome.runtime.sendMessage({action: "MuteChange", mute: false});
+      console.log("Unmute detected");
+    }
+  });
   
+  const muteInterval = setInterval(() => {
+    const muteButton = document.getElementById('audio');
+    //console.log('checking for mute button');
+    if (muteButton) {
+      //console.log('mute button found');
+      muteObserver.observe(muteButton, { attributes: true, subtree: false, childList: false });
+    }
+  }, 2000);
+
+  checkForMeetingMetadata();  
 
   const activeSpeakerObserver = new MutationObserver((mutationList) => {
     console.log("activeSpeaker changed");

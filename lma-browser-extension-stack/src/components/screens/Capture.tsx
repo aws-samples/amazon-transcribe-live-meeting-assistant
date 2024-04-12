@@ -15,7 +15,7 @@ function Capture() {
   const { navigate } = useNavigation();
   const { logout } = useUserContext();
   const settings = useSettings();
-  const { currentCall, muted, setMuted, paused,setPaused, activeSpeaker, metadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
+  const { currentCall, muted, setMuted, paused,setPaused, activeSpeaker, metadata,fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
 
   const [topic, setTopic] = React.useState("");
   const [agentName, setAgentName] = React.useState("");
@@ -23,6 +23,13 @@ function Capture() {
   const [meetingTopicErrorText, setMeetingTopicErrorText] = React.useState("");
   const [formError, setFormError] = React.useState(false);
   const [showDisclaimer, setShowDisclaimer] = React.useState(false);
+
+
+  // componentDidMount:
+  useEffect(() => {
+    // Your code here
+    fetchMetadata();
+  }, []);
 
   useEffect(() => {
     console.log("Metadata changed");
