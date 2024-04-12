@@ -135,11 +135,11 @@ function Capture() {
               {
                 paused === true ?
                   <>
-                    <Button fullWidth={true} iconName="microphone-off" onClick={() => setPaused(false)}>Resume</Button>
+                    <Button fullWidth={true} iconName="microphone-off" onClick={() => setPaused(false)}>Unmute All</Button>
                   </>
                   :
                   <>
-                  <Button fullWidth={true} iconName="microphone" onClick={() => setPaused(true)}>Pause</Button>
+                  <Button fullWidth={true} iconName="microphone" onClick={() => setPaused(true)}>Mute All</Button>
                   </>
               }
               <Button fullWidth={true} variant='primary'  onClick={() => stopListening()}>Stop Listening</Button>
@@ -167,9 +167,9 @@ function Capture() {
           )}
           <Grid gridDefinition={[{ colspan: 6 }, { colspan:6}]}>
             {muted === true ? 
-              <Button  iconAlign="left" iconName="microphone-off" fullWidth={true} onClick={() => unmute()}>Unmute</Button>
+              <Button  iconAlign="left" iconName="microphone-off" fullWidth={true} onClick={() => unmute()}>Unmute Me</Button>
               : 
-              <Button  iconAlign="left" iconName="microphone" fullWidth={true} onClick={() => mute()}>Mute</Button>
+              <Button  iconAlign="left" iconName="microphone" fullWidth={true} onClick={() => mute()}>Mute Me</Button>
             }
             <Button fullWidth={true} onClick={() => logout()}>Log out</Button>
           </Grid>         
