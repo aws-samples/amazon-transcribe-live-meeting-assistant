@@ -86,11 +86,7 @@ function UserProvider({ children }: any) {
     }
     
   }, []);
-
-  const refreshToken = useCallback(async () => {
-
-  }, [user, setUser, loggedIn, setLoggedIn])
-
+  
   const exchangeCodeForToken = useCallback(async (codeOrToken: string, grantType:string) => {
     const tokenEndpoint = `${settings.cognitoDomain}/oauth2/token`
     const params = new URLSearchParams();
