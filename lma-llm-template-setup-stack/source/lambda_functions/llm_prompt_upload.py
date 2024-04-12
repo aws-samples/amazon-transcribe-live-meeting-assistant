@@ -1,6 +1,7 @@
 import boto3
 import cfnresponse
 import json
+import os
 
 def lambda_handler(event, context):
     print(event)
@@ -9,7 +10,8 @@ def lambda_handler(event, context):
     print("The event is: ", str(the_event))
 
     table_name = event['ResourceProperties']['TableName']
-    llm_prompt_summary_template = event['ResourceProperties']['LLMPromptSummaryTemplate']
+    llm_prompt_summary_template_file = os.environ['LAMBDA_TASK_ROOT'] + "/LLMPromptSummaryTemplate.json"
+    llm_prompt_summary_template = open(llm_prompt_summary_template_file).read()
 
     response_data = {}
     dynamodb = boto3.resource('dynamodb')
@@ -19,24 +21,24 @@ def lambda_handler(event, context):
     try:
         if the_event in ('Create'):
             summary_prompt_template_str = llm_prompt_summary_template
-        
+            
             try:
                 summary_prompt_template = json.loads(summary_prompt_template_str)
             except Exception as e:
                 print("Not a valid JSON:", str(e))
                 summary_prompt_template = {"Summary": summary_prompt_template_str}
-        
+
             update_expression = "SET"
             expression_attribute_names = {}
             expression_attribute_values = {}
-        
+
             i = 1
             for key, value in summary_prompt_template.items():
                 update_expression += f" #{i} = :{i},"
                 expression_attribute_names[f"#{i}"] = f"{i}#{key}"
                 expression_attribute_values[f":{i}"] = value
                 i += 1
-        
+
             update_expression = update_expression[:-1] # remove last comma
 
             response = table.update_item(
