@@ -529,7 +529,7 @@ Resources:
         LLMApi: 'LAMBDA'
         LLMLambdaArn: !GetAtt QNABOTPLUGINBEDROCK.Outputs.LLMLambdaArn
 
-  LLMTemplateSetupStack:
+  LLMTEMPLATESTACK:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
@@ -702,6 +702,10 @@ Outputs:
     Description: The ARN of a Lambda function that will process and export a call transcript as a string.
     Value: !GetAtt AISTACK.Outputs.FetchTranscriptArn
 
-  LLMPromptSummaryTemplate:
-    Description: The LLM custom summary prompt template DynamoDB Table - open to customize summary prompts.
+  LLMDefaultPromptSummaryTemplate:
+    Description: View the *default* summary prompts. Do not edit. To override default prompts, add or edit the custom summary prompts table.
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=LLMPromptSummaryTemplate&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTemplateSetupStack.Outputs.LLMDefaultPromptTableName}"
+
+  LLMCustomPromptSummaryTemplate:
+    Description: Edit the *custom* summary prompts. Values in this table override the default values, and are preserved during stack updates.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=LLMPromptSummaryTemplate&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTemplateSetupStack.Outputs.LLMCustomPromptTableName}"

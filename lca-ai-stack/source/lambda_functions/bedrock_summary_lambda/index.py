@@ -62,7 +62,7 @@ def get_templates_from_dynamodb(prompt_override):
             print("Merged Prompt Template:", mergedPromptTemplates)
 
             for k in sorted(mergedPromptTemplates):
-                if (k != "LLMPromptTemplateId"):
+                if (k != "LLMPromptTemplateId" and k != "*Information*"):
                     prompt = mergedPromptTemplates[k]['S'].replace("<br>", "\n")
                     index = k.find('#')
                     k_stripped = k[index+1:]
