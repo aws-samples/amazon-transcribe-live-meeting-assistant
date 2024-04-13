@@ -702,9 +702,9 @@ Outputs:
     Value: !GetAtt AISTACK.Outputs.FetchTranscriptArn
 
   LLMDefaultPromptSummaryTemplate:
-    Description: View the *default* summary prompts. Do not edit. To override default prompts, add or edit the custom summary prompts item.
+    Description: View the *default* summary prompts. Do not edit. To override default prompts, add or edit attributes in the custom summary prompts item.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=DefaultSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
 
   LLMCustomPromptSummaryTemplate:
-    Description: Edit the *custom* summary prompts. Values in this item override the default summary prompts, and are preserved during stack updates.
+    Description: Edit the *custom* summary prompts. Attribite values here override the default summary prompts, and are preserved during stack updates.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
