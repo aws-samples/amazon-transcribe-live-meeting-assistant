@@ -562,8 +562,8 @@ Resources:
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
-        LLMDefaultPromptTableName: !GetAtt LLMTemplateSetupStack.Outputs.LLMDefaultPromptTableName
-        LLMCustomPromptTableName: !GetAtt LLMTemplateSetupStack.Outputs.LLMCustomPromptTableName
+        LLMDefaultPromptTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMDefaultPromptTableName
+        LLMCustomPromptTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMCustomPromptTableName
 
 
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
@@ -704,8 +704,8 @@ Outputs:
 
   LLMDefaultPromptSummaryTemplate:
     Description: View the *default* summary prompts. Do not edit. To override default prompts, add or edit the custom summary prompts table.
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=LLMPromptSummaryTemplate&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTemplateSetupStack.Outputs.LLMDefaultPromptTableName}"
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=LLMPromptSummaryTemplate&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMDefaultPromptTableName}"
 
   LLMCustomPromptSummaryTemplate:
     Description: Edit the *custom* summary prompts. Values in this table override the default values, and are preserved during stack updates.
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=LLMPromptSummaryTemplate&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTemplateSetupStack.Outputs.LLMCustomPromptTableName}"
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=LLMPromptSummaryTemplate&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMCustomPromptTableName}"
