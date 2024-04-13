@@ -3,6 +3,9 @@ import cfnresponse
 import json
 import os
 
+DEFAULT_PROMPT_TEMPLATES_PK = "DefaultSummaryPromptTemplates"
+CUSTOM_PROMPT_TEMPLATES_PK = "CustomSummaryPromptTemplates"
+
 def get_update_expr(prompt_templates):
     update_expr = "SET"
     attr_names = {}
@@ -25,24 +28,23 @@ def lambda_handler(event, context):
     response_data = {}
     try:
         if the_event in ('Create', 'Update'):
-            defaultPromptTableName = event['ResourceProperties']['LLMDefaultPromptTableName']
-            customPromptTableName = event['ResourceProperties']['LLMCustomPromptTableName']
+            promptTemplateTableName = event['ResourceProperties']['LLMPromptTemplateTableName']
 
             llm_prompt_summary_template_file = os.environ['LAMBDA_TASK_ROOT'] + "/LLMPromptSummaryTemplate.json"
             llm_prompt_summary_template = open(llm_prompt_summary_template_file).read()
             dynamodb = boto3.resource('dynamodb')
-            defaultPromptTable = dynamodb.Table(defaultPromptTableName)
+            promptTable = dynamodb.Table(promptTemplateTableName)
            
-            print("Populating / updating default prompt table (for Create or Update event):", defaultPromptTableName)
+            print("Populating / updating default prompt item (for Create or Update event):", promptTemplateTableName)
             prompt_templates_str = llm_prompt_summary_template
             prompt_templates = json.loads(prompt_templates_str)
             default_prompt_templates = {
-                "*Information*": f"LMA default summary prompt templates. Do not edit - changes may be overridden by updates - override default prompts using table: {customPromptTableName}",
+                "*Information*": f"LMA default summary prompt templates. Do not edit - changes may be overridden by updates - override default prompts using same keys in item: {CUSTOM_PROMPT_TEMPLATES_PK}",
                 **prompt_templates
             }
             update_expr, attr_names, attr_values = get_update_expr(default_prompt_templates)
-            response = defaultPromptTable.update_item(
-                  Key={'LLMPromptTemplateId': 'LLMPromptSummaryTemplate'},
+            response = promptTable.update_item(
+                  Key={'LLMPromptTemplateId': DEFAULT_PROMPT_TEMPLATES_PK},
                   UpdateExpression=update_expr,
                   ExpressionAttributeValues=attr_values,
                   ExpressionAttributeNames=attr_names
@@ -50,14 +52,13 @@ def lambda_handler(event, context):
             print("DDB response", response)
 
             if the_event in ('Create'):
-                customPromptTable = dynamodb.Table(customPromptTableName)
-                print("Populating Custom Prompt table with default prompts (for Create event):", customPromptTableName)
+                print("Populating Custom Prompt table with default prompts (for Create event):", promptTemplateTableName)
                 custom_prompt_templates = {
-                    "*Information*": f"LMA custom summary prompt templates. Prompt defined here override default prompts defined in table: {defaultPromptTableName}"
+                    "*Information*": f"LMA custom summary prompt templates. Key values defined here override defaults with same key defined in item: {DEFAULT_PROMPT_TEMPLATES_PK}. To disable a default value, override here with the value 'NONE' for the same key."
                 }
                 update_expr, attr_names, attr_values = get_update_expr(custom_prompt_templates)
-                response = customPromptTable.update_item(
-                    Key={'LLMPromptTemplateId': 'LLMPromptSummaryTemplate'},
+                response = promptTable.update_item(
+                    Key={'LLMPromptTemplateId': CUSTOM_PROMPT_TEMPLATES_PK},
                     UpdateExpression=update_expr,
                     ExpressionAttributeValues=attr_values,
                     ExpressionAttributeNames=attr_names

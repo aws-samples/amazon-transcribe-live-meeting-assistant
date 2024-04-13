@@ -5,22 +5,7 @@ Description: Amazon Transcribe Live Meeting Assistant - LLM Prompts
 Transform: AWS::Serverless-2016-10-31
 
 Resources:
-  LLMDefaultPromptTable:
-    Type: "AWS::DynamoDB::Table"
-    Properties:
-      KeySchema:
-        - AttributeName: LLMPromptTemplateId
-          KeyType: HASH
-      AttributeDefinitions:
-        - AttributeName: LLMPromptTemplateId
-          AttributeType: S
-      BillingMode: PAY_PER_REQUEST
-      SSESpecification:
-        SSEEnabled: True
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-  
-  LLMCustomPromptTable:
+  LLMPromptTemplateTable:
     Type: "AWS::DynamoDB::Table"
     Properties:
       KeySchema:
@@ -53,8 +38,7 @@ Resources:
             Statement:
               Effect: Allow
               Resource: 
-                - !GetAtt LLMDefaultPromptTable.Arn
-                - !GetAtt LLMCustomPromptTable.Arn
+                - !GetAtt LLMPromptTemplateTable.Arn
               Action:
                 - 'dynamodb:PutItem'
                 - 'dynamodb:UpdateItem'
@@ -77,17 +61,14 @@ Resources:
       MemorySize: 128
       Timeout: 60
 
-  LLMStoreDefaultPrompts:
+  LLMStorePromptTemplates:
     Type: "AWS::CloudFormation::CustomResource"
     Properties:
       ServiceToken: !GetAtt LLMPromptUploadFunction.Arn
-      LLMDefaultPromptTableName: !Ref LLMDefaultPromptTable
-      LLMCustomPromptTableName: !Ref LLMCustomPromptTable
+      LLMPromptTemplateTableName: !Ref LLMPromptTemplateTable
 
 Outputs:
 
-    LLMDefaultPromptTableName:
-      Value: !Ref LLMDefaultPromptTable
+    LLMPromptTemplateTableName:
+      Value: !Ref LLMPromptTemplateTable
 
-    LLMCustomPromptTableName:
-      Value: !Ref LLMCustomPromptTable

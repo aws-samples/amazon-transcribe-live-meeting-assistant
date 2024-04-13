@@ -17,12 +17,17 @@ BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
 FETCH_TRANSCRIPT_LAMBDA_ARN = os.environ['FETCH_TRANSCRIPT_LAMBDA_ARN']
 PROCESS_TRANSCRIPT = (os.getenv('PROCESS_TRANSCRIPT', 'False') == 'True')
 TOKEN_COUNT = int(os.getenv('TOKEN_COUNT', '0')) # default 0 - do not truncate.
-LLM_DEFAULT_PROMPT_TABLE_NAME = os.environ["LLM_DEFAULT_PROMPT_TABLE_NAME"]
-LLM_CUSTOM_PROMPT_TABLE_NAME = os.environ["LLM_CUSTOM_PROMPT_TABLE_NAME"]
+
+# Table name and keys used for default and custom prompt templates items in DDB
+LLM_PROMPT_TEMPLATE_TABLE_NAME = os.environ["LLM_PROMPT_TEMPLATE_TABLE_NAME"]
+DEFAULT_PROMPT_TEMPLATES_PK = "DefaultSummaryPromptTemplates"
+CUSTOM_PROMPT_TEMPLATES_PK = "CustomSummaryPromptTemplates"
 
 # Optional environment variables allow region / endpoint override for bedrock Boto3
 BEDROCK_REGION = os.environ["BEDROCK_REGION_OVERRIDE"] if "BEDROCK_REGION_OVERRIDE" in os.environ else os.environ["AWS_REGION"]
 BEDROCK_ENDPOINT_URL = os.environ.get("BEDROCK_ENDPOINT_URL", f'https://bedrock-runtime.{BEDROCK_REGION}.amazonaws.com')
+
+
 
 lambda_client = boto3.client('lambda')
 dynamodb_client = boto3.client('dynamodb')
@@ -48,10 +53,10 @@ def get_templates_from_dynamodb(prompt_override):
 
     if prompt_template_str is None:
         try:
-            defaultPromptTemplatesResponse = dynamodb_client.get_item(Key={'LLMPromptTemplateId': {'S': 'LLMPromptSummaryTemplate'}},
-                                                               TableName=LLM_DEFAULT_PROMPT_TABLE_NAME)
-            customPromptTemplatesResponse = dynamodb_client.get_item(Key={'LLMPromptTemplateId': {'S': 'LLMPromptSummaryTemplate'}},
-                                                               TableName=LLM_CUSTOM_PROMPT_TABLE_NAME)
+            defaultPromptTemplatesResponse = dynamodb_client.get_item(Key={'LLMPromptTemplateId': {'S': DEFAULT_PROMPT_TEMPLATES_PK}},
+                                                               TableName=LLM_PROMPT_TEMPLATE_TABLE_NAME)
+            customPromptTemplatesResponse = dynamodb_client.get_item(Key={'LLMPromptTemplateId': {'S': CUSTOM_PROMPT_TEMPLATES_PK}},
+                                                               TableName=LLM_PROMPT_TEMPLATE_TABLE_NAME)
 
             defaultPromptTemplates = defaultPromptTemplatesResponse["Item"]
             customPromptTemplates = customPromptTemplatesResponse["Item"]
@@ -63,10 +68,13 @@ def get_templates_from_dynamodb(prompt_override):
 
             for k in sorted(mergedPromptTemplates):
                 if (k != "LLMPromptTemplateId" and k != "*Information*"):
-                    prompt = mergedPromptTemplates[k]['S'].replace("<br>", "\n")
-                    index = k.find('#')
-                    k_stripped = k[index+1:]
-                    templates.append({ k_stripped:prompt })
+                    prompt = mergedPromptTemplates[k]['S']
+                    # skip if prompt value is empty, or set to 'NONE'
+                    if (prompt and prompt != 'NONE'):
+                        prompt = prompt.replace("<br>", "\n")
+                        index = k.find('#')
+                        k_stripped = k[index+1:]
+                        templates.append({ k_stripped:prompt })
         except Exception as e:
             print ("Exception:", e)
             raise (e)
