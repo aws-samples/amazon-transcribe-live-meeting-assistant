@@ -101,10 +101,10 @@ export const writeCallEvent = async (callEvent: CallStartEvent | CallEndEvent | 
     try {
         await kinesisClient.send(putCmd);
         console.debug('Written Call Event to KDS');
-        console.debug(callEvent);
+        console.debug(JSON.stringify(callEvent));
     } catch (error) {
         console.error('Error writing Call Event to KDS', error);
-        console.debug(callEvent);
+        console.debug(JSON.stringify(callEvent));
     }
 };
 

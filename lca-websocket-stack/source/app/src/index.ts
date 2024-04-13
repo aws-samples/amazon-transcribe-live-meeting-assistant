@@ -50,6 +50,10 @@ server.register(websocket);
 
 // Setup preHandler hook to authenticate 
 server.addHook('preHandler', async (request, reply) => {
+    server.log.debug('Received preHandler hook for authentication. Calling jwtVerifier to authenticate.');
+    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers, null, 1)}`);
+
+
     if (!request.url.includes('health/check')) { 
         await jwtVerifier(request, reply);
     }
@@ -57,13 +61,17 @@ server.addHook('preHandler', async (request, reply) => {
 
 // Setup Route for websocket connection
 server.get('/api/v1/ws', { websocket: true, logLevel: 'debug' }, (connection, request) => {
-    server.log.info(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers, null, 1)}`);
+    server.log.debug('Received Connection request.');
+    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers, null, 1)}`);
 
     registerHandlers(connection.socket); // setup the handler functions for websocket events
 });
 
 // Setup Route for health check 
 server.get('/health/check', { logLevel: 'warn' }, (request, response) => {
+    server.log.debug('Received Health Check request.');
+    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers, null, 1)}`);
+
     const cpuUsage = os.loadavg()[0] / os.cpus().length * 100;
 
     const isHealthy = cpuUsage > CPU_HEALTH_THRESHOLD ? false : true;
@@ -86,6 +94,7 @@ server.listen(
             server.log.error('Error starting websocket server: ',err);
             process.exit(1);
         }
+        server.log.debug('Websocket server is ready and listening.');
         server.log.info(`Routes: \n${server.printRoutes()}`);
     }
 );
@@ -107,6 +116,7 @@ const registerHandlers = (ws: WebSocket): void => {
     });
 
     ws.on('close', (code: number) => {
+        server.log.debug('Received Websocket close message from the client. Closing the connection.');
         try {
             onWsClose(ws, code);
         } catch (err) {
@@ -137,6 +147,8 @@ const getWavRecordingFileName = (callMetaData: CallMetaData): string => {
 };
 
 const onBinaryMessage = async (ws: WebSocket, data: Uint8Array): Promise<void> => {
+    server.log.debug(`Received Binary Message of length ${data.byteLength}`);
+
     const socketData = socketMap.get(ws);
 
     if (socketData !== undefined && socketData.audioInputStream !== undefined &&
@@ -150,12 +162,13 @@ const onBinaryMessage = async (ws: WebSocket, data: Uint8Array): Promise<void> =
 };
 
 const onTextMessage = async (ws: WebSocket, data: string): Promise<void> => {
-
+    server.log.debug(`Received Text Message of length ${data.length}. Message = ${data}`);
+    
     const callMetaData:CallMetaData = JSON.parse(data);
     try {
         server.log.info(`Call Metadata received from client :  ${data}`);
     } catch (error) {
-        server.log.error('Error parsing call metadata: ', data);
+        server.log.error(`Error parsing call metadata: ${error} ${data}`);
         callMetaData.callId = randomUUID();
     }
     
@@ -186,7 +199,6 @@ const onTextMessage = async (ws: WebSocket, data: string): Promise<void> => {
         startTranscribe(callMetaData, audioInputStream, socketCallMap);
 
     } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
-        server.log.info(`Speaker Change event received :  ${JSON.stringify(callMetaData)}`);
         const socketData = socketMap.get(ws);
         if (socketData && socketData.callMetadata) {
             socketData.callMetadata.activeSpeaker = callMetaData.activeSpeaker;
@@ -197,19 +209,20 @@ const onTextMessage = async (ws: WebSocket, data: string): Promise<void> => {
     } else if (callMetaData.callEvent === 'END') {
         const socketData = socketMap.get(ws);
         if (!socketData || !(socketData.callMetadata)) {
-            server.log.info(`Received END without having a call:  ${JSON.stringify(callMetaData)}`);
+            server.log.debug(`Received END without having a call:  ${JSON.stringify(callMetaData)}`);
             return;
         }
-        server.log.info(`Received call end event from client, writing it to KDS:  ${JSON.stringify(callMetaData)}`);
+        server.log.debug(`Received call end event from client, writing it to KDS:  ${JSON.stringify(callMetaData)}`);
         await endCall(ws, callMetaData, socketData);
     }
 };
 
-const onWsClose = async (ws:WebSocket, code: number): Promise<void> => {
+const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
+    
     ws.close(code);
     const socketData = socketMap.get(ws);
     if (socketData) {
-        server.log.info(`Writing call end event due to websocket close event ${JSON.stringify(socketData.callMetadata)}`);
+        server.log.debug(`Writing call end event due to websocket close event ${JSON.stringify(socketData.callMetadata)}`);
         await endCall(ws, undefined, socketData);
     }
 };
@@ -263,7 +276,7 @@ const endCall = async (ws: WebSocket, callMetaData: CallMetaData|undefined, sock
             socketMap.delete(ws);
         }
     } else {
-        server.log.info(`Already received the end call event.: ${JSON.stringify(callMetaData)}`);
+        server.log.info(`Already received the end call event: ${JSON.stringify(callMetaData)}`);
 
     }
 };
@@ -271,7 +284,7 @@ const endCall = async (ws: WebSocket, callMetaData: CallMetaData|undefined, sock
 const writeToS3 = async (tempFileName:string) => {
     const sourceFile = path.join(LOCAL_TEMP_DIR, tempFileName);
 
-    server.log.info(`Uploading audio to S3: ${sourceFile}`);
+    server.log.debug(`Uploading audio to S3: ${sourceFile}`);
 
     let data;
     const fileStream = fs.createReadStream(sourceFile);
@@ -282,7 +295,7 @@ const writeToS3 = async (tempFileName:string) => {
     };
     try {
         data = await s3Client.send(new PutObjectCommand(uploadParams));
-        server.log.info(`Uploading to S3 complete: ${JSON.stringify(data)}`);
+        server.log.debug(`Uploading to S3 complete: ${JSON.stringify(data)}`);
     } catch (err) {
         server.log.error(`S3 upload error: ${JSON.stringify(err)}`);
 
