@@ -116,7 +116,6 @@ const StreamAudio = () => {
   };
 
   const interleave = (lbuffer, rbuffer) => {
-
     const leftAudioBuffer = pcmEncode(lbuffer);
     const leftView = new DataView(leftAudioBuffer);
     const rightAudioBuffer = pcmEncode(rbuffer);
@@ -146,9 +145,8 @@ const StreamAudio = () => {
       console.log('Error trying to stop recording. AudioWorklet Processor node is not active.');
     }
     if (streamingStarted && !recording) {
-
       callMetaData.callEvent = 'END';
-      console.log(`Sending call END event metadata to the websocket server: ${JSON.stringify(callMetaData)}`);
+      console.log(`Sending Call END event to WS server: ${JSON.stringify(callMetaData)}`);
       sendMessage(JSON.stringify(callMetaData));
       setStreamingStarted(false);
       setCallMetaData({
@@ -184,7 +182,7 @@ const StreamAudio = () => {
       callMetaData.samplingRate = SOURCE_SAMPLING_RATE;
 
       callMetaData.callEvent = 'START';
-      console.log(`Sending START event callMetadata to the websocket server: ${JSON.stringify(callMetaData)}`);
+      console.log(`Sending Call START event to WS server: ${JSON.stringify(callMetaData)}`);
       sendMessage(JSON.stringify(callMetaData));
       setStreamingStarted(true);
 
