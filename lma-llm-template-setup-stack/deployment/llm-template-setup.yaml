@@ -66,6 +66,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt LLMPromptUploadFunction.Arn
       LLMPromptTemplateTableName: !Ref LLMPromptTemplateTable
+      source_hash: abcfa6a9d4df344d
 
 Outputs:
 

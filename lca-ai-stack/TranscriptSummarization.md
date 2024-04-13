@@ -1,12 +1,10 @@
 # Transcript Summarization
 
-LMA can now generate and display an abstractive call transcript summary (rendered in markdown) in addition to the existing extractive summarization from Real Time Transcribe Call Analytics. 
-  
-Example Transcript Summary:
-   
-![TranscriptSummary](./images/bedrock-summary.png)
-   
-Transcript Summaries are generated after the call has ended, and can take 20-30 seconds to appear on the UI.
+LMA uses Amazon Bedrock to summarize meeting transcripts once the meeting is over.
+
+![TranscriptSummary](./images/post-meeting-summaries.png)
+        
+Transcript Summaries are generated after the meeting has ended, and take only a few seconds to appear on the UI.
 
 Configure Transcript Summarization by choosing a value for the `EndOfCallTranscriptSummary` CloudFormation parameter when deploying or updating your LMA stack. Valid values are 
 `BEDROCK` and `LAMBDA`.
@@ -14,9 +12,20 @@ If `BEDROCK` option is chosen, select a supported model ID from the list (`Bedro
 
 ### **BEDROCK** (default)
 
-The `BEDROCK` option is enabled by default. You must [request model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) for the model selected in the `BedrockModelId` parameter. By default, the selected model is `anthropic.claude-instant-v1`.  
+The `BEDROCK` option is enabled by default. You must [request model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) for the model selected in the `BedrockModelId` parameter. By default, the selected model is `anthropic.claude-3-haiku-20240307-v1:0`.
 
-When `BEDROCK` option is enabled, LMA can run one or more LLM inferences against Amazon Bedrock after the call is complete. The prompt used to generate the insights is configured in a [AWS Systems Manager Parameter Store](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html). The name of the parameter is `{LMA-Stack-Name}-LLMPromptSummaryTemplate`. You can find a link to the parameter in the LMA main stack's CloudFormation outputs.
+When `BEDROCK` option is enabled, LMA will run multiple LLM inferences after the call is complete. The prompt templates used to generate the insights from the transcript are stored in a DynamoDB table. There are two items (records) in the table:  
+
+1. Default prompt templates: these come with the LMA release, and define the summaries you get it you do not create custom prompt templates. Default prompts may change in new versions of LMA. View the default prompts by opening the DynamoDB URL in the LMA Stack output `LLMDefaultPromptSummaryTemplate`. 
+
+![DefaultPrompts](./images/summary-default-prompts.png)
+
+2. Custom prompt templates: initially after deploying LMA, there are no custom prompts defined, but you can create them. Use custom prompt templates to override or disable default summary prompts, or to add new ones. Custom prompt templates are not overwritten when you update your LMA stack to a new version.
+
+
+
+
+
 
 The parameter's value is a JSON object with key/value pairs, each pair representing the label (key) and the prompt (value). After the call ends, LMA will iterate through the keys and run each prompt. In the prompt, LMA replaces `<br>` tags with newlines, and  `{transcript}` is replaced with the call transcript. The key will be used as a header for the section in the "Transcript Summary" section in the LMA UI.  You can learn more about how each of the prompts are designed in Anthropic's [Introduction to Prompt Design](https://docs.anthropic.com/claude/docs/introduction-to-prompt-design).
 

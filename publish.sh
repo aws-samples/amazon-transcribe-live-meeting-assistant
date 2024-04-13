@@ -170,7 +170,26 @@ popd
 dir=lma-llm-template-setup-stack
 echo "PACKAGING $dir/deployment"
 pushd $dir/deployment
+
+# by hashing the contents of the src folder, we can force the custom resource lambda to re-run
+# when the code or prompt template contents change.
+echo "Computing hash of src folder contents"
+HASH=$(
+  find ../src \( -name node_modules -o -name build \) -prune -o -type f -print0 | 
+  sort -z |
+  xargs -0 sha256sum |
+  sha256sum |
+  cut -d" " -f1 | 
+  cut -c1-16
+  )
 template=llm-template-setup.yaml
+echo "Replace hash in template"
+# Detection of differences. sed varies betwen GNU sed and BSD sed
+if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
+  sed -i 's/source_hash: .*/source_hash: '"$HASH"'/' ${template}
+else # BSD like sed
+  sed -i '' 's/source_hash: .*/source_hash: '"$HASH"'/' ${template}
+fi
 s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-llm-template-setup-stack/llm-template-setup.yaml"
 aws cloudformation package \
 --template-file ${template} \
