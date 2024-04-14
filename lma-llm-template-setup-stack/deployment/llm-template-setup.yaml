@@ -67,7 +67,7 @@ Resources:
       ServiceToken: !GetAtt LLMPromptUploadFunction.Arn
       LLMPromptTemplateTableName: !Ref LLMPromptTemplateTable
       # hash below is updated by publish.sh script- used to force tempate updates when source has changed.
-      source_hash: ce3b2f635d3849b1
+      source_hash: 75f8c3b317afc80e
 
 Outputs:
 
