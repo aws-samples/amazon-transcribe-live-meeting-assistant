@@ -31,7 +31,7 @@ const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || undefine
 const RECORDING_FILE_PREFIX = process.env['RECORDING_FILE_PREFIX'] || 'lca-audio-wav/';
 const CPU_HEALTH_THRESHOLD = parseInt(process.env['CPU_HEALTH_THRESHOLD'] || '50', 10);
 const LOCAL_TEMP_DIR = process.env['LOCAL_TEMP_DIR'] || '/tmp/';
-const WS_LOG_LEVEL = process.env['WS_LOG_LEVEL'] || 'info';
+const WS_LOG_LEVEL = process.env['WS_LOG_LEVEL'] || 'debug';
 
 const s3Client = new S3Client({ region: AWS_REGION });
 
@@ -101,7 +101,7 @@ server.listen(
             process.exit(1);
         }
         server.log.debug('Websocket server is ready and listening.');
-        server.log.info(`Routes: \n${server.printRoutes()}`);
+        server.log.debug(`Routes: \n${server.printRoutes()}`);
     }
 );
 
