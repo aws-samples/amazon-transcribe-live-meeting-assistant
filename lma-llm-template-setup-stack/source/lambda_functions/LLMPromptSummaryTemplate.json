@@ -1,5 +1,4 @@
 {
   "Summary": "{transcript}<br><br>Carefully read the above meeting transcript. Summarize the meeting in no more than 5 sentences, and include the speakers names, topics discussed, and outcomes. Do not include any preamble.",
-  "Topic": "{transcript}<br><br>Identify the primary issue or topic discussed in this meeting. For example, project planning, iphone issue, billing issue, cancellation. Only reply with the topic, nothing more.",
   "Follow-Up Actions": "{transcript}<br><br>Please review the above transcript and extract a list of actionable items with owners and due dates (if available)"
 }

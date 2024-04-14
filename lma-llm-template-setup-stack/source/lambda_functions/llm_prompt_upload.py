@@ -5,20 +5,31 @@ import os
 
 DEFAULT_PROMPT_TEMPLATES_PK = "DefaultSummaryPromptTemplates"
 CUSTOM_PROMPT_TEMPLATES_PK = "CustomSummaryPromptTemplates"
+DEFAULT_PROMPT_TEMPLATES_INFO = f"""
+    LMA default summary prompt templates. 
+    Do not edit - changes may be overridden by updates.
+    To override default prompts, use same keys in item: {CUSTOM_PROMPT_TEMPLATES_PK}
+    NOTE: Prompt keys must be in the form 'N#Title' where N is a sequence number.
+    """
+CUSTOM_PROMPT_TEMPLATES_INFO = f"""
+    LMA custom summary prompt templates. 
+    Any key values defined here override defaults with same key defined in item: {DEFAULT_PROMPT_TEMPLATES_PK}. 
+    To disable a default value, override it here with the same key, and value either emplty or 'NONE'.
+    NOTE: Prompt keys must be in the form 'N#Title' where N is a sequence number.
+    """
 
-def get_update_expr(prompt_templates):
-    update_expr = "SET"
-    attr_names = {}
-    attr_values = {}
-    i = 0
+def get_new_item(pk, info, prompt_templates):
+    item = {
+        'LLMPromptTemplateId': pk,
+        '*Information*': info
+    }
+    i = 1
     for key, value in prompt_templates.items():
-        attr_name = key if key == "*Information*" else f"{i}#{key}"
-        update_expr += f" #{i} = :{i},"
-        attr_names[f"#{i}"] = attr_name
-        attr_values[f":{i}"] = value
+        # prepend sequence number to allow control of sort order later
+        attr_name = f"{i}#{key}"
+        item[attr_name] = value
         i += 1
-    update_expr = update_expr[:-1] # remove last comma
-    return update_expr, attr_names, attr_values
+    return item
 
 def lambda_handler(event, context):
     print(event)
@@ -38,31 +49,16 @@ def lambda_handler(event, context):
             print("Populating / updating default prompt item (for Create or Update event):", promptTemplateTableName)
             prompt_templates_str = llm_prompt_summary_template
             prompt_templates = json.loads(prompt_templates_str)
-            default_prompt_templates = {
-                "*Information*": f"LMA default summary prompt templates. Do not edit - changes may be overridden by updates - override default prompts using same keys in item: {CUSTOM_PROMPT_TEMPLATES_PK}",
-                **prompt_templates
-            }
-            update_expr, attr_names, attr_values = get_update_expr(default_prompt_templates)
-            response = promptTable.update_item(
-                  Key={'LLMPromptTemplateId': DEFAULT_PROMPT_TEMPLATES_PK},
-                  UpdateExpression=update_expr,
-                  ExpressionAttributeValues=attr_values,
-                  ExpressionAttributeNames=attr_names
-                )
+            item = get_new_item(DEFAULT_PROMPT_TEMPLATES_PK, DEFAULT_PROMPT_TEMPLATES_INFO, prompt_templates)
+            print("Writing default item to DDB:", json.dumps(item))
+            response = promptTable.put_item(Item=item)
             print("DDB response", response)
 
             if the_event in ('Create'):
                 print("Populating Custom Prompt table with default prompts (for Create event):", promptTemplateTableName)
-                custom_prompt_templates = {
-                    "*Information*": f"LMA custom summary prompt templates. Key values defined here override defaults with same key defined in item: {DEFAULT_PROMPT_TEMPLATES_PK}. To disable a default value, override here with the value 'NONE' for the same key."
-                }
-                update_expr, attr_names, attr_values = get_update_expr(custom_prompt_templates)
-                response = promptTable.update_item(
-                    Key={'LLMPromptTemplateId': CUSTOM_PROMPT_TEMPLATES_PK},
-                    UpdateExpression=update_expr,
-                    ExpressionAttributeValues=attr_values,
-                    ExpressionAttributeNames=attr_names
-                    )
+                item = get_new_item(CUSTOM_PROMPT_TEMPLATES_PK, CUSTOM_PROMPT_TEMPLATES_INFO, {})
+                print("Writing initial custom item to DDB:", json.dumps(item))
+                response = promptTable.put_item(Item=item)
                 print("DDB response", response)
 
     except Exception as e:
