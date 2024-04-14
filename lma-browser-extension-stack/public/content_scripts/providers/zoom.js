@@ -1,5 +1,7 @@
 console.log("Inside LMA Zoom script");
 
+let meetingConfig = {};
+
 /************** Helper functions ***************/
 const getNameForVideoAvatar = function (element) {
   var speakerName = "n/a";
@@ -79,11 +81,49 @@ var muteObserver = new MutationSummary({
   ]
 });
 
+
+const openChatPanel = function () {
+    const chatPanelButtons = document.querySelectorAll('[aria-label*="open the chat panel"]');
+    if (chatPanelButtons.length > 0) {
+      chatPanelButtons[0].click(); // open the attendee panel
+    }
+}
+
+const sendChatMessage = function (message) {
+  const chatPanelButtons = document.getElementsByClassName("chat-rtf-box__send");
+  if (chatPanelButtons.length > 0) {
+    const outerTextBox = document.getElementsByClassName("chat-rtf-box__editor-outer");
+    if (outerTextBox.length > 0) {
+      
+      const innerTextBox = outerTextBox[0].querySelectorAll("p");
+      if (innerTextBox.length > 0) {
+        innerTextBox[0].innerText = message;
+      }
+    }
+    setTimeout(() => {
+      chatPanelButtons[0].click();
+    }, 250);
+  }
+}
+
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.action === "FetchMetadata") {
-    if (window.MeetingConfig) {
-      sendResponse(MeetingConfig);
+    console.log("Received request to send meeting config");
+    if (Object.keys(meetingConfig).length > 0) {
+      console.log("Sending meeting config to extension");
+      sendResponse(meetingConfig);
     }
+  }
+  else if (request.action === "SendChatMessage") {
+    console.log("received request to send a chat message");
+    console.log("message:", request.message);
+    let chatWindow = document.getElementsByClassName("chat-rtf-box__editor-outer");
+    if (chatWindow.length === 0) {
+      openChatPanel();
+    }
+    setTimeout(() => {
+      sendChatMessage(request.message);
+    }, 500);
   }
 });
 
@@ -108,9 +148,10 @@ injectScript('content_scripts/providers/zoom-injection.js');
 
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
-
+  
   if (event.data.type && (event.data.type == "MeetingConfig")) {
     console.log("received value from page: ", event.data.value);
+    meetingConfig = event.data.value;
     chrome.runtime.sendMessage({ action: "UpdateMetadata", metadata: event.data.value });
   }
 });

@@ -11,7 +11,7 @@ const openChatPanel = function () {
     }
 }
 
-const sendRecordingMessage = function (message) {
+const sendChatMessage = function (message) {
   /*const titles = document.querySelectorAll('[data-testid="meetingChatInput"] textarea');
   if (titles.length > 0) {
     titles[0].value = message;
@@ -33,16 +33,50 @@ const sendRecordingMessage = function (message) {
 }
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
-  if (request.action === "SendRecordingMessage") {
-    console.log("received request to send a start recording message");
+  if (request.action === "FetchMetadata") {
+    checkForMeetingMetadata();
+  }
+  if (request.action === "SendChatMessage") {
+    console.log("received request to send a chat message");
     console.log("message:", request.message);
     let titles = document.querySelectorAll('[data-testid="meetingChatInput"] textarea');
     if (titles.length === 0) {
       openChatPanel();
     }
-    sendRecordingMessage(request.message);
+    sendChatMessage(request.message);
   }
 });
+
+const checkForMeetingMetadata = function() {
+  const titleInterval = setInterval(() => {
+    //console.log('Checking for title');
+    let sessionData = undefined;
+    try {
+      sessionData = JSON.parse(JSON.parse(localStorage.getItem("AmazonChimeExpressSession")));
+      if (sessionData !== undefined && sessionData.fullName) {
+        metadata.userName = sessionData.fullName;
+      }
+    } catch (error) {
+      console.log("Unable to read chime session data", error);
+    }
+    
+    const titles = document.querySelectorAll('[data-test-id="meetingTitle"]');
+    if (titles.length > 0) {
+      //console.log('Title found');
+      let title = titles[0].innerText;
+      metadata.meetingTopic = title;
+      clearInterval(titleInterval);
+    } else {
+      const title = document.title.replace("Amazon Chime: ", "");
+      metadata.meetingTopic = title;
+    }
+
+    chrome.runtime.sendMessage({
+      action: "UpdateMetadata",
+      metadata: metadata
+    });
+  }, 2000);
+}
 
 
 window.onload = function () {
@@ -66,31 +100,7 @@ window.onload = function () {
     }
   }, 2000);
 
-  const titleInterval = setInterval(() => {
-    //console.log('Checking for title');
-    let sessionData = undefined;
-    try {
-      sessionData = JSON.parse(JSON.parse(localStorage.getItem("AmazonChimeExpressSession")));
-    } catch (error) {
-      console.log("Unable to read chime session data", error);
-    }
-    
-    const titles = document.querySelectorAll('[data-test-id="meetingTitle"]');
-    if (titles.length > 0) {
-      //console.log('Title found');
-      let title = titles[0].innerText;
-      metadata.meetingTopic = title;
-      if (sessionData !== undefined && sessionData.fullName) {
-        metadata.userName = sessionData.fullName;
-      }      
-      chrome.runtime.sendMessage({
-        action: "UpdateMetadata",
-        metadata: metadata
-      });
-      clearInterval(titleInterval);
-    }
-  }, 2000);
-  
+  checkForMeetingMetadata();  
 
   const activeSpeakerObserver = new MutationObserver((mutationList) => {
     console.log("activeSpeaker changed");

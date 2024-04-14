@@ -196,6 +196,15 @@ Parameters:
     Default: >
       Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.
 
+  ShowSpeakerLabel:
+    Type: String
+    Default: 'true'
+    Description: >-
+      Enable diarization on Transcribe streaming
+    AllowedValues:
+      - 'true'
+      - 'false'
+
 Metadata:
   "AWS::CloudFormation::Interface":
     ParameterGroups:
@@ -1157,6 +1166,8 @@ Resources:
               Value: !Ref TranscriberCallEventTable
             - Name: SAVE_PARTIAL_TRANSCRIPTS
               Value: "true"
+            - Name: SHOW_SPEAKER_LABEL
+              Value: !Ref ShowSpeakerLabel
             - Name: TRANSCRIBE_API_MODE
               Value: !Ref TranscribeApiMode
             - Name: IS_CONTENT_REDACTION_ENABLED

@@ -1,6 +1,6 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+/* eslint-disable @typescript-eslint/no-empty-function */
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useSettings } from './SettingsContext';
-import { isToken } from 'typescript';
 
 type User = {
   id_token?: string,
@@ -12,32 +12,38 @@ const initialUserContext = {
   user: {} as User,
   login: () => {},
   logout: () => { },
-  exchangeCodeForToken: (code:string) => {},
+  exchangeCodeForToken: async (codeOrToken: string, grantType: string) => { return true; },
   loggedIn: false,
-  checkTokenExpired: (): boolean => { return true; }
+  checkTokenExpired: async () => { return true; }
 };
 const UserContext = createContext(initialUserContext);
 
 function UserProvider({ children }: any) {
   const [user, setUser] = useState<User>({});
-  const [userName, setUserName] = useState("");
   const settings = useSettings();
   const [loggedIn, setLoggedIn] = useState(false);
 
-  const isTokenExpired = (jwtToken:string) => {
+  const isTokenExpired = (jwtToken: string) => {
     const [, payload] = jwtToken.split('.');
     const { exp: expires } = JSON.parse(atob(payload));
     if (typeof expires === 'number') {
-      let expiryDate = new Date(expires * 1000);
+      const expiryDate = new Date(expires * 1000);
       console.log("expiry:", expiryDate);
       return (expiryDate < new Date());
     }
     return true;
   }
 
-  const checkTokenExpired = useCallback((): boolean => {
+  const checkTokenExpired = useCallback(async () => {
     if (user.access_token) {
-      return isTokenExpired(user.access_token);
+      const isExpired = isTokenExpired(user.access_token);
+      if (isExpired) {
+        // try to refresh it
+        if (user && user.refresh_token) {
+          return await exchangeCodeForToken(user.refresh_token, 'refresh_token');
+        }
+      }
+      return true;
     }
     return false
   }, [user]);
@@ -47,11 +53,13 @@ function UserProvider({ children }: any) {
     if (chrome.storage) {
       chrome.storage.local.get('authTokens', (result) => {
         if (result.authTokens && result.authTokens.access_token) {
-          const isExpired = isTokenExpired(result.authTokens.access_token);
+          const isExpired = isTokenExpired(result.authTokens.access_token);          
           if (isExpired) {
             chrome.storage.local.remove('authTokens');
             setUser({});
             setLoggedIn(false);
+            // try to refresh anyway
+            exchangeCodeForToken(result.authTokens.refresh_token, 'refresh_token');
           } else {
             setUser(result.authTokens);
             setLoggedIn(true);
@@ -65,33 +73,31 @@ function UserProvider({ children }: any) {
         const authTokens = JSON.parse(authTokenStr);
         const isExpired = isTokenExpired(authTokens.access_token)
         if (isExpired) {
-          localStorage.removeItem('authTokens');
-          setUser({});
-          setLoggedIn(false);
+          logout();
         } else {
           setUser(authTokens);
           setLoggedIn(true);
         }
       } else {
-        setUser({});
-        setLoggedIn(false);
+        logout();
       }
     }
     
   }, []);
 
-  const exchangeCodeForToken = useCallback(async (code: string) => {
+  const exchangeCodeForToken = useCallback(async (codeOrToken: string, grantType:string) => {
     const tokenEndpoint = `${settings.cognitoDomain}/oauth2/token`
     const params = new URLSearchParams();
-    params.append('grant_type', 'authorization_code');
+
+    params.append('grant_type', grantType);
+    params.append((grantType === 'authorization_code' ? 'code' : 'refresh_token'), codeOrToken);
     params.append('client_id', `${settings.clientId}`);
+
     if (chrome.runtime) {
       params.append('redirect_uri', `https://${chrome.runtime.id}.chromiumapp.org/`);
     } else {
       params.append('redirect_uri', `http://localhost:3000/`);
-
-    }
-    params.append('code', code);
+    }    
   
     try {
       const response = await fetch(tokenEndpoint, {
@@ -112,10 +118,13 @@ function UserProvider({ children }: any) {
       }
       setUser(data);
       setLoggedIn(true);
+      return true;
     } catch (error) {
       console.error('error exchanging code for token', error);
       //throw error;
+      return false;
     }
+    return false;
   }, [user, setUser, loggedIn, setLoggedIn]);
 
   const login = useCallback(async () => {
@@ -128,9 +137,9 @@ function UserProvider({ children }: any) {
         interactive: true
       });
       if (redirectURL) {
-        let url = new URL(redirectURL);
-        let authorizationCode = url.searchParams.get("code");
-        if (authorizationCode) exchangeCodeForToken(authorizationCode);
+        const url = new URL(redirectURL);
+        const authorizationCode = url.searchParams.get("code");
+        if (authorizationCode) exchangeCodeForToken(authorizationCode, 'authorization_code');
         else console.error("No authorization code in redirect url.");
       } else {
         console.error("Error with login.");
@@ -142,6 +151,7 @@ function UserProvider({ children }: any) {
   }, [exchangeCodeForToken]);
 
   const logout = useCallback(() => {
+    localStorage.removeItem('authTokens');
     setUser({});
     setLoggedIn(false);
   }, [user, loggedIn]);
