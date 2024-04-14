@@ -57,7 +57,7 @@ server.register(websocket);
 // Setup preHandler hook to authenticate 
 server.addHook('preHandler', async (request, reply) => {
     server.log.debug('Received preHandler hook for authentication. Calling jwtVerifier to authenticate.');
-    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers, null, 1)}`);
+    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers)}`);
 
 
     if (!request.url.includes('health/check')) { 
@@ -68,7 +68,7 @@ server.addHook('preHandler', async (request, reply) => {
 // Setup Route for websocket connection
 server.get('/api/v1/ws', { websocket: true, logLevel: 'debug' }, (connection, request) => {
     server.log.debug('Received Connection request.');
-    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers, null, 1)}`);
+    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers)}`);
 
     registerHandlers(connection.socket); // setup the handler functions for websocket events
 });
@@ -76,7 +76,7 @@ server.get('/api/v1/ws', { websocket: true, logLevel: 'debug' }, (connection, re
 // Setup Route for health check 
 server.get('/health/check', { logLevel: 'warn' }, (request, response) => {
     server.log.debug('Received Health Check request.');
-    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers, null, 1)}`);
+    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers)}`);
 
     const cpuUsage = os.loadavg()[0] / os.cpus().length * 100;
 
