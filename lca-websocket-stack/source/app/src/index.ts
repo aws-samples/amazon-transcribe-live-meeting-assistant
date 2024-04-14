@@ -48,7 +48,6 @@ const server = fastify({
             translateTime: 'SYS:HH:MM:ss.l',
             colorize: false,
             levelFirst: true,
-            messageFormat: '{level} - {time} : {msg}',
         }
     },
 });
