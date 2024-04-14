@@ -1,53 +1,49 @@
 # Transcript Summarization
 
-LMA uses Amazon Bedrock to summarize meeting transcripts once the meeting is over.
+LMA summarizes meeting transcripts once the meeting is over.
 
 ![TranscriptSummary](./images/post-meeting-summaries.png)
         
-Transcript Summaries are generated after the meeting has ended, and take only a few seconds to appear on the UI.
-
 Configure Transcript Summarization by choosing a value for the `EndOfCallTranscriptSummary` CloudFormation parameter when deploying or updating your LMA stack. Valid values are 
-`BEDROCK` and `LAMBDA`.
-If `BEDROCK` option is chosen, select a supported model ID from the list (`BedrockModelId` parameter)
+`BEDROCK` (default) and `LAMBDA`.
+If the `BEDROCK` option is chosen, select a supported model ID from the list (`BedrockModelId` parameter)
 
 ### **BEDROCK** (default)
 
 The `BEDROCK` option is enabled by default. You must [request model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) for the model selected in the `BedrockModelId` parameter. By default, the selected model is `anthropic.claude-3-haiku-20240307-v1:0`.
 
-When `BEDROCK` option is enabled, LMA will run multiple LLM inferences after the call is complete. The prompt templates used to generate the insights from the transcript are stored in a DynamoDB table. There are two items (records) in the table:  
+LMA can run multiple LLM inferences after the call is complete. The prompt templates used to generate the insights from the transcript are stored in a DynamoDB table. There are two items (records) in the table:  
 
-1. Default prompt templates: these come with the LMA release, and define the summaries you get it you do not create custom prompt templates. Default prompts may change in new versions of LMA. View the default prompts by opening the DynamoDB URL in the LMA Stack output `LLMDefaultPromptSummaryTemplate`. 
+1. **Default prompt templates:** These come with the LMA release, and define the summaries you get it you do not create custom prompt templates. Default prompts may change in new versions of LMA. View the default prompts by opening the DynamoDB URL in the LMA Stack output `LLMDefaultPromptSummaryTemplate`. 
 
-![DefaultPrompts](./images/summary-default-prompts.png)
+    ![DefaultPrompts](./images/summary-default-prompts.png)
 
-2. Custom prompt templates: initially after deploying LMA, there are no custom prompts defined, but you can create them. Use custom prompt templates to override or disable default summary prompts, or to add new ones. Custom prompt templates are not overwritten when you update your LMA stack to a new version.
+2. **Custom prompt templates:** Initially after deploying LMA, there are no custom prompts defined, but you can create them. Use custom prompt templates to override or disable default summary prompts, or to add new ones. Custom prompt templates are not overwritten when you update your LMA stack to a new version. View and edit the custom prompts by opening the DynamoDB URL in the LMA Stack output `LLMCustomPromptSummaryTemplate`.
 
+    ![Custom](./images/summary-custom-prompts.png)
 
+The attribute named `**Information**` is ignored by LMA - it is informational only.
 
+All other attributes define the summary prompts that LMA executes when the meeting is over. Each has an attribute name used as the heading that shows up in the LMA summary, and an attribute value which defines the prompt template used to invoke the selected LLM.  
 
+**Attribute Name:** The attribute name must be formatted using a sequence number `N`, a `#` symbol, and the heading you want to use for the summary in the UI. For example, `1#Summary` defines a heading value of **Summary**, that will always be displayed above other headings with a higher sequence number. LMA removes the sequence number before displaying the title.
 
-
-The parameter's value is a JSON object with key/value pairs, each pair representing the label (key) and the prompt (value). After the call ends, LMA will iterate through the keys and run each prompt. In the prompt, LMA replaces `<br>` tags with newlines, and  `{transcript}` is replaced with the call transcript. The key will be used as a header for the section in the "Transcript Summary" section in the LMA UI.  You can learn more about how each of the prompts are designed in Anthropic's [Introduction to Prompt Design](https://docs.anthropic.com/claude/docs/introduction-to-prompt-design).
-
-Below is the default value of `[LMA-Stack-Name]-LLMPromptSummaryTemplate`: 
-
+**Attribute Value:** The attribute value is used as the prompt template. LMA replaces `<br>` tags with newlines. Use the tempate variable `{transcript}` to indicate where the meeting transcript will be placed in the prompt. LMA replaces `{transcript}` with the actual meeting transcript in the form:
 ```
-{
-    "Summary":"<br><br>Human: Answer the questions below, defined in <question></question> based on the transcript defined in <transcript></transcript>. If you cannot answer the question, reply with 'n/a'. Use gender neutral pronouns. When you reply, only respond with the answer.<br><br><question>What is a summary of the transcript?</question><br><br><transcript><br>{transcript}<br></transcript><br><br>Assistant:",
-    "Topic":"<br><br>Human: Answer the questions below, defined in <question></question> based on the transcript defined in <transcript></transcript>. If you cannot answer the question, reply with 'n/a'. Use gender neutral pronouns. When you reply, only respond with the answer.<br><br><question>What is the topic of the call? For example, iphone issue, billing issue, cancellation. Only reply with the topic, nothing more.</question><br><br><transcript><br>{transcript}<br></transcript><br><br>Assistant:",
-    "Follow-Up Actions":"<br><br>Human: Answer the question below, defined in <question></question> based on the transcript defined in <transcript></transcript>. If you cannot answer the question, reply with 'n/a'. Use gender neutral pronouns. When you reply, only respond with the answer.<br><br><question>What follow-up actions did the agent say they are going to take? </question><br><br><transcript><br>{transcript}<br></transcript><br><br>Assistant:"
-}
+<SpeakerName>: <transcription text>
+<SpeakerName>: <transcription text>
+...
 ```
+LMA invokes the Bedrock model using your prompt, and renders the results in the Summary section of the Meeting detail page, under your heading.
 
-The expected output after the summarize step is a single json object, as a string, that contains all the key/value pairs. For example:
+#### Customizing prompts
 
-```
-{
-  "Summary": "...",
-  "Topic": "...",
-  "Follow-Up Actions": "...",
-}
-```
+**Add a new custom summary:** Edit the Custom prompt templated by opening the DynamoDB URL in the LMA Stack output `LLMCustomPromptSummaryTemplate`. Initially this item has no prompt templates defined, but you can choose **Add new Attribute** to define your own prompt. Use the attribute type **String**. Use the **Attribute Name** format described above, e.g. `#4My Custom Meeting Insights`, and use **Attribute Value** to define the prompt template as described above.
+
+**Customize default prompts:** To override a default prompt value, provide an alternative prompt template for the same Attribute Name (heading) in the Custom prompt templates. LMA merges the default and custom prompts at runtime, and when both contain the same Attribute Name, the prompt template from the Custom prompt templates table is used instead of the default. *Do not edit the Default prompt templates item directly, as it may be overwritten during future stack updates.*
+
+**Remove default prompts:** Create a custom prompt template attribute with the same name as the default prompt you want to disable, but leave the attribute value empty, or give it the value 'NONE'. When LMA merges the default and custom values, the empty (or 'NONE') valued prompts are skipped.
+
 
 ### **LAMBDA**
 
