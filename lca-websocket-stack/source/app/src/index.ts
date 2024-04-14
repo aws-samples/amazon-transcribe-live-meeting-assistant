@@ -56,11 +56,10 @@ server.register(websocket);
 
 // Setup preHandler hook to authenticate 
 server.addHook('preHandler', async (request, reply) => {
-    server.log.debug('Received preHandler hook for authentication. Calling jwtVerifier to authenticate.');
-    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers)}`);
-
-
     if (!request.url.includes('health')) { 
+        server.log.debug('Received preHandler hook for authentication. Calling jwtVerifier to authenticate.');
+        server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers)}`);
+    
         await jwtVerifier(request, reply);
     }
 });
