@@ -5,18 +5,12 @@ import os
 
 DEFAULT_PROMPT_TEMPLATES_PK = "DefaultSummaryPromptTemplates"
 CUSTOM_PROMPT_TEMPLATES_PK = "CustomSummaryPromptTemplates"
-DEFAULT_PROMPT_TEMPLATES_INFO = f"""
-    LMA default summary prompt templates. 
-    Do not edit - changes may be overridden by updates.
-    To override default prompts, use same keys in item: {CUSTOM_PROMPT_TEMPLATES_PK}
-    NOTE: Prompt keys must be in the form 'N#Title' where N is a sequence number.
-    """
-CUSTOM_PROMPT_TEMPLATES_INFO = f"""
-    LMA custom summary prompt templates. 
-    Any key values defined here override defaults with same key defined in item: {DEFAULT_PROMPT_TEMPLATES_PK}. 
-    To disable a default value, override it here with the same key, and value either emplty or 'NONE'.
-    NOTE: Prompt keys must be in the form 'N#Title' where N is a sequence number.
-    """
+DEFAULT_PROMPT_TEMPLATES_INFO = f"""LMA default summary prompt templates. Do not edit - changes may be overridden by updates.
+To override default prompts, use same keys in item: {CUSTOM_PROMPT_TEMPLATES_PK}. Prompt keys must be in the form 'N#Title' where N is a sequence number.
+"""
+CUSTOM_PROMPT_TEMPLATES_INFO = f"""LMA custom summary prompt templates. Any key values defined here override defaults with same key defined in item: {DEFAULT_PROMPT_TEMPLATES_PK}. 
+To disable a default value, override it here with the same key, and value either emplty or 'NONE'. Prompt keys must be in the form 'N#Title' where N is a sequence number.
+"""
 
 def get_new_item(pk, info, prompt_templates):
     item = {
