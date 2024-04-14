@@ -60,6 +60,7 @@ const StreamAudio = () => {
     onError: (event) => {
       console.log(`Websocket onClose Event: ${event}`);
     },
+    shouldReconnect: (closeEvent) => true,
   });
 
   const handleCallIdChange = (e) => {
