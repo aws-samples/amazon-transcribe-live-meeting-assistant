@@ -102,10 +102,10 @@ export const writeCallEvent = async (callEvent: CallStartEvent | CallEndEvent | 
     try {
         await kinesisClient.send(putCmd);
         console.debug('Written Call Event to KDS');
-        console.debug(callEvent);
+        console.debug(JSON.stringify(callEvent));
     } catch (error) {
         console.error('Error writing Call Event to KDS', error);
-        console.debug(callEvent);
+        console.debug(JSON.stringify(callEvent));
     }
 };
 
@@ -147,9 +147,8 @@ export const writeTranscriptionSegment = async function(transcribeMessageJson:Tr
             const putCmd = new PutRecordCommand(putParams);
             try {
                 await kinesisClient.send(putCmd);
-                console.info('Written ADD_TRANSCRIPT_SEGMENT event to KDS');
-                // console.info(JSON.stringify(kdsObject));
-                console.info(kdsObject.Transcript);
+                console.debug('Written ADD_TRANSCRIPT_SEGMENT event to KDS');
+                console.debug(JSON.stringify(kdsObject));
             } catch (error) {
                 console.error('Error writing transcription segment (TRANSCRIBE) to KDS', error);
                 console.debug(JSON.stringify(kdsObject));
@@ -209,9 +208,8 @@ export const writeAddTranscriptSegmentEvent = async function(utteranceEvent:Utte
     const putCmd = new PutRecordCommand(putParams);
     try {
         await kinesisClient.send(putCmd);
-        console.info('Written ADD_TRANSCRIPT_SEGMENT event to KDS');
-        console.info(JSON.stringify(kdsObject));
-        console.info(kdsObject.Transcript);
+        console.debug('Written ADD_TRANSCRIPT_SEGMENT event to KDS');
+        console.debug(JSON.stringify(kdsObject));
     } catch (error) {
         console.error('Error writing transcription segment to KDS', error);
         console.debug(JSON.stringify(kdsObject));
@@ -239,8 +237,8 @@ export const writeAddCallCategoryEvent = async function(categoryEvent:CategoryEv
         const putCmd = new PutRecordCommand(putParams);
         try {
             await kinesisClient.send(putCmd);
-            // console.debug('Written ADD_CALL_CATEGORY to KDS');
-            // console.debug(JSON.stringify(kdsObject));
+            console.debug('Written ADD_CALL_CATEGORY to KDS');
+            console.debug(JSON.stringify(kdsObject));
         } catch (error) {
             console.error('Error writing ADD_CALL_CATEGORY to KDS', error);
             console.debug(JSON.stringify(kdsObject));
@@ -361,7 +359,7 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
             for await (const event of tsStream) {
                 if (event.TranscriptEvent) {
                     if (event.TranscriptEvent.Transcript.Results.length > 0) {
-                        console.log('Event ', JSON.stringify(event));
+                        console.log('Transcribe results stream event ', JSON.stringify(event));
                     }
                     if (showSpeakerLabel) {
                         // const message: TranscriptEvent = event.TranscriptEvent;

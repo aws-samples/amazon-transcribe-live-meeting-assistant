@@ -19,35 +19,7 @@ import useWebSocket from 'react-use-websocket';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 
-// const TARGET_SAMPLING_RATE = 8000;
 let SOURCE_SAMPLING_RATE;
-
-// export const downsampleBuffer = (buffer, inputSampleRate = 44100, outputSampleRate = 16000) => {
-//   if (outputSampleRate === inputSampleRate) {
-//     return buffer;
-//   }
-
-//   const sampleRateRatio = inputSampleRate / outputSampleRate;
-//   const newLength = Math.round(buffer.length / sampleRateRatio);
-//   const result = new Float32Array(newLength);
-//   let offsetResult = 0;
-//   let offsetBuffer = 0;
-
-//   while (offsetResult < result.length) {
-//     const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
-//     let accum = 0;
-//     let count = 0;
-
-//     for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i += 1) {
-//       accum += buffer[i];
-//       count += 1;
-//     }
-//     result[offsetResult] = accum / count;
-//     offsetResult += 1;
-//     offsetBuffer = nextOffsetBuffer;
-//   }
-//   return result;
-// };
 
 const StreamAudio = () => {
   const { currentSession } = useAppContext();
@@ -80,13 +52,13 @@ const StreamAudio = () => {
       authorization: `Bearer ${JWT_TOKEN}`,
     },
     onOpen: (event) => {
-      console.log(event);
+      console.log(`Websocket onOpen Event: ${event}`);
     },
     onClose: (event) => {
-      console.log(event);
+      console.log(`Websocket onClose Event: ${event}`);
     },
     onError: (event) => {
-      console.log(event);
+      console.log(`Websocket onClose Event: ${event}`);
     },
   });
 
@@ -144,15 +116,8 @@ const StreamAudio = () => {
   };
 
   const interleave = (lbuffer, rbuffer) => {
-    // const leftAudioBuffer = pcmEncode(
-    //   downsampleBuffer(lbuffer, SOURCE_SAMPLING_RATE, TARGET_SAMPLING_RATE),
-    // );
     const leftAudioBuffer = pcmEncode(lbuffer);
     const leftView = new DataView(leftAudioBuffer);
-
-    // const rightAudioBuffer = pcmEncode(
-    //   downsampleBuffer(rbuffer, SOURCE_SAMPLING_RATE, TARGET_SAMPLING_RATE),
-    // );
     const rightAudioBuffer = pcmEncode(rbuffer);
     const rightView = new DataView(rightAudioBuffer);
 
@@ -167,6 +132,8 @@ const StreamAudio = () => {
   };
 
   const stopRecording = async () => {
+    console.log('Stop Recording');
+
     if (audioProcessor.current) {
       audioProcessor.current.port.postMessage({
         message: 'UPDATE_RECORDING_STATE',
@@ -175,10 +142,11 @@ const StreamAudio = () => {
       audioProcessor.current.port.close();
       audioProcessor.current.disconnect();
     } else {
-      console.log('no media recorder available to stop');
+      console.log('Error trying to stop recording. AudioWorklet Processor node is not active.');
     }
     if (streamingStarted && !recording) {
       callMetaData.callEvent = 'END';
+      console.log(`Sending Call END event to WS server: ${JSON.stringify(callMetaData)}`);
       sendMessage(JSON.stringify(callMetaData));
       setStreamingStarted(false);
       setCallMetaData({
@@ -189,6 +157,7 @@ const StreamAudio = () => {
   };
 
   const startRecording = async () => {
+    console.log('Start Recording and Streaming Audio to Websocket server.');
     try {
       audioContext.current = new window.AudioContext();
       displayStream.current = await window.navigator.mediaDevices.getDisplayMedia({
@@ -210,10 +179,10 @@ const StreamAudio = () => {
       });
       SOURCE_SAMPLING_RATE = audioContext.current.sampleRate;
 
-      // callMetaData.samplingRate = TARGET_SAMPLING_RATE;
       callMetaData.samplingRate = SOURCE_SAMPLING_RATE;
 
       callMetaData.callEvent = 'START';
+      console.log(`Sending Call START event to WS server: ${JSON.stringify(callMetaData)}`);
       sendMessage(JSON.stringify(callMetaData));
       setStreamingStarted(true);
 
@@ -228,10 +197,11 @@ const StreamAudio = () => {
       displayAudioSource.current.connect(channelMerger.current, 0, 0);
       micAudioSource.current.connect(channelMerger.current, 0, 1);
 
+      console.log('Registering and adding AudioWorklet processor to capture audio');
       try {
         await audioContext.current.audioWorklet.addModule('./worklets/recording-processor.js');
       } catch (error) {
-        console.log(`Add module error ${error}`);
+        console.log(`Error registering AudioWorklet processor: ${error}`);
       }
 
       audioProcessor.current = new AudioWorkletNode(audioContext.current, 'recording-processor', {
@@ -254,6 +224,7 @@ const StreamAudio = () => {
         console.log(`Error receving message from worklet ${error}`);
       };
 
+      console.log('Sending audio buffer to the websocket server.');
       // buffer[0] - display stream,  buffer[1] - mic stream
       audioProcessor.current.port.onmessage = (event) => {
         if (micInputOption.value === 'agent') {

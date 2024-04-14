@@ -79,6 +79,19 @@ else
   PUBLIC=false
 fi
 
+function calculate_hash() {
+  local directory_path=$1
+  local HASH=$(
+    find "$directory_path" \( -name node_modules -o -name build \) -prune -o -type f -print0 | 
+    sort -z |
+    xargs -0 sha256sum |
+    sha256sum |
+    cut -d" " -f1 | 
+    cut -c1-16
+  )
+  echo $HASH
+}
+
 # Remove trailing slash from prefix if needed, and append VERSION
 VERSION=$(cat ./VERSION)
 [[ "${PREFIX}" == */ ]] && PREFIX="${PREFIX%?}"
@@ -109,14 +122,7 @@ pushd $dir
 # changes when the extension folder contents change.
 # This allows us to force codebuild to re-run when the extension folder contents change.
 echo "Computing hash of extension folder contents"
-HASH=$(
-  find . \( -name node_modules -o -name build \) -prune -o -type f -print0 | 
-  sort -z |
-  xargs -0 sha256sum |
-  sha256sum |
-  cut -d" " -f1 | 
-  cut -c1-16
-  )
+HASH=$(calculate_hash ".")
 zipfile=src-${HASH}.zip
 echo "Zipping source to ${tmpdir}/${zipfile}"
 zip -r ${tmpdir}/$zipfile . -x "node_modules/*" -x "build/*"
@@ -170,7 +176,19 @@ popd
 dir=lma-llm-template-setup-stack
 echo "PACKAGING $dir/deployment"
 pushd $dir/deployment
+
+# by hashing the contents of the source folder, we can force the custom resource lambda to re-run
+# when the code or prompt template contents change.
+echo "Computing hash of src folder contents"
+HASH=$(calculate_hash "../source")
 template=llm-template-setup.yaml
+echo "Replace hash in template"
+# Detection of differences. sed varies betwen GNU sed and BSD sed
+if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
+  sed -i 's/source_hash: .*/source_hash: '"$HASH"'/' ${template}
+else # BSD like sed
+  sed -i '' 's/source_hash: .*/source_hash: '"$HASH"'/' ${template}
+fi
 s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-llm-template-setup-stack/llm-template-setup.yaml"
 aws cloudformation package \
 --template-file ${template} \
@@ -258,7 +276,7 @@ fi
 echo "OUTPUTS"
 echo Template URL: $template
 echo CF Launch URL: https://${REGION}.console.aws.amazon.com/cloudformation/home?region=${REGION}#/stacks/create/review?templateURL=${template}\&stackName=LMA
-echo CLI Deploy: aws cloudformation deploy --region $REGION --template-file $tmpdir/$MAIN_TEMPLATE --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --stack-name LMA --parameter-overrides S3BucketName=\"\" AdminEmail='jdoe@example.com' MeetingAssistExistingQApplicationId='xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
+echo CLI Deploy: aws cloudformation deploy --region $REGION --template-file $tmpdir/$MAIN_TEMPLATE --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --stack-name LMA --parameter-overrides S3BucketName=\"\" AdminEmail='jdoe@example.com' BedrockKnowledgeBaseId='xxxxxxxxxx'
 echo Done
 exit 0
 

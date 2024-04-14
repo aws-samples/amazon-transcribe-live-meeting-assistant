@@ -3,62 +3,66 @@ import cfnresponse
 import json
 import os
 
+DEFAULT_PROMPT_TEMPLATES_PK = "DefaultSummaryPromptTemplates"
+CUSTOM_PROMPT_TEMPLATES_PK = "CustomSummaryPromptTemplates"
+DEFAULT_PROMPT_TEMPLATES_INFO = f"""LMA default summary prompt templates. Do not edit - changes may be overridden by updates.
+To override default prompts, use same keys in item: {CUSTOM_PROMPT_TEMPLATES_PK}. Prompt keys must be in the form 'N#Title' where N is a sequence number.
+"""
+CUSTOM_PROMPT_TEMPLATES_INFO = f"""LMA custom summary prompt templates. Any key values defined here override defaults with same key defined in item: {DEFAULT_PROMPT_TEMPLATES_PK}. 
+To disable a default value, override it here with the same key, and value either emplty or 'NONE'. Prompt keys must be in the form 'N#Title' where N is a sequence number.
+"""
+
+def get_new_item(pk, info, prompt_templates):
+    item = {
+        'LLMPromptTemplateId': pk,
+        '*Information*': info
+    }
+    i = 1
+    for key, value in prompt_templates.items():
+        # prepend sequence number to allow control of sort order later
+        attr_name = f"{i}#{key}"
+        item[attr_name] = value
+        i += 1
+    return item
+
 def lambda_handler(event, context):
     print(event)
-    # Init ...
     the_event = event['RequestType']
     print("The event is: ", str(the_event))
-
-    table_name = event['ResourceProperties']['TableName']
-    llm_prompt_summary_template_file = os.environ['LAMBDA_TASK_ROOT'] + "/LLMPromptSummaryTemplate.json"
-    llm_prompt_summary_template = open(llm_prompt_summary_template_file).read()
-
+    cfn_status = cfnresponse.SUCCESS
     response_data = {}
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(table_name)
-    ssm_client = boto3.client('ssm')
-
     try:
-        if the_event in ('Create'):
-            summary_prompt_template_str = llm_prompt_summary_template
-            
-            try:
-                summary_prompt_template = json.loads(summary_prompt_template_str)
-            except Exception as e:
-                print("Not a valid JSON:", str(e))
-                summary_prompt_template = {"Summary": summary_prompt_template_str}
+        if the_event in ('Create', 'Update'):
+            promptTemplateTableName = event['ResourceProperties']['LLMPromptTemplateTableName']
 
-            update_expression = "SET"
-            expression_attribute_names = {}
-            expression_attribute_values = {}
+            llm_prompt_summary_template_file = os.environ['LAMBDA_TASK_ROOT'] + "/LLMPromptSummaryTemplate.json"
+            llm_prompt_summary_template = open(llm_prompt_summary_template_file).read()
+            dynamodb = boto3.resource('dynamodb')
+            promptTable = dynamodb.Table(promptTemplateTableName)
+           
+            print("Populating / updating default prompt item (for Create or Update event):", promptTemplateTableName)
+            prompt_templates_str = llm_prompt_summary_template
+            prompt_templates = json.loads(prompt_templates_str)
+            item = get_new_item(DEFAULT_PROMPT_TEMPLATES_PK, DEFAULT_PROMPT_TEMPLATES_INFO, prompt_templates)
+            print("Writing default item to DDB:", json.dumps(item))
+            response = promptTable.put_item(Item=item)
+            print("DDB response", response)
 
-            i = 1
-            for key, value in summary_prompt_template.items():
-                update_expression += f" #{i} = :{i},"
-                expression_attribute_names[f"#{i}"] = f"{i}#{key}"
-                expression_attribute_values[f":{i}"] = value
-                i += 1
+            if the_event in ('Create'):
+                print("Populating Custom Prompt table with default prompts (for Create event):", promptTemplateTableName)
+                item = get_new_item(CUSTOM_PROMPT_TEMPLATES_PK, CUSTOM_PROMPT_TEMPLATES_INFO, {})
+                print("Writing initial custom item to DDB:", json.dumps(item))
+                response = promptTable.put_item(Item=item)
+                print("DDB response", response)
 
-            update_expression = update_expression[:-1] # remove last comma
-
-            response = table.update_item(
-                  Key={'LLMPromptTemplateId': 'LLMPromptSummaryTemplate'},
-                  UpdateExpression=update_expression,
-                  ExpressionAttributeValues=expression_attribute_values,
-                  ExpressionAttributeNames=expression_attribute_names
-                )
-
-        # Everything OK... send the signal back
-        print("Operation successful!")
-        cfnresponse.send(event,
-                         context,
-                         cfnresponse.SUCCESS,
-                         response_data)
     except Exception as e:
         print("Operation failed...")
         print(str(e))
         response_data['Data'] = str(e)
-        cfnresponse.send(event,
-                         context,
-                         cfnresponse.FAILED,
-                         response_data)
+        cfn_status = cfnresponse.FAILED
+    
+    print("Returning CFN Status", cfn_status)
+    cfnresponse.send(event,
+                    context,
+                    cfn_status,
+                    response_data)
