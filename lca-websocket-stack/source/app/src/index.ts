@@ -56,11 +56,10 @@ server.register(websocket);
 
 // Setup preHandler hook to authenticate 
 server.addHook('preHandler', async (request, reply) => {
-    server.log.debug('Received preHandler hook for authentication. Calling jwtVerifier to authenticate.');
-    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers)}`);
-
-
-    if (!request.url.includes('health/check')) { 
+    if (!request.url.includes('health')) { 
+        server.log.debug('Received preHandler hook for authentication. Calling jwtVerifier to authenticate.');
+        server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers)}`);
+    
         await jwtVerifier(request, reply);
     }
 });
@@ -74,15 +73,16 @@ server.get('/api/v1/ws', { websocket: true, logLevel: 'debug' }, (connection, re
 });
 
 // Setup Route for health check 
-server.get('/health/check', { logLevel: 'warn' }, (request, response) => {
-    server.log.debug('Received Health Check request.');
-    server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers)}`);
+server.get('/health/check', { logLevel: 'debug' }, (request, response) => {
+    // server.log.debug('Received Health Check request.');
+    // server.log.debug(`Websocket Request - URI: <${request.url}>, SocketRemoteAddr: ${request.socket.remoteAddress}, Headers: ${JSON.stringify(request.headers)}`);
 
     const cpuUsage = os.loadavg()[0] / os.cpus().length * 100;
 
     const isHealthy = cpuUsage > CPU_HEALTH_THRESHOLD ? false : true;
     const status = isHealthy ? 200 : 503;
 
+    server.log.debug(`Health Check request received. CPU Usage%: ${cpuUsage}, IsHealthy: ${isHealthy}, Status: ${status}`);
     response
         .code(status)
         .header('Cache-Control', 'max-age=0, no-cache, no-store, must-revalidate, proxy-revalidate')
