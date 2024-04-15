@@ -1,8 +1,8 @@
 # FetchTranscript Utility Lambda
 
-LCA provides a utility Lambda function to retrieve the call transcript for a given call id. This Lambda is available for you to invoke from your own custom (LAMBDA) based summarization functions, or from custom Lambda functions used as TranscriptLambdaHooks or custom Lambda based Agent Assist functions to retrieve cumulative transcripts for any completed or in-progress call.
+LMA provides a utility Lambda function to retrieve the call transcript for a given call id. This Lambda is available for you to invoke from your own custom (LAMBDA) based summarization functions, or from custom Lambda functions used as TranscriptLambdaHooks or custom Lambda based Agent Assist functions to retrieve cumulative transcripts for any completed or in-progress call.
 
-The ARN for the `FetchTranscript` lambda is provided in the LCA stack outputs as `FetchTranscriptLambdaArn`.
+The ARN for the `FetchTranscript` lambda is provided in the LMA stack outputs as `FetchTranscriptLambdaArn`.
 
 The `FetchTranscript` Lambda function accepts 3 parameters:
 

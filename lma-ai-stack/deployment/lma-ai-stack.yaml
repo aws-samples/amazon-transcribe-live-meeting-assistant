@@ -20,9 +20,9 @@ Description: Amazon Transcribe Live Meeting Assist - AI Stack
 
 Parameters:
   # Required
-  LCAStackName:
+  LMAStackName:
     Type: String
-    Description: LCA Stack Name
+    Description: LMA Stack Name
   
   RecordingsBucketRetentionDays:
     Type: Number
@@ -104,7 +104,7 @@ Parameters:
     Type: String
     AllowedPattern: '^(|arn:aws:lambda:.*)$'
     Description: >
-      (Optional) If present, the specified Lambda function is invoked by the LCA Call Event Processor Lambda function for each completed 
+      (Optional) If present, the specified Lambda function is invoked by the LMA Call Event Processor Lambda function for each completed 
       (non-partial) transcript segment. The function can capture and/or modify the text of the transcript, for example to implement custom
       redaction logic, profanity filtering, or custom rules to highlight patterns in the transcript.
 
@@ -146,7 +146,7 @@ Parameters:
     Type: String
     AllowedPattern: '^(|arn:aws:lambda:.*)$'
     Description: >
-      (Optional) If 'End Of Call Transcript Summary' is LAMBDA, provide ARN for a Lambda function. The specified Lambda function is invoked by the LCA Call Event Processor Lambda function 
+      (Optional) If 'End Of Call Transcript Summary' is LAMBDA, provide ARN for a Lambda function. The specified Lambda function is invoked by the LMA Call Event Processor Lambda function 
       for end of call event. The function is passed en event with CallId as input.
       This function can implement custom logic that is relevant to end of call processing, for example, creating a call summary.
 
@@ -155,7 +155,7 @@ Parameters:
     Type: String
     AllowedPattern: '^(|arn:aws:lambda:.*)$'
     Description: >
-      (Optional) The specified Lambda function is invoked by the LCA Call Event Processor Lambda function for beginning or start of 
+      (Optional) The specified Lambda function is invoked by the LMA Call Event Processor Lambda function for beginning or start of 
       call event. This function can implement custom logic that is relevant to beginning of call processing, for example, retrieving
       call summary details logged into a case in a CRM.
 
@@ -164,7 +164,7 @@ Parameters:
     Type: String
     AllowedPattern: '^(|arn:aws:lambda:.*)$'
     Description: >
-      (Optional) The specified Lambda function is invoked by the LCA Call Event Processor Lambda function after the call summary is processed.
+      (Optional) The specified Lambda function is invoked by the LMA Call Event Processor Lambda function after the call summary is processed.
       This function can implement custom logic that is relevant to post processing, for example, updating the call summary to a CRM system.
 
   CloudFrontPriceClass:
@@ -384,7 +384,7 @@ Outputs:
     Description: The Name of the IAM role used by CallEventProcessorFunction
     Value: !Ref CallEventProcessorFunctionRole
   SNSTopic:
-    Description: The SNS topic name that LCA publishes category events to
+    Description: The SNS topic name that LMA publishes category events to
     Value: !GetAtt CategorySNSTopic.TopicName
   FetchTranscriptArn:
     Description: The arn for a Lambda function that fetches a call transcript as a string
@@ -396,7 +396,7 @@ Outputs:
     Description: The arn for the Agent Assist Bot Identity Pool Cognito role
     Value: !GetAtt AgentAssistBotUnauthRole.Arn
   CloudFrontDistributionId:
-    Description: The ID of the CloudFront distribution for LCA's main web ui
+    Description: The ID of the CloudFront distribution for LMA's main web ui
     Value: !Ref WebAppCloudFrontDistribution
   WebAppBucket:
     Description: Name of S3 web app bucket
@@ -404,9 +404,9 @@ Outputs:
   CloudFrontDomainName:
     Description: The full domain name of the CloudFront distribution
     Value: !GetAtt WebAppCloudFrontDistribution.DomainName
-  LCASettingsParameterName:
+  LMASettingsParameterName:
     Description: Name of the Parameter store 
-    Value: !Ref LCASettingsParameter
+    Value: !Ref LMASettingsParameter
     
   TranscriptSummaryFunctionArn:
     Description: Call Summarizer Lambda function ARN
@@ -527,7 +527,7 @@ Resources:
   # ParameterStore
   ##########################################################################
 
-  LCASettingsParameter:
+  LMASettingsParameter:
     Type: AWS::SSM::Parameter
     Properties:
       Type: String
@@ -675,7 +675,7 @@ Resources:
           # code at build time. See:
           # https://create-react-app.dev/docs/adding-custom-environment-variables/
           - Name: REACT_APP_SETTINGS_PARAMETER
-            Value: !Ref LCASettingsParameter
+            Value: !Ref LMASettingsParameter
           - Name: REACT_APP_USER_POOL_ID
             Value: !Ref UserPool
           - Name: REACT_APP_USER_POOL_CLIENT_ID
@@ -1171,7 +1171,7 @@ Resources:
             - Effect: Allow
               Action:
                 - ssm:GetParameter
-              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LCASettingsParameter}"
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameter}"
             - Effect: Allow
               Action:
                 - appsync:GraphQL
@@ -1254,7 +1254,7 @@ Resources:
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           SNS_TOPIC_ARN: !Ref CategorySNSTopic
-          PARAMETER_STORE_NAME: !Ref LCASettingsParameter
+          PARAMETER_STORE_NAME: !Ref LMASettingsParameter
 
   ##########################################################################
   # Transcript Enrichment Lambda Layers
@@ -1689,7 +1689,7 @@ Resources:
     Type: Custom::GetDomain
     Properties:
       ServiceToken: !GetAtt GetDomainLambda.Arn
-      InputString: !Ref LCAStackName
+      InputString: !Ref LMAStackName
 
 
   LMAUserPoolDomain:
@@ -1791,7 +1791,7 @@ Resources:
                 Action:
                   - ssm:GetParameter
                 Resource:
-                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LCASettingsParameter}"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameter}"
         - PolicyName: accessTranslateAPI
           PolicyDocument:
             Version: 2012-10-17

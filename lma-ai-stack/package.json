@@ -1,5 +1,5 @@
 {
-    "name": "lca-ai-stack",
+    "name": "lma-ai-stack",
     "private": true,
     "devDependencies": {
         "eslint": "^8.14.0",

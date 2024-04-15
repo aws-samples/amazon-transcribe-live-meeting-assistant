@@ -16,14 +16,14 @@ export NEW_VERSION=${1:-}
 # files to be modified are declared relative to the script path
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 ROOT_DIR=$(readlink -f "${SCRIPT_DIR}/..")
-AI_STACK_DIR="${ROOT_DIR}/lca-ai-stack"
+AI_STACK_DIR="${ROOT_DIR}/lma-ai-stack"
 
 # files to be modified
 # values can be overridden by existing environment vars values
 VERSION_FILE=${VERSION_FILE:-"${ROOT_DIR}/VERSION"}
 AI_STACK_VERSION_FILE=${AI_STACK_VERSION_FILE:-"${AI_STACK_DIR}/VERSION"}
 TEMPLATE_FILE=${TEMPLATE_FILE:-"${ROOT_DIR}/lca-main.yaml"}
-AI_STACK_TEMPLATE_FILE=${AI_STACK_TEMPLATE_FILE:-"${AI_STACK_DIR}/deployment/lca-ai-stack.yaml"}
+AI_STACK_TEMPLATE_FILE=${AI_STACK_TEMPLATE_FILE:-"${AI_STACK_DIR}/deployment/lma-ai-stack.yaml"}
 SAMCONFIG_FILE=${SAMCONFIG_FILE:-"${AI_STACK_DIR}/samconfig.toml"}
 UI_PACKAGE_JSON_FILE=${UI_PACKAGE_JSON_FILE:-"${AI_STACK_DIR}/source/ui/package.json"}
 UI_PACKAGE_LOCK_JSON_FILE=${UI_PACKAGE_LOCK_JSON_FILE:-"${AI_STACK_DIR}/source/ui/package-lock.json"}

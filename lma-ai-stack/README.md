@@ -1,13 +1,12 @@
-# Amazon Transcribe Live Call Analytics with Agent Assist (LCA) Sample Solution
-The Amazon Transcribe Live Call Analytics with Agent Assist (LCA) Sample Solution provides the combination of speech to text transcription and insights for agents and supervisors all in real-time. This enables agents to better understand customer needs and drive resolution using the insights the solution provides while they are still interacting with their customer.
+# Amazon Transcribe Live Meeting Analytics (LMA) Sample Solution
 
-This sample solution deploys resources that consume audio from any producer that streams to Amazon Kinesis Video Streams (KVS), uses Amazon Transcribe real-time streaming for transcription, Amazon Comprehend for sentiment analysis, and provides a demo website to demonstrate live call analytics capabilities.
+See main project [README](../README.md). The AISTACK is a nested stack in the overall LMA solution, originally dincluded as part of the companion Live Call Analytics (LCA) solution, and adapted for LMA.
 
 ## Building distributable for customization
 
 ### Requirements
 
-This project is developed and tested on Amazon Linux 2 using AWS Cloud9. These
+This AISTACK project is developed and tested on Amazon Linux 2 using AWS Cloud9. These
 are the minimum requirements for building the solution:
 
 - [AWS CLI](https://aws.amazon.com/cli/)
