@@ -32,7 +32,7 @@ Parameters:
     Type: String
     Description: Message used for the extension to notify speakers this meeting is being recorded.
     Default: >
-      This meeting is being recorded with Amazon Live Meeting Assistant (https://amazon.com/live-meeting-assistant).
+      This meeting is being recorded with Amazon Live Meeting Assistant - see https://amazon.com/live-meeting-assistant. 
 
   StopRecordingMessage:
     Type: String
