@@ -170,7 +170,9 @@ echo "PACKAGING $dir"
 pushd $dir/deployment
 rm -fr ../out
 chmod +x ./build-s3-dist.sh
+echo ./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lma-ai-stack $VERSION $REGION || exit 1
 ./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lma-ai-stack $VERSION $REGION || exit 1
+exit 1
 popd
 
 dir=lma-llm-template-setup-stack
