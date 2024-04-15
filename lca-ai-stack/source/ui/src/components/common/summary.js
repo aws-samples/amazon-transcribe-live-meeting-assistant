@@ -12,8 +12,7 @@ export const getTextOnlySummary = (callSummaryText) => {
     const summaryKey = Object.keys(jsonObj).find((key) => key.toLowerCase() === 'summary');
     if (summaryKey !== undefined) {
       summary = jsonObj[summaryKey];
-    }
-    else if (Object.keys(jsonObj).length > 0) {
+    } else if (Object.keys(jsonObj).length > 0) {
       // If 'summary' is not found, use the first key as the summary
       summary = Object.keys(jsonObj)[0] || '';
       summary = jsonObj[summary];
