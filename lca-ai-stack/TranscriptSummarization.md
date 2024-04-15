@@ -1,10 +1,10 @@
 # Transcript Summarization
 
-LMA summarizes meeting transcripts once the meeting is over.
+Live Meeting Assistant (LMA) summarizes meeting transcripts once the meeting is over.
 
 ![TranscriptSummary](./images/post-meeting-summaries.png)
         
-Configure Transcript Summarization by choosing a value for the `EndOfCallTranscriptSummary` CloudFormation parameter when deploying or updating your LMA stack. Valid values are 
+You can configure Transcript Summarization by choosing a value for the `EndOfCallTranscriptSummary` CloudFormation parameter when deploying or updating your LMA stack. Valid values are 
 `BEDROCK` (default) and `LAMBDA`.
 If the `BEDROCK` option is chosen, select a supported model ID from the list (`BedrockModelId` parameter)
 
@@ -14,11 +14,11 @@ The `BEDROCK` option is enabled by default. You must [request model access](http
 
 LMA can run multiple LLM inferences after the call is complete. The prompt templates used to generate the insights from the transcript are stored in a DynamoDB table. There are two items (records) in the table:  
 
-1. **Default prompt templates:** These come with the LMA release, and define the summaries you get it you do not create custom prompt templates. Default prompts may change in new versions of LMA. View the default prompts by opening the DynamoDB URL in the LMA Stack output `LLMDefaultPromptSummaryTemplate`. 
+1. **Default prompt templates:** These come with the LMA release, and define the summaries you get if you do not create custom prompt templates. Default prompts may change in new versions of LMA. View the default prompts by opening the DynamoDB URL in the LMA Stack output `LLMDefaultPromptSummaryTemplate`. 
 
     ![DefaultPrompts](./images/summary-default-prompts.png)
 
-2. **Custom prompt templates:** Initially after deploying LMA, there are no custom prompts defined, but you can create them. Use custom prompt templates to override or disable default summary prompts, or to add new ones. Custom prompt templates are not overwritten when you update your LMA stack to a new version. View and edit the custom prompts by opening the DynamoDB URL in the LMA Stack output `LLMCustomPromptSummaryTemplate`.
+2. **Custom prompt templates:** Initially after deploying LMA, there are no custom prompts defined, but you can add your own. Create custom prompt templates to override or disable default summary prompts, or to add new ones. Custom prompt templates are not overwritten when you update your LMA stack to a new version. View and edit the custom prompts by opening the DynamoDB URL in the LMA Stack output `LLMCustomPromptSummaryTemplate`.
 
     ![Custom](./images/summary-custom-prompts.png)
 
@@ -28,7 +28,7 @@ All other attributes define the summary prompts that LMA executes when the meeti
 
 **Attribute Name:** The attribute name must be formatted using a sequence number `N`, a `#` symbol, and the heading you want to use for the summary in the UI. For example, `1#Summary` defines a heading value of **Summary**, that will always be displayed above other headings with a higher sequence number. LMA removes the sequence number before displaying the title.
 
-**Attribute Value:** The attribute value is used as the prompt template. LMA replaces `<br>` tags with newlines. Use the tempate variable `{transcript}` to indicate where the meeting transcript will be placed in the prompt. LMA replaces `{transcript}` with the actual meeting transcript in the form:
+**Attribute Value:** The attribute value is used as the prompt template. LMA replaces `<br>` tags with newlines. Use the template variable `{transcript}` to indicate where the meeting transcript will be placed in the prompt. LMA replaces `{transcript}` with the actual meeting transcript in the form:
 ```
 <SpeakerName>: <transcription text>
 <SpeakerName>: <transcription text>
@@ -49,7 +49,7 @@ LMA invokes the Bedrock model using your prompt, and renders the results in the 
 
 Use the LAMBDA option to provide your own summarization functions and/or machine learning models. This option allows you to experiment with different models and techniques to customize the summary as you need.
 
-When you choose the `LAMBDA` option, you must provide the Arn of your custom Lambda function in the `EndOfCallLambdaHookFunctionArn` CloudFormation parameter. At the end of a call, the `CallEventProcessor` Lambda function will invoke the custom Lambda and pass in the CallId of the call.
+When you choose the `LAMBDA` option, you must provide the Arn of your custom Lambda function in the `EndOfCallLambdaHookFunctionArn` CloudFormation parameter. At the end of a call, the `CallEventProcessor` Lambda function will invoke the custom Lambda function and pass in the CallId of the call.
 
 Your custom Lambda function must return the summary in the following JSON format:
 
@@ -64,7 +64,7 @@ The summary can optionally use Markdown syntax to include rich text, hyperlinks,
 If you would like to include more than one section in the summary, similar to the `BEDROCK` option, you may provide a JSON-encoded string that contains key value pairs as the summary's value. This will render each key as a section header, and the value as the body of the section. The following is an example:
 ```
 {
-  "summary": "{\n\"Summary\":\"This is a summary.\",\n\"Topic\":\"Credit Cards\",\n\"Follow-Up Actions\": \"The agent will send a replacement card.\"\n}"
+  "summary": "{\n\"Summary\":\"The weekly report was reviewed.\",\n\"Topic\":\"Weekly Report\",\n\"Follow-Up Actions\": \"John will set up a follow-up meeting.\"\n}"
 }
 ```
 This would be rendered as:
@@ -86,7 +86,7 @@ def lambda_handler(event, context):
 
 This example function trivially returns a hardcoded string as the summary. Your function will be much smarter, and will implement your custom rules or models.
   
-Use the provided [FetchTranscript utility Lambda function ](./FetchTranscriptLambda.md) in your custom summarization Lambda to retrieve the call transcript, optionally truncated to the maximum input token limit imposed by your summarization model.
+Use the provided [FetchTranscript utility Lambda function ](./FetchTranscriptLambda.md) in your custom summarization Lambda to retrieve the call transcript, and optionally truncated to the maximum input token limit imposed by your summarization model.
 
 If your custom Lambda fails at runtime, or you do not want to return a summary for the call, return an empty string for the value of the summary field.
 
