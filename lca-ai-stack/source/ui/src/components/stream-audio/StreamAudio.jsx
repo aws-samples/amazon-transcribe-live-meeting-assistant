@@ -38,10 +38,12 @@ const StreamAudio = () => {
   const [micInputOption, setMicInputOption] = useState({ label: 'Me', value: 'agent' });
 
   const getSocketUrl = useCallback(() => {
-    console.log('Trying to resolve websocket url...');
+    console.log(`DEBUG - [${new Date().toISOString()}]: Trying to resolve websocket url...`);
     return new Promise((resolve) => {
       if (settings.WSEndpoint) {
-        console.log(`Resolved Websocket URL to ${settings.WSEndpoint}`);
+        console.log(`
+          DEBUG - [${new Date().toISOString()}]: Resolved Websocket URL to ${settings.WSEndpoint}
+        `);
         resolve(settings.WSEndpoint);
       }
     });
@@ -52,13 +54,19 @@ const StreamAudio = () => {
       authorization: `Bearer ${JWT_TOKEN}`,
     },
     onOpen: (event) => {
-      console.log(`Websocket onOpen Event: ${event}`);
+      console.log(`
+        DEBUG - [${new Date().toISOString()}]: Websocket onOpen Event: ${JSON.stringify(event)}
+      `);
     },
     onClose: (event) => {
-      console.log(`Websocket onClose Event: ${event}`);
+      console.log(`
+        DEBUG - [${new Date().toISOString()}]: Websocket onClose Event: ${JSON.stringify(event)}
+      `);
     },
     onError: (event) => {
-      console.log(`Websocket onClose Event: ${event}`);
+      console.log(`
+        DEBUG - [${new Date().toISOString()}]: Websocket onError Event: ${JSON.stringify(event)}
+      `);
     },
     shouldReconnect: () => true,
   });
@@ -126,7 +134,7 @@ const StreamAudio = () => {
   };
 
   const stopRecording = async () => {
-    console.log('Stop Recording');
+    console.log(`DEBUG - [${new Date().toISOString()}]: Stopping recording...`);
 
     if (audioProcessor.current) {
       audioProcessor.current.port.postMessage({
@@ -136,11 +144,16 @@ const StreamAudio = () => {
       audioProcessor.current.port.close();
       audioProcessor.current.disconnect();
     } else {
-      console.log('Error trying to stop recording. AudioWorklet Processor node is not active.');
+      console.log(`
+        DEBUG - [${new Date().toISOString()}]: Error trying to stop recording. AudioWorklet Processor node is not active.
+      `);
     }
     if (streamingStarted && !recording) {
       callMetaData.callEvent = 'END';
-      console.log(`Sending Call END event to WS server: ${JSON.stringify(callMetaData)}`);
+      // eslint-disable-next-line prettier/prettier
+      console.log(`
+        DEBUG - [${new Date().toISOString()}]: Send Call END msg: ${JSON.stringify(callMetaData)}
+      `);
       sendMessage(JSON.stringify(callMetaData));
       setStreamingStarted(false);
       setCallMetaData({
@@ -151,7 +164,9 @@ const StreamAudio = () => {
   };
 
   const startRecording = async () => {
-    console.log('Start Recording and Streaming Audio to Websocket server.');
+    console.log(`
+      DEBUG - [${new Date().toISOString()}]: Start Recording and Streaming Audio to Websocket server.
+    `);
     try {
       audioContext.current = new window.AudioContext();
       displayStream.current = await window.navigator.mediaDevices.getDisplayMedia({
@@ -176,7 +191,10 @@ const StreamAudio = () => {
       callMetaData.samplingRate = SOURCE_SAMPLING_RATE;
 
       callMetaData.callEvent = 'START';
-      console.log(`Sending Call START event to WS server: ${JSON.stringify(callMetaData)}`);
+      // eslint-disable-next-line prettier/prettier
+      console.log(`
+        DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(callMetaData)}
+      `);
       sendMessage(JSON.stringify(callMetaData));
       setStreamingStarted(true);
 
@@ -191,11 +209,15 @@ const StreamAudio = () => {
       displayAudioSource.current.connect(channelMerger.current, 0, 0);
       micAudioSource.current.connect(channelMerger.current, 0, 1);
 
-      console.log('Registering and adding AudioWorklet processor to capture audio');
+      console.log(`
+        DEBUG - [${new Date().toISOString()}]: Registering and adding AudioWorklet processor to capture audio
+      `);
       try {
         await audioContext.current.audioWorklet.addModule('./worklets/recording-processor.js');
       } catch (error) {
-        console.log(`Error registering AudioWorklet processor: ${error}`);
+        console.log(`
+          DEBUG - [${new Date().toISOString()}]: Error registering AudioWorklet processor: ${error}
+        `);
       }
 
       audioProcessor.current = new AudioWorkletNode(audioContext.current, 'recording-processor', {
@@ -215,10 +237,14 @@ const StreamAudio = () => {
       channelMerger.current.connect(audioProcessor.current).connect(destination.current);
 
       audioProcessor.current.port.onmessageerror = (error) => {
-        console.log(`Error receving message from worklet ${error}`);
+        console.log(`
+          DEBUG - [${new Date().toISOString()}]: Error receving message from worklet ${error}
+        `);
       };
 
-      console.log('Sending audio buffer to the websocket server.');
+      console.log(`
+        DEBUG - [${new Date().toISOString()}]: Sending audio buffer to the websocket server.
+      `);
       // buffer[0] - display stream,  buffer[1] - mic stream
       audioProcessor.current.port.onmessage = (event) => {
         if (micInputOption.value === 'agent') {
