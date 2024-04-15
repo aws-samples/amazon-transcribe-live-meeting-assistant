@@ -8,8 +8,16 @@ export const getTextOnlySummary = (callSummaryText) => {
   let summary = callSummaryText;
   try {
     const jsonObj = JSON.parse(summary);
-    if ('summary' in jsonObj) summary = jsonObj.summary;
-    else if ('Summary' in jsonObj) summary = jsonObj.Summary;
+    // Do a case-insensitive search for 'summary' in the JSON object keys
+    const summaryKey = Object.keys(jsonObj).find((key) => key.toLowerCase() === 'summary');
+    if (summaryKey !== undefined) {
+      summary = jsonObj[summaryKey];
+    }
+    else if (Object.keys(jsonObj).length > 0) {
+      // If 'summary' is not found, use the first key as the summary
+      summary = Object.keys(jsonObj)[0] || '';
+      summary = jsonObj[summary];
+    }
   } catch (e) {
     return callSummaryText;
   }
