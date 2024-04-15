@@ -42,7 +42,7 @@ else
 fi
 
 TEMPLATE_DIR=$(dirname "$(readlink -f "$0")")
-export TEMPLATE_FILE="$TEMPLATE_DIR/lca-ai-stack.yaml"
+export TEMPLATE_FILE="$TEMPLATE_DIR/lma-ai-stack.yaml"
 
 cd "${TEMPLATE_DIR}/.."
 

@@ -157,20 +157,20 @@ aws cloudformation validate-template --template-url ${https_template} > /dev/nul
 aws s3 cp ./qna-ma-demo.jsonl s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
 popd
 
-dir=lca-websocket-stack
+dir=lma-websocket-stack
 echo "PACKAGING $dir"
 pushd $dir/deployment
 rm -rf ../out
 chmod +x ./build-s3-dist.sh
-./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lca-websocket-stack $VERSION $REGION || exit 1
+./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lma-websocket-stack $VERSION $REGION || exit 1
 popd
 
-dir=lca-ai-stack
+dir=lma-ai-stack
 echo "PACKAGING $dir"
 pushd $dir/deployment
 rm -fr ../out
 chmod +x ./build-s3-dist.sh
-./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lca-ai-stack $VERSION $REGION || exit 1
+./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lma-ai-stack $VERSION $REGION || exit 1
 popd
 
 dir=lma-llm-template-setup-stack
@@ -213,8 +213,8 @@ dir=submodule-aws-qnabot
 echo "PACKAGING $dir"
 git submodule init
 git submodule update
-echo "Applying patch files to simplify UX by removing some QnABot options not needed for lca"
-# lca customizations
+echo "Applying patch files to simplify UX by removing some QnABot options not needed for lma"
+# lma customizations
 cp -v ./patches/qnabot/lambda_schema_qna.js $dir/lambda/schema/qna.js
 cp -v ./patches/qnabot/website_js_admin.vue $dir/website/js/admin.vue
 cp -v ./patches/qnabot/Makefile $dir/Makefile

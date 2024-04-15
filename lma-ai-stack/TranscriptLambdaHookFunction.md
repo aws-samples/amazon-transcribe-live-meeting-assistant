@@ -2,7 +2,7 @@
 
 ## Overview
 
-LCA v0.5.2 and later offers optional custom logic via a user-provided Lambda function, to support the following features:
+LMA optional custom logic via a user-provided Lambda function, to support the following features:
 1. Modify Transcriptions in real time using custom logic, for example, implement your redaction or profanity filtering rules.
 2. Choose to process non-partial (final) transcript segments only, or both partial (not final) and non-partial (final) transcript segments.
 3. Log or save transcript segments to an external data store.
@@ -15,7 +15,7 @@ To use this feature:
 
 ## Transcript Lambda function requirements
 
-Your Lambda function will be invoked by the LCA AISTACK CallEventProcessor function for each transcription message read from the incoming KDS stream. The message passed as the input event to your Lambda looks like this:
+Your Lambda function will be invoked by the LMA AISTACK CallEventProcessor function for each transcription message read from the incoming KDS stream. The message passed as the input event to your Lambda looks like this:
 
 ```
 {
@@ -51,7 +51,7 @@ the "Transcript" field modified to redact the personal identifier using custom b
 }
 ``` 
 
-The modified value of "Transcript" is subsequently displayed in the LCA UI, and stored in the LCA DynamoDB event sourcing table.   
+The modified value of "Transcript" is subsequently displayed in the LMA UI, and stored in the LMA DynamoDB event sourcing table.   
   
 The modified version is also used by default as input to the Agent Assist Lex bot or Lambda function, if Agent Assist is enabled. To use the original, unmodified transcript for Agent Assist, your function must add an additional field, `OriginalTranscript`, to the returned message. When the returned messsage contains the `OriginalTranscript` field, this value is used as input to Agent Assist. Example:
 
@@ -92,12 +92,12 @@ Your function is invoked for every non-partial transcript segment (by default), 
 ## Accessing cumulative transcript for the call
 You can use the [Fetch Transcript](./FetchTranscriptLambda.md) function to retrieve the cumulative transcript of the call, up to but not including the current transcription segment. This may be useful when your processing function requires prior context to process the current segment.
 
-## Register the Lambda function with LCA
+## Register the Lambda function with LMA
 
-Use the LCA CloudFormation template parameter **Lambda Hook Function ARN for Custom Transcript Segment Processing (existing)** to set the ARN value for your custom Lambda hook function when ceating a new LCA stack, or when updating an existing one. You find the ARN for your Lambda in the AWS Lambda console - it has this format:
+Use the LMA CloudFormation template parameter **Lambda Hook Function ARN for Custom Transcript Segment Processing (existing)** to set the ARN value for your custom Lambda hook function when ceating a new LMA stack, or when updating an existing one. You find the ARN for your Lambda in the AWS Lambda console - it has this format:
 ```
 arn:aws:lambda:us-east-1:<accountId>:function:<functionName>
 ```
 
-Use the LCA CloudFormation template parameter **Lambda Hook Function Mode Non-Partial only** to choose whether to call your function for NonPartial segments only (`true`, recommended) , or all segments (`false`).
+Use the LMA CloudFormation template parameter **Lambda Hook Function Mode Non-Partial only** to choose whether to call your function for NonPartial segments only (`true`, recommended) , or all segments (`false`).
 

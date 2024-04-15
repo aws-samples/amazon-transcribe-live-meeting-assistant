@@ -4,7 +4,7 @@ import { WebSocket } from 'ws';
 import * as fs from 'fs';
 import Chain from 'stream-chain';
 import { randomUUID } from 'crypto';
-import { CallMetaData } from '../../../lca-websocket-stack/source/app/src/lca';
+import { CallMetaData } from '../../../lma-websocket-stack/source/app/src/lca';
 
 import dotenv from 'dotenv';
 dotenv.config();
@@ -28,7 +28,7 @@ new Command()
     .option('--uri <uri>', 'URI of websocket server')
     .option('--wavfile <wavfile>', 'WAV file to stream')
     .action(async (serveruri: string | undefined, options: CmdOptions, command: Command): Promise<void> => {
-        if(options.uri && serveruri) {
+        if (options.uri && serveruri) {
             command.error('More than one server URI specified!');
         }
 
@@ -62,9 +62,9 @@ new Command()
                     await timer(2000);
                 })();
 
-                const CHUNK_SIZE = SAMPLE_RATE * (CHUNK_SIZE_IN_MS/1000) * BYTES_PER_SAMPLE * 2;
-				
-                const audiopipeline:Chain = new Chain([
+                const CHUNK_SIZE = SAMPLE_RATE * (CHUNK_SIZE_IN_MS / 1000) * BYTES_PER_SAMPLE * 2;
+
+                const audiopipeline: Chain = new Chain([
                     fs.createReadStream(options.wavfile as fs.PathLike, { highWaterMark: CHUNK_SIZE }),
                     async data => {
                         await timer(CHUNK_SIZE_IN_MS);
@@ -80,7 +80,7 @@ new Command()
                             binary: true
                         });
                     }
-                })().finally(()=>{
+                })().finally(() => {
                     console.log('Finished Sending the audio data chunks');
                     console.log('Sending Call End Event');
 
@@ -98,11 +98,11 @@ new Command()
                 });
 
             });
-			
+
             ws.on('message', (message: string) => {
                 console.log(`Received message from server: ${message}`);
             });
-			
+
             ws.on('close', () => {
                 console.log('Disconnected from server');
             });
@@ -112,11 +112,11 @@ new Command()
 
 emitKeypressEvents(process.stdin);
 process.stdin.setRawMode(true);
-    
+
 let ctrlcHit = false;
 process.stdin.on('keypress', (str, key) => {
-    if(key.ctrl && (key.name === 'c' || key.name === 'd')) {
-        if(!ctrlcHit) {
+    if (key.ctrl && (key.name === 'c' || key.name === 'd')) {
+        if (!ctrlcHit) {
             closer();
             ctrlcHit = true;
         } else {
@@ -127,7 +127,7 @@ process.stdin.on('keypress', (str, key) => {
         console.log(`You pressed the ${JSON.stringify(str)} key: ${JSON.stringify(key)}`);
     }
 });
-    
+
 process.once('SIGTERM', () => {
     console.log('SIGTERM!');
     closer();

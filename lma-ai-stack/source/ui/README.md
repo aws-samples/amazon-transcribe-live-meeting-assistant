@@ -1,6 +1,6 @@
 # How to run LMA UI Locally:
 
-1. To get the LMA UI to run locally, you will need to configure a `.env` file in the `/lca-ai-stack/source/ui/` folder. The contents of the `.env` file must contain the environment variables listed below along with their values. The values may be found in the resources tab of the LMA AI Stack, except for the GraphQL URL, which can be found in the AWS AppSync management console, either in the main list
+1. To get the LMA UI to run locally, you will need to configure a `.env` file in the `/lma-ai-stack/source/ui/` folder. The contents of the `.env` file must contain the environment variables listed below along with their values. The values may be found in the resources tab of the LMA AI Stack, except for the GraphQL URL, which can be found in the AWS AppSync management console, either in the main list
 
 Example contents of `.env` file:
 
@@ -10,7 +10,7 @@ Example contents of `.env` file:
   REACT_APP_IDENTITY_POOL_ID=us-west-2:XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
   REACT_APP_APPSYNC_GRAPHQL_URL=https://XXXXXXXXXX.appsync-api.us-west-2.amazonaws.com/graphql
   REACT_APP_AWS_REGION=us-west-2
-  REACT_APP_SETTINGS_PARAMETER=CFN-LCASettingsParameter-XXXXXXXXXXXX
+  REACT_APP_SETTINGS_PARAMETER=CFN-LMASettingsParameter-XXXXXXXXXXXX
   REACT_APP_ENABLE_LEX_AGENT_ASSIST=true
 ```
 

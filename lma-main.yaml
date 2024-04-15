@@ -145,7 +145,7 @@ Parameters:
     Type: String
     AllowedPattern: '^(|arn:aws:lambda:.*)$'
     Description: >
-      (Optional) If present, the specified Lambda function is invoked by the LCA Call Event Processor Lambda function for each completed 
+      (Optional) If present, the specified Lambda function is invoked by the LMA Call Event Processor Lambda function for each completed 
       (non-partial) transcript segment. The function can capture and/or modify the text of the transcript, for example to implement custom
       redaction logic, profanity filtering, or custom rules to highlight patterns in the transcript.
 
@@ -186,7 +186,7 @@ Parameters:
     Type: String
     AllowedPattern: '^(|arn:aws:lambda:.*)$'
     Description: >
-      (Optional) If 'End Of Call Transcript Summary' is LAMBDA, provide ARN for a Lambda function. The specified Lambda function is invoked by the LCA Call Event Processor Lambda function 
+      (Optional) If 'End Of Call Transcript Summary' is LAMBDA, provide ARN for a Lambda function. The specified Lambda function is invoked by the LMA Call Event Processor Lambda function 
       for end of call event. The function is passed en event with CallId as input.
       This function can implement custom logic that is relevant to end of call processing, for example, creating a call summary.
 
@@ -195,7 +195,7 @@ Parameters:
     Type: String
     AllowedPattern: '^(|arn:aws:lambda:.*)$'
     Description: >
-      (Optional) The specified Lambda function is invoked by the LCA Call Event Processor Lambda function for beginning or start of 
+      (Optional) The specified Lambda function is invoked by the LMA Call Event Processor Lambda function for beginning or start of 
       call event. This function can implement custom logic that is relevant to beginning of call processing, for example, retrieving
       call summary details logged into a case in a CRM.
 
@@ -204,7 +204,7 @@ Parameters:
     Type: String
     AllowedPattern: '^(|arn:aws:lambda:.*)$'
     Description: >
-      (Optional) The specified Lambda function is invoked by the LCA Call Event Processor Lambda function after the call summary is processed.
+      (Optional) The specified Lambda function is invoked by the LMA Call Event Processor Lambda function after the call summary is processed.
       This function can implement custom logic that is relevant to post processing, for example, updating the call summary to a CRM system.
 
   AdminEmail:
@@ -252,7 +252,7 @@ Parameters:
     Type: Number
     Default: 90
     Description: >-
-      Number of days to retain call records. Records will be automatically deleted from LCA after this time.
+      Number of days to retain call records. Records will be automatically deleted from LMA after this time.
 
   RecordingsBucketRetentionDays:
     Type: Number
@@ -539,10 +539,10 @@ Resources:
     DependsOn: IsStacknameLengthOK
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lca-ai-stack/<VERSION_TOKEN>/template.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-ai-stack/<VERSION_TOKEN>/template.yaml
       # yamllint enable rule:line-length
       Parameters:
-        LCAStackName: !Ref AWS::StackName
+        LMAStackName: !Ref AWS::StackName
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         RecordingsBucketRetentionDays: !Ref RecordingsBucketRetentionDays
         EnableVoiceToneAnalysis: 'false'
@@ -625,7 +625,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lca-websocket-stack/<VERSION_TOKEN>/template.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-stack/<VERSION_TOKEN>/template.yaml
       # yamllint enable rule:line-length
       Parameters:
         S3BucketName: !GetAtt AISTACK.Outputs.S3BucketName
@@ -646,7 +646,7 @@ Resources:
         PcaPlaybackAudioFilePrefix: ''
         PcaWebAppURL: ''
         PcaWebAppCallPathPrefix: ''
-        LCASettingsParameterName: !GetAtt AISTACK.Outputs.LCASettingsParameterName
+        LMASettingsParameterName: !GetAtt AISTACK.Outputs.LMASettingsParameterName
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack
@@ -666,7 +666,7 @@ Resources:
 
 Outputs:
   ApplicationCloudfrontEndpoint:
-    Description: LCA User Interface URL
+    Description: LMA User Interface URL
     Value: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
   
   ChromeExtensionDownloadUrl:
@@ -681,7 +681,7 @@ Outputs:
       Name:
         'Fn::Sub': '${AWS::StackName}-CallDataStreamArn'
 
-  LCAWebsocketEndpoint:
+  LMAWebsocketEndpoint:
     Description: Websocket endpoint for websocket integration
     Value: !GetAtt WEBSOCKETSTACK.Outputs.WebSocketEndpoint
       

@@ -238,8 +238,8 @@ Amazon Transcribe has a default limit of 25 concurrent transcription streams, wh
 LMA provides runtime monitoring and logs for each component using CloudWatch:
 
 - Websocket processing and transcribing Fargate task – On the [ECS Clusters console](https://us-east-1.console.aws.amazon.com/ecs/v2/clusters), open the `LMA-WEBSOCKETSTACK-xxxx-TranscribingCluster` function. Choose the **Tasks** tab and open the task page. Choose **Logs** and **View in CloudWatch** to inspect the websocket transcriber task logs.
-- Call Event Processor Lambda function – On the Lambda console, open the `LCA-AISTACK-CallEventProcessor` function. Choose the Monitor tab to see function metrics. Choose View logs in CloudWatch to inspect function logs.
-- AWS AppSync API – On the AWS AppSync console, open the `CallAnalytics-LCA` API. Choose Monitoring in the navigation pane to see API metrics. Choose View logs in CloudWatch to inspect AppSyncAPI logs.
+- Call Event Processor Lambda function – On the Lambda console, open the `AISTACK-CallEventProcessor` function. Choose the Monitor tab to see function metrics. Choose View logs in CloudWatch to inspect function logs.
+- AWS AppSync API – On the AWS AppSync console, open the `CallAnalytics-LMA` API. Choose Monitoring in the navigation pane to see API metrics. Choose View logs in CloudWatch to inspect AppSyncAPI logs.
 - For QnABot on AWS with Amazon Q for Meeting Assist, refer to the [Meeting Assist README](./lma-meetingassist-setup-stack/README.md), and the [QnABot solution implementation guide](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/welcome.html) for additional information.
 
 ## Cost assessment
@@ -269,16 +269,16 @@ To explore LMA costs for yourself, use AWS Cost Explorer or choose Bill Details 
 
 ## Customize your deployment
 
-Use the following CloudFormation template parameters when creating or updating your stack to customize your LCA deployment:
+Use the following CloudFormation template parameters when creating or updating your stack to customize your LMA deployment:
 
 - To use your own S3 bucket for meeting recordings, use **Call Audio Recordings Bucket Name** and **Audio File Prefix**.
 - To redact PII from the transcriptions, set **Enable Content Redaction for Transcripts** to `true`, and adjust **Transcription PII Redaction Entity Types** as needed. For more information, see [Redacting or identifying PII in a real-time stream](https://docs.aws.amazon.com/transcribe/latest/dg/pii-redaction-stream.html).
 - To improve transcription accuracy for technical and domain-specific acronyms and jargon, set **Transcription Custom Vocabulary Name** to the name of a custom vocabulary that you already created in Amazon Transcribe and/or set **Transcription Custom Language Model Name** to the name of a previously created custom language model. For more information, see [Improving Transcription Accuracy](https://docs.aws.amazon.com/transcribe/latest/dg/improving-accuracy.html).
 - To transcribe meetings in a supported language other than US English, chose the desired value for **Language for Transcription**.
-- To customize transcript processing, optionally set **Lambda Hook Function ARN for Custom Transcript Segment Processing** to the ARN of your own Lambda function. For more information, see [Using a Lambda function to optionally provide custom logic for transcript processing](./lca-ai-stack/TranscriptLambdaHookFunction.md).
+- To customize transcript processing, optionally set **Lambda Hook Function ARN for Custom Transcript Segment Processing** to the ARN of your own Lambda function. For more information, see [Using a Lambda function to optionally provide custom logic for transcript processing](./lma-ai-stack/TranscriptLambdaHookFunction.md).
 - •	To customize the Meeting Assist capabilities based on the QnABot on AWS solution, Amazon Lex, Amazon Bedrock, and Bedrock Knowledge base integration, see the [Meeting Assist README](./lma-meetingassist-setup-stack/README.md).
-- To customize Transcript Summarization by configuring LMA to call your own Lambda function, see [Transcript Summarization LAMBDA option](./lca-ai-stack/TranscriptSummarization.md#lambda).
-- To customize Transcript Summarization by modifying the default prompts or adding new ones, see [Transcript Summarization](./lca-ai-stack/TranscriptSummarization).
+- To customize Transcript Summarization by configuring LMA to call your own Lambda function, see [Transcript Summarization LAMBDA option](./lma-ai-stack/TranscriptSummarization.md#lambda).
+- To customize Transcript Summarization by modifying the default prompts or adding new ones, see [Transcript Summarization](./lma-ai-stack/TranscriptSummarization).
 - To change the retention period, set **Record Expiration In Days** to the desired value. All call data is permanently deleted from the LMA DynamoDB storage after this period. Changes to this setting apply only to new calls received after the update.
 
 LMA is an open-source project. You can fork the LMA GitHub repository, enhance the code, and send us pull requests so we can incorporate and share your improvements!
