@@ -84,13 +84,6 @@ const StreamAudio = () => {
     });
   };
 
-  const handletoNumberChange = (e) => {
-    setCallMetaData({
-      ...callMetaData,
-      toNumber: e.detail.value,
-    });
-  };
-
   const handleMicInputOptionSelection = (e) => {
     setMicInputOption(e.detail.selectedOption);
   };
@@ -306,9 +299,6 @@ const StreamAudio = () => {
               description="Participant Names(s)"
             >
               <Input value={callMetaData.fromNumber} onChange={handlefromNumberChange} />
-            </FormField>
-            <FormField label="System" stretch required description="System">
-              <Input value={callMetaData.toNumber} onChange={handletoNumberChange} />
             </FormField>
             <FormField label="Microphone Role" stretch required description="Mic input">
               <Select
