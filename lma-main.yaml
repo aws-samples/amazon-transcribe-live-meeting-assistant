@@ -69,7 +69,7 @@ Parameters:
 
   AudioFilePrefix:
     Type: String
-    Default: lca-audio-recordings/
+    Default: lma-audio-recordings/
     Description: The Amazon S3 prefix where the audio files will be saved (must end in "/")
 
   IsPartialTranscriptEnabled:
