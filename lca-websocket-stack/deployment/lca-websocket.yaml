@@ -198,7 +198,7 @@ Parameters:
 
   ShowSpeakerLabel:
     Type: String
-    Default: 'true'
+    Default: 'false'
     Description: >-
       Enable diarization on Transcribe streaming
     AllowedValues:
