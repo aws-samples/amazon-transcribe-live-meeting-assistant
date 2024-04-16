@@ -55,6 +55,8 @@ function Capture() {
   }, [topic, agentName, nameErrorText, setNameErrorText, meetingTopicErrorText, setMeetingTopicErrorText ]);
 
   const startListening = useCallback(() => {
+    setTopic(topic.replace(/[\/?#%]/g, '|'));
+
     if (validateForm() === false) {
       return;
     }
