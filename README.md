@@ -278,7 +278,7 @@ Use the following CloudFormation template parameters when creating or updating y
 - To customize transcript processing, optionally set **Lambda Hook Function ARN for Custom Transcript Segment Processing** to the ARN of your own Lambda function. For more information, see [Using a Lambda function to optionally provide custom logic for transcript processing](./lma-ai-stack/TranscriptLambdaHookFunction.md).
 - •	To customize the Meeting Assist capabilities based on the QnABot on AWS solution, Amazon Lex, Amazon Bedrock, and Bedrock Knowledge base integration, see the [Meeting Assist README](./lma-meetingassist-setup-stack/README.md).
 - To customize Transcript Summarization by configuring LMA to call your own Lambda function, see [Transcript Summarization LAMBDA option](./lma-ai-stack/TranscriptSummarization.md#lambda).
-- To customize Transcript Summarization by modifying the default prompts or adding new ones, see [Transcript Summarization](./lma-ai-stack/TranscriptSummarization).
+- To customize Transcript Summarization by modifying the default prompts or adding new ones, see [Transcript Summarization](./lma-ai-stack/TranscriptSummarization.md).
 - To change the retention period, set **Record Expiration In Days** to the desired value. All call data is permanently deleted from the LMA DynamoDB storage after this period. Changes to this setting apply only to new calls received after the update.
 
 LMA is an open-source project. You can fork the LMA GitHub repository, enhance the code, and send us pull requests so we can incorporate and share your improvements!
