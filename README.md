@@ -40,7 +40,7 @@ Here are some of the things it can do:
 - **Inventory list of meetings** - LMA keeps track of all your meetings in a handy searchable list.
   <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" /></p>
 - **Browser extension captures audio and meeting metadata (title and speaker names) from popular meeting apps** - an easy to install browser extension captures meeting metadata – the meeting title and names of active speakers - and audio from you (your microphone) and others (from the meeting browser tab). Browsers supported: Chrome. Meeting Apps supported: Zoom and Chime (Teams and/or WebEx coming soon). *Standalone meeting apps don't work with LMA - instead launch your meetings in the browser.*
-  <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" /></p>
+  <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" width=200/></p>
 
 *Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.*
 
@@ -68,7 +68,7 @@ Complete the following steps to launch the CloudFormation stack:
 
    Region | Easy Deploy Button  
    --- | --- 
-   N. Virginia (us-east-1) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/bobs-artifacts-us-east-1/lma-prerelease-share/lma-main.yaml&stackName=LMA) 
+   N. Virginia (us-east-1) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml&stackName=LMA) 
 
 
 1. For **Stack name**, use the default value, `LMA`.
@@ -276,7 +276,7 @@ Use the following CloudFormation template parameters when creating or updating y
 - To improve transcription accuracy for technical and domain-specific acronyms and jargon, set **Transcription Custom Vocabulary Name** to the name of a custom vocabulary that you already created in Amazon Transcribe and/or set **Transcription Custom Language Model Name** to the name of a previously created custom language model. For more information, see [Improving Transcription Accuracy](https://docs.aws.amazon.com/transcribe/latest/dg/improving-accuracy.html).
 - To transcribe meetings in a supported language other than US English, chose the desired value for **Language for Transcription**.
 - To customize transcript processing, optionally set **Lambda Hook Function ARN for Custom Transcript Segment Processing** to the ARN of your own Lambda function. For more information, see [Using a Lambda function to optionally provide custom logic for transcript processing](./lma-ai-stack/TranscriptLambdaHookFunction.md).
-- •	To customize the Meeting Assist capabilities based on the QnABot on AWS solution, Amazon Lex, Amazon Bedrock, and Bedrock Knowledge base integration, see the [Meeting Assist README](./lma-meetingassist-setup-stack/README.md).
+- To customize the Meeting Assist capabilities based on the QnABot on AWS solution, Amazon Lex, Amazon Bedrock, and Bedrock Knowledge base integration, see the [Meeting Assist README](./lma-meetingassist-setup-stack/README.md).
 - To customize Transcript Summarization by configuring LMA to call your own Lambda function, see [Transcript Summarization LAMBDA option](./lma-ai-stack/TranscriptSummarization.md#lambda).
 - To customize Transcript Summarization by modifying the default prompts or adding new ones, see [Transcript Summarization](./lma-ai-stack/TranscriptSummarization.md).
 - To change the retention period, set **Record Expiration In Days** to the desired value. All call data is permanently deleted from the LMA DynamoDB storage after this period. Changes to this setting apply only to new calls received after the update.
@@ -294,7 +294,7 @@ LMA is an open-source project. You can fork the LMA GitHub repository, enhance t
 
 | Region name           | Region code | Template URL                                                                         |
 | --------------------- | ----------- | ------------------------------------------------------------------------------------ |
-| US East (N. Virginia) | us-east-1   | https://s3.us-east-1.amazonaws.com/bobs-artifacts-us-east-1/lma-prerelease-share/lma-main.yaml |
+| US East (N. Virginia) | us-east-1   | https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml |
 
 6. Choose **Next** and review the stack parameters.
 7. Choose **Next** two more times.
