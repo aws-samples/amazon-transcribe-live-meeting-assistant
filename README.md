@@ -70,6 +70,7 @@ Complete the following steps to launch the CloudFormation stack:
    Region | Easy Deploy Button  
    --- | --- 
    US East (N. Virginia) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml&stackName=LMA) 
+   US West (Oregon) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-west-2.console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/create/review?templateURL=https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml&stackName=LMA) 
 
 
 1. For **Stack name**, use the default value, `LMA`.
@@ -301,6 +302,7 @@ LMA is an open-source project. You can fork the LMA GitHub repository, enhance t
 | Region name           | Region code | Template URL                                                                         |
 | --------------------- | ----------- | ------------------------------------------------------------------------------------ |
 | US East (N. Virginia) | us-east-1   | https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml |
+| US West (Oregon) | us-west-2   | https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml |
 
 6. Choose **Next** and review the stack parameters.
 7. Choose **Next** two more times.
