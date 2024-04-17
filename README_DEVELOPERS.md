@@ -19,18 +19,18 @@ To deploy or to publish, you need to have the following packages installed on yo
 7. sam (AWS SAM)
 
 Copy the GitHub repo to your computer. Either:
-- use the git command: git clone https://github.com/aws-samples/XXX.git
-- OR, download and expand the ZIP file from the GitHub page: https://github.com/aws-samples/XXX/archive/refs/heads/main.zip
+- use the git command: git clone https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant.git
+- OR, download and expand the ZIP file from the GitHub page: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/archive/refs/heads/main.zip
 
 ## Publish the solution
 
 In our main README, you will see that we provided Easy Deploy Buttons to launch a stack using pre-built templates that we published already to an S3 bucket. 
 
-If you want to build and publish your own template, to your own S3 bucket, so that others can easily use a similar easy button approach to deploy a stack, using *your* templates, here's how.
+If you want to build and publish your own template, to your own S3 bucket, so that others can easily use a similar easy button approach to deploy a stack, using *your* templates, in your preferred region, here's how.
 
 Navigate into the project root directory and, in a bash shell, run:
 
-1. `./publish.sh <cfn_bucket_basename> <cfn_prefix> <us-east-1 | us-west-2>`.  
+1. `./publish.sh <cfn_bucket_basename> <cfn_prefix> <region e.g. us-east-1>`.  
   This:
     - checks your system dependendencies for required packages (see Dependencies above)
     - creates CloudFormation templates and asset zip files
@@ -42,8 +42,8 @@ That's it! There's just one step.
 When completed, it displays the CloudFormation templates S3 URLs and 1-click URLs for launching the stack creation in CloudFormation console, e.g.:
 ```
 OUTPUTS
-Template URL: https://s3.us-east-1.amazonaws.com/yourbucketbasename-us-east-1/lma-test/LMA.json
-CF Launch URL: https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/yourbucketbasename-us-east-1/lma-test/LMA.json&stackName=LMA
+Template URL: https://s3.us-east-1.amazonaws.com/yourbucketbasename-us-east-1/lma-test/lma-main.yaml
+CF Launch URL: https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/yourbucketbasename-us-east-1/lma-test/lma-main.yaml&stackName=LMA
 Done
 ``````
 
