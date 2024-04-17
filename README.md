@@ -338,5 +338,5 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 
 ## License Summary
 
-This sample code is made available under the MIT-0 license. See the [LICENSE](LICENSE.txt) file.
+This sample code is made available under the MIT-0 license. See the [LICENSE](LICENSE) file.
 
