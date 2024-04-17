@@ -250,7 +250,7 @@ For QnABot on AWS for Meeting Assist, refer to the [Meeting Assist README](./lma
 
 ## Cost assessment
 
-LMA provides a websocket server using Fargate (2vCPU) and VPC networking resources costing about $0.025/hr (~$18/mth) - see [Fargate pricing](https://aws.amazon.com/fargate/pricing/).
+LMA provides a websocket server using Fargate (2vCPU) and VPC networking resources costing about $0.10/hr (~$72/mth) - see [Fargate pricing](https://aws.amazon.com/fargate/pricing/).
 
 Meeting Assist is enabled using QnABot and Knowledge bases for Amazon Bedrock. You create your own Knowledge base which you use for LMA and potentially other use cases – see [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/) for more. Additional AWS services used by the QnABot solution cost about $0.77/hour – see [QnABot on AWS solution costs](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/cost.html). 
 
