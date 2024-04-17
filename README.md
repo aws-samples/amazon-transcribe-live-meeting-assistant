@@ -13,9 +13,9 @@ Then there are the times that others are talking in a language that’s not your
 And after the call is over you usually want to capture a summary for your records, or to send to the participants, with a list of all the action items, owners, and due dates.
 All of this, and more, is now possible with our newest sample solution, Live Meeting Assistant (LMA).  
 
-Here’s a demo to whet your appetite:  *(currently internal, on Broadcast)*
+Check out the following demo to see how it works.
 
-<a href="https://broadcast.amazon.com/videos/1057403"> <img src="./images/readme-video-thumbnail.png" alt="Video Demo" width="300"></a>
+https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/assets/10953374/d5979569-c99c-4141-be56-9f436b48b0ec
 
 ## Solution overview
 
