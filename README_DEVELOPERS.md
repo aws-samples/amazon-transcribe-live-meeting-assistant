@@ -2,9 +2,7 @@
 
 The main README is here: [Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Q Business Expert, and Amazon Bedrock](./README.md)
 
-This Developer README describes how to build the project from the source code - for developer types. You can:
-- [Deploy the solution](#deploy-the-solution)
-- [Publish the solution](#publish-the-solution)
+This Developer README describes how to build the project from the source code - for developer types - so you can deploy to additional regions, or build and deploy customized source code.
 
 ### 1. Dependencies
 
