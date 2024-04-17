@@ -22,7 +22,7 @@ AI_STACK_DIR="${ROOT_DIR}/lma-ai-stack"
 # values can be overridden by existing environment vars values
 VERSION_FILE=${VERSION_FILE:-"${ROOT_DIR}/VERSION"}
 AI_STACK_VERSION_FILE=${AI_STACK_VERSION_FILE:-"${AI_STACK_DIR}/VERSION"}
-TEMPLATE_FILE=${TEMPLATE_FILE:-"${ROOT_DIR}/lca-main.yaml"}
+TEMPLATE_FILE=${TEMPLATE_FILE:-"${ROOT_DIR}/lma-main.yaml"}
 AI_STACK_TEMPLATE_FILE=${AI_STACK_TEMPLATE_FILE:-"${AI_STACK_DIR}/deployment/lma-ai-stack.yaml"}
 SAMCONFIG_FILE=${SAMCONFIG_FILE:-"${AI_STACK_DIR}/samconfig.toml"}
 UI_PACKAGE_JSON_FILE=${UI_PACKAGE_JSON_FILE:-"${AI_STACK_DIR}/source/ui/package.json"}
@@ -31,6 +31,7 @@ UI_PACKAGE_LOCK_JSON_FILE=${UI_PACKAGE_LOCK_JSON_FILE:-"${AI_STACK_DIR}/source/u
 export VERSION_REGEX="${VERSION_REGEX:-$'((0|[1-9]\d*)\.){2\}(0|[1-9]\d*)'}"
 
 if [[ -f "$VERSION_FILE" ]] ; then
+    echo "Updating version in ${VERSION_FILE} file"
     sed --in-place --regexp-extended --expression "$(
         # shellcheck disable=SC2016
         echo 's/^${VERSION_REGEX}$/${NEW_VERSION}/' | \
@@ -41,6 +42,7 @@ else
 fi
 
 if [[ -f "$AI_STACK_VERSION_FILE" ]] ; then
+    echo "Updating version in ${AI_STACK_VERSION_FILE} file"
     sed --in-place --regexp-extended --expression "$(
         # shellcheck disable=SC2016
         echo 's/^${VERSION_REGEX}$/${NEW_VERSION}/' | \
@@ -51,6 +53,7 @@ else
 fi
 
 if [[ -f "$TEMPLATE_FILE" ]] ; then
+    echo "Updating version in ${TEMPLATE_FILE} file"
     sed --in-place --regexp-extended --expression "$(
         # shellcheck disable=SC2016
         echo '
@@ -63,6 +66,7 @@ else
 fi
 
 if [[ -f "$AI_STACK_TEMPLATE_FILE" ]] ; then
+    echo "Updating version in ${AI_STACK_TEMPLATE_FILE} file"
     sed --in-place --regexp-extended --expression "$(
         # shellcheck disable=SC2016
         echo '
@@ -77,6 +81,7 @@ else
 fi
 
 if [[ -f "$SAMCONFIG_FILE" ]] ; then
+    echo "Updating version in ${SAMCONFIG_FILE} file"
     sed --in-place --regexp-extended --expression "$(
         # shellcheck disable=SC2016
         echo '
@@ -90,10 +95,11 @@ else
 fi
 
 if [[ -f "$UI_PACKAGE_JSON_FILE" ]] ; then
+    echo "Updating version in ${UI_PACKAGE_JSON_FILE} file"
     sed --in-place --regexp-extended --expression "$(
         # shellcheck disable=SC2016
         echo '
-		  /^ *"name" *: *"lca-ui" *, *$/ , /^ *"version" *:/ {
+		  /^ *"name" *: *"lma-ui" *, *$/ , /^ *"version" *:/ {
             s/^(.*"version" *: *")${VERSION_REGEX}(.*)/\1${NEW_VERSION}\5/;
           }
         ' | \
@@ -104,10 +110,11 @@ else
 fi
 
 if [[ -f "$UI_PACKAGE_LOCK_JSON_FILE" ]] ; then
+    echo "Updating version in ${UI_PACKAGE_LOCK_JSON_FILE} file"
     sed --in-place --regexp-extended --expression "$(
         # shellcheck disable=SC2016
         echo '
-		  /^ *"name" *: *"lca-ui" *, *$/ , /^ *"version" *:/ {
+		  /^ *"name" *: *"lma-ui" *, *$/ , /^ *"version" *:/ {
             s/^(.*"version" *: *")${VERSION_REGEX}(.*)/\1${NEW_VERSION}\5/;
           }
         ' | \
