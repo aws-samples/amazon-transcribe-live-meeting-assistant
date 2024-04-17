@@ -1,6 +1,6 @@
 # Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Bedrock, and Knowledge Bases for Amazon Bedrock 
 
-_Companion AWS blog post: [Live meeting assist with Amazon language AI services](http://www.amazon.com/live-meeting-assist)_
+_Companion AWS blog post: [Live meeting assist with Amazon language AI services](http://www.amazon.com/live-meeting-assistant)_
 
 _See [CHANGELOG](./CHANGELOG.md) for latest features and fixes._
 
