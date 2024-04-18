@@ -4,13 +4,14 @@
 import fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import WebSocket from 'ws'; // type structure for the websocket object used by fastify/websocket
-import stream from 'stream';
+// import stream from 'stream';
 import os from 'os';
 import path from 'path';
 import { 
     S3Client, 
     PutObjectCommand
 } from '@aws-sdk/client-s3';
+import BlockStream from 'block-stream2';
 
 import fs from 'fs';
 import { randomUUID } from 'crypto';
@@ -192,7 +193,9 @@ const onTextMessage = async (ws: WebSocket, data: string): Promise<void> => {
         const writeRecordingStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR, tempRecordingFilename));
         const recordingFileSize = 0;
         const highWaterMarkSize = (callMetaData.samplingRate / 10) * 2 * 2;
-        const audioInputStream = new stream.PassThrough({ highWaterMark: highWaterMarkSize });
+        server.log.info(`Calculated high water mark size: ${highWaterMarkSize}`);
+        //const audioInputStream = new stream.PassThrough({ highWaterMark: highWaterMarkSize });
+        const audioInputStream = new BlockStream({ size: highWaterMarkSize });
         const socketCallMap:SocketCallData = {
             callMetadata: callMetaData,
             audioInputStream: audioInputStream,
@@ -274,7 +277,6 @@ const endCall = async (ws: WebSocket, callMetaData: CallMetaData|undefined, sock
         }
         if (socketData.audioInputStream) {
             server.log.info(`Closing audio input stream:  ${JSON.stringify(callMetaData)}`);
-
             socketData.audioInputStream.end();
             socketData.audioInputStream.destroy();
         }

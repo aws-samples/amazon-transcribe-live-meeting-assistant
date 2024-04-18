@@ -292,7 +292,7 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
         }
         for await (const chunk of audioInputStream ) {
             yield { AudioEvent: { AudioChunk: chunk } };
-            console.log(`Sending chunk of size ${chunk.length} to Transcribe.`);
+            //console.log(`Sending chunk of size ${chunk.length} to Transcribe.`);
         }
         // yield { AudioEvent: { AudioChunk:Uint8Array.from(new Array(2).fill([0x00, 0x00]).flat()), EndOfStream: true } };
     };
