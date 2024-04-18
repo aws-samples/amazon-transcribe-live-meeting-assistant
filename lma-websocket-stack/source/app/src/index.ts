@@ -153,7 +153,7 @@ const getWavRecordingFileName = (callMetaData: CallMetaData): string => {
 };
 
 const onBinaryMessage = async (ws: WebSocket, data: Uint8Array): Promise<void> => {
-    server.log.debug(`Received Binary Message of length ${data.byteLength}`);
+    // server.log.debug(`Received Binary Message of length ${data.byteLength}`);
 
     const socketData = socketMap.get(ws);
 
@@ -191,7 +191,8 @@ const onTextMessage = async (ws: WebSocket, data: string): Promise<void> => {
         // wavFileName = `${callMetaData.callId}.wav`;
         const writeRecordingStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR, tempRecordingFilename));
         const recordingFileSize = 0;
-        const audioInputStream = new stream.PassThrough();
+        const highWaterMarkSize = (callMetaData.samplingRate / 10) * 2 * 2;
+        const audioInputStream = new stream.PassThrough({ highWaterMark: highWaterMarkSize });
         const socketCallMap:SocketCallData = {
             callMetadata: callMetaData,
             audioInputStream: audioInputStream,

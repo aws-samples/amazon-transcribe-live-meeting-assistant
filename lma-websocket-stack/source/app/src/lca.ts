@@ -100,7 +100,7 @@ export const writeCallEvent = async (callEvent: CallStartEvent | CallEndEvent | 
 
     const putCmd = new PutRecordCommand(putParams);
     try {
-        await kinesisClient.send(putCmd);
+        kinesisClient.send(putCmd);
         console.debug('Written Call Event to KDS');
         console.debug(JSON.stringify(callEvent));
     } catch (error) {
@@ -146,7 +146,7 @@ export const writeTranscriptionSegment = async function(transcribeMessageJson:Tr
 
             const putCmd = new PutRecordCommand(putParams);
             try {
-                await kinesisClient.send(putCmd);
+                kinesisClient.send(putCmd);
                 console.debug('Written ADD_TRANSCRIPT_SEGMENT event to KDS');
                 console.debug(JSON.stringify(kdsObject));
             } catch (error) {
@@ -207,7 +207,7 @@ export const writeAddTranscriptSegmentEvent = async function(utteranceEvent:Utte
 
     const putCmd = new PutRecordCommand(putParams);
     try {
-        await kinesisClient.send(putCmd);
+        kinesisClient.send(putCmd);
         console.debug('Written ADD_TRANSCRIPT_SEGMENT event to KDS');
         console.debug(JSON.stringify(kdsObject));
     } catch (error) {
@@ -236,7 +236,7 @@ export const writeAddCallCategoryEvent = async function(categoryEvent:CategoryEv
 
         const putCmd = new PutRecordCommand(putParams);
         try {
-            await kinesisClient.send(putCmd);
+            kinesisClient.send(putCmd);
             console.debug('Written ADD_CALL_CATEGORY to KDS');
             console.debug(JSON.stringify(kdsObject));
         } catch (error) {
@@ -292,9 +292,9 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
         }
         for await (const chunk of audioInputStream ) {
             yield { AudioEvent: { AudioChunk: chunk } };
+            console.log(`Sending chunk of size ${chunk.length} to Transcribe.`);
         }
         // yield { AudioEvent: { AudioChunk:Uint8Array.from(new Array(2).fill([0x00, 0x00]).flat()), EndOfStream: true } };
-
     };
 
     let tsStream;
@@ -351,8 +351,6 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
     } else if (outputTranscriptStream) {
         tsStream = stream.Readable.from(outputTranscriptStream);
     }
-    
-
 
     try {
         if (tsStream) {
@@ -379,7 +377,6 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
                     await writeAddTranscriptSegmentEvent(event.UtteranceEvent, undefined, callMetaData);
                 }
             }
-
         } else {
             console.log('Transcribe stream is empty');
         }
