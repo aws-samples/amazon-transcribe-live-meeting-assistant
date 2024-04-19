@@ -308,6 +308,14 @@ LMA is an open-source project. You can fork the LMA GitHub repository, enhance t
 7. Choose **Next** two more times.
 8. Check the blue boxes for creating IAM resources, and choose **Update stack** to start the update.
 
+### Update the Chrome browser extension
+
+Make sure you have the latest version of the browser extension installed in your browser after you update the LMA stack.
+1. Remove your existing Amazon Live Meeting Assistant extension in the `chrome://extensions/` page.
+
+2. Follow the steps documented in [Download and install the Chrome browser extension](#download-and-install-the-chrome-browser-extension) to install the latest extension from your updated LMA deployment.
+
+
 ## Clean Up
 
 Congratulations! :tada: You have completed all the steps for setting up your live call analytics sample solution using AWS services.
