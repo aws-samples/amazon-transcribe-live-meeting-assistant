@@ -83,7 +83,7 @@ function calculate_hash() {
   local directory_path=$1
   local HASH=$(
     find "$directory_path" \( -name node_modules -o -name build \) -prune -o -type f -print0 | 
-    sort -z |
+    sort -f -z |
     xargs -0 sha256sum |
     sha256sum |
     cut -d" " -f1 | 
