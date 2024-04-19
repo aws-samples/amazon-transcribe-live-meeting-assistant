@@ -56,7 +56,7 @@ function Capture() {
 
   const startListening = useCallback(() => {
     // eslint-disable-next-line no-useless-escape
-    setTopic(topic.replace(/[\/?#%]/g, '|'));
+    setTopic(topic.replace(/[\/?#%]\+/g, '|'));
 
     if (validateForm() === false) {
       return;
