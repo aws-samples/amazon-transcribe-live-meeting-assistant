@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+  
+## [0.1.1] - 2024-04-19
+### Fixed
+- Added defense against Meeting Names / IDs with special characters `/?#%+` that are not URL safe, by replacing with pipe character `|` in the browser extension when starting the streaming.
+
+
 ## [0.1.0] - 2024-04-17
 ### Added
 - Initial release
 
 
-[Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/v0.1.0...develop
+[Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/v0.1.1...develop
+[0.1.1]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.1
 [0.1.0]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.0
