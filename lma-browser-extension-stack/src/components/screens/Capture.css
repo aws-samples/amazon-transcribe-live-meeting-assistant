@@ -40,3 +40,10 @@
   max-width: 3em;
   padding-right:0.3em;
 }
+
+.version {
+  text-align: center;
+  margin-top: 0px;
+  font-size: 0.8em;
+  color:lightgray;
+}

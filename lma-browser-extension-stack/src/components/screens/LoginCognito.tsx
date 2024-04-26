@@ -1,4 +1,4 @@
-import React from 'react';
+import { useEffect, useState } from 'react';
 import logo from './logo.svg';
 import './LoginCognito.css';
 import { Box, Button, Container, ContentLayout, Form, FormField, Grid, Header, Input, Link, SpaceBetween } from '@cloudscape-design/components';
@@ -12,6 +12,16 @@ function LoginCognito() {
 
   const queryParameters = new URLSearchParams(window.location.search);
   const code = queryParameters.get("code");
+
+  const [ version, setVersion ] = useState("");
+  useEffect(() => {
+    if (chrome && chrome.runtime) {
+      const manifestData = chrome.runtime.getManifest();
+      setVersion(manifestData.version)
+    } else {
+      setVersion("dev/web");
+    }
+  }, [version, setVersion]);
 
   if (code && !loggedIn) {
     exchangeCodeForToken(code, 'authorization_code');
@@ -38,6 +48,9 @@ function LoginCognito() {
           </Grid>
           <Grid gridDefinition={[{ colspan: 6, offset: 3 }]}>
             <Button variant='primary' fullWidth={true} onClick={() => login()}>Login</Button>
+          </Grid>
+          <Grid gridDefinition={[{ colspan: 10, offset: 1 }]}>
+            <div className='version'>{version}</div>
           </Grid>
         </SpaceBetween>
       </Container>

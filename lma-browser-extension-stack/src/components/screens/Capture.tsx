@@ -85,6 +85,16 @@ function Capture() {
     setMuted(false);
   }, [muted, setMuted]);
 
+  const [ version, setVersion ] = React.useState("");
+  useEffect(() => {
+    if (chrome && chrome.runtime) {
+      const manifestData = chrome.runtime.getManifest();
+      setVersion(manifestData.version)
+    } else {
+      setVersion("dev/web");
+    }
+  }, [version, setVersion]);
+
   return (
     <ContentLayout
       header={
@@ -175,6 +185,10 @@ function Capture() {
               <Button  iconAlign="left" iconName="microphone" fullWidth={true} onClick={() => mute()}>Mute Me</Button>
             }
             <Button fullWidth={true} onClick={() => logout()}>Log out</Button>
+          </Grid>
+
+          <Grid gridDefinition={[{ colspan: 10, offset: 1 }]}>
+            <div className='version'>{version}</div>
           </Grid>
         </SpaceBetween>
       </Container>
