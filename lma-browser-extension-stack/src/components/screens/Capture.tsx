@@ -29,12 +29,16 @@ function Capture() {
   useEffect(() => {
     // Your code here
     fetchMetadata();
-  }, []);
+  }, [fetchMetadata]);
 
   useEffect(() => {
     console.log("Metadata changed");
-    setTopic(metadata.meetingTopic);
-    setAgentName(metadata.userName);
+    if (metadata && metadata.meetingTopic) {
+      setTopic(metadata.meetingTopic);
+    }
+    if (metadata && metadata.userName) {
+      setAgentName(metadata.userName);
+    }
   }, [metadata, setTopic, setAgentName]);
 
   const validateForm = useCallback(() => {
