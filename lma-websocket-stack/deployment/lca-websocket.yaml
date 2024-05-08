@@ -1200,10 +1200,10 @@ Resources:
           PortMappings:
             - ContainerPort: 8080
               Protocol: tcp
-      Cpu: 2048
+      Cpu: 256
       ExecutionRoleArn: !GetAtt TranscriberWebsocketTaskDefExecutionRole.Arn
       Family: !Sub ${AWS::StackName}TranscriberWebsocketTaskDef
-      Memory: 4096
+      Memory: 1024
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
