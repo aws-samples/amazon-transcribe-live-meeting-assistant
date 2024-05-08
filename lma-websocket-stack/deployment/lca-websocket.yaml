@@ -164,6 +164,12 @@ Parameters:
     Type: String
     Description: LCA settings SSM Parameter store 
 
+  AssistantWakePhraseRegEx:
+    Type: String
+    Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
+    Description: >
+      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant'.
+
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
     Type: String
@@ -1482,6 +1488,7 @@ Resources:
             settingsJSON = json.loads(settings)
             settingsJSON['WSEndpoint'] = props['WSEndpoint']
             settingsJSON['recordingDisclaimer'] = props['recordingDisclaimer']
+            settingsJSON['AssistantWakePhraseRegEx'] = props['assistantWakePhraseRegEx']
             updatedsettings = json.dumps(settingsJSON)
             ssm.put_parameter(Name=parameterName, Value=updatedsettings, Overwrite=True)
                         
@@ -1520,6 +1527,7 @@ Resources:
                         - !GetAtt WebSocketCloudFrontDistribution.DomainName
                         - '/api/v1/ws'
       recordingDisclaimer: !Ref RecordingDisclaimer
+      assistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
