@@ -13,7 +13,7 @@
 
 ## Introduction
 
-Live Meeting Assist (LMA) is a solution which provides users with real-time multi-participant audio transcription, optionally translated into their preferred language, and an integrated AI meeting assistant that uses trusted enterprise data and meeting context to fact-check, look up relevant information, and propose responses. It creates succinct on-demand recaps, insights, and action item lists during and after meetings, securely maintaining an inventory of meeting records. Enterprises can use LMA with an existing Amazon Bedrock Agent/Knowledgebase. LMA integrates with popular meeting platforms and offers improved participant focus, understanding, accuracy, time-saving, and record-keeping efficiency, while supporting enterprise security, compliance, and availability. 
+Live Meeting Assist (LMA) is a solution which provides users with real-time multi-participant audio transcription, optionally translated into their preferred language, and an integrated AI meeting assistant that uses trusted enterprise data and meeting context to fact-check, look up relevant information, and propose responses. It creates succinct on-demand recaps, insights, and action item lists during and after meetings, securely maintaining an inventory of meeting records. Enterprises can use LMA with an existing Amazon Bedrock Agent/Knowledgebase, or with a bedrock LLM without a knowledge base. LMA integrates with popular meeting platforms and offers improved participant focus, understanding, accuracy, time-saving, and record-keeping efficiency, while supporting enterprise security, compliance, and availability. 
 
 Before continuing, please read the blog post [Live Meeting Assistant (LMA)](https://amazon.com/live-meeting-assistant), deploy LMA, and follow the tutorial to experience the Meeting Assist demo. This is prerequisite context for the rest of this document.
 
@@ -78,7 +78,7 @@ The **SUMMARIZE** and **TOPIC** buttons work the same way as **ACTIONS**. They a
 
 The **ASK ASSISTANT!** button works similarly, but it uses a different Lambda Hook function than the Summarize, Topic, and Actions items. 
 
-In QnAbot Designer, select the `AA.AskAssistant` item to see its definition. Note that it has a different **Lambda Hook** function. Here we use the 'BedrockKB-LambdaHook' function that was also deployed with LMA - this function interacts with Knowledge bases for Bedrock.
+In QnAbot Designer, select the `AA.AskAssistant` item to see its definition. Note that it has a different **Lambda Hook** function. Here we use the 'BedrockKB-LambdaHook' function that was also deployed with LMA - this function interacts with Knowledge bases for Bedrock. If you elected not to integrate a knowledge base by selecting `BEDROCK_LLM` as the Meeting Assist Service when you deployed LMA, then you will see 'BedrockLLM-LambdaHook' function here instead.
 
 The Lambda Hook function retrieves the meeting transcript, and truncates it if needed to represent the last N turns, where N is the value of the QnABot Setting `LLM_CHAT_HISTORY_MAX_MESSAGES` (default is 20, but you can change it in QnABot designer Settings page). The transcript is used to provide context for the prompt.
 
@@ -122,7 +122,7 @@ Select `CustomNoMatches` item in Designer:
 
   <img src="../images/meetingassist-qnabot-designer-no_hits_qid.png" alt="Bot No_hits" style="display: block; margin-left: 0; margin-right: auto;"/> 
 
-This item, too, has a Lambda Hook function. It also uses the 'BedrockKB-LambdaHook' function, but note that here, unlike in the previous 'AA.AskAssistant' item, there is no value for "Prompt" in the Lambda Hook Argument JSON value.  Rather than using a predefined value for Prompt, the prompt is the actual question that you typed or spoke.  Your question is used in the context of the meeting transcription, so it can refer to recent statements and topics being discussed. 
+This item, too, has a Lambda Hook function. It also uses either the 'BedrockKB-LambdaHook' or the 'BedrockLLM-LambdaHook' function, but note that here, unlike in the previous 'AA.AskAssistant' item, there is no value for "Prompt" in the Lambda Hook Argument JSON value.  Rather than using a predefined value for Prompt, the prompt is the actual question that you typed or spoke.  Your question is used in the context of the meeting transcription, so it can refer to recent statements and topics being discussed. 
 
 ## Start Message
 
@@ -149,8 +149,8 @@ Create new items in QnABot designer to add capabilities to LMA.
 
 Give you new item an `Item ID`. Use this ID in any button values (`QID::<Item ID>`) as you've seen in the examples above, when you want a button press to explicitly match the item.
 
-Add one or more **Questions/Utterances** to your item to enable semantic search for free form questions. When an LMA user says `OK Assistant, Why is the sky blue?` or types `Why is the sky blue?` in the bot, QnAbot first tries to find a 'good answer' from the set of items, before invoking the no_hits fallback when it asks Knowledge base (see [Freeform questions](#freeform-questions)). By configuring one or more questions that are a "good match" (eg `Why is the sky blue`) then QnAbot will match the question to your item instead of the no_hits item, and your item will determine the response that is given by the meeting assistant.
+Add one or more **Questions/Utterances** to your item to enable semantic search for free form questions. When an LMA user says `OK Assistant, Why is the sky blue?` or types `Why is the sky blue?` in the bot, QnAbot first tries to find a 'good answer' from the set of items, before invoking the no_hits fallback when it asks Knowledge base or the LLM (see [Freeform questions](#freeform-questions)). By configuring one or more questions that are a "good match" (eg `Why is the sky blue`) then QnAbot will match the question to your item instead of the no_hits item, and your item will determine the response that is given by the meeting assistant.
 
 You can configure a static response by entering plain text in the **Answer** field, or (better) choose **Advanced** and enter rich text in the form of Markdown or HTML in the **Alternate Answers / Markdown Answer** field. Your static answer can optionally use Handlebars to enable conditions and substitutions - see [Handlerbars README](https://github.com/aws-solutions/qnabot-on-aws/blob/main/docs/handlebars/README.md). 
 
-Or you can configure a Lambda Hook for completely dynamic answers based on any logic you choose. Use one of the Lambda Hook functions discussed above (`SummarizeCall` or `BedrockKB-LambdaHook`) with your own Argument values. Or use a new Lambda Hook function that you create yourself, to do whatever you want it to do, for example, query your databases, retrieve information or perform actions using API, integrate with other LLMs - you provide the function, and LMA will run it and return its response to the LMA user. 
+Or you can configure a Lambda Hook for completely dynamic answers based on any logic you choose. Use one of the Lambda Hook functions discussed above (`SummarizeCall`, `BedrockKB-LambdaHook`, or `BedrockLLM-LambdaHook`) with your own Argument values. Or use a new Lambda Hook function that you create yourself, to do whatever you want it to do, for example, query your databases, retrieve information or perform actions using API, integrate with other LLMs - you provide the function, and LMA will run it and return its response to the LMA user. 

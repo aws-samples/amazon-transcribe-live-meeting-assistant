@@ -30,7 +30,7 @@ The following are some of the things LMA can do:
    <p align="left"><img src="./images/readme-transcription.png" alt="Transcription" /></p>
 - **Live translation** - It uses Amazon Translate to optionally show each segment of the conversation translated into your language of choice, from a selection of 75 languages.
   <p align="left"><img src="./images/readme-translation.png" alt="Translation" width=400/></p>
-- **Context aware meeting assistant** - It uses Knowledge Bases for Amazon Bedrock to provide answers from your trusted sources, using the live transcript as context for fact-checking and follow-up questions. To activate the assistant, just say “*Okay, Assistant*,” choose the **ASK ASSISTANT!** button, or enter your own question in the UI.
+- **Context aware meeting assistant** - It uses Knowledge Bases for Amazon Bedrock to provide answers from your trusted sources, or a Bedrock LLM if you don't have or need a knowledge base, using the live transcript as context for fact-checking and follow-up questions. To activate the assistant, just say “*Okay, Assistant*,” choose the **ASK ASSISTANT!** button, or enter your own question in the UI.
   <p align="left"><img src="./images/readme-OK-Assistant.png" alt="OK Q" width=400/></p>
 - **On demand summaries of the meeting** - With the click of a button on the UI, you can generate a summary, which is useful when someone joins late and needs to get caught up. The summaries are generated from the transcript by Amazon Bedrock. LMA also provides options for identifying the current meeting topic, and for generating a list of action items with owners and due dates. You can also create your own custom prompts and corresponding options.
   <p align="left"><img src="./images/readme-action-items.png" alt="Action Items" /></p>
@@ -49,9 +49,9 @@ You are responsible for complying with legal, corporate, and ethical restriction
 
 You need to have an AWS account and an [AWS Identity and Access Management](https://aws.amazon.com/iam/) (IAM) role and user with permissions to create and manage the necessary resources and components for this application. If you don’t have an AWS account, see [How do I create and activate a new Amazon Web Services account?](https://aws.amazon.com/premiumsupport/knowledge-center/create-and-activate-aws-account/)
 
-You also need to have an existing, working, Knowledge Base of Amazon Bedrock. If you haven’t set one up yet, see [Create a knowledge base](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-create.html). Populate your knowledge base with content to power LMA’s context aware meeting assistant. 
+If you want LMA to use your own trusted documents, then you also need to have an existing, working, Knowledge Base of Amazon Bedrock. If you haven’t set one up yet, see [Create a knowledge base](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-create.html). Populate your knowledge base with content to power LMA’s context aware meeting assistant.  Otherwise, you can use LMA without a knowledge base, and take live meeting advice directly from the selected Bedrock LLM model.  
 
-Finally, LMA uses Amazon Bedrock LLM models for its meeting summarization features. Before proceeding, if you have not previously done so, you must [request access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to the following Amazon Bedrock models:
+Finally, LMA uses Amazon Bedrock LLM models for its live meeting assistant and meeting summarization features. Before proceeding, if you have not previously done so, you must [request access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to the following Amazon Bedrock models:
 - Titan Embeddings G1 – Text
 - Anthropic:  All Claude models
 
@@ -76,8 +76,8 @@ Complete the following steps to launch the CloudFormation stack:
 1. For **Stack name**, use the default value, `LMA`.
 1. For **Admin Email Address**, use a valid email address—your temporary password is emailed to this address during the deployment.
 1. For **Authorized Account Email Domain**, use the domain name part of your corporate email address to allow users with email addresses in the same domain to create their own new UI accounts, or leave blank to prevent users from directly creating their own accounts. You can enter multiple domains as a comma separated list.
-1. For **MeetingAssistService** choose BEDROCK_KNOWLEDGE_BASE (currently the only available option!)  
-1. For **Meeting Assist Bedrock Knowledge Base Id (existing)**, enter your existing Knowledge base ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Knowledge bases console.
+1. For **MeetingAssistService** choose BEDROCK_KNOWLEDGE_BASE (preferred) or BEDROCK_LLM (if you do not need a knowledge base)  
+1. For **Meeting Assist Bedrock Knowledge Base Id (existing)**, leave it blank if you selected BEDROCK_LLM in the previous step, otherwise enter your existing Knowledge base ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Knowledge bases console.
     <p align="left"><img src="./images/readme-knowledgebase-id.png" alt="KB ID" width=350/></p>
 1. For **all other parameters**, use the default values. If you want to customize the settings later, for example to add your own lambda functions, to use  custom vocabularies and language models to improve accuracy, enable PII redaction, and more, you can update the stack for these parameters.
 1. Check the acknowledgement boxes, and choose Create stack.
@@ -175,7 +175,7 @@ We show you how to use both options in the following sections.
    <img src="./images/readme-browser-extension-listening.png" alt="Browser Extension Listening" width="500"/>
  
 1. Choose **Open in LMA** to see your live transcript in a new tab.  
-1. Choose your preferred transcript language, and interact with the meeting assistant using the wake phrase *"OK Assistant!"* or the **Meeting Assist Bot** pane on the right. The **ASK ASSISTANT** button is fun to try – it asks the meeting assistant service (Bedrock knowledge base) to suggest a ‘good response’ based on the transcript of the recent interactions in the meeting. Your mileage may vary, so experiment!
+1. Choose your preferred transcript language, and interact with the meeting assistant using the wake phrase *"OK Assistant!"* or the **Meeting Assist Bot** pane on the right. The **ASK ASSISTANT** button is fun to try – it asks the meeting assistant service (Bedrock knowledge base or Bedrock LLM) to suggest a ‘good response’ based on the transcript of the recent interactions in the meeting. Your mileage may vary, so experiment!
 
    <img src="./images/readme-lma-meeting-detail.png" alt="Meeting Detail page" width="500"/>
 
@@ -251,9 +251,10 @@ For QnABot on AWS for Meeting Assist, refer to the [Meeting Assist README](./lma
 
 ## Cost assessment
 
-LMA provides a websocket server using Fargate (2vCPU) and VPC networking resources costing about $0.10/hr (~$72/mth) - see [Fargate pricing](https://aws.amazon.com/fargate/pricing/).
+LMA provides a websocket server using Fargate (0.25vCPU) and VPC networking resources costing about $0.014/hr (~$10/mth) - see [Fargate pricing](https://aws.amazon.com/fargate/pricing/).
 
-Meeting Assist is enabled using QnABot and Knowledge bases for Amazon Bedrock. You create your own Knowledge base which you use for LMA and potentially other use cases – see [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/) for more. Additional AWS services used by the QnABot solution cost about $0.77/hour – see [QnABot on AWS solution costs](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/cost.html). 
+Meeting Assist is enabled using QnABot and Knowledge bases for Amazon Bedrock. You create your own Knowledge base which you use for LMA and potentially other use cases – see [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/) for more, or you can choose, when you deploy, to use a Bedrock LLM without a knowledge base.
+Additional AWS services used by the QnABot solution as configured (with Opensearch node count default of '1') cost about $0.14/hour ($100/mth) – see [QnABot on AWS solution costs](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/cost.html). 
 
 The remaining solution costs are based on usage.
 
