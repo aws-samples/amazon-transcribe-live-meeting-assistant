@@ -671,6 +671,7 @@ Resources:
         PcaPlaybackAudioFilePrefix: ''
         PcaWebAppURL: ''
         PcaWebAppCallPathPrefix: ''
+        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         LMASettingsParameterName: !GetAtt AISTACK.Outputs.LMASettingsParameterName
 
   BROWSEREXTENSIONSTACK:
