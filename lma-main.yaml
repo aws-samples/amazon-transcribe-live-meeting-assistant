@@ -23,8 +23,9 @@ Parameters:
     Default: 'BEDROCK_KNOWLEDGE_BASE'
     Type: String
     AllowedValues:
+      - 'BEDROCK_LLM'
       - 'BEDROCK_KNOWLEDGE_BASE'
-    Description: Choose which knowledge base / LLM service to use (Currently only BEDROCK_KNOWLEDGE_BASE is supported)
+    Description: Choose which knowledge base / LLM service to use
 
   BedrockKnowledgeBaseId:
     Type: String
@@ -33,14 +34,14 @@ Parameters:
     Description: >
       If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the knowledge base *Id* (not name) of an existing Bedrock knowledge base to be used for Meeting Assist bot.
 
-  BedrockKnowledgeBaseModelID:
+  MeetingAssistServiceBedrockModelID:
     Type: String
-    Default: 'anthropic.claude-3-sonnet-20240229-v1:0'
+    Default: 'anthropic.claude-3-haiku-20240307-v1:0'
     AllowedValues:
       - 'anthropic.claude-3-haiku-20240307-v1:0'
       - 'anthropic.claude-3-sonnet-20240229-v1:0'
     Description: >-
-      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, select a Bedrock LLM model from the list."
+      If MeetingAssistService is BEDROCK_LLM or BEDROCK_KNOWLEDGE_BASE, select a Bedrock LLM model from the list."
 
   AssistantWakePhraseRegEx:
     Type: String
@@ -272,7 +273,7 @@ Metadata:
         Parameters:
           - MeetingAssistService
           - BedrockKnowledgeBaseId
-          - BedrockKnowledgeBaseModelID
+          - MeetingAssistServiceBedrockModelID
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
@@ -330,6 +331,8 @@ Metadata:
         default: Authorized Account Email Domain(s)
       BedrockKnowledgeBaseId:
         default: Meeting Assist Bedrock Knowledge Base Id (existing)
+      MeetingAssistServiceBedrockModelID:
+        default: Meeting Assist Service Bedrock Model ID
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
       MeetingAssistQnABotOpenSearchNodeCount:
@@ -422,6 +425,21 @@ Mappings:
     zh-CN:
       Value: zh_CH
 
+Rules:
+  # check required parameters
+  BedrockKnowledgeBaseId:
+    RuleCondition:
+      !Equals [
+        !Ref MeetingAssistService,
+        'BEDROCK_KNOWLEDGE_BASE',
+      ]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref BedrockKnowledgeBaseId, '']]
+        AssertDescription: BedrockKnowledgeBaseId is required when MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE'
+
+Conditions:
+  ShouldConfigureBedrockKB: !Equals [!Ref MeetingAssistService, 'BEDROCK_KNOWLEDGE_BASE']
+
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
   StacknameCheckFunction:
@@ -492,7 +510,7 @@ Resources:
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
 
-  QNABOTPLUGINBEDROCK:
+  QNABOTBR:
     Type: AWS::CloudFormation::Stack
     DependsOn: IsStacknameLengthOK
     Properties:
@@ -524,10 +542,10 @@ Resources:
         BootstrapPrefix: <ARTIFACT_PREFIX_TOKEN>/aws-qnabot
         InstallLexResponseBots: 'false'
         EmbeddingsApi: 'LAMBDA'
-        EmbeddingsLambdaArn: !GetAtt QNABOTPLUGINBEDROCK.Outputs.EmbeddingsLambdaArn
-        EmbeddingsLambdaDimensions: !GetAtt QNABOTPLUGINBEDROCK.Outputs.EmbeddingsLambdaDimensions
+        EmbeddingsLambdaArn: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaArn
+        EmbeddingsLambdaDimensions: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaDimensions
         LLMApi: 'LAMBDA'
-        LLMLambdaArn: !GetAtt QNABOTPLUGINBEDROCK.Outputs.LLMLambdaArn
+        LLMLambdaArn: !GetAtt QNABOTBR.Outputs.LLMLambdaArn
 
   LLMTEMPLATESTACK:
     Type: AWS::CloudFormation::Stack
@@ -570,13 +588,20 @@ Resources:
     Type: Custom::ToJSON
     Properties:
       ServiceToken: !GetAtt ToJSONFunction.Arn
-      EMBEDDINGS_SCORE_THRESHOLD: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsScoreThreshold
-      EMBEDDINGS_SCORE_ANSWER_THRESHOLD: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsScoreAnswerThreshold
-      EMBEDDINGS_TEXT_PASSAGE_SCORE_THRESHOLD: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsTextPassageScoreThreshold
+      EMBEDDINGS_SCORE_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsScoreThreshold
+      EMBEDDINGS_SCORE_ANSWER_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsScoreAnswerThreshold
+      EMBEDDINGS_TEXT_PASSAGE_SCORE_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsTextPassageScoreThreshold
       LLM_GENERATE_QUERY_ENABLE: "FALSE"
+      LLM_GENERATE_QUERY_PROMPT_TEMPLATE: ""
       EMPTYMESSAGE: "No response from meeting assist QnAbot"
-      BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. Only output the rephrased question. Do not include any preamble. "
-      BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a set of search results. Your job is to respond to the user's request using only information from the search results. If search results do not contain information that can answer the question, please state that you could not find an exact answer to the question. Just because the user asserts a fact does not mean it is true, make sure to double check the search results to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
+      BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "deprecated"
+      BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "deprecated"
+      ASSISTANT_QUERY_PROMPT_TEMPLATE: "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. Only output the rephrased question. Do not include any preamble. "
+      ASSISTANT_GENERATE_PROMPT_TEMPLATE:
+        !If
+        - ShouldConfigureBedrockKB
+        - "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a set of search results. Your job is to respond to the user's request using only information from the search results. If search results do not contain information that can answer the question, please state that you could not find an exact answer to the question. Just because the user asserts a fact does not mean it is true, make sure to double check the search results to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
+        - "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting (which may be empty), and a user's request. Your job is to respond to the user's request using any relevant context from the transcript, or from your own world knowledge. Just because the user asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the user's request:<br>{userInput}<br>"
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
@@ -591,7 +616,7 @@ Resources:
         QNABOTSTACK: !Ref QNABOT
         MeetingAssistService: !Ref MeetingAssistService
         BedrockKnowledgeBaseID: !Ref BedrockKnowledgeBaseId
-        BedrockKnowledgeBaseModelID: !Ref BedrockKnowledgeBaseModelID
+        MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
         AmazonQAppId: 'NOT CURRENTLY USED'
         AmazonQUserId: 'NOT CURRENTLY USED'
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
