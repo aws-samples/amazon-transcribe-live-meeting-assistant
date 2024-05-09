@@ -164,6 +164,10 @@ Parameters:
     Type: String
     Description: LCA settings SSM Parameter store 
 
+  # NOTE: "AssistantWakePhraseRegEx" (wake phrase parameter) is not used by this stack/lambda function. 
+  # It is added to parameters only to force a custom resource update when wake phrase parameter 
+  # in the main stack is changed. The custom resource update then runs UpdateWSEndpointSettings lambda to restore 
+  # "WSEndpoint" and "recordingDisclaimer" fields overwritten by AI Stack (when wake phrase is changed).
   AssistantWakePhraseRegEx:
     Type: String
     Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
@@ -1488,7 +1492,6 @@ Resources:
             settingsJSON = json.loads(settings)
             settingsJSON['WSEndpoint'] = props['WSEndpoint']
             settingsJSON['recordingDisclaimer'] = props['recordingDisclaimer']
-            settingsJSON['AssistantWakePhraseRegEx'] = props['assistantWakePhraseRegEx']
             updatedsettings = json.dumps(settingsJSON)
             ssm.put_parameter(Name=parameterName, Value=updatedsettings, Overwrite=True)
                         
@@ -1527,6 +1530,10 @@ Resources:
                         - !GetAtt WebSocketCloudFrontDistribution.DomainName
                         - '/api/v1/ws'
       recordingDisclaimer: !Ref RecordingDisclaimer
+      # "AssistantWakePhraseRegEx" (wake phrase parameter) is not used by this stack/lambda function. 
+      # It is added to parameters only to force a custom resource update when wake phrase parameter 
+      # in the main stack is changed. The custom resource update then runs UpdateWSEndpointSettings lambda to restore 
+      # "WSEndpoint" and "recordingDisclaimer" fields overwritten by AI Stack (when wake phrase is changed).
       assistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
