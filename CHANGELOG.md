@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix for #1 - "Stream Audio" tab stops working after a stack update when AssistantWakePhraseRegEx is modified. PR #11
 ### Changed
 - Downsize web socket server ecs-fargate task for improved cost efficiency. PR #12
+### Added
+- New MeetingAssistService option to allow Bedrock (without KB) to be used for 'OK Assistant' and 'Ask Assistant' responses.
+ 
 
 
 ## [0.1.1] - 2024-04-19

@@ -5,20 +5,15 @@ import boto3
 
 FETCH_TRANSCRIPT_FUNCTION_ARN = os.environ['FETCH_TRANSCRIPT_FUNCTION_ARN']
 
-KB_REGION = os.environ.get("KB_REGION") or os.environ["AWS_REGION"]
-KB_ID = os.environ.get("KB_ID")
+BR_REGION = os.environ.get("BR_REGION") or os.environ["AWS_REGION"]
 MODEL_ID = os.environ.get("MODEL_ID")
-MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}::foundation-model/{MODEL_ID}"
+MODEL_ARN = f"arn:aws:bedrock:{BR_REGION}::foundation-model/{MODEL_ID}"
 DEFAULT_MAX_TOKENS = 256
 
 LAMBDA_CLIENT = boto3.client("lambda")
-KB_CLIENT = boto3.client(
-    service_name="bedrock-agent-runtime",
-    region_name=KB_REGION
-)
 BEDROCK_CLIENT = boto3.client(
     service_name="bedrock-runtime",
-    region_name=KB_REGION
+    region_name=BR_REGION
 )
 
 
@@ -59,35 +54,11 @@ def get_call_transcript(callId, userInput, maxMessages):
     return transcript
 
 
-def get_kb_response(generatePromptTemplate, transcript, query):
-    promptTemplate = generatePromptTemplate or "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a set of search results. Your job is to respond to the user's request using only information from the search results. If search results do not contain information that can answer the question, please state that you could not find an exact answer to the question. Just because the user asserts a fact does not mean it is true, make sure to double check the search results to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
-    promptTemplate = promptTemplate.format(transcript=json.dumps(transcript))
-    input = {
-        "input": {
-            'text': query
-        },
-        "retrieveAndGenerateConfiguration": {
-            'knowledgeBaseConfiguration': {
-                "generationConfiguration": {
-                    "promptTemplate": {
-                        "textPromptTemplate": promptTemplate
-                    }
-                },
-                'knowledgeBaseId': KB_ID,
-                'modelArn': MODEL_ARN
-            },
-            'type': 'KNOWLEDGE_BASE'
-        }
-    }
-    print("Amazon Bedrock KB Request: ", input)
-    try:
-        resp = KB_CLIENT.retrieve_and_generate(**input)
-    except Exception as e:
-        print("Amazon Bedrock KB Exception: ", e)
-        resp = {
-            "systemMessage": "Amazon Bedrock KB Error: " + str(e)
-        }
-    print("Amazon Bedrock KB Response: ", json.dumps(resp))
+def get_br_response(generatePromptTemplate, transcript, query):
+    promptTemplate = generatePromptTemplate or "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a user's request. Your job is to respond to the user's request. If you cannot confidently respond to the user, please state that you could not find an exact answer. Just because the user asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the user's request:<br>{userInput}<br>"
+    prompt = promptTemplate.format(transcript=json.dumps(transcript), userInput=query)
+    prompt = prompt.replace("<br>", "\n")
+    resp = get_bedrock_response(prompt)
     return resp
 
 
@@ -165,16 +136,12 @@ def get_args_from_lambdahook_args(event):
     return parameters
 
 
-def format_response(event, kb_response, query):
+def format_response(event, message, query):
     # get settings, if any, from lambda hook args
     # e.g: {"AnswerPrefix":"<custom prefix heading>", "ShowContext": False}
     lambdahook_settings = get_settings_from_lambdahook_args(event)
     answerprefix = lambdahook_settings.get("AnswerPrefix", "Assistant Answer:")
-    showContextText = lambdahook_settings.get("ShowContextText", True)
-    showSourceLinks = lambdahook_settings.get("ShowSourceLinks", True)
     queryprefix = lambdahook_settings.get("QueryPrefix")
-    message = kb_response.get("output").get("text") or kb_response.get(
-        "systemMessage") or "No answer found"
     # set plaintext, markdown, & ssml response
     if answerprefix in ["None", "N/A", "Empty"]:
         answerprefix = None
@@ -187,35 +154,6 @@ def format_response(event, kb_response, query):
     if queryprefix:
         plainttext = f"{queryprefix} {query}\n\n{plainttext}"
         markdown = f"**{queryprefix}** *{query}*\n\n{markdown}"
-    if showContextText:
-        contextText = ""
-        for source in kb_response.get("citations", []):
-            for reference in source.get("retrievedReferences", []):
-                snippet = reference.get("content", {}).get(
-                    "text", "no reference text")
-                url = reference.get("location", {}).get(
-                    "s3Location", {}).get("uri")
-                title = os.path.basename(url)
-                if url:
-                    contextText = f'{contextText}<br><a href="{url}">{title}</a>'
-                else:
-                    contextText = f'{contextText}<br><u><b>{title}</b></u>'
-                contextText = f"{contextText}<br>{snippet}\n"
-        if contextText:
-            markdown = f'{markdown}\n<details><summary>Context</summary><p style="white-space: pre-line;">{contextText}</p></details>'
-    if showSourceLinks:
-        sourceLinks = []
-        for citation in kb_response.get("citations", []):
-            for retrievedReference in citation.get("retrievedReferences", []):
-                # TODO - (1) convert s3 path to http. (2) support additional location types
-                url = retrievedReference.get("location", {}).get(
-                    "s3Location", {}).get("uri")
-                title = os.path.basename(url)
-                if url:
-                    sourceLinks.append(f'<a href="{url}">{title}</a>')
-        if len(sourceLinks):
-            markdown = f'{markdown}<br>Sources: ' + ", ".join(sourceLinks)
-
     # add plaintext, markdown, and ssml fields to event.res
     event["res"]["message"] = plainttext
     event["res"]["session"]["appContext"] = {
@@ -224,22 +162,20 @@ def format_response(event, kb_response, query):
             "ssml": ssml
         }
     }
-    # TODO - can we determine when Bedrock KB has a good answer or not?
+    # TODO - can we determine when Bedrock has a good answer or not?
     # For now, always assume it's a good answer.
     # QnAbot sets session attribute qnabot_gotanswer True when got_hits > 0
     event["res"]["got_hits"] = 1
     return event
 
-
 def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput):
-    print("Use Bedrock to generate a relevant search query based on the transcript and input")
+    print("Use Bedrock to generate a relevant disambiguated query based on the transcript and input")
     promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. Only output the rephrased question. Do not include any preamble. "
     prompt = promptTemplate.format(
         transcript=json.dumps(transcript), input=userInput)
     prompt = prompt.replace("<br>", "\n")
     query = get_bedrock_response(prompt)
     return query
-
 
 def handler(event, context):
     print("Received event: %s" % json.dumps(event))
@@ -266,16 +202,15 @@ def handler(event, context):
     else:
         print("no callId in request or session attributes")
 
-    retrievePromptTemplate = event["req"]["_settings"].get(
+    queryPromptTemplate = event["req"]["_settings"].get(
         "QUERY_PROMPT_TEMPLATE")
     query = generateRetrieveQuery(
-        retrievePromptTemplate, transcript, userInput)
+        queryPromptTemplate, transcript, userInput)
 
     generatePromptTemplate = event["req"]["_settings"].get(
         "GENERATE_PROMPT_TEMPLATE")
-    kb_response = get_kb_response(
+    br_response = get_br_response(
         generatePromptTemplate, transcript, query)
-
-    event = format_response(event, kb_response, query)
+    event = format_response(event, br_response, query)
     print("Returning response: %s" % json.dumps(event))
     return event
