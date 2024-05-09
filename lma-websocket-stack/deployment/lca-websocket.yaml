@@ -94,9 +94,11 @@ Parameters:
   TranscribeLanguageCode:
     Type: String
     Description: >-
-      Language code to be used for Amazon Transcribe
+      Language code or language detection setting for Amazon Transcribe
     Default: en-US
     AllowedValues:
+      - identify-language
+      - identify-multiple-languages
       - en-US
       - es-US
       - en-GB
@@ -109,6 +111,15 @@ Parameters:
       - ja-JP
       - ko-KR
       - zh-CN
+  
+  TranscribeLanguageOptions:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|[a-z]{2}-[A-Z]{2}(?:,[a-z]{2}-[A-Z]{2})*)$'
+    Description: >-
+      When TranscribeLanguageCode is set to 'identify-language' or 'identify-multiple-languages', optionally 
+      specify two or more comma separated language codes, e.g. "en-US,es-US" that represent the languages you 
+      think may be used in your meeting; including more than five is not recommended. If you're unsure, leave it empty.
 
   TranscribePiiEntityTypes:
     Type: String
@@ -225,6 +236,8 @@ Metadata:
         default: Type of Content Redaction
       TranscribeLanguageCode:
         default: Transcription Language Code
+      TranscribeLanguageOptions:
+        default: Transcribe Language Options
       TranscribePiiEntityTypes:
         default: Transcription PII Redaction Entity Types
       CustomVocabularyName:
@@ -1181,6 +1194,8 @@ Resources:
               Value: !Ref TranscribePiiEntityTypes      
             - Name: TRANSCRIBE_LANGUAGE_CODE
               Value: !Ref TranscribeLanguageCode
+            - Name: TRANSCRIBE_LANGUAGE_OPTIONS
+              Value: !Ref TranscribeLanguageOptions
             - Name: CUSTOM_VOCABULARY_NAME
               Value: !Ref CustomVocabularyName
             - Name: CUSTOM_LANGUAGE_MODEL_NAME
