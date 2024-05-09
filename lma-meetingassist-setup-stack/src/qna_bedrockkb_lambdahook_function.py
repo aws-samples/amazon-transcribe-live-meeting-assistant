@@ -267,12 +267,12 @@ def handler(event, context):
         print("no callId in request or session attributes")
 
     retrievePromptTemplate = event["req"]["_settings"].get(
-        "QUERY_PROMPT_TEMPLATE")
+        "ASSISTANT_QUERY_PROMPT_TEMPLATE")
     query = generateRetrieveQuery(
         retrievePromptTemplate, transcript, userInput)
 
     generatePromptTemplate = event["req"]["_settings"].get(
-        "GENERATE_PROMPT_TEMPLATE")
+        "ASSISTANT_GENERATE_PROMPT_TEMPLATE")
     kb_response = get_kb_response(
         generatePromptTemplate, transcript, query)
 

@@ -203,12 +203,12 @@ def handler(event, context):
         print("no callId in request or session attributes")
 
     queryPromptTemplate = event["req"]["_settings"].get(
-        "QUERY_PROMPT_TEMPLATE")
+        "ASSISTANT_QUERY_PROMPT_TEMPLATE")
     query = generateRetrieveQuery(
         queryPromptTemplate, transcript, userInput)
 
     generatePromptTemplate = event["req"]["_settings"].get(
-        "GENERATE_PROMPT_TEMPLATE")
+        "ASSISTANT_GENERATE_PROMPT_TEMPLATE")
     br_response = get_br_response(
         generatePromptTemplate, transcript, query)
     event = format_response(event, br_response, query)
