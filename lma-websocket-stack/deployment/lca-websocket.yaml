@@ -115,11 +115,14 @@ Parameters:
   TranscribeLanguageOptions:
     Type: String
     Default: ''
-    AllowedPattern: '^(|[a-z]{2}-[A-Z]{2}(?:,[a-z]{2}-[A-Z]{2})*)$'
+    AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN)\s*)*)?$'
+    ConstraintDescription: >-
+      Unsupported language code. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN
     Description: >-
       When TranscribeLanguageCode is set to 'identify-language' or 'identify-multiple-languages', optionally 
       specify two or more comma separated language codes, e.g. "en-US,es-US" that represent the languages you 
-      think may be used in your meeting; including more than five is not recommended. If you're unsure, leave it empty.
+      think may be used in your meeting; including more than five is not recommended. If you're unsure, leave it empty. 
+      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN
 
   TranscribePiiEntityTypes:
     Type: String
