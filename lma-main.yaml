@@ -104,9 +104,11 @@ Parameters:
   TranscribeLanguageCode:
     Type: String
     Description: >-
-      Language code to be used for Amazon Transcribe
+      Language code or language detection setting for Amazon Transcribe
     Default: en-US
     AllowedValues:
+      - identify-language
+      - identify-multiple-languages
       - en-US
       - es-US
       - en-GB
@@ -120,11 +122,24 @@ Parameters:
       - ko-KR
       - zh-CN
 
+  TranscribeLanguageOptions:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN)\s*)*)?$'
+    ConstraintDescription: >-
+      Unsupported language code. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN
+    Description: >-
+      When TranscribeLanguageCode is set to 'identify-language' or 'identify-multiple-languages', optionally 
+      specify two or more comma separated language codes, e.g. "en-US,es-US" that represent the languages you 
+      think may be used in your meeting; including more than five is not recommended. If you're unsure, leave it empty. 
+      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN
+
   TranscribePiiEntityTypes:
     Type: String
     Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
     Description: >-
-      Select the PII entity types you want to identify or redact. Remove the values that you don't want to redact from the default. DO NOT ADD CUSTOM VALUES HERE.
+      Select the PII entity types you want to identify or redact. Remove the values that you don't want to redact from the default. 
+      DO NOT ADD CUSTOM VALUES HERE.
 
   CustomVocabularyName:
     Type: String
@@ -287,6 +302,7 @@ Metadata:
           - IsPartialTranscriptEnabled
           - IsContentRedactionEnabled
           - TranscribeLanguageCode
+          - TranscribeLanguageOptions
           - TranscribeContentRedactionType
           - TranscribePiiEntityTypes
           - CustomVocabularyName
@@ -343,6 +359,8 @@ Metadata:
         default: Enable Content Redaction for Transcripts
       TranscribeLanguageCode:
         default: Language for Transcription
+      TranscribeLanguageOptions:
+        default: Transcribe Language Options
       TranscribeContentRedactionType:
         default: Content Redaction Type for Transcription
       TranscribePiiEntityTypes:
@@ -373,33 +391,12 @@ Metadata:
         default: Recording Expiration In Days
 
 Mappings:
-  TranscribeToComprehendLanguage:
-    en-US:
-      Value: en
-    es-US:
-      Value: es
-    en-GB:
-      Value: en
-    fr-CA:
-      Value: fr
-    fr-FR:
-      Value: fr
-    en-AU:
-      Value: en
-    it-IT:
-      Value: it
-    de-DE:
-      Value: de
-    pt-BR:
-      Value: pt
-    ja-JP:
-      Value: ja
-    ko-KR:
-      Value: ko
-    zh-CN:
-      Value: zh
 
   TranscribeToLexLocaleId:
+    identify-language:
+      Value: en_US
+    identify-multiple-languages:
+      Value: en_US
     en-US:
       Value: en_US
     es-US:
@@ -663,6 +660,7 @@ Resources:
         IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
+        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
