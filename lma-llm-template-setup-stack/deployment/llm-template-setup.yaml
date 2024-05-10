@@ -4,6 +4,15 @@ Description: Amazon Transcribe Live Meeting Assistant - LLM Prompts
 
 Transform: AWS::Serverless-2016-10-31
 
+Parameters:
+  Domain:
+    Type: String
+    Default: ''
+    AllowedValues:
+      - ''
+      - Healthcare
+    Description: The domain of the application (optional)
+
 Resources:
   LLMPromptTemplateTable:
     Type: "AWS::DynamoDB::Table"
@@ -60,6 +69,9 @@ Resources:
       Runtime: python3.11
       MemorySize: 128
       Timeout: 60
+      Environment:
+        Variables:
+          DOMAIN: !Ref Domain
 
   LLMStorePromptTemplates:
     Type: "AWS::CloudFormation::CustomResource"

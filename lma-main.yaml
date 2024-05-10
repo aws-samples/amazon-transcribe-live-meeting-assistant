@@ -19,6 +19,14 @@ Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.1)
 
 Parameters:
 
+  Domain:
+    Default: ''
+    Type: String
+    AllowedValues:
+      - ''
+      - 'Healthcare'
+    Description: Select the Healthcare domain if necessary, or leave it at default
+
   MeetingAssistService:
     Default: 'BEDROCK_KNOWLEDGE_BASE'
     Type: String
@@ -439,6 +447,7 @@ Rules:
 
 Conditions:
   ShouldConfigureBedrockKB: !Equals [!Ref MeetingAssistService, 'BEDROCK_KNOWLEDGE_BASE']
+  IsHealthcareDomainSelected: !Equals [ !Ref Domain, 'Healthcare' ]
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -551,6 +560,8 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
+      Parameters:
+        Domain: !Ref Domain
 
   AISTACK:
     Type: AWS::CloudFormation::Stack
@@ -629,7 +640,11 @@ Resources:
           ]
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         CloudFrontDistributionId: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
-        QnaMeetingAssistDemoJson: <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
+        #QnaMeetingAssistDemoJson: <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
+        QnaMeetingAssistDemoJson: !If
+          - IsHealthcareDomainSelected
+          - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-healthcare-demo.jsonl
+          - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
         # Changes to Params below force AgentAssist Setup to update.
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn

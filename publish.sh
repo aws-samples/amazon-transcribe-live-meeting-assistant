@@ -155,6 +155,7 @@ aws s3 cp ${tmpdir}/${template} ${s3_template}
 echo "Validating template"
 aws cloudformation validate-template --template-url ${https_template} > /dev/null || exit 1
 aws s3 cp ./qna-ma-demo.jsonl s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
+aws s3 cp ./qna-ma-healthcare-demo.jsonl s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/qna-ma-healthcare-demo.jsonl
 popd
 
 dir=lma-websocket-stack
