@@ -24,12 +24,11 @@ function Capture() {
   const [formError, setFormError] = React.useState(false);
   const [showDisclaimer, setShowDisclaimer] = React.useState(false);
 
-
   // componentDidMount:
   useEffect(() => {
     // Your code here
     fetchMetadata();
-  }, [fetchMetadata]);
+  }, []);
 
   useEffect(() => {
     console.log("Metadata changed");
