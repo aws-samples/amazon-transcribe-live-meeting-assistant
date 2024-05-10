@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.2] - TBD
+## [0.1.2] - 2024-05-10
 ### Added
-- New MeetingAssistService option to allow Bedrock LLM (without knowledge bases) to be used for 'OK Assistant' and 'Ask Assistant' responses.
-- Support for single language auto-detection - using Amazon Transcribe's 'Identify Language' feature with optional list of possible language codes.
-- Support for multiple language auto-detection - using Amazon Transcribe's 'Identify Multiple Languages' feature with optional list of possible language codes. 
+- Added option for Bedrock LLM (without knowledge bases) to be used as the meeting assistant service for 'OK Assistant' and 'Ask Assistant' responses. 
+- Added option for single language auto-detection - using Amazon Transcribe's 'Identify Language' feature with optional list of possible language codes.
+- Added option for multiple language auto-detection - using Amazon Transcribe's 'Identify Multiple Languages' feature with optional list of possible language codes. 
 ### Fixed
 - Added `&` to the previous defense against Meeting Names / IDs with special characters that are not URL safe, by replacing with pipe character `|` in the browser extension when starting the streaming. PR #10
 - Fix for #1 - "Stream Audio" tab stops working after a stack update when AssistantWakePhraseRegEx is modified. PR #11
