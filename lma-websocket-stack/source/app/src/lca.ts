@@ -336,6 +336,7 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
     }
 
     if (isTCAEnabled) {
+        console.log('TCA parameters:', tsParams);
         const response = await transcribeClient.send(
             new StartCallAnalyticsStreamTranscriptionCommand(tsParams as StartCallAnalyticsStreamTranscriptionCommandInput)
         );
@@ -349,7 +350,7 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
         if (showSpeakerLabel) {
             tsParams.ShowSpeakerLabel = true;
         }
-
+        console.log('Transcribe parameters:', tsParams);
         const response = await transcribeClient.send(
             new StartStreamTranscriptionCommand(tsParams)
         );
