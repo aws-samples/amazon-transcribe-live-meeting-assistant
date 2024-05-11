@@ -104,7 +104,8 @@ Parameters:
   TranscribeLanguageCode:
     Type: String
     Description: >-
-      Language code or language detection setting for Amazon Transcribe
+      Language code or language identification setting for Amazon Transcribe. NOTE: Language identification can't 
+      be combined with custom language models or redaction. 
     Default: en-US
     AllowedValues:
       - identify-language
@@ -121,18 +122,42 @@ Parameters:
       - ja-JP
       - ko-KR
       - zh-CN
+      - hi-IN
+      - th-TH
 
   TranscribeLanguageOptions:
     Type: String
-    Default: ''
-    AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN)\s*)*)?$'
+    Default: 'en-US, es-US'
+    AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*)*)?$'
     ConstraintDescription: >-
-      Unsupported language code. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN
+      Unsupported language code or invalid syntax. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
     Description: >-
-      When TranscribeLanguageCode is set to 'identify-language' or 'identify-multiple-languages', optionally 
-      specify two or more comma separated language codes, e.g. "en-US,es-US" that represent the languages you 
-      think may be used in your meeting; including more than five is not recommended. If you're unsure, leave it empty. 
-      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN
+      When using language identification, specify two or more language codes, e.g. "en-US, es-US" that represent the languages that may be 
+      used in your meeting. Including more than five is not recommended. 
+      Enter only one language dialect per language - e.g. 'en-US, en-AU' is not allowed.
+      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+
+  TranscribePreferredLanguage:
+    Type: String
+    Description: >-
+      Optionally select a preferred language when using language identification - must be one of the languages entered for TranscribeLanguageOptions.
+    Default: None
+    AllowedValues:
+      - None
+      - en-US
+      - es-US
+      - en-GB
+      - fr-CA
+      - fr-FR
+      - en-AU
+      - it-IT
+      - de-DE
+      - pt-BR
+      - ja-JP
+      - ko-KR
+      - zh-CN
+      - hi-IN
+      - th-TH
 
   TranscribePiiEntityTypes:
     Type: String
@@ -303,6 +328,7 @@ Metadata:
           - IsContentRedactionEnabled
           - TranscribeLanguageCode
           - TranscribeLanguageOptions
+          - TranscribePreferredLanguage
           - TranscribeContentRedactionType
           - TranscribePiiEntityTypes
           - CustomVocabularyName
@@ -361,6 +387,8 @@ Metadata:
         default: Language for Transcription
       TranscribeLanguageOptions:
         default: Transcribe Language Options
+      TranscribePreferredLanguage:
+        default: Transcribe Preferred Language
       TranscribeContentRedactionType:
         default: Content Redaction Type for Transcription
       TranscribePiiEntityTypes:
@@ -421,6 +449,10 @@ Mappings:
       Value: ko_KR
     zh-CN:
       Value: zh_CH
+    hi-IN:
+      Value: hi_IN
+    th-TH:
+      Value: th_TH
 
 Rules:
   # check required parameters
@@ -476,6 +508,61 @@ Resources:
       InputString: !Ref 'AWS::StackName'
       MaxLength: 25
   
+  # Custom resource to validate parameters
+  ValidateParametersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: python3.11
+      InlineCode: |
+        import cfnresponse
+        import json
+        def handler(event, context):
+            print(json.dumps(event))
+            transcribeLanguageCode = event['ResourceProperties'].get('TranscribeLanguageCode', '')
+            transcribeLanguageOptions = event['ResourceProperties'].get('TranscribeLanguageOptions', '')
+            transcribePreferredLanguage = event['ResourceProperties'].get('TranscribePreferredLanguage', '')
+            status = cfnresponse.SUCCESS
+            reason = f"Parameters Validated"
+            if event['RequestType'] == "Create":
+              if transcribeLanguageCode in ['identify-language', 'identify-multiple-languages']:
+                if transcribeLanguageOptions == '':
+                  status = cfnresponse.FAILED
+                  reason = f"At least two languages must be provided for TranscribeLanguageOptions when using language identification"
+                else:
+                  # only one language dialect per language
+                  languages = set()
+                  lang_codes = [l.strip() for l in transcribeLanguageOptions.split(',')]
+                  for lang_code in lang_codes:
+                    lang = lang_code.split('-')[0]
+                    if lang in languages:
+                      status = cfnresponse.FAILED
+                      reason = f"TranscribeLanguageOptions has a duplicate entry for '{lang}' - only one language dialect per language is allowed."
+                    languages.add(lang)
+                  # transcribePreferredLanguage must be in transcribeLanguageOptions
+                  if not transcribePreferredLanguage == 'None':
+                    if not transcribePreferredLanguage in lang_codes:
+                      status = cfnresponse.FAILED
+                      reason = f"TranscribePreferredLanguage '{transcribePreferredLanguage}' is not in TranscribeLanguageOptions '{transcribeLanguageOptions}'"
+            else:
+              print(f"Request type is {event['RequestType']} - skipping")
+            cfnresponse.send(event, context, status, {}, reason=reason)
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+
+  ValidateParameters:
+    Type: Custom::ValidateParameters
+    Properties:
+      ServiceToken: !GetAtt ValidateParametersFunction.Arn
+      TranscribeLanguageCode: !Ref TranscribeLanguageCode
+      TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
+      TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
+
   ToJSONFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -509,7 +596,9 @@ Resources:
 
   QNABOTBR:
     Type: AWS::CloudFormation::Stack
-    DependsOn: IsStacknameLengthOK
+    DependsOn: 
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot-plugins/bedrock-embeddings-and-llm.yaml
@@ -520,7 +609,9 @@ Resources:
 
   QNABOT:
     Type: AWS::CloudFormation::Stack
-    DependsOn: IsStacknameLengthOK
+    DependsOn: 
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot/templates/master.json
@@ -546,12 +637,17 @@ Resources:
 
   LLMTEMPLATESTACK:
     Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
 
   AISTACK:
     Type: AWS::CloudFormation::Stack
-    DependsOn: IsStacknameLengthOK
+    DependsOn: 
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-ai-stack/<VERSION_TOKEN>/template.yaml
@@ -661,6 +757,7 @@ Resources:
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
         TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
+        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
