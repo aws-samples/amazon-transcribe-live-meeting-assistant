@@ -93,17 +93,17 @@ function IntegrationProvider({ children }: any) {
   }
   
   const updateMetadata = useCallback((newMetadata:any) => {
-    if (newMetadata.baseUrl && newMetadata.baseUrl === "https://app.zoom.us") {
+    if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.zoom.us") {
       setPlatform("Zoom");
-    } else if (newMetadata.baseUrl && newMetadata.baseUrl === "https://app.chime.aws") {
+    } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.chime.aws") {
       setPlatform("Amazon Chime");
     }
     setMetadata(newMetadata);
   }, [metadata, setMetadata, platform, setPlatform]);
 
   const fetchMetadata = async () => {
-    const [tab] = await chrome.tabs.query({ active: true});
-    if (tab.id) {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (tab && tab.id) {
       const response = await chrome.tabs.sendMessage(tab.id, { action: "FetchMetadata" });
       console.log("Received response from Metadata query!", response);
       updateMetadata(response);
@@ -113,7 +113,7 @@ function IntegrationProvider({ children }: any) {
 
   const sendRecordingMessage = useCallback(async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (tab.id) {
+    if (tab && tab.id) {
       const response = await chrome.tabs.sendMessage(tab.id, { action: "SendChatMessage", message: settings.recordingMessage });
     }
     return {};
@@ -122,7 +122,7 @@ function IntegrationProvider({ children }: any) {
 
   const sendStopMessage = useCallback(async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (tab.id) {
+    if (tab && tab.id) {
       const response = await chrome.tabs.sendMessage(tab.id, { action: "SendChatMessage", message: settings.stopRecordingMessage });
     }
     return {};
