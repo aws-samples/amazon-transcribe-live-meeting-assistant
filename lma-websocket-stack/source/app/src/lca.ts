@@ -54,6 +54,7 @@ const TRANSCRIBE_API_MODE = process.env['TRANSCRIBE_API_MODE'] || 'standard';
 const isTCAEnabled = TRANSCRIBE_API_MODE === 'analytics';
 const TRANSCRIBE_LANGUAGE_CODE = process.env['TRANSCRIBE_LANGUAGE_CODE'] || 'en-US';
 const TRANSCRIBE_LANGUAGE_OPTIONS = process.env['TRANSCRIBE_LANGUAGE_OPTIONS'] || undefined;
+const TRANSCRIBE_PREFERRED_LANGUAGE = process.env['TRANSCRIBE_PREFERRED_LANGUAGE'] || 'None';
 const CUSTOM_VOCABULARY_NAME = process.env['CUSTOM_VOCABULARY_NAME'] || undefined;
 const CUSTOM_LANGUAGE_MODEL_NAME = process.env['CUSTOM_LANGUAGE_MODEL_NAME'] || undefined;
 const IS_CONTENT_REDACTION_ENABLED = (process.env['IS_CONTENT_REDACTION_ENABLED'] || '') === 'true';
@@ -311,12 +312,18 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
     if (TRANSCRIBE_LANGUAGE_CODE === 'identify-language') {
         tsParams.IdentifyLanguage = true;
         if (TRANSCRIBE_LANGUAGE_OPTIONS) {
-            tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS;
+            tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
+            if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
+                tsParams.PreferredLanguage = TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
+            }
         }
     } else if (TRANSCRIBE_LANGUAGE_CODE === 'identify-multiple-languages') {
         tsParams.IdentifyMultipleLanguages = true;
         if (TRANSCRIBE_LANGUAGE_OPTIONS) {
-            tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS;
+            tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
+            if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
+                tsParams.PreferredLanguage = TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
+            }
         }
     } else {
         tsParams.LanguageCode = TRANSCRIBE_LANGUAGE_CODE as LanguageCode;
@@ -350,7 +357,7 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
         if (showSpeakerLabel) {
             tsParams.ShowSpeakerLabel = true;
         }
-        console.log('Transcribe parameters:', tsParams);
+        console.log('Transcribe parameters:', JSON.stringify(tsParams));
         const response = await transcribeClient.send(
             new StartStreamTranscriptionCommand(tsParams)
         );
