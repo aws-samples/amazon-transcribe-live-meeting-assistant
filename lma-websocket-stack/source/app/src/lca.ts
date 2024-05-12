@@ -357,7 +357,7 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
         if (showSpeakerLabel) {
             tsParams.ShowSpeakerLabel = true;
         }
-        console.log('Transcribe parameters:', tsParams);
+        console.log('Transcribe parameters:', JSON.stringify(tsParams));
         const response = await transcribeClient.send(
             new StartStreamTranscriptionCommand(tsParams)
         );
