@@ -118,7 +118,7 @@ window.onload = function () {
       } else */
       if (mutation.type === "characterData") {
         // this is a changed record
-        if (!mutation.target.data.includes("Mute") && !mutation.target.data.includes("Only they may unmute themselves.")) {
+        if (!mutation.target.data.includes("Mute") && !mutation.target.data.includes("Unmute my microphone") && !mutation.target.data.includes("Only they may unmute themselves.")) {
           const activeSpeaker = mutation.target.data;
           if (activeSpeaker !== 'No one') {
             chrome.runtime.sendMessage({action: "ActiveSpeakerChange", active_speaker: activeSpeaker});
