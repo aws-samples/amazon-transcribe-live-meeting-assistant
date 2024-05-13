@@ -118,7 +118,9 @@ window.onload = function () {
       } else */
       if (mutation.type === "characterData") {
         // this is a changed record
-        if (!mutation.target.data.includes("Mute") && !mutation.target.data.includes("Only they may unmute themselves.")) {
+        // The following will ignore text that includes the word 'Mute', 'Unmute my microphone', 
+        // and 'Only they may' which covers both 'Only they may mute themselves' and 'Only they may unmute themselves', which appear as text within the active speaker.
+        if (!mutation.target.data.includes("Mute") && !mutation.target.data.includes("Unmute my microphone") && !mutation.target.data.includes("Only they may")) {
           const activeSpeaker = mutation.target.data;
           if (activeSpeaker !== 'No one') {
             chrome.runtime.sendMessage({action: "ActiveSpeakerChange", active_speaker: activeSpeaker});
