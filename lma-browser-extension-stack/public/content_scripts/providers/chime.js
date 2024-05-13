@@ -119,7 +119,7 @@ window.onload = function () {
       if (mutation.type === "characterData") {
         // this is a changed record
         // The following will ignore text that includes the word 'Mute', 'Unmute my microphone', 
-        // and 'Only they may'(to cover both 'Only they may mute themselves' and 'Only they may unmute themselves', which appear as text within the active speaker.
+        // and 'Only they may' which covers both 'Only they may mute themselves' and 'Only they may unmute themselves', which appear as text within the active speaker.
         if (!mutation.target.data.includes("Mute") && !mutation.target.data.includes("Unmute my microphone") && !mutation.target.data.includes("Only they may")) {
           const activeSpeaker = mutation.target.data;
           if (activeSpeaker !== 'No one') {
