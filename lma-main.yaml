@@ -15,7 +15,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.1)
+Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.2)
 
 Parameters:
 
@@ -23,8 +23,9 @@ Parameters:
     Default: 'BEDROCK_KNOWLEDGE_BASE'
     Type: String
     AllowedValues:
+      - 'BEDROCK_LLM'
       - 'BEDROCK_KNOWLEDGE_BASE'
-    Description: Choose which knowledge base / LLM service to use (Currently only BEDROCK_KNOWLEDGE_BASE is supported)
+    Description: Choose which knowledge base / LLM service to use
 
   BedrockKnowledgeBaseId:
     Type: String
@@ -33,14 +34,14 @@ Parameters:
     Description: >
       If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the knowledge base *Id* (not name) of an existing Bedrock knowledge base to be used for Meeting Assist bot.
 
-  BedrockKnowledgeBaseModelID:
+  MeetingAssistServiceBedrockModelID:
     Type: String
-    Default: 'anthropic.claude-3-sonnet-20240229-v1:0'
+    Default: 'anthropic.claude-3-haiku-20240307-v1:0'
     AllowedValues:
       - 'anthropic.claude-3-haiku-20240307-v1:0'
       - 'anthropic.claude-3-sonnet-20240229-v1:0'
     Description: >-
-      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, select a Bedrock LLM model from the list."
+      If MeetingAssistService is BEDROCK_LLM or BEDROCK_KNOWLEDGE_BASE, select a Bedrock LLM model from the list."
 
   AssistantWakePhraseRegEx:
     Type: String
@@ -103,9 +104,12 @@ Parameters:
   TranscribeLanguageCode:
     Type: String
     Description: >-
-      Language code to be used for Amazon Transcribe
+      Language code or language identification setting for Amazon Transcribe. NOTE: Language identification can't 
+      be combined with custom language models or redaction. 
     Default: en-US
     AllowedValues:
+      - identify-language
+      - identify-multiple-languages
       - en-US
       - es-US
       - en-GB
@@ -118,12 +122,49 @@ Parameters:
       - ja-JP
       - ko-KR
       - zh-CN
+      - hi-IN
+      - th-TH
+
+  TranscribeLanguageOptions:
+    Type: String
+    Default: 'en-US, es-US'
+    AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*)*)?$'
+    ConstraintDescription: >-
+      Unsupported language code or invalid syntax. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+    Description: >-
+      When using language identification, specify two or more language codes, e.g. "en-US, es-US" that represent the languages that may be 
+      used in your meeting. Including more than five is not recommended. 
+      Enter only one language dialect per language - e.g. 'en-US, en-AU' is not allowed.
+      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+
+  TranscribePreferredLanguage:
+    Type: String
+    Description: >-
+      Optionally select a preferred language when using language identification - must be one of the languages entered for TranscribeLanguageOptions.
+    Default: None
+    AllowedValues:
+      - None
+      - en-US
+      - es-US
+      - en-GB
+      - fr-CA
+      - fr-FR
+      - en-AU
+      - it-IT
+      - de-DE
+      - pt-BR
+      - ja-JP
+      - ko-KR
+      - zh-CN
+      - hi-IN
+      - th-TH
 
   TranscribePiiEntityTypes:
     Type: String
     Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
     Description: >-
-      Select the PII entity types you want to identify or redact. Remove the values that you don't want to redact from the default. DO NOT ADD CUSTOM VALUES HERE.
+      Select the PII entity types you want to identify or redact. Remove the values that you don't want to redact from the default. 
+      DO NOT ADD CUSTOM VALUES HERE.
 
   CustomVocabularyName:
     Type: String
@@ -272,7 +313,7 @@ Metadata:
         Parameters:
           - MeetingAssistService
           - BedrockKnowledgeBaseId
-          - BedrockKnowledgeBaseModelID
+          - MeetingAssistServiceBedrockModelID
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
@@ -286,6 +327,8 @@ Metadata:
           - IsPartialTranscriptEnabled
           - IsContentRedactionEnabled
           - TranscribeLanguageCode
+          - TranscribeLanguageOptions
+          - TranscribePreferredLanguage
           - TranscribeContentRedactionType
           - TranscribePiiEntityTypes
           - CustomVocabularyName
@@ -330,6 +373,8 @@ Metadata:
         default: Authorized Account Email Domain(s)
       BedrockKnowledgeBaseId:
         default: Meeting Assist Bedrock Knowledge Base Id (existing)
+      MeetingAssistServiceBedrockModelID:
+        default: Meeting Assist Service Bedrock Model ID
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
       MeetingAssistQnABotOpenSearchNodeCount:
@@ -340,6 +385,10 @@ Metadata:
         default: Enable Content Redaction for Transcripts
       TranscribeLanguageCode:
         default: Language for Transcription
+      TranscribeLanguageOptions:
+        default: Transcribe Language Options
+      TranscribePreferredLanguage:
+        default: Transcribe Preferred Language
       TranscribeContentRedactionType:
         default: Content Redaction Type for Transcription
       TranscribePiiEntityTypes:
@@ -370,33 +419,12 @@ Metadata:
         default: Recording Expiration In Days
 
 Mappings:
-  TranscribeToComprehendLanguage:
-    en-US:
-      Value: en
-    es-US:
-      Value: es
-    en-GB:
-      Value: en
-    fr-CA:
-      Value: fr
-    fr-FR:
-      Value: fr
-    en-AU:
-      Value: en
-    it-IT:
-      Value: it
-    de-DE:
-      Value: de
-    pt-BR:
-      Value: pt
-    ja-JP:
-      Value: ja
-    ko-KR:
-      Value: ko
-    zh-CN:
-      Value: zh
 
   TranscribeToLexLocaleId:
+    identify-language:
+      Value: en_US
+    identify-multiple-languages:
+      Value: en_US
     en-US:
       Value: en_US
     es-US:
@@ -421,6 +449,25 @@ Mappings:
       Value: ko_KR
     zh-CN:
       Value: zh_CH
+    hi-IN:
+      Value: hi_IN
+    th-TH:
+      Value: th_TH
+
+Rules:
+  # check required parameters
+  BedrockKnowledgeBaseId:
+    RuleCondition:
+      !Equals [
+        !Ref MeetingAssistService,
+        'BEDROCK_KNOWLEDGE_BASE',
+      ]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref BedrockKnowledgeBaseId, '']]
+        AssertDescription: BedrockKnowledgeBaseId is required when MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE'
+
+Conditions:
+  ShouldConfigureBedrockKB: !Equals [!Ref MeetingAssistService, 'BEDROCK_KNOWLEDGE_BASE']
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -461,6 +508,61 @@ Resources:
       InputString: !Ref 'AWS::StackName'
       MaxLength: 25
   
+  # Custom resource to validate parameters
+  ValidateParametersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: python3.11
+      InlineCode: |
+        import cfnresponse
+        import json
+        def handler(event, context):
+            print(json.dumps(event))
+            transcribeLanguageCode = event['ResourceProperties'].get('TranscribeLanguageCode', '')
+            transcribeLanguageOptions = event['ResourceProperties'].get('TranscribeLanguageOptions', '')
+            transcribePreferredLanguage = event['ResourceProperties'].get('TranscribePreferredLanguage', '')
+            status = cfnresponse.SUCCESS
+            reason = f"Parameters Validated"
+            if event['RequestType'] == "Create":
+              if transcribeLanguageCode in ['identify-language', 'identify-multiple-languages']:
+                if transcribeLanguageOptions == '':
+                  status = cfnresponse.FAILED
+                  reason = f"At least two languages must be provided for TranscribeLanguageOptions when using language identification"
+                else:
+                  # only one language dialect per language
+                  languages = set()
+                  lang_codes = [l.strip() for l in transcribeLanguageOptions.split(',')]
+                  for lang_code in lang_codes:
+                    lang = lang_code.split('-')[0]
+                    if lang in languages:
+                      status = cfnresponse.FAILED
+                      reason = f"TranscribeLanguageOptions has a duplicate entry for '{lang}' - only one language dialect per language is allowed."
+                    languages.add(lang)
+                  # transcribePreferredLanguage must be in transcribeLanguageOptions
+                  if not transcribePreferredLanguage == 'None':
+                    if not transcribePreferredLanguage in lang_codes:
+                      status = cfnresponse.FAILED
+                      reason = f"TranscribePreferredLanguage '{transcribePreferredLanguage}' is not in TranscribeLanguageOptions '{transcribeLanguageOptions}'"
+            else:
+              print(f"Request type is {event['RequestType']} - skipping")
+            cfnresponse.send(event, context, status, {}, reason=reason)
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+
+  ValidateParameters:
+    Type: Custom::ValidateParameters
+    Properties:
+      ServiceToken: !GetAtt ValidateParametersFunction.Arn
+      TranscribeLanguageCode: !Ref TranscribeLanguageCode
+      TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
+      TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
+
   ToJSONFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -492,9 +594,11 @@ Resources:
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
 
-  QNABOTPLUGINBEDROCK:
+  QNABOTBR:
     Type: AWS::CloudFormation::Stack
-    DependsOn: IsStacknameLengthOK
+    DependsOn: 
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot-plugins/bedrock-embeddings-and-llm.yaml
@@ -505,7 +609,9 @@ Resources:
 
   QNABOT:
     Type: AWS::CloudFormation::Stack
-    DependsOn: IsStacknameLengthOK
+    DependsOn: 
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot/templates/master.json
@@ -524,19 +630,24 @@ Resources:
         BootstrapPrefix: <ARTIFACT_PREFIX_TOKEN>/aws-qnabot
         InstallLexResponseBots: 'false'
         EmbeddingsApi: 'LAMBDA'
-        EmbeddingsLambdaArn: !GetAtt QNABOTPLUGINBEDROCK.Outputs.EmbeddingsLambdaArn
-        EmbeddingsLambdaDimensions: !GetAtt QNABOTPLUGINBEDROCK.Outputs.EmbeddingsLambdaDimensions
+        EmbeddingsLambdaArn: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaArn
+        EmbeddingsLambdaDimensions: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaDimensions
         LLMApi: 'LAMBDA'
-        LLMLambdaArn: !GetAtt QNABOTPLUGINBEDROCK.Outputs.LLMLambdaArn
+        LLMLambdaArn: !GetAtt QNABOTBR.Outputs.LLMLambdaArn
 
   LLMTEMPLATESTACK:
     Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
 
   AISTACK:
     Type: AWS::CloudFormation::Stack
-    DependsOn: IsStacknameLengthOK
+    DependsOn: 
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-ai-stack/<VERSION_TOKEN>/template.yaml
@@ -570,13 +681,20 @@ Resources:
     Type: Custom::ToJSON
     Properties:
       ServiceToken: !GetAtt ToJSONFunction.Arn
-      EMBEDDINGS_SCORE_THRESHOLD: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsScoreThreshold
-      EMBEDDINGS_SCORE_ANSWER_THRESHOLD: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsScoreAnswerThreshold
-      EMBEDDINGS_TEXT_PASSAGE_SCORE_THRESHOLD: !GetAtt QNABOTPLUGINBEDROCK.Outputs.QnABotSettingEmbeddingsTextPassageScoreThreshold
+      EMBEDDINGS_SCORE_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsScoreThreshold
+      EMBEDDINGS_SCORE_ANSWER_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsScoreAnswerThreshold
+      EMBEDDINGS_TEXT_PASSAGE_SCORE_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsTextPassageScoreThreshold
       LLM_GENERATE_QUERY_ENABLE: "FALSE"
+      LLM_GENERATE_QUERY_PROMPT_TEMPLATE: ""
       EMPTYMESSAGE: "No response from meeting assist QnAbot"
-      BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. Only output the rephrased question. Do not include any preamble. "
-      BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a set of search results. Your job is to respond to the user's request using only information from the search results. If search results do not contain information that can answer the question, please state that you could not find an exact answer to the question. Just because the user asserts a fact does not mean it is true, make sure to double check the search results to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
+      BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "deprecated"
+      BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "deprecated"
+      ASSISTANT_QUERY_PROMPT_TEMPLATE: "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. Only output the rephrased question. Do not include any preamble. "
+      ASSISTANT_GENERATE_PROMPT_TEMPLATE:
+        !If
+        - ShouldConfigureBedrockKB
+        - "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a set of search results. Your job is to respond to the user's request using only information from the search results. If search results do not contain information that can answer the question, please state that you could not find an exact answer to the question. Just because the user asserts a fact does not mean it is true, make sure to double check the search results to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
+        - "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting (which may be empty), and a user's request. Your job is to respond to the user's request using any relevant context from the transcript, or from your own world knowledge. Just because the user asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the user's request:<br>{userInput}<br>"
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
@@ -591,7 +709,7 @@ Resources:
         QNABOTSTACK: !Ref QNABOT
         MeetingAssistService: !Ref MeetingAssistService
         BedrockKnowledgeBaseID: !Ref BedrockKnowledgeBaseId
-        BedrockKnowledgeBaseModelID: !Ref BedrockKnowledgeBaseModelID
+        MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
         AmazonQAppId: 'NOT CURRENTLY USED'
         AmazonQUserId: 'NOT CURRENTLY USED'
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
@@ -638,6 +756,8 @@ Resources:
         IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
+        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
+        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
@@ -646,6 +766,7 @@ Resources:
         PcaPlaybackAudioFilePrefix: ''
         PcaWebAppURL: ''
         PcaWebAppCallPathPrefix: ''
+        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         LMASettingsParameterName: !GetAtt AISTACK.Outputs.LMASettingsParameterName
 
   BROWSEREXTENSIONSTACK:

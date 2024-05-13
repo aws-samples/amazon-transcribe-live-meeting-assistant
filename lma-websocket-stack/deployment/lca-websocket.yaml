@@ -94,9 +94,12 @@ Parameters:
   TranscribeLanguageCode:
     Type: String
     Description: >-
-      Language code to be used for Amazon Transcribe
+      Language code or language detection setting for Amazon Transcribe. NOTE: Streaming language identification can't 
+      be combined with custom language models or redaction. 
     Default: en-US
     AllowedValues:
+      - identify-language
+      - identify-multiple-languages
       - en-US
       - es-US
       - en-GB
@@ -109,6 +112,44 @@ Parameters:
       - ja-JP
       - ko-KR
       - zh-CN
+      - hi-IN
+      - th-TH
+
+  TranscribeLanguageOptions:
+    Type: String
+    Default: 'en-US, es-US'
+    AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*)*)?$'
+    ConstraintDescription: >-
+      Unsupported language code. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+    Description: >-
+      When TranscribeLanguageCode is set to 'identify-language' or 'identify-multiple-languages',  
+      specify two or more comma separated language codes, e.g. "en-US,es-US" that represent the languages you 
+      think may be used in your meeting. Including more than five is not recommended. 
+      You can select only one language dialect per language per stream - i.e. you cannot select both en-US and en-AU as language options.
+      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+
+  TranscribePreferredLanguage:
+    Type: String
+    Description: >-
+      Select a preferred language from the set of language codes you provide for TranscribeLanguageOptions, when 
+      TranscribeLanguageCode is set to identify-language or identify-multiple-languages. 
+    Default: None
+    AllowedValues:
+      - None
+      - en-US
+      - es-US
+      - en-GB
+      - fr-CA
+      - fr-FR
+      - en-AU
+      - it-IT
+      - de-DE
+      - pt-BR
+      - ja-JP
+      - ko-KR
+      - zh-CN
+      - hi-IN
+      - th-TH
 
   TranscribePiiEntityTypes:
     Type: String
@@ -163,6 +204,16 @@ Parameters:
   LMASettingsParameterName:
     Type: String
     Description: LCA settings SSM Parameter store 
+
+  # NOTE: "AssistantWakePhraseRegEx" (wake phrase parameter) is not used by this stack/lambda function. 
+  # It is added to parameters only to force a custom resource update when wake phrase parameter 
+  # in the main stack is changed. The custom resource update then runs UpdateWSEndpointSettings lambda to restore 
+  # "WSEndpoint" and "recordingDisclaimer" fields overwritten by AI Stack (when wake phrase is changed).
+  AssistantWakePhraseRegEx:
+    Type: String
+    Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
+    Description: >
+      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant'.
 
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
@@ -225,6 +276,10 @@ Metadata:
         default: Type of Content Redaction
       TranscribeLanguageCode:
         default: Transcription Language Code
+      TranscribeLanguageOptions:
+        default: Transcribe Language Options
+      TranscribePreferredLanguage:
+        default: Transcribe Preferred Language
       TranscribePiiEntityTypes:
         default: Transcription PII Redaction Entity Types
       CustomVocabularyName:
@@ -1181,6 +1236,10 @@ Resources:
               Value: !Ref TranscribePiiEntityTypes      
             - Name: TRANSCRIBE_LANGUAGE_CODE
               Value: !Ref TranscribeLanguageCode
+            - Name: TRANSCRIBE_LANGUAGE_OPTIONS
+              Value: !Ref TranscribeLanguageOptions
+            - Name: TRANSCRIBE_PREFERRED_LANGUAGE
+              Value: !Ref TranscribePreferredLanguage
             - Name: CUSTOM_VOCABULARY_NAME
               Value: !Ref CustomVocabularyName
             - Name: CUSTOM_LANGUAGE_MODEL_NAME
@@ -1200,10 +1259,10 @@ Resources:
           PortMappings:
             - ContainerPort: 8080
               Protocol: tcp
-      Cpu: 2048
+      Cpu: 256
       ExecutionRoleArn: !GetAtt TranscriberWebsocketTaskDefExecutionRole.Arn
       Family: !Sub ${AWS::StackName}TranscriberWebsocketTaskDef
-      Memory: 4096
+      Memory: 1024
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -1520,6 +1579,11 @@ Resources:
                         - !GetAtt WebSocketCloudFrontDistribution.DomainName
                         - '/api/v1/ws'
       recordingDisclaimer: !Ref RecordingDisclaimer
+      # "AssistantWakePhraseRegEx" (wake phrase parameter) is not used by this stack/lambda function. 
+      # It is added to parameters only to force a custom resource update when wake phrase parameter 
+      # in the main stack is changed. The custom resource update then runs UpdateWSEndpointSettings lambda to restore 
+      # "WSEndpoint" and "recordingDisclaimer" fields overwritten by AI Stack (when wake phrase is changed).
+      assistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 

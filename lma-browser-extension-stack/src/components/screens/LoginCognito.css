@@ -16,3 +16,10 @@ main {
   text-align: center;
   margin-top: 0px;
 }
+
+.version {
+  text-align: center;
+  margin-top: 0px;
+  font-size: 0.8em;
+  color:lightgray;
+}
