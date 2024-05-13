@@ -48,7 +48,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 });
 
 const checkForMeetingMetadata = function() {
-  const titleInterval = setInterval(() => {
+  setTimeout(() => {
     //console.log('Checking for title');
     let sessionData = undefined;
     try {
@@ -65,7 +65,6 @@ const checkForMeetingMetadata = function() {
       //console.log('Title found');
       let title = titles[0].innerText;
       metadata.meetingTopic = title;
-      clearInterval(titleInterval);
     } else {
       const title = document.title.replace("Amazon Chime: ", "");
       metadata.meetingTopic = title;

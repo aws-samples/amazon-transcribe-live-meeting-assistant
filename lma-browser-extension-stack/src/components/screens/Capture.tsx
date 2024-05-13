@@ -24,7 +24,6 @@ function Capture() {
   const [formError, setFormError] = React.useState(false);
   const [showDisclaimer, setShowDisclaimer] = React.useState(false);
 
-
   // componentDidMount:
   useEffect(() => {
     // Your code here
@@ -33,8 +32,12 @@ function Capture() {
 
   useEffect(() => {
     console.log("Metadata changed");
-    setTopic(metadata.meetingTopic);
-    setAgentName(metadata.userName);
+    if (metadata && metadata.meetingTopic) {
+      setTopic(metadata.meetingTopic);
+    }
+    if (metadata && metadata.userName) {
+      setAgentName(metadata.userName);
+    }
   }, [metadata, setTopic, setAgentName]);
 
   const validateForm = useCallback(() => {
@@ -84,6 +87,16 @@ function Capture() {
   const unmute = useCallback(() => {
     setMuted(false);
   }, [muted, setMuted]);
+
+  const [ version, setVersion ] = React.useState("");
+  useEffect(() => {
+    if (chrome && chrome.runtime) {
+      const manifestData = chrome.runtime.getManifest();
+      setVersion(manifestData.version)
+    } else {
+      setVersion("dev/web");
+    }
+  }, [version, setVersion]);
 
   return (
     <ContentLayout
@@ -175,6 +188,10 @@ function Capture() {
               <Button  iconAlign="left" iconName="microphone" fullWidth={true} onClick={() => mute()}>Mute Me</Button>
             }
             <Button fullWidth={true} onClick={() => logout()}>Log out</Button>
+          </Grid>
+
+          <Grid gridDefinition={[{ colspan: 10, offset: 1 }]}>
+            <div className='version'>{version}</div>
           </Grid>
         </SpaceBetween>
       </Container>
