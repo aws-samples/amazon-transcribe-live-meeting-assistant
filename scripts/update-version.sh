@@ -33,8 +33,7 @@ UI_PACKAGE_LOCK_JSON_FILE=${UI_PACKAGE_LOCK_JSON_FILE:-"${AI_STACK_DIR}/source/u
 EXTENSION_PACKAGE_JSON_FILE=${EXTENSION_PACKAGE_JSON_FILE:-"${EXTENSION_STACK_DIR}/package.json"}
 EXTENSION_MANIFEST_FILE=${EXTENSION_MANIFEST_FILE:-"${EXTENSION_STACK_DIR}/public/manifest.json"}
 
-
-export VERSION_REGEX="${VERSION_REGEX:-$'((0|[1-9]\d*)\.){2\}(0|[1-9]\d*)'}"
+export VERSION_REGEX="${VERSION_REGEX:-$'([0-9]+)\.([0-9]+)\.([0-9]+)'}"
 
 if [[ -f "$VERSION_FILE" ]] ; then
     echo "Updating version in ${VERSION_FILE} file"
