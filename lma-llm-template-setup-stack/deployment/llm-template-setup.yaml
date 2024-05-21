@@ -9,7 +9,7 @@ Parameters:
     Type: String
     Default: 'Default'
     AllowedValues:
-      - 'Default'
+      - Default
       - Healthcare
     Description: The domain of the application (optional)
 
