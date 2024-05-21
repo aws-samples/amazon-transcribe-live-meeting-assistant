@@ -367,7 +367,6 @@ Metadata:
           default: Business Domain
         Parameters:
           - Domain
-
     ParameterLabels:
       CallAudioProcessor:
         default: Call Audio Processor
