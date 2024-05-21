@@ -429,6 +429,8 @@ Metadata:
         default: Record Expiration In Days
       RecordingsBucketRetentionDays:
         default: Recording Expiration In Days
+      Domain:
+        default: Select the Healthcare domain if necessary, or leave it at default
 
 Mappings:
 
