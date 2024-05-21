@@ -7,9 +7,9 @@ Transform: AWS::Serverless-2016-10-31
 Parameters:
   Domain:
     Type: String
-    Default: ''
+    Default: 'Default'
     AllowedValues:
-      - ''
+      - 'Default'
       - Healthcare
     Description: The domain of the application (optional)
 

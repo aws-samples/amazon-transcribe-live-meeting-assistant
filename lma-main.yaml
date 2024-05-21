@@ -25,7 +25,7 @@ Parameters:
     AllowedValues:
       - 'Default'
       - 'Healthcare'
-    Description: Select the Healthcare domain if necessary, or leave it at default
+    Description: Select the appropriate domain as necessary, or leave it at default
 
   MeetingAssistService:
     Default: 'BEDROCK_KNOWLEDGE_BASE'
@@ -428,8 +428,7 @@ Metadata:
         default: Record Expiration In Days
       RecordingsBucketRetentionDays:
         default: Recording Expiration In Days
-      Domain:
-        default: Select the Healthcare domain if necessary, or leave it at default
+
 
 Mappings:
 
