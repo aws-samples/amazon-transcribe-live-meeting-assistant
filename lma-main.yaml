@@ -19,15 +19,13 @@ Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.2)
 
 Parameters:
 
-
-
-#  Domain:
-#    Default: ''
-#    Type: String
-#    AllowedValues:
-#      - ''
-#      - 'Healthcare'
-#    Description: Select the Healthcare domain if necessary, or leave it at default
+  Domain:
+    Default: 'Default'
+    Type: String
+    AllowedValues:
+      - 'Default'
+      - 'Healthcare'
+    Description: Select the Healthcare domain if necessary, or leave it at default
 
   MeetingAssistService:
     Default: 'BEDROCK_KNOWLEDGE_BASE'
@@ -309,14 +307,6 @@ Parameters:
     Type: Number
     Description: 'Number of days after which bucket objects will be deleted from the Recordings bucket.'
     Default: 30
-
-  Domain:
-    Default: 'Default'
-    Type: String
-    AllowedValues:
-      - 'Default'
-      - 'Healthcare'
-    Description: Select the Healthcare domain if necessary, or leave it at default
 
 Metadata:
   AWS::CloudFormation::Interface:
