@@ -127,7 +127,7 @@ export const writeTranscriptionSegment = async function (transcribeMessageJson: 
                 EventType: 'ADD_TRANSCRIPT_SEGMENT',
                 CallId: callMetadata.callId,
                 Channel: (result.ChannelId === 'ch_0' ? 'CALLER' : 'AGENT'),
-                SegmentId: result.ResultId || '',
+                SegmentId: `${result.ChannelId}-${result.StartTime}`,
                 StartTime: result.StartTime || 0,
                 EndTime: result.EndTime || 0,
                 Transcript: transcript || '',
