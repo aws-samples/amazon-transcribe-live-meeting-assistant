@@ -46,6 +46,17 @@
     },
     {
       "matches": [
+        "https://web.webex.com/*"
+      ],
+      "js": [
+        "content_scripts/mutation-summary.js",
+        "content_scripts/providers/webex.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "<all_urls>"
       ],
       "js": [
@@ -60,7 +71,8 @@
         "content_scripts/recorder/recorder.js",
         "content_scripts/recorder/audio-worklet.js",
         "content_scripts/providers/chime-injection.js",
-        "content_scripts/providers/zoom-injection.js"
+        "content_scripts/providers/zoom-injection.js",
+        "content_scripts/providers/webex-injection.js"
       ],
       "matches": [
         "<all_urls>"

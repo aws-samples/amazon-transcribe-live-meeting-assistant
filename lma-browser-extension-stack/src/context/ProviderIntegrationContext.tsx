@@ -97,6 +97,8 @@ function IntegrationProvider({ children }: any) {
       setPlatform("Zoom");
     } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.chime.aws") {
       setPlatform("Amazon Chime");
+    } else if (newMetadata && newMetadata.baseUrl && /^https:\/\/.*\.webex\.com\/$/.test(newMetadata.baseUrl)) {
+      setPlatform("Webex");
     }
     setMetadata(newMetadata);
   }, [metadata, setMetadata, platform, setPlatform]);
