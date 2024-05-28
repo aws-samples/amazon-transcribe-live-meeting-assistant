@@ -165,7 +165,7 @@ const CallSummary = ({ item }) => {
         </Header>
       }
     >
-      <Grid gridDefinition={[{ colspan: { default: 12, xs: 6 } }]}>
+      <Grid gridDefinition={[{ colspan: { default: 12 } }]}>
         <Tabs
           tabs={[
             {
