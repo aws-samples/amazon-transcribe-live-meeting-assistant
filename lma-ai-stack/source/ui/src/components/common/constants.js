@@ -3,8 +3,6 @@
 
 // eslint-disable import/prefer-default-export
 
-
-
 export const DEFAULT_OTHER_SPEAKER_NAME = 'Other Participant';
 export const DEFAULT_LOCAL_SPEAKER_NAME = 'Me';
 export const SYSTEM = 'System';

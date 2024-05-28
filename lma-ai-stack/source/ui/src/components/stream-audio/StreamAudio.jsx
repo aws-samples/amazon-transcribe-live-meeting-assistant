@@ -40,7 +40,10 @@ const StreamAudio = () => {
 
   const [recording, setRecording] = useState(false);
   const [streamingStarted, setStreamingStarted] = useState(false);
-  const [micInputOption, setMicInputOption] = useState({ label: DEFAULT_LOCAL_SPEAKER_NAME, value: 'agent' });
+  const [micInputOption, setMicInputOption] = useState({
+    label: DEFAULT_LOCAL_SPEAKER_NAME,
+    value: 'agent',
+  });
 
   const getSocketUrl = useCallback(() => {
     console.log(`DEBUG - [${new Date().toISOString()}]: Trying to resolve websocket url...`);
