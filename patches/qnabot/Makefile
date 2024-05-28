@@ -1,4 +1,4 @@
-TEMPLATES=$(shell for l in $$(ls ./templates | egrep -v "util|lib|dev|README.md");do echo templates/$$l;done)
+TEMPLATES=$(shell for l in $$(ls ./templates | egrep -v "__tests__|util|lib|dev|README.md|jest.config.js|package.json|package-lock.json");do echo templates/$$l;done)
 
 All: ml_model assets templates lambda website make_directories
 
