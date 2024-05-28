@@ -16,6 +16,11 @@ import {
 import '@awsui/global-styles/index.css';
 import useWebSocket from 'react-use-websocket';
 
+import {
+  DEFAULT_OTHER_SPEAKER_NAME,
+  DEFAULT_LOCAL_SPEAKER_NAME,
+  SYSTEM,
+} from '../common/constants';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 
@@ -28,14 +33,14 @@ const StreamAudio = () => {
 
   const [callMetaData, setCallMetaData] = useState({
     callId: crypto.randomUUID(),
-    agentId: 'Me',
-    fromNumber: 'Other Participant',
-    toNumber: 'System',
+    agentId: DEFAULT_LOCAL_SPEAKER_NAME,
+    fromNumber: DEFAULT_OTHER_SPEAKER_NAME,
+    toNumber: SYSTEM,
   });
 
   const [recording, setRecording] = useState(false);
   const [streamingStarted, setStreamingStarted] = useState(false);
-  const [micInputOption, setMicInputOption] = useState({ label: 'Me', value: 'agent' });
+  const [micInputOption, setMicInputOption] = useState({ label: DEFAULT_LOCAL_SPEAKER_NAME, value: 'agent' });
 
   const getSocketUrl = useCallback(() => {
     console.log(`DEBUG - [${new Date().toISOString()}]: Trying to resolve websocket url...`);
@@ -319,10 +324,10 @@ const StreamAudio = () => {
               <Input value={callMetaData.agentId} onChange={handleAgentIdChange} />
             </FormField>
             <FormField
-              label="Participant Names(s)"
+              label="Participant Name(s)"
               stretch
               required
-              description="Participant Names(s)"
+              description="Participant Name(s)"
             >
               <Input value={callMetaData.fromNumber} onChange={handlefromNumberChange} />
             </FormField>
@@ -332,7 +337,7 @@ const StreamAudio = () => {
                 onChange={handleMicInputOptionSelection}
                 options={[
                   { label: 'Others', value: 'caller' },
-                  { label: 'Me', value: 'agent' },
+                  { label: DEFAULT_LOCAL_SPEAKER_NAME, value: 'agent' },
                 ]}
               />
             </FormField>
