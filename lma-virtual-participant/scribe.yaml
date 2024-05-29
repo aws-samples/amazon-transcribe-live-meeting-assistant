@@ -1,0 +1,1304 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Automated Meeting Scribe and Summarizer Template
+
+Parameters:
+
+  VPC:
+    Description: VPC to deploy the meeting summarizer solution.
+    Type: String
+
+  Email:
+    Description: Address to receive meeting transcripts, summaries, action items, etc.
+    Type: String
+    AllowedPattern: "^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,6}$"
+
+Resources:
+### Build Resources ###
+  ImageRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      EmptyOnDelete: true
+      ImageTagMutability: IMMUTABLE
+
+  BuildRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'codebuild.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !GetAtt LogsPolicy.PolicyArn
+      Policies:
+        - PolicyName: 'ECRPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:CompleteLayerUpload'
+                  - 'ecr:InitiateLayerUpload'
+                  - 'ecr:PutImage'
+                  - 'ecr:UploadLayerPart'
+                Resource:
+                  - !GetAtt ImageRepo.Arn
+              - Effect: 'Allow'
+                Action:
+                  - 'ecr:GetAuthorizationToken'
+                Resource:
+                  - '*'
+        - PolicyName: 'S3PutObject'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - "s3:PutObject"
+                  - "s3:PutObjectAcl"
+                Resource:
+                  - !Sub arn:aws:s3:::${WebsiteBucket}/*
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Source:
+        Type: GITHUB
+        Location: https://github.com/aws-samples/automated-meeting-scribe-and-summarizer.git
+        BuildSpec: 
+          !Sub
+            - |
+              version: 0.2
+              phases:
+                pre_build:
+                  commands:
+                    - pip3 install awscli --upgrade --user
+                    - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+                build:
+                  commands:    
+                    - docker build -t ${ImageRepo} backend
+                    - docker tag ${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                    - cd frontend
+                    - echo -e "VITE_USER_POOL_ID=${UserPool}\nVITE_USER_POOL_CLIENT_ID=${UserPoolClient}\nVITE_API_ENDPOINT=https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod\nVITE_REGION=${AWS::Region}" > .env
+                    - npm install
+                    - npm run build
+                post_build:
+                  commands:
+                    - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                    - aws s3 cp dist/ s3://${WebsiteBucket} --recursive
+            - { 
+                ImageRepo: !Ref ImageRepo,
+                UserPool: !Ref UserPool,
+                UserPoolClient: !Ref UserPoolClient,
+                RestApi: !Ref RestApi,
+                WebsiteBucket: !Ref WebsiteBucket
+              }
+      SourceVersion: transcribe
+      Environment:
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        ComputeType: BUILD_GENERAL1_SMALL
+      ServiceRole: !GetAtt BuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+
+### Custom Resources ###
+
+  BuildCustomResourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: "/"
+      ManagedPolicyArns:
+        - !GetAtt LogsPolicy.PolicyArn
+      Policies:
+        - PolicyName: BuildPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource:
+                  - '*'
+        - PolicyName: ObjectPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub arn:aws:s3:::${LoggingBucket}/*
+                  - !Sub arn:aws:s3:::${LoggingBucket}
+                  - !Sub arn:aws:s3:::${WebsiteBucket}/*
+                  - !Sub arn:aws:s3:::${WebsiteBucket}
+
+  BuildCustomResourceFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt BuildCustomResourceRole.Arn
+      Timeout: 900
+      Runtime: python3.12
+      Code:
+        ZipFile: !Sub |
+          import boto3
+          from time import sleep
+          import cfnresponse
+
+          def handler(event, context):
+
+            request_type = event['RequestType']
+            print(request_type)
+
+            if request_type in ['Create', 'Update']:
+              client = boto3.client("codebuild")
+
+              build_id = client.start_build(
+                projectName=event['ResourceProperties']['PROJECT']
+              )['build']['id']
+              status = 'STARTING'
+
+              while status != 'SUCCEEDED':
+                if status in ['FAILED', 'FAULT', 'TIMED_OUT', 'STOPPED']:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+                  return
+                sleep(15)
+                status = client.batch_get_builds(ids=[build_id])['builds'][0]['buildStatus']
+                print(status)
+
+            elif request_type == 'Delete':
+              resource = boto3.resource("s3")
+              resource.Bucket(event['ResourceProperties']['LOGGING_BUCKET']).objects.delete()
+              resource.Bucket(event['ResourceProperties']['WEBSITE_BUCKET']).objects.delete()
+
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+  BuildCustomResource:
+    Type: Custom::BuildCode
+    Properties:
+      ServiceToken: !GetAtt BuildCustomResourceFunction.Arn
+      PROJECT: !Ref BuildProject
+      LOGGING_BUCKET: !Ref LoggingBucket
+      WEBSITE_BUCKET: !Ref WebsiteBucket 
+
+  ECSRoleCustomResourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: "/"
+      ManagedPolicyArns:
+        - !GetAtt LogsPolicy.PolicyArn
+      Policies:
+        - PolicyName: IAMPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:CreateServiceLinkedRole
+                  - iam:ListRoles
+                  - iam:AttachRolePolicy
+                Resource:
+                  - '*'
+
+  ECSRoleCustomResourceFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt ECSRoleCustomResourceRole.Arn
+      Timeout: 300
+      Runtime: python3.12
+      Code:
+        ZipFile: !Sub |
+          import boto3
+          from botocore.exceptions import ClientError
+          import cfnresponse
+
+          def handler(event, context):
+              
+            request_type = event['RequestType']
+            print(request_type)
+
+            if request_type == 'Create':
+              desired_role_name = "AWSServiceRoleForECS"
+              iam_client = boto3.client('iam')
+
+              try:
+                iam_client.get_role(RoleName=desired_role_name)
+                role_exists = True
+              except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchEntity':
+                  role_exists = False
+                else:
+                  raise
+
+              print(role_exists)
+              if not role_exists:
+                iam_client.create_service_linked_role(AWSServiceName="ecs.amazonaws.com")
+
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+  ECSRoleCustomResource:
+    Type: Custom::ECSRole
+    Properties:
+      ServiceToken: !GetAtt ECSRoleCustomResourceFunction.Arn
+
+### Bot Resources ###
+
+  Identity:
+      Type: AWS::SES::EmailIdentity
+      Properties:
+        EmailIdentity: !Ref Email
+
+  # Create VPC for ECS tasks.
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+
+  VPCLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      RetentionInDays: 7
+
+  VPCLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !GetAtt LogsPolicy.PolicyArn
+
+  VPCFlowLog:
+    Type: "AWS::EC2::FlowLog"
+    Properties:
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+      LogGroupName: !Ref VPCLogGroup
+      DeliverLogsPermissionArn: !GetAtt [ VPCLogRole, Arn ]
+
+  # Create internet gateway so that ECS tasks can reach the internet.
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  # Attach internet gateway to VPC so that ECS tasks can reach the internet.
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  # Create public route table so ECS tasks can reach the internet.
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  # Create default public route so ECS tasks can reach the internet.       
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Create public subnet required for ECS task.
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 10.0.0.0/24
+
+  # Create public subnet required for ECS task
+  PublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      CidrBlock: 10.0.1.0/24
+
+  # Create public subnet route table association required for ECS task.
+  PublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetOne
+
+  # Create public subnet route table association required for ECS task.
+  PublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetTwo
+
+  # Setup networking resources for the private subnets. 
+  NatGatewayOneAttachment:
+    Type: AWS::EC2::EIP
+    Properties:
+        Domain: vpc
+
+  NatGatewayTwoAttachment:
+    Type: AWS::EC2::EIP
+    Properties:
+        Domain: vpc
+
+  NatGatewayOne:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayOneAttachment.AllocationId
+      SubnetId: !Ref PublicSubnetOne
+
+  NatGatewayTwo:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayTwoAttachment.AllocationId
+      SubnetId: !Ref PublicSubnetTwo
+
+  PrivateRouteTableOne:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+
+  PrivateRouteOne:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableOne
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayOne
+
+  PrivateRouteTableTwo:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+
+  PrivateRouteTwo:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableTwo
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayTwo
+
+  # Create private subnet required for ECS task.
+  PrivateSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 10.0.2.0/24
+
+  # Create private subnet required for ECS task.
+  PrivateSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      CidrBlock: 10.0.3.0/24
+
+  PrivateRouteTableOneAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableOne
+      SubnetId: !Ref PrivateSubnetOne
+
+  PrivateRouteTableTwoAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableTwo
+      SubnetId: !Ref PrivateSubnetTwo
+
+  # Create security group required for ECS task.
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Only allow outbound traffic.
+      VpcId: !Ref VPC
+      SecurityGroupEgress: 
+        - Description: Allow all outbound traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !GetAtt LogsPolicy.PolicyArn
+      Policies:
+        - PolicyName: TranscribePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'transcribe:*'
+                Resource: '*'
+        - PolicyName: DetectPIIPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'comprehend:DetectPiiEntities'
+                Resource: '*'
+        - PolicyName: InvokeModelPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'bedrock:InvokeModel'
+                Resource: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0'
+        - PolicyName: SendRawEmailPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ses:SendRawEmail"
+                Resource: "*"
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      MaxSessionDuration: 36000
+      ManagedPolicyArns:
+        # AWS managed policies required to allow ECS task to function properly.
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceEventsRole
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - !GetAtt LogsPolicy.PolicyArn
+
+  Cluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      CapacityProviders:
+        - FARGATE
+    DependsOn:
+      - ECSRoleCustomResource
+      - Distribution
+
+  TaskDefinition:
+    Type: "AWS::ECS::TaskDefinition"
+    Properties:
+      ContainerDefinitions:
+        - Essential: true
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
+          LogConfiguration:
+            LogDriver: "awslogs"
+            Options:
+              awslogs-create-group: "true"
+              awslogs-group: "/ecs/scribe"
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: "ecs"
+          Name: "scribe"
+      Family: "scribe_family"
+      TaskRoleArn: !Ref TaskRole
+      ExecutionRoleArn: !Ref TaskExecutionRole
+      NetworkMode: "awsvpc"
+      RequiresCompatibilities:
+        - "FARGATE"
+      Cpu: "1 vCPU"
+      Memory: "4 GB"
+    DependsOn:
+      - Cluster
+      - BuildCustomResource
+
+### Scheduler Resources ###
+
+  ScheduleGroup:
+    Type: AWS::Scheduler::ScheduleGroup
+
+  ECSPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'ecs:RunTask'
+            Resource: '*'
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: "*"
+            Condition:
+              StringLike:
+                iam:PassedToService: ecs-tasks.amazonaws.com
+
+  TargetECSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+                - scheduler.amazonaws.com
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !GetAtt LogsPolicy.PolicyArn
+        - !GetAtt ECSPolicy.PolicyArn
+      Policies:
+        - PolicyName: TagPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecs:TagResource
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    ecs:CreateAction:
+                      - RunTask
+
+  SchedulerStateMachineLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      RetentionInDays: 7
+      LogGroupName: !Sub '/aws/vendedlogs/states/${AWS::StackName}'
+
+  SchedulerStateMachineRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: states.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - !GetAtt ECSPolicy.PolicyArn
+      Policies:
+        - PolicyName: ExpandedLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:CreateLogDelivery'
+                  - 'logs:CreateLogStream'
+                  - 'logs:GetLogDelivery'
+                  - 'logs:UpdateLogDelivery'
+                  - 'logs:DeleteLogDelivery'
+                  - 'logs:ListLogDeliveries'
+                  - 'logs:PutLogEvents'
+                  - 'logs:PutResourcePolicy'
+                  - 'logs:DescribeResourcePolicies'
+                  - 'logs:DescribeLogGroups'
+                Resource: '*'
+        - PolicyName: TracesPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: '*'
+        - PolicyName: SchedulePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - scheduler:CreateSchedule
+                  - scheduler:ListSchedules
+                  - scheduler:GetSchedule
+                  - scheduler:UpdateSchedule
+                  - scheduler:DeleteSchedule
+                Resource:
+                  - arn:aws:scheduler:*:*:schedule/*
+                  - arn:aws:scheduler:*:*:schedule-group/default
+        - PolicyName: PassRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt TargetECSRole.Arn
+                Condition:
+                  StringLike:
+                    iam:PassedToService: scheduler.amazonaws.com
+
+  SchedulerStateMachine:
+    Type: "AWS::StepFunctions::StateMachine"
+    Properties:
+      RoleArn: !GetAtt [ SchedulerStateMachineRole, Arn ]
+      LoggingConfiguration:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt 
+                - SchedulerStateMachineLogGroup
+                - Arn
+        IncludeExecutionData: true
+        Level: ALL
+      StateMachineType: EXPRESS
+      TracingConfiguration: 
+         Enabled: true
+      DefinitionString:
+        !Sub
+          - |
+            {
+              "StartAt": "Method Choice",
+              "States": {
+                "Method Choice": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Variable": "$.apiInfo.httpMethod",
+                      "StringEquals": "POST",
+                      "Next": "Time Choice"
+                    },
+                    {
+                      "Variable": "$.apiInfo.httpMethod",
+                      "StringEquals": "GET",
+                      "Next": "ListSchedules"
+                    },
+                    {
+                      "Variable": "$.apiInfo.httpMethod",
+                      "StringEquals": "DELETE",
+                      "Next": "DeleteSchedule"
+                    }
+                  ],
+                  "Default": "Pass"
+                },
+                "Time Choice": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Not": {
+                        "Variable": "$.data.meetingTime",
+                        "StringMatches": ""
+                      },
+                      "Next": "CreateSchedule"
+                    }
+                  ],
+                  "Default": "RunTask"
+                },
+                "RunTask": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::ecs:runTask",
+                  "Parameters": {
+                    "Cluster": "${ClusterArn}",
+                    "TaskDefinition": "${TaskDefinition}",
+                    "LaunchType": "FARGATE",
+                    "NetworkConfiguration": {
+                      "AwsvpcConfiguration": {
+                        "AssignPublicIp": "DISABLED",
+                        "SecurityGroups": [
+                          "${SecurityGroup}"
+                        ],
+                        "Subnets": [
+                          "${PrivateSubnetOne}",
+                          "${PrivateSubnetTwo}"
+                        ]
+                      }
+                    },
+                    "Overrides": {
+                      "ContainerOverrides": [
+                        {
+                          "Name": "scribe",
+                          "Environment": [
+                            {
+                              "Name": "MEETING_ID",
+                              "Value.$": "$.data.meetingID"
+                            },
+                            {
+                              "Name": "MEETING_PASSWORD",
+                              "Value.$": "$.data.meetingPassword"
+                            },
+                            {
+                              "Name": "EMAIL",
+                              "Value": "${Email}"
+                            },
+                            {
+                              "Name": "MEETING_NAME",
+                              "Value.$": "$.data.meetingName"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "End": true
+                },
+                "CreateSchedule": {
+                  "Type": "Task",
+                  "Parameters": {
+                    "ActionAfterCompletion": "DELETE",
+                    "Description.$": "$.data.meetingName",
+                    "FlexibleTimeWindow": {
+                      "Mode": "OFF"
+                    },
+                    "GroupName": "${ScheduleGroup}",
+                    "Name.$": "States.Format('{}_{}', $.data.meetingID, States.UUID())",
+                    "ScheduleExpression.$": "States.Format('at({})', $.data.meetingTime)",
+                    "ScheduleExpressionTimezone": "UTC",
+                    "State": "ENABLED",
+                    "Target": {
+                      "Arn": "${ClusterArn}",
+                      "RoleArn": "${TargetECSRoleArn}",
+                      "EcsParameters": {
+                        "EnableECSManagedTags": false,
+                        "EnableExecuteCommand": false,
+                        "LaunchType": "FARGATE",
+                        "NetworkConfiguration": {
+                          "AwsvpcConfiguration": {
+                            "AssignPublicIp": "DISABLED",
+                            "SecurityGroups": [
+                              "${SecurityGroup}"
+                            ],
+                            "Subnets": [
+                              "${PrivateSubnetOne}",
+                              "${PrivateSubnetTwo}"
+                            ]
+                          }
+                        },
+                        "TaskCount": 1,
+                        "TaskDefinitionArn": "${TaskDefinition}"
+                      },
+                      "Input": {
+                        "containerOverrides": [
+                          {
+                            "name": "scribe",
+                            "environment": [
+                              {
+                                "name": "MEETING_ID",
+                                "value.$": "$.data.meetingID"
+                              },
+                              {
+                                "name": "MEETING_PASSWORD",
+                                "value.$": "$.data.meetingPassword"
+                              },
+                              {
+                                "name": "EMAIL",
+                                "value": "${Email}"
+                              },
+                              {
+                                "name": "MEETING_NAME",
+                                "value.$": "$.data.meetingName"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "Resource": "arn:aws:states:::aws-sdk:scheduler:createSchedule",
+                  "End": true
+                },
+                "ListSchedules": {
+                  "Type": "Task",
+                  "Parameters": {
+                    "GroupName": "${ScheduleGroup}"
+                  },
+                  "Resource": "arn:aws:states:::aws-sdk:scheduler:listSchedules",
+                  "Next": "Map"
+                },
+                "Map": {
+                  "Type": "Map",
+                  "ItemProcessor": {
+                    "ProcessorConfig": {
+                      "Mode": "INLINE"
+                    },
+                    "StartAt": "GetSchedule",
+                    "States": {
+                      "GetSchedule": {
+                        "Type": "Task",
+                        "End": true,
+                        "Parameters": {
+                          "GroupName.$": "$.GroupName",
+                          "Name.$": "$.Name"
+                        },
+                        "Resource": "arn:aws:states:::aws-sdk:scheduler:getSchedule",
+                        "ResultSelector": {
+                          "CreationDate.$": "$.CreationDate",
+                          "Description.$": "$.Description",
+                          "GroupName.$": "$.GroupName",
+                          "Name.$": "$.Name",
+                          "ScheduleExpression.$": "$.ScheduleExpression",
+                          "ScheduleExpressionTimezone.$": "$.ScheduleExpressionTimezone"
+                        }
+                      }
+                    }
+                  },
+                  "End": true,
+                  "ItemsPath": "$.Schedules"
+                },
+                "DeleteSchedule": {
+                  "Type": "Task",
+                  "Parameters": {
+                    "GroupName": "${ScheduleGroup}",
+                    "Name.$": "$.data.source.meetingName"
+                  },
+                  "Resource": "arn:aws:states:::aws-sdk:scheduler:deleteSchedule",
+                  "End": true
+                },
+                "Pass": {
+                  "Type": "Pass",
+                  "End": true
+                }
+              }
+            }
+          - {
+              ClusterArn: !GetAtt [ Cluster, Arn ],
+              TargetECSRoleArn: !GetAtt [ TargetECSRole, Arn ]
+            }
+
+### API Resources ###
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolAddOns:
+        AdvancedSecurityMode: ENFORCED
+      Policies:
+        PasswordPolicy:
+            MinimumLength: 8
+            RequireLowercase: true
+            RequireNumbers: true
+            RequireSymbols: true
+            RequireUppercase: true
+            TemporaryPasswordValidityDays: 2
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
+      MfaConfiguration: "OPTIONAL"
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      UsernameAttributes:
+        - email
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: false
+          Required: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+
+  # Default User
+  UserPoolUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserAttributes:        
+        - Name: email
+          Value: !Ref Email
+      UserPoolId: !Ref UserPool
+      Username: !Ref Email
+
+  RestApi:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: 'ScribeApi'
+      FailOnWarnings: 'true'
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  RestApiAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: ScribeAuthorizer
+      ProviderARNs: 
+        - !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPool}
+      RestApiId: !Ref RestApi
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+
+  ApiGatewayRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'apigateway.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs'
+      Policies:
+      - PolicyName: StartSyncExecutionPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: 'Allow'
+              Action:
+                - 'states:StartSyncExecution'
+              Resource: !GetAtt SchedulerStateMachine.Arn
+
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayRole.Arn
+
+  RestApiResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: 'Scribe'
+
+  RestApiMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref RestApiAuthorizer
+      HttpMethod: ANY
+      ResourceId: !Ref RestApiResource
+      RestApiId: !Ref RestApi
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:states:action/StartSyncExecution
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+            application/json: !Sub
+              - |
+                #set($body= $input.json('$'))
+                #set($inputRoot='{ "data" :'+$body+',"apiInfo":{"httpMethod" :"'+ $context.httpMethod+'", "apiKey":"'+ $context.identity.apiKey+'"}}')
+                #set($apiData=$util.escapeJavaScript($inputRoot))
+                #set($apiData=$apiData.replaceAll("\\'","'"))
+                {
+                  "input": "$apiData",
+                  "stateMachineArn": "${StateMachineArn}"
+                }
+              - { StateMachineArn: !GetAtt SchedulerStateMachine.Arn }
+        Credentials: !GetAtt ApiGatewayRole.Arn
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS,DELETE,GET'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Credentials: "'true'"
+            ResponseTemplates:
+              application/json: |
+                #set ($bodyObj = $util.parseJson($input.body))
+                #if ($bodyObj.status == "SUCCEEDED")
+                    $bodyObj.output
+                #elseif ($bodyObj.status == "FAILED")
+                    #set($context.responseOverride.status = 500)
+                    {
+                        "cause": "$bodyObj.cause",
+                        "error": "$bodyObj.error"
+                    }
+                #else
+                    #set($context.responseOverride.status = 500)
+                    $input.body
+                #end              
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Credentials: true
+
+  RestApiOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref RestApiResource
+      RestApiId: !Ref RestApi
+      Integration:
+        IntegrationHttpMethod: OPTIONS
+        Type: MOCK
+        RequestTemplates:
+            application/json: | 
+                {"statusCode": 200}
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Credentials: "'true'"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Credentials: true
+
+  RestApiLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      RetentionInDays: 7  
+
+  RestApiDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    DependsOn: RestApiMethod
+    Properties:
+      RestApiId: !Ref RestApi
+      StageName: 'Prod' 
+      StageDescription:
+        LoggingLevel: INFO
+        MetricsEnabled: True
+        MethodSettings:
+          - ResourcePath: "/*"
+            HttpMethod: "*"
+            LoggingLevel: INFO
+            MetricsEnabled: True
+        AccessLogSetting:
+          DestinationArn: !GetAtt RestApiLogGroup.Arn
+
+  # Create WAF Web ACL for API Gateway REST API. 
+  ApiGatewayWebACL:
+      Type: "AWS::WAFv2::WebACL"
+      Properties:
+          Description: Web ACL to protect API Gateway Rest API
+          DefaultAction: 
+              Allow: {}
+          VisibilityConfig: 
+              SampledRequestsEnabled: true
+              CloudWatchMetricsEnabled: true
+              MetricName: "ApiGatewayWebACL"
+          Scope: "REGIONAL"
+          Rules: 
+            - Name: "AWS-AWSManagedRulesAmazonIpReputationList"
+              Priority: 0
+              OverrideAction: 
+                  None: {}
+              Statement: 
+                  ManagedRuleGroupStatement: 
+                      VendorName: "AWS"
+                      Name: "AWSManagedRulesAmazonIpReputationList"
+              VisibilityConfig: 
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: "AWS-AWSManagedRulesAmazonIpReputationList-APIGateway"
+            - Name: "AWS-AWSManagedRulesCommonRuleSet"
+              Priority: 1
+              OverrideAction: 
+                  None: {}
+              Statement: 
+                  ManagedRuleGroupStatement: 
+                      VendorName: "AWS"
+                      Name: "AWSManagedRulesCommonRuleSet"
+              VisibilityConfig: 
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: "AWS-AWSManagedRulesCommonRuleSet-APIGateway"
+            - Name: "AWS-AWSManagedRulesKnownBadInputsRuleSet"
+              Priority: 2
+              OverrideAction: 
+                  None: {}
+              Statement: 
+                  ManagedRuleGroupStatement: 
+                      VendorName: "AWS"
+                      Name: "AWSManagedRulesKnownBadInputsRuleSet"
+              VisibilityConfig: 
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: "AWS-AWSManagedRulesKnownBadInputsRuleSet-APIGateway"
+
+  ApiGatewayWebACLAssociation:
+      Type: AWS::WAFv2::WebACLAssociation
+      Properties:
+        ResourceArn: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/${RestApi}/stages/Prod"
+        WebACLArn: !GetAtt ApiGatewayWebACL.Arn
+      DependsOn:
+        - Distribution
+        - RestApiDeployment
+
+### Front-end Resources ###
+
+  # Restricts access to S3 bucket, only allowing read access via CloudFront.
+  WebsiteBucketPolicy:
+      Type: "AWS::S3::BucketPolicy"
+      Properties:
+          Bucket: !Ref WebsiteBucket
+          PolicyDocument: 
+              Version: "2008-10-17"
+              Id: "PolicyForCloudFrontPrivateContent"
+              Statement: 
+                - Sid: "AllowCloudFrontServicePrincipal"
+                  Effect: "Allow"
+                  Principal: 
+                      Service: "cloudfront.amazonaws.com"
+                  Action: "s3:GetObject"
+                  Resource: !Sub "arn:aws:s3:::${WebsiteBucket}/*"
+                  Condition: 
+                      StringEquals: 
+                          "AWS:SourceArn": !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  CloudFrontWebACL:
+      Type: "AWS::WAFv2::WebACL"
+      Properties:
+          Description: Web ACL to protect CloudFront front end website for Amazon Scribe
+          DefaultAction: 
+              Allow: {}
+          VisibilityConfig: 
+              SampledRequestsEnabled: true
+              CloudWatchMetricsEnabled: true
+              MetricName: "CloudFrontWebACL"
+          Scope: "CLOUDFRONT"
+          Rules: 
+            - Name: "AWS-AWSManagedRulesAmazonIpReputationList"
+              Priority: 0
+              OverrideAction: 
+                  None: {}
+              Statement: 
+                  ManagedRuleGroupStatement: 
+                      VendorName: "AWS"
+                      Name: "AWSManagedRulesAmazonIpReputationList"
+              VisibilityConfig: 
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: "AWS-AWSManagedRulesAmazonIpReputationList"
+            - Name: "AWS-AWSManagedRulesCommonRuleSet"
+              Priority: 1
+              OverrideAction: 
+                  None: {}
+              Statement: 
+                  ManagedRuleGroupStatement: 
+                      VendorName: "AWS"
+                      Name: "AWSManagedRulesCommonRuleSet"
+              VisibilityConfig: 
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: "AWS-AWSManagedRulesCommonRuleSet"
+            - Name: "AWS-AWSManagedRulesKnownBadInputsRuleSet"
+              Priority: 2
+              OverrideAction: 
+                  None: {}
+              Statement: 
+                  ManagedRuleGroupStatement: 
+                      VendorName: "AWS"
+                      Name: "AWSManagedRulesKnownBadInputsRuleSet"
+              VisibilityConfig: 
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: "AWS-AWSManagedRulesKnownBadInputsRuleSet"
+
+  OriginAccessControl:
+      Type: "AWS::CloudFront::OriginAccessControl"
+      Properties:
+          OriginAccessControlConfig: 
+              Name: !Join [ '', ['FrontendWebAccess-', !Select [2, !Split [/, !Ref AWS::StackId ]]]]
+              OriginAccessControlOriginType: "s3"
+              SigningBehavior: "always"
+              SigningProtocol: "sigv4"
+
+  Distribution:
+      Type: "AWS::CloudFront::Distribution"
+      Properties:
+          DistributionConfig: 
+              Origins: 
+                - ConnectionAttempts: 3
+                  ConnectionTimeout: 10
+                  DomainName: !Sub "${WebsiteBucket}.s3.${AWS::Region}.amazonaws.com"
+                  Id: !Sub "${WebsiteBucket}.s3.${AWS::Region}.amazonaws.com"
+                  S3OriginConfig: 
+                      OriginAccessIdentity: ""
+                  OriginAccessControlId: !GetAtt OriginAccessControl.Id
+              DefaultCacheBehavior: 
+                  AllowedMethods: 
+                    - "HEAD"
+                    - "DELETE"
+                    - "POST"
+                    - "GET"
+                    - "OPTIONS"
+                    - "PUT"
+                    - "PATCH"
+                  CachedMethods: 
+                    - "HEAD"
+                    - "GET"
+                  Compress: true
+                  CachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"
+                  SmoothStreaming: false
+                  TargetOriginId: !Sub "${WebsiteBucket}.s3.${AWS::Region}.amazonaws.com"
+                  ViewerProtocolPolicy: "redirect-to-https"
+              PriceClass: "PriceClass_All"
+              Enabled: true                  
+              HttpVersion: "http2"
+              DefaultRootObject: "index.html"
+              IPV6Enabled: true
+              Logging: 
+                Bucket: !Sub '${LoggingBucket}.s3.amazonaws.com'
+                IncludeCookies: true
+                Prefix: distribution-logs/
+              ViewerCertificate:
+                CloudFrontDefaultCertificate: true
+                MinimumProtocolVersion: TLSv1.2_2018
+              WebACLId: !GetAtt CloudFrontWebACL.Arn
+
+Outputs:
+
+  Website:
+    Description: "CloudFront URL"
+    Value: !GetAtt Distribution.DomainName
+
+  Email:
+    Value: !Ref Email
