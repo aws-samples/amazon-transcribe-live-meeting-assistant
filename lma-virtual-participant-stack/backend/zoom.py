@@ -88,6 +88,8 @@ def get_aws_date_now():
     aws_datetime = now.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
     return aws_datetime
 
+def sanitize_filename(filename):
+    return re.sub(r'[:\s]', '_', filename)
 
 def baseline_text(text: str):
     return text.lower().translate(str.maketrans('', '', string.punctuation))
@@ -125,7 +127,7 @@ async def write_recording_s3():
             await write_wav_header(output_f, sample_rate, number_of_channels, 16, num_samples)
             await output_f.write(await input_f.read())
 
-        unique_filename = f'{lma_meeting_id}.wav'
+        unique_filename = sanitize_filename(f'{lma_meeting_id}.wav')
         # write to s3
         s3.upload_file(recording_file, recordings_bucket_name, f'{recording_file_prefix}{unique_filename}')
         logging.info("Recording uploaded to S3")
