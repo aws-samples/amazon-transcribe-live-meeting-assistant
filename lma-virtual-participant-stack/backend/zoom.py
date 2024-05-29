@@ -17,6 +17,9 @@ import random
 import logging
 import sys
 import datetime
+import aiofiles
+import math
+import struct
 from botocore.session import Session
 from botocore.exceptions import ClientError
 
@@ -42,9 +45,13 @@ session_token = credentials.token
 region = os.getenv("AWS_DEFAULT_REGION","us-east-1")
 kinesis_stream_name = os.getenv("KINESIS_STREAM_NAME")
 transcribe_url_generator = AWSTranscribePresignedURL(access_key, secret_key, session_token, region)
+recordings_bucket_name = os.getenv('RECORDINGS_BUCKET_NAME')
+recording_file_prefix = os.getenv('RECORDINGS_KEY_PREFIX')
 
-# Create a Kinesis client
+
+# Create AWS clients
 kinesis = boto3.client('kinesis', region_name=region)
+s3 = boto3.client('s3', region_name=region)
 
 # Sound settings
 language_code = "en-US"
@@ -54,7 +61,8 @@ number_of_channels = 1
 channel_identification = False
 bytes_per_sample = 2 # 16 bit audio
 chunk_size = sample_rate * 2 * number_of_channels / 10 # roughly 100ms of audio data
-file_name = 'example_call_2_channel.wav'
+file_name = 'recording.raw'
+recording_file = 'recording.wav'
 
 # Scribe specific
 scribe_name = "Scribe"
@@ -84,7 +92,63 @@ def get_aws_date_now():
 def baseline_text(text: str):
     return text.lower().translate(str.maketrans('', '', string.punctuation))
 
+async def write_wav_header(file, sample_rate, num_channels, bit_depth, num_samples):
+    await file.seek(0)
+    
+    # RIFF header
+    await file.write(b'RIFF')
+    await file.write(struct.pack('<I', 36 + num_samples * num_channels * bit_depth // 8))
+    await file.write(b'WAVE')
+    
+    # fmt chunk
+    await file.write(b'fmt ')
+    await file.write(struct.pack('<I', 16))
+    await file.write(struct.pack('<H', 1))  # audio format (1 = PCM)
+    await file.write(struct.pack('<H', num_channels))
+    await file.write(struct.pack('<I', sample_rate))
+    await file.write(struct.pack('<I', sample_rate * num_channels * bit_depth // 8))  # byte rate
+    await file.write(struct.pack('<H', num_channels * bit_depth // 8))  # block align
+    await file.write(struct.pack('<H', bit_depth))
+    
+    # data chunk
+    await file.write(b'data')
+    await file.write(struct.pack('<I', num_samples * num_channels * bit_depth // 8))
+
 # LMA funcs
+
+async def write_recording_s3():
+    try:
+        logging.info(f'Uploading recording to S3, bucket {recordings_bucket_name}...')
+        num_samples = math.ceil(os.path.getsize(file_name) / 2)
+
+        async with aiofiles.open(file_name, 'rb') as input_f, aiofiles.open(recording_file, 'wb') as output_f:
+            await write_wav_header(output_f, sample_rate, number_of_channels, 16, num_samples)
+            await output_f.write(await input_f.read())
+
+        unique_filename = f'{lma_meeting_id}.wav'
+        # write to s3
+        s3.upload_file(recording_file, recordings_bucket_name, f'{recording_file_prefix}{unique_filename}')
+        logging.info("Recording uploaded to S3")
+
+        recording_url = f'https://{recordings_bucket_name}.s3.{region}.amazonaws.com/{recording_file_prefix}{unique_filename}'
+
+        payload = {
+            'EventType': 'ADD_S3_RECORDING_URL',
+            'CallId': lma_meeting_id,
+            'RecordingUrl': recording_url
+        }
+        logging.info(f"Sending add recording url event to Kinesis. Event: {payload}")
+        # Write the messages to the Kinesis Data Stream
+        response = kinesis.put_record(
+            StreamName=kinesis_stream_name,
+            PartitionKey=lma_meeting_id,
+            Data=json.dumps(payload).encode('utf-8')
+        )
+        logging.info(f"Sent add recording url event to Kinesis. Response: {response}")
+    except Exception as e:
+        logging.exception(e)
+        logging.error(f"Error sending add recording url event to Kinesis: {e}")
+
 
 def send_add_transcript_segment(result):
     logging.info("Sending add transcript segment event to Kinesis")
@@ -109,7 +173,7 @@ def send_add_transcript_segment(result):
         # Write the messages to the Kinesis Data Stream
         response = kinesis.put_record(
             StreamName=kinesis_stream_name,
-            PartitionKey=meeting_id,
+            PartitionKey=lma_meeting_id,
             Data=json.dumps(add_transcript_segment).encode('utf-8')
         )
         logging.info(f"Sent add transcript segment event to Kinesis. Response: {response}")
@@ -131,7 +195,7 @@ def send_start_meeting():
         # Write the messages to the Kinesis Data Stream
         response = kinesis.put_record(
             StreamName=kinesis_stream_name,
-            PartitionKey=meeting_id,
+            PartitionKey=lma_meeting_id,
             Data=json.dumps(start_call_event).encode('utf-8')
         )
         logging.info(f"Sent start meeting event to Kinesis. Response: {response}")
@@ -153,7 +217,7 @@ def send_end_meeting():
         # Write the messages to the Kinesis Data Stream
         response = kinesis.put_record(
             StreamName=kinesis_stream_name,
-            PartitionKey=meeting_id,
+            PartitionKey=lma_meeting_id,
             Data=json.dumps(start_call_event).encode('utf-8')
         )
         logging.info(f"Sent end meeting event to Kinesis. Response: {response}")
@@ -170,22 +234,25 @@ async def send(websocket):
         loop.call_soon_threadsafe(input_queue.put_nowait, (bytes(indata), status))
 
     try:
-        # Create the audio stream
-        with sd.RawInputStream(
-            channels=1,
-            samplerate=16000,
-            callback=callback,
-            blocksize=1024 * 2,
-            dtype='int16'
-            # device="pulse"
-        ):
-            while not meeting_end:
-                indata, status = await input_queue.get()
-                if len(indata) > 0:
-                    audioEvent = create_audio_event(indata) 
-                    await websocket.send(audioEvent)
-                await asyncio.sleep(0)  # yield control to the event loop, also delay reading audio file
+        async with aiofiles.open(file_name, 'ab') as file:
 
+            # Create the audio stream
+            with sd.RawInputStream(
+                channels=number_of_channels,
+                samplerate=sample_rate,
+                callback=callback,
+                blocksize=1024 * 2, 
+                dtype='int16'
+                # device="pulse"
+            ):
+                while not meeting_end:
+                    indata, status = await input_queue.get()
+                    await file.write(indata)
+                    if len(indata) > 0:
+                        audioEvent = create_audio_event(indata) 
+                        await websocket.send(audioEvent)
+                    await asyncio.sleep(0)  # yield control to the event loop, also delay reading audio file
+        await write_recording_s3()
     except websockets.exceptions.ConnectionClosedError:
         logging.info(f"Connection closed error")
     except Exception as error:
@@ -495,5 +562,6 @@ async def initialize():
             await transcribe_task
 
 asyncio.run(initialize())
+
 
 # deliver()
