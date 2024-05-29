@@ -80,8 +80,8 @@ speakers = []
 
 current_speaker = ""
 meeting_end = False
-
 start = False
+paused = False
 
 def get_aws_date_now():
     now = datetime.datetime.now()
@@ -249,6 +249,8 @@ async def send(websocket):
             ):
                 while not meeting_end:
                     indata, status = await input_queue.get()
+                    if paused:
+                        indata = b'\x00' * len(indata)
                     await file.write(indata)
                     if len(indata) > 0:
                         audioEvent = create_audio_event(indata) 
@@ -401,6 +403,8 @@ async def initialize():
 
     start_command = "START"
     end_command = "END"
+    pause_command = "PAUSE"
+    resume_command = "RESUME"
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -501,8 +505,9 @@ async def initialize():
             transcribe_task = asyncio.create_task(transcribe())
 
         async def message_change(message):
-            logging.info(message)      
+            logging.info(message)
             global start
+            global paused
             if end_command in message:
                 leave_button_element = await page.wait_for_selector('button[aria-label="Leave"]')
                 await leave_button_element.hover()
@@ -514,6 +519,16 @@ async def initialize():
                 send_start_meeting()
                 await send_message(start_message)
                 await start_transcription()
+            elif pause_command in message:
+                paused = True
+                pause_message = 'Paused transcription.'
+                logging.info(pause_message)
+                await send_message(pause_message)
+            elif resume_command in message:
+                paused = False
+                resume_message = 'Resumed transcription.'
+                logging.info(resume_message)
+                await send_message(resume_message)
             elif start:
                 messages.append(message)              
 
