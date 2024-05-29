@@ -233,7 +233,8 @@ cat > config.json <<_EOF
   "profile": "${AWS_PROFILE:-default}",
   "region": "${REGION}",
   "buildType": "Custom",
-  "skipCheckTemplate":true
+  "skipCheckTemplate":true,
+  "noStackOutput": true
 }
 _EOF
 npm install
