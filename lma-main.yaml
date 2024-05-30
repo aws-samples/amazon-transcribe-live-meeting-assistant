@@ -51,7 +51,7 @@ Parameters:
 
   MeetingAssistQnABotOpenSearchNodeCount:
     Type: String
-    Default: '1'
+    Default: 1
     AllowedValues:
       - 1
       - 2
@@ -784,6 +784,29 @@ Resources:
         WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         SourceCodeLocation: <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>
+
+  VIRTUALPARTICIPANTSTACK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-virtual-participant-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        S3BucketName: !GetAtt AISTACK.Outputs.S3BucketName
+        AudioFilePrefix: !Ref AudioFilePrefix
+        CallDataStreamName: !GetAtt AISTACK.Outputs.CallDataStreamName
+        TranscribeApiMode: 'standard'
+        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
+        TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
+        TranscribeLanguageCode: !Ref TranscribeLanguageCode
+        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
+        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
+        TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
+        CustomVocabularyName: !Ref CustomVocabularyName
+        CustomLanguageModelName: !Ref CustomLanguageModelName
+        SecurityGroup: !GetAtt WEBSOCKETSTACK.Outputs.TranscriberWebsocketFargateServiceSecurityGroup
+        PrivateSubnet1: !GetAtt WEBSOCKETSTACK.Outputs.TranscribingVPCPrivateSubnet1Subnet
+        PrivateSubnet2: !GetAtt WEBSOCKETSTACK.Outputs.TranscribingVPCPrivateSubnet2Subnet
 
 Outputs:
   ApplicationCloudfrontEndpoint:

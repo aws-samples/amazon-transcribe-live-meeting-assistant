@@ -903,3 +903,6 @@ Outputs:
 
   Email:
     Value: !Ref Email
+
+  StepFunctions:
+    Value: !Ref SchedulerStateMachine

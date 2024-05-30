@@ -135,6 +135,24 @@ aws s3 cp ./template.yaml ${s3_template}
 aws cloudformation validate-template --template-url ${https_template} > /dev/null || exit 1
 popd
 
+
+dir=lma-virtual-participant-stack
+echo "PACKAGING $dir"
+pushd $dir
+echo "Computing hash of extension folder contents"
+HASH=$(calculate_hash ".")
+zipfile=src-${HASH}.zip
+echo "Zipping source to ${tmpdir}/${zipfile}"
+zip -r ${tmpdir}/$zipfile . -x "node_modules/*" -x "build/*"
+echo "Upload source and template to S3"
+BROWSER_EXTENSION_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${dir}/${zipfile}
+aws s3 cp ${tmpdir}/${zipfile} s3://${BROWSER_EXTENSION_SRC_S3_LOCATION}
+s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
+https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
+aws s3 cp ./template.yaml ${s3_template}
+aws cloudformation validate-template --template-url ${https_template} > /dev/null || exit 1
+popd
+
 dir=lma-meetingassist-setup-stack
 echo "PACKAGING $dir"
 pushd $dir
