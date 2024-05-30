@@ -306,6 +306,18 @@ Outputs:
                 - !GetAtt WebSocketCloudFrontDistribution.DomainName
                 - '/api/v1/ws'
 
+  TranscriberWebsocketFargateServiceSecurityGroup:
+    Description: Egress security group for ECS 
+    Value: !Ref TranscriberWebsocketFargateServiceSecurityGroup
+
+  TranscribingVPCPrivateSubnet1Subnet:
+    Description: Subnet 1 for ECS VPC
+    Value: !Ref TranscribingVPCPrivateSubnet1Subnet
+
+  TranscribingVPCPrivateSubnet2Subnet:
+    Description: Subnet 2 for ECS VPC
+    Value: !Ref TranscribingVPCPrivateSubnet2Subnet
+
 Resources:
 
 
