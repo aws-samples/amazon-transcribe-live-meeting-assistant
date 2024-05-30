@@ -76,12 +76,11 @@ file_name = 'recording.raw'
 recording_file = 'recording.wav'
 
 # Scribe specific
-scribe_name = "Scribe"
-email_address = os.environ['EMAIL']
+scribe_name = "Live Meeting Assistant"
 meeting_id = os.environ['MEETING_ID']
 lma_meeting_id = meeting_id + '-' + datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S.%f')[:-3]
 meeting_password = os.environ['MEETING_PASSWORD']
-scribe_identity = f"{scribe_name} ({email_address})"
+scribe_identity = f"{scribe_name}"
 
 attendees = []
 messages = []
@@ -330,91 +329,9 @@ async def transcribe():
         await asyncio.gather(receive(websocket), send(websocket))
 
 def deliver():
+    # Stub for future processing post meeting. Used to send email.
 
-    email_source = f"{scribe_name} <{'+scribe@'.join(email_address.split('@'))}>"
-    email_destinations = [email_address]
-
-    msg = MIMEMultipart('mixed')
-    msg['From'] = email_source
-    msg['To'] = ', '.join(email_destinations)
-
-    if not start:
-        msg['Subject'] = os.environ['MEETING_NAME']
-        body_html = body_text = "No meeting details were saved."
-    else:
-        attendance = '\n'.join(attendees)
-        chat = '\n'.join(messages)
-        transcriptions = [f"{speaker}: {caption}" for speaker, caption in zip(speakers, captions)]
-        transcript = '\n\n'.join(transcriptions)
-
-        prompt = (
-            "Please create a title, summary, and list of action items from the following transcript:"
-            f"\n<transcript>{transcript}</transcript>"
-            "\nPlease output the title in <title></title> tags, the summary in <summary></summary> tags,"
-            " and the action items in <action items></action items> tags."
-        )
-        body = json.dumps({
-            "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}],
-            "anthropic_version": "bedrock-2023-05-31"
-        })
-        try: 
-            response = boto3.client("bedrock-runtime").invoke_model(
-                body=body, modelId="anthropic.claude-3-sonnet-20240229-v1:0"
-            )
-            bedrock_completion = json.loads(response.get("body").read())["content"][0]["text"]
-        except Exception as e:
-            logging.info(f"Error while invoking model: {e}")
-            bedrock_completion = ""
-
-        title = re.findall(r'<title>(.*?)</title>|$', bedrock_completion, re.DOTALL)[0].strip()
-        summary = re.findall(r'<summary>(.*?)</summary>|$', bedrock_completion, re.DOTALL)[0].strip()
-        action_items = re.findall(
-            r'<action items>(.*?)</action items>|$', bedrock_completion, re.DOTALL
-        )[0].strip()   
-
-        msg['Subject'] = f"{os.environ['MEETING_NAME']} | {title}"
-
-        body_text = "Attendees:\n" + attendance + "\nSummary:\n" + summary \
-            + "\n\nAction Items:\n" + action_items
-        newline = '\n'
-        body_html = f"""
-        <html>
-            <body>
-                <h4>Attendees</h4>
-                <p>{attendance.replace(newline, '<br>')}</p>
-                <h4>Summary</h4>
-                <p>{summary.replace(newline, '<br>')}</p>
-                <h4>Action Items</h4>
-                <p>{action_items.replace(newline, '<br>')}</p>
-            </body>
-        </html>
-        """
-
-        attachment = MIMEApplication(transcript)
-        attachment.add_header('Content-Disposition','attachment',filename="transcript.txt")
-        msg.attach(attachment)
-
-        attachment = MIMEApplication(chat)
-        attachment.add_header('Content-Disposition','attachment',filename="chat.txt")
-        msg.attach(attachment)
-
-    charset = "utf-8"
-
-    msg_body = MIMEMultipart('alternative')
-    msg_body.attach(MIMEText(body_text.encode(charset), 'plain', charset))
-    msg_body.attach(MIMEText(body_html.encode(charset), 'html', charset))
-    msg.attach(msg_body)
-    
-    boto3.client("ses").send_raw_email(
-        Source=email_source,
-        Destinations=email_destinations,
-        RawMessage={
-            'Data':msg.as_string(),
-        }
-    )
-    logging.info("Email sent!")
-
+    logging.info("Meeting complete")
     exit()
 
 async def initialize():
@@ -598,5 +515,4 @@ async def initialize():
 
 asyncio.run(initialize())
 
-
-# deliver()
+deliver()

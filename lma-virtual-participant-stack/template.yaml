@@ -159,12 +159,6 @@ Parameters:
       - 'true'
       - 'false'
 
-# scribe specific
-  Email:
-    Description: Address to receive meeting transcripts, summaries, action items, etc.
-    Type: String
-    AllowedPattern: "^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,6}$"
-
 Conditions:
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, 'true']
@@ -403,12 +397,6 @@ Resources:
       ServiceToken: !GetAtt ECSRoleCustomResourceFunction.Arn
 
 ### Bot Resources ###
-
-  Identity:
-      Type: AWS::SES::EmailIdentity
-      Properties:
-        EmailIdentity: !Ref Email
-
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -762,10 +750,6 @@ Resources:
                               "Value.$": "$.data.meetingPassword"
                             },
                             {
-                              "Name": "EMAIL",
-                              "Value": "${Email}"
-                            },
-                            {
                               "Name": "MEETING_NAME",
                               "Value.$": "$.data.meetingName"
                             }
@@ -823,10 +807,6 @@ Resources:
                               {
                                 "name": "MEETING_PASSWORD",
                                 "value.$": "$.data.meetingPassword"
-                              },
-                              {
-                                "name": "EMAIL",
-                                "value": "${Email}"
                               },
                               {
                                 "name": "MEETING_NAME",
@@ -900,9 +880,6 @@ Resources:
             }
 
 Outputs:
-
-  Email:
-    Value: !Ref Email
-
+  
   StepFunctions:
     Value: !Ref SchedulerStateMachine
