@@ -43,7 +43,7 @@ Parameters:
 
   TranscribeApiMode:
     Type: String
-    Default: analytics
+    Default: standard
     AllowedValues:
         - standard
         - analytics
