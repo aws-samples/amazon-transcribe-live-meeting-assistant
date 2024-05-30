@@ -43,18 +43,29 @@ access_key = credentials.access_key
 secret_key = credentials.secret_key
 session_token = credentials.token
 region = os.getenv("AWS_DEFAULT_REGION","us-east-1")
-kinesis_stream_name = os.getenv("KINESIS_STREAM_NAME")
+KINESIS_STREAM_NAME = os.getenv("KINESIS_STREAM_NAME")
 transcribe_url_generator = AWSTranscribePresignedURL(access_key, secret_key, session_token, region)
-recordings_bucket_name = os.getenv('RECORDINGS_BUCKET_NAME')
-recording_file_prefix = os.getenv('RECORDINGS_KEY_PREFIX')
+RECORDINGS_BUCKET_NAME = os.getenv('RECORDINGS_BUCKET_NAME')
+RECORDINGS_KEY_PREFIX = os.getenv('RECORDINGS_KEY_PREFIX', 'lca-audio-wav/')
 
+# Transcribe configurations
+TRANSCRIBE_LANGUAGE_CODE = os.getenv('TRANSCRIBE_LANGUAGE_CODE', 'en-US')
+TRANSCRIBE_LANGUAGE_OPTIONS = os.getenv('TRANSCRIBE_LANGUAGE_OPTIONS')
+TRANSCRIBE_PREFERRED_LANGUAGE = os.getenv('TRANSCRIBE_PREFERRED_LANGUAGE', '')
+CUSTOM_VOCABULARY_NAME = os.getenv('CUSTOM_VOCABULARY_NAME')
+CUSTOM_LANGUAGE_MODEL_NAME = os.getenv('CUSTOM_LANGUAGE_MODEL_NAME')
+IS_CONTENT_REDACTION_ENABLED = os.getenv('IS_CONTENT_REDACTION_ENABLED', '').lower() == 'true'
+CONTENT_REDACTION_TYPE = os.getenv('CONTENT_REDACTION_TYPE', 'PII')
+TRANSCRIBE_PII_ENTITY_TYPES = os.getenv('TRANSCRIBE_PII_ENTITY_TYPES', 'ALL')
+IDENTIFY_MULTIPLE_LANGUAGES = False
+if TRANSCRIBE_LANGUAGE_CODE == 'identify-multiple-languages':
+    IDENTIFY_MULTIPLE_LANGUAGES = True
 
 # Create AWS clients
 kinesis = boto3.client('kinesis', region_name=region)
 s3 = boto3.client('s3', region_name=region)
 
 # Sound settings
-language_code = "en-US"
 media_encoding = "pcm"
 sample_rate = 16000
 number_of_channels = 1
@@ -120,7 +131,7 @@ async def write_wav_header(file, sample_rate, num_channels, bit_depth, num_sampl
 
 async def write_recording_s3():
     try:
-        logging.info(f'Uploading recording to S3, bucket {recordings_bucket_name}...')
+        logging.info(f'Uploading recording to S3, bucket {RECORDINGS_BUCKET_NAME}...')
         num_samples = math.ceil(os.path.getsize(file_name) / 2)
 
         async with aiofiles.open(file_name, 'rb') as input_f, aiofiles.open(recording_file, 'wb') as output_f:
@@ -129,10 +140,10 @@ async def write_recording_s3():
 
         unique_filename = sanitize_filename(f'{lma_meeting_id}.wav')
         # write to s3
-        s3.upload_file(recording_file, recordings_bucket_name, f'{recording_file_prefix}{unique_filename}')
+        s3.upload_file(recording_file, RECORDINGS_BUCKET_NAME, f'{RECORDINGS_KEY_PREFIX}{unique_filename}')
         logging.info("Recording uploaded to S3")
 
-        recording_url = f'https://{recordings_bucket_name}.s3.{region}.amazonaws.com/{recording_file_prefix}{unique_filename}'
+        recording_url = f'https://{RECORDINGS_BUCKET_NAME}.s3.{region}.amazonaws.com/{RECORDINGS_KEY_PREFIX}{unique_filename}'
 
         payload = {
             'EventType': 'ADD_S3_RECORDING_URL',
@@ -142,7 +153,7 @@ async def write_recording_s3():
         logging.info(f"Sending add recording url event to Kinesis. Event: {payload}")
         # Write the messages to the Kinesis Data Stream
         response = kinesis.put_record(
-            StreamName=kinesis_stream_name,
+            StreamName=KINESIS_STREAM_NAME,
             PartitionKey=lma_meeting_id,
             Data=json.dumps(payload).encode('utf-8')
         )
@@ -174,7 +185,7 @@ def send_add_transcript_segment(result):
         }
         # Write the messages to the Kinesis Data Stream
         response = kinesis.put_record(
-            StreamName=kinesis_stream_name,
+            StreamName=KINESIS_STREAM_NAME,
             PartitionKey=lma_meeting_id,
             Data=json.dumps(add_transcript_segment).encode('utf-8')
         )
@@ -196,7 +207,7 @@ def send_start_meeting():
 
         # Write the messages to the Kinesis Data Stream
         response = kinesis.put_record(
-            StreamName=kinesis_stream_name,
+            StreamName=KINESIS_STREAM_NAME,
             PartitionKey=lma_meeting_id,
             Data=json.dumps(start_call_event).encode('utf-8')
         )
@@ -218,7 +229,7 @@ def send_end_meeting():
 
         # Write the messages to the Kinesis Data Stream
         response = kinesis.put_record(
-            StreamName=kinesis_stream_name,
+            StreamName=KINESIS_STREAM_NAME,
             PartitionKey=lma_meeting_id,
             Data=json.dumps(start_call_event).encode('utf-8')
         )
@@ -301,8 +312,15 @@ async def transcribe():
     }
     # generate signed url to connect to
     request_url = transcribe_url_generator.get_request_url(sample_rate, 
-                                                           language_code, 
-                                                           media_encoding, 
+                                                           TRANSCRIBE_LANGUAGE_CODE,
+                                                           media_encoding,
+                                                           identify_multiple_languages=IDENTIFY_MULTIPLE_LANGUAGES, 
+                                                           vocabulary_name=CUSTOM_VOCABULARY_NAME,
+                                                           language_options=TRANSCRIBE_LANGUAGE_OPTIONS,
+                                                           preferred_language=TRANSCRIBE_PREFERRED_LANGUAGE,
+                                                           language_model_name=CUSTOM_LANGUAGE_MODEL_NAME,
+                                                           pii_entity_types=TRANSCRIBE_PII_ENTITY_TYPES,
+                                                           content_redaction_type=CONTENT_REDACTION_TYPE,
                                                            number_of_channels=number_of_channels,
                                                            enable_channel_identification=channel_identification)
     async with websockets.connect(request_url, 
