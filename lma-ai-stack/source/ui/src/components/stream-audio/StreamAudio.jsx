@@ -12,10 +12,16 @@ import {
   Header,
   ColumnLayout,
   Select,
+  Grid,
 } from '@awsui/components-react';
 import '@awsui/global-styles/index.css';
 import useWebSocket from 'react-use-websocket';
 
+import {
+  DEFAULT_OTHER_SPEAKER_NAME,
+  DEFAULT_LOCAL_SPEAKER_NAME,
+  SYSTEM,
+} from '../common/constants';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 
@@ -28,14 +34,18 @@ const StreamAudio = () => {
 
   const [callMetaData, setCallMetaData] = useState({
     callId: crypto.randomUUID(),
-    agentId: 'Me',
-    fromNumber: 'Other Participant',
-    toNumber: 'System',
+    agentId: DEFAULT_LOCAL_SPEAKER_NAME,
+    fromNumber: DEFAULT_OTHER_SPEAKER_NAME,
+    toNumber: SYSTEM,
   });
 
   const [recording, setRecording] = useState(false);
   const [streamingStarted, setStreamingStarted] = useState(false);
-  const [micInputOption, setMicInputOption] = useState({ label: 'Me', value: 'agent' });
+  const [micInputOption, setMicInputOption] = useState({
+    label: DEFAULT_LOCAL_SPEAKER_NAME,
+    value: 'agent',
+  });
+  const [micMuted, setMicMuted] = useState(false);
 
   const getSocketUrl = useCallback(() => {
     console.log(`DEBUG - [${new Date().toISOString()}]: Trying to resolve websocket url...`);
@@ -143,6 +153,7 @@ const StreamAudio = () => {
       });
       audioProcessor.current.port.close();
       audioProcessor.current.disconnect();
+      setMicMuted(false);
     } else {
       console.log(`
         DEBUG - [${new Date().toISOString()}]: Error trying to stop recording. AudioWorklet Processor node is not active.
@@ -294,6 +305,11 @@ const StreamAudio = () => {
     return recording;
   };
 
+  const toggleMicrophoneEnabled = () => {
+    micStream.current.getAudioTracks()[0].enabled = !micStream.current.getAudioTracks()[0].enabled;
+    setMicMuted(!micStream.current.getAudioTracks()[0].enabled);
+  };
+
   return (
     <form onSubmit={(e) => e.preventDefault()}>
       <Form
@@ -305,7 +321,29 @@ const StreamAudio = () => {
           </SpaceBetween>
         }
       >
-        <Container header={<Header variant="h2">Meeting Information</Header>}>
+        <Container
+          header={
+            <Header
+              variant="h2"
+              actions={
+                <div>
+                  {recording && (
+                    <Button
+                      href={`#/calls/${callMetaData.callId}`}
+                      variant="link"
+                      iconName="external"
+                      target="blank"
+                    >
+                      Open current meeting
+                    </Button>
+                  )}
+                </div>
+              }
+            >
+              Meeting Information
+            </Header>
+          }
+        >
           <ColumnLayout columns={2}>
             <FormField
               label="Meeting ID"
@@ -313,28 +351,50 @@ const StreamAudio = () => {
               required
               description="Auto-generated Unique meeting ID"
             >
-              <Input value={callMetaData.callId} onChange={handleCallIdChange} />
+              <Input
+                value={callMetaData.callId}
+                onChange={handleCallIdChange}
+                disabled={recording}
+              />
             </FormField>
             <FormField label="Name" stretch required description="Name">
-              <Input value={callMetaData.agentId} onChange={handleAgentIdChange} />
+              <Input
+                value={callMetaData.agentId}
+                onChange={handleAgentIdChange}
+                disabled={recording}
+              />
             </FormField>
             <FormField
-              label="Participant Names(s)"
+              label="Participant Name(s)"
               stretch
               required
-              description="Participant Names(s)"
+              description="Participant Name(s)"
             >
-              <Input value={callMetaData.fromNumber} onChange={handlefromNumberChange} />
+              <Input
+                value={callMetaData.fromNumber}
+                onChange={handlefromNumberChange}
+                disabled={recording}
+              />
             </FormField>
             <FormField label="Microphone Role" stretch required description="Mic input">
-              <Select
-                selectedOption={micInputOption}
-                onChange={handleMicInputOptionSelection}
-                options={[
-                  { label: 'Others', value: 'caller' },
-                  { label: 'Me', value: 'agent' },
-                ]}
-              />
+              <Grid gridDefinition={[{ colspan: 10 }, { colspan: 1 }]}>
+                <Select
+                  selectedOption={micInputOption}
+                  onChange={handleMicInputOptionSelection}
+                  disabled={recording}
+                  options={[
+                    { label: 'Others', value: 'caller' },
+                    { label: DEFAULT_LOCAL_SPEAKER_NAME, value: 'agent' },
+                  ]}
+                />
+                <Button
+                  variant={micMuted ? 'secondary' : 'primary'}
+                  onClick={toggleMicrophoneEnabled}
+                  disabled={!recording}
+                  iconAlign="left"
+                  iconName={micMuted ? 'microphone-off' : 'microphone'}
+                />
+              </Grid>
             </FormField>
           </ColumnLayout>
         </Container>

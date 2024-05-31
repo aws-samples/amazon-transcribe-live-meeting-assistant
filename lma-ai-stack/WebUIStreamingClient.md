@@ -9,6 +9,6 @@ To use this feature:
 3. Click on `Start Streaming` as shown below.![Stream](../images/websocket-start-stream.png)
 4. Share the browser tab that is playing the media (video/audio files, meeting, etc.)
 5. Speak into the microphone.
-6. The web streaming client combines the audio output from browser tab and the microphone input into a streo (two channel) audio stream. The client sends the stream to the websocket server for downstream processing (enrichment, agent assist, etc.).  
+6. The web streaming client combines the audio output from browser tab and the microphone input into a stereo (two channel) audio stream. The client sends the stream to the websocket server for downstream processing (enrichment, agent assist, etc.).  
 7. Click on `Stop Streaming` to end the streaming session. ![Stream](../images/websocket-stop-stream.png)
 
