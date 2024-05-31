@@ -6,9 +6,9 @@ import { SideNavigation } from '@awsui/components-react';
 
 import {
   CALLS_PATH,
+  DEFAULT_PATH,
   STREAM_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
-  DEFAULT_PATH,
 } from '../../routes/constants';
 
 export const callsNavHeader = { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` };
@@ -65,17 +65,17 @@ const defaultOnFollowHandler = (ev) => {
 
 /* eslint-disable react/prop-types */
 const Navigation = ({
-  activeHref = `#${CALLS_PATH}`,
+  activeHref = `#${VIRTUAL_PARTICIPANT_PATH}`,
   header = callsNavHeader,
   items = callsNavItems,
   onFollowHandler = defaultOnFollowHandler,
 }) => (
   <Switch>
-    <Route path={CALLS_PATH}>
+    <Route path={VIRTUAL_PARTICIPANT_PATH}>
       <SideNavigation
         items={items || callsNavItems}
         header={header || callsNavHeader}
-        activeHref={activeHref || `#${CALLS_PATH}`}
+        activeHref={activeHref || `#${STREAM_AUDIO_PATH}`}
         onFollow={onFollowHandler}
       />
     </Route>
