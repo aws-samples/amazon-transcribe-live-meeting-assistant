@@ -151,7 +151,9 @@ Parameters:
     Type: String
   TranscriptLambdaHookFunctionNonPartialOnly:
     Type: String
-  DynamoDbExpirationInDays:
+  MeetingRecordExpirationInDays:
+    Type: String
+  TranscriptionExpirationInDays:
     Type: String
   EndOfCallTranscriptSummary:
     Type: String
@@ -575,7 +577,8 @@ Resources:
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
       TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
       TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
-      DynamoDbExpirationInDays: !Ref DynamoDbExpirationInDays
+      MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
+      TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
       EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
       EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
       CloudFrontDomainName: !Sub "https://${CloudFrontDomainName}/"

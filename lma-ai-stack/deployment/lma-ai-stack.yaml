@@ -24,9 +24,9 @@ Parameters:
     Type: String
     Description: LMA Stack Name
   
-  RecordingsBucketRetentionDays:
+  AudioRecordingExpirationInDays:
     Type: Number
-    Description: "Number of days after which bucket objects will be deleted from the Recordings bucket."
+    Description: 'Number of days after which audio recordings will be deleted from the Recordings bucket.'
     Default: 30
 
   CallAudioSource:
@@ -235,11 +235,17 @@ Parameters:
       Used only if IsLambdaAgentAssistEnabled is set to "true".
       Provide the function ARN of an existing Lambda function to be used for Agent Assist." 
 
-  DynamoDbExpirationInDays:
+  MeetingRecordExpirationInDays:
     Type: Number
     Default: 90
     Description: >-
-      Number of days set in the time to live of event data stored in the DynamoDB table
+      Number of days to retain meeting records. Meetings will be automatically deleted from LMA after this time.
+
+  TranscriptionExpirationInDays:
+    Type: Number
+    Default: 90
+    Description: >-
+      Number of days to retain turn by turn meeting transcriptions. Transcriptions will be automatically deleted from LMA after this time.
 
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
@@ -448,7 +454,7 @@ Resources:
           - Id: RuleRetention
             Status: Enabled
             Prefix: ""
-            ExpirationInDays: !Ref RecordingsBucketRetentionDays
+            ExpirationInDays: !Ref AudioRecordingExpirationInDays
 
   RecordingsBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -1244,7 +1250,8 @@ Resources:
           IS_LEX_AGENT_ASSIST_ENABLED: !Ref IsLexAgentAssistEnabled
           # Lambda Agent Assist
           IS_LAMBDA_AGENT_ASSIST_ENABLED: !Ref IsLambdaAgentAssistEnabled
-          DYNAMODB_EXPIRATION_IN_DAYS: !Ref DynamoDbExpirationInDays
+          MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays
+          TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS: !Ref TranscriptionRecordExpirationInDays
           TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN: !Ref TranscriptLambdaHookFunctionArn
           START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN: !Ref StartOfCallLambdaHookFunctionArn
           POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN: !Ref PostCallSummaryLambdaHookFunctionArn

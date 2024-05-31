@@ -289,16 +289,38 @@ Parameters:
     ConstraintDescription: >-
       Comma separated list of uppercase two letter country codes or empty
 
-  DynamoDbExpirationInDays:
+  EnableAudioRecording:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >--
+      Enable or disable recording of audio during a meeting. If set to false, the meeting will not be recorded.
+      If set to true, the meeting will be recorded.
+
+  AudioRecordingExpirationInDays:
+    Type: Number
+    Description: 'Number of days after which audio recordings will be deleted from the Recordings bucket.'
+    Default: 30
+
+  MeetingRecordExpirationInDays:
     Type: Number
     Default: 90
     Description: >-
-      Number of days to retain call records. Records will be automatically deleted from LMA after this time.
+      Number of days to retain meeting records. Meetings will be automatically deleted from LMA after this time.
 
-  RecordingsBucketRetentionDays:
+  TranscriptionExpirationInDays:
     Type: Number
-    Description: 'Number of days after which bucket objects will be deleted from the Recordings bucket.'
-    Default: 30
+    Default: 90
+    Description: >-
+      Number of days to retain turn by turn meeting transcriptions. Transcriptions will be automatically deleted from LMA after this time.
+
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 90
+    Description: >-
+      Number of days to retain CloudWatch log records. Logs will be automatically deleted from LMA after this time.
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -351,10 +373,13 @@ Metadata:
           - CloudFrontPriceClass
           - CloudFrontAllowedGeos
       - Label:
-          default: Retention
+          default: Retention Settings
         Parameters:
-          - DynamoDbExpirationInDays
-          - RecordingsBucketRetentionDays
+          - EnableAudioRecording
+          - MeetingRecordExpirationInDays
+          - TranscriptionExpirationInDays
+          - AudioRecordingExpirationInDays
+          - CloudWatchLogsExpirationInDays
 
     ParameterLabels:
       CallAudioProcessor:
@@ -413,9 +438,11 @@ Metadata:
         default: CloudFront Price Class
       CloudFrontAllowedGeos:
         default: CloudFront Allowed Geographies
-      DynamoDbExpirationInDays:
+      MeetingRecordExpirationInDays:
         default: Record Expiration In Days
-      RecordingsBucketRetentionDays:
+      TranscriptionExpirationInDays:
+        default: Transcription Expiration In Days
+      AudioRecordingExpirationInDays:
         default: Recording Expiration In Days
 
 Mappings:
@@ -655,7 +682,7 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
-        RecordingsBucketRetentionDays: !Ref RecordingsBucketRetentionDays
+        AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
         EnableVoiceToneAnalysis: 'false'
         CallAudioSource: 'Genesys Cloud Audiohook Web Socket'
         S3BucketName: !Ref S3BucketName
@@ -665,7 +692,8 @@ Resources:
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
         IsLexAgentAssistEnabled: true
-        DynamoDbExpirationInDays: !Ref DynamoDbExpirationInDays
+        MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
+        TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
@@ -727,7 +755,8 @@ Resources:
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
-        DynamoDbExpirationInDays: !Ref DynamoDbExpirationInDays
+        MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
+        TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         LexMeetingAssistIdentityPoolId: !GetAtt AISTACK.Outputs.LexAgentAssistIdentityPoolId
