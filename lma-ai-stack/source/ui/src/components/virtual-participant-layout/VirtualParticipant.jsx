@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
 
-import { Container, Header, ColumnLayout, Link } from '@awsui/components-react';
+import { Container, Header, ColumnLayout } from '@awsui/components-react';
 import '@awsui/global-styles/index.css';
 
 // import useAppContext from '../../contexts/app';
@@ -18,23 +18,7 @@ const VirtualParticipant = () => {
   console.log(test);
 
   return (
-    <Container
-      header={
-        <Header
-          variant="h2"
-          description={
-            <Link
-              external
-              href="https://github.com/aws-samples/automated-meeting-scribe-and-summarizer"
-            >
-              Based on Automated Meeting Scribe and Summarizer
-            </Link>
-          }
-        >
-          Virtual Participant
-        </Header>
-      }
-    >
+    <Container header={<Header variant="h2">Virtual Participant</Header>}>
       <ColumnLayout columns={2}>
         <MeetingForm />
       </ColumnLayout>

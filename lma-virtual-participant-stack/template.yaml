@@ -410,6 +410,37 @@ Resources:
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
       Policies:
+
+        - PolicyName: LMAPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject*
+                  - s3:GetBucket*
+                  - s3:List*
+                  - s3:DeleteObject*
+                  - s3:PutObject
+                  - s3:PutObjectLegalHold
+                  - s3:PutObjectRetention
+                  - s3:PutObjectTagging
+                  - s3:PutObjectVersionTagging
+                  - s3:Abort*
+                Resource:
+                  - !Sub
+                    - "arn:aws:s3:::${bucket}"
+                    - bucket: !Ref S3BucketName
+                  - !Sub
+                    - "arn:aws:s3:::${bucket}/*"
+                    - bucket: !Ref S3BucketName
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource:  
+                  - !Sub 
+                    - "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${streamName}"
+                    - streamName: !Ref CallDataStreamName
         - PolicyName: TranscribePolicy
           PolicyDocument:
             Version: 2012-10-17
