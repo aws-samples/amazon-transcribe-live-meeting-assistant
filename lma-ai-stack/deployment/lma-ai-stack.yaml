@@ -351,6 +351,8 @@ Outputs:
     Value: !Sub https://${LMAUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
   CognitoClientId:
     Value: !Ref UserPoolClient
+  CognitoAuthRoleArn:
+    Value: !GetAtt CognitoAuthorizedRole.Arn
   CallDataStreamName:
     Description: >-
       The Name of Kinesis Data Stream to write the call data to.

@@ -16,6 +16,11 @@ Parameters:
     Description: Private subnet 2 for scribe Fargate
     Type: String
 
+# cognito
+  CognitoAuthRoleArn:
+    Description: The Cognito auth role to add additional policies to execute the step function.
+    Type: String
+
 # transcibe parameters
   S3BucketName:
     Type: String

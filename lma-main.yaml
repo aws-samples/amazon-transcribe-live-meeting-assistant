@@ -792,6 +792,7 @@ Resources:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-virtual-participant-stack/template.yaml
       # yamllint enable rule:line-length
       Parameters:
+        CognitoAuthRoleArn: !GetAtt AISTACK.Outputs.CognitoAuthRoleArn
         S3BucketName: !GetAtt AISTACK.Outputs.S3BucketName
         AudioFilePrefix: !Ref AudioFilePrefix
         CallDataStreamName: !GetAtt AISTACK.Outputs.CallDataStreamName
