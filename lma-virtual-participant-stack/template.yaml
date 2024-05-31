@@ -184,7 +184,7 @@ Resources:
     Type: AWS::ECR::Repository
     Properties:
       EmptyOnDelete: true
-      ImageTagMutability: IMMUTABLE
+      ImageTagMutability: MUTABLE
 
   BuildRole:
     Type: 'AWS::IAM::Role'
