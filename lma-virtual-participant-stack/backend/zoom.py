@@ -451,7 +451,7 @@ async def initialize():
                 await leave_button_element.click()
             elif not start and start_command in message:
                 start = True
-                start_message = 'Saving attendance, new messages and transcriptions.'
+                start_message = 'Saving attendance, new messages and transcriptions. Type PAUSE to pause LMA, and RESUME to resume LMA.'
                 logging.info(start_message)
                 send_start_meeting()
                 await send_message(start_message)
