@@ -64,6 +64,8 @@ const piiTypesSplitRegEx = new RegExp(`\\[(${piiTypes.join('|')})\\]`);
 const MAXIMUM_ATTEMPTS = 100;
 const MAXIMUM_RETRY_DELAY = 1000;
 
+const PAUSE_TO_MERGE_IN_SECONDS = 1;
+
 const languageCodes = [
   { value: '', label: 'Choose a Language' },
   { value: 'af', label: 'Afrikaans' },
@@ -459,6 +461,37 @@ const TranscriptSegment = ({
   );
 };
 
+/**
+ * Check whether the current segment should be merged to the previous segment to get better
+ * user experience. The conditions for merge are:
+ * - Same speaker
+ * - Same channel
+ * - The gap between two segments is less than PAUSE_TO_MERGE_IN_SECONDS second
+ * - Add language code check if available
+ * TODO: Check language code once it is returned
+ * @param previous previous segment
+ * @param current current segment
+ * @returns {boolean} indicates whether to merge or not
+ */
+const shouldAppendToPreviousSegment = ({ previous, current }) =>
+  // prettier-ignore
+  // eslint-disable-next-line implicit-arrow-linebreak
+  previous.speaker === current.speaker
+  && previous.channel === current.channel
+  && current.startTime - previous.endTime < PAUSE_TO_MERGE_IN_SECONDS;
+
+/**
+ * Append current segment to its previous segment
+ * @param previous previous segment
+ * @param current current segment
+ */
+const appendToPreviousSegment = ({ previous, current }) => {
+  /* eslint-disable no-param-reassign */
+  previous.transcript += ` ${current.transcript}`;
+  previous.endTime = current.endTime;
+  previous.isPartial = current.isPartial;
+};
+
 const CallInProgressTranscript = ({
   item,
   callTranscriptPerCallId,
@@ -618,6 +651,23 @@ const CallInProgressTranscript = ({
       })
       // sort entries by end time
       .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), [])
+      .reduce((accumulator, current) => {
+        if (
+          // prettier-ignore
+          !accumulator.length
+          || !shouldAppendToPreviousSegment(
+            { previous: accumulator[accumulator.length - 1], current },
+          )
+          // Enable it once it is compatible with translation
+          || translateOn
+        ) {
+          // Get copy of current segment to avoid direct modification
+          accumulator.push({ ...current });
+        } else {
+          appendToPreviousSegment({ previous: accumulator[accumulator.length - 1], current });
+        }
+        return accumulator;
+      }, [])
       .map((c) => {
         const t = c;
         t.agentTranscript = agentTranscript;
