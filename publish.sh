@@ -215,8 +215,6 @@ git submodule init
 git submodule update
 echo "Applying patch files to simplify UX by removing some QnABot options not needed for lma"
 # lma customizations
-cp -v ./patches/qnabot/lambda_schema_qna.js $dir/lambda/schema/qna.js
-cp -v ./patches/qnabot/website_js_admin.vue $dir/website/js/admin.vue
 cp -v ./patches/qnabot/Makefile $dir/Makefile
 echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lma'"
 # Detection of differences. sed varies betwen GNU sed and BSD sed
