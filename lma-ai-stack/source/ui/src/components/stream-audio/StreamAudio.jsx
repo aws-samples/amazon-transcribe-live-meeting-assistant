@@ -13,6 +13,7 @@ import {
   ColumnLayout,
   Select,
   Grid,
+  Box,
 } from '@awsui/components-react';
 import '@awsui/global-styles/index.css';
 import useWebSocket from 'react-use-websocket';
@@ -45,7 +46,21 @@ const StreamAudio = () => {
     label: DEFAULT_LOCAL_SPEAKER_NAME,
     value: 'agent',
   });
+  const [isFlashing, setIsFlashing] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
+
+  useEffect(() => {
+    let interval;
+    if (recording) {
+      interval = setInterval(() => {
+        setIsFlashing((prevState) => !prevState);
+      }, 500);
+    } else {
+      clearInterval(interval);
+      setIsFlashing(false);
+    }
+    return () => clearInterval(interval);
+  }, [recording]);
 
   const getSocketUrl = useCallback(() => {
     console.log(`DEBUG - [${new Date().toISOString()}]: Trying to resolve websocket url...`);
@@ -145,7 +160,6 @@ const StreamAudio = () => {
 
   const stopRecording = async () => {
     console.log(`DEBUG - [${new Date().toISOString()}]: Stopping recording...`);
-
     if (audioProcessor.current) {
       audioProcessor.current.port.postMessage({
         message: 'UPDATE_RECORDING_STATE',
@@ -172,6 +186,7 @@ const StreamAudio = () => {
         callId: crypto.randomUUID(),
       });
     }
+    setRecording(false);
   };
 
   const startRecording = async () => {
@@ -187,6 +202,7 @@ const StreamAudio = () => {
           autoGainControl: true,
           echoCancellation: true,
         },
+        selfBrowserSurface: 'exclude',
       });
 
       micStream.current = await window.navigator.mediaDevices.getUserMedia({
@@ -249,7 +265,7 @@ const StreamAudio = () => {
 
       audioProcessor.current.port.onmessageerror = (error) => {
         console.log(`
-          DEBUG - [${new Date().toISOString()}]: Error receving message from worklet ${error}
+          DEBUG - [${new Date().toISOString()}]: Error receiving message from worklet ${error}
         `);
       };
 
@@ -315,7 +331,7 @@ const StreamAudio = () => {
       <Form
         actions={
           <SpaceBetween direction="horizontal" size="xs">
-            <Button variant="primary" onClick={handleRecording}>
+            <Button variant={recording ? 'secondary' : 'primary'} onClick={handleRecording}>
               {recording ? 'Stop Streaming' : 'Start Streaming'}
             </Button>
           </SpaceBetween>
@@ -397,6 +413,16 @@ const StreamAudio = () => {
               </Grid>
             </FormField>
           </ColumnLayout>
+
+          {recording && (
+            <Box
+              margin={{ top: 'xl' }}
+              float="right"
+              color={isFlashing && recording ? 'text-status-error' : 'text-body-secondary'}
+            >
+              Recording in progress, do not close or refresh this tab.
+            </Box>
+          )}
         </Container>
       </Form>
     </form>
