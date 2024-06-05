@@ -27,7 +27,7 @@ Parameters:
   AudioRecordingExpirationInDays:
     Type: Number
     Description: 'Number of days after which audio recordings will be deleted from the Recordings bucket.'
-    Default: 30
+    Default: 90
 
   CallAudioSource:
     Type: String
@@ -240,12 +240,15 @@ Parameters:
     Default: 90
     Description: >-
       Number of days to retain meeting records. Meetings will be automatically deleted from LMA after this time.
-
+      Specify partial days like 0.5 to retain meeting records for half a day.
+  
   TranscriptionExpirationInDays:
     Type: Number
     Default: 90
     Description: >-
-      Number of days to retain turn by turn meeting transcriptions. Transcriptions will be automatically deleted from LMA after this time.
+      Number of days to retain turn by turn meeting transcriptions. 
+      Transcriptions will be automatically deleted from LMA after this time.
+      Specify partial days like 0.5 to retain transcriptions for half a day.
 
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
@@ -1251,7 +1254,7 @@ Resources:
           # Lambda Agent Assist
           IS_LAMBDA_AGENT_ASSIST_ENABLED: !Ref IsLambdaAgentAssistEnabled
           MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays
-          TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS: !Ref TranscriptionRecordExpirationInDays
+          TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS: !Ref TranscriptionExpirationInDays
           TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN: !Ref TranscriptLambdaHookFunctionArn
           START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN: !Ref StartOfCallLambdaHookFunctionArn
           POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN: !Ref PostCallSummaryLambdaHookFunctionArn

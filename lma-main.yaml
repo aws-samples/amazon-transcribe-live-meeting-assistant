@@ -295,32 +295,35 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
-    Description: >--
+    Description: >-
       Enable or disable recording of audio during a meeting. If set to false, the meeting will not be recorded.
       If set to true, the meeting will be recorded.
 
   AudioRecordingExpirationInDays:
     Type: Number
-    Description: 'Number of days after which audio recordings will be deleted from the Recordings bucket.'
-    Default: 30
+    Description: 'Whole number of days after which audio recordings will be deleted from the Recordings bucket.'
+    Default: 90
 
   MeetingRecordExpirationInDays:
     Type: Number
     Default: 90
     Description: >-
       Number of days to retain meeting records. Meetings will be automatically deleted from LMA after this time.
+      Specify partial days like 0.5 to retain meeting records for half a day.
 
   TranscriptionExpirationInDays:
     Type: Number
     Default: 90
     Description: >-
-      Number of days to retain turn by turn meeting transcriptions. Transcriptions will be automatically deleted from LMA after this time.
+      Number of days to retain turn by turn meeting transcriptions. 
+      Transcriptions will be automatically deleted from LMA after this time.
+      Specify partial days like 0.5 to retain transcriptions for half a day.
 
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 90
     Description: >-
-      Number of days to retain CloudWatch log records. Logs will be automatically deleted from LMA after this time.
+      Number of days to retain CloudWatch log records. Logs will be automatically deleted after this time.
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -439,11 +442,11 @@ Metadata:
       CloudFrontAllowedGeos:
         default: CloudFront Allowed Geographies
       MeetingRecordExpirationInDays:
-        default: Record Expiration In Days
+        default: Meeting Record Expiration In Days
       TranscriptionExpirationInDays:
         default: Transcription Expiration In Days
       AudioRecordingExpirationInDays:
-        default: Recording Expiration In Days
+        default: Audio Recording Expiration In Days
 
 Mappings:
 

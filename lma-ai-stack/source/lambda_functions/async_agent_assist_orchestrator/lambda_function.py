@@ -10,7 +10,7 @@ import uuid
 
 from datetime import datetime
 from eventprocessor_utils import (
-    get_ttl
+    get_transcription_ttl
 )
 from lex_utils import recognize_text_lex
 
@@ -61,12 +61,16 @@ LEX_BOT_ID = getenv("LEX_BOT_ID", "")
 LEX_BOT_ALIAS_ID = getenv("LEX_BOT_ALIAS_ID", "")
 LEX_BOT_LOCALE_ID = getenv("LEX_BOT_LOCALE_ID", "")
 
-LAMBDA_AGENT_ASSIST_FUNCTION_ARN = getenv("LAMBDA_AGENT_ASSIST_FUNCTION_ARN", "")
+LAMBDA_AGENT_ASSIST_FUNCTION_ARN = getenv(
+    "LAMBDA_AGENT_ASSIST_FUNCTION_ARN", "")
 
-IS_LEX_AGENT_ASSIST_ENABLED = getenv("IS_LEX_AGENT_ASSIST_ENABLED", "false").lower() == "true"
-IS_LAMBDA_AGENT_ASSIST_ENABLED = getenv("IS_LAMBDA_AGENT_ASSIST_ENABLED", "false").lower() == "true"
+IS_LEX_AGENT_ASSIST_ENABLED = getenv(
+    "IS_LEX_AGENT_ASSIST_ENABLED", "false").lower() == "true"
+IS_LAMBDA_AGENT_ASSIST_ENABLED = getenv(
+    "IS_LAMBDA_AGENT_ASSIST_ENABLED", "false").lower() == "true"
 
 DYNAMODB_TABLE_NAME = getenv("DYNAMODB_TABLE_NAME", "")
+
 
 def write_agent_assist_to_kds(
     message: Dict[str, Any]
@@ -81,13 +85,15 @@ def write_agent_assist_to_kds(
                 PartitionKey=callId,
                 Data=json.dumps(message)
             )
-            LOGGER.info("Write AGENT_ASSIST event to KDS: %s", json.dumps(message))
+            LOGGER.info("Write AGENT_ASSIST event to KDS: %s",
+                        json.dumps(message))
         except Exception as error:
             LOGGER.error(
                 "Error writing AGENT_ASSIST event to KDS ",
                 extra=error,
             )
     return
+
 
 def publish_lex_agent_assist_transcript_segment(
     message: Dict[str, Any],
@@ -111,24 +117,25 @@ def publish_lex_agent_assist_transcript_segment(
     created_at = datetime.utcnow().astimezone().isoformat()
     status: str = message["Status"]
 
-    transcript_segment_args=dict(
-            CallId=call_id,
-            Channel="AGENT_ASSISTANT",
-            CreatedAt=created_at,
-            EndTime=end_time,
-            ExpiresAfter=get_ttl(),
-            IsPartial=is_partial,
-            SegmentId=str(uuid.uuid4()),
-            StartTime=start_time,
-            Status="TRANSCRIBING",
-        )
+    transcript_segment_args = dict(
+        CallId=call_id,
+        Channel="AGENT_ASSISTANT",
+        CreatedAt=created_at,
+        EndTime=end_time,
+        ExpiresAfter=get_transcription_ttl(),
+        IsPartial=is_partial,
+        SegmentId=str(uuid.uuid4()),
+        StartTime=start_time,
+        Status="TRANSCRIBING",
+    )
     lex_agent_assist_input = dict(
-            content=transcript,
-            transcript_segment_args=transcript_segment_args
-        )
-    
+        content=transcript,
+        transcript_segment_args=transcript_segment_args
+    )
+
     # write initial message to indicate that wake word was detected and request submitted.
-    transcript_segment = {**transcript_segment_args, "Transcript": "Checking...", "IsPartial":True}
+    transcript_segment = {**transcript_segment_args,
+                          "Transcript": "Checking...", "IsPartial": True}
     write_agent_assist_to_kds(transcript_segment)
 
     transcript_segment = get_lex_agent_assist_transcript(
@@ -136,6 +143,7 @@ def publish_lex_agent_assist_transcript_segment(
     )
 
     write_agent_assist_to_kds(transcript_segment)
+
 
 def get_lex_agent_assist_transcript(
     transcript_segment_args: Dict[str, Any],
@@ -161,9 +169,11 @@ def get_lex_agent_assist_transcript(
     transcript_segment = {}
     transcript = process_lex_bot_response(bot_response)
     if transcript:
-        transcript_segment = {**transcript_segment_args, "Transcript": transcript}
+        transcript_segment = {
+            **transcript_segment_args, "Transcript": transcript}
 
     return transcript_segment
+
 
 def process_lex_bot_response(bot_response):
     message = ""
@@ -180,13 +190,15 @@ def process_lex_bot_response(bot_response):
         message = bot_response["messages"][0]["content"]
     return message
 
+
 def is_qnabot_debug_response(message):
-    # QnABot debug responses are contained in opening [] section, starting with User Input 
+    # QnABot debug responses are contained in opening [] section, starting with User Input
     pattern = r'^\**\[User Input.*?\]\**'
     match = re.search(pattern, message)
     if match:
         return match.group()
     return None
+
 
 def is_qnabot_noanswer(bot_response):
     if (
@@ -200,6 +212,7 @@ def is_qnabot_noanswer(bot_response):
     ):
         return True
     return False
+
 
 def publish_lambda_agent_assist_transcript_segment(
     message: Dict[str, Any],
@@ -224,25 +237,26 @@ def publish_lambda_agent_assist_transcript_segment(
     created_at = datetime.utcnow().astimezone().isoformat()
 
     lambda_agent_assist_input = dict(
-            content=transcript,
-            transcript_segment_args=dict(
-                CallId=call_id,
-                Channel="AGENT_ASSISTANT",
-                CreatedAt=created_at,
-                EndTime=end_time,
-                ExpiresAfter=get_ttl(),
-                IsPartial=is_partial,
-                SegmentId=str(uuid.uuid4()),
-                StartTime=start_time,
-                Status="TRANSCRIBING",
-            ),
-        )
+        content=transcript,
+        transcript_segment_args=dict(
+            CallId=call_id,
+            Channel="AGENT_ASSISTANT",
+            CreatedAt=created_at,
+            EndTime=end_time,
+            ExpiresAfter=get_transcription_ttl(),
+            IsPartial=is_partial,
+            SegmentId=str(uuid.uuid4()),
+            StartTime=start_time,
+            Status="TRANSCRIBING",
+        ),
+    )
 
     transcript_segment = get_lambda_agent_assist_transcript(
         **lambda_agent_assist_input,
     )
 
     write_agent_assist_to_kds(transcript_segment)
+
 
 def get_lambda_agent_assist_transcript(
     transcript_segment_args: Dict[str, Any],
@@ -272,14 +286,17 @@ def get_lambda_agent_assist_transcript(
     transcript_segment = {}
     transcript = process_lambda_response(lambda_response)
     if transcript:
-        transcript_segment = {**transcript_segment_args, "Transcript": transcript}
+        transcript_segment = {
+            **transcript_segment_args, "Transcript": transcript}
 
     return transcript_segment
+
 
 def process_lambda_response(lambda_response):
     message = ""
     try:
-        payload = json.loads(lambda_response.get("Payload").read().decode("utf-8"))
+        payload = json.loads(lambda_response.get(
+            "Payload").read().decode("utf-8"))
         # Lambda result payload should include field 'message'
         message = payload["message"]
     except Exception as error:
@@ -288,6 +305,7 @@ def process_lambda_response(lambda_response):
             extra=error,
         )
     return message
+
 
 def transform_segment_to_issues_agent_assist(
         segment: Dict[str, Any],
@@ -303,7 +321,8 @@ def transform_segment_to_issues_agent_assist(
     segment_item = segment["ContactLensTranscript"]
     transcript = segment_item["Content"]
 
-    issues_detected = segment.get("ContactLensTranscript", {}).get("IssuesDetected", [])
+    issues_detected = segment.get(
+        "ContactLensTranscript", {}).get("IssuesDetected", [])
     if not issues_detected:
         raise ValueError("Invalid issue segment")
 
@@ -318,7 +337,7 @@ def transform_segment_to_issues_agent_assist(
         CallId=call_id,
         Channel=channel,
         CreatedAt=created_at,
-        ExpiresAfter=get_ttl(),
+        ExpiresAfter=get_transcription_ttl(),
         EndTime=end_time,
         IsPartial=is_partial,
         SegmentId=segment_id,
@@ -373,7 +392,7 @@ def publish_contact_lens_lex_agent_assist_transcript_segment(
                     Channel=channel,
                     CreatedAt=created_at,
                     EndTime=end_time,
-                    ExpiresAfter=get_ttl(),
+                    ExpiresAfter=get_transcription_ttl(),
                     IsPartial=is_partial,
                     SegmentId=segment_id,
                     StartTime=start_time,
@@ -382,14 +401,16 @@ def publish_contact_lens_lex_agent_assist_transcript_segment(
             )
         )
 
-    issues_detected = segment.get("ContactLensTranscript", {}).get("IssuesDetected", [])
+    issues_detected = segment.get(
+        "ContactLensTranscript", {}).get("IssuesDetected", [])
     for issue in issues_detected:
         issue_segment = transform_segment_to_issues_agent_assist(
             segment={**segment, "CallId": call_id},
             issue=issue,
         )
         send_lex_agent_assist_args.append(
-            dict(content=issue_segment["Transcript"], transcript_segment_args=issue_segment),
+            dict(content=issue_segment["Transcript"],
+                 transcript_segment_args=issue_segment),
         )
 
     categories = segment.get("Categories", {})
@@ -415,6 +436,7 @@ def publish_contact_lens_lex_agent_assist_transcript_segment(
         write_agent_assist_to_kds(transcript_segment)
 
     return
+
 
 def transform_segment_to_categories_agent_assist(
         category: str,
@@ -450,7 +472,7 @@ def transform_segment_to_categories_agent_assist(
         CallId=call_id,
         Channel=channel,
         CreatedAt=created_at,
-        ExpiresAfter=get_ttl(),
+        ExpiresAfter=get_transcription_ttl(),
         EndTime=end_time,
         IsPartial=is_partial,
         SegmentId=segment_id,
@@ -505,7 +527,7 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
                     CallId=call_id,
                     Channel=channel,
                     CreatedAt=created_at,
-                    ExpiresAfter=get_ttl(),
+                    ExpiresAfter=get_transcription_ttl(),
                     EndTime=end_time,
                     IsPartial=is_partial,
                     SegmentId=segment_id,
@@ -516,7 +538,8 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
         )
     # BobS - Issue detection code will not be invoked since we are not processing
     # Transcript events now - only Utterance events - for latency reasons.
-    issues_detected = segment.get("ContactLensTranscript", {}).get("IssuesDetected", [])
+    issues_detected = segment.get(
+        "ContactLensTranscript", {}).get("IssuesDetected", [])
     if (
         "ContactLensTranscript" in segment
         and segment["ContactLensTranscript"].get("ParticipantRole") == "CUSTOMER"
@@ -539,7 +562,7 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
                     CallId=call_id,
                     Channel=channel,
                     CreatedAt=created_at,
-                    ExpiresAfter=get_ttl(),
+                    ExpiresAfter=get_transcription_ttl(),
                     EndTime=end_time,
                     IsPartial=is_partial,
                     SegmentId=segment_id,
@@ -554,7 +577,8 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
             issue=issue,
         )
         send_lambda_agent_assist_args.append(
-            dict(content=issue_segment["Transcript"], transcript_segment_args=issue_segment),
+            dict(content=issue_segment["Transcript"],
+                 transcript_segment_args=issue_segment),
         )
 
     categories = segment.get("Categories", {})
@@ -581,6 +605,7 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
 
     return
 
+
 @LOGGER.inject_lambda_context
 def handler(event, context: LambdaContext):
     # pylint: disable=unused-argument
@@ -598,4 +623,3 @@ def handler(event, context: LambdaContext):
     else:
         LOGGER.warning("Agent assist is not enabled but orchestrator invoked")
     return
-

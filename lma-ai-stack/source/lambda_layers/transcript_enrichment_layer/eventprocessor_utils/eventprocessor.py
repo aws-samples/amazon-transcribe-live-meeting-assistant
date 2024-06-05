@@ -37,8 +37,16 @@ UTTERANCES_MAP: Dict[str, str] = {}
 # Get value for DynamboDB TTL field
 
 
-def get_ttl():
-    return int((datetime.utcnow() + timedelta(days=int(MEETING_RECORD_EXPIRATION_IN_DAYS))).timestamp())
+def get_ttl(expire_in_days):
+    return int((datetime.utcnow() + timedelta(days=float(expire_in_days))).timestamp())
+
+
+def get_meeting_ttl():
+    return get_ttl(MEETING_RECORD_EXPIRATION_IN_DAYS)
+
+
+def get_transcription_ttl():
+    return get_ttl(TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS)
 
 
 def transform_segment_to_categories_agent_assist(
@@ -75,7 +83,7 @@ def transform_segment_to_categories_agent_assist(
         CallId=call_id,
         Channel=channel,
         CreatedAt=created_at,
-        ExpiresAfter=get_ttl(),
+        ExpiresAfter=get_transcription_ttl(),
         EndTime=end_time,
         IsPartial=is_partial,
         SegmentId=segment_id,
@@ -114,7 +122,7 @@ def transform_segment_to_issues_agent_assist(
         CallId=call_id,
         Channel=channel,
         CreatedAt=created_at,
-        ExpiresAfter=get_ttl(),
+        ExpiresAfter=get_transcription_ttl(),
         EndTime=end_time,
         IsPartial=is_partial,
         SegmentId=segment_id,
@@ -181,7 +189,7 @@ def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
         ContactId=contact_id,
         Channel=channel,
         CreatedAt=created_at,
-        ExpiresAfter=get_ttl(),
+        ExpiresAfter=get_transcription_ttl(),
         EndTime=end_time,
         IsPartial=is_partial,
         SegmentId=segment_id,
@@ -221,7 +229,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
     sentimentWeighted = None
     sentimentScore = None
     status: str = "TRANSCRIBING"
-    expires_afer = get_ttl()
+    expires_afer = get_transcription_ttl()
     created_at = datetime.utcnow().astimezone().isoformat()
     segments = []
 
