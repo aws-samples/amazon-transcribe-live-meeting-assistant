@@ -32,7 +32,7 @@ if ! [ -x "$(command -v sam)" ]; then
   exit 1
 fi
 sam_version=$(sam --version | awk '{print $4}')
-min_sam_version="1.99.0"
+min_sam_version="1.118.0"
 if [[ $(echo -e "$min_sam_version\n$sam_version" | sort -V | tail -n1) == $min_sam_version && $min_sam_version != $sam_version ]]; then
     echo "Error: sam version >= $min_sam_version is not installed and required. (Installed version is $sam_version)" >&2
     echo 'Install: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/manage-sam-cli-versions.html' >&2
