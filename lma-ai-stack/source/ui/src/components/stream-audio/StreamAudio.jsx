@@ -11,7 +11,9 @@ import {
   Input,
   Header,
   ColumnLayout,
-  Select,
+  Grid,
+  Box,
+  Link,
 } from '@awsui/components-react';
 import '@awsui/global-styles/index.css';
 import useWebSocket from 'react-use-websocket';
@@ -23,27 +25,45 @@ import {
 } from '../common/constants';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
+import { getTimestampStr } from '../common/utilities';
 
 let SOURCE_SAMPLING_RATE;
+const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if left blank.';
 
 const StreamAudio = () => {
-  const { currentSession } = useAppContext();
+  const { currentSession, user } = useAppContext();
   const { settings } = useSettingsContext();
   const JWT_TOKEN = currentSession.getAccessToken().getJwtToken();
 
+  const userIdentifier = user?.attributes?.email || DEFAULT_LOCAL_SPEAKER_NAME;
+
+  const [meetingTopic, setMeetingTopic] = useState('Stream Audio');
   const [callMetaData, setCallMetaData] = useState({
-    callId: crypto.randomUUID(),
-    agentId: DEFAULT_LOCAL_SPEAKER_NAME,
+    callId: `${meetingTopic} - ${getTimestampStr()}`,
+    agentId: userIdentifier,
     fromNumber: DEFAULT_OTHER_SPEAKER_NAME,
     toNumber: SYSTEM,
   });
 
   const [recording, setRecording] = useState(false);
   const [streamingStarted, setStreamingStarted] = useState(false);
-  const [micInputOption, setMicInputOption] = useState({
-    label: DEFAULT_LOCAL_SPEAKER_NAME,
-    value: 'agent',
-  });
+  const [isFlashing, setIsFlashing] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
+  const [micInputOption] = useState('agent');
+  const [recordedMeetingId, setRecordedMeetingId] = useState('');
+
+  useEffect(() => {
+    let interval;
+    if (recording) {
+      interval = setInterval(() => {
+        setIsFlashing((prevState) => !prevState);
+      }, 500);
+    } else {
+      clearInterval(interval);
+      setIsFlashing(false);
+    }
+    return () => clearInterval(interval);
+  }, [recording]);
 
   const getSocketUrl = useCallback(() => {
     console.log(`DEBUG - [${new Date().toISOString()}]: Trying to resolve websocket url...`);
@@ -80,9 +100,10 @@ const StreamAudio = () => {
   });
 
   const handleCallIdChange = (e) => {
+    setMeetingTopic(e.detail.value);
     setCallMetaData({
       ...callMetaData,
-      callId: e.detail.value,
+      callId: `${e.detail.value} - ${getTimestampStr()}`,
     });
   };
 
@@ -98,10 +119,6 @@ const StreamAudio = () => {
       ...callMetaData,
       fromNumber: e.detail.value,
     });
-  };
-
-  const handleMicInputOptionSelection = (e) => {
-    setMicInputOption(e.detail.selectedOption);
   };
 
   const audioProcessor = useRef();
@@ -143,7 +160,6 @@ const StreamAudio = () => {
 
   const stopRecording = async () => {
     console.log(`DEBUG - [${new Date().toISOString()}]: Stopping recording...`);
-
     if (audioProcessor.current) {
       audioProcessor.current.port.postMessage({
         message: 'UPDATE_RECORDING_STATE',
@@ -151,6 +167,8 @@ const StreamAudio = () => {
       });
       audioProcessor.current.port.close();
       audioProcessor.current.disconnect();
+      setMicMuted(false);
+      setRecordedMeetingId(callMetaData.callId);
     } else {
       console.log(`
         DEBUG - [${new Date().toISOString()}]: Error trying to stop recording. AudioWorklet Processor node is not active.
@@ -169,12 +187,30 @@ const StreamAudio = () => {
         callId: crypto.randomUUID(),
       });
     }
+    setRecording(false);
+  };
+
+  // Default any missing fields in the call metadata
+  // The callMetaData state is updated so onscreen fields are updated, but a copy is returned
+  //  to avoid the scenario of the state not updating before it is used
+  const getFinalCallMetadata = () => {
+    const meetingPrefix = meetingTopic || 'Stream Audio';
+    setMeetingTopic(meetingPrefix);
+    const callMetaDataCopy = {
+      ...callMetaData,
+      callId: `${meetingPrefix} - ${getTimestampStr()}`,
+      agentId: callMetaData.agentId || DEFAULT_LOCAL_SPEAKER_NAME,
+      fromNumber: callMetaData.fromNumber || DEFAULT_OTHER_SPEAKER_NAME,
+    };
+    setCallMetaData(callMetaDataCopy);
+    return callMetaDataCopy;
   };
 
   const startRecording = async () => {
     console.log(`
       DEBUG - [${new Date().toISOString()}]: Start Recording and Streaming Audio to Websocket server.
     `);
+    const recordingCallMetaData = getFinalCallMetadata();
     try {
       audioContext.current = new window.AudioContext();
       displayStream.current = await window.navigator.mediaDevices.getDisplayMedia({
@@ -184,6 +220,7 @@ const StreamAudio = () => {
           autoGainControl: true,
           echoCancellation: true,
         },
+        selfBrowserSurface: 'exclude',
       });
 
       micStream.current = await window.navigator.mediaDevices.getUserMedia({
@@ -196,14 +233,12 @@ const StreamAudio = () => {
       });
       SOURCE_SAMPLING_RATE = audioContext.current.sampleRate;
 
-      callMetaData.samplingRate = SOURCE_SAMPLING_RATE;
+      recordingCallMetaData.samplingRate = SOURCE_SAMPLING_RATE;
+      recordingCallMetaData.callEvent = 'START';
 
-      callMetaData.callEvent = 'START';
       // eslint-disable-next-line prettier/prettier
-      console.log(`
-        DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(callMetaData)}
-      `);
-      sendMessage(JSON.stringify(callMetaData));
+      console.log(`DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(recordingCallMetaData)}`);
+      sendMessage(JSON.stringify(recordingCallMetaData));
       setStreamingStarted(true);
 
       displayAudioSource.current = audioContext.current.createMediaStreamSource(
@@ -246,7 +281,7 @@ const StreamAudio = () => {
 
       audioProcessor.current.port.onmessageerror = (error) => {
         console.log(`
-          DEBUG - [${new Date().toISOString()}]: Error receving message from worklet ${error}
+          DEBUG - [${new Date().toISOString()}]: Error receiving message from worklet ${error}
         `);
       };
 
@@ -255,7 +290,7 @@ const StreamAudio = () => {
       `);
       // buffer[0] - display stream,  buffer[1] - mic stream
       audioProcessor.current.port.onmessage = (event) => {
-        if (micInputOption.value === 'agent') {
+        if (micInputOption === 'agent') {
           audioData.current = new Uint8Array(
             interleave(event.data.buffer[0], event.data.buffer[1]),
           );
@@ -302,52 +337,121 @@ const StreamAudio = () => {
     return recording;
   };
 
+  const toggleMicrophoneEnabled = () => {
+    micStream.current.getAudioTracks()[0].enabled = !micStream.current.getAudioTracks()[0].enabled;
+    setMicMuted(!micStream.current.getAudioTracks()[0].enabled);
+  };
+
   return (
-    <form onSubmit={(e) => e.preventDefault()}>
-      <Form
-        actions={
-          <SpaceBetween direction="horizontal" size="xs">
-            <Button variant="primary" onClick={handleRecording}>
-              {recording ? 'Stop Streaming' : 'Start Streaming'}
-            </Button>
+    <div>
+      <form onSubmit={(e) => e.preventDefault()}>
+        <Form
+          actions={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant={recording ? 'secondary' : 'primary'}
+                onClick={handleRecording}
+                disabled={false}
+              >
+                {recording ? 'Stop Streaming' : 'Start Streaming'}
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <Container
+            header={
+              <Header
+                variant="h2"
+                actions={
+                  <div>
+                    {recording && (
+                      <Button
+                        href={`#/calls/${callMetaData.callId}`}
+                        variant="link"
+                        iconName="external"
+                        target="blank"
+                      >
+                        Open in progress meeting
+                      </Button>
+                    )}
+                  </div>
+                }
+              >
+                Meeting Information
+              </Header>
+            }
+          >
+            <ColumnLayout columns={2}>
+              <FormField
+                label="Meeting Topic"
+                stretch
+                required
+                description="Prefix for unique meeting identifier"
+                errorText={meetingTopic.length < 1 && DEFAULT_BLANK_FIELD_MSG}
+              >
+                <Input value={meetingTopic} onChange={handleCallIdChange} disabled={recording} />
+              </FormField>
+              <FormField
+                label="Participants (stream)"
+                stretch
+                required
+                description="Label for stream audio"
+                errorText={callMetaData.fromNumber.length < 1 && DEFAULT_BLANK_FIELD_MSG}
+              >
+                <Input
+                  value={callMetaData.fromNumber}
+                  onChange={handlefromNumberChange}
+                  disabled={recording}
+                />
+              </FormField>
+
+              <FormField
+                label="Meeting owner (microphone)"
+                stretch
+                required
+                description="Label for microphone input"
+                errorText={callMetaData.agentId.length < 1 && DEFAULT_BLANK_FIELD_MSG}
+              >
+                <Grid gridDefinition={[{ colspan: 10 }, { colspan: 1 }]}>
+                  <Input
+                    value={callMetaData.agentId}
+                    onChange={handleAgentIdChange}
+                    disabled={recording}
+                  />
+                  <Button
+                    variant={micMuted ? 'secondary' : 'primary'}
+                    onClick={toggleMicrophoneEnabled}
+                    disabled={!recording}
+                    iconAlign="left"
+                    iconName={micMuted ? 'microphone-off' : 'microphone'}
+                  />
+                </Grid>
+              </FormField>
+            </ColumnLayout>
+
+            {recording && (
+              <Box
+                margin={{ top: 'xl' }}
+                float="right"
+                color={isFlashing && recording ? 'text-status-error' : 'text-body-secondary'}
+              >
+                Recording in progress, do not close or refresh this tab.
+              </Box>
+            )}
+          </Container>
+        </Form>
+      </form>
+      {!recording && recordedMeetingId !== '' && (
+        <Box margin={{ top: 'xl' }} float="right" color="text-label">
+          <SpaceBetween direction="horizontal" size="s">
+            <span>Stream ended:</span>
+            <Link href={`#/calls/${recordedMeetingId}`} external>
+              Open recorded meeting
+            </Link>
           </SpaceBetween>
-        }
-      >
-        <Container header={<Header variant="h2">Meeting Information</Header>}>
-          <ColumnLayout columns={2}>
-            <FormField
-              label="Meeting ID"
-              stretch
-              required
-              description="Auto-generated Unique meeting ID"
-            >
-              <Input value={callMetaData.callId} onChange={handleCallIdChange} />
-            </FormField>
-            <FormField label="Name" stretch required description="Name">
-              <Input value={callMetaData.agentId} onChange={handleAgentIdChange} />
-            </FormField>
-            <FormField
-              label="Participant Name(s)"
-              stretch
-              required
-              description="Participant Name(s)"
-            >
-              <Input value={callMetaData.fromNumber} onChange={handlefromNumberChange} />
-            </FormField>
-            <FormField label="Microphone Role" stretch required description="Mic input">
-              <Select
-                selectedOption={micInputOption}
-                onChange={handleMicInputOptionSelection}
-                options={[
-                  { label: 'Others', value: 'caller' },
-                  { label: DEFAULT_LOCAL_SPEAKER_NAME, value: 'agent' },
-                ]}
-              />
-            </FormField>
-          </ColumnLayout>
-        </Container>
-      </Form>
-    </form>
+        </Box>
+      )}
+    </div>
   );
 };
 

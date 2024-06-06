@@ -13,7 +13,7 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 import boto3
 from botocore.config import Config as BotoCoreConfig
 from eventprocessor_utils import (
-    get_ttl
+    get_meeting_ttl
 )
 
 
@@ -31,7 +31,7 @@ else:
 
 BOTO3_SESSION: Boto3Session = boto3.Session()
 CLIENT_CONFIG = BotoCoreConfig(
-    read_timeout= int(getenv("BOTO_READ_TIMEOUT", '60')),
+    read_timeout=int(getenv("BOTO_READ_TIMEOUT", '60')),
     retries={"mode": "adaptive", "max_attempts": 3},
 )
 
@@ -46,6 +46,7 @@ KINESIS_CLIENT: KinesisClient = BOTO3_SESSION.client(
 TRANSCRIPT_SUMMARY_FUNCTION_ARN = getenv("TRANSCRIPT_SUMMARY_FUNCTION_ARN", "")
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 
+
 def get_call_summary(
     message: Dict[str, Any]
 ):
@@ -55,7 +56,8 @@ def get_call_summary(
         Payload=json.dumps(message)
     )
     try:
-        message = json.loads(lambda_response.get("Payload").read().decode("utf-8"))
+        message = json.loads(lambda_response.get(
+            "Payload").read().decode("utf-8"))
     except Exception as error:
         LOGGER.error(
             "Transcript summary result payload parsing exception. Lambda must return JSON object with (modified) input event fields",
@@ -63,13 +65,14 @@ def get_call_summary(
         )
     return message
 
+
 def write_call_summary_to_kds(
     message: Dict[str, Any]
 ):
     callId = message.get("CallId", None)
-    expiresAfter = message.get("ExpiresAfter", get_ttl())
+    expiresAfter = message.get("ExpiresAfter", get_meeting_ttl())
 
-    new_message = dict (
+    new_message = dict(
         CallId=callId,
         EventType="ADD_SUMMARY",
         ExpiresAfter=expiresAfter,
@@ -77,7 +80,7 @@ def write_call_summary_to_kds(
     )
 
     if callId:
-        try: 
+        try:
             KINESIS_CLIENT.put_record(
                 StreamName=CALL_DATA_STREAM_NAME,
                 PartitionKey=callId,
@@ -90,6 +93,7 @@ def write_call_summary_to_kds(
                 extra=error,
             )
     return
+
 
 @LOGGER.inject_lambda_context
 def handler(event, context: LambdaContext):
