@@ -9,14 +9,14 @@ Resources:
     Type: "AWS::DynamoDB::Table"
     Properties:
       KeySchema:
-        - AttributeName: LLMPromptTemplateId
-          KeyType: HASH
+      - AttributeName: LLMPromptTemplateId
+        KeyType: HASH
       AttributeDefinitions:
-        - AttributeName: LLMPromptTemplateId
-          AttributeType: S
+      - AttributeName: LLMPromptTemplateId
+        AttributeType: S
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
-        SSEEnabled: True
+        SSEEnabled: true
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
@@ -25,42 +25,55 @@ Resources:
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action:
-              - "sts:AssumeRole"
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action:
+          - "sts:AssumeRole"
       ManagedPolicyArns:
-        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
-        - PolicyName: allow-s3-notification-config
-          PolicyDocument:
-            Statement:
-              Effect: Allow
-              Resource: 
-                - !GetAtt LLMPromptTemplateTable.Arn
-              Action:
-                - 'dynamodb:PutItem'
-                - 'dynamodb:UpdateItem'
-        - PolicyName: SSMGetParameterPolicy
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*
+      - PolicyName: allow-s3-notification-config
+        PolicyDocument:
+          Statement:
+            Effect: Allow
+            Resource:
+            - !GetAtt LLMPromptTemplateTable.Arn
+            Action:
+            - 'dynamodb:PutItem'
+            - 'dynamodb:UpdateItem'
+      - PolicyName: SSMGetParameterPolicy
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - ssm:GetParameter
+            - ssm:GetParameters
+            Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*
 
   LLMPromptUploadFunction:
     Type: "AWS::Lambda::Function"
     Properties:
-      Code:  ../source/lambda_functions
+      Code: ../source/lambda_functions
       Handler: llm_prompt_upload.lambda_handler
       Role: !GetAtt LLMPromptUploadRole.Arn
       Runtime: python3.11
       MemorySize: 128
       Timeout: 60
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/LLMPromptUploadFunction
+    DependsOn:
+    - LLMPromptUploadFunctionLogGroup
 
+  LLMPromptUploadFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/LLMPromptUploadFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+        
   LLMStorePromptTemplates:
     Type: "AWS::CloudFormation::CustomResource"
     Properties:
@@ -71,6 +84,11 @@ Resources:
 
 Outputs:
 
-    LLMPromptTemplateTableName:
-      Value: !Ref LLMPromptTemplateTable
+  LLMPromptTemplateTableName:
+    Value: !Ref LLMPromptTemplateTable
 
+Parameters:
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs.

@@ -15,8 +15,11 @@ else:
     ComprehendClient = object
     DetectSentimentResponseTypeDef = object
 
-DYNAMODB_EXPIRATION_IN_DAYS = getenv("DYNAMODB_EXPIRATION_IN_DAYS", "90")
- 
+MEETING_RECORD_EXPIRATION_IN_DAYS = getenv(
+    "MEETING_RECORD_EXPIRATION_IN_DAYS", "90")
+TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS = getenv(
+    "TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+
 SENTIMENT_WEIGHT = dict(POSITIVE=5, NEGATIVE=-5, NEUTRAL=0, MIXED=0)
 
 SENTIMENT_SCORE = dict(
@@ -32,8 +35,19 @@ SENTIMENT_SCORE = dict(
 UTTERANCES_MAP: Dict[str, str] = {}
 
 # Get value for DynamboDB TTL field
-def get_ttl():
-    return int((datetime.utcnow() + timedelta(days=int(DYNAMODB_EXPIRATION_IN_DAYS))).timestamp())
+
+
+def get_ttl(expire_in_days):
+    return int((datetime.utcnow() + timedelta(days=float(expire_in_days))).timestamp())
+
+
+def get_meeting_ttl():
+    return get_ttl(MEETING_RECORD_EXPIRATION_IN_DAYS)
+
+
+def get_transcription_ttl():
+    return get_ttl(TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS)
+
 
 def transform_segment_to_categories_agent_assist(
     category: str,
@@ -69,7 +83,7 @@ def transform_segment_to_categories_agent_assist(
         CallId=call_id,
         Channel=channel,
         CreatedAt=created_at,
-        ExpiresAfter=get_ttl(),
+        ExpiresAfter=get_transcription_ttl(),
         EndTime=end_time,
         IsPartial=is_partial,
         SegmentId=segment_id,
@@ -77,6 +91,7 @@ def transform_segment_to_categories_agent_assist(
         Status="TRANSCRIBING",
         Transcript=transcript,
     )
+
 
 def transform_segment_to_issues_agent_assist(
     segment: Dict[str, Any],
@@ -107,7 +122,7 @@ def transform_segment_to_issues_agent_assist(
         CallId=call_id,
         Channel=channel,
         CreatedAt=created_at,
-        ExpiresAfter=get_ttl(),
+        ExpiresAfter=get_transcription_ttl(),
         EndTime=end_time,
         IsPartial=is_partial,
         SegmentId=segment_id,
@@ -136,7 +151,8 @@ def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
         segment_item = segment["Utterance"]
         segment_id = segment_item["TranscriptId"]
         content = segment_item["PartialContent"]
-        UTTERANCES_MAP[segment_id] = UTTERANCES_MAP.get(segment_id, "") + " " + content
+        UTTERANCES_MAP[segment_id] = UTTERANCES_MAP.get(
+            segment_id, "") + " " + content
         transcript = UTTERANCES_MAP[segment_id]
     # final transcript
     elif "Transcript" in segment:
@@ -168,12 +184,12 @@ def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
     start_time: float = segment_item["BeginOffsetMillis"] / 1000
     end_time: float = segment_item["EndOffsetMillis"] / 1000
 
-    transcript_segment = dict (
+    transcript_segment = dict(
         CallId=call_id,
         ContactId=contact_id,
         Channel=channel,
         CreatedAt=created_at,
-        ExpiresAfter=get_ttl(),
+        ExpiresAfter=get_transcription_ttl(),
         EndTime=end_time,
         IsPartial=is_partial,
         SegmentId=segment_id,
@@ -184,13 +200,13 @@ def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
         **sentiment_args,
     )
 
-    if(utterance):
+    if (utterance):
         transcript_segment["Utterance"] = utterance
 
-    if(categories):
+    if (categories):
         transcript_segment["Categories"] = categories
 
-    if(contact_lens_transcript):
+    if (contact_lens_transcript):
         transcript_segment["ContactLensTranscript"] = contact_lens_transcript
 
     return transcript_segment
@@ -199,7 +215,7 @@ def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
 # Transform Transcript segment fields
 def normalize_transcript_segments(message: Dict) -> List[Dict]:
     """Transforms Kinesis Stream Transcript Payload to addTranscript API"""
-    
+
     call_id: str = None
     channel: str = None
     speaker: str = None
@@ -213,16 +229,15 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
     sentimentWeighted = None
     sentimentScore = None
     status: str = "TRANSCRIBING"
-    expires_afer = get_ttl()
+    expires_afer = get_transcription_ttl()
     created_at = datetime.utcnow().astimezone().isoformat()
     segments = []
-
 
     utteranceEvent = message.get("UtteranceEvent", None)
     transcriptEvent = message.get("TranscriptEvent", None)
     contactLensEvent = message.get("ContactId", None)
 
-    if (utteranceEvent): # TCA streaming event in KDS
+    if (utteranceEvent):  # TCA streaming event in KDS
         call_id = message["CallId"]
         channel = utteranceEvent["ParticipantRole"]
         if channel == "CUSTOMER":
@@ -243,24 +258,24 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
             issuesdetected = utteranceEvent.get("IssuesDetected")
         segments.append(
             dict(
-                    CallId=call_id,
-                    Channel=channel,
-                    SegmentId=segment_id,
-                    StartTime=start_time,
-                    EndTime=end_time,
-                    Transcript=transcript,
-                    OriginalTranscript=transcript,
-                    IsPartial=is_partial,
-                    Sentiment=sentiment,
-                    SentimentWeighted=sentimentWeighted,
-                    SentimentScore=sentimentScore,
-                    IssuesDetected=issuesdetected,
-                    Status=status,
-                    ExpiresAfter=expires_afer,
-                    CreatedAt=created_at,
+                CallId=call_id,
+                Channel=channel,
+                SegmentId=segment_id,
+                StartTime=start_time,
+                EndTime=end_time,
+                Transcript=transcript,
+                OriginalTranscript=transcript,
+                IsPartial=is_partial,
+                Sentiment=sentiment,
+                SentimentWeighted=sentimentWeighted,
+                SentimentScore=sentimentScore,
+                IssuesDetected=issuesdetected,
+                Status=status,
+                ExpiresAfter=expires_afer,
+                CreatedAt=created_at,
             )
         )
-    elif(transcriptEvent): # Standard Transcribe streaming event in KDS
+    elif (transcriptEvent):  # Standard Transcribe streaming event in KDS
         call_id = message["CallId"]
         channel = transcriptEvent["Channel"]
         if channel == "CUSTOMER":
@@ -277,23 +292,23 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
         issuesdetected = None
         segments.append(
             dict(
-                    CallId=call_id,
-                    Channel=channel,
-                    SegmentId=segment_id,
-                    StartTime=start_time,
-                    EndTime=end_time,
-                    Speaker=speaker,
-                    Transcript=transcript,
-                    OriginalTranscript=transcript,
-                    IsPartial=is_partial,
-                    Sentiment=sentiment,
-                    IssuesDetected=issuesdetected,
-                    Status=status,
-                    ExpiresAfter=expires_afer,
-                    CreatedAt=created_at,
+                CallId=call_id,
+                Channel=channel,
+                SegmentId=segment_id,
+                StartTime=start_time,
+                EndTime=end_time,
+                Speaker=speaker,
+                Transcript=transcript,
+                OriginalTranscript=transcript,
+                IsPartial=is_partial,
+                Sentiment=sentiment,
+                IssuesDetected=issuesdetected,
+                Status=status,
+                ExpiresAfter=expires_afer,
+                CreatedAt=created_at,
             )
         )
-    elif(contactLensEvent): # Contact Lens event
+    elif (contactLensEvent):  # Contact Lens event
         call_id = message["ContactId"]
         for segment in message.get("Segments", []):
             # only handle utterances and transcripts - delegate categories to agent assist
@@ -315,53 +330,54 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 channel = "CALLER"
             else:
                 channel = "AGENT"
-        
+
         if message.get("SegmentId", None):
             segment_id = message["SegmentId"]
         else:
             segment_id = str(uuid.uuid4())
-        
+
         if message.get("BeginOffsetMillis", None):
             start_time = message["BeginOffsetMillis"]
         if message.get("StartTime", None):
             start_time = message["StartTime"]
-        
+
         if message.get("EndOffsetMillis", None):
             end_time = message["EndOffsetMillis"]
         if message.get("EndTime", None):
             end_time = message["EndTime"]
-        
+
         speaker = message.get("Speaker", None)
         if (not speaker):
             speaker = "Other Participant"
 
         transcript = message["Transcript"]
         is_partial = message["IsPartial"]
-        
+
         if message.get("Sentiment", None):
             sentiment = message["Sentiment"]
         segments.append(
             dict(
-                    CallId=call_id,
-                    Channel=channel,
-                    SegmentId=segment_id,
-                    StartTime=start_time,
-                    EndTime=end_time,
-                    Transcript=transcript,
-                    Speaker=speaker,
-                    OriginalTranscript=transcript,
-                    IsPartial=is_partial,
-                    Sentiment=sentiment,
-                    IssuesDetected=issuesdetected,
-                    Status=status,
-                    ExpiresAfter=expires_afer,
-                    CreatedAt=created_at,
+                CallId=call_id,
+                Channel=channel,
+                SegmentId=segment_id,
+                StartTime=start_time,
+                EndTime=end_time,
+                Transcript=transcript,
+                Speaker=speaker,
+                OriginalTranscript=transcript,
+                IsPartial=is_partial,
+                Sentiment=sentiment,
+                IssuesDetected=issuesdetected,
+                Status=status,
+                ExpiresAfter=expires_afer,
+                CreatedAt=created_at,
             )
         )
 
     return segments
 
-async def detect_sentiment(text: str, COMPREHEND_CLIENT:ComprehendClient, COMPREHEND_LANGUAGE_CODE) -> DetectSentimentResponseTypeDef:
+
+async def detect_sentiment(text: str, COMPREHEND_CLIENT: ComprehendClient, COMPREHEND_LANGUAGE_CODE) -> DetectSentimentResponseTypeDef:
     loop = asyncio.get_running_loop()
     sentiment_future = loop.run_in_executor(
         None,
@@ -374,21 +390,23 @@ async def detect_sentiment(text: str, COMPREHEND_CLIENT:ComprehendClient, COMPRE
     result = results[0]
     return result
 
+
 async def transform_segment_to_add_sentiment(message: Dict, sentiment_analysis_args: Dict) -> Dict[str, object]:
 
     sentiment_label_in_message = message.get("Sentiment", None)
 
     sentiment = {}
-    if (sentiment_label_in_message): # we received sentiment label in transcript, use it.
+    # we received sentiment label in transcript, use it.
+    if (sentiment_label_in_message):
         sentiment_weighted_in_message = message.get("SentimentWeighted", None)
         sentiment_score_in_message = message.get("SentimentScore", None)
 
         sentimentlabel: str = ""
-        if sentiment_label_in_message.strip()=="":
+        if sentiment_label_in_message.strip() == "":
             sentimentlabel = "NEUTRAL"
         else:
-            sentimentlabel= sentiment_label_in_message
-        
+            sentimentlabel = sentiment_label_in_message
+
         sentiment = dict(
             Sentiment=sentimentlabel,
             SentimentScore=SENTIMENT_SCORE,
@@ -398,17 +416,20 @@ async def transform_segment_to_add_sentiment(message: Dict, sentiment_analysis_a
         if (sentiment_weighted_in_message):
             sentiment["SentimentWeighted"] = sentiment_weighted_in_message
         elif sentimentlabel in ["POSITIVE", "NEGATIVE", "NEUTRAL"]:
-            sentiment["SentimentWeighted"] = SENTIMENT_WEIGHT.get(sentimentlabel, 0)
+            sentiment["SentimentWeighted"] = SENTIMENT_WEIGHT.get(
+                sentimentlabel, 0)
         if (sentiment_score_in_message):
             sentiment["SentimentScore"] = sentiment_score_in_message
 
-    else: # did not receive sentiment label, so call Comprehend to figure out sentiment
+    else:  # did not receive sentiment label, so call Comprehend to figure out sentiment
 
         text = message.get("OriginalTranscript", message.get("Transcript", ""))
-        comprehend_client: ComprehendClient = sentiment_analysis_args.get("comprehend_client")
-        comprehend_language_code = sentiment_analysis_args.get("comprehend_language_code", "en")
+        comprehend_client: ComprehendClient = sentiment_analysis_args.get(
+            "comprehend_client")
+        comprehend_language_code = sentiment_analysis_args.get(
+            "comprehend_language_code", "en")
 
-        sentiment_response:DetectSentimentResponseTypeDef = await detect_sentiment(text, comprehend_client, comprehend_language_code)
+        sentiment_response: DetectSentimentResponseTypeDef = await detect_sentiment(text, comprehend_client, comprehend_language_code)
         comprehend_weighted_sentiment = ComprehendWeightedSentiment()
 
         sentiment = {
@@ -418,8 +439,8 @@ async def transform_segment_to_add_sentiment(message: Dict, sentiment_analysis_a
         if sentiment:
             if sentiment.get("Sentiment") in ["POSITIVE", "NEGATIVE"]:
                 sentiment["SentimentWeighted"] = comprehend_weighted_sentiment.get_weighted_sentiment_score(
-                        sentiment_response=sentiment_response
-                    )
+                    sentiment_response=sentiment_response
+                )
     transcript_segment_with_sentiment = {
         **message,
         **sentiment

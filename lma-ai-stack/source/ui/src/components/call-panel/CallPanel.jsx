@@ -23,6 +23,11 @@ import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate
 import { Logger } from 'aws-amplify';
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
 import { getMarkdownSummary } from '../common/summary';
+import {
+  COMPREHEND_PII_TYPES,
+  DEFAULT_OTHER_SPEAKER_NAME,
+  LANGUAGE_CODES,
+} from '../common/constants';
 
 import RecordingPlayer from '../recording-player';
 import useSettingsContext from '../../contexts/settings';
@@ -46,20 +51,7 @@ import awsExports from '../../aws-exports';
 const logger = new Logger('CallPanel');
 
 // comprehend PII types
-const piiTypes = [
-  'BANK_ACCOUNT_NUMBER',
-  'BANK_ROUTING',
-  'CREDIT_DEBIT_NUMBER',
-  'CREDIT_DEBIT_CVV',
-  'CREDIT_DEBIT_EXPIRY',
-  'PIN',
-  'EMAIL',
-  'ADDRESS',
-  'NAME',
-  'PHONE',
-  'SSN',
-];
-const piiTypesSplitRegEx = new RegExp(`\\[(${piiTypes.join('|')})\\]`);
+const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]`);
 
 const MAXIMUM_ATTEMPTS = 100;
 const MAXIMUM_RETRY_DELAY = 1000;
@@ -254,7 +246,7 @@ const CallSummary = ({ item }) => {
         </Header>
       }
     >
-      <Grid gridDefinition={[{ colspan: { default: 12, xs: 6 } }]}>
+      <Grid gridDefinition={[{ colspan: { default: 12 } }]}>
         <Tabs
           tabs={[
             {
@@ -349,7 +341,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
   const transcriptPiiSplit = transcript.split(piiTypesSplitRegEx);
 
   const transcriptComponents = transcriptPiiSplit.map((t, i) => {
-    if (piiTypes.includes(t)) {
+    if (COMPREHEND_PII_TYPES.includes(t)) {
       // eslint-disable-next-line react/no-array-index-key
       return <Badge key={`${segmentId}-pii-${i}`} color="red">{`${t}`}</Badge>;
     }
@@ -434,8 +426,8 @@ const TranscriptSegment = ({
     displayChannel = 'MEETING_ASSISTANT';
     channelClass = 'transcript-segment-agent-assist';
   }
-  if (displayChannel === '') {
-    displayChannel = participantName || 'Other Participant';
+  if (displayChannel === DEFAULT_OTHER_SPEAKER_NAME || displayChannel === '') {
+    displayChannel = participantName || DEFAULT_OTHER_SPEAKER_NAME;
   }
 
   return (
@@ -838,7 +830,7 @@ const CallTranscriptContainer = ({
         // eslint-disable-jsx-a11y/control-has-associated-label
         <div>
           <select value={targetLanguage} onChange={handleLanguageSelect}>
-            {languageCodes.map(({ value, label }) => <option value={value}>{label}</option>)}
+            {LANGUAGE_CODES.map(({ value, label }) => <option value={value}>{label}</option>)}
           </select>
         </div>
       );
