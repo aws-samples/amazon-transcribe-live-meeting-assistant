@@ -41,7 +41,7 @@ const CPU_HEALTH_THRESHOLD = parseInt(process.env['CPU_HEALTH_THRESHOLD'] || '50
 const LOCAL_TEMP_DIR = process.env['LOCAL_TEMP_DIR'] || '/tmp/';
 const WS_LOG_LEVEL = process.env['WS_LOG_LEVEL'] || 'debug';
 const WS_LOG_INTERVAL = parseInt(process.env['WS_LOG_INTERVAL'] || '120', 10);
-const SHOULD_RECORD_CALL = (process.env['SHOULD_RECORD_CALL'] || 'false') === 'true';
+const SHOULD_RECORD_CALL = (process.env['SHOULD_RECORD_CALL'] || '') === 'true';
 
 const s3Client = new S3Client({ region: AWS_REGION });
 
@@ -183,8 +183,12 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Pro
         callMetaData.toNumber = callMetaData.toNumber || 'System Phone';
         
         if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
+            server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);
+
             callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
-        }  
+        } else {
+            server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`);
+        }
 
         callMetaData.agentId = callMetaData.agentId || randomUUID();  
 
@@ -247,12 +251,13 @@ const endCall = async (ws: WebSocket, socketData: SocketCallData, callMetaData?:
     if (socketData !== undefined && socketData.ended === false) {
         socketData.ended = true;
 
-        if (typeof callMetaData !== undefined && callMetaData != null) {
+        if (callMetaData !== undefined && callMetaData != null) {
             await writeCallEndEvent(callMetaData, server);
             if (socketData.writeRecordingStream && socketData.recordingFileSize) {
                 socketData.writeRecordingStream.end();
 
                 if (callMetaData.shouldRecordCall) {
+                    server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Audio Recording enabled. Writing to S3.: ${JSON.stringify(callMetaData)}`);
                     const header = createWavHeader(callMetaData.samplingRate, socketData.recordingFileSize);
                     const tempRecordingFilename = getTempRecordingFileName(callMetaData);
                     const wavRecordingFilename = getWavRecordingFileName(callMetaData);
@@ -273,7 +278,11 @@ const endCall = async (ws: WebSocket, socketData: SocketCallData, callMetaData?:
                     const recordingUrl = url.href;
                 
                     await writeCallRecordingEvent(callMetaData, recordingUrl, server);
+                } else {
+                    server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Audio Recording disabled. Add s3 url event is not written to KDS. : ${JSON.stringify(callMetaData)}`);
+
                 }
+
             }
         
             if (socketData.audioInputStream) {
@@ -290,7 +299,7 @@ const endCall = async (ws: WebSocket, socketData: SocketCallData, callMetaData?:
         }
 
     } else {
-        if (typeof callMetaData !== undefined && callMetaData != null) {
+        if (callMetaData !== undefined && callMetaData != null) {
             server.log.error(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Duplicate End call event. Already received the end call event: ${JSON.stringify(callMetaData)}`);
         } else {
             server.log.error('[END]: Duplicate End call event. Missing Call Meta Data in END event');
