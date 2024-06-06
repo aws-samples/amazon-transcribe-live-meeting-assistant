@@ -100,10 +100,8 @@ export const writeCallEvent = async (callEvent: CallStartEvent | CallEndEvent | 
     try {
         kinesisClient.send(putCmd);
         server.log.debug(`[${callEvent.EventType}]: ${callEvent.CallId} - Written ${callEvent.EventType} Event to KDS: ${JSON.stringify(callEvent)}`);
-        console.debug(JSON.stringify(callEvent));
     } catch (error) {
         server.log.debug(`[${callEvent.EventType}]: ${callEvent.CallId} - Error writing ${callEvent.EventType} Call Event to KDS : ${normalizeErrorForLogging(error)} Event: ${JSON.stringify(callEvent)}`);
-        console.debug(JSON.stringify(callEvent));
     }
 };
 
@@ -318,7 +316,6 @@ export const writeTranscriptionSegment = async function (transcribeMessageJson: 
                 kinesisClient.send(putCmd);
                 server.log.debug(`[${kdsObject.EventType}]: [${callMetadata.callId}] - Written ${kdsObject.EventType} event to KDS: ${JSON.stringify(kdsObject)}`);
             } catch (error) {
-                console.error('Error writing transcription segment (TRANSCRIBE) to KDS', error);
                 server.log.error(`[${kdsObject.EventType}]: [${callMetadata.callId}] - Error writing ${kdsObject.EventType} to KDS : ${normalizeErrorForLogging(error)} KDS object: ${JSON.stringify(kdsObject)}`);
             }
         }

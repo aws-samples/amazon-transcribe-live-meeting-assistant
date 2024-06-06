@@ -166,7 +166,6 @@ const onBinaryMessage = async (clientIP: string, ws: WebSocket, data: Uint8Array
 };
 
 const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Promise<void> => {
-    server.log.debug(`Received Text Message of length ${data.length}. Message = ${data}`);
     
     const callMetaData: CallMetaData = JSON.parse(data);
     
@@ -191,12 +190,10 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Pro
 
         await writeCallStartEvent(callMetaData, server);
         const tempRecordingFilename = getTempRecordingFileName(callMetaData);
-        // wavFileName = `${callMetaData.callId}.wav`;
         const writeRecordingStream = fs.createWriteStream(path.join(LOCAL_TEMP_DIR, tempRecordingFilename));
         const recordingFileSize = 0;
+
         const highWaterMarkSize = (callMetaData.samplingRate / 10) * 2 * 2;
-        server.log.info(`Calculated high water mark size: ${highWaterMarkSize}`);
-        //const audioInputStream = new stream.PassThrough({ highWaterMark: highWaterMarkSize });
         const audioInputStream = new BlockStream({ size: highWaterMarkSize });
         const socketCallMap:SocketCallData = {
             callMetadata: callMetaData,
