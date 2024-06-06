@@ -564,7 +564,7 @@ Resources:
             cfnresponse.send(event, context, status, {}, reason=reason)
       LoggingConfig:
         LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/StacknameCheckFunction
+          Ref: StacknameCheckFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -578,8 +578,6 @@ Resources:
   StacknameCheckFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/StacknameCheckFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
 
@@ -631,7 +629,7 @@ Resources:
             cfnresponse.send(event, context, status, {}, reason=reason)
       LoggingConfig:
         LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/ValidateParametersFunction
+          Ref: ValidateParametersFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -645,8 +643,6 @@ Resources:
   ValidateParametersFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/ValidateParametersFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
 
@@ -683,7 +679,7 @@ Resources:
             cfnresponse.send(event, context, status, result, reason=reason)
       LoggingConfig:
         LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/ToJSONFunction
+          Ref: ToJSONFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -697,8 +693,6 @@ Resources:
   ToJSONFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/ToJSONFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
         
