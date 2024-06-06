@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
-Description: Lambda Layer for boto3 Amazon Bedrock SDK extensions - requires access to Amazon Bedrock Service, currently in limited preview.
+Description: Lambda Layer for boto3 Amazon Bedrock SDK extensions.
 
 Resources:
 
@@ -9,13 +9,13 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W51
-            reason: Bucket has identity based policy.
+        - id: W51
+          reason: Bucket has identity based policy.
     Properties:
       BucketEncryption:
-        ServerSideEncryptionConfiguration: 
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
 
   BedrockBoto3ZipFunctionRole:
     Type: AWS::IAM::Role
@@ -23,24 +23,23 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 's3:PutObject'
-                  - 's3:DeleteObject'
-                  - 's3:ListBucket'
-                Resource: 
-                  !Sub 'arn:aws:s3:::${BedrockBoto3Bucket}*'
-          PolicyName: S3Policy
+      - PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - 's3:PutObject'
+            - 's3:DeleteObject'
+            - 's3:ListBucket'
+            Resource: !Sub 'arn:aws:s3:::${BedrockBoto3Bucket}*'
+        PolicyName: S3Policy
 
   BedrockBoto3ZipFunction:
     Type: AWS::Lambda::Function
@@ -127,14 +126,28 @@ Resources:
             if existingZip:
               deleteObject(existingZip)
             cfnresponse.send(event, context, status, responseData, reason=reason, physicalResourceId=physicalResourceId)
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/BedrockBoto3ZipFunction
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W89
-            reason: Lambda function is not communicating with any VPC resources.
-          - id: W92
-            reason: No requirements to set reserved concurrencies, function will not be invoked simultaneously.
-      
+        - id: W89
+          reason: Lambda function is not communicating with any VPC resources.
+        - id: W92
+          reason: No requirements to set reserved concurrencies, function will not
+            be invoked simultaneously.
+    DependsOn:
+    - BedrockBoto3ZipFunctionLogGroup
+
+  BedrockBoto3ZipFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/BedrockBoto3ZipFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+
   BedrockBoto3Zip:
     Type: Custom::BedrockBoto3Zip
     Properties:
@@ -150,10 +163,16 @@ Resources:
         S3Bucket: !GetAtt BedrockBoto3Zip.Bucket
         S3Key: !GetAtt BedrockBoto3Zip.Key
       CompatibleRuntimes:
-        - python3.11
+      - python3.11
 
 Outputs:
 
   BedrockBoto3Layer:
     Description: Lambda layer for Boto3 Bedrock SDK extensions
     Value: !Ref BedrockBoto3Layer
+
+Parameters:
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs.

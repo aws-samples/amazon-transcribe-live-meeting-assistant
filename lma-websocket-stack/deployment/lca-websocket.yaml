@@ -1,25 +1,10 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License").
-# You may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
----
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
 Description: Amazon Transcribe Live Meeting Assist - Websocket Server
 
 Parameters:
-  UserPoolId: 
+  UserPoolId:
     Type: String
     Description: >
       Cognito User Pool ID
@@ -36,12 +21,14 @@ Parameters:
     Type: String
     Default: lca-audio-recordings/
     Description: >-
-      The Amazon S3 prefix where the merged output audio files will be saved (must end in "/")
+      The Amazon S3 prefix where the merged output audio files will be saved (must
+      end in "/")
 
   CallAnalyticsPrefix:
     Type: String
     Default: lca-call-analytics/
-    Description: The Amazon S3 prefix where the post-call analytics files will be saved, when using analytics api mode (must end in "/")
+    Description: The Amazon S3 prefix where the post-call analytics files will be
+      saved, when using analytics api mode (must end in "/")
 
   CallDataStreamName:
     Type: String
@@ -56,12 +43,13 @@ Parameters:
     Type: String
     Default: PriceClass_100
     Description: >-
-      Specify the CloudFront price class. See https://aws.amazon.com/cloudfront/pricing/ for a
+      Specify the CloudFront price class. See https://aws.amazon.com/cloudfront/pricing/
+      for a
       description of each price class.
     AllowedValues:
-      - PriceClass_100
-      - PriceClass_200
-      - PriceClass_All
+    - PriceClass_100
+    - PriceClass_200
+    - PriceClass_All
     ConstraintDescription: >-
       Allowed Price Classes PriceClass_100 PriceClass_200 and PriceClass_All
 
@@ -69,19 +57,20 @@ Parameters:
     Type: String
     Default: analytics
     AllowedValues:
-        - standard
-        - analytics
+    - standard
+    - analytics
     Description: Set the default operational mode for Transcribe
 
   IsContentRedactionEnabled:
     Type: String
     Default: "false"
     Description: >-
-      Enable content redaction from Amazon Transcribe transcription output. This is only used when
+      Enable content redaction from Amazon Transcribe transcription output. This is
+      only used when
       the 'en-US' language is selected in the TranscribeLanguageCode parameter.
     AllowedValues:
-      - "true"
-      - "false"
+    - "true"
+    - "false"
 
   TranscribeContentRedactionType:
     Type: String
@@ -89,94 +78,106 @@ Parameters:
     Description: >-
       Type of content redaction from Amazon Transcribe transcription output
     AllowedValues:
-      - PII
+    - PII
 
   TranscribeLanguageCode:
     Type: String
     Description: >-
-      Language code or language detection setting for Amazon Transcribe. NOTE: Streaming language identification can't 
-      be combined with custom language models or redaction. 
+      Language code or language detection setting for Amazon Transcribe. NOTE: Streaming
+      language identification can't  be combined with custom language models or redaction.
+      
     Default: en-US
     AllowedValues:
-      - identify-language
-      - identify-multiple-languages
-      - en-US
-      - es-US
-      - en-GB
-      - fr-CA
-      - fr-FR
-      - en-AU
-      - it-IT
-      - de-DE
-      - pt-BR
-      - ja-JP
-      - ko-KR
-      - zh-CN
-      - hi-IN
-      - th-TH
+    - identify-language
+    - identify-multiple-languages
+    - en-US
+    - es-US
+    - en-GB
+    - fr-CA
+    - fr-FR
+    - en-AU
+    - it-IT
+    - de-DE
+    - pt-BR
+    - ja-JP
+    - ko-KR
+    - zh-CN
+    - hi-IN
+    - th-TH
 
   TranscribeLanguageOptions:
     Type: String
     Default: 'en-US, es-US'
     AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*)*)?$'
     ConstraintDescription: >-
-      Unsupported language code. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+      Unsupported language code. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR,
+      en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
     Description: >-
-      When TranscribeLanguageCode is set to 'identify-language' or 'identify-multiple-languages',  
-      specify two or more comma separated language codes, e.g. "en-US,es-US" that represent the languages you 
-      think may be used in your meeting. Including more than five is not recommended. 
-      You can select only one language dialect per language per stream - i.e. you cannot select both en-US and en-AU as language options.
-      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+      When TranscribeLanguageCode is set to 'identify-language' or 'identify-multiple-languages',   specify
+      two or more comma separated language codes, e.g. "en-US,es-US" that represent
+      the languages you  think may be used in your meeting. Including more than five
+      is not recommended.  You can select only one language dialect per language per
+      stream - i.e. you cannot select both en-US and en-AU as language options.
+      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE,
+      pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
 
   TranscribePreferredLanguage:
     Type: String
     Description: >-
-      Select a preferred language from the set of language codes you provide for TranscribeLanguageOptions, when 
-      TranscribeLanguageCode is set to identify-language or identify-multiple-languages. 
+      Select a preferred language from the set of language codes you provide for TranscribeLanguageOptions,
+      when  TranscribeLanguageCode is set to identify-language or identify-multiple-languages.
+      
     Default: None
     AllowedValues:
-      - None
-      - en-US
-      - es-US
-      - en-GB
-      - fr-CA
-      - fr-FR
-      - en-AU
-      - it-IT
-      - de-DE
-      - pt-BR
-      - ja-JP
-      - ko-KR
-      - zh-CN
-      - hi-IN
-      - th-TH
+    - None
+    - en-US
+    - es-US
+    - en-GB
+    - fr-CA
+    - fr-FR
+    - en-AU
+    - it-IT
+    - de-DE
+    - pt-BR
+    - ja-JP
+    - ko-KR
+    - zh-CN
+    - hi-IN
+    - th-TH
 
   TranscribePiiEntityTypes:
     Type: String
     # yamllint disable rule:line-length
-    Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
+    Default: 
+      BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
     # yamllint enable rule:line-length
     Description: >-
-      Select the PII entity types you want to identify or redact. Remove the values that you don't
+      Select the PII entity types you want to identify or redact. Remove the values
+      that you don't
       want to redact from the default.  DO NOT ADD CUSTOM VALUES HERE.
 
   CustomVocabularyName:
     Type: String
     Default: ''
     Description: >-
-      The name of the vocabulary to use when processing the transcription job. Leave blank if no
-      custom vocabulary to be used. If yes, the custom vocabulary must pre-exist in your account.
+      The name of the vocabulary to use when processing the transcription job. Leave
+      blank if no
+      custom vocabulary to be used. If yes, the custom vocabulary must pre-exist in
+      your account.
 
   CustomLanguageModelName:
     Type: String
     Default: ''
     Description: >-
-      The name of the custom language model to use when processing the transcription job. Leave blank if no
-      custom language model is to be used. If yes, the custom language model must pre-exist in your account.
+      The name of the custom language model to use when processing the transcription
+      job. Leave blank if no
+      custom language model is to be used. If yes, the custom language model must
+      pre-exist in your account.
   PcaS3BucketName:
     Type: String
     Description: >
-      Value of PCA stack "InputBucket". Effective only Transcribe API Mode parameter is 'analytics'.
+      Value of PCA stack "InputBucket". Effective only Transcribe API Mode parameter
+      is 'analytics'.
     # yamllint disable rule:line-length
     AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
     # yamllint enable rule:line-length
@@ -194,7 +195,7 @@ Parameters:
   PcaWebAppURL:
     Type: String
     AllowedPattern: '^(|https:\/\/.*)$'
-    Description: Value of PCA stack "WebAppURL". 
+    Description: Value of PCA stack "WebAppURL".
 
   PcaWebAppCallPathPrefix:
     Type: String
@@ -203,7 +204,7 @@ Parameters:
 
   LMASettingsParameterName:
     Type: String
-    Description: LCA settings SSM Parameter store 
+    Description: LCA settings SSM Parameter store
 
   # NOTE: "AssistantWakePhraseRegEx" (wake phrase parameter) is not used by this stack/lambda function. 
   # It is added to parameters only to force a custom resource update when wake phrase parameter 
@@ -213,15 +214,18 @@ Parameters:
     Type: String
     Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
     Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant'.
+      A regular expression for the wake phrase that invokes the Meeting Assistant.
+      Default is 'OK Assistant'.
 
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
     Type: String
     Default: ai-ml-blog
     Description: >
-      Base name of bootstrap S3 bucket. The region is appended to the bucket name. For example if
-      you provide a base name `mybucket`, a bucket with a region suffix must exist in the region
+      Base name of bootstrap S3 bucket. The region is appended to the bucket name.
+      For example if
+      you provide a base name `mybucket`, a bucket with a region suffix must exist
+      in the region
       you are deploying (e.g. `mybucket-us-east-1`)
       The bucket contains pre-staged packaged templates and source artifacts
     # yamllint disable rule:line-length
@@ -245,7 +249,9 @@ Parameters:
     Type: String
     Description: Disclaimer used for the extension message popup
     Default: >
-      Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.
+      Important: You are responsible for complying with legal, corporate, and ethical
+      restrictions that apply to recording meetings and calls. Do not use this solution
+      to stream, record, or transcribe calls if otherwise prohibited.
 
   ShowSpeakerLabel:
     Type: String
@@ -253,17 +259,21 @@ Parameters:
     Description: >-
       Enable diarization on Transcribe streaming
     AllowedValues:
-      - 'true'
-      - 'false'
+    - 'true'
+    - 'false'
 
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs.
 Metadata:
   "AWS::CloudFormation::Interface":
     ParameterGroups:
-      - Label:
-          default: Amazon S3 Configuration
-        Parameters:
-          - S3BucketName
-          - AudioFilePrefix
+    - Label:
+        default: Amazon S3 Configuration
+      Parameters:
+      - S3BucketName
+      - AudioFilePrefix
 
     ParameterLabels:
       S3BucketName:
@@ -289,8 +299,8 @@ Metadata:
 
 Conditions:
   ShouldEnableContentRedaction: !And
-    - !Equals [!Ref IsContentRedactionEnabled, 'true']
-    - !Equals [!Ref TranscribeLanguageCode, 'en-US']
+  - !Equals [!Ref IsContentRedactionEnabled, 'true']
+  - !Equals [!Ref TranscribeLanguageCode, 'en-US']
   ShouldInstallPcaIntegration: !Not [!Equals [!Ref PcaS3BucketName, '']]
 
 Outputs:
@@ -301,10 +311,10 @@ Outputs:
   WebSocketEndpoint:
     Description: Websocket endpoint for Websocket integration
     Value: !Join
-              - ''
-              - - 'wss://'
-                - !GetAtt WebSocketCloudFrontDistribution.DomainName
-                - '/api/v1/ws'
+    - ''
+    - - 'wss://'
+      - !GetAtt WebSocketCloudFrontDistribution.DomainName
+      - '/api/v1/ws'
 
 Resources:
 
@@ -320,15 +330,15 @@ Resources:
       RepositoryPolicyText:
         Version: "2012-10-17"
         Statement:
-          - Sid: "Allow Amazon ECR read access to the users of this AWS account"
-            Effect: Allow
-            Principal:
-              AWS:
-                - !Sub ${AWS::AccountId}
-            Action:
-              - "ecr:GetDownloadUrlForLayer"
-              - "ecr:BatchGetImage"
-              - "ecr:BatchCheckLayerAvailability"
+        - Sid: "Allow Amazon ECR read access to the users of this AWS account"
+          Effect: Allow
+          Principal:
+            AWS:
+            - !Sub ${AWS::AccountId}
+          Action:
+          - "ecr:GetDownloadUrlForLayer"
+          - "ecr:BatchGetImage"
+          - "ecr:BatchCheckLayerAvailability"
 
   EcrImagesDeleteLambdaRole:
     Type: AWS::IAM::Role
@@ -336,26 +346,25 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: deleteEcrImages
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Resource:
-                  - !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/\
-                    ${TranscriberECRRepository}"
-                Action:
-                  - ecr:DescribeImages
-                  - ecr:ListImages
-                  - ecr:BatchGetImage
-                  - ecr:BatchDeleteImage
+      - PolicyName: deleteEcrImages
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Resource:
+            - !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${TranscriberECRRepository}"
+            Action:
+            - ecr:DescribeImages
+            - ecr:ListImages
+            - ecr:BatchGetImage
+            - ecr:BatchDeleteImage
 
   EcrImagesDeleteLambda:
     Type: AWS::Lambda::Function
@@ -404,13 +413,26 @@ Resources:
                       reason = f"Exception thrown: {e}"
                       status = cfnresponse.FAILED
               cfnresponse.send(event, context, status, response_data, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/EcrImagesDeleteLambda
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
+        - id: W89
+          reason: Customer can use VPC if desired
+        - id: W92
+          reason: Customer can choose reserved concurrency based on their requirement.
+    DependsOn:
+    - EcrImagesDeleteLambdaLogGroup
+
+  EcrImagesDeleteLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/EcrImagesDeleteLambda
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
 
   EcrImagesDelete:
     Type: Custom::EcrImagesDelete
@@ -425,64 +447,61 @@ Resources:
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
-          - Action: sts:AssumeRole
-            Effect: Allow
-            Principal:
-              Service: codebuild.amazonaws.com
+        - Action: sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
       Policies:
-        - PolicyName: ecs-service
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Resource:
-                  - !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}"
-                  - !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/\
-                    ${BootstrapS3Prefix}/*"
-                Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:GetObjectVersion
-                  - s3:GetBucketAcl
-                  - s3:GetBucketLocation
-                  - s3:PutObject
-                  - s3:ListBucket
-              - Resource:
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:\
-                    /aws/codebuild/*:*"
-                Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-              - Resource:
-                  !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/\
-                  ${TranscriberECRRepository}"
-                Effect: Allow
-                Action:
-                  - ecr:DescribeImages
-                  - ecr:ListImages
-                  - ecr:PutImage
-                  - ecr:BatchCheckLayerAvailability
-                  - ecr:BatchGetImage
-                  - ecr:CompleteLayerUpload
-                  - ecr:GetDownloadUrlForLayer
-                  - ecr:GetRepositoryPolicy
-                  - ecr:InitiateLayerUpload
-                  - ecr:UploadLayerPart
-              - Resource: "*"
-                Effect: Allow
-                Action:
-                  - ecr:GetAuthorizationToken
+      - PolicyName: ecs-service
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Resource:
+            - !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}"
+            - !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/*"
+            Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:GetObjectVersion
+            - s3:GetBucketAcl
+            - s3:GetBucketLocation
+            - s3:PutObject
+            - s3:ListBucket
+          - Resource:
+            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*"
+            Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          - Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${TranscriberECRRepository}"
+            Effect: Allow
+            Action:
+            - ecr:DescribeImages
+            - ecr:ListImages
+            - ecr:PutImage
+            - ecr:BatchCheckLayerAvailability
+            - ecr:BatchGetImage
+            - ecr:CompleteLayerUpload
+            - ecr:GetDownloadUrlForLayer
+            - ecr:GetRepositoryPolicy
+            - ecr:InitiateLayerUpload
+            - ecr:UploadLayerPart
+          - Resource: "*"
+            Effect: Allow
+            Action:
+            - ecr:GetAuthorizationToken
 
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W11
-            reason: >-
-              ECR do not support resource-level permissions for GetAuthorizationToken and therefore
-              cannot be specificed directly.
-  
+        - id: W11
+          reason: >-
+            ECR do not support resource-level permissions for GetAuthorizationToken
+            and therefore
+            cannot be specificed directly.
+
 
   TranscriberCodeBuildProject:
     Type: AWS::CodeBuild::Project
@@ -494,9 +513,7 @@ Resources:
       Artifacts:
         Type: NO_ARTIFACTS
       Source:
-        Location:
-          !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/\
-          ${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
+        Location: !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
         Type: S3
         BuildSpec: |
           version: 0.2
@@ -537,20 +554,18 @@ Resources:
         ComputeType: BUILD_GENERAL1_MEDIUM
         Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
         Type: LINUX_CONTAINER
-        PrivilegedMode: True
+        PrivilegedMode: true
         EnvironmentVariables:
-          - Name: AWS_DEFAULT_REGION
-            Value: !Ref AWS::Region
-          - Name: AWS_ACCOUNT_ID
-            Value: !Ref AWS::AccountId
-          - Name: REPOSITORY_URI
-            Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}\
-              .amazonaws.com/${TranscriberECRRepository}"
-          - Name: IMAGE_TAG
-            Value: !Ref BootstrapVersion
-          - Name: SOURCE_CODE_LOCATION
-            Value: !Sub "${BootstrapBucketBaseName}-${AWS::Region}/\
-              ${BootstrapS3Prefix}/${BootstrapVersion}"
+        - Name: AWS_DEFAULT_REGION
+          Value: !Ref AWS::Region
+        - Name: AWS_ACCOUNT_ID
+          Value: !Ref AWS::AccountId
+        - Name: REPOSITORY_URI
+          Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${TranscriberECRRepository}"
+        - Name: IMAGE_TAG
+          Value: !Ref BootstrapVersion
+        - Name: SOURCE_CODE_LOCATION
+          Value: !Sub "${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}"
       TimeoutInMinutes: 10
 
   LambdaCodeBuildStartBuildExecutionRole:
@@ -559,53 +574,50 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
       Path: "/"
       Policies:
-        - PolicyName: root
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - codebuild:StartBuild
-                  - codebuild:BatchGetBuilds
-                Resource: !GetAtt TranscriberCodeBuildProject.Arn
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:\
-                    /aws/lambda/*"
+      - PolicyName: root
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: Allow
+            Action:
+            - codebuild:StartBuild
+            - codebuild:BatchGetBuilds
+            Resource: !GetAtt TranscriberCodeBuildProject.Arn
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
         # Used by custom resource helper poller
         # https://github.com/aws-cloudformation/custom-resource-helper
-        - PolicyName: CustomResourcePoller
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - events:PutRule
-                  - events:DeleteRule
-                  - events:PutTargets
-                  - events:RemoveTargets
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:\
-                    ${AWS::AccountId}:rule/*"
-              - Effect: Allow
-                Action:
-                  - lambda:AddPermission
-                  - lambda:RemovePermission
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:\
-                    ${AWS::AccountId}:function:*"
+      - PolicyName: CustomResourcePoller
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - events:PutRule
+            - events:DeleteRule
+            - events:PutTargets
+            - events:RemoveTargets
+            Resource:
+            - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/*"
+          - Effect: Allow
+            Action:
+            - lambda:AddPermission
+            - lambda:RemovePermission
+            Resource:
+            - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
 
   CodeBuildRun:
     Type: Custom::CodeBuildRun
@@ -613,9 +625,7 @@ Resources:
       ServiceToken: !GetAtt LambdaCodeBuildStartBuild.Arn
       BuildProjectName: !Ref TranscriberCodeBuildProject
       # pass code location to support upgrades
-      CodeLocation:
-        !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/\
-        ${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
+      CodeLocation: !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
 
   LambdaCodeBuildStartBuild:
     Type: AWS::Serverless::Function
@@ -627,13 +637,26 @@ Resources:
       Handler: lambda_start_codebuild.handler
       CodeUri: ../source/lambda_functions/start_codebuild
       Description: This AWS Lambda Function kicks off a code build job.
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/LambdaCodeBuildStartBuild
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
+        - id: W89
+          reason: Customer can use VPC if desired
+        - id: W92
+          reason: Customer can choose reserved concurrency based on their requirement.
+    DependsOn:
+    - LambdaCodeBuildStartBuildLogGroup
+
+  LambdaCodeBuildStartBuildLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/LambdaCodeBuildStartBuild
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
 
   TranscriberCallEventTable:
     Type: AWS::DynamoDB::Table
@@ -642,15 +665,15 @@ Resources:
     Properties:
       AttributeDefinitions:
         # primary key attributes
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: SK
-          AttributeType: S
+      - AttributeName: PK
+        AttributeType: S
+      - AttributeName: SK
+        AttributeType: S
       KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-        - AttributeName: SK
-          KeyType: RANGE
+      - AttributeName: PK
+        KeyType: HASH
+      - AttributeName: SK
+        KeyType: RANGE
       BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
@@ -661,7 +684,7 @@ Resources:
         Enabled: true
       StreamSpecification:
         StreamViewType: NEW_IMAGE
-        
+
   ##########################################################################
   # VPC
   ##########################################################################
@@ -687,46 +710,49 @@ Resources:
   VPCFlowLogsLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      RetentionInDays: 3653
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W84
-            reason: >-
-              By default CloudWatchLogs LogGroups data is encrypted using the CloudWatch
-              server-side encryption keys (AWS Managed Keys).
+        - id: W84
+          reason: >-
+            By default CloudWatchLogs LogGroups data is encrypted using the CloudWatch
+            server-side encryption keys (AWS Managed Keys).
+
   VPCFlowLogsRole:
     Type: AWS::IAM::Role
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W11
-            reason: >-
-              "Allow Resource * for CloudWatch Logs API since the resources are customer defined."
+        - id: W11
+          reason: >-
+            "Allow Resource * for CloudWatch Logs API since the resources are customer
+            defined."
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - vpc-flow-logs.amazonaws.com
-            Action:
-              - sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service:
+            - vpc-flow-logs.amazonaws.com
+          Action:
+          - sts:AssumeRole
       Path: /
       Policies:
-        - PolicyName: LogRolePolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:DescribeLogGroups
-                  - logs:DescribeLogStreams
-                  - logs:PutLogEvents
-                Resource: "*"
+      - PolicyName: LogRolePolicy
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:DescribeLogGroups
+            - logs:DescribeLogStreams
+            - logs:PutLogEvents
+            Resource: "*"
   VPCFlowLog:
     Type: AWS::EC2::FlowLog
     Properties:
@@ -744,24 +770,24 @@ Resources:
         Ref: TranscribingVPC
       AvailabilityZone:
         Fn::Select:
-          - 0
-          - Fn::GetAZs: ""
+        - 0
+        - Fn::GetAZs: ""
       MapPublicIpOnLaunch: true
     DependsOn:
-      - TranscribingVPCVPCGW
-    
+    - TranscribingVPCVPCGW
+
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W33
-            reason: Public IP on launch is needed by the solution
+        - id: W33
+          reason: Public IP on launch is needed by the solution
 
   TranscribingVPCPublicSubnet1RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId:
         Ref: TranscribingVPC
-    
+
   TranscribingVPCPublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -779,7 +805,7 @@ Resources:
       GatewayId:
         Ref: TranscribingVPCIGW
     DependsOn:
-      - TranscribingVPCVPCGW
+    - TranscribingVPCVPCGW
 
   TranscribingVPCPublicSubnet:
     Type: AWS::EC2::EIP
@@ -791,8 +817,8 @@ Resources:
     Properties:
       AllocationId:
         Fn::GetAtt:
-          - TranscribingVPCPublicSubnet
-          - AllocationId
+        - TranscribingVPCPublicSubnet
+        - AllocationId
       SubnetId:
         Ref: TranscribingVPCPublicSubnet1Subnet
 
@@ -804,16 +830,16 @@ Resources:
         Ref: TranscribingVPC
       AvailabilityZone:
         Fn::Select:
-          - 1
-          - Fn::GetAZs: ""
+        - 1
+        - Fn::GetAZs: ""
       MapPublicIpOnLaunch: true
     DependsOn:
-      - TranscribingVPCVPCGW
+    - TranscribingVPCVPCGW
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W33
-            reason: Public IP on launch is needed by the solution
+        - id: W33
+          reason: Public IP on launch is needed by the solution
 
   TranscribingVPCPublicSubnet2RouteTable:
     Type: AWS::EC2::RouteTable
@@ -838,7 +864,7 @@ Resources:
       GatewayId:
         Ref: TranscribingVPCIGW
     DependsOn:
-      - TranscribingVPCVPCGW
+    - TranscribingVPCVPCGW
 
   TranscribingVPCPublicSubnet2:
     Type: AWS::EC2::EIP
@@ -850,8 +876,8 @@ Resources:
     Properties:
       AllocationId:
         Fn::GetAtt:
-          - TranscribingVPCPublicSubnet2
-          - AllocationId
+        - TranscribingVPCPublicSubnet2
+        - AllocationId
       SubnetId:
         Ref: TranscribingVPCPublicSubnet2Subnet
 
@@ -863,8 +889,8 @@ Resources:
         Ref: TranscribingVPC
       AvailabilityZone:
         Fn::Select:
-          - 0
-          - Fn::GetAZs: ""
+        - 0
+        - Fn::GetAZs: ""
       MapPublicIpOnLaunch: false
 
   TranscribingVPCPrivateSubnet1RouteTable:
@@ -898,8 +924,8 @@ Resources:
         Ref: TranscribingVPC
       AvailabilityZone:
         Fn::Select:
-          - 1
-          - Fn::GetAZs: ""
+        - 1
+        - Fn::GetAZs: ""
       MapPublicIpOnLaunch: false
 
   TranscribingVPCPrivateSubnet2RouteTable:
@@ -933,50 +959,50 @@ Resources:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterSettings:
-        - Name: containerInsights
-          Value: enabled
+      - Name: containerInsights
+        Value: enabled
 
   TranscribingWebsocketLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       LoadBalancerAttributes:
-        - Key: deletion_protection.enabled
-          Value: 'false'
+      - Key: deletion_protection.enabled
+        Value: 'false'
       Scheme: internet-facing
       SecurityGroups:
-        - Fn::GetAtt:
-          - TranscribingWebsocketLoadBalancerSecurityGroup
-          - GroupId
+      - Fn::GetAtt:
+        - TranscribingWebsocketLoadBalancerSecurityGroup
+        - GroupId
       Subnets:
-        - !Ref TranscribingVPCPublicSubnet1Subnet
-        - !Ref TranscribingVPCPublicSubnet2Subnet
+      - !Ref TranscribingVPCPublicSubnet1Subnet
+      - !Ref TranscribingVPCPublicSubnet2Subnet
       Type: application
 
   TranscribingWebsocketLoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Security Group for ELB  
+      GroupDescription: Security Group for ELB
       SecurityGroupIngress:
-        - CidrIp: 0.0.0.0/0
-          Description: Allow from anyone on port 80
-          FromPort: 80
-          IpProtocol: tcp
-          ToPort: 80      
+      - CidrIp: 0.0.0.0/0
+        Description: Allow from anyone on port 80
+        FromPort: 80
+        IpProtocol: tcp
+        ToPort: 80
       VpcId: !Ref TranscribingVPC
- 
+
   TranscribingWebsocketLoadBalancerSecurityGroupEgress:
     Type: AWS::EC2::SecurityGroupEgress
     Properties:
       GroupId:
         Fn::GetAtt:
-          - TranscribingWebsocketLoadBalancerSecurityGroup
-          - GroupId
+        - TranscribingWebsocketLoadBalancerSecurityGroup
+        - GroupId
       IpProtocol: tcp
       Description: Load balancer to target
       DestinationSecurityGroupId:
         Fn::GetAtt:
-          - TranscriberWebsocketFargateServiceSecurityGroup
-          - GroupId
+        - TranscriberWebsocketFargateServiceSecurityGroup
+        - GroupId
       FromPort: 8080
       ToPort: 8080
 
@@ -984,16 +1010,16 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       DefaultActions:
-        - FixedResponseConfig:
-            ContentType: application/json
-            MessageBody: '{"status":403,"message":"This is not a valid endpoint"}'
-            StatusCode: '403'
-          Type: fixed-response
+      - FixedResponseConfig:
+          ContentType: application/json
+          MessageBody: '{"status":403,"message":"This is not a valid endpoint"}'
+          StatusCode: '403'
+        Type: fixed-response
       LoadBalancerArn:
         Ref: TranscribingWebsocketLoadBalancer
       Port: 80
       Protocol: HTTP
- 
+
   TranscribingWebsocketLoadBalancerListenerTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -1007,60 +1033,60 @@ Resources:
       Port: 80
       Protocol: HTTP
       TargetGroupAttributes:
-        - Key: stickiness.enabled
-          Value: 'false'
-        - Key: deregistration_delay.timeout_seconds
-          Value: '180'
+      - Key: stickiness.enabled
+        Value: 'false'
+      - Key: deregistration_delay.timeout_seconds
+        Value: '180'
       TargetType: ip
       UnhealthyThresholdCount: 2
       VpcId: !Ref TranscribingVPC
- 
+
   TranscribingWebsocketLoadBalancerListenerRule1:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     DependsOn:
-      - CustomHeaderNameSecret
-      - CustomHeaderValueSecret
+    - CustomHeaderNameSecret
+    - CustomHeaderValueSecret
     Properties:
       Actions:
-        - TargetGroupArn:
-            Ref: TranscribingWebsocketLoadBalancerListenerTargetGroup
-          Type: forward
+      - TargetGroupArn:
+          Ref: TranscribingWebsocketLoadBalancerListenerTargetGroup
+        Type: forward
       Conditions:
-        - Field: host-header
-          HostHeaderConfig:
-            Values:
-              - !GetAtt WebSocketCloudFrontDistribution.DomainName
-        - Field: http-header
-          HttpHeaderConfig:
-            HttpHeaderName: !Sub "{{resolve:secretsmanager:${CustomHeaderNameSecret}::headersecret}}"
-            Values:
-              - !Sub "{{resolve:secretsmanager:${CustomHeaderValueSecret}::headersecret}}"
-        - Field: path-pattern
-          PathPatternConfig:
-            Values:
-              - "/api/v1/*"
+      - Field: host-header
+        HostHeaderConfig:
+          Values:
+          - !GetAtt WebSocketCloudFrontDistribution.DomainName
+      - Field: http-header
+        HttpHeaderConfig:
+          HttpHeaderName: !Sub "{{resolve:secretsmanager:${CustomHeaderNameSecret}::headersecret}}"
+          Values:
+          - !Sub "{{resolve:secretsmanager:${CustomHeaderValueSecret}::headersecret}}"
+      - Field: path-pattern
+        PathPatternConfig:
+          Values:
+          - "/api/v1/*"
       ListenerArn:
         Ref: TranscribingWebsocketLoadBalancerListener
       Priority: 100
- 
+
   TranscribingWebsocketLoadBalancerListenerRule2:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
       Actions:
-        - FixedResponseConfig:
-            ContentType: application/json
-            MessageBody: '{"status":404,"message":"Resource not found"}'
-            StatusCode: '404'
-          Type: fixed-response
+      - FixedResponseConfig:
+          ContentType: application/json
+          MessageBody: '{"status":404,"message":"Resource not found"}'
+          StatusCode: '404'
+        Type: fixed-response
       Conditions:
-        - Field: host-header
-          HostHeaderConfig:
-            Values:
-              - !GetAtt WebSocketCloudFrontDistribution.DomainName
+      - Field: host-header
+        HostHeaderConfig:
+          Values:
+          - !GetAtt WebSocketCloudFrontDistribution.DomainName
       ListenerArn:
         Ref: TranscribingWebsocketLoadBalancerListener
       Priority: 200
-   
+
   ##########################################################################
   # ECS
   #########################################################################
@@ -1070,10 +1096,10 @@ Resources:
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-          - Action: sts:AssumeRole
-            Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
+        - Action: sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
         Version: "2012-10-17"
 
   TranscriberWebsocketTaskDefTaskRoleDefaultPolicy:
@@ -1081,72 +1107,73 @@ Resources:
     Properties:
       PolicyDocument:
         Statement:
-          - Action:
-            - s3:GetObject*
-            - s3:GetBucket*
-            - s3:List*
-            - s3:DeleteObject*
-            - s3:PutObject
-            - s3:PutObjectLegalHold
-            - s3:PutObjectRetention
-            - s3:PutObjectTagging
-            - s3:PutObjectVersionTagging
-            - s3:Abort*
-            Effect: Allow
-            Resource:
-              - !Sub
-                - "arn:aws:s3:::${bucket}"
-                - bucket: !Ref S3BucketName
-              - !Sub
-                - "arn:aws:s3:::${bucket}/*"
-                - bucket: !Ref S3BucketName
-          - Action:
-              - iam:PassRole
-            Effect: Allow
-            Resource:
-              - !GetAtt TcaDataAccessRole.Arn
-          - Action:
-              - transcribe:DeleteTranscriptionJob
-              - transcribe:GetTranscriptionJob
-              - transcribe:GetVocabulary
-              - transcribe:ListTranscriptionJobs
-              - transcribe:ListVocabularies
-              - transcribe:StartStreamTranscription
-              - transcribe:StartTranscriptionJob
-              - transcribe:StartCallAnalyticsStreamTranscription
-            Effect: Allow
-            Resource: "*"
-          - Action:
-              - kinesis:PutRecord
-            Effect: Allow
-            Resource:  
-              - !Sub 
-                - "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${streamName}"
-                - streamName: !Ref CallDataStreamName
+        - Action:
+          - s3:GetObject*
+          - s3:GetBucket*
+          - s3:List*
+          - s3:DeleteObject*
+          - s3:PutObject
+          - s3:PutObjectLegalHold
+          - s3:PutObjectRetention
+          - s3:PutObjectTagging
+          - s3:PutObjectVersionTagging
+          - s3:Abort*
+          Effect: Allow
+          Resource:
+          - !Sub
+            - "arn:aws:s3:::${bucket}"
+            - bucket: !Ref S3BucketName
+          - !Sub
+            - "arn:aws:s3:::${bucket}/*"
+            - bucket: !Ref S3BucketName
+        - Action:
+          - iam:PassRole
+          Effect: Allow
+          Resource:
+          - !GetAtt TcaDataAccessRole.Arn
+        - Action:
+          - transcribe:DeleteTranscriptionJob
+          - transcribe:GetTranscriptionJob
+          - transcribe:GetVocabulary
+          - transcribe:ListTranscriptionJobs
+          - transcribe:ListVocabularies
+          - transcribe:StartStreamTranscription
+          - transcribe:StartTranscriptionJob
+          - transcribe:StartCallAnalyticsStreamTranscription
+          Effect: Allow
+          Resource: "*"
+        - Action:
+          - kinesis:PutRecord
+          Effect: Allow
+          Resource:
+          - !Sub
+            - "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${streamName}"
+            - streamName: !Ref CallDataStreamName
 
-          - Action:  
-              - dynamodb:Query
-              - dynamodb:Scan
-              - dynamodb:GetItem
-              - dynamodb:PutItem
-              - dynamodb:UpdateItem
-            Effect: Allow
-            Resource:
-              - !GetAtt TranscriberCallEventTable.Arn
-          - Action:
-              - logs:CreateLogStream
-              - logs:PutLogEvents
-            Effect: Allow
-            Resource: !GetAtt TranscriberWebsocketTaskDefWebsocketContainerLogGroup.Arn
+        - Action:
+          - dynamodb:Query
+          - dynamodb:Scan
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          Effect: Allow
+          Resource:
+          - !GetAtt TranscriberCallEventTable.Arn
+        - Action:
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Effect: Allow
+          Resource: !GetAtt TranscriberWebsocketTaskDefWebsocketContainerLogGroup.Arn
         Version: "2012-10-17"
       PolicyName: !Sub ${AWS::StackName}-TranscriberWebsocketTaskDefTaskRoleDefaultPolicy
       Roles:
-        - !Ref TranscriberWebsocketTaskDefTaskRole
+      - !Ref TranscriberWebsocketTaskDefTaskRole
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W12
-            reason: comprehend, translate, and connect do not support resource-level permissions.
+        - id: W12
+          reason: comprehend, translate, and connect do not support resource-level
+            permissions.
 
   TcaDataAccessRole:
     Type: AWS::IAM::Role
@@ -1154,118 +1181,118 @@ Resources:
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - transcribe.streaming.amazonaws.com
-            Action:
-              - sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service:
+            - transcribe.streaming.amazonaws.com
+          Action:
+          - sts:AssumeRole
       Path: /
       Policies:
-        - PolicyName: tca-post-call-policy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource:
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}"
-                    - bucket: !Ref S3BucketName
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}/*"
-                    - bucket: !Ref S3BucketName          
+      - PolicyName: tca-post-call-policy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:ListBucket
+            - s3:PutObject
+            - s3:DeleteObject
+            Resource:
+            - !Sub
+              - "arn:aws:s3:::${bucket}"
+              - bucket: !Ref S3BucketName
+            - !Sub
+              - "arn:aws:s3:::${bucket}/*"
+              - bucket: !Ref S3BucketName
 
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W11
-            reason: >-
-              Transcribe does not support resource-level permissions and KVS streams are dynamic
+        - id: W11
+          reason: >-
+            Transcribe does not support resource-level permissions and KVS streams
+            are dynamic
 
   TranscriberWebsocketTaskDef:
     Type: AWS::ECS::TaskDefinition
     DependsOn: CodeBuildRun
     Properties:
       ContainerDefinitions:
-        - Environment:
-            - Name: AWS_REGION
-              Value: !Ref AWS::Region
-            - Name: NODE_ENV
-              Value: 'DEV'
-            - Name: CPU_HEALTH_THRESHOLD
-              Value: '50'
-            - Name: USERPOOL_ID
-              Value: !Ref UserPoolId
-            - Name: RECORDINGS_BUCKET_NAME
-              Value: !Ref S3BucketName
-            - Name: RECORDINGS_KEY_PREFIX
-              Value: !Ref AudioFilePrefix
-            - Name: CALL_ANALYTICS_FILE_PREFIX
-              Value: !Ref CallAnalyticsPrefix
-            - Name: TCA_DATA_ACCESS_ROLE_ARN
-              Value: !GetAtt TcaDataAccessRole.Arn
-            - Name: POST_CALL_CONTENT_REDACTION_OUTPUT
-              Value: 'redacted'
-            - Name: SERVERHOST
-              Value: '0.0.0.0'
-            - Name: SERVERPORT
-              Value: '8080'
-            - Name: KINESIS_STREAM_NAME
-              Value: !Ref CallDataStreamName
-            - Name: TRANSCRIBER_CALL_EVENT_TABLE_NAME
-              Value: !Ref TranscriberCallEventTable
-            - Name: SAVE_PARTIAL_TRANSCRIPTS
-              Value: "true"
-            - Name: SHOW_SPEAKER_LABEL
-              Value: !Ref ShowSpeakerLabel
-            - Name: TRANSCRIBE_API_MODE
-              Value: !Ref TranscribeApiMode
-            - Name: IS_CONTENT_REDACTION_ENABLED
-              Value: !If
-                - ShouldEnableContentRedaction
-                - 'true'
-                - 'false'
-            - Name: CONTENT_REDACTION_TYPE
-              Value: !Ref TranscribeContentRedactionType      
-            - Name: TRANSCRIBE_PII_ENTITY_TYPES
-              Value: !Ref TranscribePiiEntityTypes      
-            - Name: TRANSCRIBE_LANGUAGE_CODE
-              Value: !Ref TranscribeLanguageCode
-            - Name: TRANSCRIBE_LANGUAGE_OPTIONS
-              Value: !Ref TranscribeLanguageOptions
-            - Name: TRANSCRIBE_PREFERRED_LANGUAGE
-              Value: !Ref TranscribePreferredLanguage
-            - Name: CUSTOM_VOCABULARY_NAME
-              Value: !Ref CustomVocabularyName
-            - Name: CUSTOM_LANGUAGE_MODEL_NAME
-              Value: !Ref CustomLanguageModelName
-          Essential: true
-          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/\
-            ${TranscriberECRRepository}:${BootstrapVersion}"
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group:
-                Ref: TranscriberWebsocketTaskDefWebsocketContainerLogGroup
-              awslogs-stream-prefix: lcawebsocket
-              awslogs-region:
-                Ref: AWS::Region
-          Name: websocketcontainer
-          PortMappings:
-            - ContainerPort: 8080
-              Protocol: tcp
+      - Environment:
+        - Name: AWS_REGION
+          Value: !Ref AWS::Region
+        - Name: NODE_ENV
+          Value: 'DEV'
+        - Name: CPU_HEALTH_THRESHOLD
+          Value: '50'
+        - Name: USERPOOL_ID
+          Value: !Ref UserPoolId
+        - Name: RECORDINGS_BUCKET_NAME
+          Value: !Ref S3BucketName
+        - Name: RECORDINGS_KEY_PREFIX
+          Value: !Ref AudioFilePrefix
+        - Name: CALL_ANALYTICS_FILE_PREFIX
+          Value: !Ref CallAnalyticsPrefix
+        - Name: TCA_DATA_ACCESS_ROLE_ARN
+          Value: !GetAtt TcaDataAccessRole.Arn
+        - Name: POST_CALL_CONTENT_REDACTION_OUTPUT
+          Value: 'redacted'
+        - Name: SERVERHOST
+          Value: '0.0.0.0'
+        - Name: SERVERPORT
+          Value: '8080'
+        - Name: KINESIS_STREAM_NAME
+          Value: !Ref CallDataStreamName
+        - Name: TRANSCRIBER_CALL_EVENT_TABLE_NAME
+          Value: !Ref TranscriberCallEventTable
+        - Name: SAVE_PARTIAL_TRANSCRIPTS
+          Value: "true"
+        - Name: SHOW_SPEAKER_LABEL
+          Value: !Ref ShowSpeakerLabel
+        - Name: TRANSCRIBE_API_MODE
+          Value: !Ref TranscribeApiMode
+        - Name: IS_CONTENT_REDACTION_ENABLED
+          Value: !If
+          - ShouldEnableContentRedaction
+          - 'true'
+          - 'false'
+        - Name: CONTENT_REDACTION_TYPE
+          Value: !Ref TranscribeContentRedactionType
+        - Name: TRANSCRIBE_PII_ENTITY_TYPES
+          Value: !Ref TranscribePiiEntityTypes
+        - Name: TRANSCRIBE_LANGUAGE_CODE
+          Value: !Ref TranscribeLanguageCode
+        - Name: TRANSCRIBE_LANGUAGE_OPTIONS
+          Value: !Ref TranscribeLanguageOptions
+        - Name: TRANSCRIBE_PREFERRED_LANGUAGE
+          Value: !Ref TranscribePreferredLanguage
+        - Name: CUSTOM_VOCABULARY_NAME
+          Value: !Ref CustomVocabularyName
+        - Name: CUSTOM_LANGUAGE_MODEL_NAME
+          Value: !Ref CustomLanguageModelName
+        Essential: true
+        Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${TranscriberECRRepository}:${BootstrapVersion}"
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group:
+              Ref: TranscriberWebsocketTaskDefWebsocketContainerLogGroup
+            awslogs-stream-prefix: lcawebsocket
+            awslogs-region:
+              Ref: AWS::Region
+        Name: websocketcontainer
+        PortMappings:
+        - ContainerPort: 8080
+          Protocol: tcp
       Cpu: 256
       ExecutionRoleArn: !GetAtt TranscriberWebsocketTaskDefExecutionRole.Arn
       Family: !Sub ${AWS::StackName}TranscriberWebsocketTaskDef
       Memory: 1024
       NetworkMode: awsvpc
       RequiresCompatibilities:
-        - FARGATE
+      - FARGATE
       TaskRoleArn: !GetAtt TranscriberWebsocketTaskDefTaskRole.Arn
 
   TranscriberWebsocketTaskDefWebsocketContainerLogGroup:
@@ -1273,24 +1300,27 @@ Resources:
     UpdateReplacePolicy: Retain
     DeletionPolicy: Retain
     Properties:
-      RetentionInDays: 3653
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/fargate/TranscriberWebsocket
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W84
-            reason: >-
-              By default CloudWatchLogs LogGroups data is encrypted using the CloudWatch
-              server-side encryption keys (AWS Managed Keys).
+        - id: W84
+          reason: >-
+            By default CloudWatchLogs LogGroups data is encrypted using the CloudWatch
+            server-side encryption keys (AWS Managed Keys).
 
   TranscriberWebsocketTaskDefExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-          - Action: sts:AssumeRole
-            Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
+        - Action: sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
         Version: "2012-10-17"
 
   TranscriberWebsocketTaskDefExecutionRoleDefaultPolicy:
@@ -1298,37 +1328,36 @@ Resources:
     Properties:
       PolicyDocument:
         Statement:
-          - Action:
-              - ecr:BatchCheckLayerAvailability
-              - ecr:GetDownloadUrlForLayer
-              - ecr:BatchGetImage
-            Effect: Allow
-            Resource:
-              Fn::GetAtt:
-                - TranscriberECRRepository
-                - Arn
-          - Action: ecr:GetAuthorizationToken
-            Effect: Allow
-            Resource: "*"
-          - Action:
-              - logs:CreateLogStream
-              - logs:PutLogEvents
-            Effect: Allow
-            Resource:
-              Fn::GetAtt:
-                - TranscriberWebsocketTaskDefWebsocketContainerLogGroup
-                - Arn
+        - Action:
+          - ecr:BatchCheckLayerAvailability
+          - ecr:GetDownloadUrlForLayer
+          - ecr:BatchGetImage
+          Effect: Allow
+          Resource:
+            Fn::GetAtt:
+            - TranscriberECRRepository
+            - Arn
+        - Action: ecr:GetAuthorizationToken
+          Effect: Allow
+          Resource: "*"
+        - Action:
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Effect: Allow
+          Resource:
+            Fn::GetAtt:
+            - TranscriberWebsocketTaskDefWebsocketContainerLogGroup
+            - Arn
         Version: "2012-10-17"
-      PolicyName:
-        !Sub "${AWS::StackName}-\
-              TranscriberWebsocketTaskDefExecutionRoleDefaultPolicy"
+      PolicyName: !Sub "${AWS::StackName}-TranscriberWebsocketTaskDefExecutionRoleDefaultPolicy"
       Roles:
-        - Ref: TranscriberWebsocketTaskDefExecutionRole
+      - Ref: TranscriberWebsocketTaskDefExecutionRole
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W12
-            reason: comprehend, translate, and connect do not support resource-level permissions.
+        - id: W12
+          reason: comprehend, translate, and connect do not support resource-level
+            permissions.
 
   TranscriberWebsocketFargateService:
     Type: AWS::ECS::Service
@@ -1343,36 +1372,36 @@ Resources:
       EnableECSManagedTags: false
       LaunchType: FARGATE
       LoadBalancers:
-        - ContainerName: websocketcontainer
-          ContainerPort: 8080
-          TargetGroupArn:
-            Ref: TranscribingWebsocketLoadBalancerListenerTargetGroup
+      - ContainerName: websocketcontainer
+        ContainerPort: 8080
+        TargetGroupArn:
+          Ref: TranscribingWebsocketLoadBalancerListenerTargetGroup
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
           SecurityGroups:
-            - Fn::GetAtt:
-                - TranscriberWebsocketFargateServiceSecurityGroup
-                - GroupId
+          - Fn::GetAtt:
+            - TranscriberWebsocketFargateServiceSecurityGroup
+            - GroupId
           Subnets:
-            - Ref: TranscribingVPCPrivateSubnet1Subnet
-            - Ref: TranscribingVPCPrivateSubnet2Subnet
+          - Ref: TranscribingVPCPrivateSubnet1Subnet
+          - Ref: TranscribingVPCPrivateSubnet2Subnet
       TaskDefinition:
         Ref: TranscriberWebsocketTaskDef
     DependsOn:
-      - TranscribingWebsocketLoadBalancerListenerTargetGroup
-      - TranscribingWebsocketLoadBalancerListenerRule1
-      - TranscribingWebsocketLoadBalancerListenerRule2
-      - TranscribingWebsocketLoadBalancerListener
+    - TranscribingWebsocketLoadBalancerListenerTargetGroup
+    - TranscribingWebsocketLoadBalancerListenerRule1
+    - TranscribingWebsocketLoadBalancerListenerRule2
+    - TranscribingWebsocketLoadBalancerListener
 
   TranscriberWebsocketFargateServiceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Websocket-fargate/service/Service/SecurityGroup
       SecurityGroupEgress:
-        - CidrIp: 0.0.0.0/0
-          Description: Allow all outbound traffic by default
-          IpProtocol: "-1"
+      - CidrIp: 0.0.0.0/0
+        Description: Allow all outbound traffic by default
+        IpProtocol: "-1"
       VpcId: !Ref TranscribingVPC
 
 
@@ -1384,35 +1413,37 @@ Resources:
       FromPort: 8080
       GroupId:
         Fn::GetAtt:
-          - TranscriberWebsocketFargateServiceSecurityGroup
-          - GroupId
+        - TranscriberWebsocketFargateServiceSecurityGroup
+        - GroupId
       SourceSecurityGroupId:
         Fn::GetAtt:
-          - TranscribingWebsocketLoadBalancerSecurityGroup
-          - GroupId
+        - TranscribingWebsocketLoadBalancerSecurityGroup
+        - GroupId
       ToPort: 8080
 
   CustomHeaderNameSecret:
     Type: "AWS::SecretsManager::Secret"
     Properties:
-      Description: Generates a random value for custom header name and stores it in secrets manager
+      Description: Generates a random value for custom header name and stores it in
+        secrets manager
       GenerateSecretString:
         SecretStringTemplate: '{"header_name": "custom_header"}'
         GenerateStringKey: headersecret
         PasswordLength: 10
         ExcludeCharacters: "\"@/\\;.:+' %"
-        ExcludePunctuation: True
+        ExcludePunctuation: true
 
   CustomHeaderValueSecret:
     Type: "AWS::SecretsManager::Secret"
     Properties:
-      Description: Generates a random value for custom header value and stores it in secrets manager
+      Description: Generates a random value for custom header value and stores it
+        in secrets manager
       GenerateSecretString:
         SecretStringTemplate: '{"header_value": "custom_header_value"}'
         GenerateStringKey: headersecret
         PasswordLength: 20
         ExcludeCharacters: "\"@/\\;.:+' %"
-        ExcludePunctuation: True
+        ExcludePunctuation: true
 
   CloudFrontOriginAccessIdentity:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
@@ -1422,51 +1453,51 @@ Resources:
 
   CloudFrontOriginRequestPolicy:
     Type: AWS::CloudFront::OriginRequestPolicy
-    Properties: 
+    Properties:
       OriginRequestPolicyConfig:
         Name: !Sub ${AWS::StackName}-CloudFrontOriginRequestPolicyConfig
-        CookiesConfig: 
+        CookiesConfig:
           CookieBehavior: none
-        HeadersConfig: 
+        HeadersConfig:
           HeaderBehavior: whitelist
-          Headers: 
-            - "Sec-WebSocket-Key"
-            - "Sec-WebSocket-Version"
-            - "Host"
-            - "Origin"
-            - "x-api-key"
-            - "signature-input"
-            - "signature"
+          Headers:
+          - "Sec-WebSocket-Key"
+          - "Sec-WebSocket-Version"
+          - "Host"
+          - "Origin"
+          - "x-api-key"
+          - "signature-input"
+          - "signature"
 
-        QueryStringsConfig: 
+        QueryStringsConfig:
           QueryStringBehavior: all
 
   WebSocketCloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     DependsOn:
-      - CustomHeaderNameSecret
-      - CustomHeaderValueSecret
+    - CustomHeaderNameSecret
+    - CustomHeaderValueSecret
     Properties:
       DistributionConfig:
         Comment: !Sub "Web Socket Websocket proxy cloudfront distribution ${AWS::StackName}"
         Origins:
-          - Id: Websocket-fargate
-            DomainName: !GetAtt TranscribingWebsocketLoadBalancer.DNSName
-            CustomOriginConfig: 
-              HTTPPort: '80'
-              OriginProtocolPolicy: http-only
-            OriginCustomHeaders:
-              - HeaderName: !Sub "{{resolve:secretsmanager:${CustomHeaderNameSecret}::headersecret}}"
-                HeaderValue: !Sub "{{resolve:secretsmanager:${CustomHeaderValueSecret}::headersecret}}"
+        - Id: Websocket-fargate
+          DomainName: !GetAtt TranscribingWebsocketLoadBalancer.DNSName
+          CustomOriginConfig:
+            HTTPPort: '80'
+            OriginProtocolPolicy: http-only
+          OriginCustomHeaders:
+          - HeaderName: !Sub "{{resolve:secretsmanager:${CustomHeaderNameSecret}::headersecret}}"
+            HeaderValue: !Sub "{{resolve:secretsmanager:${CustomHeaderValueSecret}::headersecret}}"
         DefaultCacheBehavior:
           AllowedMethods:
-            - GET
-            - HEAD
-            - OPTIONS
-            - PUT
-            - POST
-            - PATCH
-            - DELETE
+          - GET
+          - HEAD
+          - OPTIONS
+          - PUT
+          - POST
+          - PATCH
+          - DELETE
           TargetOriginId: Websocket-fargate
           ViewerProtocolPolicy: https-only
           OriginRequestPolicyId: !Ref CloudFrontOriginRequestPolicy
@@ -1474,51 +1505,52 @@ Resources:
           Compress: false
 
         CustomErrorResponses:
-          - ErrorCachingMinTTL: 300
-            ErrorCode: 403
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-          - ErrorCachingMinTTL: 300
-            ErrorCode: 404
-            ResponseCode: 200
-            ResponsePagePath: /index.html
+        - ErrorCachingMinTTL: 300
+          ErrorCode: 403
+          ResponseCode: 200
+          ResponsePagePath: /index.html
+        - ErrorCachingMinTTL: 300
+          ErrorCode: 404
+          ResponseCode: 200
+          ResponsePagePath: /index.html
         DefaultRootObject: index.html
         Enabled: true
         HttpVersion: http2
         IPV6Enabled: true
-        PriceClass: !Ref CloudFrontPriceClass       
+        PriceClass: !Ref CloudFrontPriceClass
         ViewerCertificate:
           CloudFrontDefaultCertificate: 'true'
 
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W70
-            reason: This is using Cloudfront default TLS, can be changed by customer if needed.
+        - id: W70
+          reason: This is using Cloudfront default TLS, can be changed by customer
+            if needed.
 
-  WSEndpointLambdaRole: 
+  WSEndpointLambdaRole:
     Type: "AWS::IAM::Role"
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-          - Action: "sts:AssumeRole"
-            Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
+        - Action: "sts:AssumeRole"
+          Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
         Version: 2012-10-17
-      ManagedPolicyArns: 
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      ManagedPolicyArns:
+      - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
-        - PolicyName: updateSSMStore
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssm:GetParameter
-                  - ssm:PutParameter
-                Resource:
-                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
+      - PolicyName: updateSSMStore
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - ssm:GetParameter
+            - ssm:PutParameter
+            Resource:
+            - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
 
   UpdateWSEndpointSettings:
     Type: "AWS::Lambda::Function"
@@ -1558,15 +1590,28 @@ Resources:
                 reason = f"Exception thrown: {e}"
                 status = cfnresponse.FAILED              
             cfnresponse.send(event, context, status, responseData, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UpdateWSEndpointSettings
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-          - id: W58
-            reason: Managed policy already provides access to CloudWatch logs.
+        - id: W89
+          reason: Customer can use VPC if desired
+        - id: W92
+          reason: Customer can choose reserved concurrency based on their requirement.
+        - id: W58
+          reason: Managed policy already provides access to CloudWatch logs.
+    DependsOn:
+    - UpdateWSEndpointSettingsLogGroup
+
+  UpdateWSEndpointSettingsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UpdateWSEndpointSettings
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
 
   UpdateWSEndpointSettingsExec:
     Type: AWS::CloudFormation::CustomResource
@@ -1574,10 +1619,10 @@ Resources:
       ServiceToken: !GetAtt UpdateWSEndpointSettings.Arn
       LCASettings: !Ref LMASettingsParameterName
       WSEndpoint: !Join
-                      - ''
-                      - - 'wss://'
-                        - !GetAtt WebSocketCloudFrontDistribution.DomainName
-                        - '/api/v1/ws'
+      - ''
+      - - 'wss://'
+        - !GetAtt WebSocketCloudFrontDistribution.DomainName
+        - '/api/v1/ws'
       recordingDisclaimer: !Ref RecordingDisclaimer
       # "AssistantWakePhraseRegEx" (wake phrase parameter) is not used by this stack/lambda function. 
       # It is added to parameters only to force a custom resource update when wake phrase parameter 
@@ -1592,12 +1637,13 @@ Resources:
     Condition: ShouldInstallPcaIntegration
     Properties:
       Description: >-
-        AWS Lambda Function that will be triggered Transcribe Call Analytics completes after end of streaming session
+        AWS Lambda Function that will be triggered Transcribe Call Analytics completes
+        after end of streaming session
       Handler: index.handler
       Layers:
         # periodically update the Lambda Insights Layer
         # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Lambda-Insights-extension-versions.html
-        - !Sub "arn:aws:lambda:${AWS::Region}:580247275435:layer:LambdaInsightsExtension:38"
+      - !Sub "arn:aws:lambda:${AWS::Region}:580247275435:layer:LambdaInsightsExtension:38"
       Role: !GetAtt PCAIntegrationFunctionRole.Arn
       Runtime: nodejs16.x
       MemorySize: 768
@@ -1617,13 +1663,26 @@ Resources:
           PCA_WEB_APP_CALL_PATH_PREFIX: !Ref PcaWebAppCallPathPrefix
           IS_CONTENT_REDACTION_ENABLED: !Ref IsContentRedactionEnabled
       CodeUri: ../source/lambda_functions/pca_integration
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/PCAIntegrationFunction
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
+        - id: W89
+          reason: Customer can use VPC if desired
+        - id: W92
+          reason: Customer can choose reserved concurrency based on their requirement.
+    DependsOn:
+    - PCAIntegrationFunctionLogGroup
+
+  PCAIntegrationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/PCAIntegrationFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
 
   PCAIntegrationFunctionRole:
     Type: AWS::IAM::Role
@@ -1632,66 +1691,65 @@ Resources:
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
       Path: /
       ManagedPolicyArns:
         # CloudWatch Insights Managed Policy
-        - arn:aws:iam::aws:policy/CloudWatchLambdaInsightsExecutionRolePolicy
-        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+      - arn:aws:iam::aws:policy/CloudWatchLambdaInsightsExecutionRolePolicy
+      - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
       Policies:
-        - PolicyName: lambda-policy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:\
-                    ${AWS::AccountId}:log-group:/aws/lambda/*"
-              - Effect: Allow
-                Action:
-                  - dynamodb:Query
-                  - dynamodb:Scan
-                  - dynamodb:GetItem
-                Resource:
-                  - !GetAtt TranscriberCallEventTable.Arn
-              - Action:
-                  - kinesis:PutRecord
-                Effect: Allow
-                Resource:  
-                  - !Ref CallDataStreamArn
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource:
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}"
-                    - bucket: !Ref S3BucketName
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}/*"
-                    - bucket: !Ref S3BucketName
-              - Effect: Allow
-                Action:
-                  - s3:ListBucket
-                  - s3:PutObject
-                Resource:
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}"
-                    - bucket: !Ref PcaS3BucketName
-                  - !Sub
-                    - "arn:aws:s3:::${bucket}/*"
-                    - bucket: !Ref PcaS3BucketName
+      - PolicyName: lambda-policy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+          - Effect: Allow
+            Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            Resource:
+            - !GetAtt TranscriberCallEventTable.Arn
+          - Action:
+            - kinesis:PutRecord
+            Effect: Allow
+            Resource:
+            - !Ref CallDataStreamArn
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:ListBucket
+            - s3:PutObject
+            - s3:DeleteObject
+            Resource:
+            - !Sub
+              - "arn:aws:s3:::${bucket}"
+              - bucket: !Ref S3BucketName
+            - !Sub
+              - "arn:aws:s3:::${bucket}/*"
+              - bucket: !Ref S3BucketName
+          - Effect: Allow
+            Action:
+            - s3:ListBucket
+            - s3:PutObject
+            Resource:
+            - !Sub
+              - "arn:aws:s3:::${bucket}"
+              - bucket: !Ref PcaS3BucketName
+            - !Sub
+              - "arn:aws:s3:::${bucket}/*"
+              - bucket: !Ref PcaS3BucketName
 
   AllowEventBridgeToCallPCAIntegrationFunction:
     Type: "AWS::Lambda::Permission"
@@ -1710,10 +1768,10 @@ Resources:
       Description: "This rule is triggered when TCA post call output job completes"
       EventPattern:
         detail-type:
-          - "Call Analytics Post Call Job State Change"
+        - "Call Analytics Post Call Job State Change"
         source:
-          - aws.transcribe
+        - aws.transcribe
       Targets:
-        - Id: PCAIntegrationTarget
-          Arn: !GetAtt PCAIntegrationFunction.Arn
+      - Id: PCAIntegrationTarget
+        Arn: !GetAtt PCAIntegrationFunction.Arn
       State: "ENABLED"

@@ -31,9 +31,9 @@ from sns_utils import publish_sns
 from lambda_utils import invoke_lambda
 from eventprocessor_utils import (
     normalize_transcript_segments,
-    get_ttl,
+    get_meeting_ttl,
+    get_transcription_ttl,
     transform_segment_to_add_sentiment,
-    transform_segment_to_issues_agent_assist,
     transform_segment_to_categories_agent_assist,
 )
 # pylint: enable=import-error
@@ -934,7 +934,7 @@ def add_call_category(
                         Channel="CATEGORY_MATCH",
                         CreatedAt=message["CreatedAt"],
                         EndTime=end_time,
-                        ExpiresAfter=get_ttl(),
+                        ExpiresAfter=get_meeting_ttl(),
                         SegmentId=str(uuid.uuid4()),
                         StartTime=start_time,
                         IsPartial=False,
@@ -1010,7 +1010,7 @@ def add_contact_lens_call_category(
                         Channel="CATEGORY_MATCH",
                         CreatedAt=category_segment["CreatedAt"],
                         EndTime=category_segment['EndTime'],
-                        ExpiresAfter=get_ttl(),
+                        ExpiresAfter=get_meeting_ttl(),
                         SegmentId=str(uuid.uuid4()),
                         StartTime=category_segment['StartTime'],
                         IsPartial=category_segment['IsPartial'],
@@ -1169,18 +1169,6 @@ def add_contact_lens_agent_assistances(
             category_segment["Transcript"] = "[Matched Category] " + category_segment["Transcript"]
             transcript_segments.append(category_segment)
 
-        """BobS: Disable display of DetectedIssues"""
-        """
-        issues_detected = segment.get("Transcript", {}).get("IssuesDetected", [])
-        for issue in issues_detected:
-            issue_segment = transform_segment_to_issues_agent_assist(
-                segment={**segment, "CallId": call_id},
-                issue=issue,
-            )
-            issue_segment["Transcript"] = "[Detected Issue] " + issue_segment["Transcript"]
-            transcript_segments.append(issue_segment)
-        """
-
         for transcript_segment in transcript_segments:
             query = dsl_gql(
                 DSLMutation(
@@ -1329,7 +1317,8 @@ async def execute_process_event_api_mutation(
             event_type = "CALL_ANALYTICS_METADATA"
 
     message["EventType"] = event_type
-    message["ExpiresAfter"] = get_ttl()
+    # default expiration for meeting (note: transcript segments can have a different - earlier - expiration)
+    message["ExpiresAfter"] = get_meeting_ttl() 
 
     LOGGER.debug("Process event. eventType: %s, callId: %s", event_type, message.get("CallId", ""))
 
@@ -1438,6 +1427,7 @@ async def execute_process_event_api_mutation(
             if not participantRole:
                 return return_value
 
+        # normalize_transcript_segments also sets transcript segment expiration time
         normalized_messages = normalize_transcript_segments({**message})
 
         add_transcript_tasks = []
