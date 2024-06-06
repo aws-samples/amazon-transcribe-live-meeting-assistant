@@ -899,6 +899,7 @@ Resources:
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         LMASettingsParameterName: !GetAtt AISTACK.Outputs.LMASettingsParameterName
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        EnableAudioRecording: !Ref EnableAudioRecording
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack

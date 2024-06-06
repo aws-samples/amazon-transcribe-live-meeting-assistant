@@ -266,6 +266,18 @@ Parameters:
     Type: Number
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
+
+  EnableAudioRecording:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+    Description: >-
+      Enable or disable recording of audio during a meeting. If set to false, the
+      meeting will not be recorded.
+      If set to true, the meeting will be recorded.
+
 Metadata:
   "AWS::CloudFormation::Interface":
     ParameterGroups:
@@ -1272,6 +1284,8 @@ Resources:
           Value: !Ref CustomVocabularyName
         - Name: CUSTOM_LANGUAGE_MODEL_NAME
           Value: !Ref CustomLanguageModelName
+        - Name: SHOULD_RECORD_CALL
+          Value: !Ref EnableAudioRecording
         Essential: true
         Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${TranscriberECRRepository}:${BootstrapVersion}"
         LogConfiguration:
