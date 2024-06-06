@@ -56,6 +56,87 @@ const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]
 const MAXIMUM_ATTEMPTS = 100;
 const MAXIMUM_RETRY_DELAY = 1000;
 
+const PAUSE_TO_MERGE_IN_SECONDS = 1;
+
+const languageCodes = [
+  { value: '', label: 'Choose a Language' },
+  { value: 'af', label: 'Afrikaans' },
+  { value: 'sq', label: 'Albanian' },
+  { value: 'am', label: 'Amharic' },
+  { value: 'ar', label: 'Arabic' },
+  { value: 'hy', label: 'Armenian' },
+  { value: 'az', label: 'Azerbaijani' },
+  { value: 'bn', label: 'Bengali' },
+  { value: 'bs', label: 'Bosnian' },
+  { value: 'bg', label: 'Bulgarian' },
+  { value: 'ca', label: 'Catalan' },
+  { value: 'zh', label: 'Chinese (Simplified)' },
+  { value: 'zh-TW', label: 'Chinese (Traditional)' },
+  { value: 'hr', label: 'Croatian' },
+  { value: 'cs', label: 'Czech' },
+  { value: 'da', label: 'Danish' },
+  { value: 'fa-AF', label: 'Dari' },
+  { value: 'nl', label: 'Dutch' },
+  { value: 'en', label: 'English' },
+  { value: 'et', label: 'Estonian' },
+  { value: 'fa', label: 'Farsi (Persian)' },
+  { value: 'tl', label: 'Filipino, Tagalog' },
+  { value: 'fi', label: 'Finnish' },
+  { value: 'fr', label: 'French' },
+  { value: 'fr-CA', label: 'French (Canada)' },
+  { value: 'ka', label: 'Georgian' },
+  { value: 'de', label: 'German' },
+  { value: 'el', label: 'Greek' },
+  { value: 'gu', label: 'Gujarati' },
+  { value: 'ht', label: 'Haitian Creole' },
+  { value: 'ha', label: 'Hausa' },
+  { value: 'he', label: 'Hebrew' },
+  { value: 'hi', label: 'Hindi' },
+  { value: 'hu', label: 'Hungarian' },
+  { value: 'is', label: 'Icelandic' },
+  { value: 'id', label: 'Indonesian' },
+  { value: 'ga', label: 'Irish' },
+  { value: 'it', label: 'Italian' },
+  { value: 'ja', label: 'Japanese' },
+  { value: 'kn', label: 'Kannada' },
+  { value: 'kk', label: 'Kazakh' },
+  { value: 'ko', label: 'Korean' },
+  { value: 'lv', label: 'Latvian' },
+  { value: 'lt', label: 'Lithuanian' },
+  { value: 'mk', label: 'Macedonian' },
+  { value: 'ms', label: 'Malay' },
+  { value: 'ml', label: 'Malayalam' },
+  { value: 'mt', label: 'Maltese' },
+  { value: 'mr', label: 'Marathi' },
+  { value: 'mn', label: 'Mongolian' },
+  { value: 'no', label: 'Norwegian (Bokmål)' },
+  { value: 'ps', label: 'Pashto' },
+  { value: 'pl', label: 'Polish' },
+  { value: 'pt', label: 'Portuguese (Brazil)' },
+  { value: 'pt-PT', label: 'Portuguese (Portugal)' },
+  { value: 'pa', label: 'Punjabi' },
+  { value: 'ro', label: 'Romanian' },
+  { value: 'ru', label: 'Russian' },
+  { value: 'sr', label: 'Serbian' },
+  { value: 'si', label: 'Sinhala' },
+  { value: 'sk', label: 'Slovak' },
+  { value: 'sl', label: 'Slovenian' },
+  { value: 'so', label: 'Somali' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'es-MX', label: 'Spanish (Mexico)' },
+  { value: 'sw', label: 'Swahili' },
+  { value: 'sv', label: 'Swedish' },
+  { value: 'ta', label: 'Tamil' },
+  { value: 'te', label: 'Telugu' },
+  { value: 'th', label: 'Thai' },
+  { value: 'tr', label: 'Turkish' },
+  { value: 'uk', label: 'Ukrainian' },
+  { value: 'ur', label: 'Urdu' },
+  { value: 'uz', label: 'Uzbek' },
+  { value: 'vi', label: 'Vietnamese' },
+  { value: 'cy', label: 'Welsh' },
+];
+
 /* eslint-disable react/prop-types, react/destructuring-assignment */
 const CallAttributes = ({ item, setToolsOpen }) => (
   <Container
@@ -372,6 +453,37 @@ const TranscriptSegment = ({
   );
 };
 
+/**
+ * Check whether the current segment should be merged to the previous segment to get better
+ * user experience. The conditions for merge are:
+ * - Same speaker
+ * - Same channel
+ * - The gap between two segments is less than PAUSE_TO_MERGE_IN_SECONDS second
+ * - Add language code check if available
+ * TODO: Check language code once it is returned
+ * @param previous previous segment
+ * @param current current segment
+ * @returns {boolean} indicates whether to merge or not
+ */
+const shouldAppendToPreviousSegment = ({ previous, current }) =>
+  // prettier-ignore
+  // eslint-disable-next-line implicit-arrow-linebreak
+  previous.speaker === current.speaker
+  && previous.channel === current.channel
+  && current.startTime - previous.endTime < PAUSE_TO_MERGE_IN_SECONDS;
+
+/**
+ * Append current segment to its previous segment
+ * @param previous previous segment
+ * @param current current segment
+ */
+const appendToPreviousSegment = ({ previous, current }) => {
+  /* eslint-disable no-param-reassign */
+  previous.transcript += ` ${current.transcript}`;
+  previous.endTime = current.endTime;
+  previous.isPartial = current.isPartial;
+};
+
 const CallInProgressTranscript = ({
   item,
   callTranscriptPerCallId,
@@ -531,6 +643,23 @@ const CallInProgressTranscript = ({
       })
       // sort entries by end time
       .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), [])
+      .reduce((accumulator, current) => {
+        if (
+          // prettier-ignore
+          !accumulator.length
+          || !shouldAppendToPreviousSegment(
+            { previous: accumulator[accumulator.length - 1], current },
+          )
+          // Enable it once it is compatible with translation
+          || translateOn
+        ) {
+          // Get copy of current segment to avoid direct modification
+          accumulator.push({ ...current });
+        } else {
+          appendToPreviousSegment({ previous: accumulator[accumulator.length - 1], current });
+        }
+        return accumulator;
+      }, [])
       .map((c) => {
         const t = c;
         t.agentTranscript = agentTranscript;
