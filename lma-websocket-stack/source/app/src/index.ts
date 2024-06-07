@@ -182,13 +182,13 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Pro
         callMetaData.fromNumber = callMetaData.fromNumber || 'Customer Phone';
         callMetaData.toNumber = callMetaData.toNumber || 'System Phone';
         
-        if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
-            server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);
+        // if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
+        //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);
 
-            callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
-        } else {
-            server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`);
-        }
+        //     callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
+        // } else {
+        //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`);
+        // }
 
         callMetaData.agentId = callMetaData.agentId || randomUUID();  
 
