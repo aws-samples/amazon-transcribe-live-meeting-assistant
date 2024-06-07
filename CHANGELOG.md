@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Streamline Websocket server logs
 - #25 - Fix Updating Participant Name on Stream Audio Page does not reflect in the meeting transcript
 - #24 - Fix TEST ALL in QnABot is continuously putting file version into the S3 bucket (PR #26)
-
+- #35 - Fix Browser extension intermittently silently fails to authenticate (PR #35)
 
 ## [0.1.3] - 2024-05-22
 ### Fixed
