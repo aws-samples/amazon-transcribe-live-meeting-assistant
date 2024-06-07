@@ -228,6 +228,14 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Pro
             return;
         }
         server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Received call end event from client, writing it to KDS:  ${JSON.stringify(callMetaData)}`);
+        
+        if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
+            server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);
+
+            callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
+        } else {
+            server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`);
+        }
         await endCall(ws, socketData, callMetaData);
     }
 };
@@ -256,7 +264,7 @@ const endCall = async (ws: WebSocket, socketData: SocketCallData, callMetaData?:
             if (socketData.writeRecordingStream && socketData.recordingFileSize) {
                 socketData.writeRecordingStream.end();
 
-                if (socketData.callMetadata.shouldRecordCall) {
+                if (callMetaData.shouldRecordCall) {
                     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Audio Recording enabled. Writing to S3.: ${JSON.stringify(callMetaData)}`);
                     const header = createWavHeader(callMetaData.samplingRate, socketData.recordingFileSize);
                     const tempRecordingFilename = getTempRecordingFileName(callMetaData);
