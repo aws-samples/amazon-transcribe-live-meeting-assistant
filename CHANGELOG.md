@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2024-06-07
+### Added
+- Improve the user experience by merging consecutive segments and render them in single line - see PR #28
+- Stream Audio tab UX improvements (PR #30)
+    - Added Mute/Unmute button for microphone - #29
+    - Updated labels on fields and added validation
+    - Defaulted meeting organiser field to logged in user's email rather than "Me"
+    - Removed microphone source field (defaulted to meeting organiser)
+    - Added links to open the meeting while/after recording
+    - Added logic to disable fields while recording is in progress and show warning message
+    - Added timestamp to meeting name to ensure id is unique
+    - Updated READMEs with new field names and functionality
+- Enable/disable call recording - useful if you don't want any audio recordings saved (PR #31)
+- Enable configurable retention period for turn by turn tramscription - useful if you want to keep the meeting summary, but not the line by line transcription (PR #31)
+- Enable configurable retention for CloudWatch logs (PR #31)
+### Fixed
+- #33 - Fix/active speaker assignment not for mic channel (PR #34)
+- Streamline Websocket server logs
+- #25 - Fix Updating Participant Name on Stream Audio Page does not reflect in the meeting transcript
+- #24 - Fix TEST ALL in QnABot is continuously putting file version into the S3 bucket (PR #26)
+
+
 ## [0.1.3] - 2024-05-22
 ### Fixed
 - #6 - Fixed multi languageID segment overwrite issue (PR #23)
@@ -40,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.1.4]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.4
 [0.1.3]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.3
 [0.1.2]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.2
 [0.1.1]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.1
