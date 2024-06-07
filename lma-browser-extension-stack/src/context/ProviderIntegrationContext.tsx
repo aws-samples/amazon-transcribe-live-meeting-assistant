@@ -6,7 +6,7 @@ import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 
 type Call = {
-  callEvent: string, 
+  callEvent: string,
   agentId: string,
   fromNumber: string,
   toNumber: string,
@@ -19,19 +19,19 @@ const initialIntegration = {
   currentCall: {} as Call,
   isTranscribing: false,
   muted: false,
-  setMuted: (muteValue:boolean) => {},
+  setMuted: (muteValue: boolean) => { },
   paused: false,
-  setPaused: (pauseValue:boolean) => {},
-  fetchMetadata: () => {},
-  startTranscription: (userName:string, meetingTopic:string) => {},
-  stopTranscription: () => {},
+  setPaused: (pauseValue: boolean) => { },
+  fetchMetadata: () => { },
+  startTranscription: (user: any, userName: string, meetingTopic: string) => { },
+  stopTranscription: () => { },
   metadata: {
     userName: "",
     meetingTopic: ""
   },
   platform: "n/a",
   activeSpeaker: "n/a",
-  sendRecordingMessage: () => {}
+  sendRecordingMessage: () => { }
 };
 const IntegrationContext = createContext(initialIntegration);
 
@@ -47,7 +47,7 @@ function IntegrationProvider({ children }: any) {
   const [platform, setPlatform] = useState("n/a");
   const [activeSpeaker, setActiveSpeaker] = useState("n/a");
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const [shouldConnect, setShouldConnect] = useState(false); 
+  const [shouldConnect, setShouldConnect] = useState(false);
   const [muted, setMuted] = useState(false);
   const [paused, setPaused] = useState(false);
 
@@ -76,7 +76,7 @@ function IntegrationProvider({ children }: any) {
     [ReadyState.UNINSTANTIATED]: 'Uninstantiated',
   }[readyState];
 
-  const dataUrlToBytes = async (dataUrl:string, isMuted:boolean, isPaused:boolean) => {
+  const dataUrlToBytes = async (dataUrl: string, isMuted: boolean, isPaused: boolean) => {
     const res = await fetch(dataUrl);
     const dataArray = new Uint8Array(await res.arrayBuffer());
     if (isPaused) {
@@ -91,8 +91,8 @@ function IntegrationProvider({ children }: any) {
     }
     return dataArray;
   }
-  
-  const updateMetadata = useCallback((newMetadata:any) => {
+
+  const updateMetadata = useCallback((newMetadata: any) => {
     if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.zoom.us") {
       setPlatform("Zoom");
     } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.chime.aws") {
@@ -141,8 +141,8 @@ function IntegrationProvider({ children }: any) {
     return formattedDate;
   }
 
-  const startTranscription = useCallback(async (userName: string, meetingTopic: string) => {
-    if (await checkTokenExpired()) {
+  const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string) => {
+    if (await checkTokenExpired(user)) {
       login();
       return;
     }
@@ -157,9 +157,9 @@ function IntegrationProvider({ children }: any) {
       samplingRate: 8000,
       activeSpeaker: 'n/a'
     }
-    
+
     setCurrentCall(callMetadata);
-   
+
     try {
       if (chrome.runtime) {
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -188,11 +188,11 @@ function IntegrationProvider({ children }: any) {
       setPaused(false);
       sendStopMessage();
     }
-  }, [readyState,shouldConnect, isTranscribing, paused, setIsTranscribing, getWebSocket, sendMessage, setPaused, sendStopMessage, sendRecordingMessage]);
+  }, [readyState, shouldConnect, isTranscribing, paused, setIsTranscribing, getWebSocket, sendMessage, setPaused, sendStopMessage, sendRecordingMessage]);
 
   useEffect(() => {
     if (chrome.runtime) {
-      const handleRuntimeMessage = async (request:any, sender:any, sendResponse:any) => {
+      const handleRuntimeMessage = async (request: any, sender: any, sendResponse: any) => {
         if (request.action === "TranscriptionStopped") {
           stopTranscription();
         } else if (request.action === "UpdateMetadata") {
@@ -205,8 +205,7 @@ function IntegrationProvider({ children }: any) {
           setIsTranscribing(true);
           sendRecordingMessage();
         } else if (request.action === "AudioData") {
-          if (readyState === ReadyState.OPEN)
-          {
+          if (readyState === ReadyState.OPEN) {
             const audioData = await dataUrlToBytes(request.audio, muted, paused);
             sendMessage(audioData);
           }
@@ -219,7 +218,7 @@ function IntegrationProvider({ children }: any) {
           setMuted(request.mute);
         }
       };
-      chrome.runtime.onMessage.addListener(handleRuntimeMessage); 
+      chrome.runtime.onMessage.addListener(handleRuntimeMessage);
       // Clean up the listener when the component unmounts
       return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     }
@@ -237,7 +236,7 @@ function IntegrationProvider({ children }: any) {
     </IntegrationContext.Provider>
   );
 }
-export function useIntegration() { 
+export function useIntegration() {
   return useContext(IntegrationContext);
 }
 export default IntegrationProvider;
