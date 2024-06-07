@@ -3,6 +3,14 @@
 ## Introduction
 Websocket server ingests audio from the web client (web and microphone audio stream), transcribes the audio real time, and writes the transcription events to KDS. 
 
+## Local build check
+
+Test locally for syntax or lint errors that will cause CodeBuild failures during deployment if not fixed. Run these commands from the root directory of the repo:
+```
+cd lca-websocket-stack/source/app/
+npm run setup
+npm run buildcheck
+```
 
 ## Cloudformation Deployment
 
