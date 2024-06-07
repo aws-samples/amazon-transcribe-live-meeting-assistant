@@ -20,7 +20,7 @@ import {
     ContentRedactionOutput,
     LanguageCode,
     ContentRedactionType,
-    Item, 
+    Item,
     Result,
 } from '@aws-sdk/client-transcribe-streaming';
 
@@ -133,12 +133,16 @@ export const writeCallRecordingEvent = async (callMetaData: CallMetaData, record
         CallId: callMetaData.callId,
         RecordingUrl: recordingUrl
     };
-    await writeCallEvent(callRecordingEvent, server);  
+    await writeCallEvent(callRecordingEvent, server);
 };
 
 
-export const startTranscribe = async (callMetaData: CallMetaData, audioInputStream: stream.PassThrough, socketCallMap: SocketCallData, server: FastifyInstance) => {
+export const startTranscribe = async (socketCallMap: SocketCallData, server: FastifyInstance) => {
 
+    const callMetaData = socketCallMap.callMetadata;
+    const audioInputStream = socketCallMap.audioInputStream;
+
+    server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Starting transcribe:  ${JSON.stringify(callMetaData)}`);
     const transcribeInput = async function* () {
         if (isTCAEnabled) {
             const channel0: ChannelDefinition = { ChannelId: 0, ParticipantRole: ParticipantRole.CUSTOMER };
@@ -158,10 +162,14 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
             }
             yield { ConfigurationEvent: configuration_event };
         }
-        for await (const chunk of audioInputStream) {
-            yield { AudioEvent: { AudioChunk: chunk } };
+        if (audioInputStream != undefined) {
+            for await (const chunk of audioInputStream) {
+                yield { AudioEvent: { AudioChunk: chunk } };
+                // yield { AudioEvent: { AudioChunk:Uint8Array.from(new Array(2).fill([0x00, 0x00]).flat()), EndOfStream: true } };
+            }
+        } else {
+            server.log.error(`[TRANSCRIBING]: [${callMetaData.callId}] - audioInputStream undefined`);
         }
-        // yield { AudioEvent: { AudioChunk:Uint8Array.from(new Array(2).fill([0x00, 0x00]).flat()), EndOfStream: true } };
     };
 
     let tsStream;
@@ -234,7 +242,7 @@ export const startTranscribe = async (callMetaData: CallMetaData, audioInputStre
             outputTranscriptStream = response.TranscriptResultStream;
         } catch (err) {
             server.log.error(`[TRANSCRIBING]: [${callMetaData.callId}] - Error in StartStreamTranscription: ${normalizeErrorForLogging(err)}`);
-            return;            
+            return;
         }
     }
     socketCallMap.startStreamTime = new Date();
@@ -406,34 +414,34 @@ export const concatItemsIntoTranscript = (items: Item[]) => {
     return text;
 };
 
-export const splitTranscriptEventBySpeaker = (transcript:TranscriptEvent):TranscriptEvent[] => {
-    const itemsBySpeaker:{[key: string]: Item[]} = {};
+export const splitTranscriptEventBySpeaker = (transcript: TranscriptEvent): TranscriptEvent[] => {
+    const itemsBySpeaker: { [key: string]: Item[] } = {};
 
-    let initialSpeaker:string;
-    let lastSpeaker:string;
-    let firstResult:Result;
-    if(transcript.Transcript && 
+    let initialSpeaker: string;
+    let lastSpeaker: string;
+    let firstResult: Result;
+    if (transcript.Transcript &&
         transcript.Transcript.Results &&
         transcript.Transcript.Results[0] &&
-        transcript.Transcript.Results[0].Alternatives && 
+        transcript.Transcript.Results[0].Alternatives &&
         transcript.Transcript.Results[0].Alternatives[0] &&
         transcript.Transcript.Results[0].Alternatives[0].Items) {
-        
+
         firstResult = transcript.Transcript.Results[0];
         if (firstResult.IsPartial) {
             return [transcript]; // we don't split here because partials dont contain speaker information
         }
-        
+
         transcript.Transcript.Results[0].Alternatives[0].Items.forEach(item => {
             if (item.Speaker) { // this is because punctuation does not have a speaker label.
-                lastSpeaker = item.Speaker; 
+                lastSpeaker = item.Speaker;
                 if (initialSpeaker === undefined) {
                     initialSpeaker = item.Speaker;
                 }
             }
             if (lastSpeaker) {
-                if(!itemsBySpeaker[lastSpeaker]) {
-                    itemsBySpeaker[lastSpeaker] = [];  
+                if (!itemsBySpeaker[lastSpeaker]) {
+                    itemsBySpeaker[lastSpeaker] = [];
                 }
                 itemsBySpeaker[lastSpeaker].push(item);
             }
@@ -449,10 +457,10 @@ export const splitTranscriptEventBySpeaker = (transcript:TranscriptEvent):Transc
                         Transcript: concatItemsIntoTranscript(itemsBySpeaker[speaker])
                     }],
                     ChannelId: firstResult?.ChannelId,
-                    EndTime: itemsBySpeaker[speaker][itemsBySpeaker[speaker].length -1].EndTime,
+                    EndTime: itemsBySpeaker[speaker][itemsBySpeaker[speaker].length - 1].EndTime,
                     IsPartial: firstResult?.IsPartial,
                     ResultId: firstResult?.ResultId + (speaker === initialSpeaker ? '' : '-' + speaker),
-                    StartTime: itemsBySpeaker[speaker][0].StartTime  
+                    StartTime: itemsBySpeaker[speaker][0].StartTime
                 }]
             }
         };

@@ -7,8 +7,8 @@ import WebSocket from 'ws'; // type structure for the websocket object used by f
 // import stream from 'stream';
 import os from 'os';
 import path from 'path';
-import { 
-    S3Client, 
+import {
+    S3Client,
     PutObjectCommand
 } from '@aws-sdk/client-s3';
 import BlockStream from 'block-stream2';
@@ -65,10 +65,10 @@ server.register(websocket);
 
 // Setup preHandler hook to authenticate 
 server.addHook('preHandler', async (request, reply) => {
-    if (!request.url.includes('health')) { 
+    if (!request.url.includes('health')) {
         const clientIP = getClientIP(request.headers);
         server.log.debug(`[AUTH]: [${clientIP}] - Received preHandler hook for authentication. URI: <${request.url}>, Headers: ${JSON.stringify(request.headers)}`);
-    
+
         await jwtVerifier(request, reply);
     }
 });
@@ -96,7 +96,7 @@ server.get('/health/check', { logLevel: 'warn' }, (request, response) => {
     const cpuUsage = os.loadavg()[0] / os.cpus().length * 100;
     const isHealthy = cpuUsage > CPU_HEALTH_THRESHOLD ? false : true;
     const status = isHealthy ? 200 : 503;
-    
+
     const remoteIp = request.socket.remoteAddress || 'unknown';
     const item = healthCheckStats.get(remoteIp);
     if (!item) {
@@ -166,22 +166,22 @@ const onBinaryMessage = async (clientIP: string, ws: WebSocket, data: Uint8Array
 };
 
 const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Promise<void> => {
-    
+
     const callMetaData: CallMetaData = JSON.parse(data);
-    
+
     try {
         server.log.debug(`[ON TEXT MESSAGE]: [${clientIP}][${callMetaData.callId}] - Call Metadata received from client: ${data}`);
     } catch (error) {
         server.log.error(`[ON TEXT MESSAGE]: [${clientIP}][${callMetaData.callId}] - Error parsing call metadata: ${data} ${normalizeErrorForLogging(error)}`);
         callMetaData.callId = randomUUID();
     }
-    
+
     if (callMetaData.callEvent === 'START') {
         // generate random metadata if none is provided
         callMetaData.callId = callMetaData.callId || randomUUID();
         callMetaData.fromNumber = callMetaData.fromNumber || 'Customer Phone';
         callMetaData.toNumber = callMetaData.toNumber || 'System Phone';
-        
+
         // if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
         //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);
 
@@ -190,7 +190,7 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Pro
         //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`);
         // }
 
-        callMetaData.agentId = callMetaData.agentId || randomUUID();  
+        callMetaData.agentId = callMetaData.agentId || randomUUID();
 
         await writeCallStartEvent(callMetaData, server);
         const tempRecordingFilename = getTempRecordingFileName(callMetaData);
@@ -199,8 +199,9 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Pro
 
         const highWaterMarkSize = (callMetaData.samplingRate / 10) * 2 * 2;
         const audioInputStream = new BlockStream({ size: highWaterMarkSize });
-        const socketCallMap:SocketCallData = {
-            callMetadata: callMetaData,
+        const socketCallMap: SocketCallData = {
+            // copy (not reference) callMetaData into socketCallMap
+            callMetadata: Object.assign({}, callMetaData),
             audioInputStream: audioInputStream,
             writeRecordingStream: writeRecordingStream,
             recordingFileSize: recordingFileSize,
@@ -209,17 +210,28 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Pro
             ended: false
         };
         socketMap.set(ws, socketCallMap);
-        startTranscribe(callMetaData, audioInputStream, socketCallMap, server);
+        startTranscribe(socketCallMap, server);
 
     } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
         const socketData = socketMap.get(ws);
         server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Received speaker change. Active speaker = ${callMetaData.activeSpeaker}`);
 
         if (socketData && socketData.callMetadata) {
-            socketData.callMetadata.activeSpeaker = callMetaData.activeSpeaker;
+            // We already know speaker name for the microphone channel (ch_1) - represented in callMetaData.agentId. 
+            // We should only use SPEAKER_CHANGE to track who is speaking on the incoming meeting channel (ch_0)
+            // If the speaker is the same as the agentId, then we should ignore the event.
+            const mic_channel_speaker = callMetaData.agentId;
+            const activeSpeaker = callMetaData.activeSpeaker;
+            if (activeSpeaker !== mic_channel_speaker) {
+                server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - active speaker '${activeSpeaker}' assigned to meeting channel (ch_0) as name does not match mic channel (ch_1) speaker '${mic_channel_speaker}'`);
+                // set active speaker in the socketData structure being used by startTranscribe results loop.
+                socketData.callMetadata.activeSpeaker = callMetaData.activeSpeaker;
+            } else {
+                server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - active speaker '${activeSpeaker}' not assigned to meeting channel (ch_0) as name matches mic channel (ch_1) speaker '${mic_channel_speaker}'`);
+            }
         } else {
-            // this is not a valid call
-            server.log.error(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Invalid call : ${JSON.stringify(callMetaData)}`);
+            // this is not a valid call metadata
+            server.log.error(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Invalid call metadata: ${JSON.stringify(callMetaData)}`);
         }
     } else if (callMetaData.callEvent === 'END') {
         const socketData = socketMap.get(ws);
@@ -228,7 +240,7 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Pro
             return;
         }
         server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Received call end event from client, writing it to KDS:  ${JSON.stringify(callMetaData)}`);
-        
+
         if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
             server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);
 
@@ -241,7 +253,7 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Pro
 };
 
 const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
-    
+
     ws.close(code);
     const socketData = socketMap.get(ws);
     if (socketData) {
@@ -251,7 +263,7 @@ const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
 };
 
 const endCall = async (ws: WebSocket, socketData: SocketCallData, callMetaData?: CallMetaData): Promise<void> => {
-    
+
     if (callMetaData === undefined) {
         callMetaData = socketData.callMetadata;
     }
@@ -276,15 +288,15 @@ const endCall = async (ws: WebSocket, socketData: SocketCallData, callMetaData?:
                         writeStream.write(chunk);
                     }
                     writeStream.end();
-        
+
                     await writeToS3(callMetaData, tempRecordingFilename);
                     await writeToS3(callMetaData, wavRecordingFilename);
                     await deleteTempFile(callMetaData, path.join(LOCAL_TEMP_DIR, tempRecordingFilename));
                     await deleteTempFile(callMetaData, path.join(LOCAL_TEMP_DIR, wavRecordingFilename));
-        
+
                     const url = new URL(RECORDING_FILE_PREFIX + wavRecordingFilename, `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com`);
                     const recordingUrl = url.href;
-                
+
                     await writeCallRecordingEvent(callMetaData, recordingUrl, server);
                 } else {
                     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Audio Recording disabled. Add s3 url event is not written to KDS. : ${JSON.stringify(callMetaData)}`);
@@ -292,7 +304,7 @@ const endCall = async (ws: WebSocket, socketData: SocketCallData, callMetaData?:
                 }
 
             }
-        
+
             if (socketData.audioInputStream) {
                 server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Closing audio input stream:  ${JSON.stringify(callMetaData)}`);
                 socketData.audioInputStream.end();
@@ -346,7 +358,7 @@ const getWavRecordingFileName = (callMetaData: CallMetaData): string => {
     return `${posixifyFilename(callMetaData.callId)}.wav`;
 };
 
-const deleteTempFile = async(callMetaData:CallMetaData, sourceFile:string) => {
+const deleteTempFile = async (callMetaData: CallMetaData, sourceFile: string) => {
     try {
         await fs.promises.unlink(sourceFile);
         server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Deleted tmp file ${sourceFile}`);
@@ -357,7 +369,7 @@ const deleteTempFile = async(callMetaData:CallMetaData, sourceFile:string) => {
 
 // Start the websocket server on default port 3000 if no port supplied in environment variables
 server.listen(
-    { 
+    {
         port: parseInt(process.env?.['SERVERPORT'] ?? '8080'),
         host: process.env?.['SERVERHOST'] ?? '127.0.0.1'
     },
