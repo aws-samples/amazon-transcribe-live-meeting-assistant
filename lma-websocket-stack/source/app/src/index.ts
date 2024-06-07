@@ -256,7 +256,7 @@ const endCall = async (ws: WebSocket, socketData: SocketCallData, callMetaData?:
             if (socketData.writeRecordingStream && socketData.recordingFileSize) {
                 socketData.writeRecordingStream.end();
 
-                if (callMetaData.shouldRecordCall) {
+                if (socketData.callMetadata.shouldRecordCall) {
                     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Audio Recording enabled. Writing to S3.: ${JSON.stringify(callMetaData)}`);
                     const header = createWavHeader(callMetaData.samplingRate, socketData.recordingFileSize);
                     const tempRecordingFilename = getTempRecordingFileName(callMetaData);
