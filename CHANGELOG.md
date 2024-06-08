@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.4] - 2024-06-07
+## [0.1.4] - 2024-06-08
 ### Added
 - Improve the user experience by merging consecutive segments and render them in single line - see PR #28
 - Stream Audio tab UX improvements (PR #30)
