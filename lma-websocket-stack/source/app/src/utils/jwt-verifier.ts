@@ -1,6 +1,9 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import dotenv from 'dotenv';
+import { normalizeErrorForLogging } from './common';
+import { getClientIP } from './headers';
+
 dotenv.config();
 
 const USERPOOL_ID = process.env['USERPOOL_ID'] || '';
@@ -20,15 +23,18 @@ export const jwtVerifier = async (request: FastifyRequest, reply: FastifyReply) 
     const query = request.query as queryobj;
     const headers = request.headers as headersobj;
     const auth = query.authorization || headers.authorization;
+    const clientIP = getClientIP(headers);
 
     if (!auth) {
-        request.log.error('No authorization query string or header found');
+        request.log.error(`[AUTH]: [${clientIP}] - No authorization query string or header found. URI: <${request.url}>, Headers: ${JSON.stringify(request.headers)}`);
+
         return reply.status(401).send();
     }
 
     const match = auth?.match(/^Bearer (.+)$/);
     if (!match) {
-        request.log.error('No Bearer token found in header or query string');
+        request.log.error(`[AUTH]: [${clientIP}] - No Bearer token found in header or query string. URI: <${request.url}>, Headers: ${JSON.stringify(request.headers)}`);
+
         return reply.status(401).send();
     }
 
@@ -36,16 +42,16 @@ export const jwtVerifier = async (request: FastifyRequest, reply: FastifyReply) 
     try {
         const payload = await cognitoJwtVerifier.verify(accessToken, { clientId: null, tokenUse: 'access' });      
         if (!payload) {
-            request.log.error('Connection not authorized. Returning 401');
+            request.log.error(`[AUTH]: [${clientIP}] - Connection not authorized. Returning 401. URI: <${request.url}>, Headers: ${JSON.stringify(request.headers)}`);
+
             return reply.status(401).send();
         }
-        request.log.info(`Connection request authorized at ${payload.auth_time}`);
+        request.log.info(`[AUTH]: [${clientIP}] - Connection request authorized. URI: <${request.url}>, Headers: ${JSON.stringify(request.headers)}`);
+
         return;
     } catch (err) {
-        request.log.error(`Error Authorizing client connection ${err}`);
+        request.log.error(`[AUTH]: [${clientIP}] - Error Authorizing client connection. ${normalizeErrorForLogging(err)} URI: <${request.url}>, Headers: ${JSON.stringify(request.headers)}`);
+
         return reply.status(401).send();
     }
 };
-
-
-

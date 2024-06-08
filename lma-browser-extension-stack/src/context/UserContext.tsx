@@ -10,11 +10,11 @@ type User = {
 
 const initialUserContext = {
   user: {} as User,
-  login: () => {},
+  login: () => { },
   logout: () => { },
   exchangeCodeForToken: async (codeOrToken: string, grantType: string) => { return true; },
   loggedIn: false,
-  checkTokenExpired: async () => { return true; }
+  checkTokenExpired: async (user: User) => { return true; }
 };
 const UserContext = createContext(initialUserContext);
 
@@ -34,26 +34,33 @@ function UserProvider({ children }: any) {
     return true;
   }
 
-  const checkTokenExpired = useCallback(async () => {
-    if (user.access_token) {
-      const isExpired = isTokenExpired(user.access_token);
-      if (isExpired) {
-        // try to refresh it
-        if (user && user.refresh_token) {
-          return await exchangeCodeForToken(user.refresh_token, 'refresh_token');
-        }
-      }
+  const checkTokenExpired = async (user: User) => {
+    if (!(user && user.access_token)) {
+      console.log("checkTokenExpired: no user token set")
       return true;
     }
-    return false
-  }, [user]);
+    const isExpired = isTokenExpired(user.access_token);
+    if (!isExpired) {
+      console.log("checkTokenExpired: token not expired")
+      return false;
+    }
+    if (user.refresh_token) {
+      console.log("checkTokenExpired: refreshing expired token");
+      const refreshed = await exchangeCodeForToken(user.refresh_token, 'refresh_token');
+      if (refreshed) {
+        return false;
+      }
+    }
+    console.log("checkTokenExpired: unable to refresh expired token");
+    return true;
+  };
 
   // Load user
   useEffect(() => {
     if (chrome.storage) {
       chrome.storage.local.get('authTokens', (result) => {
         if (result.authTokens && result.authTokens.access_token) {
-          const isExpired = isTokenExpired(result.authTokens.access_token);          
+          const isExpired = isTokenExpired(result.authTokens.access_token);
           if (isExpired) {
             chrome.storage.local.remove('authTokens');
             setUser({});
@@ -82,10 +89,10 @@ function UserProvider({ children }: any) {
         logout();
       }
     }
-    
+
   }, []);
 
-  const exchangeCodeForToken = useCallback(async (codeOrToken: string, grantType:string) => {
+  const exchangeCodeForToken = useCallback(async (codeOrToken: string, grantType: string) => {
     const tokenEndpoint = `${settings.cognitoDomain}/oauth2/token`
     const params = new URLSearchParams();
 
@@ -97,8 +104,8 @@ function UserProvider({ children }: any) {
       params.append('redirect_uri', `https://${chrome.runtime.id}.chromiumapp.org/`);
     } else {
       params.append('redirect_uri', `http://localhost:3000/`);
-    }    
-  
+    }
+
     try {
       const response = await fetch(tokenEndpoint, {
         method: 'POST',
@@ -106,7 +113,7 @@ function UserProvider({ children }: any) {
           'Content-Type': 'application/x-www-form-urlencoded'
         }, body: params
       });
-  
+
       if (!response.ok) {
         throw new Error(`HTTP ERROR! status: ${response.status}`);
       }
@@ -162,7 +169,7 @@ function UserProvider({ children }: any) {
     </UserContext.Provider>
   );
 }
-export function useUserContext() { 
+export function useUserContext() {
   return useContext(UserContext);
 }
 export default UserProvider;
