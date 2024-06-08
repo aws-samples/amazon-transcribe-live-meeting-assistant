@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Added timestamp to meeting name to ensure id is unique
     - Updated READMEs with new field names and functionality
 - Enable/disable call recording - useful if you don't want any audio recordings saved (PR #31)
-- Enable configurable retention period for turn by turn tramscription - useful if you want to keep the meeting summary, but not the line by line transcription (PR #31)
+- Enable configurable retention period for turn by turn transcription - useful if you want to keep the meeting summary, but not the line by line transcription (PR #31)
 - Enable configurable retention for CloudWatch logs (PR #31)
 ### Fixed
 - #33 - Fix/active speaker assignment not for mic channel (PR #34)
