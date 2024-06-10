@@ -7,7 +7,6 @@ import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 
 type Call = {
   callEvent: string,
-  callEvent: string,
   agentId: string,
   fromNumber: string,
   toNumber: string,
