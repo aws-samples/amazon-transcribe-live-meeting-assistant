@@ -1,11 +1,12 @@
 /* eslint-disable @typescript-eslint/no-empty-function */
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, startTransition, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { useSettings } from './SettingsContext';
 import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
 
 type Call = {
+  callEvent: string,
   callEvent: string,
   agentId: string,
   fromNumber: string,
@@ -23,7 +24,7 @@ const initialIntegration = {
   paused: false,
   setPaused: (pauseValue: boolean) => { },
   fetchMetadata: () => { },
-  startTranscription: (userName: string, meetingTopic: string) => { },
+  startTranscription: (user: any, userName: string, meetingTopic: string) => { },
   stopTranscription: () => { },
   metadata: {
     userName: "",
@@ -93,14 +94,12 @@ function IntegrationProvider({ children }: any) {
   }
 
   const updateMetadata = useCallback((newMetadata: any) => {
-    if (newMetadata && newMetadata.baseUrl) {
-      if (newMetadata.baseUrl === "https://app.zoom.us") {
-        setPlatform("Zoom");
-      } else if (newMetadata.baseUrl === "https://app.chime.aws") {
-        setPlatform("Amazon Chime");
-      } else if (newMetadata.baseUrl === "https://teams.microsoft.com" || newMetadata.baseUrl === "https://teams.live.com") {
+    if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.zoom.us") {
+      setPlatform("Zoom");
+    } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.chime.aws") {
+      setPlatform("Amazon Chime");
+    } else if (newMetadata.baseUrl === "https://teams.microsoft.com" || newMetadata.baseUrl === "https://teams.live.com") {
         setPlatform("Microsoft Teams");
-      }
     }
     setMetadata(newMetadata);
   }, [metadata, setMetadata, platform, setPlatform]);
@@ -144,8 +143,8 @@ function IntegrationProvider({ children }: any) {
     return formattedDate;
   }
 
-  const startTranscription = useCallback(async (userName: string, meetingTopic: string) => {
-    if (await checkTokenExpired()) {
+  const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string) => {
+    if (await checkTokenExpired(user)) {
       login();
       return;
     }
@@ -172,7 +171,7 @@ function IntegrationProvider({ children }: any) {
         }
       }
     } catch (exception) {
-      alert("If you recently installed or updated LMA, please refresh the browser's page and try again.");
+      alert("If you recently installed or update LMA, please refresh the browser's page and try again.");
     }
   }, [setShouldConnect, setCurrentCall]);
 
@@ -239,9 +238,7 @@ function IntegrationProvider({ children }: any) {
     </IntegrationContext.Provider>
   );
 }
-
 export function useIntegration() {
   return useContext(IntegrationContext);
 }
-
 export default IntegrationProvider;

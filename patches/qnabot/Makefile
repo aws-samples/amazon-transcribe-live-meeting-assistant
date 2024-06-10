@@ -1,13 +1,13 @@
-TEMPLATES=$(shell for l in $$(ls ./templates | egrep -v "util|lib|dev|README.md");do echo templates/$$l;done)
+TEMPLATES=$(shell for l in $$(ls ./templates | egrep -v "util|lib|README.md|jest.config.js|package.json|package-lock.json|node_modules|coverage|__tests__|.pytest_cache|.venv-test|pytest.ini|requirements.txt|requirements-test.txt");do echo templates/$$l;done)
 
-All: ml_model assets templates lambda website make_directories
+All: assets templates lambda website make_directories
 
 build: All
 
 make_directories:
-	mkdir -p build/ml_model build/lambda build/documents build/templates/test  build/templates/dev
+	mkdir -p build/lambda build/documents build/templates/test  build/templates/dev
 
-.PHONY: ml_model lambda templates upload website test bootstrap assets config.aws-solutions.json
+.PHONY: lambda templates upload website test bootstrap assets config.aws-solutions.json
 .PHONY: $(TEMPLATES)
 
 config.json:
@@ -15,9 +15,6 @@ config.json:
 
 config.aws-solutions.json:
 	node bin/config.js buildType=AWSSolutions > config.json
-
-ml_model:  make_directories
-	make -C ./ml_model
 
 lambda:  make_directories
 	make -C ./lambda
@@ -39,7 +36,7 @@ assets: make_directories
 samples:docs/blog-samples.json make_directories
 	cp docs/blog-samples.json build/documents
 
-upload: ml_model templates lambda website make_directories assets
+upload: templates lambda website make_directories assets
 	./bin/upload.sh
 
 test: make_directories

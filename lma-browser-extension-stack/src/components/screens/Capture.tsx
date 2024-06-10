@@ -13,9 +13,9 @@ import { useSettings } from '../../context/SettingsContext';
 
 function Capture() {
   const { navigate } = useNavigation();
-  const { logout } = useUserContext();
+  const { user, logout } = useUserContext();
   const settings = useSettings();
-  const { currentCall, muted, setMuted, paused,setPaused, activeSpeaker, metadata,fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
+  const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
 
   const [topic, setTopic] = React.useState("");
   const [agentName, setAgentName] = React.useState("");
@@ -55,7 +55,7 @@ function Capture() {
       setMeetingTopicErrorText("");
     }
     return isValid;
-  }, [topic, agentName, nameErrorText, setNameErrorText, meetingTopicErrorText, setMeetingTopicErrorText ]);
+  }, [topic, agentName, nameErrorText, setNameErrorText, meetingTopicErrorText, setMeetingTopicErrorText]);
 
   const startListening = useCallback(() => {
     // eslint-disable-next-line no-useless-escape
@@ -65,11 +65,11 @@ function Capture() {
       return;
     }
     setShowDisclaimer(true);
-  }, [ settings, validateForm, showDisclaimer]);
+  }, [settings, validateForm, showDisclaimer]);
 
   const disclaimerConfirmed = useCallback(() => {
-    startTranscription(agentName, topic);
-  }, [agentName, topic, startTranscription])
+    startTranscription(user, agentName, topic);
+  }, [user, agentName, topic, startTranscription])
 
   const stopListening = useCallback(() => {
     stopTranscription();
@@ -88,7 +88,7 @@ function Capture() {
     setMuted(false);
   }, [muted, setMuted]);
 
-  const [ version, setVersion ] = React.useState("");
+  const [version, setVersion] = React.useState("");
   useEffect(() => {
     if (chrome && chrome.runtime) {
       const manifestData = chrome.runtime.getManifest();
@@ -119,27 +119,27 @@ function Capture() {
           </Header>
         }
       >
-    <Modal
-      onDismiss={() => setShowDisclaimer(false)}
-      visible={showDisclaimer}
-      footer={
-        <Box float="right">
-          <SpaceBetween direction="horizontal" size="xs">
-            <Button variant="link" onClick={async () => {
-              setShowDisclaimer(false);
-            }}>Cancel</Button>
-            <Button variant="primary" onClick={async () => {
-              setShowDisclaimer(false);
-              disclaimerConfirmed();
-            }}>Agree</Button>
-          </SpaceBetween>
-        </Box>
-      }
-      header="Important:"
+        <Modal
+          onDismiss={() => setShowDisclaimer(false)}
+          visible={showDisclaimer}
+          footer={
+            <Box float="right">
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button variant="link" onClick={async () => {
+                  setShowDisclaimer(false);
+                }}>Cancel</Button>
+                <Button variant="primary" onClick={async () => {
+                  setShowDisclaimer(false);
+                  disclaimerConfirmed();
+                }}>Agree</Button>
+              </SpaceBetween>
+            </Box>
+          }
+          header="Important:"
         >
-        <Icon name="status-warning"></Icon>&nbsp;
-        {settings.recordingDisclaimer}
-    </Modal>
+          <Icon name="status-warning"></Icon>&nbsp;
+          {settings.recordingDisclaimer}
+        </Modal>
         <SpaceBetween size="l">
           <ValueWithLabel label="Platform Detected:">{platform}</ValueWithLabel>
           {(isTranscribing === true ?
@@ -155,37 +155,37 @@ function Capture() {
                   </>
                   :
                   <>
-                  <Button fullWidth={true} iconName="microphone" onClick={() => setPaused(true)}>Mute All</Button>
+                    <Button fullWidth={true} iconName="microphone" onClick={() => setPaused(true)}>Mute All</Button>
                   </>
               }
-              <Button fullWidth={true} variant='primary'  onClick={() => stopListening()}>Stop Listening</Button>
+              <Button fullWidth={true} variant='primary' onClick={() => stopListening()}>Stop Listening</Button>
             </>
             :
             <>
               <FormField
-                  stretch={true}
-                  constraintText=""
-                  errorText={nameErrorText}
-                  label="Your name:"
-                >
+                stretch={true}
+                constraintText=""
+                errorText={nameErrorText}
+                label="Your name:"
+              >
                 <Input value={agentName} onChange={({ detail }) => setAgentName(detail.value)} placeholder='Your name' ></Input>
               </FormField>
               <FormField
-                  stretch={true}
-                  constraintText=""
-                  errorText={meetingTopicErrorText}
-                  label="Meeting Topic:"
-                >
+                stretch={true}
+                constraintText=""
+                errorText={meetingTopicErrorText}
+                label="Meeting Topic:"
+              >
                 <Input value={topic} onChange={({ detail }) => setTopic(detail.value)} placeholder='Meeting room topic' inputMode='text'></Input>
               </FormField>
               <Button fullWidth={true} variant='primary' onClick={() => startListening()}>Start Listening</Button>
             </>
           )}
-          <Grid gridDefinition={[{ colspan: 6 }, { colspan:6}]}>
-            {muted === true ? 
-              <Button  iconAlign="left" iconName="microphone-off" fullWidth={true} onClick={() => unmute()}>Unmute Me</Button>
-              : 
-              <Button  iconAlign="left" iconName="microphone" fullWidth={true} onClick={() => mute()}>Mute Me</Button>
+          <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+            {muted === true ?
+              <Button iconAlign="left" iconName="microphone-off" fullWidth={true} onClick={() => unmute()}>Unmute Me</Button>
+              :
+              <Button iconAlign="left" iconName="microphone" fullWidth={true} onClick={() => mute()}>Mute Me</Button>
             }
             <Button fullWidth={true} onClick={() => logout()}>Log out</Button>
           </Grid>
