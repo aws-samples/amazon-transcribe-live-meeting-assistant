@@ -98,7 +98,7 @@ function IntegrationProvider({ children }: any) {
         setPlatform("Zoom");
       } else if (newMetadata.baseUrl === "https://app.chime.aws") {
         setPlatform("Amazon Chime");
-      } else if (newMetadata.baseUrl === "https://teams.microsoft.com") {
+      } else if (newMetadata.baseUrl === "https://teams.microsoft.com" || newMetadata.baseUrl === "https://teams.live.com") {
         setPlatform("Microsoft Teams");
       }
     }
