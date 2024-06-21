@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Stack deployment now fails fast if required Bedrock models are not available or enabled in the account/region
+
+
 ## [0.1.4] - 2024-06-08
 ### Added
 - Improve the user experience by merging consecutive segments and render them in single line - see PR #28
