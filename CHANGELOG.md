@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Fixed
 - Stack deployment now fails fast if required Bedrock models are not available or enabled in the account/region
 
 
