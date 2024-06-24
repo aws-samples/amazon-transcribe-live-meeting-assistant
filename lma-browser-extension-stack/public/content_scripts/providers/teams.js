@@ -5,24 +5,60 @@ let metadata = {
 }
 
 const openChatPanel = function () {
-  const chatPanelButtons = document.querySelectorAll('[aria-label*="Open chat"]');
-  if (chatPanelButtons.length > 0) {
-    chatPanelButtons[0].click(); // open the chat panel
+  const chatPanelButton = document.getElementById('chat-button');
+  // click chatPanelButton if found
+  if (chatPanelButton) {
+    chatPanelButton.click();
   }
 }
 
 const sendChatMessage = function (message) {
-  const chatInput = document.querySelector('[aria-label="Type a new message"]');
-  if (chatInput) {
-    chatInput.value = message;
-    const inputEvent = new Event('input', { bubbles: true });
-    chatInput.dispatchEvent(inputEvent);
-    const sendButton = chatInput.closest('div').querySelector('[aria-label="Send"]');
-    if (sendButton) {
-      sendButton.click();
+  const findChatInputAndSend = function () {
+    try {
+      const chatInputDiv = document.querySelector('div[id^="new-message-"]');
+      if (chatInputDiv) {
+        // Focus and click the div (optional, if needed)
+        chatInputDiv.focus();
+        chatInputDiv.click();
+
+        // Remove any existing content inside the div
+        while (chatInputDiv.firstChild) {
+          chatInputDiv.removeChild(chatInputDiv.firstChild);
+        }
+
+        // Create a new <p> element with the provided message
+        const newParagraph = document.createElement('p');
+        newParagraph.setAttribute('data-placeholder', 'Type a message');
+        newParagraph.textContent = message;
+
+        // Add the new <p> element to the chatInputDiv
+        chatInputDiv.appendChild(newParagraph);
+
+        // Click the send button immediately after appending the new paragraph
+        const sendButton = document.querySelector('button[data-tid="newMessageCommands-send"]');
+        if (sendButton) {
+          sendButton.click();
+          console.log('Send button found and clicked');
+        } else {
+          console.error('Send button not found or disabled');
+        }
+      } else {
+        console.error('Chat input not found, retrying in 1 second...');
+        setTimeout(findChatInputAndSend, 1000); // Retry after 1 second
+      }
+    } catch (error) {
+      console.error('Error in findChatInputAndSend:', error);
+      setTimeout(findChatInputAndSend, 1000); // Retry after 1 second if there's an error
     }
+  };
+
+  try {
+    findChatInputAndSend();
+  } catch (error) {
+    console.error('Error in sendChatMessage:', error);
+    setTimeout(() => sendChatMessage(message), 1000); // Retry after 1 second if there's an error
   }
-}
+};
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.action === "FetchMetadata") {
@@ -31,7 +67,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.action === "SendChatMessage") {
     console.log("received request to send a chat message");
     console.log("message:", request.message);
-    let chatInput = document.querySelector('[aria-label="Type a new message"]');
+    let chatInput = document.querySelector('p[data-placeholder="Type a message"]');
     if (!chatInput) {
       openChatPanel();
     }
@@ -68,7 +104,6 @@ const checkForMeetingMetadata = function () {
       }
     }
 
-
     const showMoreButton = document.getElementById('callingButtons-showMoreBtn');
     if (showMoreButton) {
       showMoreButton.click();
@@ -96,68 +131,80 @@ const checkForMeetingMetadata = function () {
   }, 2000); // Check every 2000 milliseconds (2 seconds)
 }
 
-// function checkValues(oldValue, newValue) {
-
-//   if (cleanNewValue === oldValue) {
-//       // If they match, return the part of the oldValue before the first comma
-//       return oldValue.split(',')[0].trim();
-//   } else {
-//       // Optional: Return some indication of no match or other action
-//       return "Values do not match";
-//   }
-// }
-
 // Function to start the MutationObserver
 const startObserver = () => {
   // Select the node that will be observed for mutations
   const targetNodes = document.querySelectorAll('div[data-tid="participant-speaker-ring"]');
+  
+  // Options for the observer (which mutations to observe)
+  const config = { attributes: true, attributeOldValue: true, childList: true, subtree: true };
 
-  if (targetNodes.length) {
-    // Options for the observer (which mutations to observe)
-    const config = { attributes: true, attributeOldValue: true };
-
-    // Callback function to execute when mutations are observed
-    const callback = (mutationsList, observer) => {
-      //get 'participant-speaker-ring' mute class - to do
-      for (let mutation of mutationsList) {
-        console.log(mutation);
-        if (mutation.type === 'attributes') {
-          console.log(`Attribute mutation detected: ${mutation.attributeName}`);
-          const oldValue = mutation.oldValue;
-          const newValue = mutation.target.getAttribute(mutation.attributeName);
-          console.log(`Old value: ${oldValue}`);
-          console.log(`New value: ${newValue}`);
-          // const activeSpeaker = checkValues(oldValue, newValue);
-          if (oldValue.startsWith("fui-Primitive ___19upu4n") && newValue.startsWith("fui-Primitive ___s78zj80")) {
-            console.log("Active Speaker participant-speaker-ring");
-            let parentElement = mutation.target.parentElement.parentElement;
-            if (parentElement && parentElement.hasAttribute('aria-label')) {
-              const ariaLabel = parentElement.getAttribute('aria-label');
-              console.log(`Found aria-label: ${ariaLabel}`);
-              // 1. Check if the ariaLabel does not contain the string 'muted'
-              if (ariaLabel.includes('muted')) {
-                console.log('The ariaLabel contain the word "muted".');
-              } else {
-                // 2. Since the ariaLabel does not contains 'muted', we proceed to get the string before the first comma
-                const activeSpeaker = ariaLabel.split(',')[0]; // Split the string by comma and take the first element
-                console.log(`Active Speaker Change: ${activeSpeaker}`);
-                chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: activeSpeaker });
-              }
+  // Callback function to execute when mutations are observed
+  const callback = (mutationsList, observer) => {
+    mutationsList.forEach((mutation) => {
+      console.log(mutation);
+      if (mutation.type === 'attributes') {
+        console.log(`Attribute mutation detected: ${mutation.attributeName}`);
+        const oldValue = mutation.oldValue;
+        const newValue = mutation.target.getAttribute(mutation.attributeName);
+        // console.log(`Old value: ${oldValue}`);
+        // console.log(`New value: ${newValue}`);
+        if (oldValue.startsWith("fui-Primitive ___s78zj80") && newValue.startsWith("fui-Primitive ___19upu4n")) {
+          // console.log("Active Speaker participant-speaker-ring activated");
+          let parentElement = mutation.target.parentElement.parentElement;
+          if (parentElement && parentElement.hasAttribute('aria-label')) {
+            const ariaLabel = parentElement.getAttribute('aria-label');
+            // console.log(`Found aria-label: ${ariaLabel}`);
+            if (ariaLabel.includes('muted')) {
+              // console.log('The ariaLabel contains the word "muted".');
             } else {
-              console.log('No aria-label found at expected parent level.');
+              const activeSpeaker = ariaLabel.split(',')[0];
+              console.log(`Active Speaker Change: ${activeSpeaker}`);
+              chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: activeSpeaker });
+            }
+          } else {
+            console.log('No aria-label found at expected parent level.');
+          }
+        }
+        else if(oldValue.startsWith("fui-Primitive ___19upu4n") && newValue.startsWith("fui-Primitive ___s78zj80")){
+          console.log("Active Speaker participant-speaker-ring stopped");
+          let parentElement = mutation.target.parentElement.parentElement;
+          if (parentElement && parentElement.hasAttribute('aria-label')) {
+            const ariaLabel = parentElement.getAttribute('aria-label');
+            console.log(`Found aria-label: ${ariaLabel}`);
+            if (ariaLabel.includes('muted')) {
+              console.log('The ariaLabel contains the word "muted".');
+              chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: " " });
+            } else {
+              console.log(`Active Speaker Change to empty`);
             }
           }
-
-        } else if (mutation.type === 'childList') {
-          console.log(`Child list mutation detected. Added nodes: ${mutation.addedNodes.length}, Removed nodes: ${mutation.removedNodes.length}`);
         }
+      } else if (mutation.type === 'childList') {
+        console.log(`Child list mutation detected. Added nodes: ${mutation.addedNodes.length}, Removed nodes: ${mutation.removedNodes.length}`);
+        mutation.addedNodes.forEach(node => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            console.log(`Added node: ${node.outerHTML}`);
+          }
+        });
+        mutation.removedNodes.forEach(node => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            console.log(`Removed node: ${node.outerHTML}`);
+          }
+        });
+        // Disconnect and reconnect the observer to handle new target nodes
+        observer.disconnect();
+        startObserver();
+        return; // Exit the callback to avoid further processing until reconnected
       }
-    };
+    });
+  };
 
-    // Create an observer instance linked to the callback function
-    const activeSpeakerObserver = new MutationObserver(callback);
+  // Create an observer instance linked to the callback function
+  const activeSpeakerObserver = new MutationObserver(callback);
 
-    // Start observing the target node for configured mutations
+  // Start observing the target nodes for configured mutations
+  if (targetNodes.length > 0) {
     targetNodes.forEach(node => {
       activeSpeakerObserver.observe(node, config);
     });
@@ -168,16 +215,17 @@ const startObserver = () => {
   }
 };
 
+
 window.onload = function () {
 
   const muteObserver = new MutationObserver((mutationList) => {
     mutationList.forEach((mutation) => {
-      if (mutation.type === 'attributes' && mutation.attributeName === 'title') {
+      if (mutation.type === 'attributes' && mutation.attributeName === 'aria-label') {
         const muteButton = mutation.target;
-        if (muteButton.getAttribute('title').includes('Unmute')) {
+        if (muteButton.getAttribute('aria-label').includes('Unmute')) {
           chrome.runtime.sendMessage({ action: "MuteChange", mute: true });
           console.log("Mute detected");
-        } else if (muteButton.getAttribute('title').includes('Mute')) {
+        } else if (muteButton.getAttribute('aria-label').includes('Mute')) {
           chrome.runtime.sendMessage({ action: "MuteChange", mute: false });
           console.log("Unmute detected");
         }
@@ -186,7 +234,7 @@ window.onload = function () {
   });
 
   const muteInterval = setInterval(() => {
-    const muteButton = document.querySelector('[aria-label*="Mute"]');
+    const muteButton = document.querySelector('[aria-label*="Mute"], [aria-label*="Unmute"]');
     if (muteButton) {
       muteObserver.observe(muteButton, { attributes: true });
       clearInterval(muteInterval);
