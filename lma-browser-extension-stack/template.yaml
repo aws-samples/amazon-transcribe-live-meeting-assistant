@@ -1,17 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License").
-# You may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
----
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Amazon Transcribe Live Meeting Assist - Browser extension
 
@@ -26,19 +12,24 @@ Parameters:
     Type: String
     Description: Disclaimer used for the extension message popup
     Default: >
-      Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.
+      Important: You are responsible for complying with legal, corporate, and ethical
+      restrictions that apply to recording meetings and calls. Do not use this solution
+      to stream, record, or transcribe calls if otherwise prohibited.
 
   RecordingMessage:
     Type: String
-    Description: Message used for the extension to notify speakers this meeting is being recorded.
+    Description: Message used for the extension to notify speakers this meeting is
+      being transcribed.
     Default: >
-      This meeting is being recorded with Amazon Live Meeting Assistant - see https://amazon.com/live-meeting-assistant. 
+      This meeting is being transcribed with Amazon Live Meeting Assistant - see https://amazon.com/live-meeting-assistant.
+      
 
   StopRecordingMessage:
     Type: String
-    Description: Message used for the extension to notify speakers this meeting has stopped being recorded.
+    Description: Message used for the extension to notify speakers this meeting has
+      stopped being transcribed.
     Default: >
-      Amazon Live Meeting Assistant recording stopped.
+      Amazon Live Meeting Assistant transcription stopped.
 
   WebSocketEndpoint:
     Type: String
@@ -68,6 +59,10 @@ Parameters:
     Type: String
     Description: S3 location of the browser extension source code zipfile
 
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs.
 Resources:
 
   BrowserExtensionCodeBuildServiceRole:
@@ -77,41 +72,39 @@ Resources:
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
-          - Action: sts:AssumeRole
-            Effect: Allow
-            Principal:
-              Service: codebuild.amazonaws.com
+        - Action: sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
       Policies:
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Resource:
-                  - !Sub "arn:aws:s3:::${SourceCodeLocation}"
-                Effect: Allow
-                Action:
-                  - s3:GetObject
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource:
-                  - !Sub "arn:aws:s3:::${WebAppBucket}/*"
-              - Resource:
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:\
-                    /aws/codebuild/*:*"
-                Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-              - Effect: Allow
-                Action:
-                  - cloudfront:CreateInvalidation
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:\
-                    distribution/${WebAppCloudFrontDistribution}"
+      - PolicyName: S3Access
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Resource:
+            - !Sub "arn:aws:s3:::${SourceCodeLocation}"
+            Effect: Allow
+            Action:
+            - s3:GetObject
+          - Effect: Allow
+            Action:
+            - s3:PutObject
+            - s3:DeleteObject
+            Resource:
+            - !Sub "arn:aws:s3:::${WebAppBucket}/*"
+          - Resource:
+            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*"
+            Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          - Effect: Allow
+            Action:
+            - cloudfront:CreateInvalidation
+            Resource:
+            - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebAppCloudFrontDistribution}"
 
   BrowserExtensionCodeBuildProject:
     Type: AWS::CodeBuild::Project
@@ -127,29 +120,28 @@ Resources:
         Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
         Type: LINUX_CONTAINER
         EnvironmentVariables:
-          - Name: SOURCE_CODE_LOCATION
-            Value: !Sub "${SourceCodeLocation}"
-          - Name: WEBSOCKET_ENDPOINT
-            Value: !Ref WebSocketEndpoint
-          - Name: COGNITO_CLIENT_ID
-            Value: !Ref CognitoClientId
-          - Name: COGNITO_LOGIN_URL 
-            Value: !Ref CognitoLoginUrl
-          - Name: CLOUDFRONT_ENDPOINT
-            Value: !Ref CloudfrontEndpoint
-          - Name: CLOUDFRONT_DISTRIBUTION_ID
-            Value: !Ref WebAppCloudFrontDistribution
-          - Name: WEBAPP_BUCKET
-            Value: !Ref WebAppBucket
-          - Name: RECORDING_DISCLAIMER
-            Value: !Ref RecordingDisclaimer
-          - Name: RECORDING_MESSAGE
-            Value: !Ref RecordingMessage
-          - Name: STOP_RECORDING_MESSAGE
-            Value: !Ref StopRecordingMessage
+        - Name: SOURCE_CODE_LOCATION
+          Value: !Sub "${SourceCodeLocation}"
+        - Name: WEBSOCKET_ENDPOINT
+          Value: !Ref WebSocketEndpoint
+        - Name: COGNITO_CLIENT_ID
+          Value: !Ref CognitoClientId
+        - Name: COGNITO_LOGIN_URL
+          Value: !Ref CognitoLoginUrl
+        - Name: CLOUDFRONT_ENDPOINT
+          Value: !Ref CloudfrontEndpoint
+        - Name: CLOUDFRONT_DISTRIBUTION_ID
+          Value: !Ref WebAppCloudFrontDistribution
+        - Name: WEBAPP_BUCKET
+          Value: !Ref WebAppBucket
+        - Name: RECORDING_DISCLAIMER
+          Value: !Ref RecordingDisclaimer
+        - Name: RECORDING_MESSAGE
+          Value: !Ref RecordingMessage
+        - Name: STOP_RECORDING_MESSAGE
+          Value: !Ref StopRecordingMessage
       Source:
-        Location:
-          !Sub "arn:aws:s3:::${SourceCodeLocation}"
+        Location: !Sub "arn:aws:s3:::${SourceCodeLocation}"
         Type: S3
         BuildSpec: |
           version: 0.2
@@ -197,31 +189,30 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
       Path: "/"
       Policies:
-        - PolicyName: root
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - codebuild:StartBuild
-                  - codebuild:BatchGetBuilds
-                Resource: !GetAtt BrowserExtensionCodeBuildProject.Arn
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:\
-                    /aws/lambda/*"
+      - PolicyName: root
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: Allow
+            Action:
+            - codebuild:StartBuild
+            - codebuild:BatchGetBuilds
+            Resource: !GetAtt BrowserExtensionCodeBuildProject.Arn
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
 
   CodeBuildTriggerFunction:
     Type: AWS::Lambda::Function
@@ -260,7 +251,20 @@ Resources:
                   cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
               except Exception as e:
                   cfnresponse.send(event, context, cfnresponse.FAILED, {})      
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/CodeBuildTriggerFunction
+    DependsOn:
+    - CodeBuildTriggerFunctionLogGroup
 
+  CodeBuildTriggerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/CodeBuildTriggerFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+        
   CodeBuildRun:
     Type: Custom::CodeBuildRun
     Properties:

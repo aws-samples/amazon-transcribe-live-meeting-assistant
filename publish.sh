@@ -32,7 +32,7 @@ if ! [ -x "$(command -v sam)" ]; then
   exit 1
 fi
 sam_version=$(sam --version | awk '{print $4}')
-min_sam_version="1.99.0"
+min_sam_version="1.118.0"
 if [[ $(echo -e "$min_sam_version\n$sam_version" | sort -V | tail -n1) == $min_sam_version && $min_sam_version != $sam_version ]]; then
     echo "Error: sam version >= $min_sam_version is not installed and required. (Installed version is $sam_version)" >&2
     echo 'Install: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/manage-sam-cli-versions.html' >&2
@@ -233,8 +233,6 @@ git submodule init
 git submodule update
 echo "Applying patch files to simplify UX by removing some QnABot options not needed for lma"
 # lma customizations
-cp -v ./patches/qnabot/lambda_schema_qna.js $dir/lambda/schema/qna.js
-cp -v ./patches/qnabot/website_js_admin.vue $dir/website/js/admin.vue
 cp -v ./patches/qnabot/Makefile $dir/Makefile
 echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lma'"
 # Detection of differences. sed varies betwen GNU sed and BSD sed
