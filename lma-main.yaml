@@ -589,22 +589,69 @@ Resources:
       MaxLength: 25
 
   # Custom resource to validate parameters
+
+  ValidateParametersFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - "bedrock:InvokeModel"
+            Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
+        PolicyName: BedrockPolicy
+  
   ValidateParametersFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
       Runtime: python3.11
+      Role: !GetAtt ValidateParametersFunctionRole.Arn
+      Timeout: 60
       InlineCode: |
         import cfnresponse
         import json
+        import boto3
+        def is_model_available(modelId):
+          try:
+              client = boto3.client('bedrock-runtime')
+              prompt = "Why is the sky blue?"
+              if 'embed' in modelId:
+                  body = {"inputText": prompt}
+              else:
+                  body = {
+                      "anthropic_version": "bedrock-2023-05-31",
+                      "messages": [{"role": "user", "content": [{'type': 'text', 'text': prompt}]}],
+                      "max_tokens": 128
+                  }
+              print(f"Testing model: {modelId} - {body}")
+              client.invoke_model(body=json.dumps(
+                  body), modelId=modelId, accept='application/json', contentType='application/json')
+              print(f"The model '{modelId}' is available and enabled.")
+              return True
+          except Exception as e:
+              print(f"The model '{modelId}' is not available or not enabled. {e}")
+              return False
         def handler(event, context):
             print(json.dumps(event))
-            transcribeLanguageCode = event['ResourceProperties'].get('TranscribeLanguageCode', '')
-            transcribeLanguageOptions = event['ResourceProperties'].get('TranscribeLanguageOptions', '')
-            transcribePreferredLanguage = event['ResourceProperties'].get('TranscribePreferredLanguage', '')
             status = cfnresponse.SUCCESS
             reason = f"Parameters Validated"
-            if event['RequestType'] == "Create":
+            if event['RequestType'] != "Delete":
+              # Validate Transcribe Language options
+              transcribeLanguageCode = event['ResourceProperties'].get('TranscribeLanguageCode', '')
+              transcribeLanguageOptions = event['ResourceProperties'].get('TranscribeLanguageOptions', '')
+              transcribePreferredLanguage = event['ResourceProperties'].get('TranscribePreferredLanguage', '')
               if transcribeLanguageCode in ['identify-language', 'identify-multiple-languages']:
                 if transcribeLanguageOptions == '':
                   status = cfnresponse.FAILED
@@ -624,6 +671,15 @@ Resources:
                     if not transcribePreferredLanguage in lang_codes:
                       status = cfnresponse.FAILED
                       reason = f"TranscribePreferredLanguage '{transcribePreferredLanguage}' is not in TranscribeLanguageOptions '{transcribeLanguageOptions}'"
+              # Validate Bedrock model access
+              failedModels = []
+              requiredmodels = event['ResourceProperties'].get('BedrockModelIds', [])
+              for modelId in requiredmodels: 
+                if not is_model_available(modelId):
+                  failedModels.append(modelId)
+              if failedModels:
+                status = cfnresponse.FAILED
+                reason = f"Model(s) '{failedModels}' not available or not enabled. Check that Amazon Bedrock is available in your region, and that required models ('{requiredmodels}') are activated in your Amazon Bedrock account"
             else:
               print(f"Request type is {event['RequestType']} - skipping")
             cfnresponse.send(event, context, status, {}, reason=reason)
@@ -653,6 +709,11 @@ Resources:
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
       TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
       TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
+      BedrockModelIds: 
+      - !Ref MeetingAssistServiceBedrockModelID  # Meeting assistant
+      - !Ref BedrockModelId  # Meeting summarization
+      - 'amazon.titan-embed-text-v1' # QNABOTBR
+      - 'anthropic.claude-instant-v1' # QNABOTBR
 
   ToJSONFunction:
     Type: AWS::Serverless::Function
