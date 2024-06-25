@@ -12,11 +12,11 @@ const openChatPanel = function () {
   }
 }
 
-const activeRingClass = "fui-Primitive ___19upu4n";
-const inactiveRingClass = "fui-Primitive ___s78zj80";
+const activeRingClass = "fui-Avatar r81b29z ___l339ri0";
+const inactiveRingClass = "fui-Avatar r81b29z ___1okzwt8";
 
 const sendChatMessage = function (message) {
-  const findChatInputAndSend = function () {
+  /* const findChatInputAndSend = function () {
     try {
       const chatInputDiv = document.querySelector('div[id^="new-message-"]');
       if (chatInputDiv) {
@@ -60,7 +60,7 @@ const sendChatMessage = function (message) {
   } catch (error) {
     console.error('Error in sendChatMessage:', error);
     setTimeout(() => sendChatMessage(message), 1000); // Retry after 1 second if there's an error
-  }
+  } */
 };
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
@@ -70,11 +70,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.action === "SendChatMessage") {
     console.log("received request to send a chat message");
     console.log("message:", request.message);
-    let chatInput = document.querySelector('p[data-placeholder="Type a message"]');
+    /* let chatInput = document.querySelector('p[data-placeholder="Type a message"]');
     if (!chatInput) {
       openChatPanel();
-    }
+    } 
     sendChatMessage(request.message);
+    */
   }
 });
 
@@ -134,135 +135,103 @@ const checkForMeetingMetadata = function () {
   }, 2000); // Check every 2000 milliseconds (2 seconds)
 }
 
-let audioStageObserver;
-let activeSpeakerObserver;
-
-const startAudioStageObserver = () => {
-  const audioStage = document.querySelector('div[data-tid="audio-stage"]');
-
-  if (audioStage) {
-    const config = { childList: true, subtree: true };
-    const callback = (mutationsList, observer) => {
-      mutationsList.forEach((mutation) => {
-        if (mutation.type === 'childList') {
-          console.log('Audio stage child elements changed');
-          mutation.addedNodes.forEach(node => {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-              // console.log('Added node:', node);
-            }
-          });
-          mutation.removedNodes.forEach(node => {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-              // console.log('Removed node:', node);
-            }
-          });
-          if (activeSpeakerObserver) {
-            activeSpeakerObserver.disconnect();
-            startObserver();
-          }
-        }
-      });
-    };
-
-    if (audioStageObserver) {
-      audioStageObserver.disconnect();
-    }
-    audioStageObserver = new MutationObserver(callback);
-    audioStageObserver.observe(audioStage, config);
-    console.log('Audio stage observer started');
-  } else {
-    console.log('Audio stage not found. Retrying in 2 seconds...');
-    setTimeout(startAudioStageObserver, 2000);
-  }
-};
-
+let activeSpeakerObserver = null;
 // Function to start the MutationObserver
 const startObserver = () => {
-  // Select the node that will be observed for mutations
-  const targetNodes = document.querySelectorAll('div[data-tid="participant-speaker-ring"]');
+  // Step 1: Locate the roster title element
+  const rosterTitleElement = document.querySelector('span[id^="roster-title-section"][aria-label^="In this meeting"]');
+  console.log('Roster Title Element:', rosterTitleElement);
+
+  let targetDivElement = null;
+
+  if (rosterTitleElement) {
+    // Step 2: Locate the closest div with role="treeitem"
+    const treeItemDiv = rosterTitleElement.closest('div[role="treeitem"]');
+    console.log('Tree Item Div:', treeItemDiv);
+
+    // Step 3: Get its parent div
+    if (treeItemDiv) {
+      targetDivElement = treeItemDiv.parentElement.parentElement;
+      console.log('Target Div Element:', targetDivElement);
+    }
+  }
+
+  // Retry if target element is not found
+  if (!targetDivElement) {
+    console.log('Target div not found. Retrying in 2 seconds...');
+    setTimeout(startObserver, 2000); // Retry after 2 seconds
+    return;
+  }
 
   // Options for the observer (which mutations to observe)
-  const config = { attributes: true, attributeOldValue: true };
+  const config = { childList: true, subtree: true, attributes: true, attributeOldValue: true };
 
   // Callback function to execute when mutations are observed
   const callback = (mutationsList, observer) => {
+    console.log('Callback function triggered');
     mutationsList.forEach((mutation) => {
-      console.log(mutation);
-      if (mutation.type === 'attributes') {
-        console.log(`Attribute mutation detected: ${mutation.attributeName}`);
-        const oldValue = mutation.oldValue;
-        const newValue = mutation.target.getAttribute(mutation.attributeName);
-        // console.log(`Old value: ${oldValue}`);
-        // console.log(`New value: ${newValue}`);
-        if (oldValue.startsWith(inactiveRingClass) && newValue.startsWith(activeRingClass)) {
-          // console.log("Active Speaker participant-speaker-ring activated");
-          let parentElement = mutation.target.parentElement.parentElement;
-          if (parentElement && parentElement.hasAttribute('aria-label')) {
-            const ariaLabel = parentElement.getAttribute('aria-label');
-            // console.log(`Found aria-label: ${ariaLabel}`);
-            if (ariaLabel.includes('muted')) {
-              // console.log('The ariaLabel contains the word "muted".');
+      if (mutation.type === 'childList') {
+        console.log('A speaker added or removed.');
+        console.log(mutation);
+      } else if (mutation.type === 'attributes') {
+        console.log(`The ${mutation.attributeName} attribute was modified.`);
+        console.log(mutation);
+        const targetElement = mutation.target;
+        const isSpan = targetElement.tagName.toLowerCase() === 'span';
+        const hasRolePresentation = targetElement.getAttribute('role') === 'presentation';
+
+        if (isSpan && hasRolePresentation) {
+          console.log('Both conditions are true: the element is a span and its role attribute is presentation.');
+          const oldValue = mutation.oldValue;
+          const newValue = mutation.target.getAttribute(mutation.attributeName);
+
+          if (oldValue && newValue && oldValue.startsWith(inactiveRingClass) && newValue.startsWith(activeRingClass)) {
+            console.log('Active Speaker participant-speaker-ring activated');
+            let parentElement = mutation.target.closest('li');
+            if (parentElement && parentElement.hasAttribute('aria-label')) {
+              const ariaLabel = parentElement.getAttribute('aria-label');
+              if (ariaLabel && !ariaLabel.endsWith(' Muted')) {
+                const activeSpeaker = ariaLabel.split(',')[0];
+                console.log(`Active Speaker Change: ${activeSpeaker}`);
+                chrome.runtime.sendMessage({ action: 'ActiveSpeakerChange', active_speaker: activeSpeaker });
+              }
             } else {
-              const activeSpeaker = ariaLabel.split(',')[0];
-              console.log(`Active Speaker Change: ${activeSpeaker}`);
-              chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: activeSpeaker });
+              console.log('No aria-label found at expected parent level.');
             }
-          } else {
-            console.log('No aria-label found at expected parent level.');
-          }
-        }
-        else if (oldValue.startsWith(activeRingClass) && newValue.startsWith(inactiveRingClass)) {
-          let foundActiveSpeaker = false;
-          console.log("Active Speaker participant-speaker-ring stopped, findout who else is speaking");
-          const speakerList = document.querySelectorAll('div[data-cid="calling-participant-stream"]');
-          speakerList.forEach((speakerDiv, index) => {
-            //select the first div element with attribute of data-tid="participant-speaker"
-            const participantSpeaker = speakerDiv.querySelector('div[data-tid="participant-speaker"]');
-            if (participantSpeaker) {
-              // console.log(`Found participant speaker div for speaker ${index + 1}`);
-              const participantSpeakerRing = participantSpeaker.querySelector('div[data-tid="participant-speaker-ring"]');
-              if (participantSpeakerRing) {
-                const ringClass = participantSpeakerRing.getAttribute('class');
-                if (ringClass.startsWith(activeRingClass)) {
-                  const ariaLabel = speakerDiv.getAttribute('aria-label');
-                  if (ariaLabel.includes('muted')) {
-                    // console.log('The ariaLabel contains the word "muted".');
-                  } else {
-                    const activeSpeaker = ariaLabel.split(',')[0];
-                    console.log(`Active Speaker Change: ${activeSpeaker}`);
-                    chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: activeSpeaker });
-                    foundActiveSpeaker = true;
-                    return true;
-                  }
+          } else if (oldValue && newValue && oldValue.startsWith(activeRingClass) && newValue.startsWith(inactiveRingClass)) {
+            console.log('Active Speaker stopped, finding out who else is speaking');
+            let foundActiveSpeaker = false;
+
+            const otherActiveSpeaker = targetDivElement.querySelector(`span[role="presentation"][class^="${activeRingClass}"]`);
+            if (otherActiveSpeaker) {
+              const otherActiveSpeakerLi = otherActiveSpeaker.closest('li');
+              if (otherActiveSpeakerLi && otherActiveSpeakerLi.hasAttribute('aria-label')) {
+                const ariaLabel = otherActiveSpeakerLi.getAttribute('aria-label');
+                if (ariaLabel && !ariaLabel.endsWith(' Muted')) {
+                  const activeSpeaker = ariaLabel.split(',')[0];
+                  foundActiveSpeaker = true;
+                  console.log(`Active Speaker Change: ${activeSpeaker}`);
+                  chrome.runtime.sendMessage({ action: 'ActiveSpeakerChange', active_speaker: activeSpeaker });
                 }
               }
             }
-          });
-          if (!foundActiveSpeaker) {
-            console.log(`No more active speakers.`);
-            chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: "N/A" });
+
+            if (!foundActiveSpeaker) {
+              console.log('No more active speakers.');
+              chrome.runtime.sendMessage({ action: 'ActiveSpeakerChange', active_speaker: 'n/a' });
+            }
           }
         }
       }
     });
   };
 
-  if (activeSpeakerObserver) {
-    activeSpeakerObserver.disconnect();
-  }
   // Create an observer instance linked to the callback function
   activeSpeakerObserver = new MutationObserver(callback);
 
   // Start observing the target nodes for configured mutations
-  if (targetNodes.length > 0) {
-    targetNodes.forEach(node => {
-      activeSpeakerObserver.observe(node, config);
-    });
-    console.log('MutationObserver started for child nodes');
-  } else {
-    console.log('Target node not found. Retrying in 2 seconds...');
-    setTimeout(startObserver, 2000); // Retry after 2 seconds
-  }
+  activeSpeakerObserver.observe(targetDivElement, config);
+  console.log('MutationObserver started for active speakers');
 };
 
 window.onload = function () {
@@ -290,8 +259,5 @@ window.onload = function () {
   }, 2000);
 
   checkForMeetingMetadata();
-
-  startAudioStageObserver();
-
   startObserver();
 };
