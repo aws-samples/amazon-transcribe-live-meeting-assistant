@@ -12,6 +12,9 @@ const openChatPanel = function () {
   }
 }
 
+const activeRingClass = "fui-Primitive ___19upu4n";
+const inactiveRingClass = "fui-Primitive ___s78zj80";
+
 const sendChatMessage = function (message) {
   const findChatInputAndSend = function () {
     try {
@@ -131,13 +134,55 @@ const checkForMeetingMetadata = function () {
   }, 2000); // Check every 2000 milliseconds (2 seconds)
 }
 
+let audioStageObserver;
+let activeSpeakerObserver;
+
+const startAudioStageObserver = () => {
+  const audioStage = document.querySelector('div[data-tid="audio-stage"]');
+
+  if (audioStage) {
+    const config = { childList: true, subtree: true };
+    const callback = (mutationsList, observer) => {
+      mutationsList.forEach((mutation) => {
+        if (mutation.type === 'childList') {
+          console.log('Audio stage child elements changed');
+          mutation.addedNodes.forEach(node => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              // console.log('Added node:', node);
+            }
+          });
+          mutation.removedNodes.forEach(node => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              // console.log('Removed node:', node);
+            }
+          });
+          if (activeSpeakerObserver) {
+            activeSpeakerObserver.disconnect();
+            startObserver();
+          }
+        }
+      });
+    };
+
+    if (audioStageObserver) {
+      audioStageObserver.disconnect();
+    }
+    audioStageObserver = new MutationObserver(callback);
+    audioStageObserver.observe(audioStage, config);
+    console.log('Audio stage observer started');
+  } else {
+    console.log('Audio stage not found. Retrying in 2 seconds...');
+    setTimeout(startAudioStageObserver, 2000);
+  }
+};
+
 // Function to start the MutationObserver
 const startObserver = () => {
   // Select the node that will be observed for mutations
   const targetNodes = document.querySelectorAll('div[data-tid="participant-speaker-ring"]');
-  
+
   // Options for the observer (which mutations to observe)
-  const config = { attributes: true, attributeOldValue: true, childList: true, subtree: true };
+  const config = { attributes: true, attributeOldValue: true };
 
   // Callback function to execute when mutations are observed
   const callback = (mutationsList, observer) => {
@@ -149,7 +194,7 @@ const startObserver = () => {
         const newValue = mutation.target.getAttribute(mutation.attributeName);
         // console.log(`Old value: ${oldValue}`);
         // console.log(`New value: ${newValue}`);
-        if (oldValue.startsWith("fui-Primitive ___s78zj80") && newValue.startsWith("fui-Primitive ___19upu4n")) {
+        if (oldValue.startsWith(inactiveRingClass) && newValue.startsWith(activeRingClass)) {
           // console.log("Active Speaker participant-speaker-ring activated");
           let parentElement = mutation.target.parentElement.parentElement;
           if (parentElement && parentElement.hasAttribute('aria-label')) {
@@ -166,58 +211,61 @@ const startObserver = () => {
             console.log('No aria-label found at expected parent level.');
           }
         }
-        else if(oldValue.startsWith("fui-Primitive ___19upu4n") && newValue.startsWith("fui-Primitive ___s78zj80")){
-          console.log("Active Speaker participant-speaker-ring stopped");
-          let parentElement = mutation.target.parentElement.parentElement;
-          if (parentElement && parentElement.hasAttribute('aria-label')) {
-            const ariaLabel = parentElement.getAttribute('aria-label');
-            console.log(`Found aria-label: ${ariaLabel}`);
-            if (ariaLabel.includes('muted')) {
-              console.log('The ariaLabel contains the word "muted".');
-              chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: " " });
-            } else {
-              console.log(`Active Speaker Change to empty`);
+        else if (oldValue.startsWith(activeRingClass) && newValue.startsWith(inactiveRingClass)) {
+          let foundActiveSpeaker = false;
+          console.log("Active Speaker participant-speaker-ring stopped, findout who else is speaking");
+          const speakerList = document.querySelectorAll('div[data-cid="calling-participant-stream"]');
+          speakerList.forEach((speakerDiv, index) => {
+            //select the first div element with attribute of data-tid="participant-speaker"
+            const participantSpeaker = speakerDiv.querySelector('div[data-tid="participant-speaker"]');
+            if (participantSpeaker) {
+              // console.log(`Found participant speaker div for speaker ${index + 1}`);
+              const participantSpeakerRing = participantSpeaker.querySelector('div[data-tid="participant-speaker-ring"]');
+              if (participantSpeakerRing) {
+                const ringClass = participantSpeakerRing.getAttribute('class');
+                if (ringClass.startsWith(activeRingClass)) {
+                  const ariaLabel = speakerDiv.getAttribute('aria-label');
+                  if (ariaLabel.includes('muted')) {
+                    // console.log('The ariaLabel contains the word "muted".');
+                  } else {
+                    const activeSpeaker = ariaLabel.split(',')[0];
+                    console.log(`Active Speaker Change: ${activeSpeaker}`);
+                    chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: activeSpeaker });
+                    foundActiveSpeaker = true;
+                    return true;
+                  }
+                }
+              }
             }
+          });
+          if (!foundActiveSpeaker) {
+            console.log(`No more active speakers.`);
+            chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: "N/A" });
           }
         }
-      } else if (mutation.type === 'childList') {
-        console.log(`Child list mutation detected. Added nodes: ${mutation.addedNodes.length}, Removed nodes: ${mutation.removedNodes.length}`);
-        mutation.addedNodes.forEach(node => {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            console.log(`Added node: ${node.outerHTML}`);
-          }
-        });
-        mutation.removedNodes.forEach(node => {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            console.log(`Removed node: ${node.outerHTML}`);
-          }
-        });
-        // Disconnect and reconnect the observer to handle new target nodes
-        observer.disconnect();
-        startObserver();
-        return; // Exit the callback to avoid further processing until reconnected
       }
     });
   };
 
+  if (activeSpeakerObserver) {
+    activeSpeakerObserver.disconnect();
+  }
   // Create an observer instance linked to the callback function
-  const activeSpeakerObserver = new MutationObserver(callback);
+  activeSpeakerObserver = new MutationObserver(callback);
 
   // Start observing the target nodes for configured mutations
   if (targetNodes.length > 0) {
     targetNodes.forEach(node => {
       activeSpeakerObserver.observe(node, config);
     });
-    console.log('MutationObserver started');
+    console.log('MutationObserver started for child nodes');
   } else {
     console.log('Target node not found. Retrying in 2 seconds...');
     setTimeout(startObserver, 2000); // Retry after 2 seconds
   }
 };
 
-
 window.onload = function () {
-
   const muteObserver = new MutationObserver((mutationList) => {
     mutationList.forEach((mutation) => {
       if (mutation.type === 'attributes' && mutation.attributeName === 'aria-label') {
@@ -242,6 +290,8 @@ window.onload = function () {
   }, 2000);
 
   checkForMeetingMetadata();
+
+  startAudioStageObserver();
 
   startObserver();
 };
