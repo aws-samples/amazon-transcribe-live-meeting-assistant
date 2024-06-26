@@ -35,4 +35,6 @@ aws stepfunctions start-execution \
 
 Use the following commands to test it locally in the browser. Note it is required to pass not only the meeting id and passcode, but also the LMA settings such as the Transcribe settings, Kinesis Data Stream name, etc.
 
-`docker build -t scribe-transcribe . && docker run --env MEETING_ID=[Meeting ID here] --env MEETING_PASSWORD=[Meeting Password Here]  --env MEETING_NAME=testMeetingName --env AWS_DEFAULT_REGION=us-east-1 --env KINESIS_STREAM_NAME=[LMA's Kinesis Stream Here] --env CONTENT_REDACTION_TYPE=PII --env RECORDINGS_BUCKET_NAME=[bucket name here] --env RECORDINGS_KEY_PREFIX=lca-audio-recordings/ scribe-transcribe`
+`docker build -t scribe-transcribe . `
+*Copy image id*
+`docker run --env MEETING_ID=[Meeting ID here] --env MEETING_PASSWORD=[Meeting Password Here]  --env MEETING_NAME=testMeetingName --env AWS_DEFAULT_REGION=us-east-1 --env KINESIS_STREAM_NAME=[LMA's Kinesis Stream Here] --env CONTENT_REDACTION_TYPE=PII --env RECORDINGS_BUCKET_NAME=[bucket name here] --env RECORDINGS_KEY_PREFIX=lca-audio-recordings/ scribe-transcribe <imageid>`

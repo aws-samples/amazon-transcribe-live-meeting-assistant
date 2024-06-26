@@ -7,4 +7,4 @@ echo "PulseAudio Info:"
 pactl list short sinks
 pactl list short sources
 
-python3 zoom.py
+python3 src/meeting.py
