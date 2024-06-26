@@ -922,13 +922,22 @@ Resources:
         QnaBotSettings: !GetAtt SettingsJSON.Output
         Version: v0.8.8
 
-
-  WEBSOCKETSTACK:
+  VPCSTACK:
     Type: AWS::CloudFormation::Stack
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: 
-        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-stack/<VERSION_TOKEN>/template.yaml
+        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-vpc-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+
+  WEBSOCKETTRANSCRIBERSTACK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: 
+        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-transcriber-stack/<VERSION_TOKEN>/template.yaml
       # yamllint enable rule:line-length
       Parameters:
         S3BucketName: !GetAtt AISTACK.Outputs.S3BucketName
@@ -955,24 +964,11 @@ Resources:
         LMASettingsParameterName: !GetAtt AISTACK.Outputs.LMASettingsParameterName
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
-
-  BROWSEREXTENSIONSTACK:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      # yamllint disable rule:line-length
-      TemplateURL: 
-        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-browser-extension-stack/template.yaml
-      # yamllint enable rule:line-length
-      Parameters:
-        LMAStackName: !Ref AWS::StackName
-        WebSocketEndpoint: !GetAtt WEBSOCKETSTACK.Outputs.WebSocketEndpoint
-        CognitoClientId: !GetAtt AISTACK.Outputs.CognitoClientId
-        CognitoLoginUrl: !GetAtt AISTACK.Outputs.CognitoLoginUrl
-        CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
-        WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
-        WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
-        SourceCodeLocation: <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>
-        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        VPC: !GetAtt VPCSTACK.Outputs.VPC
+        PublicSubnet1: !GetAtt VPCSTACK.Outputs.PublicSubnet1
+        PublicSubnet2: !GetAtt VPCSTACK.Outputs.PublicSubnet2
+        PrivateSubnet1: !GetAtt VPCSTACK.Outputs.PrivateSubnet1
+        PrivateSubnet2: !GetAtt VPCSTACK.Outputs.PrivateSubnet2
 
   VIRTUALPARTICIPANTSTACK:
     Type: AWS::CloudFormation::Stack
@@ -994,9 +990,28 @@ Resources:
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
-        SecurityGroup: !GetAtt WEBSOCKETSTACK.Outputs.TranscriberWebsocketFargateServiceSecurityGroup
-        PrivateSubnet1: !GetAtt WEBSOCKETSTACK.Outputs.TranscribingVPCPrivateSubnet1Subnet
-        PrivateSubnet2: !GetAtt WEBSOCKETSTACK.Outputs.TranscribingVPCPrivateSubnet2Subnet
+        VPC: !GetAtt VPCSTACK.Outputs.VPC
+        PrivateSubnet1: !GetAtt VPCSTACK.Outputs.PrivateSubnet1
+        PrivateSubnet2: !GetAtt VPCSTACK.Outputs.PrivateSubnet2
+
+  BROWSEREXTENSIONSTACK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: 
+        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-browser-extension-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        LMAStackName: !Ref AWS::StackName
+        WebSocketEndpoint: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
+        CognitoClientId: !GetAtt AISTACK.Outputs.CognitoClientId
+        CognitoLoginUrl: !GetAtt AISTACK.Outputs.CognitoLoginUrl
+        CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
+        WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
+        WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
+        SourceCodeLocation: <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+
 
 Outputs:
   ApplicationCloudfrontEndpoint:
@@ -1017,7 +1032,7 @@ Outputs:
 
   LMAWebsocketEndpoint:
     Description: Websocket endpoint for websocket integration
-    Value: !GetAtt WEBSOCKETSTACK.Outputs.WebSocketEndpoint
+    Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
 
   QnaBotContentDesigner:
     Description: Agent Assist Content Designer URL (QnABot on AWS)

@@ -1,19 +1,19 @@
-
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Automated Meeting Scribe and Summarizer Template
 
 Parameters:
-# networking parameters
-  SecurityGroup:
-    Description: Security group for scribe Fargate
+
+  # networking parameters
+  VPC:
+    Description: VPC ID
     Type: String
 
   PrivateSubnet1:
-    Description: Private subnet 1 for scribe Fargate
+    Description: Private subnet 1 for Fargate
     Type: String
 
   PrivateSubnet2:
-    Description: Private subnet 2 for scribe Fargate
+    Description: Private subnet 2 for Fargate
     Type: String
 
 # cognito
@@ -169,7 +169,18 @@ Conditions:
     - !Equals [!Ref IsContentRedactionEnabled, 'true']
     - !Equals [!Ref TranscribeLanguageCode, 'en-US']
 
-Resources:  
+Resources:
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Websocket-fargate/service/Service/SecurityGroup
+      SecurityGroupEgress:
+      - CidrIp: 0.0.0.0/0
+        Description: Allow all outbound traffic by default
+        IpProtocol: "-1"
+      VpcId: !Ref VPC
+
   LogsPolicy:
     Type: "AWS::IAM::ManagedPolicy"
     Properties:
