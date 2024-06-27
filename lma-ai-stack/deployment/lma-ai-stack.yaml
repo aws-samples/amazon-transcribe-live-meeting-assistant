@@ -458,10 +458,19 @@ Outputs:
   LMASettingsParameterName:
     Description: Name of the Parameter store
     Value: !Ref LMASettingsParameter
-
   TranscriptSummaryFunctionArn:
     Description: Call Summarizer Lambda function ARN
     Value: !If [ShouldEnableBedrockSummarizer, !GetAtt BedrockSummaryLambda.Arn, !Ref EndOfCallLambdaHookFunctionArn]
+  LocalUITestingEnv:
+    Description: Copy to create .env file for local UI testing
+    Value: !Sub >-
+      REACT_APP_USER_POOL_ID=${UserPool}
+      REACT_APP_USER_POOL_CLIENT_ID=${UserPoolClient}
+      REACT_APP_IDENTITY_POOL_ID=${IdentityPool}
+      REACT_APP_APPSYNC_GRAPHQL_URL=${AppSyncApi.GraphQLUrl}
+      REACT_APP_AWS_REGION=${AWS::Region}
+      REACT_APP_SETTINGS_PARAMETER=${LMASettingsParameter}
+      REACT_APP_ENABLE_LEX_AGENT_ASSIST=true
 
 Resources:
   ## BUCKET TO STORE STEREO RECORDINGS
