@@ -993,6 +993,7 @@ Resources:
         VPC: !GetAtt VPCSTACK.Outputs.VPC
         PrivateSubnet1: !GetAtt VPCSTACK.Outputs.PrivateSubnet1
         PrivateSubnet2: !GetAtt VPCSTACK.Outputs.PrivateSubnet2
+        SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack
