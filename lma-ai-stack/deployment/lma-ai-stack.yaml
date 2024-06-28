@@ -24,11 +24,24 @@ Parameters:
     Type: String
     Description: LMA Stack Name
 
+  CallDataStream:
+    Type: String
+    Description: >-
+      The Name of Kinesis Data Stream to write the call data to.
+  CallDataStreamArn:
+    Type: String
+    Description: >-
+      The Arn of Kinesis Data Stream to write the call data to.
+
   AudioRecordingExpirationInDays:
     Type: Number
     Description: 'Number of days after which audio recordings will be deleted from
       the Recordings bucket.'
     Default: 90
+
+  LMASettingsParameterName:
+    Type: String
+    Description: LCA settings SSM Parameter store
 
   CallAudioSource:
     Type: String
@@ -50,8 +63,7 @@ Parameters:
     Type: String
     Default: ""
     Description: >
-      (Optional) Existing bucket where call recording files will be stored.
-      Leave blank to automatically create new bucket.
+      Existing bucket where call recording files will be stored.
     # yamllint disable rule:line-length
     AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
     # yamllint enable rule:line-length
@@ -302,13 +314,6 @@ Parameters:
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket
 
-  CategoryAlertRegEx:
-    Type: String
-    Default: .*
-    Description: >
-      A regular expression that will be used to show an alert in the UI if a category
-      matches
-
   AssistantWakePhraseRegEx:
     Type: String
     Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
@@ -400,24 +405,10 @@ Outputs:
     Value: !Ref UserPoolClient
   CognitoAuthRoleArn:
     Value: !GetAtt CognitoAuthorizedRole.Arn
-  CallDataStreamName:
-    Description: >-
-      The Name of Kinesis Data Stream to write the call data to.
-    Value: !Ref CallDataStream
-  CallDataStreamArn:
-    Description: >-
-      The ARN of Kinesis Data Stream to write the call data to.
-    Value: !GetAtt CallDataStream.Arn
   UserPoolId:
     Description: >-
       The id of Cognito user pool.
     Value: !Ref UserPool
-  S3BucketName:
-    Description: Bucket which contains all the call recordings
-    Value: !If
-    - ShouldCreateRecordingBucket
-    - !Ref RecordingsBucket
-    - !Ref S3BucketName
   CloudfrontEndpoint:
     Description: Endpoint for Cloudfront distribution
     Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
@@ -455,9 +446,6 @@ Outputs:
   CloudFrontDomainName:
     Description: The full domain name of the CloudFront distribution
     Value: !GetAtt WebAppCloudFrontDistribution.DomainName
-  LMASettingsParameterName:
-    Description: Name of the Parameter store
-    Value: !Ref LMASettingsParameter
   TranscriptSummaryFunctionArn:
     Description: Call Summarizer Lambda function ARN
     Value: !If [ShouldEnableBedrockSummarizer, !GetAtt BedrockSummaryLambda.Arn, !Ref EndOfCallLambdaHookFunctionArn]
@@ -469,61 +457,10 @@ Outputs:
       REACT_APP_IDENTITY_POOL_ID=${IdentityPool}
       REACT_APP_APPSYNC_GRAPHQL_URL=${AppSyncApi.GraphQLUrl}
       REACT_APP_AWS_REGION=${AWS::Region}
-      REACT_APP_SETTINGS_PARAMETER=${LMASettingsParameter}
+      REACT_APP_SETTINGS_PARAMETER=${LMASettingsParameterName}
       REACT_APP_ENABLE_LEX_AGENT_ASSIST=true
 
 Resources:
-  ## BUCKET TO STORE STEREO RECORDINGS
-  RecordingsBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Condition: ShouldCreateRecordingBucket
-    Properties:
-      AccessControl: LogDeliveryWrite
-      OwnershipControls:
-        Rules:
-        - ObjectOwnership: ObjectWriter
-      # XXX figure out access logging
-      # LoggingConfiguration:
-      #    DestinationBucketName: !Ref S3BucketName
-      #    LogFilePrefix: 'logs/'
-      VersioningConfiguration:
-        Status: Enabled
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-        - ServerSideEncryptionByDefault:
-            SSEAlgorithm: AES256
-      LifecycleConfiguration:
-        Rules:
-        - Id: RuleRetention
-          Status: Enabled
-          Prefix: ""
-          ExpirationInDays: !Ref AudioRecordingExpirationInDays
-
-  RecordingsBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Condition: ShouldCreateRecordingBucket
-    Properties:
-      Bucket: !Ref RecordingsBucket
-      PolicyDocument:
-        Version: 2012-10-17
-        Statement:
-        - Action:
-          - "s3:*"
-          Effect: "Deny"
-          Principal: "*"
-          Resource:
-          - !GetAtt RecordingsBucket.Arn
-          - !Sub "${RecordingsBucket.Arn}/*"
-          Condition:
-            Bool:
-              "aws:SecureTransport": false
 
   EventSourcingTable:
     Type: AWS::DynamoDB::Table
@@ -583,12 +520,7 @@ Resources:
   # ParameterStore
   ##########################################################################
 
-  LMASettingsParameter:
-    Type: AWS::SSM::Parameter
-    Properties:
-      Type: String
-      Value: !Sub '{ "CategoryAlertRegex":"${CategoryAlertRegEx}", "EnableVoiceToneAnalysis":"${EnableVoiceToneAnalysis}",  "IsSentimentAnalysisEnabled":"${IsSentimentAnalysisEnabled}",
-        "WSEndpoint":"", "AssistantWakePhraseRegEx":"${AssistantWakePhraseRegEx}"}'
+
 
   ##########################################################################
   # CodeBuild
@@ -727,7 +659,7 @@ Resources:
           # code at build time. See:
           # https://create-react-app.dev/docs/adding-custom-environment-variables/
         - Name: REACT_APP_SETTINGS_PARAMETER
-          Value: !Ref LMASettingsParameter
+          Value: !Ref LMASettingsParameterName
         - Name: REACT_APP_USER_POOL_ID
           Value: !Ref UserPool
         - Name: REACT_APP_USER_POOL_CLIENT_ID
@@ -845,24 +777,10 @@ Resources:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
 
-  ##########################################################################
-  # Kinesis Data Stream
-  ##########################################################################
-  CallDataStream:
-    Type: AWS::Kinesis::Stream
-    Properties:
-      # TODO pass retention from a parameter from 24hrs (1day) up to 8760hrs (365days)
-      RetentionPeriodHours: 24
-      StreamModeDetails:
-        StreamMode: ON_DEMAND
-      StreamEncryption:
-        EncryptionType: KMS
-        KeyId: alias/aws/kinesis
-
   DataStreamConsumer:
     Type: AWS::Kinesis::StreamConsumer
     Properties:
-      StreamARN: !GetAtt CallDataStream.Arn
+      StreamARN: !Ref CallDataStreamArn
       ConsumerName: DataStreamConsumer
 
   BedrockPreviewBoto3Stack:
@@ -1080,7 +998,7 @@ Resources:
           Statement:
           - Effect: Allow
             Action: kinesis:PutRecord
-            Resource: !GetAtt CallDataStream.Arn
+            Resource: !Ref CallDataStreamArn
           - Effect: Allow
             Action:
             - lex:RecognizeText
@@ -1154,7 +1072,7 @@ Resources:
           Statement:
           - Effect: Allow
             Action: kinesis:PutRecord
-            Resource: !GetAtt CallDataStream.Arn
+            Resource: !Ref CallDataStreamArn
           - !If
             - ShouldEnableEndOfCallLambdaHookFunction
             - Effect: Allow
@@ -1280,7 +1198,7 @@ Resources:
         - Effect: Allow
           Action:
           - ssm:GetParameter
-          Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameter}"
+          Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
         - Effect: Allow
           Action:
           - appsync:GraphQL
@@ -1364,7 +1282,7 @@ Resources:
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           SNS_TOPIC_ARN: !Ref CategorySNSTopic
-          PARAMETER_STORE_NAME: !Ref LMASettingsParameter
+          PARAMETER_STORE_NAME: !Ref LMASettingsParameterName
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/CallEventProcessorFunction
@@ -1909,16 +1827,10 @@ Resources:
             Resource:
             - !Sub
               - "arn:aws:s3:::${bucket}"
-              - bucket: !If
-                - ShouldCreateRecordingBucket
-                - !Ref RecordingsBucket
-                - !Ref S3BucketName
+              - bucket: S3BucketName
             - !Sub
               - "arn:aws:s3:::${bucket}/*"
-              - bucket: !If
-                - ShouldCreateRecordingBucket
-                - !Ref RecordingsBucket
-                - !Ref S3BucketName
+              - bucket: S3BucketName
       - PolicyName: accessParameterStore
         PolicyDocument:
           Version: 2012-10-17
@@ -1927,7 +1839,7 @@ Resources:
             Action:
             - ssm:GetParameter
             Resource:
-            - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameter}"
+            - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
       - PolicyName: accessTranslateAPI
         PolicyDocument:
           Version: 2012-10-17
@@ -2136,10 +2048,6 @@ Resources:
         ServerSideEncryptionConfiguration:
         - ServerSideEncryptionByDefault:
             SSEAlgorithm: AES256
-      # XXX figure out access logging
-      # LoggingConfiguration:
-      #    DestinationBucketName: !Ref RecordingsBucket
-      #    LogFilePrefix: logs/
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -2214,10 +2122,6 @@ Resources:
         Enabled: true
         HttpVersion: http2
         IPV6Enabled: true
-        # Logging:
-        #   Bucket: !GetAtt RecordingsBucket.DomainName
-        #   IncludeCookies: false
-        #   Prefix: logs/cloudfront/
         Origins:
         - Id: webapp-s3-bucket
           DomainName: !GetAtt WebAppBucket.RegionalDomainName

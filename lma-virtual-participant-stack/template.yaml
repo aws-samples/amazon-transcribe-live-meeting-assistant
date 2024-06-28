@@ -43,11 +43,6 @@ Parameters:
     Type: String
     Description: S3 location of the browser extension source code zipfile
 
-# cognito
-  CognitoAuthRoleArn:
-    Description: The Cognito auth role to add additional policies to execute the step function.
-    Type: String
-
 # transcibe parameters
   S3BucketName:
     Type: String
@@ -681,7 +676,7 @@ Resources:
                     ecs:CreateAction:
                       - RunTask
 
-  LMAVirtualParticipantSchedulerStateMachineLogGroup:
+  SchedulerStateMachineLogGroup:
     Type: 'AWS::Logs::LogGroup'
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
@@ -764,7 +759,7 @@ Resources:
         Destinations:
           - CloudWatchLogsLogGroup:
               LogGroupArn: !GetAtt 
-                - LMAVirtualParticipantSchedulerStateMachineLogGroup
+                - SchedulerStateMachineLogGroup
                 - Arn
         IncludeExecutionData: true
         Level: ALL

@@ -536,6 +536,7 @@ Rules:
         is 'BEDROCK_KNOWLEDGE_BASE'
 
 Conditions:
+  ShouldCreateRecordingBucket: !Equals [!Ref S3BucketName, ""]
   ShouldConfigureBedrockKB: !Equals [!Ref MeetingAssistService, 'BEDROCK_KNOWLEDGE_BASE']
 
 Resources:
@@ -715,6 +716,73 @@ Resources:
       - 'amazon.titan-embed-text-v1' # QNABOTBR
       - 'anthropic.claude-instant-v1' # QNABOTBR
 
+  ##########################################################################
+  # Resources shared by multiple nested stacks
+  ##########################################################################
+  CallDataStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      RetentionPeriodHours: 24
+      StreamModeDetails:
+        StreamMode: ON_DEMAND
+      StreamEncryption:
+        EncryptionType: KMS
+        KeyId: alias/aws/kinesis
+
+  LMASettingsParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Value: !Sub '{ "WSEndpoint":"", "AssistantWakePhraseRegEx":"${AssistantWakePhraseRegEx}"}'
+
+  ## BUCKET TO STORE STEREO RECORDINGS
+  RecordingsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Condition: ShouldCreateRecordingBucket
+    Properties:
+      AccessControl: LogDeliveryWrite
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+        - Id: RuleRetention
+          Status: Enabled
+          Prefix: ""
+          ExpirationInDays: !Ref AudioRecordingExpirationInDays
+
+  RecordingsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: ShouldCreateRecordingBucket
+    Properties:
+      Bucket: !Ref RecordingsBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Action:
+          - "s3:*"
+          Effect: "Deny"
+          Principal: "*"
+          Resource:
+          - !GetAtt RecordingsBucket.Arn
+          - !Sub "${RecordingsBucket.Arn}/*"
+          Condition:
+            Bool:
+              "aws:SecureTransport": false
+
   ToJSONFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -823,7 +891,10 @@ Resources:
         AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
         EnableVoiceToneAnalysis: 'false'
         CallAudioSource: 'Genesys Cloud Audiohook Web Socket'
-        S3BucketName: !Ref S3BucketName
+        S3BucketName: !If
+          - ShouldCreateRecordingBucket
+          - !Ref RecordingsBucket
+          - !Ref S3BucketName
         AdminEmail: !Ref AdminEmail
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         IsSentimentAnalysisEnabled: 'false'
@@ -841,6 +912,9 @@ Resources:
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CallDataStream: !Ref CallDataStream
+        CallDataStreamArn: !GetAtt CallDataStream.Arn
+        LMASettingsParameterName: !Ref LMASettingsParameter
 
 
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
@@ -882,7 +956,6 @@ Resources:
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
-    DependsOn: AISTACK
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: 
@@ -940,11 +1013,14 @@ Resources:
         https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-transcriber-stack/<VERSION_TOKEN>/template.yaml
       # yamllint enable rule:line-length
       Parameters:
-        S3BucketName: !GetAtt AISTACK.Outputs.S3BucketName
+        S3BucketName: !If
+          - ShouldCreateRecordingBucket
+          - !Ref RecordingsBucket
+          - !Ref S3BucketName
         AudioFilePrefix: !Ref AudioFilePrefix
         UserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
-        CallDataStreamName: !GetAtt AISTACK.Outputs.CallDataStreamName
-        CallDataStreamArn: !GetAtt AISTACK.Outputs.CallDataStreamArn
+        CallDataStreamName: !Ref CallDataStream
+        CallDataStreamArn: !GetAtt CallDataStream.Arn
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         TranscribeApiMode: 'standard'
         IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
@@ -961,7 +1037,7 @@ Resources:
         PcaWebAppURL: ''
         PcaWebAppCallPathPrefix: ''
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
-        LMASettingsParameterName: !GetAtt AISTACK.Outputs.LMASettingsParameterName
+        LMASettingsParameterName: !Ref LMASettingsParameter
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
         VPC: !GetAtt VPCSTACK.Outputs.VPC
@@ -977,10 +1053,12 @@ Resources:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-virtual-participant-stack/template.yaml
       # yamllint enable rule:line-length
       Parameters:
-        CognitoAuthRoleArn: !GetAtt AISTACK.Outputs.CognitoAuthRoleArn
-        S3BucketName: !GetAtt AISTACK.Outputs.S3BucketName
+        S3BucketName: !If
+          - ShouldCreateRecordingBucket
+          - !Ref RecordingsBucket
+          - !Ref S3BucketName
         AudioFilePrefix: !Ref AudioFilePrefix
-        CallDataStreamName: !GetAtt AISTACK.Outputs.CallDataStreamName
+        CallDataStreamName: !Ref CallDataStream
         TranscribeApiMode: 'standard'
         IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
@@ -1023,14 +1101,6 @@ Outputs:
     Description: LMA Chrome Browser extension download link
     Value: !GetAtt BROWSEREXTENSIONSTACK.Outputs.ExtensionDownloadLocation
 
-  CallDataStreamArn:
-    Description: >-
-      The ARN of Kinesis Data Stream for sending Call and Transcription events.
-    Value: !GetAtt AISTACK.Outputs.CallDataStreamArn
-    Export:
-      Name:
-        'Fn::Sub': '${AWS::StackName}-CallDataStreamArn'
-
   LMAWebsocketEndpoint:
     Description: Websocket endpoint for websocket integration
     Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
@@ -1040,8 +1110,11 @@ Outputs:
     Value: !GetAtt QNABOT.Outputs.ContentDesignerURL
 
   RecordingsS3Bucket:
-    Description: Bucket contains all the call recordings
-    Value: !GetAtt AISTACK.Outputs.S3BucketName
+    Description: Bucket which contains all the call recordings
+    Value: !If
+    - ShouldCreateRecordingBucket
+    - !Ref RecordingsBucket
+    - !Ref S3BucketName
 
   SNSCategoryTopicName:
     Description: The name of the SNS Topic for matched category and alert notifications
@@ -1061,3 +1134,17 @@ Outputs:
     Description: Edit the *custom* summary prompts. Attribite values here override
       the default summary prompts, and are preserved during stack updates.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
+
+  CallDataStreamName:
+    Description: >-
+      The Name of Kinesis Data Stream to write the call data to.
+    Value: !Ref CallDataStream
+
+  CallDataStreamArn:
+    Description: >-
+      The ARN of Kinesis Data Stream to write the call data to.
+    Value: !GetAtt CallDataStream.Arn
+
+  LMASettingsParameterName:
+    Description: Name of the Parameter store setting that holds the LMA Settings
+    Value: !Ref LMASettingsParameter
