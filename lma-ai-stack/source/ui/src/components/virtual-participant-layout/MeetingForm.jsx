@@ -112,7 +112,8 @@ const MeetingForm = () => {
                 onBlur={() => validateMeetingTime(meetingTime)}
                 value={meetingDate}
                 isDateEnabled={(date) => {
-                  const currentDate = new Date() - 1;
+                  const currentDate = new Date();
+                  currentDate.setDate(currentDate.getDate() - 1);
                   return date > currentDate;
                 }}
                 placeholder="YYYY/MM/DD"
@@ -134,14 +135,14 @@ const MeetingForm = () => {
           <FormField>
             <SpaceBetween direction="horizontal" size="l">
               <Button variant="normal" form="meetingForm" disabled={!meetingId || !meetingName}>
-                Invite Now
+                Join Now
               </Button>
               <Button
                 variant="primary"
                 form="meetingForm"
                 disabled={!meetingId || !meetingName || !meetingTime || !!meetingTimeError}
               >
-                Invite Later
+                Join Later
               </Button>
             </SpaceBetween>
           </FormField>
