@@ -542,7 +542,7 @@ Resources:
             cannot be specificed directly.
 
 
-  TranscriberCodeBuildProject:
+  WebsocketTranscriberCodeBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Description: !Sub >-
@@ -629,7 +629,7 @@ Resources:
             Action:
             - codebuild:StartBuild
             - codebuild:BatchGetBuilds
-            Resource: !GetAtt TranscriberCodeBuildProject.Arn
+            Resource: !GetAtt WebsocketTranscriberCodeBuildProject.Arn
           - Effect: Allow
             Action:
             - logs:CreateLogGroup
@@ -662,7 +662,7 @@ Resources:
     Type: Custom::CodeBuildRun
     Properties:
       ServiceToken: !GetAtt LambdaCodeBuildStartBuild.Arn
-      BuildProjectName: !Ref TranscriberCodeBuildProject
+      BuildProjectName: !Ref WebsocketTranscriberCodeBuildProject
       # pass code location to support upgrades
       CodeLocation: !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
 
