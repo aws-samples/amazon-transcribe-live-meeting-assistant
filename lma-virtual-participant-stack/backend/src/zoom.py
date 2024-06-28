@@ -4,6 +4,7 @@ import details
 import scribe
 from playwright.async_api import TimeoutError
 
+
 async def meeting(page):
 
     print("Getting meeting link.")
@@ -48,7 +49,7 @@ async def meeting(page):
         )
         for message in messages:
             await message_element.fill(message)
-            await message_element.press('Enter')   
+            await message_element.press('Enter')
 
     print("Sending introduction messages.")
     await send_messages(details.intro_messages)
@@ -96,10 +97,17 @@ async def meeting(page):
         if (initial_speaker) speakerChange(initial_speaker)
     ''')
 
+    # start the transcription if details.start flag is true
+    if details.start:
+        print(details.start_messages[0])
+        await send_messages(details.start_messages)
+        asyncio.create_task(scribe.transcribe())
+
     async def message_change(message):
-        # print('New Message:', message)
+        print('New Message:', message)
         if details.end_command in message:
             print("Your scribe has been removed from the meeting.")
+            await send_messages(details.exit_messages)
             await page.goto("about:blank")
         elif details.start and details.pause_command in message:
             details.start = False
@@ -111,10 +119,10 @@ async def meeting(page):
             await send_messages(details.start_messages)
             asyncio.create_task(scribe.transcribe())
         elif details.start:
-            details.messages.append(message)   
+            details.messages.append(message)
 
     await page.expose_function("messageChange", message_change)
-    
+
     print("Listening for message changes.")
     await page.evaluate('''
         const targetNode = document.querySelector('div[aria-label="Chat Message List"]')
@@ -138,8 +146,10 @@ async def meeting(page):
     try:
         done, pending = await asyncio.wait(
             fs=[
-                asyncio.create_task(page.wait_for_selector('button[aria-label="Leave"]', state="detached", timeout=0)),
-                asyncio.create_task(page.wait_for_selector('div[class="zm-modal zm-modal-legacy"]', timeout=0))
+                asyncio.create_task(page.wait_for_selector(
+                    'button[aria-label="Leave"]', state="detached", timeout=0)),
+                asyncio.create_task(page.wait_for_selector(
+                    'div[class="zm-modal zm-modal-legacy"]', timeout=0))
             ],
             return_when=asyncio.FIRST_COMPLETED,
             timeout=details.meeting_timeout

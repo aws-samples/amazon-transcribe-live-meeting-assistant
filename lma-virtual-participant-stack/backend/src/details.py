@@ -1,41 +1,47 @@
 
-import os 
+import os
 
 meeting_platform = os.environ['MEETING_PLATFORM']
 meeting_id = os.environ['MEETING_ID']
 meeting_password = os.environ['MEETING_PASSWORD']
 meeting_name = os.environ['MEETING_NAME']
 
-email_sender = os.environ['EMAIL_SENDER']
-email_receiver = os.environ['EMAIL_RECEIVER']
+email_sender = os.getenv('EMAIL_SENDER', '')
+email_receiver = os.getenv('EMAIL_RECEIVER', '')
 
-scribe_name = "Scribe"
-scribe_identity = f"{scribe_name} ({email_receiver})"
+lma_user = os.getenv('LMA_USER', 'unknown user')
 
-waiting_timeout = 300000 # 5 minutes
-meeting_timeout = 21600000 # 6 hours
+intro_message = os.environ['INTRO_MESSAGE'].replace('{LMA_USER}', lma_user)
+start_recording_message = os.environ['START_RECORDING_MESSAGE'].replace(
+    '{LMA_USER}', lma_user)
+stop_recording_message = os.environ['STOP_RECORDING_MESSAGE'].replace(
+    '{LMA_USER}', lma_user)
+exit_message = os.environ['EXIT_MESSAGE'].replace('{LMA_USER}', lma_user)
 
-start = False
+
+scribe_name = "Live Meeting Assistant"
+scribe_identity = f"{scribe_name} ({lma_user})"
+
+waiting_timeout = 300000  # 5 minutes
+meeting_timeout = 21600000  # 6 hours
+
+start = True
 
 start_command = "START"
 pause_command = "PAUSE"
 end_command = "END"
 
 intro_messages = [
-    ('Hello! I am an AI-assisted scribe. To learn more about me,'
-    ' visit https://github.com/aws-samples/automated-meeting-scribe-and-summarizer.'),
-    (f'If all participants consent to my use, send "{start_command}" in the chat'
-    ' to start saving new speakers, messages, and machine-generated captions.'),
-    (f'If you do not consent to my use, send "{end_command}" in the chat'
-    ' to remove me from this meeting.')
+    intro_message
 ]
 start_messages = [
-    'Saving new speakers, messages, and machine-generated captions.',
-    f'Send "{pause_command}" in the chat to stop saving meeting details.'
+    start_recording_message
 ]
 pause_messages = [
-    'Not saving speakers, messages, or machine-generated captions.',
-    f'Send "{start_command}" in the chat to start saving meeting details.'
+    stop_recording_message
+]
+exit_messages = [
+    exit_message
 ]
 
 messages = []

@@ -2,11 +2,12 @@ import os
 import boto3
 import json
 import datetime
+import details
 
 REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 KINESIS_STREAM_NAME = os.getenv("KINESIS_STREAM_NAME")
-MEETING_ID = os.environ['MEETING_ID']
-LMA_MEETING_ID = MEETING_ID + '-' + \
+MEETING_NAME = details.meeting_name
+LMA_MEETING_NAME = MEETING_NAME + '-' + \
     datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S.%f')[:-3]
 
 KINESIS = boto3.client('kinesis', region_name=REGION)
@@ -24,7 +25,7 @@ def send_add_transcript_segment(current_speaker, result):
         transcript = result.alternatives[0].transcript
         add_transcript_segment = {
             'EventType': 'ADD_TRANSCRIPT_SEGMENT',
-            'CallId': LMA_MEETING_ID,
+            'CallId': LMA_MEETING_NAME,
             'Channel': 'CALLER',
             'SegmentId': f'CALLER-${result.start_time}',
             'StartTime': result.start_time if result.start_time is not None else 0,
@@ -41,7 +42,7 @@ def send_add_transcript_segment(current_speaker, result):
         # Write the messages to the Kinesis Data Stream
         response = KINESIS.put_record(
             StreamName=KINESIS_STREAM_NAME,
-            PartitionKey=LMA_MEETING_ID,
+            PartitionKey=LMA_MEETING_NAME,
             Data=json.dumps(add_transcript_segment).encode('utf-8')
         )
         print(
@@ -55,7 +56,7 @@ def send_start_meeting():
     try:
         start_call_event = {
             'EventType': 'START',
-            'CallId': LMA_MEETING_ID,
+            'CallId': LMA_MEETING_NAME,
             'CustomerPhoneNumber': 'Customer Phone',
             'SystemPhoneNumber': 'System Phone',
             'AgentId': 'test-agent',
@@ -67,7 +68,7 @@ def send_start_meeting():
         # Write the messages to the Kinesis Data Stream
         response = KINESIS.put_record(
             StreamName=KINESIS_STREAM_NAME,
-            PartitionKey=LMA_MEETING_ID,
+            PartitionKey=LMA_MEETING_NAME,
             Data=json.dumps(start_call_event).encode('utf-8')
         )
         print(
@@ -80,7 +81,7 @@ def send_end_meeting():
     try:
         start_call_event = {
             'EventType': 'END',
-            'CallId': LMA_MEETING_ID,
+            'CallId': LMA_MEETING_NAME,
             'CustomerPhoneNumber': 'Customer Phone',
             'SystemPhoneNumber': 'System Phone',
             'CreatedAt': get_aws_date_now()
@@ -91,7 +92,7 @@ def send_end_meeting():
         # Write the messages to the Kinesis Data Stream
         response = KINESIS.put_record(
             StreamName=KINESIS_STREAM_NAME,
-            PartitionKey=LMA_MEETING_ID,
+            PartitionKey=LMA_MEETING_NAME,
             Data=json.dumps(start_call_event).encode('utf-8')
         )
         print(

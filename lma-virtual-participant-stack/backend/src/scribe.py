@@ -52,8 +52,8 @@ async def transcribe():
         write_audio(stream),
         MyEventHandler(stream.output_stream).handle_events()
     )
-    print("Transcribe complete")
-    kds.send_start_meeting()
+    print("Transcribe stopped")
+    kds.send_end_meeting()
 
 
 async def speaker_change(speaker):

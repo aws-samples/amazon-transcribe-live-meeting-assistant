@@ -5,6 +5,7 @@ import scribe
 from playwright.async_api import TimeoutError
 from datetime import datetime
 
+
 async def meeting(page):
 
     print("Getting meeting link.")
@@ -49,7 +50,7 @@ async def meeting(page):
         )
         for message in messages:
             await message_element.fill(message)
-            await message_element.press('Enter')   
+            await message_element.press('Enter')
 
     print("Sending introduction messages.")
     await send_messages(details.intro_messages)
@@ -101,6 +102,12 @@ async def meeting(page):
         if (initial_speaker != "No one") speakerChange(initial_speaker)
     ''')
 
+    # start the transcription if details.start flag is true
+    if details.start:
+        print(details.start_messages[0])
+        await send_messages(details.start_messages)
+        asyncio.create_task(scribe.transcribe())
+
     async def message_change(sender, text, attachment_title, attachment_href):
         global prev_sender
         if not sender:
@@ -108,6 +115,7 @@ async def meeting(page):
         prev_sender = sender
         if text == details.end_command:
             print("Your scribe has been removed from the meeting.")
+            await send_messages(details.exit_messages)
             await page.goto("about:blank")
         elif details.start and text == details.pause_command:
             details.start = False
@@ -130,10 +138,10 @@ async def meeting(page):
             else:
                 message += text
             # print('New Message:', message)
-            details.messages.append(message)                
+            details.messages.append(message)
 
     await page.expose_function("messageChange", message_change)
-    
+
     print("Listening for message changes.")
     await page.evaluate('''
         const targetNode = document.querySelector('._2B9DdDvc2PdUbvEGXfOU20')

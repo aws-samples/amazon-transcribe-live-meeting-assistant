@@ -1,7 +1,29 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Automated Meeting Scribe and Summarizer Template
+Description: Amazon Transcribe Live Meeting Assistant - Virtual Participant
 
 Parameters:
+
+  IntroMessage:
+    Type: String
+    Default: >-
+      Hello. I am an AI Live Meeting Assistant (LMA).
+      I was invited by {LMA_USER} to join this call. 
+      To learn more about me please visit: https://amazon.com/live-meeting-assistant.
+
+  StartRecordingMessage:
+    Type: String
+    Default: >-
+      Live Meeting Assistant started.
+      
+  StopRecordingMessage:
+    Type: String
+    Default: >
+      Live Meeting Assistant stopped.
+
+  ExitMessage:
+    Type: String
+    Default: >
+      Live Meeting Assistant has left the room.
 
   # networking parameters
   VPC:
@@ -15,6 +37,11 @@ Parameters:
   PrivateSubnet2:
     Description: Private subnet 2 for Fargate
     Type: String
+
+  # container source code
+  SourceCodeLocation:
+    Type: String
+    Description: S3 location of the browser extension source code zipfile
 
 # cognito
   CognitoAuthRoleArn:
@@ -221,6 +248,11 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              - Effect: Allow
+                Action:
+                - s3:GetObject
+                Resource:
+                - !Sub "arn:aws:s3:::${SourceCodeLocation}"
               - Effect: 'Allow'
                 Action:
                   - 'ecr:BatchCheckLayerAvailability'
@@ -236,12 +268,12 @@ Resources:
                 Resource:
                   - '*'
 
-  BuildProject:
+  VirtualParticipantBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Source:
-        Type: GITHUB
-        Location: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant.git
+        Location: !Sub "arn:aws:s3:::${SourceCodeLocation}"
+        Type: S3
         BuildSpec: 
           !Sub
             - |
@@ -253,19 +285,25 @@ Resources:
                     - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
                 build:
                   commands:
-                    - docker build -t ${ImageRepo} lma-virtual-participant-stack/backend
+                    - echo Build started on `date`
+                    - echo `pwd`
+                    - echo `ls -altr`
+                    - docker build -t ${ImageRepo} backend
                     - docker tag ${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
                 post_build:
                   commands:
                     - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                    - echo Build completed on `date`
             - { 
                 ImageRepo: !Ref ImageRepo
               }
-      SourceVersion: feature/scribe
       Environment:
         Type: LINUX_CONTAINER
         Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
         ComputeType: BUILD_GENERAL1_SMALL
+        EnvironmentVariables:
+        - Name: SOURCE_CODE_LOCATION
+          Value: !Sub "${SourceCodeLocation}"
       ServiceRole: !GetAtt BuildRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
@@ -339,7 +377,8 @@ Resources:
     Type: Custom::BuildCode
     Properties:
       ServiceToken: !GetAtt BuildCustomResourceFunction.Arn
-      PROJECT: !Ref BuildProject
+      PROJECT: !Ref VirtualParticipantBuildProject
+      SOURCE_CODE_LOCATION: !Sub "${SourceCodeLocation}"
 
   ECSRoleCustomResourceRole:
     Type: AWS::IAM::Role
@@ -561,6 +600,14 @@ Resources:
               Value: !Ref CustomVocabularyName
             - Name: CUSTOM_LANGUAGE_MODEL_NAME
               Value: !Ref CustomLanguageModelName
+            - Name: INTRO_MESSAGE
+              Value: !Ref IntroMessage              
+            - Name: START_RECORDING_MESSAGE
+              Value: !Ref StartRecordingMessage
+            - Name: STOP_RECORDING_MESSAGE
+              Value: !Ref StopRecordingMessage
+            - Name: EXIT_MESSAGE
+              Value: !Ref ExitMessage
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           LogConfiguration:
@@ -634,7 +681,7 @@ Resources:
                     ecs:CreateAction:
                       - RunTask
 
-  SchedulerStateMachineLogGroup:
+  LMAVirtualParticipantSchedulerStateMachineLogGroup:
     Type: 'AWS::Logs::LogGroup'
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
@@ -642,7 +689,7 @@ Resources:
       RetentionInDays: 7
       LogGroupName: !Sub '/aws/vendedlogs/states/${AWS::StackName}'
 
-  SchedulerStateMachineRole:
+  LMAVirtualParticipantSchedulerStateMachineRole:
     Type: "AWS::IAM::Role"
     Properties:
       AssumeRolePolicyDocument:
@@ -709,15 +756,15 @@ Resources:
                   StringLike:
                     iam:PassedToService: scheduler.amazonaws.com
 
-  SchedulerStateMachine:
+  LMAVirtualParticipantSchedulerStateMachine:
     Type: "AWS::StepFunctions::StateMachine"
     Properties:
-      RoleArn: !GetAtt [ SchedulerStateMachineRole, Arn ]
+      RoleArn: !GetAtt [ LMAVirtualParticipantSchedulerStateMachineRole, Arn ]
       LoggingConfiguration:
         Destinations:
           - CloudWatchLogsLogGroup:
               LogGroupArn: !GetAtt 
-                - SchedulerStateMachineLogGroup
+                - LMAVirtualParticipantSchedulerStateMachineLogGroup
                 - Arn
         IncludeExecutionData: true
         Level: ALL
@@ -789,6 +836,10 @@ Resources:
                           "Name": "scribe",
                           "Environment": [
                             {
+                              "Name": "MEETING_PLATFORM",
+                              "Value.$": "$.data.meetingPlatform"
+                            },
+                            {
                               "Name": "MEETING_ID",
                               "Value.$": "$.data.meetingID"
                             },
@@ -799,6 +850,10 @@ Resources:
                             {
                               "Name": "MEETING_NAME",
                               "Value.$": "$.data.meetingName"
+                            },
+                            {
+                              "Name": "LMA_USER",
+                              "Value.$": "$.data.userName"
                             }
                           ]
                         }
@@ -929,4 +984,4 @@ Resources:
 Outputs:
   
   StepFunctions:
-    Value: !Ref SchedulerStateMachine
+    Value: !Ref LMAVirtualParticipantSchedulerStateMachine
