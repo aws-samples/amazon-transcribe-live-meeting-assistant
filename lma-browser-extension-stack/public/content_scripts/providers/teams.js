@@ -61,6 +61,13 @@ const sendChatMessage = function (message) {
     console.error('Error in sendChatMessage:', error);
     setTimeout(() => sendChatMessage(message), 1000); // Retry after 1 second if there's an error
   } */
+    if (message.includes('stopped')) {
+      console.log("Recording stopped");
+      activeSpeakerObserver.disconnect();
+  } else {
+      console.log("Start Listening");
+      startObserver();
+  }
 };
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
@@ -76,6 +83,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     } 
     sendChatMessage(request.message);
     */
+    sendChatMessage(request.message);
   }
 });
 
@@ -259,5 +267,5 @@ window.onload = function () {
   }, 2000);
 
   checkForMeetingMetadata();
-  startObserver();
+
 };
