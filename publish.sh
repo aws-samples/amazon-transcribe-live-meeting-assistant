@@ -145,8 +145,8 @@ zipfile=src-${HASH}.zip
 echo "Zipping source to ${tmpdir}/${zipfile}"
 zip -r ${tmpdir}/$zipfile . -x "node_modules/*" -x "build/*"
 echo "Upload source and template to S3"
-BROWSER_EXTENSION_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${dir}/${zipfile}
-aws s3 cp ${tmpdir}/${zipfile} s3://${BROWSER_EXTENSION_SRC_S3_LOCATION}
+VIRTUAL_PARTICIPANT_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${dir}/${zipfile}
+aws s3 cp ${tmpdir}/${zipfile} s3://${VIRTUAL_PARTICIPANT_SRC_S3_LOCATION}
 s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
 https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
 aws s3 cp ./template.yaml ${s3_template}
@@ -289,7 +289,8 @@ sed -e "s%<ARTIFACT_BUCKET_TOKEN>%$BUCKET%g" |
 sed -e "s%<ARTIFACT_PREFIX_TOKEN>%$PREFIX_AND_VERSION%g" |
 sed -e "s%<VERSION_TOKEN>%$VERSION%g" |
 sed -e "s%<REGION_TOKEN>%$REGION%g" |
-sed -e "s%<BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>%$BROWSER_EXTENSION_SRC_S3_LOCATION%g" > $tmpdir/$MAIN_TEMPLATE
+sed -e "s%<BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>%$BROWSER_EXTENSION_SRC_S3_LOCATION%g" |
+sed -e "s%<VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>%$VIRTUAL_PARTICIPANT_SRC_S3_LOCATION%g" > $tmpdir/$MAIN_TEMPLATE
 # upload main template
 aws s3 cp $tmpdir/$MAIN_TEMPLATE s3://${BUCKET}/${PREFIX}/$MAIN_TEMPLATE || exit 1
 
