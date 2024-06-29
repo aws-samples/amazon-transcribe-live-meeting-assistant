@@ -1151,6 +1151,7 @@ Resources:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-virtual-participant-stack/template.yaml
       # yamllint enable rule:line-length
       Parameters:
+        LMAStackName: !Ref AWS::StackName
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
@@ -1170,6 +1171,8 @@ Resources:
         PrivateSubnet1: !GetAtt VPCSTACK.Outputs.PrivateSubnet1
         PrivateSubnet2: !GetAtt VPCSTACK.Outputs.PrivateSubnet2
         SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
+        LMASettingsParameterName: !Ref LMASettingsParameter
+        UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack

@@ -3,6 +3,10 @@ Description: Amazon Transcribe Live Meeting Assistant - Virtual Participant
 
 Parameters:
 
+  LMAStackName:
+    Type: String
+    Description: LMA Stack Name
+
   IntroMessage:
     Type: String
     Default: >-
@@ -37,6 +41,14 @@ Parameters:
   PrivateSubnet2:
     Description: Private subnet 2 for Fargate
     Type: String
+
+  LMASettingsParameterName:
+    Type: String
+    Description: LCA settings SSM Parameter store
+
+  UpdateLMASettingsFunctionArn:
+    Type: String
+    Description: Update LMA Settings Lambda function ARN
 
   # container source code
   SourceCodeLocation:
@@ -754,6 +766,8 @@ Resources:
   LMAVirtualParticipantSchedulerStateMachine:
     Type: "AWS::StepFunctions::StateMachine"
     Properties:
+      # StateMachine name is used in policy in AISTACK template
+      StateMachineName: !Sub '${LMAStackName}-LMAVirtualParticipantScheduler'
       RoleArn: !GetAtt [ LMAVirtualParticipantSchedulerStateMachineRole, Arn ]
       LoggingConfiguration:
         Destinations:
@@ -855,18 +869,21 @@ Resources:
                       ]
                     }
                   },
-                  "End": true
+                  "End": true,
+                  "ResultSelector": {
+                    "failures.$": "$.Failures"
+                  }
                 },
                 "CreateSchedule": {
                   "Type": "Task",
                   "Parameters": {
                     "ActionAfterCompletion": "DELETE",
-                    "Description.$": "$.data.meetingName",
+                    "Description.$": "States.Format('{}_{}', $.data.meetingPlatform, $.data.meetingName)",
                     "FlexibleTimeWindow": {
                       "Mode": "OFF"
                     },
                     "GroupName": "${ScheduleGroup}",
-                    "Name.$": "States.Format('{}_{}', $.data.meetingID, States.UUID())",
+                    "Name.$": "States.Format('{}_{}_{}_{}', $.data.meetingPlatform, $.data.meetingName, $.data.meetingID, States.MathRandom(0, 1000000))",
                     "ScheduleExpression.$": "States.Format('at({})', $.data.meetingTime)",
                     "ScheduleExpressionTimezone": "UTC",
                     "State": "ENABLED",
@@ -898,6 +915,10 @@ Resources:
                             "name": "scribe",
                             "environment": [
                               {
+                                "name": "MEETING_PLATFORM",
+                                "value.$": "$.data.meetingPlatform"
+                              },
+                              {
                                 "name": "MEETING_ID",
                                 "value.$": "$.data.meetingID"
                               },
@@ -908,6 +929,10 @@ Resources:
                               {
                                 "name": "MEETING_NAME",
                                 "value.$": "$.data.meetingName"
+                              },
+                              {
+                                "Name": "LMA_USER",
+                                "Value.$": "$.data.userName"
                               }
                             ]
                           }
@@ -975,6 +1000,16 @@ Resources:
               ClusterArn: !GetAtt [ Cluster, Arn ],
               TargetECSRoleArn: !GetAtt [ TargetECSRole, Arn ]
             }
+
+  UpdateLMASettingsWithStateMachine:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !Ref UpdateLMASettingsFunctionArn
+      LCASettingsName: !Ref LMASettingsParameterName
+      LCASettingsKeyValuePairs:
+        LMAVirtualParticipantSchedulerStateMachine: !GetAtt [ LMAVirtualParticipantSchedulerStateMachine, Arn ]
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
 
 Outputs:
   
