@@ -526,7 +526,7 @@ Resources:
   # CodeBuild
   ##########################################################################
 
-  TranscriberCodeBuildServiceRole:
+  LMAUICodeBuildServiceRole:
     Type: AWS::IAM::Role
     Properties:
       Path: /
@@ -585,12 +585,12 @@ Resources:
             and therefore
             cannot be specificed directly.
 
-  TranscriberCodeBuildProject:
+  LMAUICodeBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Description: !Sub >-
         Builds docker images and the website of stack: ${AWS::StackName}
-      ServiceRole: !Ref TranscriberCodeBuildServiceRole
+      ServiceRole: !Ref LMAUICodeBuildServiceRole
       EncryptionKey: alias/aws/s3
       Artifacts:
         Type: NO_ARTIFACTS
@@ -615,7 +615,6 @@ Resources:
             build:
               commands:
                 - echo Build started on `date`
-                - echo Building kvs transcribe streamig container image
                 - cd $CODEBUILD_SRC_DIR
                 - cd source/ui
                 - echo Building Web UI
@@ -703,7 +702,7 @@ Resources:
             Action:
             - codebuild:StartBuild
             - codebuild:BatchGetBuilds
-            Resource: !GetAtt TranscriberCodeBuildProject.Arn
+            Resource: !GetAtt LMAUICodeBuildProject.Arn
           - Effect: Allow
             Action:
             - logs:CreateLogGroup
@@ -732,14 +731,15 @@ Resources:
             Resource:
             - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
 
-  CodeBuildRun:
-    Type: Custom::CodeBuildRun
+  LMAUICodeBuildRun:
+    Type: Custom::LMAUICodeBuildRun
     Properties:
       ServiceToken: !GetAtt LambdaCodeBuildStartBuild.Arn
-      BuildProjectName: !Ref TranscriberCodeBuildProject
+      BuildProjectName: !Ref LMAUICodeBuildProject
       IsLexAgentAssistEnabled: !Ref IsLexAgentAssistEnabled
       EnableVoiceToneAnalysis: !Ref EnableVoiceToneAnalysis
       IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
+      LMASettingsParameterName: !Ref LMASettingsParameterName
       # Makefile calculates and substitute code hash in the filename here during package build
       # to force codebuild to rerun when source code changes, and to correctly roll back to 
       # previous version if build fails.
