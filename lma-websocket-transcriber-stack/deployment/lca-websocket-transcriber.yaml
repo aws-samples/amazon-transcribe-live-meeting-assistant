@@ -228,16 +228,9 @@ Parameters:
     Type: String
     Description: LCA settings SSM Parameter store
 
-  # NOTE: "AssistantWakePhraseRegEx" (wake phrase parameter) is not used by this stack/lambda function. 
-  # It is added to parameters only to force a custom resource update when wake phrase parameter 
-  # in the main stack is changed. The custom resource update then runs UpdateWSEndpointSettings lambda to restore 
-  # "WSEndpoint" and "recordingDisclaimer" fields overwritten by AI Stack (when wake phrase is changed).
-  AssistantWakePhraseRegEx:
+  UpdateLMASettingsFunctionArn:
     Type: String
-    Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
-    Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant.
-      Default is 'OK Assistant'.
+    Description: Update LMA Settings Lambda function ARN
 
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
@@ -1302,107 +1295,17 @@ Resources:
           reason: This is using Cloudfront default TLS, can be changed by customer
             if needed.
 
-  WSEndpointLambdaRole:
-    Type: "AWS::IAM::Role"
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-        - Action: "sts:AssumeRole"
-          Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-        Version: 2012-10-17
-      ManagedPolicyArns:
-      - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-      Policies:
-      - PolicyName: updateSSMStore
-        PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - ssm:GetParameter
-            - ssm:PutParameter
-            Resource:
-            - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
-
-  UpdateWSEndpointSettings:
-    Type: "AWS::Lambda::Function"
-    Properties:
-      Role: !GetAtt WSEndpointLambdaRole.Arn
-      Handler: index.handler
-      Runtime: python3.11
-      Timeout: 900
-      Code:
-        ZipFile: |
-          import boto3
-          import cfnresponse
-          import json
-
-          ssm = boto3.client('ssm')
-          def updateSSMParameter(props):
-            parameterName = props['LCASettings']
-            response = ssm.get_parameter(Name=parameterName)
-            settings = response['Parameter']['Value']
-            settingsJSON = json.loads(settings)
-            settingsJSON['WSEndpoint'] = props['WSEndpoint']
-            settingsJSON['recordingDisclaimer'] = props['recordingDisclaimer']
-            updatedsettings = json.dumps(settingsJSON)
-            ssm.put_parameter(Name=parameterName, Value=updatedsettings, Overwrite=True)
-                        
-          def handler(event, context):        
-            print(json.dumps(event))
-            status = cfnresponse.SUCCESS
-            responseData = {}
-            reason = "Success"
-            props = event["ResourceProperties"]
-            if event['RequestType'] != 'Delete':
-              try:
-                updateSSMParameter(props)
-              except Exception as e:
-                print(e)
-                reason = f"Exception thrown: {e}"
-                status = cfnresponse.FAILED              
-            cfnresponse.send(event, context, status, responseData, reason=reason)
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/UpdateWSEndpointSettings
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-        - id: W89
-          reason: Customer can use VPC if desired
-        - id: W92
-          reason: Customer can choose reserved concurrency based on their requirement.
-        - id: W58
-          reason: Managed policy already provides access to CloudWatch logs.
-    DependsOn:
-    - UpdateWSEndpointSettingsLogGroup
-
-  UpdateWSEndpointSettingsLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/UpdateWSEndpointSettings
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-
-  UpdateWSEndpointSettingsExec:
+  UpdateLMASettingsWithWSEndpoint:
     Type: AWS::CloudFormation::CustomResource
     Properties:
-      ServiceToken: !GetAtt UpdateWSEndpointSettings.Arn
-      LCASettings: !Ref LMASettingsParameterName
-      WSEndpoint: !Join
-      - ''
-      - - 'wss://'
-        - !GetAtt WebSocketCloudFrontDistribution.DomainName
-        - '/api/v1/ws'
-      recordingDisclaimer: !Ref RecordingDisclaimer
-      # "AssistantWakePhraseRegEx" (wake phrase parameter) is not used by this stack/lambda function. 
-      # It is added to parameters only to force a custom resource update when wake phrase parameter 
-      # in the main stack is changed. The custom resource update then runs UpdateWSEndpointSettings lambda to restore 
-      # "WSEndpoint" and "recordingDisclaimer" fields overwritten by AI Stack (when wake phrase is changed).
-      assistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
+      ServiceToken: !Ref UpdateLMASettingsFunctionArn
+      LCASettingsName: !Ref LMASettingsParameterName
+      LCASettingsKeyValuePairs:
+        WSEndpoint: !Join
+          - ''
+          - - 'wss://'
+            - !GetAtt WebSocketCloudFrontDistribution.DomainName
+            - '/api/v1/ws'
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 

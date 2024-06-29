@@ -729,11 +729,109 @@ Resources:
         EncryptionType: KMS
         KeyId: alias/aws/kinesis
 
+  # Initialise LMASettingsParameter as empty (so it never gets replaced) 
+  # and use CR UpdateLMASettingsFunction to add/update values
   LMASettingsParameter:
     Type: AWS::SSM::Parameter
     Properties:
       Type: String
-      Value: !Sub '{ "WSEndpoint":"", "AssistantWakePhraseRegEx":"${AssistantWakePhraseRegEx}"}'
+      Name: !Sub "${AWS::StackName}-LMASettings"
+      Value: '{}'
+
+  UpdateLMASettingsFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: "sts:AssumeRole"
+          Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+      - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+      - PolicyName: updateSSMStore
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - ssm:GetParameter
+            - ssm:PutParameter
+            Resource:
+            - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameter}"
+
+  UpdateLMASettingsFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Role: !GetAtt UpdateLMASettingsFunctionRole.Arn
+      Handler: index.handler
+      Runtime: python3.11
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import json
+          ssm = boto3.client('ssm')
+          def updateSSMParameter(props):
+            parameterName = props['LCASettingsName']
+            parameterValues = props['LCASettingsKeyValuePairs']
+            response = ssm.get_parameter(Name=parameterName)
+            settingsJSON = response['Parameter']['Value']
+            settings = json.loads(settingsJSON)
+            print(f"Existing settings: {settings}")
+            for key, value in parameterValues.items():
+              settings[key] = value
+            print(f"Updated settings: {settings}")
+            newSettingsJSON = json.dumps(settings)
+            ssm.put_parameter(Name=parameterName, Value=newSettingsJSON, Overwrite=True)
+                        
+          def handler(event, context):        
+            print(json.dumps(event))
+            status = cfnresponse.SUCCESS
+            responseData = {}
+            reason = "Success"
+            props = event["ResourceProperties"]
+            if event['RequestType'] != 'Delete':
+              try:
+                updateSSMParameter(props)
+              except Exception as e:
+                print(e)
+                reason = f"Exception thrown: {e}"
+                status = cfnresponse.FAILED              
+            cfnresponse.send(event, context, status, responseData, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Ref: UpdateLMASettingsFunctionLogGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+        - id: W89
+          reason: Customer can use VPC if desired
+        - id: W92
+          reason: Customer can choose reserved concurrency based on their requirement.
+        - id: W58
+          reason: Managed policy already provides access to CloudWatch logs.
+
+  UpdateLMASettingsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UpdateLMASettingsFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+
+  UpdateLMASettingsWithAssistantWakePhraseRegEx:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt UpdateLMASettingsFunction.Arn
+      LCASettingsName: !Ref LMASettingsParameter
+      LCASettingsKeyValuePairs:
+        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
 
   ## BUCKET TO STORE STEREO RECORDINGS
   RecordingsBucket:
@@ -1036,8 +1134,8 @@ Resources:
         PcaPlaybackAudioFilePrefix: ''
         PcaWebAppURL: ''
         PcaWebAppCallPathPrefix: ''
-        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         LMASettingsParameterName: !Ref LMASettingsParameter
+        UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
         VPC: !GetAtt VPCSTACK.Outputs.VPC
