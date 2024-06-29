@@ -708,8 +708,7 @@ Resources:
             - logs:CreateLogGroup
             - logs:CreateLogStream
             - logs:PutLogEvents
-            Resource:
-            - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+            Resource: "*"
         # Used by custom resource helper poller
         # https://github.com/aws-cloudformation/custom-resource-helper
       - PolicyName: CustomResourcePoller
@@ -731,8 +730,8 @@ Resources:
             Resource:
             - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
 
-  LMAUICodeBuildRun:
-    Type: Custom::LMAUICodeBuildRun
+  CodeBuildRun:
+    Type: Custom::CodeBuildRun
     Properties:
       ServiceToken: !GetAtt LambdaCodeBuildStartBuild.Arn
       BuildProjectName: !Ref LMAUICodeBuildProject
@@ -1849,6 +1848,16 @@ Resources:
             - translate:TranslateText
             - comprehend:DetectDominantLanguage
             Resource: "*"
+      - PolicyName: executeStepfunctions
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - states:StartSyncExecution
+            Resource:
+            - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine/${LMAStackName}-LMAVirtualParticipantScheduler"
+
     Metadata:
       cfn_nag:
         rules_to_suppress:
