@@ -12,6 +12,16 @@ const openChatPanel = function () {
   }
 }
 
+document.addEventListener("DOMContentLoaded", function () {
+  const allSpans = document.querySelectorAll('span');
+  allSpans.forEach(span => {
+    console.log(span.getAttribute('aria-label'));
+  });
+
+  const rosterTitleElement = document.querySelector('span[aria-label^="In this meeting"]');
+  console.log('Roster Title Element:', rosterTitleElement);
+});
+
 const activeRingClass = "ui-avatar e jf fo by jg qk ql qm qn qo qp qq qr qs qt qu qv gx gy gz ha rt";
 const inactiveRingClass = "ui-avatar e jf fo by jg qk ql qm qn qo qp qq qr qs qt qu qv gx gy gz ha qw";
 
@@ -136,101 +146,111 @@ const checkForMeetingMetadata = function () {
 let activeSpeakerObserver = null;
 // Function to start the MutationObserver
 const startObserver = () => {
-  // Step 1: Locate the roster title element
-  // const rosterTitleElement = document.querySelector('span[id^="roster-title-section"][aria-label^="In this meeting"]');
-  const rosterTitleElement = document.querySelector('span[aria-label^="In this meeting"]');
-  console.log('Roster Title Element:', rosterTitleElement);
 
-  let targetDivElement = null;
+  const iframe = document.querySelector('iframe[id^="experience-container"]');
+  if (iframe) {
+    const iframeDocument = iframe.contentWindow.document;
+    // Step 1: Locate the roster title element
+    // const rosterTitleElement = document.querySelector('span[id^="roster-title-section"][aria-label^="In this meeting"]');
+    const rosterTitleElement = iframeDocument.querySelector('span[aria-label^="In this meeting"]');
+    console.log('Roster Title Element:', rosterTitleElement);
 
-  if (rosterTitleElement) {
-    // Step 2: Locate the closest div with role="treeitem"
-    const treeItemDiv = rosterTitleElement.closest('div[role="treeitem"]');
-    console.log('Tree Item Div:', treeItemDiv);
+    let targetDivElement = null;
 
-    // Step 3: Get its parent div
-    if (treeItemDiv) {
-      targetDivElement = treeItemDiv.parentElement.parentElement;
-      console.log('Target Div Element:', targetDivElement);
+    if (rosterTitleElement) {
+      // Step 2: Locate the closest div with role="treeitem"
+      const treeItemDiv = rosterTitleElement.closest('div[role="treeitem"]');
+      console.log('Tree Item Div:', treeItemDiv);
+
+      // Step 3: Get its parent div
+      if (treeItemDiv) {
+        targetDivElement = treeItemDiv.parentElement.parentElement;
+        console.log('Target Div Element:', targetDivElement);
+      }
     }
-  }
 
-  // Retry if target element is not found
-  if (!targetDivElement) {
-    console.log('Target div not found. Retrying in 2 seconds...');
-    setTimeout(startObserver, 2000); // Retry after 2 seconds
-    return;
-  }
+    // Retry if target element is not found
+    if (!targetDivElement) {
+      console.log('Target div not found. Retrying in 2 seconds...');
+      setTimeout(startObserver, 2000); // Retry after 2 seconds
+      return;
+    }
 
-  // Options for the observer (which mutations to observe)
-  const config = { childList: true, subtree: true, attributes: true, attributeOldValue: true };
+    // Options for the observer (which mutations to observe)
+    const config = { childList: true, subtree: true, attributes: true, attributeOldValue: true };
 
-  // Callback function to execute when mutations are observed
-  const callback = (mutationsList, observer) => {
-    console.log('Callback function triggered');
-    mutationsList.forEach((mutation) => {
-      if (mutation.type === 'childList') {
-        console.log('A speaker added or removed.');
-        console.log(mutation);
-      } else if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-        console.log(`The ${mutation.attributeName} attribute was modified.`);
-        console.log(mutation);
-        const targetElement = mutation.target;
-        const isDiv = targetElement.tagName.toLowerCase() === 'div';
-        let hasHoverTargetId = null;
-        if (targetElement.hasAttribute('data-lpc-hover-target-id')) {
-          console.log(`'data-lpc-hover-target-id' attribute found on target element.`);
-          hasHoverTargetId = true;
-        }
-        if (isDiv && hasHoverTargetId) {
-          console.log('Both conditions are true: the element is a div and its role attribute is presentation.');
-          const oldValue = mutation.oldValue;
-          const newValue = mutation.target.getAttribute(mutation.attributeName);
-          if (oldValue && newValue && oldValue.startsWith(inactiveRingClass) && newValue.startsWith(activeRingClass)) {
-            console.log('Active Speaker participant-speaker-ring activated');
-            let parentElement = mutation.target.closest('li');
-            if (parentElement && parentElement.hasAttribute('aria-label')) {
-              const ariaLabel = parentElement.getAttribute('aria-label');
-              if (ariaLabel && !ariaLabel.endsWith(' Muted')) {
-                const activeSpeaker = ariaLabel.split(',')[0];
-                console.log(`Active Speaker Change: ${activeSpeaker}`);
-                chrome.runtime.sendMessage({ action: 'ActiveSpeakerChange', active_speaker: activeSpeaker });
-              }
-            } else {
-              console.log('No aria-label found at expected parent level.');
-            }
-          } else if (oldValue && newValue && oldValue.startsWith(activeRingClass) && newValue.startsWith(inactiveRingClass)) {
-            console.log('Active Speaker stopped, finding out who else is speaking');
-            let foundActiveSpeaker = false;
-            const otherActiveSpeaker = targetDivElement.querySelector(`div[data-lpc-hover-target-id^="lpc-react-target"][class^="${activeRingClass}"]`);
-            if (otherActiveSpeaker) {
-              const otherActiveSpeakerLi = otherActiveSpeaker.closest('li');
-              if (otherActiveSpeakerLi && otherActiveSpeakerLi.hasAttribute('aria-label') && otherActiveSpeakerLi.hasAttribute('data-cid') && otherActiveSpeakerLi.getAttribute('data-ci') === 'roster-participant') {
-                const ariaLabel = otherActiveSpeakerLi.getAttribute('aria-label');
+    // Callback function to execute when mutations are observed
+    const callback = (mutationsList, observer) => {
+      console.log('Callback function triggered');
+      mutationsList.forEach((mutation) => {
+        if (mutation.type === 'childList') {
+          console.log('A speaker added or removed.');
+          console.log(mutation);
+        } else if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+          console.log(`The ${mutation.attributeName} attribute was modified.`);
+          console.log(mutation);
+          const targetElement = mutation.target;
+          const isDiv = targetElement.tagName.toLowerCase() === 'div';
+          let hasHoverTargetId = null;
+          if (targetElement.hasAttribute('data-lpc-hover-target-id')) {
+            console.log(`'data-lpc-hover-target-id' attribute found on target element.`);
+            hasHoverTargetId = true;
+          }
+          if (isDiv && hasHoverTargetId) {
+            console.log('Both conditions are true: the element is a div and its role attribute is presentation.');
+            const oldValue = mutation.oldValue;
+            const newValue = mutation.target.getAttribute(mutation.attributeName);
+            if (oldValue && newValue && oldValue.startsWith(inactiveRingClass) && newValue.startsWith(activeRingClass)) {
+              console.log('Active Speaker participant-speaker-ring activated');
+              let parentElement = mutation.target.closest('li');
+              if (parentElement && parentElement.hasAttribute('aria-label')) {
+                const ariaLabel = parentElement.getAttribute('aria-label');
                 if (ariaLabel && !ariaLabel.endsWith(' Muted')) {
                   const activeSpeaker = ariaLabel.split(',')[0];
-                  foundActiveSpeaker = true;
                   console.log(`Active Speaker Change: ${activeSpeaker}`);
                   chrome.runtime.sendMessage({ action: 'ActiveSpeakerChange', active_speaker: activeSpeaker });
                 }
+              } else {
+                console.log('No aria-label found at expected parent level.');
               }
-            }
-            if (!foundActiveSpeaker) {
-              console.log('No more active speakers.');
-              chrome.runtime.sendMessage({ action: 'ActiveSpeakerChange', active_speaker: 'n/a' });
+            } else if (oldValue && newValue && oldValue.startsWith(activeRingClass) && newValue.startsWith(inactiveRingClass)) {
+              console.log('Active Speaker stopped, finding out who else is speaking');
+              let foundActiveSpeaker = false;
+              const otherActiveSpeaker = targetDivElement.querySelector(`div[data-lpc-hover-target-id^="lpc-react-target"][class^="${activeRingClass}"]`);
+              if (otherActiveSpeaker) {
+                const otherActiveSpeakerLi = otherActiveSpeaker.closest('li');
+                if (otherActiveSpeakerLi && otherActiveSpeakerLi.hasAttribute('aria-label') && otherActiveSpeakerLi.hasAttribute('data-cid') && otherActiveSpeakerLi.getAttribute('data-cid') === 'roster-participant') {
+                  const ariaLabel = otherActiveSpeakerLi.getAttribute('aria-label');
+                  if (ariaLabel && !ariaLabel.endsWith(' Muted')) {
+                    const activeSpeaker = ariaLabel.split(',')[0];
+                    foundActiveSpeaker = true;
+                    console.log(`Active Speaker Change: ${activeSpeaker}`);
+                    chrome.runtime.sendMessage({ action: 'ActiveSpeakerChange', active_speaker: activeSpeaker });
+                  }
+                }
+              }
+              if (!foundActiveSpeaker) {
+                console.log('No more active speakers.');
+                chrome.runtime.sendMessage({ action: 'ActiveSpeakerChange', active_speaker: 'n/a' });
+              }
             }
           }
         }
-      }
-    });
-  };
+      });
+    };
 
-  // Create an observer instance linked to the callback function
-  activeSpeakerObserver = new MutationObserver(callback);
+    // Create an observer instance linked to the callback function
+    activeSpeakerObserver = new MutationObserver(callback);
 
-  // Start observing the target nodes for configured mutations
-  activeSpeakerObserver.observe(targetDivElement, config);
-  console.log('MutationObserver started for active speakers');
+    // Start observing the target nodes for configured mutations
+    activeSpeakerObserver.observe(targetDivElement, config);
+    console.log('MutationObserver started for active speakers');
+
+  }
+  else {
+    console.log('Iframe not found');
+  }
+
 };
 
 window.onload = function () {
