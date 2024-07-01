@@ -7,6 +7,12 @@ Parameters:
     Type: String
     Description: LMA Stack Name
 
+  # {LMA_USER} token is replaced by user's name at runtime.
+
+  LMAIdentity:
+    Type: String
+    Default: LMA ({LMA_USER})
+
   IntroMessage:
     Type: String
     Default: >-
@@ -607,6 +613,8 @@ Resources:
               Value: !Ref CustomVocabularyName
             - Name: CUSTOM_LANGUAGE_MODEL_NAME
               Value: !Ref CustomLanguageModelName
+            - Name: LMA_IDENTITY
+              Value: !Ref LMAIdentity
             - Name: INTRO_MESSAGE
               Value: !Ref IntroMessage              
             - Name: START_RECORDING_MESSAGE

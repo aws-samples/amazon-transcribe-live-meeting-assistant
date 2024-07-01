@@ -17,10 +17,7 @@ start_recording_message = os.environ['START_RECORDING_MESSAGE'].replace(
 stop_recording_message = os.environ['STOP_RECORDING_MESSAGE'].replace(
     '{LMA_USER}', lma_user)
 exit_message = os.environ['EXIT_MESSAGE'].replace('{LMA_USER}', lma_user)
-
-
-scribe_name = "Live Meeting Assistant"
-scribe_identity = f"{scribe_name} ({lma_user})"
+lma_identity = os.environ['LMA_IDENTITY'].replace('{LMA_USER}', lma_user)
 
 waiting_timeout = 300000  # 5 minutes
 meeting_timeout = 21600000  # 6 hours

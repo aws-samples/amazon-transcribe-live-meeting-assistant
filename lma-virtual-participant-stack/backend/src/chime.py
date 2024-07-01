@@ -18,7 +18,7 @@ async def meeting(page):
         print("Your scribe was unable to join the meeting.")
         return
     else:
-        await name_text_element.type(details.scribe_identity)
+        await name_text_element.type(details.lma_identity)
         await name_text_element.press('Tab')
         await page.keyboard.press('Enter')
 
@@ -126,7 +126,7 @@ async def meeting(page):
             print(details.start_messages[0])
             await send_messages(details.start_messages)
             asyncio.create_task(scribe.transcribe())
-        elif details.start and not (sender == "Amazon Chime" or details.scribe_name in sender):
+        elif details.start and not (sender == "Amazon Chime" or details.lma_identity in sender):
             timestamp = datetime.now().strftime('%H:%M')
             message = f"[{timestamp}] {sender}: "
             if attachment_title and attachment_href:

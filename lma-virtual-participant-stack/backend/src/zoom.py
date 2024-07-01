@@ -21,7 +21,7 @@ async def meeting(page):
 
     print("Entering name.")
     name_text_element = await page.wait_for_selector('#input-for-name')
-    await name_text_element.type(details.scribe_identity)
+    await name_text_element.type(details.lma_identity)
     await name_text_element.press("Enter")
 
     print("Adding audio.")
