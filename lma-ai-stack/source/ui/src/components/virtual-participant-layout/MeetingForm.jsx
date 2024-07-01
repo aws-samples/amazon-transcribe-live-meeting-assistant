@@ -11,16 +11,22 @@ import {
   Alert,
   DatePicker,
 } from '@awsui/components-react';
+import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
+import useAppContext from '../../contexts/app';
+import awsExports from '../../aws-exports';
+import useSettingsContext from '../../contexts/settings';
 
 const MeetingForm = () => {
+  const { user } = useAppContext();
+  const { settings } = useSettingsContext();
   const [meetingPlatform, setMeetingPlatform] = useState('');
   const [meetingId, setMeetingId] = useState('');
   const [meetingPassword, setMeetingPassword] = useState('');
   const [meetingName, setMeetingName] = useState('');
   const [meetingDate, setMeetingDate] = useState('');
   const [meetingTime, setMeetingTime] = useState('');
-
   const [meetingTimeError, setMeetingTimeError] = useState('');
+  const { currentCredentials } = useAppContext();
 
   const meetingPlatforms = [
     { label: 'Amazon Chime', disabled: false, value: 'Chime' },
@@ -59,14 +65,47 @@ const MeetingForm = () => {
       meetingDateTimeFormatted = meetingDateTime.toISOString().slice(0, -5);
     }
 
-    const meeting = {
-      meetingPlatform: meetingPlatform.value,
-      meetingID: meetingId.replace(/ /g, ''),
-      meetingPassword,
-      meetingName,
-      meetingTime: meetingDateTimeFormatted,
+    console.log('User:', JSON.stringify(user));
+
+    const userName = user?.attributes?.email || 'Unknown';
+
+    // get stepfunctions client
+    const sfnClient = new SFNClient({
+      region: awsExports.aws_project_region,
+      credentials: currentCredentials,
+    });
+
+    // execute stepfunctions
+    const sfnParams = {
+      stateMachineArn: settings.LMAVirtualParticipantSchedulerStateMachine,
+      input: JSON.stringify({
+        apiInfo: { httpMethod: 'POST' },
+        data: {
+          meetingPlatform: meetingPlatform.value,
+          meetingID: meetingId.replace(/ /g, ''),
+          meetingPassword,
+          meetingName,
+          meetingTime: meetingDateTimeFormatted,
+          userName,
+        },
+      }),
     };
-    console.log(meeting);
+
+    console.log('StepFunctions params:', JSON.stringify(sfnParams));
+    sfnClient
+      .send(new StartSyncExecutionCommand(sfnParams))
+      .then((data) => {
+        console.log('StepFunctions response:', JSON.stringify(data));
+      })
+      .catch((error) => {
+        console.error('Error fetching StepFunctions response:', error);
+      });
+
+    setMeetingId('');
+    setMeetingPassword('');
+    setMeetingName('');
+    setMeetingDate('');
+    setMeetingTime('');
   };
 
   return (

@@ -1855,8 +1855,9 @@ Resources:
           - Effect: Allow
             Action:
             - states:StartSyncExecution
+            - states:StartExecution
             Resource:
-            - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine/${LMAStackName}-LMAVirtualParticipantScheduler"
+            - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
 
     Metadata:
       cfn_nag:
