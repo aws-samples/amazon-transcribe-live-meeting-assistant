@@ -202,7 +202,11 @@ export const startTranscribe = async (socketCallMap: SocketCallData, server: Fas
         tsParams.LanguageCode = TRANSCRIBE_LANGUAGE_CODE as LanguageCode;
     }
 
-    if (IS_CONTENT_REDACTION_ENABLED && TRANSCRIBE_LANGUAGE_CODE === 'en-US') {
+    if (IS_CONTENT_REDACTION_ENABLED && (
+        TRANSCRIBE_LANGUAGE_CODE === 'en-US' ||
+        TRANSCRIBE_LANGUAGE_CODE === 'en-AU' ||
+        TRANSCRIBE_LANGUAGE_CODE === 'en-GB' ||
+        TRANSCRIBE_LANGUAGE_CODE === 'es-US')) {
         tsParams.ContentRedactionType = CONTENT_REDACTION_TYPE as ContentRedactionType;
         if (TRANSCRIBE_PII_ENTITY_TYPES) {
             tsParams.PiiEntityTypes = TRANSCRIBE_PII_ENTITY_TYPES;
@@ -216,6 +220,7 @@ export const startTranscribe = async (socketCallMap: SocketCallData, server: Fas
     }
 
     if (isTCAEnabled) {
+        server.log.debug(`[TRANSCRIBING]: [${callMetaData.callId}] -StartCallAnalyticsStreamTranscriptionCommand args: ${JSON.stringify(tsParams)}`);
         try {
             const response = await transcribeClient.send(
                 new StartCallAnalyticsStreamTranscriptionCommand(tsParams as StartCallAnalyticsStreamTranscriptionCommandInput)
@@ -233,6 +238,7 @@ export const startTranscribe = async (socketCallMap: SocketCallData, server: Fas
         if (showSpeakerLabel) {
             tsParams.ShowSpeakerLabel = true;
         }
+        server.log.debug(`[TRANSCRIBING]: [${callMetaData.callId}] -Transcribe StartStreamTranscriptionCommand args: ${JSON.stringify(tsParams)}`);
         try {
             const response = await transcribeClient.send(
                 new StartStreamTranscriptionCommand(tsParams)
