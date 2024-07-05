@@ -653,8 +653,16 @@ Resources:
               transcribeLanguageCode = event['ResourceProperties'].get('TranscribeLanguageCode', '')
               transcribeLanguageOptions = event['ResourceProperties'].get('TranscribeLanguageOptions', '')
               transcribePreferredLanguage = event['ResourceProperties'].get('TranscribePreferredLanguage', '')
+              customVocabularyName = event['ResourceProperties'].get('CustomVocabularyName', '')
+              customLanguageModelName = event['ResourceProperties'].get('CustomLanguageModelName', '')
               if transcribeLanguageCode in ['identify-language', 'identify-multiple-languages']:
-                if transcribeLanguageOptions == '':
+                if customVocabularyName:
+                  status = cfnresponse.FAILED
+                  reason = f"CustomVocabularyName cannot be set when TranscribeLanguageCode is '{transcribeLanguageCode}'"
+                elif customLanguageModelName:
+                  status = cfnresponse.FAILED
+                  reason = f"CustomLanguageModelName cannot be set when TranscribeLanguageCode is '{transcribeLanguageCode}'"
+                elif transcribeLanguageOptions == '':
                   status = cfnresponse.FAILED
                   reason = f"At least two languages must be provided for TranscribeLanguageOptions when using language identification"
                 else:
@@ -710,6 +718,8 @@ Resources:
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
       TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
       TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
+      CustomVocabularyName: !Ref CustomVocabularyName
+      CustomLanguageModelName: !Ref CustomLanguageModelName
       BedrockModelIds: 
       - !Ref MeetingAssistServiceBedrockModelID  # Meeting assistant
       - !Ref BedrockModelId  # Meeting summarization
