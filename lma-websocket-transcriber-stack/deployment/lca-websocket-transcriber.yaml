@@ -87,9 +87,8 @@ Parameters:
     Type: String
     Default: "false"
     Description: >-
-      Enable content redaction from Amazon Transcribe transcription output. This is
-      only used when
-      the 'en-US' language is selected in the TranscribeLanguageCode parameter.
+      Enable content redaction from Amazon Transcribe transcription output. This is only used when
+      the 'en-US', 'en-AU', 'en-GB' or 'es-US' languages are selected in the TranscribeLanguageCode parameter.
     AllowedValues:
     - "true"
     - "false"
@@ -326,8 +325,12 @@ Metadata:
 
 Conditions:
   ShouldEnableContentRedaction: !And
-  - !Equals [!Ref IsContentRedactionEnabled, 'true']
-  - !Equals [!Ref TranscribeLanguageCode, 'en-US']
+    - !Equals [!Ref IsContentRedactionEnabled, 'true']
+    - !Or 
+      - !Equals [!Ref TranscribeLanguageCode, 'en-US']
+      - !Equals [!Ref TranscribeLanguageCode, 'en-AU']
+      - !Equals [!Ref TranscribeLanguageCode, 'en-GB']
+      - !Equals [!Ref TranscribeLanguageCode, 'es-US']
   ShouldInstallPcaIntegration: !Not [!Equals [!Ref PcaS3BucketName, '']]
 
 Outputs:
