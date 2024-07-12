@@ -118,13 +118,7 @@ const checkForMeetingMetadata = function () {
       const meetingTitle = document.querySelector('[data-tid="call-title"]');
       if (meetingTitle && displayName) {
         metadata.meetingTopic = meetingTitle.innerText;
-        const rosterElement = document.getElementById('roster-button');
-        if (rosterElement && rosterElement.getAttribute('data-track-action-outcome') === 'show') {
-            rosterElement.click();
-        } else {
-          console.log('roster-button Button not found in Teams page');
-        }
-        //clearInterval(intervalId);
+        setInterval(checkAndClickRoster, 2000);
       }
     }
     if (metadata.userName && metadata.userName.trim() !== '' && metadata.meetingTopic && metadata.meetingTopic.trim() !== '') {
@@ -422,7 +416,6 @@ window.onload = function () {
   }, 2000);
 
   checkForMeetingMetadata();
-  setInterval(checkAndClickRoster, 2000);
   startObserver();
   setInterval(checkAndStartObserver, 5000);
 };
