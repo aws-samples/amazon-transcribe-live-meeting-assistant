@@ -12,16 +12,6 @@ const openChatPanel = function () {
   }
 }
 
-document.addEventListener("DOMContentLoaded", function () {
-  const allSpans = document.querySelectorAll('span');
-  allSpans.forEach(span => {
-    console.log(span.getAttribute('aria-label'));
-  });
-
-  const rosterTitleElement = document.querySelector('span[aria-label^="In this meeting"]');
-  console.log('Roster Title Element:', rosterTitleElement);
-});
-
 const activeRingClass = "ui-avatar e jf fo by jg qk ql qm qn qo qp qq qr qs qt qu qv gx gy gz ha rt";
 const inactiveRingClass = "ui-avatar e jf fo by jg qk ql qm qn qo qp qq qr qs qt qu qv gx gy gz ha qw";
 
@@ -146,7 +136,6 @@ const checkForMeetingMetadata = function () {
 let activeSpeakerObserver = null;
 // Function to start the MutationObserver
 const startObserver = () => {
-
   const iframe = document.querySelector('iframe[id^="experience-container"]');
   if (iframe) {
     const iframeDocument = iframe.contentWindow.document;
@@ -172,6 +161,7 @@ const startObserver = () => {
     // Retry if target element is not found
     if (!targetDivElement) {
       console.log('Target div not found. Retrying in 2 seconds...');
+      openRoster();
       setTimeout(startObserver, 2000); // Retry after 2 seconds
       return;
     }
@@ -245,12 +235,11 @@ const startObserver = () => {
     // Start observing the target nodes for configured mutations
     activeSpeakerObserver.observe(targetDivElement, config);
     console.log('MutationObserver started for active speakers');
-
   }
   else {
     console.log('Iframe not found');
+    openRoster();
   }
-
 };
 
 window.onload = function () {
@@ -276,7 +265,51 @@ window.onload = function () {
       clearInterval(muteInterval);
     }
   }, 2000);
-
   checkForMeetingMetadata();
+  startRosterInterval();
+};
 
+function startRosterInterval() {
+  openRoster();
+  setInterval(openRoster, 2000);
+}
+
+const openRoster = function () {
+  const iframe = document.querySelector('iframe[id^="experience-container"]');
+  if (iframe){
+    const iframeDocument = iframe.contentWindow.document;
+    const rosterTitleElement = iframeDocument.querySelector('span[aria-label^="In this meeting"]');
+  if (rosterTitleElement) {
+    return;
+  } else {
+    let attempts = 0;
+    const maxAttempts = 50;
+    const tryOpenRoster = function () {
+      const rosterElement = document.getElementById('roster-button');
+      if (rosterElement) {
+        rosterElement.click();
+        console.log('Roster button found and clicked');
+        return;
+      }
+      console.log('roster-button not found, trying find in iframe');
+      if (iframe) {
+        const iframeDocument = iframe.contentWindow.document;
+        const alternativeRosterButton = iframeDocument.getElementById('roster-button');
+        if (alternativeRosterButton) {
+          alternativeRosterButton.click();
+          console.log('Alternative roster button found from iframe and clicked');
+          return;
+        }
+      }
+      attempts++;
+      if (attempts < maxAttempts) {
+        console.log(`Roster button not found. Retrying in 2 seconds... (Attempt ${attempts}/${maxAttempts})`);
+        setTimeout(tryOpenRoster, 2000);
+      } else {
+        console.log('Max attempts reached. Unable to find and click roster button.');
+      }
+    };
+    tryOpenRoster();
+  }
+  }
 };
