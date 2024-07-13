@@ -90,7 +90,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 const checkForMeetingMetadata = function () {
   var displayName;
   const intervalId = setInterval(() => {
-    if (!displayName) {
+    if (!metadata.userName || metadata.userName.trim() === '') {
       try {
         sessionData = JSON.parse(localStorage.getItem("msal.activeUserProfile"));
         // console.log(sessionData);
@@ -101,8 +101,10 @@ const checkForMeetingMetadata = function () {
       } catch (error) {
         console.log("Unable to read team live session data", error);
       }
+    }
+    if (!metadata.meetingTopic || metadata.meetingTopic.trim() === '') {
       // Select the span element based on type, role, and data-tid attributes
-      const spanElement = document.querySelector('span[role="timer"][data-tid="call-duration"]');
+      let spanElement = document.querySelector('span[role="timer"][data-tid="call-duration"]');
       // Initialize meetingTitle variable
       let meetingTitle;
       // Check if the span element exists before extracting aria-label
@@ -112,23 +114,29 @@ const checkForMeetingMetadata = function () {
         // Extract the meeting title from aria-label (assuming it comes before the first comma)
         meetingTitle = ariaLabel.split(',')[0].trim();
         console.log(meetingTitle); // Output the extracted meeting title
-      } else {
-        console.log('Span element not found or does not match criteria.');
-      }
-      if (meetingTitle && displayName) {
-        metadata.meetingTopic = meetingTitle;
-        const rosterElement = document.getElementById('roster-button');
-        if (rosterElement) {
-          rosterElement.click();
-        } else {
-          console.log('roster-button Button not found in Teams page');
+        if (meetingTitle && meetingTitle.trim()!== '') {
+          metadata.meetingTopic = meetingTitle;
         }
-        chrome.runtime.sendMessage({
-          action: "UpdateMetadata",
-          metadata: metadata
-        });
-        clearInterval(intervalId); // Stop checking once the element is found
+      } else {
+        console.log('Span element not found or does not match criteria, try iframe');
+        const iframe = document.querySelector('iframe[id^="experience-container"]');
+      if (iframe) {
+        const iframeDocument = iframe.contentWindow.document;
+        spanElement = iframeDocument.querySelector('span[role="timer"][data-tid="call-duration"]');
+        const ariaLabel = spanElement.getAttribute('aria-label');
+        // Extract the meeting title from aria-label (assuming it comes before the first comma)
+        meetingTitle = ariaLabel.split(',')[0].trim();
+        console.log(meetingTitle); // Output the extracted meeting title
+        if (meetingTitle && meetingTitle.trim()!== '') {
+          metadata.meetingTopic = meetingTitle;
+        }}
       }
+    }
+    if (metadata.userName && metadata.userName.trim() !== '' && metadata.meetingTopic && metadata.meetingTopic.trim() !== '') {
+      chrome.runtime.sendMessage({
+        action: "UpdateMetadata",
+        metadata: metadata
+      });
     }
   }, 2000);// Check every 2000 milliseconds (2 seconds)
 }
@@ -155,6 +163,12 @@ const startObserver = () => {
       if (treeItemDiv) {
         targetDivElement = treeItemDiv.parentElement.parentElement;
         console.log('Target Div Element:', targetDivElement);
+        if (targetDivElement && targetDivElement.hasAttribute('LMAAttached') && targetDivElement.getAttribute('LMAAttached') === 'true') {
+          return;
+        }
+        else {
+          targetDivElement.setAttribute('LMAAttached', 'true');
+        }
       }
     }
 
@@ -187,9 +201,12 @@ const startObserver = () => {
             hasHoverTargetId = true;
           }
           if (isDiv && hasHoverTargetId) {
-            console.log('Both conditions are true: the element is a div and its role attribute is presentation.');
+            console.log('Both conditions are true: the element is a div and its role attribute is presentation.'); 
             const oldValue = mutation.oldValue;
             const newValue = mutation.target.getAttribute(mutation.attributeName);
+            //log both oldValue and newValue
+            // console.log(`Old Value: ${oldValue}`);
+            // console.log(`New Value: ${newValue}`);
             if (oldValue && newValue && oldValue.startsWith(inactiveRingClass) && newValue.startsWith(activeRingClass)) {
               console.log('Active Speaker participant-speaker-ring activated');
               let parentElement = mutation.target.closest('li');
@@ -267,7 +284,36 @@ window.onload = function () {
   }, 2000);
   checkForMeetingMetadata();
   startRosterInterval();
+  setInterval(checkAndStartObserver, 5000);
 };
+
+function checkAndStartObserver() {
+  const iframe = document.querySelector('iframe[id^="experience-container"]');
+  if (iframe) {
+    const iframeDocument = iframe.contentWindow.document;
+    const rosterTitleElement = iframeDocument.querySelector('span[aria-label^="In this meeting"]');
+    let targetDivElement = null;
+
+    if (rosterTitleElement) {
+      // Step 2: Locate the closest div with role="treeitem"
+      const treeItemDiv = rosterTitleElement.closest('div[role="treeitem"]');
+      //console.log('Tree Item Div:', treeItemDiv);
+
+      // Step 3: Get its parent div
+      if (treeItemDiv) {
+        targetDivElement = treeItemDiv.parentElement.parentElement;
+        //console.log('Target Div Element:', targetDivElement);
+        if (targetDivElement && targetDivElement.hasAttribute('LMAAttached') && targetDivElement.getAttribute('LMAAttached') === 'true') {
+          return;
+        }
+        else {
+          console.log('LMAAttached is not attached, startObserver()');
+          startObserver();
+        }
+      }
+    }
+  }
+}
 
 function startRosterInterval() {
   openRoster();
@@ -276,40 +322,40 @@ function startRosterInterval() {
 
 const openRoster = function () {
   const iframe = document.querySelector('iframe[id^="experience-container"]');
-  if (iframe){
+  if (iframe) {
     const iframeDocument = iframe.contentWindow.document;
     const rosterTitleElement = iframeDocument.querySelector('span[aria-label^="In this meeting"]');
-  if (rosterTitleElement) {
-    return;
-  } else {
-    let attempts = 0;
-    const maxAttempts = 50;
-    const tryOpenRoster = function () {
-      const rosterElement = document.getElementById('roster-button');
-      if (rosterElement) {
-        rosterElement.click();
-        console.log('Roster button found and clicked');
-        return;
-      }
-      console.log('roster-button not found, trying find in iframe');
-      if (iframe) {
-        const iframeDocument = iframe.contentWindow.document;
-        const alternativeRosterButton = iframeDocument.getElementById('roster-button');
-        if (alternativeRosterButton) {
-          alternativeRosterButton.click();
-          console.log('Alternative roster button found from iframe and clicked');
+    if (rosterTitleElement) {
+      return;
+    } else {
+      let attempts = 0;
+      const maxAttempts = 50;
+      const tryOpenRoster = function () {
+        const rosterElement = document.getElementById('roster-button');
+        if (rosterElement) {
+          rosterElement.click();
+          console.log('Roster button found and clicked');
           return;
         }
-      }
-      attempts++;
-      if (attempts < maxAttempts) {
-        console.log(`Roster button not found. Retrying in 2 seconds... (Attempt ${attempts}/${maxAttempts})`);
-        setTimeout(tryOpenRoster, 2000);
-      } else {
-        console.log('Max attempts reached. Unable to find and click roster button.');
-      }
-    };
-    tryOpenRoster();
-  }
+        console.log('roster-button not found, trying find in iframe');
+        if (iframe) {
+          const iframeDocument = iframe.contentWindow.document;
+          const alternativeRosterButton = iframeDocument.getElementById('roster-button');
+          if (alternativeRosterButton) {
+            alternativeRosterButton.click();
+            console.log('Alternative roster button found from iframe and clicked');
+            return;
+          }
+        }
+        attempts++;
+        if (attempts < maxAttempts) {
+          console.log(`Roster button not found. Retrying in 2 seconds... (Attempt ${attempts}/${maxAttempts})`);
+          setTimeout(tryOpenRoster, 2000);
+        } else {
+          console.log('Max attempts reached. Unable to find and click roster button.');
+        }
+      };
+      tryOpenRoster();
+    }
   }
 };
