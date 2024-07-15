@@ -138,13 +138,15 @@ popd
 dir=lma-meetingassist-setup-stack
 echo "PACKAGING $dir"
 pushd $dir
-./publish.sh $BUCKET $PREFIX_AND_VERSION/$dir $REGION || exit 1
+chmod +x ./publish.sh
+./publish.sh $BUCKET $PREFIX_AND_VERSION $REGION || exit 1
 popd
 
 dir=lma-bedrockkb-stack
 echo "PACKAGING $dir"
 pushd $dir
-./publish.sh $BUCKET $PREFIX_AND_VERSION/$dir $REGION || exit 1
+chmod +x ./publish.sh
+./publish.sh $BUCKET $PREFIX_AND_VERSION $REGION || exit 1
 popd
 
 dir=lma-websocket-stack
@@ -196,6 +198,7 @@ git submodule update
 dir=submodule-aws-qnabot-plugins
 echo "PACKAGING $dir"
 pushd $dir
+chmod +x ./publish.sh
 ./publish.sh $BUCKET $PREFIX_AND_VERSION/aws-qnabot-plugins || exit 1
 popd
 
