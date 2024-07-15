@@ -595,7 +595,7 @@ Conditions:
     !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Use Existing)"]
   ShouldCreateBedrockKnowledgeBase:
     !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Create)"]
-  ShouldConfigureBedrockKBPrompts:
+  ShouldUseBedrockKnowledgeBase:
     !Or [
       !Condition ShouldUseExistingBedrockKnowledgeBase,
       !Condition ShouldCreateBedrockKnowledgeBase,
@@ -950,7 +950,7 @@ Resources:
         the follow up question or statement as a standalone, one sentence question.
         Only output the rephrased question. Do not include any preamble. "
       ASSISTANT_GENERATE_PROMPT_TEMPLATE: !If
-        - ShouldConfigureBedrockKBPrompts
+        - ShouldUseBedrockKnowledgeBase
         - "You are an AI assistant helping a human during a meeting. I will provide
           you with a transcript of the ongoing meeting, and a set of search results.
           Your job is to respond to the user's request using only information from the
@@ -981,12 +981,15 @@ Resources:
         QNABOTSTACK: !Ref QNABOT
         MeetingAssistService: !Ref MeetingAssistService
         BedrockKnowledgeBaseID: !If
-          - ShouldCreateBedrockKnowledgeBase
-          - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
-          - !Ref BedrockKnowledgeBaseId
+          - ShouldUseBedrockKnowledgeBase
+          - !If
+            - ShouldCreateBedrockKnowledgeBase
+            - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
+            - !Ref BedrockKnowledgeBaseId
+          - ""
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        AmazonQAppId: "NOT CURRENTLY USED"
-        AmazonQUserId: "NOT CURRENTLY USED"
+        AmazonQAppId: ""
+        AmazonQUserId: ""
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
         LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
         LexMeetingAssistLocaleId:
