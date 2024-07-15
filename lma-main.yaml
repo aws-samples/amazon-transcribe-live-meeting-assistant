@@ -594,7 +594,7 @@ Conditions:
   ShouldUseExistingBedrockKnowledgeBase:
     !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Use Existing)"]
   ShouldCreateBedrockKnowledgeBase:
-    !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Create New)"]
+    !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Create)"]
   ShouldConfigureBedrockKBPrompts:
     !Or [
       !Condition ShouldUseExistingBedrockKnowledgeBase,
