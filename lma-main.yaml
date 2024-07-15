@@ -412,12 +412,12 @@ Metadata:
           default: Meeting Assist Options
         Parameters:
           - MeetingAssistService
-          - MeetingAssistServiceBedrockModelID
           - BedrockKnowledgeBaseId
           - BedrockKnowledgeBaseS3BucketName
           - BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
           - BedrockKnowledgeBaseWebCrawlerURLs
           - BedrockKnowledgeBaseWebCrawlerScope
+          - MeetingAssistServiceBedrockModelID
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
@@ -480,8 +480,6 @@ Metadata:
         default: Authorized Account Email Domain(s)
       MeetingAssistService:
         default: Meeting Assist Service
-      MeetingAssistServiceBedrockModelID:
-        default: Meeting Assist Service Bedrock Model ID
       BedrockKnowledgeBaseId:
         default: Meeting Assist Bedrock Knowledge Base Id (existing)
       BedrockKnowledgeBaseS3BucketName:
@@ -492,6 +490,8 @@ Metadata:
         default: Publicly accessible URLs for web crawling (optional)
       BedrockKnowledgeBaseWebCrawlerScope:
         default: Web crawl sync scope
+      MeetingAssistServiceBedrockModelID:
+        default: Meeting Assist Service Bedrock Model ID
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
       MeetingAssistQnABotOpenSearchNodeCount:
