@@ -298,7 +298,7 @@ Parameters:
 
   BootstrapVersion:
     Type: String
-    Default: 0.1.4
+    Default: v0.1.5
     Description: >
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket

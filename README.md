@@ -20,7 +20,7 @@ https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/assets/1
 
 ## Solution overview
 
-The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom and Chime currently), or audio only from any other browser-based meeting app, softphone or audio source. It uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries. 
+The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom, Teams, and Chime currently), or audio only from any other browser-based meeting app, softphone or audio source. It uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries. 
 
 Everything you need is provided as open source in this [GitHub repo](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant). It’s straightforward to deploy in your AWS account. When you’re done, you’ll wonder how you ever managed without it!
 
@@ -40,7 +40,7 @@ The following are some of the things LMA can do:
   <p align="left"><img src="./images/readme-recording.png" alt="recording" /></p>
 - **Inventory list of meetings** - LMA keeps track of all your meetings in a searchable list.
   <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" /></p>
-- **Browser extension captures audio and meeting metadata from popular meeting apps** - The browser extension captures meeting metadata — the meeting title and names of active speakers — and audio from you (your microphone) and others (from the meeting browser tab). As of this writing, LMA supports Chrome for the browser extension, and Zoom and Chime for meeting apps (with Teams and WebEx coming soon). *Standalone meeting apps don’t work with LMA — instead, launch your meetings in the browser.*
+- **Browser extension captures audio and meeting metadata from popular meeting apps** - The browser extension captures meeting metadata — the meeting title and names of active speakers — and audio from you (your microphone) and others (from the meeting browser tab). As of this writing, LMA supports Chrome for the browser extension, and Zoom, Teams and Chime for meeting apps (with others coming soon). *Standalone meeting apps don’t work with LMA — instead, launch your meetings in the browser.*
   <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" width=200/></p>
 
 You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.
@@ -49,11 +49,14 @@ You are responsible for complying with legal, corporate, and ethical restriction
 
 You need to have an AWS account and an [AWS Identity and Access Management](https://aws.amazon.com/iam/) (IAM) role and user with permissions to create and manage the necessary resources and components for this application. If you don’t have an AWS account, see [How do I create and activate a new Amazon Web Services account?](https://aws.amazon.com/premiumsupport/knowledge-center/create-and-activate-aws-account/)
 
-If you want LMA to use your own trusted documents, then you also need to have an existing, working, Knowledge Base of Amazon Bedrock. If you haven’t set one up yet, see [Create a knowledge base](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-create.html). Populate your knowledge base with content to power LMA’s context aware meeting assistant.  Otherwise, you can use LMA without a knowledge base, and take live meeting advice directly from the selected Bedrock LLM model.  
+If you want LMA to use your own trusted documents to power the context aware meeting assistant then you will use a Knowledge Base on Amazon Bedrock. You choose to have LMA either:
+1. automatically create a new knowledge base and populate it from documents that you have already stored in an existing S3 bucket in your AWS account or from publically acessible Web pages. Be prepared to specify where your document location when you deploy LMA. 
+2. or use an existing knowledge base that you have created and populated already in your AWS account. See [Create a knowledge base](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-create.html).  
+If you choose not to have LMA use your own documents, then no knowledge base is needed, and the LMA meeting assistant relies directly on the 'world knowledge' of the LLM model.  
 
 Finally, LMA uses Amazon Bedrock LLM models for its live meeting assistant and meeting summarization features. Before proceeding, if you have not previously done so, you must [request access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to the following Amazon Bedrock models:
-- Titan Embeddings G1 – Text
-- Anthropic:  All Claude models
+- Amazon: All Titan Embeddings models (Titan Embeddings G1 - Text, and Titan Text Embeddings V2)
+- Anthropic:  All Claude 3 models (Claude 3 Sonnet and Claude 3 Haiku)
 
 
 ## Deploy the CloudFormation stack
@@ -76,9 +79,17 @@ Complete the following steps to launch the CloudFormation stack:
 1. For **Stack name**, use the default value, `LMA`.
 1. For **Admin Email Address**, use a valid email address—your temporary password is emailed to this address during the deployment.
 1. For **Authorized Account Email Domain**, use the domain name part of your corporate email address to allow users with email addresses in the same domain to create their own new UI accounts, or leave blank to prevent users from directly creating their own accounts. You can enter multiple domains as a comma separated list.
-1. For **MeetingAssistService** choose BEDROCK_KNOWLEDGE_BASE (preferred) or BEDROCK_LLM (if you do not need a knowledge base)  
-1. For **Meeting Assist Bedrock Knowledge Base Id (existing)**, leave it blank if you selected BEDROCK_LLM in the previous step, otherwise enter your existing Knowledge base ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Knowledge bases console.
-    <p align="left"><img src="./images/readme-knowledgebase-id.png" alt="KB ID" width=350/></p>
+1. For **MeetingAssistService** choose `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, `BEDROCK_KNOWLEDGE_BASE (Create)`, or `BEDROCK_LLM` (if you do not need a knowledge base)
+   1. If you select `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, then:
+      - For **Meeting Assist Bedrock Knowledge Base Id (existing)**, enter your existing Knowledge base ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Knowledge bases console.
+         <p align="left"><img src="./images/readme-knowledgebase-id.png" alt="KB ID" width=350/></p>
+   1. If you select `BEDROCK_KNOWLEDGE_BASE (Create)`, a new knowledge base is created for you automatically: 
+      - To optionally populate your new knowledge base with documents from an Amazon S3 bucket:
+         1. For **Existing S3 bucket with knowledge base source documents**, enter the name of an existing Amazon S3 bucket containing the documents you want to ingest into your new knowledge base.
+         1. For **S3 prefix(es) for your content**, enter any S3 prefixes (paths) to the documents in the S3 bucket, or leave it blank to ingest all documents in the bucket.
+      - To optionally populate your new knowledge base with web site content from public web pages:
+         1. For **Publicly accessible URLs for web crawling**, enter a comma separated list of web site Urls
+         2. For **Web crawl sync scope**, select the choice that best matches how you want the web crawler to navigate out from the Urls you specified.
 1. For **all other parameters**, use the default values. If you want to customize the settings later, for example to add your own lambda functions, to use  custom vocabularies and language models to improve accuracy, enable PII redaction, and more, you can update the stack for these parameters.
 1. Check the acknowledgement boxes, and choose Create stack.
 
@@ -144,7 +155,7 @@ For the best meeting streaming experience, install the LMA browser plugin - curr
 
 LMA provides two streaming options:
 
-1. Use the **Chrome browser extension** to stream audio and speaker metadata from your meeting browser app. It currently works with Zoom and Chime, but we hope to add more meeting apps.
+1. Use the **Chrome browser extension** to stream audio and speaker metadata from your meeting browser app. It currently works with Zoom, Teams and Chime, but we hope to add more meeting apps.
 1. Use the **LMA Stream Audio tab** to stream audio from your microphone and any Chrome browser-based meeting app, softphone, or audio application.
 We show you how to use both options in the following sections.
 
