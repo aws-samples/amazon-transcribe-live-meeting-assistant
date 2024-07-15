@@ -481,15 +481,15 @@ Metadata:
       MeetingAssistService:
         default: Meeting Assist Service
       BedrockKnowledgeBaseId:
-        default: Meeting Assist Bedrock Knowledge Base Id (existing)
+        default: Bedrock Knowledge Base Id (existing)
       BedrockKnowledgeBaseS3BucketName:
-        default: Existing S3 bucket with knowledge base source documents (optional).
+        default: S3 bucket with knowledge base source documents (optional).
       BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
         default: S3 prefix(es) for your content (optional)
       BedrockKnowledgeBaseWebCrawlerURLs:
         default: Publicly accessible URLs for web crawling (optional)
       BedrockKnowledgeBaseWebCrawlerScope:
-        default: Web crawl sync scope
+        default: Web crawling sync scope
       MeetingAssistServiceBedrockModelID:
         default: Meeting Assist Service Bedrock Model ID
       AssistantWakePhraseRegEx:
