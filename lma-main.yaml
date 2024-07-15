@@ -12,39 +12,73 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ---
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
 Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.4)
 
 Parameters:
-
   MeetingAssistService:
-    Default: 'BEDROCK_KNOWLEDGE_BASE'
+    Default: "BEDROCK_LLM"
     Type: String
     AllowedValues:
-    - 'BEDROCK_LLM'
-    - 'BEDROCK_KNOWLEDGE_BASE'
-    Description: Choose which knowledge base / LLM service to use
-
-  BedrockKnowledgeBaseId:
-    Type: String
-    Default: ''
-    AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
-    Description: >
-      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the knowledge base
-      *Id* (not name) of an existing Bedrock knowledge base to be used for Meeting
-      Assist bot.
+      - "BEDROCK_LLM"
+      - "BEDROCK_KNOWLEDGE_BASE (Create)"
+      - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
+    Description: Choose the knowledge base / LLM service to use
 
   MeetingAssistServiceBedrockModelID:
     Type: String
-    Default: 'anthropic.claude-3-haiku-20240307-v1:0'
+    Default: "anthropic.claude-3-haiku-20240307-v1:0"
     AllowedValues:
-    - 'anthropic.claude-3-haiku-20240307-v1:0'
-    - 'anthropic.claude-3-sonnet-20240229-v1:0'
+      - "anthropic.claude-3-haiku-20240307-v1:0"
+      - "anthropic.claude-3-sonnet-20240229-v1:0"
     Description: >-
-      If MeetingAssistService is BEDROCK_LLM or BEDROCK_KNOWLEDGE_BASE, select a Bedrock
-      LLM model from the list."
+      Select a Bedrock LLM model from the list."
+
+  BedrockKnowledgeBaseId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+    Description: >
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Use Existing)', provide the knowledge base
+      *Id* (not name) of an *existing* Bedrock knowledge base to be used for Meeting
+      Assist bot.
+
+  BedrockKnowledgeBaseS3BucketName:
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide the bucket 
+      name of an existing bucket with documents to ingest, or leave blank if you don't need an S3 data source. If you provide an S3 bucket name an S3 data
+      source will be created for you automatically.
+
+  BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of optional S3 prefixes 
+      with the paths to your source documents e.g. "prefix1/, prefix2/". If you leave blank, all documents in your S3 bucket will be scanned.
+
+  BedrockKnowledgeBaseWebCrawlerURLs:
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
+      or leave blank if you don't need a Web data source. If you provide one or more Web URLs a Web crawler data source will be created for you automatically.
+
+  BedrockKnowledgeBaseWebCrawlerScope:
+    Type: String
+    AllowedValues:
+      - "DEFAULT"
+      - "HOST_ONLY"
+      - "SUBDOMAINS"
+    Default: DEFAULT
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', specify the scope of what is crawled for your URLs.
+      Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
+      Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
+      Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
 
   AssistantWakePhraseRegEx:
     Type: String
@@ -55,11 +89,11 @@ Parameters:
 
   MeetingAssistQnABotOpenSearchNodeCount:
     Type: String
-    Default: '1'
+    Default: "1"
     AllowedValues:
-    - 1
-    - 2
-    - 4
+      - 1
+      - 2
+      - 4
     Description: >
       Number of nodes in Meeting Assistant QnABot OpenSearch domain - '4' is recommended
       for fault tolerant production deployments.
@@ -76,30 +110,31 @@ Parameters:
   AudioFilePrefix:
     Type: String
     Default: lma-audio-recordings/
-    Description: The Amazon S3 prefix where the audio files will be saved (must end
+    Description:
+      The Amazon S3 prefix where the audio files will be saved (must end
       in "/")
 
   IsPartialTranscriptEnabled:
     Type: String
-    Default: 'true'
+    Default: "true"
     Description: >-
       Enable partial transcripts to receive low latency evolving transcriptions for
       each conversation turn. Set to false to process only the
       final version of each conversation turn.
     AllowedValues:
-    - 'true'
-    - 'false'
+      - "true"
+      - "false"
 
   IsContentRedactionEnabled:
     Type: String
-    Default: 'false'
+    Default: "false"
     Description: >-
       Enable content redaction from Amazon Transcribe transcription output. This is
       only used when
       the 'en-US' language is selected in the TranscribeLanguageCode parameter.
     AllowedValues:
-    - 'true'
-    - 'false'
+      - "true"
+      - "false"
 
   TranscribeContentRedactionType:
     Type: String
@@ -107,36 +142,36 @@ Parameters:
     Description: >-
       Type of content redaction from Amazon Transcribe transcription output
     AllowedValues:
-    - PII
+      - PII
 
   TranscribeLanguageCode:
     Type: String
     Description: >-
       Language code or language identification setting for Amazon Transcribe. NOTE:
       Language identification can't  be combined with custom language models or redaction.
-      
+
     Default: en-US
     AllowedValues:
-    - identify-language
-    - identify-multiple-languages
-    - en-US
-    - es-US
-    - en-GB
-    - fr-CA
-    - fr-FR
-    - en-AU
-    - it-IT
-    - de-DE
-    - pt-BR
-    - ja-JP
-    - ko-KR
-    - zh-CN
-    - hi-IN
-    - th-TH
+      - identify-language
+      - identify-multiple-languages
+      - en-US
+      - es-US
+      - en-GB
+      - fr-CA
+      - fr-FR
+      - en-AU
+      - it-IT
+      - de-DE
+      - pt-BR
+      - ja-JP
+      - ko-KR
+      - zh-CN
+      - hi-IN
+      - th-TH
 
   TranscribeLanguageOptions:
     Type: String
-    Default: 'en-US, es-US'
+    Default: "en-US, es-US"
     AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*)*)?$'
     ConstraintDescription: >-
       Unsupported language code or invalid syntax. Allowed values are: en-US, es-US,
@@ -157,33 +192,32 @@ Parameters:
       must be one of the languages entered for TranscribeLanguageOptions.
     Default: None
     AllowedValues:
-    - None
-    - en-US
-    - es-US
-    - en-GB
-    - fr-CA
-    - fr-FR
-    - en-AU
-    - it-IT
-    - de-DE
-    - pt-BR
-    - ja-JP
-    - ko-KR
-    - zh-CN
-    - hi-IN
-    - th-TH
+      - None
+      - en-US
+      - es-US
+      - en-GB
+      - fr-CA
+      - fr-FR
+      - en-AU
+      - it-IT
+      - de-DE
+      - pt-BR
+      - ja-JP
+      - ko-KR
+      - zh-CN
+      - hi-IN
+      - th-TH
 
   TranscribePiiEntityTypes:
     Type: String
-    Default: 
-      BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
+    Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
     Description: >-
       Select the PII entity types you want to identify or redact. Remove the values
       that you don't want to redact from the default.  DO NOT ADD CUSTOM VALUES HERE.
 
   CustomVocabularyName:
     Type: String
-    Default: ''
+    Default: ""
     Description: >-
       The name of the vocabulary to use when processing the transcription job. Leave
       blank if no custom vocabulary to be used. If yes, the custom
@@ -191,7 +225,7 @@ Parameters:
 
   CustomLanguageModelName:
     Type: String
-    Default: ''
+    Default: ""
     Description: >-
       The name of the custom language model to use when processing the transcription
       job. Leave blank if no
@@ -200,9 +234,9 @@ Parameters:
       use the 'Narrow Band' base model.
 
   TranscriptLambdaHookFunctionArn:
-    Default: ''
+    Default: ""
     Type: String
-    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    AllowedPattern: "^(|arn:aws:lambda:.*)$"
     Description: >
       (Optional) If present, the specified Lambda function is invoked by the LMA Call
       Event Processor Lambda function for each completed  (non-partial) transcript
@@ -213,21 +247,21 @@ Parameters:
 
   TranscriptLambdaHookFunctionNonPartialOnly:
     Type: String
-    Default: 'true'
+    Default: "true"
     AllowedValues:
-    - 'true'
-    - 'false'
+      - "true"
+      - "false"
     Description: >
       Specifies if Transcript Lambda Hook Function (if specified) is invoked for Non-Partial
       transcript segments only (true), or for
       both Partial and Non-Partial transcript segments (false).
 
   EndOfCallTranscriptSummary:
-    Default: 'BEDROCK'
+    Default: "BEDROCK"
     Type: String
     AllowedValues:
-    - 'BEDROCK'
-    - 'LAMBDA'
+      - "BEDROCK"
+      - "LAMBDA"
 
     Description: >
       Set to enable call summarization by a Large Language Model. Currently only BEDROCK
@@ -237,19 +271,19 @@ Parameters:
       ARN below.
 
   BedrockModelId:
-    Default: 'anthropic.claude-3-haiku-20240307-v1:0'
+    Default: "anthropic.claude-3-haiku-20240307-v1:0"
     Type: String
     AllowedValues:
-    - 'anthropic.claude-3-haiku-20240307-v1:0'
-    - 'anthropic.claude-3-sonnet-20240229-v1:0'
+      - "anthropic.claude-3-haiku-20240307-v1:0"
+      - "anthropic.claude-3-sonnet-20240229-v1:0"
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models.  Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
 
   EndOfCallLambdaHookFunctionArn:
-    Default: ''
+    Default: ""
     Type: String
-    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    AllowedPattern: "^(|arn:aws:lambda:.*)$"
     Description: >
       (Optional) If 'End Of Call Transcript Summary' is LAMBDA, provide ARN for a
       Lambda function. The specified Lambda function is invoked by the LMA Call Event
@@ -259,9 +293,9 @@ Parameters:
       for example, creating a call summary.
 
   StartOfCallLambdaHookFunctionArn:
-    Default: ''
+    Default: ""
     Type: String
-    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    AllowedPattern: "^(|arn:aws:lambda:.*)$"
     Description: >
       (Optional) The specified Lambda function is invoked by the LMA Call Event Processor
       Lambda function for beginning or start of  call event. This function can implement
@@ -270,9 +304,9 @@ Parameters:
       call summary details logged into a case in a CRM.
 
   PostCallSummaryLambdaHookFunctionArn:
-    Default: ''
+    Default: ""
     Type: String
-    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    AllowedPattern: "^(|arn:aws:lambda:.*)$"
     Description: >
       (Optional) The specified Lambda function is invoked by the LMA Call Event Processor
       Lambda function after the call summary is processed.
@@ -289,7 +323,7 @@ Parameters:
 
   AllowedSignUpEmailDomain:
     Type: String
-    Default: ''
+    Default: ""
     Description: >-
       Email address domain (example.com) or comma separated list of email domains  (example1.com,
       example2.com) allowed to signin and signup using the web UI.
@@ -306,31 +340,31 @@ Parameters:
       for a
       description of each price class.
     AllowedValues:
-    - PriceClass_100
-    - PriceClass_200
-    - PriceClass_All
+      - PriceClass_100
+      - PriceClass_200
+      - PriceClass_All
     ConstraintDescription: >-
       Allowed Price Classes PriceClass_100 PriceClass_200 and PriceClass_All
 
   CloudFrontAllowedGeos:
     Type: String
-    Default: ''
+    Default: ""
     Description: >-
       Specify a comma separated list of two letter country codes (uppercase ISO 3166-1)
       that are
       allowed to access the web user interface via CloudFront. For example: US,CA.
       Leave empty if
       you do not want geo restrictions to be applied.
-    AllowedPattern: '^(|[A-Z]{2}(,[A-Z]{2})*)$'
+    AllowedPattern: "^(|[A-Z]{2}(,[A-Z]{2})*)$"
     ConstraintDescription: >-
       Comma separated list of uppercase two letter country codes or empty
 
   EnableAudioRecording:
     Type: String
-    Default: 'true'
+    Default: "true"
     AllowedValues:
-    - 'true'
-    - 'false'
+      - "true"
+      - "false"
     Description: >-
       Enable or disable recording of audio during a meeting. If set to false, the
       meeting will not be recorded.
@@ -338,8 +372,9 @@ Parameters:
 
   AudioRecordingExpirationInDays:
     Type: Number
-    Description: 'Whole number of days after which audio recordings will be deleted
-      from the Recordings bucket.'
+    Description:
+      "Whole number of days after which audio recordings will be deleted
+      from the Recordings bucket."
     Default: 90
 
   MeetingRecordExpirationInDays:
@@ -368,61 +403,65 @@ Parameters:
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
-    - Label:
-        default: Web UI Authentication
-      Parameters:
-      - AdminEmail
-      - AllowedSignUpEmailDomain
-    - Label:
-        default: Meeting Assist Options
-      Parameters:
-      - MeetingAssistService
-      - BedrockKnowledgeBaseId
-      - MeetingAssistServiceBedrockModelID
-      - AssistantWakePhraseRegEx
-      - MeetingAssistQnABotOpenSearchNodeCount
-    - Label:
-        default: Amazon S3 Configuration
-      Parameters:
-      - S3BucketName
-      - AudioFilePrefix
-    - Label:
-        default: Amazon Transcribe Configuration
-      Parameters:
-      - IsPartialTranscriptEnabled
-      - IsContentRedactionEnabled
-      - TranscribeLanguageCode
-      - TranscribeLanguageOptions
-      - TranscribePreferredLanguage
-      - TranscribeContentRedactionType
-      - TranscribePiiEntityTypes
-      - CustomVocabularyName
-      - CustomLanguageModelName
-    - Label:
-        default: Transcript Event Processing Configuration
-      Parameters:
-      - TranscriptLambdaHookFunctionArn
-      - TranscriptLambdaHookFunctionNonPartialOnly
-      - EndOfCallTranscriptSummary
-      - BedrockModelId
-      - EndOfCallLambdaHookFunctionArn
-      - StartOfCallLambdaHookFunctionArn
-      - PostCallSummaryLambdaHookFunctionArn
-    - Label:
-        default: Download locations
-    - Label:
-        default: Amazon CloudFront Configuration
-      Parameters:
-      - CloudFrontPriceClass
-      - CloudFrontAllowedGeos
-    - Label:
-        default: Retention Settings
-      Parameters:
-      - EnableAudioRecording
-      - MeetingRecordExpirationInDays
-      - TranscriptionExpirationInDays
-      - AudioRecordingExpirationInDays
-      - CloudWatchLogsExpirationInDays
+      - Label:
+          default: Web UI Authentication
+        Parameters:
+          - AdminEmail
+          - AllowedSignUpEmailDomain
+      - Label:
+          default: Meeting Assist Options
+        Parameters:
+          - MeetingAssistService
+          - MeetingAssistServiceBedrockModelID
+          - BedrockKnowledgeBaseId
+          - BedrockKnowledgeBaseS3BucketName
+          - BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
+          - BedrockKnowledgeBaseWebCrawlerURLs
+          - BedrockKnowledgeBaseWebCrawlerScope
+          - AssistantWakePhraseRegEx
+          - MeetingAssistQnABotOpenSearchNodeCount
+      - Label:
+          default: Amazon S3 Configuration
+        Parameters:
+          - S3BucketName
+          - AudioFilePrefix
+      - Label:
+          default: Amazon Transcribe Configuration
+        Parameters:
+          - IsPartialTranscriptEnabled
+          - IsContentRedactionEnabled
+          - TranscribeLanguageCode
+          - TranscribeLanguageOptions
+          - TranscribePreferredLanguage
+          - TranscribeContentRedactionType
+          - TranscribePiiEntityTypes
+          - CustomVocabularyName
+          - CustomLanguageModelName
+      - Label:
+          default: Transcript Event Processing Configuration
+        Parameters:
+          - TranscriptLambdaHookFunctionArn
+          - TranscriptLambdaHookFunctionNonPartialOnly
+          - EndOfCallTranscriptSummary
+          - BedrockModelId
+          - EndOfCallLambdaHookFunctionArn
+          - StartOfCallLambdaHookFunctionArn
+          - PostCallSummaryLambdaHookFunctionArn
+      - Label:
+          default: Download locations
+      - Label:
+          default: Amazon CloudFront Configuration
+        Parameters:
+          - CloudFrontPriceClass
+          - CloudFrontAllowedGeos
+      - Label:
+          default: Retention Settings
+        Parameters:
+          - EnableAudioRecording
+          - MeetingRecordExpirationInDays
+          - TranscriptionExpirationInDays
+          - AudioRecordingExpirationInDays
+          - CloudWatchLogsExpirationInDays
 
     ParameterLabels:
       CallAudioProcessor:
@@ -439,10 +478,20 @@ Metadata:
         default: Admin Email Address
       AllowedSignUpEmailDomain:
         default: Authorized Account Email Domain(s)
-      BedrockKnowledgeBaseId:
-        default: Meeting Assist Bedrock Knowledge Base Id (existing)
+      MeetingAssistService:
+        default: Meeting Assist Service
       MeetingAssistServiceBedrockModelID:
         default: Meeting Assist Service Bedrock Model ID
+      BedrockKnowledgeBaseId:
+        default: Meeting Assist Bedrock Knowledge Base Id (existing)
+      BedrockKnowledgeBaseS3BucketName:
+        default: Existing S3 bucket with knowledge base source documents (optional).
+      BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
+        default: S3 prefix(es) for your content (optional)
+      BedrockKnowledgeBaseWebCrawlerURLs:
+        default: Publicly accessible URLs for web crawling (optional)
+      BedrockKnowledgeBaseWebCrawlerScope:
+        default: Web crawl sync scope
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
       MeetingAssistQnABotOpenSearchNodeCount:
@@ -466,7 +515,8 @@ Metadata:
       CustomLanguageModelName:
         default: Transcription Custom Language Model Name
       TranscriptLambdaHookFunctionArn:
-        default: Lambda Hook Function ARN for Custom Transcript Segment Processing
+        default:
+          Lambda Hook Function ARN for Custom Transcript Segment Processing
           (existing)
       TranscriptLambdaHookFunctionNonPartialOnly:
         default: Lambda Hook Function Mode Non-Partial only
@@ -477,7 +527,8 @@ Metadata:
       StartOfCallLambdaHookFunctionArn:
         default: Lambda Hook Function ARN for Custom Start of Call Processing (existing)
       PostCallSummaryLambdaHookFunctionArn:
-        default: Lambda Hook Function ARN for Custom Post Processing, after the Call
+        default:
+          Lambda Hook Function ARN for Custom Post Processing, after the Call
           Transcript Summary is processed (existing)
       CloudFrontPriceClass:
         default: CloudFront Price Class
@@ -491,7 +542,6 @@ Metadata:
         default: Audio Recording Expiration In Days
 
 Mappings:
-
   TranscribeToLexLocaleId:
     identify-language:
       Value: en_US
@@ -529,14 +579,27 @@ Mappings:
 Rules:
   # check required parameters
   BedrockKnowledgeBaseId:
-    RuleCondition: !Equals [!Ref MeetingAssistService, 'BEDROCK_KNOWLEDGE_BASE']
+    RuleCondition:
+      !Equals [
+        !Ref MeetingAssistService,
+        "BEDROCK_KNOWLEDGE_BASE (Use Existing)",
+      ]
     Assertions:
-    - Assert: !Not [!Equals [!Ref BedrockKnowledgeBaseId, '']]
-      AssertDescription: BedrockKnowledgeBaseId is required when MeetingAssistService
-        is 'BEDROCK_KNOWLEDGE_BASE'
+      - Assert: !Not [!Equals [!Ref BedrockKnowledgeBaseId, ""]]
+        AssertDescription:
+          BedrockKnowledgeBaseId is required when MeetingAssistService
+          is 'BEDROCK_KNOWLEDGE_BASE (Use Existing)'
 
 Conditions:
-  ShouldConfigureBedrockKB: !Equals [!Ref MeetingAssistService, 'BEDROCK_KNOWLEDGE_BASE']
+  ShouldUseExistingBedrockKnowledgeBase:
+    !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Use Existing)"]
+  ShouldCreateBedrockKnowledgeBase:
+    !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Create New)"]
+  ShouldConfigureBedrockKBPrompts:
+    !Or [
+      !Condition ShouldUseExistingBedrockKnowledgeBase,
+      !Condition ShouldCreateBedrockKnowledgeBase,
+    ]
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -568,12 +631,12 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W89
-          reason: Customer can use VPC if desired
-        - id: W92
-          reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
-    - StacknameCheckFunctionLogGroup
+      - StacknameCheckFunctionLogGroup
 
   StacknameCheckFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -585,7 +648,7 @@ Resources:
     Type: Custom::StacknameCheck
     Properties:
       ServiceToken: !GetAtt StacknameCheckFunction.Arn
-      InputString: !Ref 'AWS::StackName'
+      InputString: !Ref "AWS::StackName"
       MaxLength: 25
 
   # Custom resource to validate parameters
@@ -594,24 +657,24 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
-        - Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-          Action: sts:AssumeRole
-      ManagedPolicyArns:
-      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-      - PolicyDocument:
-          Version: 2012-10-17
-          Statement:
           - Effect: Allow
-            Action:
-            - "bedrock:InvokeModel"
-            Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
-        PolicyName: BedrockPolicy
-  
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
+          PolicyName: BedrockPolicy
+
   ValidateParametersFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -689,12 +752,12 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W89
-          reason: Customer can use VPC if desired
-        - id: W92
-          reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
-    - ValidateParametersFunctionLogGroup
+      - ValidateParametersFunctionLogGroup
 
   ValidateParametersFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -709,11 +772,11 @@ Resources:
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
       TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
       TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
-      BedrockModelIds: 
-      - !Ref MeetingAssistServiceBedrockModelID  # Meeting assistant
-      - !Ref BedrockModelId  # Meeting summarization
-      - 'amazon.titan-embed-text-v1' # QNABOTBR
-      - 'anthropic.claude-instant-v1' # QNABOTBR
+      BedrockModelIds:
+        - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
+        - !Ref BedrockModelId # Meeting summarization
+        - "amazon.titan-embed-text-v1" # QNABOTBR
+        - "anthropic.claude-instant-v1" # QNABOTBR
 
   ToJSONFunction:
     Type: AWS::Serverless::Function
@@ -744,89 +807,89 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W89
-          reason: Customer can use VPC if desired
-        - id: W92
-          reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
-    - ToJSONFunctionLogGroup
+      - ToJSONFunctionLogGroup
 
   ToJSONFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
-        
+
   QNABOTBR:
     Type: AWS::CloudFormation::Stack
     DependsOn:
-    - IsStacknameLengthOK
-    - ValidateParameters
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: 
-        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot-plugins/bedrock-embeddings-and-llm.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot-plugins/bedrock-embeddings-and-llm.yaml
       # yamllint enable rule:line-length
       Parameters:
-        EmbeddingsModelId: 'amazon.titan-embed-text-v1'
-        LLMModelId: 'anthropic.claude-instant-v1'
+        EmbeddingsModelId: "amazon.titan-embed-text-v1"
+        LLMModelId: "anthropic.claude-instant-v1"
 
   QNABOT:
     Type: AWS::CloudFormation::Stack
     DependsOn:
-    - IsStacknameLengthOK
-    - ValidateParameters
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: 
-        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot/templates/master.json
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot/templates/master.json
       # yamllint enable rule:line-length
       Parameters:
         Email: !Ref AdminEmail
-        Username: 'Admin'
+        Username: "Admin"
         ElasticSearchNodeCount: !Ref MeetingAssistQnABotOpenSearchNodeCount
-        LexV2BotLocaleIds: !FindInMap [TranscribeToLexLocaleId, !Ref TranscribeLanguageCode,
-          Value]
+        LexV2BotLocaleIds:
+          !FindInMap [
+            TranscribeToLexLocaleId,
+            !Ref TranscribeLanguageCode,
+            Value,
+          ]
         BootstrapBucket: <ARTIFACT_BUCKET_TOKEN>
         BootstrapPrefix: <ARTIFACT_PREFIX_TOKEN>/aws-qnabot
-        InstallLexResponseBots: 'false'
-        EmbeddingsApi: 'LAMBDA'
+        InstallLexResponseBots: "false"
+        EmbeddingsApi: "LAMBDA"
         EmbeddingsLambdaArn: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaArn
         EmbeddingsLambdaDimensions: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaDimensions
-        LLMApi: 'LAMBDA'
+        LLMApi: "LAMBDA"
         LLMLambdaArn: !GetAtt QNABOTBR.Outputs.LLMLambdaArn
 
   LLMTEMPLATESTACK:
     Type: AWS::CloudFormation::Stack
     DependsOn:
-    - IsStacknameLengthOK
-    - ValidateParameters
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
-      TemplateURL: 
-        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
       Parameters:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
   AISTACK:
     Type: AWS::CloudFormation::Stack
     DependsOn:
-    - IsStacknameLengthOK
-    - ValidateParameters
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: 
-        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-ai-stack/<VERSION_TOKEN>/template.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-ai-stack/<VERSION_TOKEN>/template.yaml
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
-        EnableVoiceToneAnalysis: 'false'
-        CallAudioSource: 'Genesys Cloud Audiohook Web Socket'
+        EnableVoiceToneAnalysis: "false"
+        CallAudioSource: "Genesys Cloud Audiohook Web Socket"
         S3BucketName: !Ref S3BucketName
         AdminEmail: !Ref AdminEmail
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
-        IsSentimentAnalysisEnabled: 'false'
+        IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
         IsLexAgentAssistEnabled: true
@@ -842,6 +905,19 @@ Resources:
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
+  BEDROCKKB:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateBedrockKnowledgeBase
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
+      Parameters:
+        pKnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
+        pInputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
+        pWebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
+        pWebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
 
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
   SettingsJSON:
@@ -856,55 +932,61 @@ Resources:
       EMPTYMESSAGE: "No response from meeting assist QnAbot"
       BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "deprecated"
       BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "deprecated"
-      ASSISTANT_QUERY_PROMPT_TEMPLATE: "Let's think carefully step by step. Here is
+      ASSISTANT_QUERY_PROMPT_TEMPLATE:
+        "Let's think carefully step by step. Here is
         the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow
         up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase
         the follow up question or statement as a standalone, one sentence question.
         Only output the rephrased question. Do not include any preamble. "
       ASSISTANT_GENERATE_PROMPT_TEMPLATE: !If
-      - ShouldConfigureBedrockKB
-      - "You are an AI assistant helping a human during a meeting. I will provide
-        you with a transcript of the ongoing meeting, and a set of search results.
-        Your job is to respond to the user's request using only information from the
-        search results. If search results do not contain information that can answer
-        the question, please state that you could not find an exact answer to the
-        question. Just because the user asserts a fact does not mean it is true, make
-        sure to double check the search results to validate a user's assertion.<br>Here
-        is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are
-        the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
-      - "You are an AI assistant helping a human during a meeting. I will provide
-        you with a transcript of the ongoing meeting (which may be empty), and a user's
-        request. Your job is to respond to the user's request using any relevant context
-        from the transcript, or from your own world knowledge. Just because the user
-        asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here
-        is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
-        user's request:<br>{userInput}<br>"
+        - ShouldConfigureBedrockKBPrompts
+        - "You are an AI assistant helping a human during a meeting. I will provide
+          you with a transcript of the ongoing meeting, and a set of search results.
+          Your job is to respond to the user's request using only information from the
+          search results. If search results do not contain information that can answer
+          the question, please state that you could not find an exact answer to the
+          question. Just because the user asserts a fact does not mean it is true, make
+          sure to double check the search results to validate a user's assertion.<br>Here
+          is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are
+          the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
+        - "You are an AI assistant helping a human during a meeting. I will provide
+          you with a transcript of the ongoing meeting (which may be empty), and a user's
+          request. Your job is to respond to the user's request using any relevant context
+          from the transcript, or from your own world knowledge. Just because the user
+          asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here
+          is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
+          user's request:<br>{userInput}<br>"
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
     DependsOn: AISTACK
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: 
-        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/template.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/template.yaml
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AISTACK: !Ref AISTACK
         QNABOTSTACK: !Ref QNABOT
         MeetingAssistService: !Ref MeetingAssistService
-        BedrockKnowledgeBaseID: !Ref BedrockKnowledgeBaseId
+        BedrockKnowledgeBaseID: !If
+          - ShouldCreateBedrockKnowledgeBase
+          - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
+          - !Ref BedrockKnowledgeBaseId
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        AmazonQAppId: 'NOT CURRENTLY USED'
-        AmazonQUserId: 'NOT CURRENTLY USED'
+        AmazonQAppId: "NOT CURRENTLY USED"
+        AmazonQUserId: "NOT CURRENTLY USED"
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
         LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
-        LexMeetingAssistLocaleId: !FindInMap [TranscribeToLexLocaleId, !Ref TranscribeLanguageCode,
-          Value]
+        LexMeetingAssistLocaleId:
+          !FindInMap [
+            TranscribeToLexLocaleId,
+            !Ref TranscribeLanguageCode,
+            Value,
+          ]
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         CloudFrontDistributionId: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
-        QnaMeetingAssistDemoJson: 
-          <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
+        QnaMeetingAssistDemoJson: <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         # Changes to Params below force AgentAssist Setup to update.
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
@@ -922,13 +1004,11 @@ Resources:
         QnaBotSettings: !GetAtt SettingsJSON.Output
         Version: v0.8.8
 
-
   WEBSOCKETSTACK:
     Type: AWS::CloudFormation::Stack
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: 
-        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-stack/<VERSION_TOKEN>/template.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-stack/<VERSION_TOKEN>/template.yaml
       # yamllint enable rule:line-length
       Parameters:
         S3BucketName: !GetAtt AISTACK.Outputs.S3BucketName
@@ -937,7 +1017,7 @@ Resources:
         CallDataStreamName: !GetAtt AISTACK.Outputs.CallDataStreamName
         CallDataStreamArn: !GetAtt AISTACK.Outputs.CallDataStreamArn
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
-        TranscribeApiMode: 'standard'
+        TranscribeApiMode: "standard"
         IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
@@ -946,11 +1026,11 @@ Resources:
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
-        PcaS3BucketName: ''
-        PcaTranscriptsPrefix: ''
-        PcaPlaybackAudioFilePrefix: ''
-        PcaWebAppURL: ''
-        PcaWebAppCallPathPrefix: ''
+        PcaS3BucketName: ""
+        PcaTranscriptsPrefix: ""
+        PcaPlaybackAudioFilePrefix: ""
+        PcaWebAppURL: ""
+        PcaWebAppCallPathPrefix: ""
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         LMASettingsParameterName: !GetAtt AISTACK.Outputs.LMASettingsParameterName
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
@@ -960,8 +1040,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: 
-        https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-browser-extension-stack/template.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-browser-extension-stack/template.yaml
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
@@ -989,7 +1068,7 @@ Outputs:
     Value: !GetAtt AISTACK.Outputs.CallDataStreamArn
     Export:
       Name:
-        'Fn::Sub': '${AWS::StackName}-CallDataStreamArn'
+        "Fn::Sub": "${AWS::StackName}-CallDataStreamArn"
 
   LMAWebsocketEndpoint:
     Description: Websocket endpoint for websocket integration
@@ -1008,16 +1087,19 @@ Outputs:
     Value: !GetAtt AISTACK.Outputs.SNSTopic
 
   FetchTranscriptLambdaArn:
-    Description: The ARN of a Lambda function that will process and export a call
+    Description:
+      The ARN of a Lambda function that will process and export a call
       transcript as a string.
     Value: !GetAtt AISTACK.Outputs.FetchTranscriptArn
 
   LLMDefaultPromptSummaryTemplate:
-    Description: View the *default* summary prompts. Do not edit. To override default
+    Description:
+      View the *default* summary prompts. Do not edit. To override default
       prompts, add or edit attributes in the custom summary prompts item.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=DefaultSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
 
   LLMCustomPromptSummaryTemplate:
-    Description: Edit the *custom* summary prompts. Attribite values here override
+    Description:
+      Edit the *custom* summary prompts. Attribite values here override
       the default summary prompts, and are preserved during stack updates.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
