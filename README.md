@@ -81,15 +81,15 @@ Complete the following steps to launch the CloudFormation stack:
 1. For **Authorized Account Email Domain**, use the domain name part of your corporate email address to allow users with email addresses in the same domain to create their own new UI accounts, or leave blank to prevent users from directly creating their own accounts. You can enter multiple domains as a comma separated list.
 1. For **MeetingAssistService** choose `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, `BEDROCK_KNOWLEDGE_BASE (Create)`, or `BEDROCK_LLM` (if you do not need a knowledge base)
    1. If you select `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, then:
-      - For **Meeting Assist Bedrock Knowledge Base Id (existing)**, enter your existing Knowledge base ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Knowledge bases console.
+      - For **Bedrock Knowledge Base Id (existing)**, enter your existing Knowledge base ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Knowledge bases console.
          <p align="left"><img src="./images/readme-knowledgebase-id.png" alt="KB ID" width=350/></p>
    1. If you select `BEDROCK_KNOWLEDGE_BASE (Create)`, a new knowledge base is created for you automatically: 
       - To optionally populate your new knowledge base with documents from an Amazon S3 bucket:
-         1. For **Existing S3 bucket with knowledge base source documents**, enter the name of an existing Amazon S3 bucket containing the documents you want to ingest into your new knowledge base.
+         1. For **S3 bucket with knowledge base source documents**, enter the name of an existing Amazon S3 bucket containing the documents you want to ingest into your new knowledge base.
          1. For **S3 prefix(es) for your content**, enter any S3 prefixes (paths) to the documents in the S3 bucket, or leave it blank to ingest all documents in the bucket.
       - To optionally populate your new knowledge base with web site content from public web pages:
          1. For **Publicly accessible URLs for web crawling**, enter a comma separated list of web site Urls
-         2. For **Web crawl sync scope**, select the choice that best matches how you want the web crawler to navigate out from the Urls you specified.
+         2. For **Web crawling sync scope**, select the choice that best matches how you want the web crawler to navigate out from the Urls you specified.
 1. For **all other parameters**, use the default values. If you want to customize the settings later, for example to add your own lambda functions, to use  custom vocabularies and language models to improve accuracy, enable PII redaction, and more, you can update the stack for these parameters.
 1. Check the acknowledgement boxes, and choose Create stack.
 
