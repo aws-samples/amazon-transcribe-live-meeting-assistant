@@ -611,6 +611,7 @@ Resources:
                   - "bedrock:CreateDataSource"
                   - "bedrock:DeleteDataSource"
                   - "bedrock:UpdateDataSource"
+                  - "bedrock:StartIngestionJob"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:knowledge-base/${KnowledgeBase}"
           PolicyName: BedrockPolicy

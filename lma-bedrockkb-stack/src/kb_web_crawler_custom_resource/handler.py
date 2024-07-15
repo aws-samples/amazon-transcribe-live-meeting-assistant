@@ -27,6 +27,24 @@ def convert_numeric_strings(d):
     return d
 
 
+"""
+Attempt to start the ingestion job - catch and ignore failures
+Currently only 1 job can run at a time, so when more that one datasource is created
+the second one fails to start.
+"""
+
+
+def start_ingestion_job(knowledgeBaseId, dataSourceId):
+    try:
+        response = CLIENT.start_ingestion_job(knowledgeBaseId=knowledgeBaseId,
+                                              dataSourceId=dataSourceId, description="Autostart by CloudFormation")
+        print(f"start_ingestion_job response: {response}")
+    except Exception as e:
+        print(
+            f"WARN: start_ingestion_job failed.. Retry manually from bedrock console: {e}")
+        pass
+
+
 def lambda_handler(event, context):
     print("Event: ", json.dumps(event))
     status = cfnresponse.SUCCESS
@@ -42,6 +60,8 @@ def lambda_handler(event, context):
             print(f"create_data_source response: {response}")
             physicalResourceId = response['dataSource'].get(
                 'dataSourceId', None)
+            start_ingestion_job(
+                create_update_args['knowledgeBaseId'], physicalResourceId)
         except Exception as e:
             status = cfnresponse.FAILED
             reason = f"Exception - {e}"
@@ -51,9 +71,13 @@ def lambda_handler(event, context):
             print(f"update_data_source args: {json.dumps(create_update_args)}")
             response = CLIENT.update_data_source(**create_update_args)
             print(f"update_data_source response: {response}")
+            start_ingestion_job(
+                create_update_args['knowledgeBaseId'], physicalResourceId)
         except Exception as e:
             status = cfnresponse.FAILED
             reason = f"Exception - {e}"
+            start_ingestion_job(
+                create_update_args['knowledgeBaseId'], physicalResourceId)
     else:  # Delete
         try:
             delete_args = dict(

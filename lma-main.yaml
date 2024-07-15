@@ -23,7 +23,7 @@ Parameters:
     Type: String
     AllowedValues:
       - "BEDROCK_LLM"
-      - "BEDROCK_KNOWLEDGE_BASE (Automatically Create)"
+      - "BEDROCK_KNOWLEDGE_BASE (Create)"
       - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
     Description: Choose the knowledge base / LLM service to use
 
@@ -49,7 +49,7 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Automatically Create)', provide the bucket 
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide the bucket 
       name of an existing bucket with documents to ingest, or leave blank if you don't need an S3 data source. If you provide an S3 bucket name an S3 data
       source will be created for you automatically.
 
@@ -57,14 +57,14 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Automatically Create)', provide comma separated list of optional S3 prefixes 
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of optional S3 prefixes 
       with the paths to your source documents e.g. "prefix1/, prefix2/". If you leave blank, all documents in your S3 bucket will be scanned.
 
   BedrockKnowledgeBaseWebCrawlerURLs:
     Type: String
     Default: ""
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Automatically Create)', provide comma separated list of public web sites to crawl,
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
       or leave blank if you don't need a Web data source. If you provide one or more Web URLs a Web crawler data source will be created for you automatically.
 
   BedrockKnowledgeBaseWebCrawlerScope:
@@ -75,7 +75,7 @@ Parameters:
       - "SUBDOMAINS"
     Default: DEFAULT
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Automatically Create)', specify the scope of what is crawled for your URLs.
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', specify the scope of what is crawled for your URLs.
       Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
       Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
       Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
