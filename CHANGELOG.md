@@ -8,7 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+
+## [0.1.5] - 2024-07-15
+### Added
+- Added initial support for Teams web client in the browser extension
+- Added option to automatically create Bedrock Knowledge Base and associated S3 or Web Url datasource(s) during deployment
+
+### Fixed
 - Stack deployment now fails fast if required Bedrock models are not available or enabled in the account/region
+- #44 - Stack deployment failure in AISTACK, due to node package checksum problem
+- #43 - Assistant fails when Bedrock KB article is sourced from new KB web crawler data source connector
 
 
 ## [0.1.4] - 2024-06-08
@@ -66,6 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.1.5]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.5
 [0.1.4]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.4
 [0.1.3]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.3
 [0.1.2]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.2
