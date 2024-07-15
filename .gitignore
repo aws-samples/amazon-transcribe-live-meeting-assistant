@@ -2,7 +2,7 @@
 **/.DS_Store
 .idea
 
-
+**/opensearchpy_layer/python
 **/boto3_layer/python
 **/boto3_layer/boto3_lambda_layer.zip
 **/node_transcriber_layer/transcriber-layer.zip
