@@ -97,6 +97,8 @@ function IntegrationProvider({ children }: any) {
       setPlatform("Zoom");
     } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.chime.aws") {
       setPlatform("Amazon Chime");
+    } else if (newMetadata.baseUrl === "https://teams.microsoft.com" || newMetadata.baseUrl === "https://teams.live.com") {
+        setPlatform("Microsoft Teams");
     }
     setMetadata(newMetadata);
   }, [metadata, setMetadata, platform, setPlatform]);
@@ -118,7 +120,6 @@ function IntegrationProvider({ children }: any) {
     }
     return {};
   }, [settings]);
-
 
   const sendStopMessage = useCallback(async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
