@@ -184,8 +184,9 @@ def get_url_from_reference(reference):
     }
     location = reference.get("location", {})
     type = location.get("type")
+    key = "uri" if type == "S3" else "url"
     url = location.get(
-        location_keys.get(type, {}), {}).get("uri")
+        location_keys.get(type, {}), {}).get(key)
     if not url:
         # try getting url from the metadata tags instead
         url = reference.get("metadata", {}).get(
