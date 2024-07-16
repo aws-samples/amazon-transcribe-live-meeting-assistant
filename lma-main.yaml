@@ -784,6 +784,7 @@ Resources:
       CustomLanguageModelName: !Ref CustomLanguageModelName
       BedrockModelIds:
         - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
+        - "amazon.titan-embed-text-v2:0" # Meeting Assistant
         - !Ref BedrockModelId # Meeting summarization
         - "amazon.titan-embed-text-v1" # QNABOTBR
         - "anthropic.claude-instant-v1" # QNABOTBR
