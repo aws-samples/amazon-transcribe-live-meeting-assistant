@@ -3,6 +3,8 @@ import os
 import boto3
 import re
 
+print("Boto3 version: ", boto3.__version__)
+
 FETCH_TRANSCRIPT_FUNCTION_ARN = os.environ['FETCH_TRANSCRIPT_FUNCTION_ARN']
 
 KB_REGION = os.environ.get("KB_REGION") or os.environ["AWS_REGION"]
@@ -200,11 +202,11 @@ def get_url_from_reference(reference):
     type = location.get("type")
     if type == "S3":
         uri = location.get(
-            location_keys.get(type, {}), {}).get(uri)
+            location_keys.get(type, {}), {}).get("uri")
         url = s3_uri_to_presigned_url(uri)
     else:
         url = location.get(
-            location_keys.get(type, {}), {}).get(url)
+            location_keys.get(type, {}), {}).get("url")
     if not url:
         # try getting url from the metadata tags instead
         url = reference.get("metadata", {}).get(
@@ -242,6 +244,8 @@ def format_response(event, kb_response, query):
                     "text", "no reference text")
                 url = get_url_from_reference(reference)
                 if url:
+                    # get title from url - handle presigned urls by ignoring path after '?'
+                    title = os.path.basename(url.split('?')[0])
                     title = os.path.basename(url)
                     contextText = f'{contextText}<br><a href="{url}">{title}</a>'
                 else:
@@ -255,7 +259,8 @@ def format_response(event, kb_response, query):
             for reference in source.get("retrievedReferences", []):
                 url = get_url_from_reference(reference)
                 if url:
-                    title = os.path.basename(url)
+                    # get title from url - handle presigned urls by ignoring path after '?'
+                    title = os.path.basename(url.split('?')[0])
                     sourceLinks.append(f'<a href="{url}">{title}</a>')
         if len(sourceLinks):
             markdown = f'{markdown}<br>Sources: ' + ", ".join(sourceLinks)
