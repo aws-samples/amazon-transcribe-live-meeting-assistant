@@ -50,8 +50,8 @@ You are responsible for complying with legal, corporate, and ethical restriction
 You need to have an AWS account and an [AWS Identity and Access Management](https://aws.amazon.com/iam/) (IAM) role and user with permissions to create and manage the necessary resources and components for this application. If you don’t have an AWS account, see [How do I create and activate a new Amazon Web Services account?](https://aws.amazon.com/premiumsupport/knowledge-center/create-and-activate-aws-account/)
 
 If you want LMA to use your own trusted documents to power the context aware meeting assistant then you will use a Knowledge Base on Amazon Bedrock. You choose to have LMA either:
-1. automatically create a new knowledge base and populate it from documents that you have already stored in an existing S3 bucket in your AWS account or from publically acessible Web pages. Be prepared to specify where your document location when you deploy LMA. 
-2. or use an existing knowledge base that you have created and populated already in your AWS account. See [Create a knowledge base](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-create.html).  
+1. Automatically create a new knowledge base and populate it from documents in an S3 bucket in your AWS account, or from publicly accessible Web pages. Be prepared to specify your document location when you deploy LMA.
+2. Or, use an existing knowledge base that you have previously created and populated. See [Create a knowledge base](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-create.html).  
 If you choose not to have LMA use your own documents, then no knowledge base is needed, and the LMA meeting assistant relies directly on the 'world knowledge' of the LLM model.  
 
 Finally, LMA uses Amazon Bedrock LLM models for its live meeting assistant and meeting summarization features. Before proceeding, if you have not previously done so, you must [request access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to the following Amazon Bedrock models:
