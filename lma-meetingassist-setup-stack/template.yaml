@@ -28,6 +28,9 @@ Parameters:
     Default: ""
     AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
 
+  BedrockKnowledgeBaseS3BucketName:
+    Type: String
+
   MeetingAssistServiceBedrockModelID:
     Type: String
     Default: "anthropic.claude-3-sonnet-20240229-v1:0"
@@ -149,6 +152,11 @@ Conditions:
     ]
   HasSummaryLambdaFunction:
     !Not [!Equals [!Ref TranscriptSummaryFunctionArn, ""]]
+  IsBedrockKnowledgeBaseS3BucketName:
+    Fn::Not:
+      - Fn::Equals:
+          - ""
+          - Ref: BedrockKnowledgeBaseS3BucketName
 
 Resources:
   # Custom resource to transform input to lowercase.
@@ -369,8 +377,13 @@ Resources:
               - Effect: Allow
                 Action:
                   - "s3:GetObject"
-                Resource: "arn:aws:s3:::*-importbucket-*/*"
-          PolicyName: S3ImportBucketPolicy
+                Resource:
+                  - "arn:aws:s3:::*-importbucket-*/*"
+                  - !If
+                    - IsBedrockKnowledgeBaseS3BucketName
+                    - !Sub "arn:aws:s3:::${BedrockKnowledgeBaseS3BucketName}/*"
+                    - !Ref AWS::NoValue
+          PolicyName: S3BucketPolicy
         - PolicyName: InlinePolicy
           PolicyDocument:
             Version: "2012-10-17"

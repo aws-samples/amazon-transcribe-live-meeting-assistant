@@ -3,6 +3,8 @@ import os
 import boto3
 import re
 
+print("Boto3 version: ", boto3.__version__)
+
 FETCH_TRANSCRIPT_FUNCTION_ARN = os.environ['FETCH_TRANSCRIPT_FUNCTION_ARN']
 
 KB_REGION = os.environ.get("KB_REGION") or os.environ["AWS_REGION"]
@@ -174,6 +176,20 @@ def get_args_from_lambdahook_args(event):
     return parameters
 
 
+def s3_uri_to_presigned_url(s3_uri, expiration=3600):
+    # Extract bucket name and object key from S3 URI
+    bucket_name, object_key = s3_uri[5:].split('/', 1)
+    s3_client = boto3.client('s3')
+    return s3_client.generate_presigned_url(
+        'get_object',
+        Params={
+            'Bucket': bucket_name,
+            'Key': object_key
+        },
+        ExpiresIn=expiration
+    )
+
+
 def get_url_from_reference(reference):
     location_keys = {
         "S3": "s3Location",
@@ -184,8 +200,13 @@ def get_url_from_reference(reference):
     }
     location = reference.get("location", {})
     type = location.get("type")
-    url = location.get(
-        location_keys.get(type, {}), {}).get("uri")
+    if type == "S3":
+        uri = location.get(
+            location_keys.get(type, {}), {}).get("uri")
+        url = s3_uri_to_presigned_url(uri)
+    else:
+        url = location.get(
+            location_keys.get(type, {}), {}).get("url")
     if not url:
         # try getting url from the metadata tags instead
         url = reference.get("metadata", {}).get(
@@ -223,6 +244,8 @@ def format_response(event, kb_response, query):
                     "text", "no reference text")
                 url = get_url_from_reference(reference)
                 if url:
+                    # get title from url - handle presigned urls by ignoring path after '?'
+                    title = os.path.basename(url.split('?')[0])
                     title = os.path.basename(url)
                     contextText = f'{contextText}<br><a href="{url}">{title}</a>'
                 else:
@@ -236,7 +259,8 @@ def format_response(event, kb_response, query):
             for reference in source.get("retrievedReferences", []):
                 url = get_url_from_reference(reference)
                 if url:
-                    title = os.path.basename(url)
+                    # get title from url - handle presigned urls by ignoring path after '?'
+                    title = os.path.basename(url.split('?')[0])
                     sourceLinks.append(f'<a href="{url}">{title}</a>')
         if len(sourceLinks):
             markdown = f'{markdown}<br>Sources: ' + ", ".join(sourceLinks)
