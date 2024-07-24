@@ -1752,8 +1752,8 @@ Resources:
             <p>     https://${WebAppCloudFrontDistribution.DomainName}/
             <p>
             <p>Don't attempt to download the Chrome browser extension from LMA until the 
-            <p>CloudFormation stack status is CREATE_COMPLETE or UPDATE_COMPLETE, as the 
-            <p>extension will not be available until then.
+            CloudFormation stack status is CREATE_COMPLETE or UPDATE_COMPLETE, as the 
+            extension will not be available until then.
             <p>
             <p>Thanks,
             <p>Live Meeting Assistant (amazon.com/live-call-analytics)
