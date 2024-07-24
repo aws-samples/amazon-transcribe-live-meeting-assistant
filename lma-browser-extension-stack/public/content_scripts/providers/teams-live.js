@@ -12,8 +12,9 @@ const openChatPanel = function () {
   }
 }
 
-const activeRingClass = "ui-avatar e jf fo by jg qk ql qm qn qo qp qq qr qs qt qu qv gx gy gz ha rt";
-const inactiveRingClass = "ui-avatar e jf fo by jg qk ql qm qn qo qp qq qr qs qt qu qv gx gy gz ha qw";
+//commit
+const activeRingClass = "fui-Primitive ___19upu4n";
+const inactiveRingClass = "fui-Primitive ___s78zj80";
 
 const sendChatMessage = function (message) {
   /* const findChatInputAndSend = function () {
@@ -63,7 +64,6 @@ const sendChatMessage = function (message) {
   } */
   if (message.includes('stopped')) {
     console.log("Recording stopped");
-    activeSpeakerObserver.disconnect();
   } else {
     console.log("Start Listening");
     startObserver();
@@ -149,7 +149,7 @@ const startObserver = () => {
     const iframeDocument = iframe.contentWindow.document;
     // Step 1: Locate the roster title element
     // const rosterTitleElement = document.querySelector('span[id^="roster-title-section"][aria-label^="In this meeting"]');
-    const rosterTitleElement = iframeDocument.querySelector('span[aria-label^="In this meeting"]');
+    /* const rosterTitleElement = iframeDocument.querySelector('span[aria-label^="In this meeting"]');
     console.log('Roster Title Element:', rosterTitleElement);
 
     let targetDivElement = null;
@@ -172,16 +172,24 @@ const startObserver = () => {
       }
     }
 
-    // Retry if target element is not found
-    if (!targetDivElement) {
-      console.log('Target div not found. Retrying in 2 seconds...');
-      openRoster();
-      setTimeout(startObserver, 2000); // Retry after 2 seconds
-      return;
-    }
+     */
+  let targetDivElement = iframeDocument.querySelector('div[aria-label="Shared content view"][role=main]');
+  if (targetDivElement && targetDivElement.hasAttribute('LMAAttached') && targetDivElement.getAttribute('LMAAttached') === 'true') {
+    return;
+  }
+  else if (!targetDivElement){
+    console.log('Target div not found. Retrying in 2 seconds...');
+    setTimeout(startObserver, 2000);
+    return;
+  }
+  else{
+    targetDivElement.setAttribute('LMAAttached', 'true');
+  }
+  console.log(targetDivElement)
+
 
     // Options for the observer (which mutations to observe)
-    const config = { childList: true, subtree: true, attributes: true, attributeOldValue: true };
+    const config = { subtree: true, attributes: true, attributeOldValue: true };
 
     // Callback function to execute when mutations are observed
     const callback = (mutationsList, observer) => {
@@ -195,13 +203,13 @@ const startObserver = () => {
           console.log(mutation);
           const targetElement = mutation.target;
           const isDiv = targetElement.tagName.toLowerCase() === 'div';
-          let hasHoverTargetId = null;
-          if (targetElement.hasAttribute('data-lpc-hover-target-id')) {
-            console.log(`'data-lpc-hover-target-id' attribute found on target element.`);
-            hasHoverTargetId = true;
+          let hasSpeakerRing = null;
+          if (targetElement.hasAttribute('data-tid') && targetElement.getAttribute('data-tid') === 'participant-speaker-ring') {
+            console.log(`'data-tid=participant-speaker-ring' attribute found on target element.`);
+            hasSpeakerRing = true;
           }
-          if (isDiv && hasHoverTargetId) {
-            console.log('Both conditions are true: the element is a div and its role attribute is presentation.'); 
+          if (isDiv && hasSpeakerRing) {
+            console.log('Both conditions are true: the element is a div and its data-tid attribute is participant-speaker-ring.'); 
             const oldValue = mutation.oldValue;
             const newValue = mutation.target.getAttribute(mutation.attributeName);
             //log both oldValue and newValue
@@ -209,7 +217,7 @@ const startObserver = () => {
             // console.log(`New Value: ${newValue}`);
             if (oldValue && newValue && oldValue.startsWith(inactiveRingClass) && newValue.startsWith(activeRingClass)) {
               console.log('Active Speaker participant-speaker-ring activated');
-              let parentElement = mutation.target.closest('li');
+              let parentElement = mutation.target.parentElement.parentElement;
               if (parentElement && parentElement.hasAttribute('aria-label')) {
                 const ariaLabel = parentElement.getAttribute('aria-label');
                 if (ariaLabel && !ariaLabel.endsWith(' Muted')) {
@@ -223,10 +231,10 @@ const startObserver = () => {
             } else if (oldValue && newValue && oldValue.startsWith(activeRingClass) && newValue.startsWith(inactiveRingClass)) {
               console.log('Active Speaker stopped, finding out who else is speaking');
               let foundActiveSpeaker = false;
-              const otherActiveSpeaker = targetDivElement.querySelector(`div[data-lpc-hover-target-id^="lpc-react-target"][class^="${activeRingClass}"]`);
+              const otherActiveSpeaker = targetDivElement.querySelector(`div[data-tid="participant-speaker-ring"][class^="${activeRingClass}"]`);
               if (otherActiveSpeaker) {
-                const otherActiveSpeakerLi = otherActiveSpeaker.closest('li');
-                if (otherActiveSpeakerLi && otherActiveSpeakerLi.hasAttribute('aria-label') && otherActiveSpeakerLi.hasAttribute('data-cid') && otherActiveSpeakerLi.getAttribute('data-cid') === 'roster-participant') {
+                const otherActiveSpeakerLi = otherActiveSpeaker.parentElement.parentElement;
+                if (otherActiveSpeakerLi && otherActiveSpeakerLi.hasAttribute('aria-label') && otherActiveSpeakerLi.hasAttribute('data-cid') && otherActiveSpeakerLi.getAttribute('data-cid') === 'calling-participant-stream') {
                   const ariaLabel = otherActiveSpeakerLi.getAttribute('aria-label');
                   if (ariaLabel && !ariaLabel.endsWith(' Muted')) {
                     const activeSpeaker = ariaLabel.split(',')[0];
@@ -283,8 +291,8 @@ window.onload = function () {
     }
   }, 2000);
   checkForMeetingMetadata();
-  startRosterInterval();
-  setInterval(checkAndStartObserver, 5000);
+  // startRosterInterval();
+  // setInterval(checkAndStartObserver, 5000);
 };
 
 function checkAndStartObserver() {
