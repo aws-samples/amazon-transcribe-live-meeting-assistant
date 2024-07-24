@@ -79,19 +79,6 @@ else
   PUBLIC=false
 fi
 
-function calculate_hash() {
-  local directory_path=$1
-  local HASH=$(
-    find "$directory_path" \( -name node_modules -o -name build \) -prune -o -type f -print0 | 
-    sort -f -z |
-    xargs -0 sha256sum |
-    sha256sum |
-    cut -d" " -f1 | 
-    cut -c1-16
-  )
-  echo $HASH
-}
-
 # Remove trailing slash from prefix if needed, and append VERSION
 VERSION=$(cat ./VERSION)
 [[ "${PREFIX}" == */ ]] && PREFIX="${PREFIX%?}"
@@ -115,7 +102,55 @@ echo "Make temp dir: $tmpdir"
 [ -d $tmpdir ] && rm -fr $tmpdir
 mkdir -p $tmpdir
 
+
+function calculate_hash() {
+local directory_path=$1
+local HASH=$(
+  find "$directory_path" \( -name node_modules -o -name build \) -prune -o -type f -print0 | 
+  sort -f -z |
+  xargs -0 sha256sum |
+  sha256sum |
+  cut -d" " -f1 | 
+  cut -c1-16
+)
+echo $HASH
+}
+
+
+haschanged() {
+  local dir=$1
+  local checksum_file="${dir}/.checksum"
+  # Compute current checksum of the directory's modification times excluding specified directories, and the publish target S3 location.
+  dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -exec stat --format='%Y' {} \; | sha256sum | awk '{ print $1 }')
+  combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $dir_checksum"
+  current_checksum=$(echo -n "$combined_string" | sha256sum | awk '{ print $1 }')
+  # Check if the checksum file exists and read the previous checksum
+  if [ -f "$checksum_file" ]; then
+      previous_checksum=$(cat "$checksum_file")
+  else
+      previous_checksum=""
+  fi
+  if [ "$current_checksum" != "$previous_checksum" ]; then
+      return 0  # True, the directory has changed
+  else
+      return 1  # False, the directory has not changed
+  fi
+}
+
+update_checksum() {
+  local dir=$1
+  local checksum_file="${dir}/.checksum"
+  # Compute current checksum of the directory's modification times excluding specified directories, and the publish target S3 location.
+  dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -exec stat --format='%Y' {} \; | sha256sum | awk '{ print $1 }')
+  combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $dir_checksum"
+  current_checksum=$(echo -n "$combined_string" | sha256sum | awk '{ print $1 }')
+  # Save the current checksum
+  echo "$current_checksum" > "$checksum_file"
+}
+
+
 dir=lma-browser-extension-stack
+if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir
 # by hashing the contents of the extension folder, we can create a zipfile name that 
@@ -134,38 +169,63 @@ https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX_AND_VERSIO
 aws s3 cp ./template.yaml ${s3_template}
 aws cloudformation validate-template --template-url ${https_template} > /dev/null || exit 1
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 dir=lma-meetingassist-setup-stack
+if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir
 chmod +x ./publish.sh
 ./publish.sh $BUCKET $PREFIX_AND_VERSION $REGION || exit 1
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 dir=lma-bedrockkb-stack
+if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir
 chmod +x ./publish.sh
 ./publish.sh $BUCKET $PREFIX_AND_VERSION $REGION || exit 1
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 dir=lma-websocket-stack
+if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir/deployment
 rm -rf ../out
 chmod +x ./build-s3-dist.sh
 ./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lma-websocket-stack $VERSION $REGION || exit 1
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 dir=lma-ai-stack
+if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir/deployment
 rm -fr ../out
 chmod +x ./build-s3-dist.sh
 ./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lma-ai-stack $VERSION $REGION || exit 1
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 dir=lma-llm-template-setup-stack
+if haschanged $dir; then
 echo "PACKAGING $dir/deployment"
 pushd $dir/deployment
 
@@ -190,19 +250,29 @@ aws cloudformation package \
 echo "Uploading template file to: ${s3_template}"
 aws s3 cp ${tmpdir}/${template} ${s3_template}
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 echo "Initialize and update git submodules"
 git submodule init
 git submodule update
 
 dir=submodule-aws-qnabot-plugins
+if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir
 chmod +x ./publish.sh
 ./publish.sh $BUCKET $PREFIX_AND_VERSION/aws-qnabot-plugins || exit 1
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 dir=submodule-aws-qnabot
+if haschanged $dir; then
 echo "PACKAGING $dir"
 git submodule init
 git submodule update
@@ -232,6 +302,10 @@ npm install
 npm run build || exit 1
 aws s3 sync ./build/ s3://${BUCKET}/${PREFIX_AND_VERSION}/aws-qnabot/ --delete 
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 echo "PACKAGING Main Stack Cfn artifacts"
 MAIN_TEMPLATE=lma-main.yaml
@@ -256,13 +330,19 @@ echo "Validating template: $template"
 aws cloudformation validate-template --template-url $template > /dev/null || exit 1
 
 if $PUBLIC; then
-  echo "Setting public read ACLs on published artifacts"
-  files=$(aws s3api list-objects --bucket ${BUCKET} --prefix ${PREFIX_AND_VERSION} --query "(Contents)[].[Key]" --output text)
-  for file in $files
-    do
-    aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key $file
-    done
-  aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key ${PREFIX}/${MAIN_TEMPLATE}
+echo "Setting public read ACLs on published artifacts"
+files=$(aws s3api list-objects --bucket ${BUCKET} --prefix ${PREFIX_AND_VERSION} --query "(Contents)[].[Key]" --output text)
+c=$(echo $files | wc -w)
+counter=0
+for file in $files
+  do
+  aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key $file
+  counter=$((counter + 1))
+  echo -ne "Progress: $counter/$c files processed\r"
+  done
+aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key ${PREFIX}/${MAIN_TEMPLATE}
+echo ""
+echo "Done."
 fi
 
 echo "OUTPUTS"
