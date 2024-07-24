@@ -298,7 +298,7 @@ Parameters:
 
   BootstrapVersion:
     Type: String
-    Default: 0.1.5
+    Default: 0.1.6
     Description: >
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket
@@ -1751,6 +1751,11 @@ Resources:
             the LMA web interface and set your permanent password.
             <p>     https://${WebAppCloudFrontDistribution.DomainName}/
             <p>
+            <p>Don't attempt to download the Chrome browser extension from LMA until the 
+            <p>CloudFormation stack status is CREATE_COMPLETE or UPDATE_COMPLETE, as the 
+            <p>extension will not be available until then.
+            <p>
+            <p>Thanks,
             <p>Live Meeting Assistant (amazon.com/live-call-analytics)
       AutoVerifiedAttributes:
         - email
