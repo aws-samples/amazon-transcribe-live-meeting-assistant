@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [0.1.6] - 2024-07-24
+### Fixed
+- Bedrock KB source links for S3 documents should be click to open #46
+- Web URL missing from assistant response sources from Bedrock KB webcrawler #49
+- When using Microsoft Teams, LMA browser extension closes chat window and always opens participants window #52
+- Add note to Cognito email regarding the Chrome browser extension #55
+
+
 ## [0.1.5] - 2024-07-15
 ### Added
 - Added initial support for Teams web client in the browser extension
@@ -75,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.1.6]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.6
 [0.1.5]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.5
 [0.1.4]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.4
 [0.1.3]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.3
