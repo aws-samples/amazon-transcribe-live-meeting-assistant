@@ -77,6 +77,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     } 
     sendChatMessage(request.message);
     */
+    startObserver();
   }
 });
 
@@ -107,17 +108,18 @@ const checkForMeetingMetadata = function () {
       }
     }
     if (!metadata.meetingTopic || metadata.meetingTopic.trim() === '') {
-      const showMoreButton = document.getElementById('callingButtons-showMoreBtn');
+      /* const showMoreButton = document.getElementById('callingButtons-showMoreBtn');
       if (showMoreButton) {
         showMoreButton.click();
       }
       const meetingInfoButton = document.querySelector('[aria-label="Meeting info"]');
       if (meetingInfoButton) {
         meetingInfoButton.click();
-      }
-      const meetingTitle = document.querySelector('[data-tid="call-title"]');
+      } */
+      //const meetingTitle = document.querySelector('[data-tid="call-title"]');
+      const meetingTitle = document.title.split('|')[0].trim();
       if (meetingTitle && displayName) {
-        metadata.meetingTopic = meetingTitle.innerText;
+        metadata.meetingTopic = meetingTitle;
         setInterval(checkAndClickRoster, 2000);
       }
     }
@@ -264,17 +266,18 @@ const startObserver = () => {
 
 // Function to start the MutationObserver
 const startObserver = () => {
-  const rosterTitleElement = document.querySelector('span[id^="roster-title-section"][aria-label^="In this meeting"]');
-  console.log(rosterTitleElement)
-  let targetNodes;
-  if (rosterTitleElement) {
-    targetNodes = rosterTitleElement.parentElement.parentElement.parentElement.parentElement.parentElement;
-    if (targetNodes && targetNodes.hasAttribute('LMAAttached') && targetNodes.getAttribute('LMAAttached') === 'true') {
-      return;
-    }
-    else{
-      targetNodes.setAttribute('LMAAttached', 'true');
-    }
+  //data-cid="calling-participant-stream"
+  let targetNodes = document.querySelector('div[aria-label="Shared content view"][role=main]');
+  if (targetNodes && targetNodes.hasAttribute('LMAAttached') && targetNodes.getAttribute('LMAAttached') === 'true') {
+    return;
+  }
+  else if (!targetNodes){
+    console.log('Target div not found. Retrying in 2 seconds...');
+    setTimeout(startObserver, 2000);
+    return;
+  }
+  else{
+    targetNodes.setAttribute('LMAAttached', 'true');
   }
   console.log(targetNodes)
   // Options for the observer (which mutations to observe)
@@ -304,15 +307,16 @@ const startObserver = () => {
         console.log(`The ${mutation.attributeName} attribute was modified.`);
         console.log(mutation);
         const targetElement = mutation.target;
-        const isSpan = targetElement.tagName.toLowerCase() === 'span';
-        const hasRolePresentation = targetElement.getAttribute('role') === 'presentation';
-        if (isSpan && hasRolePresentation) {
-          console.log('Both conditions are true: the element is a span and its role attribute is presentation.');
+        const isDiv = targetElement.tagName.toLowerCase() === 'div';
+        const hasRolePresentation = targetElement.getAttribute('data-tid') === 'voice-level-stream-outline';
+        //check if the mutitation is on attribute class
+        if (isDiv && hasRolePresentation && mutation.attributeName === 'class') {
+          console.log('Both conditions are true: the element is a div and its data-cid attribute is voice-level-stream-outline.');
           const oldValue = mutation.oldValue;
           const newValue = mutation.target.getAttribute(mutation.attributeName);
-          if (oldValue.startsWith(inactiveRingClass) && newValue.startsWith(activeRingClass)) {
+          if (newValue.includes('vdi-frame-occlusion') && !oldValue.includes('vdi-frame-occlusion')) {
             // console.log("Active Speaker participant-speaker-ring activated");
-            let parentElement = mutation.target.parentElement.parentElement.parentElement;
+            let parentElement = mutation.target.parentElement;
             if (parentElement && parentElement.hasAttribute('aria-label')) {
               const ariaLabel = parentElement.getAttribute('aria-label');
               // console.log(`Found aria-label: ${ariaLabel}`);
@@ -327,13 +331,13 @@ const startObserver = () => {
               console.log('No aria-label found at expected parent level.');
             }
           }
-          else if (oldValue.startsWith(activeRingClass) && newValue.startsWith(inactiveRingClass)) {
+          else if (!newValue.includes('vdi-frame-occlusion') && oldValue.includes('vdi-frame-occlusion')) {
             let foundActiveSpeaker = false;
             console.log("Active Speaker stopped, findout who else is speaking");
             //query the active speaker:
-            const otherActiveSpeaker = targetNodes.querySelector(`span[role="presentation"][class^="${activeRingClass}"]`)
+            const otherActiveSpeaker = targetNodes.querySelector(`div[class*="vdi-frame-occlusion"]`)
             if (otherActiveSpeaker) {
-              const otherActiveSpeakerLi = otherActiveSpeaker.parentElement.parentElement.parentElement;
+              const otherActiveSpeakerLi = otherActiveSpeaker.parentElement;
               if (otherActiveSpeakerLi && otherActiveSpeakerLi.hasAttribute('aria-label')) {
                 const ariaLabel = otherActiveSpeakerLi.getAttribute('aria-label');
                 // console.log(`Found aria-label: ${ariaLabel}`);
@@ -373,10 +377,10 @@ const startObserver = () => {
 };
 
 function checkAndClickRoster() {
-  const rosterElement = document.getElementById('roster-button');
-  if (rosterElement && rosterElement.getAttribute('data-track-action-outcome') === 'show') {
-    rosterElement.click();
-  }
+  // const rosterElement = document.getElementById('roster-button');
+  // if (rosterElement && rosterElement.getAttribute('data-track-action-outcome') === 'show') {
+  //   rosterElement.click();
+  // }
 }
 
 function checkAndStartObserver() {
@@ -416,6 +420,6 @@ window.onload = function () {
   }, 2000);
 
   checkForMeetingMetadata();
-  startObserver();
-  setInterval(checkAndStartObserver, 5000);
+  // startObserver();
+  // setInterval(checkAndStartObserver, 5000);
 };
