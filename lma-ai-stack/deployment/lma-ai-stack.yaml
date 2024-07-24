@@ -1745,8 +1745,7 @@ Resources:
           EmailMessage: !Sub |-
             <p>Hello {username},
             <p>Welcome to Live Meeting Assistant (LMA)! Your temporary password is:
-            <p>     {####}
-            <p>
+            <p>     {####}<p>
             <p>When the CloudFormation stack is COMPLETE, use the link below to log in to
             the LMA web interface and set your permanent password.
             <p>     https://${WebAppCloudFrontDistribution.DomainName}/
