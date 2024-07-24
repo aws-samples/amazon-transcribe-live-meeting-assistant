@@ -999,7 +999,6 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
-        AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
         EnableVoiceToneAnalysis: "false"
         CallAudioSource: "Genesys Cloud Audiohook Web Socket"
         S3BucketName: !If
