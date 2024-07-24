@@ -1198,6 +1198,7 @@ Resources:
     Properties:
       IdentityPoolId: !Ref AgentAssistBotIdentityPool
       Roles:
+        authenticated: !GetAtt AgentAssistBotAuthRole.Arn
         unauthenticated: !GetAtt AgentAssistBotUnauthRole.Arn
 
   AgentAssistBotUnauthRole:
@@ -1216,8 +1217,25 @@ Resources:
                 "cognito-identity.amazonaws.com:aud": !Ref AgentAssistBotIdentityPool
               "ForAnyValue:StringLike":
                 "cognito-identity.amazonaws.com:amr": unauthenticated
+
+  AgentAssistBotAuthRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "cognito-identity.amazonaws.com:aud": !Ref AgentAssistBotIdentityPool
+              "ForAnyValue:StringLike":
+                "cognito-identity.amazonaws.com:amr": authenticated
       Policies:
-        - PolicyName: AgentAssistBotUnauthPolicy
+        - PolicyName: AgentAssistBotAuthPolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
