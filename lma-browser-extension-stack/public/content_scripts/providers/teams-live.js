@@ -89,7 +89,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
 const checkForMeetingMetadata = function () {
   var displayName;
-  const intervalId = setInterval(() => {
+  setTimeout(() => {
     if (!metadata.userName || metadata.userName.trim() === '') {
       try {
         sessionData = JSON.parse(localStorage.getItem("msal.activeUserProfile"));
@@ -138,7 +138,7 @@ const checkForMeetingMetadata = function () {
         metadata: metadata
       });
     }
-  }, 2000);// Check every 2000 milliseconds (2 seconds)
+  }, 2000);
 }
 
 let activeSpeakerObserver = null;
