@@ -158,7 +158,7 @@ def format_response(event, amazonq_response):
         prefix = None
     plainttext = amazonq_response["systemMessage"]
     markdown = amazonq_response["systemMessage"]
-    ssml = amazonq_response["systemMessage"]
+    ssml = f"<speak>{amazonq_response["systemMessage"]}</speak>"
     if prefix:
         plainttext = f"{prefix}\n\n{plainttext}"
         markdown = f"**{prefix}**\n\n{markdown}"
