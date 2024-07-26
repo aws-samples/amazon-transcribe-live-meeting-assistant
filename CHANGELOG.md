@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bedrock KB source links for S3 documents should be click to open #46
 - Web URL missing from assistant response sources from Bedrock KB webcrawler #49
 - When using Microsoft Teams, LMA browser extension closes chat window and always opens participants window #52
+- Teams browser extension problem when logged in as guest account. #53
 - Add note to Cognito email regarding the Chrome browser extension #55
+- Meeting assistant bot voice output doesn't work. #39
 
 
 ## [0.1.5] - 2024-07-15
