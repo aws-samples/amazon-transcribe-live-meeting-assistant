@@ -298,7 +298,7 @@ Parameters:
 
   BootstrapVersion:
     Type: String
-    Default: 0.1.5
+    Default: 0.1.6
     Description: >
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket
@@ -1745,13 +1745,17 @@ Resources:
           EmailMessage: !Sub |-
             <p>Hello {username},
             <p>Welcome to Live Meeting Assistant (LMA)! Your temporary password is:
-            <p>     {####}
-            <p>
+            <p>     {####}<p>
             <p>When the CloudFormation stack is COMPLETE, use the link below to log in to
             the LMA web interface and set your permanent password.
             <p>     https://${WebAppCloudFrontDistribution.DomainName}/
             <p>
-            <p>Live Meeting Assistant (amazon.com/live-call-analytics)
+            <p>Don't attempt to download the Chrome browser extension from LMA until the 
+            CloudFormation stack status is CREATE_COMPLETE or UPDATE_COMPLETE, as the 
+            extension will not be available until then.
+            <p>
+            <p>Thanks,
+            <p>Live Meeting Assistant (amazon.com/live-meeting-assistant)
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:

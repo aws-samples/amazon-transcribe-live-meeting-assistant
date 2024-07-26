@@ -15,7 +15,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.5)
+Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.6)
 
 Parameters:
   MeetingAssistService:
@@ -784,6 +784,7 @@ Resources:
       CustomLanguageModelName: !Ref CustomLanguageModelName
       BedrockModelIds:
         - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
+        - "amazon.titan-embed-text-v2:0" # Meeting Assistant
         - !Ref BedrockModelId # Meeting summarization
         - "amazon.titan-embed-text-v1" # QNABOTBR
         - "anthropic.claude-instant-v1" # QNABOTBR
@@ -987,6 +988,7 @@ Resources:
             - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
             - !Ref BedrockKnowledgeBaseId
           - ""
+        BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
         AmazonQAppId: ""
         AmazonQUserId: ""

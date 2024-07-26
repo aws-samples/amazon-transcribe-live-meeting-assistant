@@ -8,3 +8,4 @@
 **/node_transcriber_layer/transcriber-layer.zip
 .aws-sam
 samconfig.toml
+.checksum
