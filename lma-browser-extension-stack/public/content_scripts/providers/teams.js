@@ -117,7 +117,7 @@ const checkForMeetingMetadata = function () {
         meetingInfoButton.click();
       } */
       //const meetingTitle = document.querySelector('[data-tid="call-title"]');
-      const meetingTitle = document.title.split('|')[0].trim();
+      const meetingTitle = document.title;
       if (meetingTitle && displayName) {
         metadata.meetingTopic = meetingTitle;
         //setInterval(checkAndClickRoster, 2000);
