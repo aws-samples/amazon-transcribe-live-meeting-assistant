@@ -82,7 +82,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 });
 
 const checkForMeetingMetadata = function () {
-  const intervalId = setInterval(() => {
+  setTimeout(() => {
     if (!metadata.userName || metadata.userName.trim() === '') {
       //get the user
       const avatarButton = document.querySelector('button[data-tid="me-control-avatar-trigger"]');
@@ -120,7 +120,7 @@ const checkForMeetingMetadata = function () {
       const meetingTitle = document.title.split('|')[0].trim();
       if (meetingTitle && displayName) {
         metadata.meetingTopic = meetingTitle;
-        setInterval(checkAndClickRoster, 2000);
+        //setInterval(checkAndClickRoster, 2000);
       }
     }
     if (metadata.userName && metadata.userName.trim() !== '' && metadata.meetingTopic && metadata.meetingTopic.trim() !== '') {
@@ -129,7 +129,7 @@ const checkForMeetingMetadata = function () {
         metadata: metadata
       });
     }
-  }, 2000); // Check every 2000 milliseconds (2 seconds)
+  }, 2000);
 }
 
 let activeSpeakerObserver;
