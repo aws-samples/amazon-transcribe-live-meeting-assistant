@@ -229,7 +229,7 @@ def format_response(event, kb_response, query):
         answerprefix = None
     plainttext = message
     markdown = message
-    ssml = message
+    ssml = f"<speak>{message}</speak>"
     if answerprefix:
         plainttext = f"{answerprefix}\n\n{plainttext}"
         markdown = f"**{answerprefix}**\n\n{markdown}"
