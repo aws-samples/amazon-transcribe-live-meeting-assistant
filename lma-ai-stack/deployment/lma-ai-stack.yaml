@@ -1192,6 +1192,9 @@ Resources:
     Properties:
       IdentityPoolName: !Sub "${AWS::StackName}-AgentAssistBot-IdentityPool"
       AllowUnauthenticatedIdentities: true
+      CognitoIdentityProviders:
+        - ClientId: !Ref UserPoolClient
+          ProviderName: !GetAtt UserPool.ProviderName
 
   AgentAssistBotIdentityPoolSetRole:
     Type: AWS::Cognito::IdentityPoolRoleAttachment

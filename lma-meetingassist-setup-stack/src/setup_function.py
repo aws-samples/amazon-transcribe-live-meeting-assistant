@@ -45,20 +45,20 @@ def addBotToAistack(props, oldprops):
     )
     print("Updated AsyncAgentAssistOrchestratorFunction Environment variable to add Lex bot.")
 
-    print("Updating updating Cognito Unauthenticated Role for Agent Assist...")
-    agentAssistBotUnauthRole = getStackResource(
-        props["AISTACK"], "AgentAssistBotUnauthRole")
+    print("Updating updating Cognito Authenticated Role for Agent Assist...")
+    agentAssistBotAuthRole = getStackResource(
+        props["AISTACK"], "AgentAssistBotAuthRole")
     newArn = f'arn:{aws_partition}:lex:{AWS_REGION}:{aws_account_id}:bot-alias/{props["LexMeetingAssistBotId"]}/{props["LexMeetingAssistAliasId"]}'
     newPolicy = {'Version': '2012-10-17', 'Statement': [{'Action': [
         'lex:RecognizeText', 'lex:RecognizeUtterance', 'lex:DeleteSession', 'lex:PutSession'], 'Resource': newArn, 'Effect': 'Allow'}]}
     print('New Policy:')
     print(newPolicy)
     iam.put_role_policy(
-        RoleName=agentAssistBotUnauthRole,
-        PolicyName='AgentAssistBotUnauthPolicy',
+        RoleName=agentAssistBotAuthRole,
+        PolicyName='AgentAssistBotAthPolicy',
         PolicyDocument=json.dumps(newPolicy)
     )
-    print("Done updating Cognito Unauthenticated Role for Agent Assist")
+    print("Done updating Cognito Authenticated Role for Agent Assist")
 
     # update config file and invalidate CF
     print("Updating lex-web-ui-loader-config.json...")
@@ -76,6 +76,12 @@ def addBotToAistack(props, oldprops):
     contents = contents.replace('${REACT_APP_AWS_REGION}', AWS_REGION)
     contents = contents.replace(
         '${REACT_APP_LEX_IDENTITY_POOL_ID}', props["LexMeetingAssistIdentityPoolId"])
+    contents = contents.replace(
+        '${REACT_APP_LEX_IDENTITY_POOL_CLIENT_ID}', props["LexMeetingAssistUserPoolClientId"])
+    contents = contents.replace(
+        '${REACT_APP_LEX_USER_POOL_NAME}', props["LexMeetingAssistUserPoolId"])
+    contents = contents.replace(
+        '${REACT_APP_LEX_DOMAIN_NAME}', props["LexMeetingAssistDomainName"])
     contents = contents.replace(
         '${CLOUDFRONT_DOMAIN}', props["CloudFrontDomainName"])
     print("New LexWebUI Config: ", json.dumps(contents))

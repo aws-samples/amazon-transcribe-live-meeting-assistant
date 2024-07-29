@@ -103,6 +103,18 @@ Parameters:
     Type: String
     Description: The LMA Meeting Assist Identity Pool ID
 
+  LexMeetingAssistUserPoolClientId:
+    Type: String
+    Description: The LMA Meeting Assist User Pool Client ID
+
+  LexMeetingAssistUserPoolId:
+    Type: String
+    Description: The LMA Meeting Assist User Pool ID
+
+  LexMeetingAssistDomainName:
+    Type: String
+    Description: The LMA Meeting Assist Domain Url
+
   CloudFrontDomainName:
     Type: String
     Description: The domain name of the LMA CloudFront distribution
@@ -619,6 +631,9 @@ Resources:
       LexMeetingAssistAliasId: !Ref LexMeetingAssistAliasId
       LexMeetingAssistLocaleId: !Ref LexMeetingAssistLocaleId
       LexMeetingAssistIdentityPoolId: !Ref LexMeetingAssistIdentityPoolId
+      LexMeetingAssistUserPoolClientId: !Ref LexMeetingAssistUserPoolClientId
+      LexMeetingAssistUserPoolId: !Ref LexMeetingAssistUserPoolId
+      LexMeetingAssistDomainName: !Ref LexMeetingAssistDomainName
       QnaMeetingAssistDemoJson: !Ref QnaMeetingAssistDemoJson
       QNASummarizeCallFunction: !Ref QNASummarizeCallFunction
       QNAMeetingAssistLambdaHookFunction: !If

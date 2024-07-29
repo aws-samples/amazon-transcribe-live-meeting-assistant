@@ -16,6 +16,14 @@ const useUserAuthState = (awsconfig) => {
       logger.debug('auth state change authData:', authData);
       setAuthState(nextAuthState);
       setUser(authData);
+      if (authData) {
+        // prettier-ignore
+        localStorage.setItem(`${authData.pool.clientId}idtokenjwt`, authData.signInUserSession.idToken.jwtToken);
+        // prettier-ignore
+        localStorage.setItem(`${authData.pool.clientId}accesstokenjwt`, authData.signInUserSession.accessToken.jwtToken);
+        // prettier-ignore
+        localStorage.setItem(`${authData.pool.clientId}refreshtoken`, authData.signInUserSession.refreshToken.jwtToken);
+      }
     });
   }, [awsconfig]);
 
