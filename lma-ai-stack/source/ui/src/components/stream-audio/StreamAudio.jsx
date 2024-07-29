@@ -175,7 +175,9 @@ const StreamAudio = () => {
   //  to avoid the scenario of the state not updating before it is used
   const getFinalCallMetadata = () => {
     const meetingPrefix = meetingTopic || 'Stream Audio';
-    setMeetingTopic(meetingPrefix);
+    // eslint-disable-next-line no-useless-escape
+    setMeetingTopic(meetingPrefix.replace(/[\/?#%\+&]/g, '|'));
+    // setMeetingTopic(meetingPrefix);
     const callMetaDataCopy = {
       ...callMetaData,
       callId: `${meetingPrefix} - ${getTimestampStr()}`,
