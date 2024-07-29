@@ -49,7 +49,6 @@ const StreamAudio = () => {
   const [streamingStarted, setStreamingStarted] = useState(false);
   const [isFlashing, setIsFlashing] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
-  const [micInputOption] = useState('agent');
   const [recordedMeetingId, setRecordedMeetingId] = useState('');
 
   useEffect(() => {
@@ -250,7 +249,6 @@ const StreamAudio = () => {
         sendMessage(event.data);
       };
       channelMerger.current.connect(audioProcessor.current);
-
     } catch (error) {
       alert(`An error occurred while recording: ${error}`);
       await stopRecording();
