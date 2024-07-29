@@ -174,10 +174,10 @@ const StreamAudio = () => {
   // The callMetaData state is updated so onscreen fields are updated, but a copy is returned
   //  to avoid the scenario of the state not updating before it is used
   const getFinalCallMetadata = () => {
-    const meetingPrefix = meetingTopic || 'Stream Audio';
     // eslint-disable-next-line no-useless-escape
-    setMeetingTopic(meetingPrefix.replace(/[\/?#%\+&]/g, '|'));
-    // setMeetingTopic(meetingPrefix);
+    const meetingPrefix = meetingTopic.replace(/[\/?#%\+&]/g, '|') || 'Stream Audio';
+
+    setMeetingTopic(meetingPrefix);
     const callMetaDataCopy = {
       ...callMetaData,
       callId: `${meetingPrefix} - ${getTimestampStr()}`,
