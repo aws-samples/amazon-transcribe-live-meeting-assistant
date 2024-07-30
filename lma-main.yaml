@@ -15,7 +15,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.6)
+Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.6) (SO9497)
 
 Parameters:
   MeetingAssistService:
