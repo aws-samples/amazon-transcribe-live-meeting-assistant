@@ -1045,6 +1045,9 @@ Resources:
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         LexMeetingAssistIdentityPoolId: !GetAtt AISTACK.Outputs.LexAgentAssistIdentityPoolId
+        LexMeetingAssistUserPoolClientId: !GetAtt AISTACK.Outputs.CognitoClientId
+        LexMeetingAssistUserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
+        LexMeetingAssistDomainName: !GetAtt AISTACK.Outputs.CognitoLoginUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
