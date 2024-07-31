@@ -400,6 +400,27 @@ Parameters:
       Number of days to retain CloudWatch log records. Logs will be automatically
       deleted after this time.
 
+  EnableAppSyncApiCache:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable or disable the AppSync Api Cache.
+
+  AppSyncApiCacheInstanceType:
+    Type: String
+    Default: SMALL
+    AllowedValues:
+      - SMALL
+      - MEDIUM
+      - LARGE
+      - XLARGE
+    Description: >-
+      If you set the EnableAppSyncApiCache is true, choose a value that meets your workload requirements. 
+      This parameter is ignored if the EnableAppSyncApiCache parameter is set to false (default behavior).
+      
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -462,6 +483,11 @@ Metadata:
           - TranscriptionExpirationInDays
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
+      - Label:
+          default: AppSync Configuration
+        Parameters:
+          - EnableAppSyncApiCache
+          - AppSyncApiCacheInstanceType
 
     ParameterLabels:
       CallAudioProcessor:
@@ -540,6 +566,10 @@ Metadata:
         default: Transcription Expiration In Days
       AudioRecordingExpirationInDays:
         default: Audio Recording Expiration In Days
+      EnableAppSyncApiCache:
+        default: Enable AppSync Api Cache
+      AppSyncApiCacheInstanceType:
+        default: AppSync Api Cache Instance Type
 
 Mappings:
   TranscribeToLexLocaleId:
@@ -915,6 +945,8 @@ Resources:
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        EnableAppSyncApiCache: !Ref EnableAppSyncApiCache
+        AppSyncApiCacheInstanceType: !Ref AppSyncApiCacheInstanceType
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
