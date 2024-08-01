@@ -396,6 +396,31 @@ Parameters:
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 90
+    AllowedValues:
+      [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1096,
+        1827,
+        2192,
+        2557,
+        2922,
+        3288,
+        3653,
+      ]
     Description: >-
       Number of days to retain CloudWatch log records. Logs will be automatically
       deleted after this time.
@@ -420,7 +445,7 @@ Parameters:
     Description: >-
       If you set the EnableAppSyncApiCache is true, choose a value that meets your workload requirements. 
       This parameter is ignored if the EnableAppSyncApiCache parameter is set to false (default behavior).
-      
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
