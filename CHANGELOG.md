@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.8] - 2024-08-01
 ### Fixed
-- Remove unused KMS key #72
+- Remove unused KMS keys #72
 
 ## [0.1.7] - 2024-08-01
 ### Fixed
