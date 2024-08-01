@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add note to Cognito email regarding the Chrome browser extension #55
 - Meeting assistant bot voice output doesn't work. #39
 - Use auth role for Meeting Assistant bot, and remove all permissions for unauthenticated Cognito identities #65
-
+- Optimize costs by making Appsync API cache optional, with configurable size - default OFF. #66
 
 ## [0.1.5] - 2024-07-15
 ### Added
