@@ -282,6 +282,7 @@ echo "Applying patch files to simplify UX by removing some QnABot options not ne
 # lma customizations
 cp -v ./patches/qnabot/Makefile $dir/Makefile
 cp -v ./patches/qnabot/templates_examples_examples_index.js $dir/templates/examples/examples/index.js
+cp -v ./patches/qnabot/templates_examples_extensions_index.js $dir/templates/examples/extensions/index.js
 echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lma'"
 # Detection of differences. sed varies betwen GNU sed and BSD sed
 if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
