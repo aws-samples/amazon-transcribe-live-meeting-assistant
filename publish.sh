@@ -281,6 +281,7 @@ git submodule update
 echo "Applying patch files to simplify UX by removing some QnABot options not needed for lma"
 # lma customizations
 cp -v ./patches/qnabot/Makefile $dir/Makefile
+cp -v ./patches/qnabot/templates_examples_examples_index.js $dir/templates/examples/examples/index.js
 echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lma'"
 # Detection of differences. sed varies betwen GNU sed and BSD sed
 if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
