@@ -337,6 +337,27 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  EnableAppSyncApiCache:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable or disable the AppSync Api Cache.
+
+  AppSyncApiCacheInstanceType:
+    Type: String
+    Default: SMALL
+    AllowedValues:
+      - SMALL
+      - MEDIUM
+      - LARGE
+      - XLARGE
+    Description: >-
+      If you set the EnableAppSyncApiCache is true, choose a value that meets your workload requirements. 
+      This parameter is ignored if the EnableAppSyncApiCache parameter is set to false (default behavior).
+
 Metadata:
   "AWS::CloudFormation::Interface":
     ParameterGroups:
@@ -400,6 +421,9 @@ Conditions:
   IsTranscriptSummaryEnabled: !Or
     - !Condition ShouldEnableEndOfCallLambdaHookFunction
     - !Condition ShouldEnableBedrockSummarizer
+  ShouldEnableAppSyncApiCache:
+    !Equals [!Ref EnableAppSyncApiCache, "true"]
+    
 Outputs:
   CognitoLoginUrl:
     Value: !Sub https://${LMAUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
@@ -739,7 +763,7 @@ Resources:
           - Name: REACT_APP_IDENTITY_POOL_ID
             Value: !Ref IdentityPool
           - Name: REACT_APP_APPSYNC_GRAPHQL_URL
-            Value: !GetAtt AppSyncApi.GraphQLUrl
+            Value: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           - Name: REACT_APP_AWS_REGION
             Value: !Ref AWS::Region
           - Name: REACT_APP_SHOULD_HIDE_SIGN_UP
@@ -1192,12 +1216,16 @@ Resources:
     Properties:
       IdentityPoolName: !Sub "${AWS::StackName}-AgentAssistBot-IdentityPool"
       AllowUnauthenticatedIdentities: true
+      CognitoIdentityProviders:
+        - ClientId: !Ref UserPoolClient
+          ProviderName: !GetAtt UserPool.ProviderName
 
   AgentAssistBotIdentityPoolSetRole:
     Type: AWS::Cognito::IdentityPoolRoleAttachment
     Properties:
       IdentityPoolId: !Ref AgentAssistBotIdentityPool
       Roles:
+        authenticated: !GetAtt AgentAssistBotAuthRole.Arn
         unauthenticated: !GetAtt AgentAssistBotUnauthRole.Arn
 
   AgentAssistBotUnauthRole:
@@ -1216,8 +1244,25 @@ Resources:
                 "cognito-identity.amazonaws.com:aud": !Ref AgentAssistBotIdentityPool
               "ForAnyValue:StringLike":
                 "cognito-identity.amazonaws.com:amr": unauthenticated
+
+  AgentAssistBotAuthRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "cognito-identity.amazonaws.com:aud": !Ref AgentAssistBotIdentityPool
+              "ForAnyValue:StringLike":
+                "cognito-identity.amazonaws.com:amr": authenticated
       Policies:
-        - PolicyName: AgentAssistBotUnauthPolicy
+        - PolicyName: AgentAssistBotAuthPolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -1292,10 +1337,10 @@ Resources:
                 - appsync:GraphQL
               Resource:
                 # XXX specific mutation - addEnrichment
-                - !Sub "${AppSyncApi.Arn}/types/Mutation/*"
-                - !Sub "${AppSyncApi.Arn}/types/Query/fields/__schema"
-                - !Sub "${AppSyncApi.Arn}/types/Query/fields/getCall"
-                - !Sub "${AppSyncApi.Arn}/types/Query/*"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/*"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/__schema"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/getCall"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
             - Effect: Allow
               Action:
                 - comprehend:DetectSentiment
@@ -1347,7 +1392,7 @@ Resources:
           POWERTOOLS_SERVICE_NAME: TranscriptProcessor
           # XXX add trace parameter or map
           POWERTOOLS_TRACE_DISABLED: false
-          APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApi.GraphQLUrl
+          APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           STATE_DYNAMODB_TABLE_NAME: !Ref EventSourcingTable
           COMPREHEND_LANGUAGE_CODE: !Ref ComprehendLanguageCode
           IS_SENTIMENT_ANALYSIS_ENABLED: !Ref IsSentimentAnalysisEnabled
@@ -1446,7 +1491,7 @@ Resources:
                   - dynamodb:UpdateItem
                 Resource: !GetAtt EventSourcingTable.Arn
 
-  AppSyncApi:
+  AppSyncApiEncrypted:
     Type: AWS::AppSync::GraphQLApi
     Properties:
       Name: !Sub "CallAnalytics-${AWS::StackName}"
@@ -1470,13 +1515,13 @@ Resources:
   AppSyncSchema:
     Type: AWS::AppSync::GraphQLSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DefinitionS3Location: ../source/appsync/schema.graphql
 
   AppSyncDataSource:
     Type: AWS::AppSync::DataSource
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       Name: CallEventSourcing
       Description: Call Analytics Event Sourcing DynamoDB Table
       Type: AMAZON_DYNAMODB
@@ -1487,19 +1532,20 @@ Resources:
 
   AppSyncApiCache:
     Type: AWS::AppSync::ApiCache
+    Condition: ShouldEnableAppSyncApiCache
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
-      Type: R4_LARGE
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Type: !Ref AppSyncApiCacheInstanceType
       ApiCachingBehavior: PER_RESOLVER_CACHING
       Ttl: 30
-      TransitEncryptionEnabled: false
-      AtRestEncryptionEnabled: false
+      TransitEncryptionEnabled: true
+      AtRestEncryptionEnabled: true
 
   GetCallAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Query
       FieldName: getCall
@@ -1510,7 +1556,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: createCall
@@ -1579,7 +1625,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: updateCallStatus
@@ -1590,7 +1636,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: updateRecordingUrl
@@ -1601,7 +1647,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: updatePcaUrl
@@ -1612,7 +1658,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: updateAgent
@@ -1623,7 +1669,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: addCallCategory
@@ -1634,7 +1680,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: addIssuesDetected
@@ -1645,7 +1691,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: addCallSummaryText
@@ -1656,7 +1702,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: updateCallAggregation
@@ -1667,7 +1713,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: addTranscriptSegment
@@ -1678,7 +1724,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Query
       FieldName: listCallsDateHour
@@ -1689,7 +1735,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Query
       FieldName: listCallsDateShard
@@ -1700,7 +1746,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Query
       FieldName: listCalls
@@ -1711,7 +1757,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Query
       FieldName: getTranscriptSegments
@@ -1722,7 +1768,7 @@ Resources:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt AppSyncApi.ApiId
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Query
       FieldName: getTranscriptSegmentsWithSentiment

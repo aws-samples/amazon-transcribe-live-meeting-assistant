@@ -15,7 +15,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.6)
+Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.6) (SO9497)
 
 Parameters:
   MeetingAssistService:
@@ -396,9 +396,55 @@ Parameters:
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 90
+    AllowedValues:
+      [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1096,
+        1827,
+        2192,
+        2557,
+        2922,
+        3288,
+        3653,
+      ]
     Description: >-
       Number of days to retain CloudWatch log records. Logs will be automatically
       deleted after this time.
+
+  EnableAppSyncApiCache:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable or disable the AppSync Api Cache.
+
+  AppSyncApiCacheInstanceType:
+    Type: String
+    Default: SMALL
+    AllowedValues:
+      - SMALL
+      - MEDIUM
+      - LARGE
+      - XLARGE
+    Description: >-
+      If you set the EnableAppSyncApiCache is true, choose a value that meets your workload requirements. 
+      This parameter is ignored if the EnableAppSyncApiCache parameter is set to false (default behavior).
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -462,6 +508,11 @@ Metadata:
           - TranscriptionExpirationInDays
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
+      - Label:
+          default: AppSync Configuration
+        Parameters:
+          - EnableAppSyncApiCache
+          - AppSyncApiCacheInstanceType
 
     ParameterLabels:
       CallAudioProcessor:
@@ -540,6 +591,10 @@ Metadata:
         default: Transcription Expiration In Days
       AudioRecordingExpirationInDays:
         default: Audio Recording Expiration In Days
+      EnableAppSyncApiCache:
+        default: Enable AppSync Api Cache
+      AppSyncApiCacheInstanceType:
+        default: AppSync Api Cache Instance Type
 
 Mappings:
   TranscribeToLexLocaleId:
@@ -915,6 +970,8 @@ Resources:
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        EnableAppSyncApiCache: !Ref EnableAppSyncApiCache
+        AppSyncApiCacheInstanceType: !Ref AppSyncApiCacheInstanceType
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -1013,6 +1070,9 @@ Resources:
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         LexMeetingAssistIdentityPoolId: !GetAtt AISTACK.Outputs.LexAgentAssistIdentityPoolId
+        LexMeetingAssistUserPoolClientId: !GetAtt AISTACK.Outputs.CognitoClientId
+        LexMeetingAssistUserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
+        LexMeetingAssistDomainName: !GetAtt AISTACK.Outputs.CognitoLoginUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn

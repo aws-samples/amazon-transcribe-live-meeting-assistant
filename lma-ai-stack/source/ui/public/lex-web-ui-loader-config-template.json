@@ -2,9 +2,9 @@
   "region": "${REACT_APP_AWS_REGION}",
   "cognito": {
     "poolId": "${REACT_APP_LEX_IDENTITY_POOL_ID}",
-    "appUserPoolClientId": "notused",
-    "appUserPoolName": "notused",
-    "appDomainName": "notused",
+    "appUserPoolClientId": "${REACT_APP_LEX_IDENTITY_POOL_CLIENT_ID}",
+    "appUserPoolName": "${REACT_APP_LEX_USER_POOL_NAME}",
+    "appDomainName": "${REACT_APP_LEX_DOMAIN_NAME}",
     "aws_cognito_region": "${REACT_APP_AWS_REGION}",
     "region": "${REACT_APP_AWS_REGION}"
   },
