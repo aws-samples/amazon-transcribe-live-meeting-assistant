@@ -421,9 +421,8 @@ Conditions:
   IsTranscriptSummaryEnabled: !Or
     - !Condition ShouldEnableEndOfCallLambdaHookFunction
     - !Condition ShouldEnableBedrockSummarizer
-  ShouldEnableAppSyncApiCache:
-    !Equals [!Ref EnableAppSyncApiCache, "true"]
-    
+  ShouldEnableAppSyncApiCache: !Equals [!Ref EnableAppSyncApiCache, "true"]
+
 Outputs:
   CognitoLoginUrl:
     Value: !Sub https://${LMAUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
@@ -578,33 +577,6 @@ Resources:
         Enabled: true
       StreamSpecification:
         StreamViewType: NEW_IMAGE
-
-  # Add permissions to the default key to allow S3 access
-  SQSManagedKey:
-    Type: AWS::KMS::Key
-    Properties:
-      EnableKeyRotation: true
-      KeyPolicy:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - "s3.amazonaws.com"
-            Action:
-              - "kms:GenerateDataKey*"
-              - "kms:Decrypt"
-            Resource: "*"
-          - Effect: Allow
-            Principal:
-              AWS: !Join
-                - ""
-                - - "arn:aws:iam::"
-                  - !Ref "AWS::AccountId"
-                  - ":root"
-            Action:
-              - "kms:*"
-            Resource: "*"
 
   ##########################################################################
   # ParameterStore
