@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Teams browser extension problem when logged in as guest account. #53
 - Add note to Cognito email regarding the Chrome browser extension #55
 - Meeting assistant bot voice output doesn't work. #39
-
+- Unable to see data for a meeting, when meeting name includes '/' #21
+- Improved audio quality when using Stream Audio tab
+ 
 
 ## [0.1.5] - 2024-07-15
 ### Added
