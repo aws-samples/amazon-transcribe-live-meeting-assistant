@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Made AppSync Api Cache an optional feature, with default being false (i.e no cache created) and default size SMALL.
-- Force AppSync encrypted cache creation if EnableAppSyncApiCache is set to true and a cache already exists.
 
 ### Fixed
 
