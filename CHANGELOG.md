@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [0.1.7] - 2024-08-01
+### Fixed
+- Use auth role for Meeting Assistant bot, and remove all permissions for unauthenticated Cognito identities #65
+- Optimize costs by making Appsync API cache optional, with configurable size - default OFF. #66
+
 ## [0.1.6] - 2024-07-24
 ### Fixed
 - Bedrock KB source links for S3 documents should be click to open #46
@@ -20,8 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Teams browser extension problem when logged in as guest account. #53
 - Add note to Cognito email regarding the Chrome browser extension #55
 - Meeting assistant bot voice output doesn't work. #39
-- Use auth role for Meeting Assistant bot, and remove all permissions for unauthenticated Cognito identities #65
-- Optimize costs by making Appsync API cache optional, with configurable size - default OFF. #66
 
 ## [0.1.5] - 2024-07-15
 ### Added
