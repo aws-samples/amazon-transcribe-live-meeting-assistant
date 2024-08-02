@@ -31,7 +31,7 @@ export const callsNavItems = [
       },
       {
         type: 'link',
-        text: 'Virtual Participant',
+        text: 'Virtual Participant (Beta)',
         href: `#${VIRTUAL_PARTICIPANT_PATH}`,
         external: true,
       },

@@ -18,7 +18,7 @@ const VirtualParticipant = () => {
   console.log(test);
 
   return (
-    <Container header={<Header variant="h2">Virtual Participant</Header>}>
+    <Container header={<Header variant="h2">Virtual Participant (Beta)</Header>}>
       <ColumnLayout columns={2}>
         <MeetingForm />
       </ColumnLayout>
