@@ -492,7 +492,7 @@ Outputs:
       REACT_APP_USER_POOL_ID=${UserPool}
       REACT_APP_USER_POOL_CLIENT_ID=${UserPoolClient}
       REACT_APP_IDENTITY_POOL_ID=${IdentityPool}
-      REACT_APP_APPSYNC_GRAPHQL_URL=${AppSyncApi.GraphQLUrl}
+      REACT_APP_APPSYNC_GRAPHQL_URL=${AppSyncApiEncrypted.GraphQLUrl}
       REACT_APP_AWS_REGION=${AWS::Region}
       REACT_APP_SETTINGS_PARAMETER=${LMASettingsParameterName}
       REACT_APP_ENABLE_LEX_AGENT_ASSIST=true
