@@ -56,7 +56,8 @@ def get_call_transcript(callId, userInput, maxMessages):
 
 def get_br_response(generatePromptTemplate, transcript, query):
     promptTemplate = generatePromptTemplate or "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a user's request. Your job is to respond to the user's request. If you cannot confidently respond to the user, please state that you could not find an exact answer. Just because the user asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the user's request:<br>{userInput}<br>"
-    prompt = promptTemplate.format(transcript=json.dumps(transcript), userInput=query)
+    prompt = promptTemplate.format(
+        transcript=json.dumps(transcript), userInput=query)
     prompt = prompt.replace("<br>", "\n")
     resp = get_bedrock_response(prompt)
     return resp
@@ -147,7 +148,7 @@ def format_response(event, message, query):
         answerprefix = None
     plainttext = message
     markdown = message
-    ssml = message
+    ssml = f"<speak>{message}</speak>"
     if answerprefix:
         plainttext = f"{answerprefix}\n\n{plainttext}"
         markdown = f"**{answerprefix}**\n\n{markdown}"
@@ -168,6 +169,7 @@ def format_response(event, message, query):
     event["res"]["got_hits"] = 1
     return event
 
+
 def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput):
     print("Use Bedrock to generate a relevant disambiguated query based on the transcript and input")
     promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. Only output the rephrased question. Do not include any preamble. "
@@ -176,6 +178,7 @@ def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput):
     prompt = prompt.replace("<br>", "\n")
     query = get_bedrock_response(prompt)
     return query
+
 
 def handler(event, context):
     print("Received event: %s" % json.dumps(event))

@@ -79,19 +79,6 @@ else
   PUBLIC=false
 fi
 
-function calculate_hash() {
-  local directory_path=$1
-  local HASH=$(
-    find "$directory_path" \( -name node_modules -o -name build \) -prune -o -type f -print0 | 
-    sort -f -z |
-    xargs -0 sha256sum |
-    sha256sum |
-    cut -d" " -f1 | 
-    cut -c1-16
-  )
-  echo $HASH
-}
-
 # Remove trailing slash from prefix if needed, and append VERSION
 VERSION=$(cat ./VERSION)
 [[ "${PREFIX}" == */ ]] && PREFIX="${PREFIX%?}"
@@ -115,25 +102,79 @@ echo "Make temp dir: $tmpdir"
 [ -d $tmpdir ] && rm -fr $tmpdir
 mkdir -p $tmpdir
 
+
+function calculate_hash() {
+local directory_path=$1
+local HASH=$(
+  find "$directory_path" \( -name node_modules -o -name build \) -prune -o -type f -print0 | 
+  sort -f -z |
+  xargs -0 sha256sum |
+  sha256sum |
+  cut -d" " -f1 | 
+  cut -c1-16
+)
+echo $HASH
+}
+
+
+haschanged() {
+  local dir=$1
+  local checksum_file="${dir}/.checksum"
+  # Compute current checksum of the directory's modification times excluding specified directories, and the publish target S3 location.
+  dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -exec stat --format='%Y' {} \; | sha256sum | awk '{ print $1 }')
+  combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $dir_checksum"
+  current_checksum=$(echo -n "$combined_string" | sha256sum | awk '{ print $1 }')
+  # Check if the checksum file exists and read the previous checksum
+  if [ -f "$checksum_file" ]; then
+      previous_checksum=$(cat "$checksum_file")
+  else
+      previous_checksum=""
+  fi
+  if [ "$current_checksum" != "$previous_checksum" ]; then
+      return 0  # True, the directory has changed
+  else
+      return 1  # False, the directory has not changed
+  fi
+}
+
+update_checksum() {
+  local dir=$1
+  local checksum_file="${dir}/.checksum"
+  # Compute current checksum of the directory's modification times excluding specified directories, and the publish target S3 location.
+  dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -exec stat --format='%Y' {} \; | sha256sum | awk '{ print $1 }')
+  combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $dir_checksum"
+  current_checksum=$(echo -n "$combined_string" | sha256sum | awk '{ print $1 }')
+  # Save the current checksum
+  echo "$current_checksum" > "$checksum_file"
+}
+
+
 dir=lma-browser-extension-stack
-echo "PACKAGING $dir"
-pushd $dir
+cd $dir
 # by hashing the contents of the extension folder, we can create a zipfile name that 
 # changes when the extension folder contents change.
 # This allows us to force codebuild to re-run when the extension folder contents change.
 echo "Computing hash of extension folder contents"
 HASH=$(calculate_hash ".")
 zipfile=src-${HASH}.zip
+BROWSER_EXTENSION_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${dir}/${zipfile}
+cd ..
+if haschanged $dir; then
+pushd $dir
+echo "PACKAGING $dir"
 echo "Zipping source to ${tmpdir}/${zipfile}"
 zip -r ${tmpdir}/$zipfile . -x "node_modules/*" -x "build/*"
 echo "Upload source and template to S3"
-BROWSER_EXTENSION_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${dir}/${zipfile}
 aws s3 cp ${tmpdir}/${zipfile} s3://${BROWSER_EXTENSION_SRC_S3_LOCATION}
 s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
 https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
 aws s3 cp ./template.yaml ${s3_template}
 aws cloudformation validate-template --template-url ${https_template} > /dev/null || exit 1
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 
 dir=lma-virtual-participant-stack
@@ -171,44 +212,57 @@ aws cloudformation validate-template --template-url ${https_template} > /dev/nul
 popd
 
 dir=lma-meetingassist-setup-stack
+if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir
-echo "Packaging boto3_layer"
-pushd boto3_layer
-pip3 install --requirement ./requirements.txt --target=./python
+chmod +x ./publish.sh
+./publish.sh $BUCKET $PREFIX_AND_VERSION $REGION || exit 1
 popd
-template=template.yaml
-s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/template.yaml"
-https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/template.yaml"
-aws cloudformation package \
---template-file ${template} \
---output-template-file ${tmpdir}/${template} \
---s3-bucket $BUCKET --s3-prefix ${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack \
---region ${REGION} || exit 1
-echo "Uploading template file to: ${s3_template}"
-aws s3 cp ${tmpdir}/${template} ${s3_template}
-echo "Validating template"
-aws cloudformation validate-template --template-url ${https_template} > /dev/null || exit 1
-aws s3 cp ./qna-ma-demo.jsonl s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
+
+dir=lma-bedrockkb-stack
+if haschanged $dir; then
+echo "PACKAGING $dir"
+pushd $dir
+chmod +x ./publish.sh
+./publish.sh $BUCKET $PREFIX_AND_VERSION $REGION || exit 1
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 dir=lma-websocket-transcriber-stack
+if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir/deployment
 rm -rf ../out
 chmod +x ./build-s3-dist.sh
 ./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lma-websocket-transcriber-stack $VERSION $REGION || exit 1
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 dir=lma-ai-stack
+if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir/deployment
 rm -fr ../out
 chmod +x ./build-s3-dist.sh
 ./build-s3-dist.sh $BUCKET_BASENAME $PREFIX_AND_VERSION/lma-ai-stack $VERSION $REGION || exit 1
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 dir=lma-llm-template-setup-stack
+if haschanged $dir; then
 echo "PACKAGING $dir/deployment"
 pushd $dir/deployment
 
@@ -233,24 +287,37 @@ aws cloudformation package \
 echo "Uploading template file to: ${s3_template}"
 aws s3 cp ${tmpdir}/${template} ${s3_template}
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 echo "Initialize and update git submodules"
 git submodule init
 git submodule update
 
 dir=submodule-aws-qnabot-plugins
+if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir
+chmod +x ./publish.sh
 ./publish.sh $BUCKET $PREFIX_AND_VERSION/aws-qnabot-plugins || exit 1
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 dir=submodule-aws-qnabot
+if haschanged $dir; then
 echo "PACKAGING $dir"
 git submodule init
 git submodule update
 echo "Applying patch files to simplify UX by removing some QnABot options not needed for lma"
 # lma customizations
 cp -v ./patches/qnabot/Makefile $dir/Makefile
+cp -v ./patches/qnabot/templates_examples_examples_index.js $dir/templates/examples/examples/index.js
+cp -v ./patches/qnabot/templates_examples_extensions_index.js $dir/templates/examples/extensions/index.js
 echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lma'"
 # Detection of differences. sed varies betwen GNU sed and BSD sed
 if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
@@ -274,6 +341,10 @@ npm install
 npm run build || exit 1
 aws s3 sync ./build/ s3://${BUCKET}/${PREFIX_AND_VERSION}/aws-qnabot/ --delete 
 popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
 
 echo "PACKAGING Main Stack Cfn artifacts"
 MAIN_TEMPLATE=lma-main.yaml
@@ -299,13 +370,19 @@ echo "Validating template: $template"
 aws cloudformation validate-template --template-url $template > /dev/null || exit 1
 
 if $PUBLIC; then
-  echo "Setting public read ACLs on published artifacts"
-  files=$(aws s3api list-objects --bucket ${BUCKET} --prefix ${PREFIX_AND_VERSION} --query "(Contents)[].[Key]" --output text)
-  for file in $files
-    do
-    aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key $file
-    done
-  aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key ${PREFIX}/${MAIN_TEMPLATE}
+echo "Setting public read ACLs on published artifacts"
+files=$(aws s3api list-objects --bucket ${BUCKET} --prefix ${PREFIX_AND_VERSION} --query "(Contents)[].[Key]" --output text)
+c=$(echo $files | wc -w)
+counter=0
+for file in $files
+  do
+  aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key $file
+  counter=$((counter + 1))
+  echo -ne "Progress: $counter/$c files processed\r"
+  done
+aws s3api put-object-acl --acl public-read --bucket ${BUCKET} --key ${PREFIX}/${MAIN_TEMPLATE}
+echo ""
+echo "Done."
 fi
 
 echo "OUTPUTS"

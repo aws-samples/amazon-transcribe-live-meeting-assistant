@@ -15,25 +15,17 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.4)
+Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.8) (SO9497)
 
 Parameters:
   MeetingAssistService:
-    Default: "BEDROCK_KNOWLEDGE_BASE"
+    Default: "BEDROCK_LLM"
     Type: String
     AllowedValues:
       - "BEDROCK_LLM"
-      - "BEDROCK_KNOWLEDGE_BASE"
-    Description: Choose which knowledge base / LLM service to use
-
-  BedrockKnowledgeBaseId:
-    Type: String
-    Default: ""
-    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
-    Description: >
-      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the knowledge base
-      *Id* (not name) of an existing Bedrock knowledge base to be used for Meeting
-      Assist bot.
+      - "BEDROCK_KNOWLEDGE_BASE (Create)"
+      - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
+    Description: Choose the knowledge base / LLM service to use
 
   MeetingAssistServiceBedrockModelID:
     Type: String
@@ -42,8 +34,51 @@ Parameters:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
     Description: >-
-      If MeetingAssistService is BEDROCK_LLM or BEDROCK_KNOWLEDGE_BASE, select a Bedrock
-      LLM model from the list."
+      Select a Bedrock LLM model from the list."
+
+  BedrockKnowledgeBaseId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+    Description: >
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Use Existing)', provide the knowledge base
+      *Id* (not name) of an *existing* Bedrock knowledge base to be used for Meeting
+      Assist bot.
+
+  BedrockKnowledgeBaseS3BucketName:
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide the bucket 
+      name of an existing bucket with documents to ingest, or leave blank if you don't need an S3 data source. If you provide an S3 bucket name an S3 data
+      source will be created for you automatically.
+
+  BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of optional S3 prefixes 
+      with the paths to your source documents e.g. "prefix1/, prefix2/". If you leave blank, all documents in your S3 bucket will be scanned.
+
+  BedrockKnowledgeBaseWebCrawlerURLs:
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
+      or leave blank if you don't need a Web data source. If you provide one or more Web URLs a Web crawler data source will be created for you automatically.
+
+  BedrockKnowledgeBaseWebCrawlerScope:
+    Type: String
+    AllowedValues:
+      - "DEFAULT"
+      - "HOST_ONLY"
+      - "SUBDOMAINS"
+    Default: DEFAULT
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', specify the scope of what is crawled for your URLs.
+      Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
+      Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
+      Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
 
   AssistantWakePhraseRegEx:
     Type: String
@@ -361,9 +396,55 @@ Parameters:
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 90
+    AllowedValues:
+      [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1096,
+        1827,
+        2192,
+        2557,
+        2922,
+        3288,
+        3653,
+      ]
     Description: >-
       Number of days to retain CloudWatch log records. Logs will be automatically
       deleted after this time.
+
+  EnableAppSyncApiCache:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable or disable the AppSync Api Cache.
+
+  AppSyncApiCacheInstanceType:
+    Type: String
+    Default: SMALL
+    AllowedValues:
+      - SMALL
+      - MEDIUM
+      - LARGE
+      - XLARGE
+    Description: >-
+      If you set the EnableAppSyncApiCache is true, choose a value that meets your workload requirements. 
+      This parameter is ignored if the EnableAppSyncApiCache parameter is set to false (default behavior).
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -378,6 +459,10 @@ Metadata:
         Parameters:
           - MeetingAssistService
           - BedrockKnowledgeBaseId
+          - BedrockKnowledgeBaseS3BucketName
+          - BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
+          - BedrockKnowledgeBaseWebCrawlerURLs
+          - BedrockKnowledgeBaseWebCrawlerScope
           - MeetingAssistServiceBedrockModelID
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
@@ -423,6 +508,11 @@ Metadata:
           - TranscriptionExpirationInDays
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
+      - Label:
+          default: AppSync Configuration
+        Parameters:
+          - EnableAppSyncApiCache
+          - AppSyncApiCacheInstanceType
 
     ParameterLabels:
       CallAudioProcessor:
@@ -439,8 +529,18 @@ Metadata:
         default: Admin Email Address
       AllowedSignUpEmailDomain:
         default: Authorized Account Email Domain(s)
+      MeetingAssistService:
+        default: Meeting Assist Service
       BedrockKnowledgeBaseId:
-        default: Meeting Assist Bedrock Knowledge Base Id (existing)
+        default: Bedrock Knowledge Base Id (existing)
+      BedrockKnowledgeBaseS3BucketName:
+        default: S3 bucket with knowledge base source documents (optional).
+      BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
+        default: S3 prefix(es) for your content (optional)
+      BedrockKnowledgeBaseWebCrawlerURLs:
+        default: Publicly accessible URLs for web crawling (optional)
+      BedrockKnowledgeBaseWebCrawlerScope:
+        default: Web crawling sync scope
       MeetingAssistServiceBedrockModelID:
         default: Meeting Assist Service Bedrock Model ID
       AssistantWakePhraseRegEx:
@@ -491,6 +591,10 @@ Metadata:
         default: Transcription Expiration In Days
       AudioRecordingExpirationInDays:
         default: Audio Recording Expiration In Days
+      EnableAppSyncApiCache:
+        default: Enable AppSync Api Cache
+      AppSyncApiCacheInstanceType:
+        default: AppSync Api Cache Instance Type
 
 Mappings:
   TranscribeToLexLocaleId:
@@ -530,7 +634,11 @@ Mappings:
 Rules:
   # check required parameters
   BedrockKnowledgeBaseId:
-    RuleCondition: !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE"]
+    RuleCondition:
+      !Equals [
+        !Ref MeetingAssistService,
+        "BEDROCK_KNOWLEDGE_BASE (Use Existing)",
+      ]
     Assertions:
       - Assert: !Not [!Equals [!Ref BedrockKnowledgeBaseId, ""]]
         AssertDescription:
@@ -539,8 +647,16 @@ Rules:
 
 Conditions:
   ShouldCreateRecordingBucket: !Equals [!Ref S3BucketName, ""]
-  ShouldConfigureBedrockKB:
-    !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE"]
+
+  ShouldUseExistingBedrockKnowledgeBase:
+    !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Use Existing)"]
+  ShouldCreateBedrockKnowledgeBase:
+    !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Create)"]
+  ShouldUseBedrockKnowledgeBase:
+    !Or [
+      !Condition ShouldUseExistingBedrockKnowledgeBase,
+      !Condition ShouldCreateBedrockKnowledgeBase,
+    ]
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -665,7 +781,7 @@ Resources:
                 elif customLanguageModelName:
                   status = cfnresponse.FAILED
                   reason = f"CustomLanguageModelName cannot be set when TranscribeLanguageCode is '{transcribeLanguageCode}'"
-                elif transcribeLanguageOptions == '':
+                if transcribeLanguageOptions == '':
                   status = cfnresponse.FAILED
                   reason = f"At least two languages must be provided for TranscribeLanguageOptions when using language identification"
                 else:
@@ -725,6 +841,7 @@ Resources:
       CustomLanguageModelName: !Ref CustomLanguageModelName
       BedrockModelIds:
         - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
+        - "amazon.titan-embed-text-v2:0" # Meeting Assistant
         - !Ref BedrockModelId # Meeting summarization
         - "amazon.titan-embed-text-v1" # QNABOTBR
         - "anthropic.claude-instant-v1" # QNABOTBR
@@ -999,6 +1116,7 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
+        AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
         EnableVoiceToneAnalysis: "false"
         CallAudioSource: "Genesys Cloud Audiohook Web Socket"
         S3BucketName: !If
@@ -1025,6 +1143,22 @@ Resources:
         CallDataStream: !Ref CallDataStream
         CallDataStreamArn: !GetAtt CallDataStream.Arn
         LMASettingsParameterName: !Ref LMASettingsParameter
+        EnableAppSyncApiCache: !Ref EnableAppSyncApiCache
+        AppSyncApiCacheInstanceType: !Ref AppSyncApiCacheInstanceType
+
+  BEDROCKKB:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateBedrockKnowledgeBase
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
+      Parameters:
+        pKnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
+        pInputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
+        pWebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
+        pWebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
 
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
   SettingsJSON:
@@ -1036,6 +1170,7 @@ Resources:
       EMBEDDINGS_TEXT_PASSAGE_SCORE_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsTextPassageScoreThreshold
       LLM_GENERATE_QUERY_ENABLE: "FALSE"
       LLM_GENERATE_QUERY_PROMPT_TEMPLATE: ""
+      LLM_CHAT_HISTORY_MAX_MESSAGES: 10
       EMPTYMESSAGE: "No response from meeting assist QnAbot"
       BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "deprecated"
       BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "deprecated"
@@ -1046,7 +1181,7 @@ Resources:
         the follow up question or statement as a standalone, one sentence question.
         Only output the rephrased question. Do not include any preamble. "
       ASSISTANT_GENERATE_PROMPT_TEMPLATE: !If
-        - ShouldConfigureBedrockKB
+        - ShouldUseBedrockKnowledgeBase
         - "You are an AI assistant helping a human during a meeting. I will provide
           you with a transcript of the ongoing meeting, and a set of search results.
           Your job is to respond to the user's request using only information from the
@@ -1075,10 +1210,17 @@ Resources:
         AISTACK: !Ref AISTACK
         QNABOTSTACK: !Ref QNABOT
         MeetingAssistService: !Ref MeetingAssistService
-        BedrockKnowledgeBaseID: !Ref BedrockKnowledgeBaseId
+        BedrockKnowledgeBaseID: !If
+          - ShouldUseBedrockKnowledgeBase
+          - !If
+            - ShouldCreateBedrockKnowledgeBase
+            - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
+            - !Ref BedrockKnowledgeBaseId
+          - ""
+        BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        AmazonQAppId: "NOT CURRENTLY USED"
-        AmazonQUserId: "NOT CURRENTLY USED"
+        AmazonQAppId: ""
+        AmazonQUserId: ""
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
         LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
         LexMeetingAssistLocaleId:
@@ -1100,6 +1242,9 @@ Resources:
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         LexMeetingAssistIdentityPoolId: !GetAtt AISTACK.Outputs.LexAgentAssistIdentityPoolId
+        LexMeetingAssistUserPoolClientId: !GetAtt AISTACK.Outputs.CognitoClientId
+        LexMeetingAssistUserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
+        LexMeetingAssistDomainName: !GetAtt AISTACK.Outputs.CognitoLoginUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
@@ -1112,9 +1257,6 @@ Resources:
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-vpc-stack/template.yaml
-      # yamllint enable rule:line-length
-      Parameters:
-        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
   WEBSOCKETTRANSCRIBERSTACK:
     Type: AWS::CloudFormation::Stack

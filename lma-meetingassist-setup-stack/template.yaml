@@ -4,7 +4,6 @@ Transform: AWS::Serverless-2016-10-31
 Description: Amazon Transcribe Live Meeting Assist - Meeting Assist Setup
 
 Parameters:
-
   # Required
   LMAStackName:
     Type: String
@@ -16,63 +15,47 @@ Parameters:
     Description: AISTACK Stack ARN
 
   QNABOTSTACK:
-    Default: ''
+    Default: ""
     Type: String
     Description: QNABOT Stack ARN
 
   MeetingAssistService:
-    Default: 'BEDROCK_KNOWLEDGE_BASE'
     Type: String
-    AllowedValues:
-    - 'BEDROCK_LLM'
-    - 'BEDROCK_KNOWLEDGE_BASE'
     Description: Choose which knowledge base / LLM service to use
 
   BedrockKnowledgeBaseID:
     Type: String
-    Default: ''
-    AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
-    Description: >
-      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the *id* (not name)
-      of an existing Bedrock Knowledge Base to be used for Meeting Assist bot.
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+
+  BedrockKnowledgeBaseS3BucketName:
+    Type: String
 
   MeetingAssistServiceBedrockModelID:
     Type: String
-    Default: 'anthropic.claude-3-sonnet-20240229-v1:0'
-    AllowedValues:
-    - 'anthropic.claude-3-haiku-20240307-v1:0'
-    - 'anthropic.claude-3-sonnet-20240229-v1:0'
-    Description: >-
-      If MeetingAssistService is BEDROCK_LLM or BEDROCK_KNOWLEDGE_BASE, select a Bedrock
-      LLM model from the list."
+    Default: "anthropic.claude-3-sonnet-20240229-v1:0"
 
   AmazonQAppId:
     Type: String
-    Default: ''
-    Description: >
-      If MeetingAssistService is Q_BUSINESS, provide the application *id* (not name)
-      of an existing Q Business index to be used for Meeting Assist bot.
+    Default: ""
 
   AmazonQUserId:
     Type: String
-    Default: ''
-    Description: >-
-      If ASSISTANT is Q_BUSINESS, provide an email address to use as the proxy user
-      (e.g. jdoe@example.com)
+    Default: ""
 
   # Required
   LexMeetingAssistBotId:
     Type: String
     Description: >-
-      Lex Bot Id used for Meeting Assist. 
-    AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
+      Lex Bot Id used for Meeting Assist.
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
 
   # Required
   LexMeetingAssistAliasId:
     Type: String
     Description: >-
       Lex Bot Alias ID used for Meeting Assist.
-    AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
 
   # Required
   LexMeetingAssistLocaleId:
@@ -80,34 +63,35 @@ Parameters:
     Description: >-
       Lex Bot Locale ID used for Meeting Assist.
     AllowedValues:
-    - ca_ES
-    - de_AT
-    - de_DE
-    - en_AU
-    - en_GB
-    - en_IN
-    - en_US
-    - en_ZA
-    - es_419
-    - es_ES
-    - es_US
-    - fr_CA
-    - fr_FR
-    - it_IT
-    - ja_JP
-    - ko_KR
-    - pt_BR
-    - pt_PT
-    - zh_CN
+      - ca_ES
+      - de_AT
+      - de_DE
+      - en_AU
+      - en_GB
+      - en_IN
+      - en_US
+      - en_ZA
+      - es_419
+      - es_ES
+      - es_US
+      - fr_CA
+      - fr_FR
+      - it_IT
+      - ja_JP
+      - ko_KR
+      - pt_BR
+      - pt_PT
+      - zh_CN
 
   # Required
   QnaMeetingAssistDemoJson:
     Type: String
     Description: >-
-      Location of QnABot meeting assist sample/demo file (in JSON lines format) 
+      Location of QnABot meeting assist sample/demo file (in JSON lines format)
   QnaBotSettings:
     Type: String
-    Description: JSON string specifying key/value pairs to configure new defaults
+    Description:
+      JSON string specifying key/value pairs to configure new defaults
       for QnAbot Settings
 
   WebAppBucket:
@@ -121,6 +105,18 @@ Parameters:
   LexMeetingAssistIdentityPoolId:
     Type: String
     Description: The LMA Meeting Assist Identity Pool ID
+
+  LexMeetingAssistUserPoolClientId:
+    Type: String
+    Description: The LMA Meeting Assist User Pool Client ID
+
+  LexMeetingAssistUserPoolId:
+    Type: String
+    Description: The LMA Meeting Assist User Pool ID
+
+  LexMeetingAssistDomainName:
+    Type: String
+    Description: The LMA Meeting Assist Domain Url
 
   CloudFrontDomainName:
     Type: String
@@ -156,16 +152,26 @@ Parameters:
     Type: Number
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
+
 Conditions:
-  ShouldConfigureQnabot: !Not [!Equals [!Ref QNABOTSTACK, '']]
-  HasSummaryLambdaFunction: !Not [!Equals [!Ref TranscriptSummaryFunctionArn, '']]
-  ShouldConfigureBedrockLLM: !Equals [!Ref MeetingAssistService, 'BEDROCK_LLM']
-  ShouldConfigureBedrockKB: !Equals [!Ref MeetingAssistService, 'BEDROCK_KNOWLEDGE_BASE']
-  ShouldConfigureQBusiness: !Equals [!Ref MeetingAssistService, 'Q_BUSINESS']
+  ShouldConfigureQnabot: !Not [!Equals [!Ref QNABOTSTACK, ""]]
+  ShouldConfigureBedrockKB: !Not [!Equals [!Ref BedrockKnowledgeBaseID, ""]]
+  ShouldConfigureQBusiness: !Not [!Equals [!Ref AmazonQAppId, ""]]
+  ShouldConfigureBedrockLLM:
+    !And [
+      !Condition ShouldConfigureQnabot,
+      !Not [!Condition ShouldConfigureBedrockKB],
+    ]
+  HasSummaryLambdaFunction:
+    !Not [!Equals [!Ref TranscriptSummaryFunctionArn, ""]]
+  IsBedrockKnowledgeBaseS3BucketName:
+    Fn::Not:
+      - Fn::Equals:
+          - ""
+          - Ref: BedrockKnowledgeBaseS3BucketName
 
 Resources:
-
-  # Custom resource to transform input to lowercase.                                             
+  # Custom resource to transform input to lowercase.
   GetLowercaseFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -185,12 +191,12 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W89
-          reason: Customer can use VPC if desired
-        - id: W92
-          reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
-    - GetLowercaseFunctionLogGroup
+      - GetLowercaseFunctionLogGroup
 
   GetLowercaseFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -211,24 +217,24 @@ Resources:
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-        - Action: "sts:AssumeRole"
-          Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
+          - Action: "sts:AssumeRole"
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
         Version: 2012-10-17
       ManagedPolicyArns:
-      - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
-      - Fn::If:
-        - HasSummaryLambdaFunction
-        - PolicyName: InlinePolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-            - Action: lambda:InvokeFunction
-              Effect: Allow
-              Resource: !Ref TranscriptSummaryFunctionArn
-        - Ref: AWS::NoValue
+        - Fn::If:
+            - HasSummaryLambdaFunction
+            - PolicyName: InlinePolicy
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Action: lambda:InvokeFunction
+                    Effect: Allow
+                    Resource: !Ref TranscriptSummaryFunctionArn
+            - Ref: AWS::NoValue
 
   QNASummarizeCallFunction:
     Type: "AWS::Lambda::Function"
@@ -249,14 +255,14 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W89
-          reason: Customer can use VPC if desired
-        - id: W92
-          reason: Customer can choose reserved concurrency based on their requirement.
-        - id: W58
-          reason: Managed policy already provides access to CloudWatch logs.
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W58
+            reason: Managed policy already provides access to CloudWatch logs.
     DependsOn:
-    - QNASummarizeCallFunctionLogGroup
+      - QNASummarizeCallFunctionLogGroup
 
   QNASummarizeCallFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -271,45 +277,45 @@ Resources:
     Properties:
       Content: ./boto3_layer
       CompatibleRuntimes:
-      - python3.11
+        - python3.11
 
   QNAQBusinessFunctionRole:
     Condition: ShouldConfigureQBusiness
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
-        - Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-          Action: sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
       ManagedPolicyArns:
-      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-      - PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - "qbusiness:ChatSync"
-            Resource: !Sub "arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${AmazonQAppId}"
-        PolicyName: QBusinessPolicy
-      - PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - "s3:GetObject"
-            Resource: "arn:aws:s3:::*-importbucket-*/*"
-        PolicyName: S3ImportBucketPolicy
-      - PolicyName: InlinePolicy
-        PolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-          - Action: lambda:InvokeFunction
-            Effect: Allow
-            Resource: !Ref FetchTranscriptFunctionArn
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "qbusiness:ChatSync"
+                Resource: !Sub "arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${AmazonQAppId}"
+          PolicyName: QBusinessPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: "arn:aws:s3:::*-importbucket-*/*"
+          PolicyName: S3ImportBucketPolicy
+        - PolicyName: InlinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: lambda:InvokeFunction
+                Effect: Allow
+                Resource: !Ref FetchTranscriptFunctionArn
 
   QNAQBusinessFunction:
     Condition: ShouldConfigureQBusiness
@@ -321,7 +327,7 @@ Resources:
       Handler: qna_qbusiness_lambdahook_function.handler
       Runtime: python3.11
       Layers:
-      - !Ref Boto3Layer
+        - !Ref Boto3Layer
       Timeout: 900
       Environment:
         Variables:
@@ -335,12 +341,12 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W89
-          reason: Customer can use VPC if desired
-        - id: W92
-          reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
-    - QNAQBusinessFunctionLogGroup
+      - QNAQBusinessFunctionLogGroup
 
   QNAQBusinessFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -355,43 +361,48 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
-        - Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-          Action: sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
       ManagedPolicyArns:
-      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-      - PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - "bedrock:Retrieve"
-            - "bedrock:RetrieveAndGenerate"
-            Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseID}"
-          - Effect: Allow
-            Action:
-            - "bedrock:InvokeModel"
-            Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${MeetingAssistServiceBedrockModelID}"
-        PolicyName: BedrockPolicy
-      - PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - "s3:GetObject"
-            Resource: "arn:aws:s3:::*-importbucket-*/*"
-        PolicyName: S3ImportBucketPolicy
-      - PolicyName: InlinePolicy
-        PolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-          - Action: lambda:InvokeFunction
-            Effect: Allow
-            Resource: !Ref FetchTranscriptFunctionArn
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:Retrieve"
+                  - "bedrock:RetrieveAndGenerate"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseID}"
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${MeetingAssistServiceBedrockModelID}"
+          PolicyName: BedrockPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource:
+                  - "arn:aws:s3:::*-importbucket-*/*"
+                  - !If
+                    - IsBedrockKnowledgeBaseS3BucketName
+                    - !Sub "arn:aws:s3:::${BedrockKnowledgeBaseS3BucketName}/*"
+                    - !Ref AWS::NoValue
+          PolicyName: S3BucketPolicy
+        - PolicyName: InlinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: lambda:InvokeFunction
+                Effect: Allow
+                Resource: !Ref FetchTranscriptFunctionArn
 
   QNABedrockKnowledgeBaseFunction:
     Condition: ShouldConfigureBedrockKB
@@ -403,7 +414,7 @@ Resources:
       Handler: qna_bedrockkb_lambdahook_function.handler
       Runtime: python3.11
       Layers:
-      - !Ref Boto3Layer
+        - !Ref Boto3Layer
       Timeout: 900
       Environment:
         Variables:
@@ -417,12 +428,12 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W89
-          reason: Customer can use VPC if desired
-        - id: W92
-          reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
-    - QNABedrockKnowledgeBaseFunctionLogGroup
+      - QNABedrockKnowledgeBaseFunctionLogGroup
 
   QNABedrockKnowledgeBaseFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -437,38 +448,38 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
-        - Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-          Action: sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
       ManagedPolicyArns:
-      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-      - PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - "bedrock:InvokeModel"
-            Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${MeetingAssistServiceBedrockModelID}"
-        PolicyName: BedrockPolicy
-      - PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - "s3:GetObject"
-            Resource: "arn:aws:s3:::*-importbucket-*/*"
-        PolicyName: S3ImportBucketPolicy
-      - PolicyName: InlinePolicy
-        PolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-          - Action: lambda:InvokeFunction
-            Effect: Allow
-            Resource: !Ref FetchTranscriptFunctionArn
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${MeetingAssistServiceBedrockModelID}"
+          PolicyName: BedrockPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: "arn:aws:s3:::*-importbucket-*/*"
+          PolicyName: S3ImportBucketPolicy
+        - PolicyName: InlinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: lambda:InvokeFunction
+                Effect: Allow
+                Resource: !Ref FetchTranscriptFunctionArn
 
   QNABedrockLLMFunction:
     Condition: ShouldConfigureBedrockLLM
@@ -480,7 +491,7 @@ Resources:
       Handler: qna_bedrockllm_lambdahook_function.handler
       Runtime: python3.11
       Layers:
-      - !Ref Boto3Layer
+        - !Ref Boto3Layer
       Timeout: 900
       Environment:
         Variables:
@@ -493,12 +504,12 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W89
-          reason: Customer can use VPC if desired
-        - id: W92
-          reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
-    - QNABedrockLLMFunctionLogGroup
+      - QNABedrockLLMFunctionLogGroup
 
   QNABedrockLLMFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -513,84 +524,84 @@ Resources:
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-        - Action: "sts:AssumeRole"
-          Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
+          - Action: "sts:AssumeRole"
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
         Version: 2012-10-17
       ManagedPolicyArns:
-      - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
-      - PolicyName: InlinePolicy
-        PolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-          - Action:
-            - cloudformation:DescribeStacks
-            - cloudformation:DescribeStackResource
-            Effect: Allow
-            Resource:
-            - !Ref AISTACK
-          - Action:
-            - lambda:GetFunctionConfiguration
-            - lambda:UpdateFunctionConfiguration
-            Effect: Allow
-            Resource:
-            - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}*"
-          - Action:
-            - iam:ListRolePolicies
-            - iam:PutRolePolicy
-            Effect: Allow
-            Resource:
-            - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*"
-          - Action:
-            - s3:GetObject
-            - s3:PutObject
-            Effect: Allow
-            Resource:
-            - !Sub "arn:${AWS::Partition}:s3:::${WebAppBucket}"
-            - !Sub "arn:${AWS::Partition}:s3:::${WebAppBucket}/*"
-          - Action:
-            - cloudfront:CreateInvalidation
-            Effect: Allow
-            Resource:
-            - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}"
-          - !If
-            - ShouldConfigureQnabot
-            - Action:
-              - cloudformation:DescribeStacks
-              - cloudformation:DescribeStackResource
-              Effect: Allow
-              Resource:
-              - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LMAStackName}-QNABOT*"
-            - !Ref AWS::NoValue
-          - !If
-            - ShouldConfigureQnabot
-            - Action:
-              - ssm:GetParameter
-              - ssm:PutParameter
-              Effect: Allow
-              Resource:
-              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/CFN-DefaultQnABotSettings*"
-            - !Ref AWS::NoValue
-          - !If
-            - ShouldConfigureQnabot
-            - Action:
-              - s3:GetObject
-              - s3:PutObject
-              Effect: Allow
-              Resource:
-              - !Sub "arn:aws:s3:::${LowercaseStackName.OutputString}*"
-              - !Sub "arn:aws:s3:::${QnaMeetingAssistDemoJson}"
-            - !Ref AWS::NoValue
-          - !If
-            - ShouldConfigureQnabot
-            - Action:
-              - lambda:InvokeFunction
-              Effect: Allow
-              Resource:
-              - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}*"
-            - !Ref AWS::NoValue
+        - PolicyName: InlinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackResource
+                Effect: Allow
+                Resource:
+                  - !Ref AISTACK
+              - Action:
+                  - lambda:GetFunctionConfiguration
+                  - lambda:UpdateFunctionConfiguration
+                Effect: Allow
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}*"
+              - Action:
+                  - iam:ListRolePolicies
+                  - iam:PutRolePolicy
+                Effect: Allow
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*"
+              - Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Effect: Allow
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${WebAppBucket}"
+                  - !Sub "arn:${AWS::Partition}:s3:::${WebAppBucket}/*"
+              - Action:
+                  - cloudfront:CreateInvalidation
+                Effect: Allow
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}"
+              - !If
+                - ShouldConfigureQnabot
+                - Action:
+                    - cloudformation:DescribeStacks
+                    - cloudformation:DescribeStackResource
+                  Effect: Allow
+                  Resource:
+                    - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LMAStackName}-QNABOT*"
+                - !Ref AWS::NoValue
+              - !If
+                - ShouldConfigureQnabot
+                - Action:
+                    - ssm:GetParameter
+                    - ssm:PutParameter
+                  Effect: Allow
+                  Resource:
+                    - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/CFN-DefaultQnABotSettings*"
+                - !Ref AWS::NoValue
+              - !If
+                - ShouldConfigureQnabot
+                - Action:
+                    - s3:GetObject
+                    - s3:PutObject
+                  Effect: Allow
+                  Resource:
+                    - !Sub "arn:aws:s3:::${LowercaseStackName.OutputString}*"
+                    - !Sub "arn:aws:s3:::${QnaMeetingAssistDemoJson}"
+                - !Ref AWS::NoValue
+              - !If
+                - ShouldConfigureQnabot
+                - Action:
+                    - lambda:InvokeFunction
+                  Effect: Allow
+                  Resource:
+                    - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}*"
+                - !Ref AWS::NoValue
   SetupFunction:
     Type: "AWS::Lambda::Function"
     Properties:
@@ -605,14 +616,14 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W89
-          reason: Customer can use VPC if desired
-        - id: W92
-          reason: Customer can choose reserved concurrency based on their requirement.
-        - id: W58
-          reason: Managed policy already provides access to CloudWatch logs.
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W58
+            reason: Managed policy already provides access to CloudWatch logs.
     DependsOn:
-    - SetupFunctionLogGroup
+      - SetupFunctionLogGroup
 
   SetupFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -621,7 +632,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/SetupFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
-        
+
   SetupFunctionResource:
     Type: AWS::CloudFormation::CustomResource
     Properties:
@@ -633,15 +644,18 @@ Resources:
       LexMeetingAssistAliasId: !Ref LexMeetingAssistAliasId
       LexMeetingAssistLocaleId: !Ref LexMeetingAssistLocaleId
       LexMeetingAssistIdentityPoolId: !Ref LexMeetingAssistIdentityPoolId
+      LexMeetingAssistUserPoolClientId: !Ref LexMeetingAssistUserPoolClientId
+      LexMeetingAssistUserPoolId: !Ref LexMeetingAssistUserPoolId
+      LexMeetingAssistDomainName: !Ref LexMeetingAssistDomainName
       QnaMeetingAssistDemoJson: !Ref QnaMeetingAssistDemoJson
       QNASummarizeCallFunction: !Ref QNASummarizeCallFunction
       QNAMeetingAssistLambdaHookFunction: !If
-      - ShouldConfigureQBusiness
-      - !Ref QNAQBusinessFunction
-      - !If
-        - ShouldConfigureBedrockKB
-        - !Ref QNABedrockKnowledgeBaseFunction
-        - !Ref QNABedrockLLMFunction
+        - ShouldConfigureQBusiness
+        - !Ref QNAQBusinessFunction
+        - !If
+          - ShouldConfigureBedrockKB
+          - !Ref QNABedrockKnowledgeBaseFunction
+          - !Ref QNABedrockLLMFunction
       QnaBotSettings: !Ref QnaBotSettings
       # Changes to Params below force MeetingAssist Setup to execute.
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
@@ -655,4 +669,3 @@ Resources:
       Version: !Ref Version
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
-

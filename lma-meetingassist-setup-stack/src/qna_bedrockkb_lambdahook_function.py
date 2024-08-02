@@ -1,7 +1,9 @@
 import json
 import os
-import uuid
 import boto3
+import re
+
+print("Boto3 version: ", boto3.__version__)
 
 FETCH_TRANSCRIPT_FUNCTION_ARN = os.environ['FETCH_TRANSCRIPT_FUNCTION_ARN']
 
@@ -60,34 +62,43 @@ def get_call_transcript(callId, userInput, maxMessages):
 
 
 def get_kb_response(generatePromptTemplate, transcript, query):
-    promptTemplate = generatePromptTemplate or "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a set of search results. Your job is to respond to the user's request using only information from the search results. If search results do not contain information that can answer the question, please state that you could not find an exact answer to the question. Just because the user asserts a fact does not mean it is true, make sure to double check the search results to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
-    promptTemplate = promptTemplate.format(transcript=json.dumps(transcript))
-    input = {
-        "input": {
-            'text': query
-        },
-        "retrieveAndGenerateConfiguration": {
-            'knowledgeBaseConfiguration': {
-                "generationConfiguration": {
-                    "promptTemplate": {
-                        "textPromptTemplate": promptTemplate
-                    }
-                },
-                'knowledgeBaseId': KB_ID,
-                'modelArn': MODEL_ARN
-            },
-            'type': 'KNOWLEDGE_BASE'
-        }
-    }
-    print("Amazon Bedrock KB Request: ", input)
-    try:
-        resp = KB_CLIENT.retrieve_and_generate(**input)
-    except Exception as e:
-        print("Amazon Bedrock KB Exception: ", e)
+    # if the query has already been labeled "small talk", we can skip
+    # ensure the reponse matches the default ASSISTANT_NO_HITS_REGEX value ("Sorry,")
+    if query == "small talk":
         resp = {
-            "systemMessage": "Amazon Bedrock KB Error: " + str(e)
+            "systemMessage": "Sorry, I cannot respond to small talk"
         }
-    print("Amazon Bedrock KB Response: ", json.dumps(resp))
+        print("Small talk response: ", json.dumps(resp))
+    else:
+        promptTemplate = generatePromptTemplate
+        promptTemplate = promptTemplate.format(transcript=json.dumps(
+            transcript))
+        input = {
+            "input": {
+                'text': query
+            },
+            "retrieveAndGenerateConfiguration": {
+                'knowledgeBaseConfiguration': {
+                    "generationConfiguration": {
+                        "promptTemplate": {
+                            "textPromptTemplate": promptTemplate
+                        }
+                    },
+                    'knowledgeBaseId': KB_ID,
+                    'modelArn': MODEL_ARN
+                },
+                'type': 'KNOWLEDGE_BASE'
+            }
+        }
+        print("Amazon Bedrock KB Request: ", input)
+        try:
+            resp = KB_CLIENT.retrieve_and_generate(**input)
+        except Exception as e:
+            print("Amazon Bedrock KB Exception: ", e)
+            resp = {
+                "systemMessage": "Amazon Bedrock KB Error: " + str(e)
+            }
+        print("Amazon Bedrock KB Response: ", json.dumps(resp))
     return resp
 
 
@@ -165,6 +176,44 @@ def get_args_from_lambdahook_args(event):
     return parameters
 
 
+def s3_uri_to_presigned_url(s3_uri, expiration=3600):
+    # Extract bucket name and object key from S3 URI
+    bucket_name, object_key = s3_uri[5:].split('/', 1)
+    s3_client = boto3.client('s3')
+    return s3_client.generate_presigned_url(
+        'get_object',
+        Params={
+            'Bucket': bucket_name,
+            'Key': object_key
+        },
+        ExpiresIn=expiration
+    )
+
+
+def get_url_from_reference(reference):
+    location_keys = {
+        "S3": "s3Location",
+        "WEB": "webLocation",
+        "CONFLUENCE": "confluenceLocation",
+        "SALESFORCE": "salesforceLocation",
+        "SHAREPOINT": "sharepointLocation"
+    }
+    location = reference.get("location", {})
+    type = location.get("type")
+    if type == "S3":
+        uri = location.get(
+            location_keys.get(type, {}), {}).get("uri")
+        url = s3_uri_to_presigned_url(uri)
+    else:
+        url = location.get(
+            location_keys.get(type, {}), {}).get("url")
+    if not url:
+        # try getting url from the metadata tags instead
+        url = reference.get("metadata", {}).get(
+            "x-amz-bedrock-kb-source-uri")
+    return url
+
+
 def format_response(event, kb_response, query):
     # get settings, if any, from lambda hook args
     # e.g: {"AnswerPrefix":"<custom prefix heading>", "ShowContext": False}
@@ -173,14 +222,14 @@ def format_response(event, kb_response, query):
     showContextText = lambdahook_settings.get("ShowContextText", True)
     showSourceLinks = lambdahook_settings.get("ShowSourceLinks", True)
     queryprefix = lambdahook_settings.get("QueryPrefix")
-    message = kb_response.get("output").get("text") or kb_response.get(
+    message = kb_response.get("output", {}).get("text", {}) or kb_response.get(
         "systemMessage") or "No answer found"
     # set plaintext, markdown, & ssml response
     if answerprefix in ["None", "N/A", "Empty"]:
         answerprefix = None
     plainttext = message
     markdown = message
-    ssml = message
+    ssml = f"<speak>{message}</speak>"
     if answerprefix:
         plainttext = f"{answerprefix}\n\n{plainttext}"
         markdown = f"**{answerprefix}**\n\n{markdown}"
@@ -193,25 +242,25 @@ def format_response(event, kb_response, query):
             for reference in source.get("retrievedReferences", []):
                 snippet = reference.get("content", {}).get(
                     "text", "no reference text")
-                url = reference.get("location", {}).get(
-                    "s3Location", {}).get("uri")
-                title = os.path.basename(url)
+                url = get_url_from_reference(reference)
                 if url:
+                    # get title from url - handle presigned urls by ignoring path after '?'
+                    title = os.path.basename(url.split('?')[0])
+                    title = os.path.basename(url)
                     contextText = f'{contextText}<br><a href="{url}">{title}</a>'
                 else:
-                    contextText = f'{contextText}<br><u><b>{title}</b></u>'
+                    contextText = f"{contextText}<br>{snippet}\n"
                 contextText = f"{contextText}<br>{snippet}\n"
         if contextText:
             markdown = f'{markdown}\n<details><summary>Context</summary><p style="white-space: pre-line;">{contextText}</p></details>'
     if showSourceLinks:
         sourceLinks = []
-        for citation in kb_response.get("citations", []):
-            for retrievedReference in citation.get("retrievedReferences", []):
-                # TODO - (1) convert s3 path to http. (2) support additional location types
-                url = retrievedReference.get("location", {}).get(
-                    "s3Location", {}).get("uri")
-                title = os.path.basename(url)
+        for source in kb_response.get("citations", []):
+            for reference in source.get("retrievedReferences", []):
+                url = get_url_from_reference(reference)
                 if url:
+                    # get title from url - handle presigned urls by ignoring path after '?'
+                    title = os.path.basename(url.split('?')[0])
                     sourceLinks.append(f'<a href="{url}">{title}</a>')
         if len(sourceLinks):
             markdown = f'{markdown}<br>Sources: ' + ", ".join(sourceLinks)
@@ -224,16 +273,21 @@ def format_response(event, kb_response, query):
             "ssml": ssml
         }
     }
-    # TODO - can we determine when Bedrock KB has a good answer or not?
-    # For now, always assume it's a good answer.
-    # QnAbot sets session attribute qnabot_gotanswer True when got_hits > 0
-    event["res"]["got_hits"] = 1
+    # Check plaintext answer for match using ASSISTANT_NO_HITS_REGEX
+    pattern = re.compile(event["req"]["_settings"].get(
+        "ASSISTANT_NO_HITS_REGEX", "Sorry,"))
+    match = re.search(pattern, plainttext)
+    if match:
+        print("No hits found in response.. setting got_hits to 0")
+        event["res"]["got_hits"] = 0
+    else:
+        event["res"]["got_hits"] = 1
     return event
 
 
 def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput):
     print("Use Bedrock to generate a relevant search query based on the transcript and input")
-    promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. Only output the rephrased question. Do not include any preamble. "
+    promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {history}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. If the caller is just engaging in small talk or saying thanks, respond with \"small talk\". Only output the rephrased question. Do not include any preamble."
     prompt = promptTemplate.format(
         transcript=json.dumps(transcript), input=userInput)
     prompt = prompt.replace("<br>", "\n")
