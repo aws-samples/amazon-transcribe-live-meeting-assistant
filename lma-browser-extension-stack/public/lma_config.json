@@ -1,8 +1,8 @@
 {
-  "wssEndpoint": "[placeholder]",
-  "clientId": "[placeholder]",
-  "cognitoDomain": "[placeholder]",
-  "cloudfrontEndpoint": "[placeholder]",
+  "wssEndpoint":"wss://d1ei3bzyeokvpa.cloudfront.net/api/v1/ws",
+  "clientId": "4838n0uibd6t0spbuehs0k7b3a",
+  "cognitoDomain": "https://lma-stack-1714096258222436707.auth.us-east-1.amazoncognito.com",
+  "cloudfrontEndpoint": "https://d2iqwm2urp1po4.cloudfront.net/",
   "recordingDisclaimer": "Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.",
   "recordingMessage": "This meeting is being recorded with Amazon Live Meeting Assistant - see https://amazon.com/live-meeting-assistant.",
   "stopRecordingMessage": "Amazon Live Meeting Assistant recording stopped."
