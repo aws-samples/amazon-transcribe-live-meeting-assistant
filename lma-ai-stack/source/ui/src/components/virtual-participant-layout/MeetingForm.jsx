@@ -1,13 +1,6 @@
 import React, { useState } from 'react';
 
-import {
-  Form,
-  SpaceBetween,
-  FormField,
-  Input,
-  Select,
-  Button,
-} from '@awsui/components-react';
+import { Form, SpaceBetween, FormField, Input, Select, Button } from '@awsui/components-react';
 import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
 import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
