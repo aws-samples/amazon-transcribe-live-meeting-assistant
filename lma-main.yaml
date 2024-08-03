@@ -948,8 +948,6 @@ Resources:
   UpdateLMASettingsFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/UpdateLMASettingsFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
 
@@ -1257,6 +1255,8 @@ Resources:
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-vpc-stack/template.yaml
+      Parameters:
+        LMAStackName: !Ref "AWS::StackName"
 
   WEBSOCKETTRANSCRIBERSTACK:
     Type: AWS::CloudFormation::Stack
