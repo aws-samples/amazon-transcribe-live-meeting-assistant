@@ -2,6 +2,10 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Amazon Transcribe Live Meeting Assist - Websocket Server
 
 Parameters:
+  LMAStackName:
+    Type: String
+    Default: "LMA"
+    Description: The name of the Live Meeting Assistant stack
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -9,7 +13,6 @@ Parameters:
     Description: The number of days log events are kept in CloudWatch Logs.
 
 Outputs:
-
   VPC:
     Description: VPC
     Value: !Ref VPC
@@ -30,9 +33,7 @@ Outputs:
     Description: Private Subnet 1
     Value: !Ref PrivateSubnet2
 
-
 Resources:
-
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -40,6 +41,9 @@ Resources:
       EnableDnsHostnames: true
       EnableDnsSupport: true
       InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/VPC"
 
   VPCIGW:
     Type: AWS::EC2::InternetGateway
@@ -60,44 +64,44 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W84
-          reason: >-
-            By default CloudWatchLogs LogGroups data is encrypted using the CloudWatch
-            server-side encryption keys (AWS Managed Keys).
+          - id: W84
+            reason: >-
+              By default CloudWatchLogs LogGroups data is encrypted using the CloudWatch
+              server-side encryption keys (AWS Managed Keys).
 
   VPCFlowLogsRole:
     Type: AWS::IAM::Role
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W11
-          reason: >-
-            "Allow Resource * for CloudWatch Logs API since the resources are customer
-            defined."
+          - id: W11
+            reason: >-
+              "Allow Resource * for CloudWatch Logs API since the resources are customer
+              defined."
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-            - vpc-flow-logs.amazonaws.com
-          Action:
-          - sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service:
+                - vpc-flow-logs.amazonaws.com
+            Action:
+              - sts:AssumeRole
       Path: /
       Policies:
-      - PolicyName: LogRolePolicy
-        PolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-          - Effect: Allow
-            Action:
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:DescribeLogGroups
-            - logs:DescribeLogStreams
-            - logs:PutLogEvents
-            Resource: "*"
+        - PolicyName: LogRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                Resource: "*"
   VPCFlowLog:
     Type: AWS::EC2::FlowLog
     Properties:
@@ -115,22 +119,28 @@ Resources:
         Ref: VPC
       AvailabilityZone:
         Fn::Select:
-        - 0
-        - Fn::GetAZs: ""
+          - 0
+          - Fn::GetAZs: ""
       MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/PublicSubnet1"
     DependsOn:
-    - VPCGateway
+      - VPCGateway
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W33
-          reason: Public IP on launch is needed by the solution
+          - id: W33
+            reason: Public IP on launch is needed by the solution
 
   PublicSubnet1RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId:
         Ref: VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/PublicSubnet1RouteTable"
 
   PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -149,22 +159,28 @@ Resources:
       GatewayId:
         Ref: VPCIGW
     DependsOn:
-    - VPCGateway
+      - VPCGateway
 
   NATGatewayEIP1:
     Type: AWS::EC2::EIP
     Properties:
       Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/NATGatewayEIP1"
 
   PublicSubnet1NATGateway:
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId:
         Fn::GetAtt:
-        - NATGatewayEIP1
-        - AllocationId
+          - NATGatewayEIP1
+          - AllocationId
       SubnetId:
         Ref: PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/PublicSubnet1NATGateway"
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
@@ -174,22 +190,28 @@ Resources:
         Ref: VPC
       AvailabilityZone:
         Fn::Select:
-        - 1
-        - Fn::GetAZs: ""
+          - 1
+          - Fn::GetAZs: ""
       MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/PublicSubnet2"
     DependsOn:
-    - VPCGateway
+      - VPCGateway
     Metadata:
       cfn_nag:
         rules_to_suppress:
-        - id: W33
-          reason: Public IP on launch is needed by the solution
+          - id: W33
+            reason: Public IP on launch is needed by the solution
 
   PublicSubnet2RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId:
         Ref: VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/PublicSubnet2RouteTable"
 
   PublicSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -208,22 +230,28 @@ Resources:
       GatewayId:
         Ref: VPCIGW
     DependsOn:
-    - VPCGateway
+      - VPCGateway
 
   NATGatewayEIP2:
     Type: AWS::EC2::EIP
     Properties:
       Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/NATGatewayEIP2"
 
   PublicSubnet2NATGateway:
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId:
         Fn::GetAtt:
-        - NATGatewayEIP2
-        - AllocationId
+          - NATGatewayEIP2
+          - AllocationId
       SubnetId:
         Ref: PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/PublicSubnet2NATGateway"
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
@@ -233,15 +261,21 @@ Resources:
         Ref: VPC
       AvailabilityZone:
         Fn::Select:
-        - 0
-        - Fn::GetAZs: ""
+          - 0
+          - Fn::GetAZs: ""
       MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/PrivateSubnet1"
 
   VPCPrivateSubnet1RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId:
         Ref: VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/VPCPrivateSubnet1RouteTable"
 
   VPCPrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -268,15 +302,21 @@ Resources:
         Ref: VPC
       AvailabilityZone:
         Fn::Select:
-        - 1
-        - Fn::GetAZs: ""
+          - 1
+          - Fn::GetAZs: ""
       MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/PrivateSubnet2"
 
   VPCPrivateSubnet2RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId:
         Ref: VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${LMAStackName}/VPCPrivateSubnet2RouteTable"
 
   VPCPrivateSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -294,4 +334,3 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId:
         Ref: PublicSubnet2NATGateway
-
