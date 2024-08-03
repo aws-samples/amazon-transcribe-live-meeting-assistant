@@ -7,9 +7,6 @@ import {
   Input,
   Select,
   Button,
-  TimeInput,
-  Alert,
-  DatePicker,
 } from '@awsui/components-react';
 import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
 import useAppContext from '../../contexts/app';
@@ -23,9 +20,6 @@ const MeetingForm = () => {
   const [meetingId, setMeetingId] = useState('');
   const [meetingPassword, setMeetingPassword] = useState('');
   const [meetingName, setMeetingName] = useState('');
-  const [meetingDate, setMeetingDate] = useState('');
-  const [meetingTime, setMeetingTime] = useState('');
-  const [meetingTimeError, setMeetingTimeError] = useState('');
   const { currentCredentials } = useAppContext();
 
   const meetingPlatforms = [
@@ -35,35 +29,9 @@ const MeetingForm = () => {
     { label: 'Google Meet', disabled: true, value: 'Meet' },
   ];
 
-  const validateMeetingTime = (time) => {
-    if (!time) {
-      setMeetingTimeError('');
-    } else if (time.length !== 5) {
-      setMeetingTimeError('Meeting time is incomplete.');
-    } else {
-      const meetingDateTime = new Date(meetingDate);
-      meetingDateTime.setDate(meetingDateTime.getDate() + 1);
-      const [hour, minute] = time.split(':').map(Number);
-      meetingDateTime.setHours(hour, minute, 0, 0);
-
-      const minuteDifference = (meetingDateTime.getTime() - new Date().getTime()) / (1000 * 60);
-
-      if (minuteDifference >= 2) {
-        setMeetingTimeError('');
-      } else {
-        setMeetingTimeError('Meeting time must be at least two minutes out from now.');
-      }
-    }
-  };
-
   const submitMeetingForm = () => {
-    let meetingDateTimeFormatted = '';
-    if (meetingTime) {
-      const dateStr = `${meetingDate}T${meetingTime}`;
-      const meetingDateTime = new Date(dateStr);
-      meetingDateTime.setMinutes(meetingDateTime.getMinutes() - 2);
-      meetingDateTimeFormatted = meetingDateTime.toISOString().slice(0, -5);
-    }
+    // for later use when supporting scheduled meetings
+    const meetingDateTimeFormatted = '';
 
     console.log('User:', JSON.stringify(user));
 
@@ -104,8 +72,6 @@ const MeetingForm = () => {
     setMeetingId('');
     setMeetingPassword('');
     setMeetingName('');
-    setMeetingDate('');
-    setMeetingTime('');
   };
 
   return (
@@ -133,7 +99,7 @@ const MeetingForm = () => {
             <Input onChange={({ detail }) => setMeetingId(detail.value)} value={meetingId} />
           </FormField>
 
-          <FormField label="Meeting Password">
+          <FormField label="Meeting Password (if applicable)">
             <Input
               onChange={({ detail }) => setMeetingPassword(detail.value)}
               value={meetingPassword}
@@ -141,47 +107,10 @@ const MeetingForm = () => {
             />
           </FormField>
 
-          <FormField
-            label="Meeting Time"
-            description="Choose a date and local time that is at least two minutes out from now."
-          >
-            <SpaceBetween direction="horizontal" size="l">
-              <DatePicker
-                onChange={({ detail }) => setMeetingDate(detail.value)}
-                onBlur={() => validateMeetingTime(meetingTime)}
-                value={meetingDate}
-                isDateEnabled={(date) => {
-                  const currentDate = new Date();
-                  currentDate.setDate(currentDate.getDate() - 1);
-                  return date > currentDate;
-                }}
-                placeholder="YYYY/MM/DD"
-                controlId="date"
-              />
-              <TimeInput
-                onChange={({ detail }) => setMeetingTime(detail.value)}
-                onBlur={() => validateMeetingTime(meetingTime)}
-                value={meetingTime}
-                disabled={meetingDate.length !== 10}
-                format="hh:mm"
-                placeholder="hh:mm (24-hour format)"
-                use24Hour
-              />
-            </SpaceBetween>
-            {meetingTimeError && <Alert type="error">{meetingTimeError}</Alert>}
-          </FormField>
-
           <FormField>
             <SpaceBetween direction="horizontal" size="l">
               <Button variant="normal" form="meetingForm" disabled={!meetingId || !meetingName}>
                 Join Now
-              </Button>
-              <Button
-                variant="primary"
-                form="meetingForm"
-                disabled={!meetingId || !meetingName || !meetingTime || !!meetingTimeError}
-              >
-                Join Later
               </Button>
             </SpaceBetween>
           </FormField>
