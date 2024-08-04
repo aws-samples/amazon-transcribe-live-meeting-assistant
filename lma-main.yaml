@@ -446,6 +446,51 @@ Parameters:
       If you set the EnableAppSyncApiCache is true, choose a value that meets your workload requirements. 
       This parameter is ignored if the EnableAppSyncApiCache parameter is set to false (default behavior).
 
+  UseExistingVPC:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Use an existing VPC for the solution instead of creating a new one. If set to
+      true, the VPC ID and subnets must be provided. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+
+  VPC:
+    Type: String
+    Description: >-
+      ID of the VPC to use for the solution. Required if UseExistingVPC is true. DO NOT CHANGE VALUE WHEN 
+      UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|vpc-[a-zA-Z0-9-]+)$"
+
+  PublicSubnet1:
+    Type: String
+    Description: >-
+      ID of the public subnet in Availability Zone 1. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
+
+  PublicSubnet2:
+    Type: String
+    Description: >-
+      ID of the public subnet in Availability Zone 2. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
+
+  PrivateSubnet1:
+    Type: String
+    Description: >-
+      ID of the private subnet in Availability Zone 1. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
+
+  PrivateSubnet2:
+    Type: String
+    Description: >-
+      ID of the private subnet in Availability Zone 2. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -513,6 +558,15 @@ Metadata:
         Parameters:
           - EnableAppSyncApiCache
           - AppSyncApiCacheInstanceType
+      - Label:
+          default: VPC Configuration
+        Parameters:
+          - UseExistingVPC
+          - VPC
+          - PublicSubnet1
+          - PublicSubnet2
+          - PrivateSubnet1
+          - PrivateSubnet2
 
     ParameterLabels:
       CallAudioProcessor:
@@ -591,10 +645,24 @@ Metadata:
         default: Transcription Expiration In Days
       AudioRecordingExpirationInDays:
         default: Audio Recording Expiration In Days
+      CloudWatchLogsExpirationInDays:
+        default: CloudWatch Logs Expiration In Days
       EnableAppSyncApiCache:
         default: Enable AppSync Api Cache
       AppSyncApiCacheInstanceType:
         default: AppSync Api Cache Instance Type
+      UseExistingVPC:
+        default: Use Existing VPC
+      VPC:
+        default: Existing VPC ID
+      PublicSubnet1:
+        default: Existing Public Subnet 1
+      PublicSubnet2:
+        default: Existing Public Subnet 2
+      PrivateSubnet1:
+        default: Existing Private Subnet 1
+      PrivateSubnet2:
+        default: Existing Private Subnet 2
 
 Mappings:
   TranscribeToLexLocaleId:
@@ -657,6 +725,7 @@ Conditions:
       !Condition ShouldUseExistingBedrockKnowledgeBase,
       !Condition ShouldCreateBedrockKnowledgeBase,
     ]
+  ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -1252,6 +1321,10 @@ Resources:
 
   VPCSTACK:
     Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateVPC
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-vpc-stack/template.yaml
@@ -1292,11 +1365,26 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
-        VPC: !GetAtt VPCSTACK.Outputs.VPC
-        PublicSubnet1: !GetAtt VPCSTACK.Outputs.PublicSubnet1
-        PublicSubnet2: !GetAtt VPCSTACK.Outputs.PublicSubnet2
-        PrivateSubnet1: !GetAtt VPCSTACK.Outputs.PrivateSubnet1
-        PrivateSubnet2: !GetAtt VPCSTACK.Outputs.PrivateSubnet2
+        VPC: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.VPC
+          - !Ref VPC
+        PublicSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet1
+          - !Ref PublicSubnet1
+        PublicSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet2
+          - !Ref PublicSubnet2
+        PrivateSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet1
+          - !Ref PrivateSubnet1
+        PrivateSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet2
+          - !Ref PrivateSubnet2
 
   VIRTUALPARTICIPANTSTACK:
     Type: AWS::CloudFormation::Stack
@@ -1321,12 +1409,21 @@ Resources:
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
-        VPC: !GetAtt VPCSTACK.Outputs.VPC
-        PrivateSubnet1: !GetAtt VPCSTACK.Outputs.PrivateSubnet1
-        PrivateSubnet2: !GetAtt VPCSTACK.Outputs.PrivateSubnet2
         SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
         LMASettingsParameterName: !Ref LMASettingsParameter
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
+        VPC: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.VPC
+          - !Ref VPC
+        PrivateSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet1
+          - !Ref PrivateSubnet1
+        PrivateSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet2
+          - !Ref PrivateSubnet2
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack
