@@ -1,6 +1,6 @@
 # Virtual Participant
 
-This stack deploys an ECS Fargate Task and Step Function state machine architecture that will schedule a meeting via EventBridge Scheduler, and then join meeting via 'Virtual Participant', or VP for short. The VP is launched via Fargate Task that runs via [Playwright](https://playwright.dev/python/), a headless Chrome browser. The audio and meeting metadata are ingested and sent to the LMA Kinesis Data Stream for further processing. 
+This stack deploys an ECS Fargate Task and Step Function state machine architecture that will join meeting via 'Virtual Participant', or VP for short. The VP is launched via a Fargate Task that runs via [Playwright](https://playwright.dev/python/), a headless Chrome browser. The audio and meeting metadata are ingested and sent to the LMA Kinesis Data Stream for further processing. 
 
 ## How to test
 
@@ -28,7 +28,7 @@ To execute this in the CLI, assuming you have AWS credentials, use this:
 ```
 aws stepfunctions start-execution \
     --state-machine-arn arn:aws:states:us-east-1:123456789012:stateMachine:SchedulerStateMachine-09X1KR2ZL54I \
-    --input '{"apiInfo": {"httpMethod": "POST"}, "data": {"meetingPlatform": "Zoom", "meetingID": "12345678", "meetingPassword": "a1b2c3", "meetingName": "A meeting title", "meetingTime": ""}}'
+    --input '{"apiInfo": {"httpMethod": "POST"}, "data": {"meetingPlatform": "Zoom", "meetingID": "12345678", "meetingPassword": "a1b2c3", "meetingName": "A meeting title", "meetingTime": "", "userName": "Bob"}}'
 ```
 
 ## How to test VP via Docker
