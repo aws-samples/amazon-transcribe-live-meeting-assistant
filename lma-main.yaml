@@ -89,7 +89,7 @@ Parameters:
 
   MeetingAssistQnABotOpenSearchNodeCount:
     Type: String
-    Default: "1"
+    Default: 1
     AllowedValues:
       - 1
       - 2
@@ -446,6 +446,51 @@ Parameters:
       If you set the EnableAppSyncApiCache is true, choose a value that meets your workload requirements. 
       This parameter is ignored if the EnableAppSyncApiCache parameter is set to false (default behavior).
 
+  UseExistingVPC:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Use an existing VPC for the solution instead of creating a new one. If set to
+      true, the VPC ID and subnets must be provided. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+
+  VPC:
+    Type: String
+    Description: >-
+      ID of the VPC to use for the solution. Required if UseExistingVPC is true. DO NOT CHANGE VALUE WHEN 
+      UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|vpc-[a-zA-Z0-9-]+)$"
+
+  PublicSubnet1:
+    Type: String
+    Description: >-
+      ID of the public subnet in Availability Zone 1. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
+
+  PublicSubnet2:
+    Type: String
+    Description: >-
+      ID of the public subnet in Availability Zone 2. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
+
+  PrivateSubnet1:
+    Type: String
+    Description: >-
+      ID of the private subnet in Availability Zone 1. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
+
+  PrivateSubnet2:
+    Type: String
+    Description: >-
+      ID of the private subnet in Availability Zone 2. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -513,6 +558,15 @@ Metadata:
         Parameters:
           - EnableAppSyncApiCache
           - AppSyncApiCacheInstanceType
+      - Label:
+          default: VPC Configuration
+        Parameters:
+          - UseExistingVPC
+          - VPC
+          - PublicSubnet1
+          - PublicSubnet2
+          - PrivateSubnet1
+          - PrivateSubnet2
 
     ParameterLabels:
       CallAudioProcessor:
@@ -591,10 +645,24 @@ Metadata:
         default: Transcription Expiration In Days
       AudioRecordingExpirationInDays:
         default: Audio Recording Expiration In Days
+      CloudWatchLogsExpirationInDays:
+        default: CloudWatch Logs Expiration In Days
       EnableAppSyncApiCache:
         default: Enable AppSync Api Cache
       AppSyncApiCacheInstanceType:
         default: AppSync Api Cache Instance Type
+      UseExistingVPC:
+        default: Use Existing VPC
+      VPC:
+        default: Existing VPC ID
+      PublicSubnet1:
+        default: Existing Public Subnet 1
+      PublicSubnet2:
+        default: Existing Public Subnet 2
+      PrivateSubnet1:
+        default: Existing Private Subnet 1
+      PrivateSubnet2:
+        default: Existing Private Subnet 2
 
 Mappings:
   TranscribeToLexLocaleId:
@@ -643,9 +711,11 @@ Rules:
       - Assert: !Not [!Equals [!Ref BedrockKnowledgeBaseId, ""]]
         AssertDescription:
           BedrockKnowledgeBaseId is required when MeetingAssistService
-          is 'BEDROCK_KNOWLEDGE_BASE (Use Existing)'
+          is 'BEDROCK_KNOWLEDGE_BASE'
 
 Conditions:
+  ShouldCreateRecordingBucket: !Equals [!Ref S3BucketName, ""]
+
   ShouldUseExistingBedrockKnowledgeBase:
     !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Use Existing)"]
   ShouldCreateBedrockKnowledgeBase:
@@ -655,6 +725,7 @@ Conditions:
       !Condition ShouldUseExistingBedrockKnowledgeBase,
       !Condition ShouldCreateBedrockKnowledgeBase,
     ]
+  ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -844,6 +915,169 @@ Resources:
         - "amazon.titan-embed-text-v1" # QNABOTBR
         - "anthropic.claude-instant-v1" # QNABOTBR
 
+  ##########################################################################
+  # Resources shared by multiple nested stacks
+  ##########################################################################
+  CallDataStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      RetentionPeriodHours: 24
+      StreamModeDetails:
+        StreamMode: ON_DEMAND
+      StreamEncryption:
+        EncryptionType: KMS
+        KeyId: alias/aws/kinesis
+
+  # Initialise LMASettingsParameter as empty (so it never gets replaced)
+  # and use CR UpdateLMASettingsFunction to add/update values
+  LMASettingsParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Name: !Sub "${AWS::StackName}-LMASettings"
+      Value: "{}"
+
+  UpdateLMASettingsFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: updateSSMStore
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:PutParameter
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameter}"
+
+  UpdateLMASettingsFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Role: !GetAtt UpdateLMASettingsFunctionRole.Arn
+      Handler: index.handler
+      Runtime: python3.11
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import json
+          ssm = boto3.client('ssm')
+          def updateSSMParameter(props):
+            parameterName = props['LCASettingsName']
+            parameterValues = props['LCASettingsKeyValuePairs']
+            response = ssm.get_parameter(Name=parameterName)
+            settingsJSON = response['Parameter']['Value']
+            settings = json.loads(settingsJSON)
+            print(f"Existing settings: {settings}")
+            for key, value in parameterValues.items():
+              settings[key] = value
+            print(f"Updated settings: {settings}")
+            newSettingsJSON = json.dumps(settings)
+            ssm.put_parameter(Name=parameterName, Value=newSettingsJSON, Overwrite=True)
+                        
+          def handler(event, context):        
+            print(json.dumps(event))
+            status = cfnresponse.SUCCESS
+            responseData = {}
+            reason = "Success"
+            props = event["ResourceProperties"]
+            if event['RequestType'] != 'Delete':
+              try:
+                updateSSMParameter(props)
+              except Exception as e:
+                print(e)
+                reason = f"Exception thrown: {e}"
+                status = cfnresponse.FAILED              
+            cfnresponse.send(event, context, status, responseData, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Ref: UpdateLMASettingsFunctionLogGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W58
+            reason: Managed policy already provides access to CloudWatch logs.
+
+  UpdateLMASettingsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+
+  UpdateLMASettingsWithAssistantWakePhraseRegEx:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt UpdateLMASettingsFunction.Arn
+      LCASettingsName: !Ref LMASettingsParameter
+      LCASettingsKeyValuePairs:
+        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+
+  ## BUCKET TO STORE STEREO RECORDINGS
+  RecordingsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Condition: ShouldCreateRecordingBucket
+    Properties:
+      AccessControl: LogDeliveryWrite
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: ObjectWriter
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: RuleRetention
+            Status: Enabled
+            Prefix: ""
+            ExpirationInDays: !Ref AudioRecordingExpirationInDays
+
+  RecordingsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: ShouldCreateRecordingBucket
+    Properties:
+      Bucket: !Ref RecordingsBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - "s3:*"
+            Effect: "Deny"
+            Principal: "*"
+            Resource:
+              - !GetAtt RecordingsBucket.Arn
+              - !Sub "${RecordingsBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": false
+
   ToJSONFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -952,7 +1186,10 @@ Resources:
         AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
         EnableVoiceToneAnalysis: "false"
         CallAudioSource: "Genesys Cloud Audiohook Web Socket"
-        S3BucketName: !Ref S3BucketName
+        S3BucketName: !If
+          - ShouldCreateRecordingBucket
+          - !Ref RecordingsBucket
+          - !Ref S3BucketName
         AdminEmail: !Ref AdminEmail
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         IsSentimentAnalysisEnabled: "false"
@@ -970,6 +1207,9 @@ Resources:
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CallDataStream: !Ref CallDataStream
+        CallDataStreamArn: !GetAtt CallDataStream.Arn
+        LMASettingsParameterName: !Ref LMASettingsParameter
         EnableAppSyncApiCache: !Ref EnableAppSyncApiCache
         AppSyncApiCacheInstanceType: !Ref AppSyncApiCacheInstanceType
 
@@ -1028,7 +1268,6 @@ Resources:
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
-    DependsOn: AISTACK
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/template.yaml
@@ -1080,18 +1319,33 @@ Resources:
         QnaBotSettings: !GetAtt SettingsJSON.Output
         Version: v0.8.8
 
-  WEBSOCKETSTACK:
+  VPCSTACK:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateVPC
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-vpc-stack/template.yaml
+      Parameters:
+        LMAStackName: !Ref "AWS::StackName"
+
+  WEBSOCKETTRANSCRIBERSTACK:
     Type: AWS::CloudFormation::Stack
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-stack/<VERSION_TOKEN>/template.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-transcriber-stack/<VERSION_TOKEN>/template.yaml
       # yamllint enable rule:line-length
       Parameters:
-        S3BucketName: !GetAtt AISTACK.Outputs.S3BucketName
+        S3BucketName: !If
+          - ShouldCreateRecordingBucket
+          - !Ref RecordingsBucket
+          - !Ref S3BucketName
         AudioFilePrefix: !Ref AudioFilePrefix
         UserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
-        CallDataStreamName: !GetAtt AISTACK.Outputs.CallDataStreamName
-        CallDataStreamArn: !GetAtt AISTACK.Outputs.CallDataStreamArn
+        CallDataStreamName: !Ref CallDataStream
+        CallDataStreamArn: !GetAtt CallDataStream.Arn
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         TranscribeApiMode: "standard"
         IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
@@ -1107,10 +1361,69 @@ Resources:
         PcaPlaybackAudioFilePrefix: ""
         PcaWebAppURL: ""
         PcaWebAppCallPathPrefix: ""
-        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
-        LMASettingsParameterName: !GetAtt AISTACK.Outputs.LMASettingsParameterName
+        LMASettingsParameterName: !Ref LMASettingsParameter
+        UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
+        VPC: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.VPC
+          - !Ref VPC
+        PublicSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet1
+          - !Ref PublicSubnet1
+        PublicSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet2
+          - !Ref PublicSubnet2
+        PrivateSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet1
+          - !Ref PrivateSubnet1
+        PrivateSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet2
+          - !Ref PrivateSubnet2
+
+  VIRTUALPARTICIPANTSTACK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-virtual-participant-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        LMAStackName: !Ref AWS::StackName
+        S3BucketName: !If
+          - ShouldCreateRecordingBucket
+          - !Ref RecordingsBucket
+          - !Ref S3BucketName
+        AudioFilePrefix: !Ref AudioFilePrefix
+        CallDataStreamName: !Ref CallDataStream
+        TranscribeApiMode: "standard"
+        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
+        TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
+        TranscribeLanguageCode: !Ref TranscribeLanguageCode
+        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
+        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
+        TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
+        CustomVocabularyName: !Ref CustomVocabularyName
+        CustomLanguageModelName: !Ref CustomLanguageModelName
+        SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
+        LMASettingsParameterName: !Ref LMASettingsParameter
+        UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
+        VPC: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.VPC
+          - !Ref VPC
+        PrivateSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet1
+          - !Ref PrivateSubnet1
+        PrivateSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet2
+          - !Ref PrivateSubnet2
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack
@@ -1120,7 +1433,7 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
-        WebSocketEndpoint: !GetAtt WEBSOCKETSTACK.Outputs.WebSocketEndpoint
+        WebSocketEndpoint: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
         CognitoClientId: !GetAtt AISTACK.Outputs.CognitoClientId
         CognitoLoginUrl: !GetAtt AISTACK.Outputs.CognitoLoginUrl
         CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
@@ -1138,25 +1451,20 @@ Outputs:
     Description: LMA Chrome Browser extension download link
     Value: !GetAtt BROWSEREXTENSIONSTACK.Outputs.ExtensionDownloadLocation
 
-  CallDataStreamArn:
-    Description: >-
-      The ARN of Kinesis Data Stream for sending Call and Transcription events.
-    Value: !GetAtt AISTACK.Outputs.CallDataStreamArn
-    Export:
-      Name:
-        "Fn::Sub": "${AWS::StackName}-CallDataStreamArn"
-
   LMAWebsocketEndpoint:
     Description: Websocket endpoint for websocket integration
-    Value: !GetAtt WEBSOCKETSTACK.Outputs.WebSocketEndpoint
+    Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
 
   QnaBotContentDesigner:
     Description: Agent Assist Content Designer URL (QnABot on AWS)
     Value: !GetAtt QNABOT.Outputs.ContentDesignerURL
 
   RecordingsS3Bucket:
-    Description: Bucket contains all the call recordings
-    Value: !GetAtt AISTACK.Outputs.S3BucketName
+    Description: Bucket which contains all the call recordings
+    Value: !If
+      - ShouldCreateRecordingBucket
+      - !Ref RecordingsBucket
+      - !Ref S3BucketName
 
   SNSCategoryTopicName:
     Description: The name of the SNS Topic for matched category and alert notifications
@@ -1176,6 +1484,20 @@ Outputs:
 
   LLMCustomPromptSummaryTemplate:
     Description:
-      Edit the *custom* summary prompts. Attribite values here override
+      Edit the *custom* summary prompts. Attribute values here override
       the default summary prompts, and are preserved during stack updates.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
+
+  CallDataStreamName:
+    Description: >-
+      The Name of Kinesis Data Stream to write the call data to.
+    Value: !Ref CallDataStream
+
+  CallDataStreamArn:
+    Description: >-
+      The ARN of Kinesis Data Stream to write the call data to.
+    Value: !GetAtt CallDataStream.Arn
+
+  LMASettingsParameterName:
+    Description: Name of the Parameter store setting that holds the LMA Settings
+    Value: !Ref LMASettingsParameter

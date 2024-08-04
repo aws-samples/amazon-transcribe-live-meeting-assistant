@@ -7,7 +7,7 @@ Websocket server ingests audio from the web client (web and microphone audio str
 
 Test locally for syntax or lint errors that will cause CodeBuild failures during deployment if not fixed. Run these commands from the root directory of the repo:
 ```
-cd lma-websocket-stack/source/app/
+cd lma-websocket-transcriber-stack/source/app/
 npm run setup
 npm run buildcheck
 ```
