@@ -153,13 +153,12 @@ For the best meeting streaming experience, install the LMA browser plugin - curr
 
 ## Start using LMA
 
-LMA provides two streaming options:
+LMA provides three streaming options:
 
 1. Use the **Chrome browser extension** to stream audio and speaker metadata from your meeting browser app. It currently works with Zoom, Teams and Chime, but we hope to add more meeting apps.
 1. Use the **LMA Stream Audio tab** to stream audio from your microphone and any Chrome browser-based meeting app, softphone, or audio application.
 We show you how to use both options in the following sections.
-
-*In v0.1.9 we introduce an early (Preview) version of a new option - the LMA 'Virtual Participant" - see [Virtual Participant README](./lma-virtual-participant-stack/README.md). It's still incomplete
+1. (New) Use the **LMA Virtual Participant (Preview)** feature to have LMA join the meeting as a separate virtual participant. **Please review the [Virtual Participant README](./lma-virtual-participant-stack/README.md) for more information and known issues.*
 
 ### Option 1: Use the Chrome browser extension to stream a Zoom call
 
