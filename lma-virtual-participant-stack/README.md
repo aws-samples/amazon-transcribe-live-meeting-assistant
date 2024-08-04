@@ -1,4 +1,4 @@
-# Virtual Participant (Beta)
+# Virtual Participant (Preview)
 
 This stack deploys an ECS Fargate Task and Step Function state machine architecture that will join meeting via 'Virtual Participant', or VP for short. The VP is launched via a Fargate Task that runs via [Playwright](https://playwright.dev/python/), a headless Chrome browser. The audio and meeting metadata are ingested and sent to the LMA Kinesis Data Stream for further processing. 
 
@@ -9,7 +9,7 @@ Advantages:
 - By using the Virtual Participant instead of the browser extension, you are free to use the native Chime, or Zoom app on your desktop rather than being compelled to running the meeting in your browser.
 - You can also have the Virtual Participant join the meeting before you do (it joins as a separate participant) or stay on the call after you drop. In fact it could even join calls you've been invited to even if you don't join at all. Of course, while this is possible, you'll need to explain the presence of your LMA participant to others on the meeting, and get their permission. 
 
-Use the new "Virtual Participant (Beta)" tab to have LMA join your Chime or Zoom call.  
+Use the new "Virtual Participant (Preview)" tab to have LMA join your Chime or Zoom call.  
   
   ![VirtualParticipantLink](./images/virtual-participant-link.png)
 
@@ -23,7 +23,7 @@ Your virtual participant will join your meeting in about 1 minute (after the Far
 
 
 ## Known issues with the beta, will be addressed in later releases.
-- The "Virtual Participant (Beta)" UI currently lacks error handling, user feedback, status visibility, and controls (pause/resume, leave meeting, etc.). If it fails to join your meeting after about 1m, you will need to troubleshoot using the logs from StepFunctions and/or the Fargate tasks.
+- The "Virtual Participant (Preview)" UI currently lacks error handling, user feedback, status visibility, and controls (pause/resume, leave meeting, etc.). If it fails to join your meeting after about 1m, you will need to troubleshoot using the logs from StepFunctions and/or the Fargate tasks.
 - Speaker assignment fidelity is not great. If multiple participants speak simultaneously, or with insufficient pauses between speakers, the virtual participant may confuse speaker name assignments. 
 - Limited currently to just Chime and Zoom meetings.
 

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.9] - 2024-08-05
 ### Fixed
 - #76 Support optional deployment using existing VPC/subnets 
-- #71 Introduce 'Virtual Participant' (Beta) [VP README](./lma-virtual-participant-stack/README.md)
+- #71 Introduce 'Virtual Participant' (Preview) [VP README](./lma-virtual-participant-stack/README.md)
 
 ## [0.1.8] - 2024-08-01
 ### Fixed

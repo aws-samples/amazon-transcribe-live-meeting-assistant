@@ -159,6 +159,8 @@ LMA provides two streaming options:
 1. Use the **LMA Stream Audio tab** to stream audio from your microphone and any Chrome browser-based meeting app, softphone, or audio application.
 We show you how to use both options in the following sections.
 
+*In v0.1.9 we introduce an early (Preview) version of a new option - the LMA 'Virtual Participant" - see [Virtual Participant README](./lma-virtual-participant-stack/README.md). It's still incomplete
+
 ### Option 1: Use the Chrome browser extension to stream a Zoom call
 
 1. Open the LMA extension and login with your LMA credentials.
