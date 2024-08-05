@@ -4,7 +4,8 @@ This stack deploys an ECS Fargate Task and Step Function state machine architect
 
 This feature is currently a work in progress - not feature complete. It currently works for Chime and Zoom calls only, and while it can join and stream a call, it has known issues, listed below.
 
-Using the Virtual Participant is an alternative to using the LMA browser extension to capture your meeting. 
+Using the Virtual Participant is an alternative to using the LMA browser extension to capture your meeting.   
+
 Advantages:
 - By using the Virtual Participant instead of the browser extension, you are free to use the native Chime, or Zoom app on your desktop rather than being compelled to running the meeting in your browser.
 - You can also have the Virtual Participant join the meeting before you do (it joins as a separate participant) or stay on the call after you drop. In fact it could even join calls you've been invited to even if you don't join at all. Of course, while this is possible, you'll need to explain the presence of your LMA participant to others on the meeting, and get their permission. 
