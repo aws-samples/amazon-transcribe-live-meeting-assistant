@@ -31,7 +31,7 @@ export const callsNavItems = [
       },
       {
         type: 'link',
-        text: 'Virtual Participant (Preview)',
+        text: 'Virtual Participant',
         href: `#${VIRTUAL_PARTICIPANT_PATH}`,
         external: true,
       },
@@ -65,13 +65,13 @@ const defaultOnFollowHandler = (ev) => {
 
 /* eslint-disable react/prop-types */
 const Navigation = ({
-  activeHref = `#${STREAM_AUDIO_PATH}`,
+  activeHref = `#${VIRTUAL_PARTICIPANT_PATH}`,
   header = callsNavHeader,
   items = callsNavItems,
   onFollowHandler = defaultOnFollowHandler,
 }) => (
   <Switch>
-    <Route path={STREAM_AUDIO_PATH}>
+    <Route path={VIRTUAL_PARTICIPANT_PATH}>
       <SideNavigation
         items={items || callsNavItems}
         header={header || callsNavHeader}

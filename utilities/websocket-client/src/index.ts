@@ -4,7 +4,7 @@ import { WebSocket } from 'ws';
 import * as fs from 'fs';
 import Chain from 'stream-chain';
 import { randomUUID } from 'crypto';
-import { CallMetaData } from '../../../lma-websocket-stack/source/app/src/lca';
+import { CallMetaData } from '../../../lma-websocket-transcriber-stack/source/app/src/lca';
 
 import dotenv from 'dotenv';
 dotenv.config();
