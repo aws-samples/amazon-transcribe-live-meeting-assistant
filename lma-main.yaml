@@ -19,21 +19,12 @@ Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.9) (SO9497)
 
 Parameters:
   Domain:
-<<<<<<< HEAD
-    Default: ""
+    Default: "Default"
     Type: String
     AllowedValues:
-      - ""
+      - "Default"
       - "Healthcare"
-    Description: Select the Healthcare domain if necessary, or leave it at default
-=======
-    Default: 'Default'
-    Type: String
-    AllowedValues:
-      - 'Default'
-      - 'Healthcare'
     Description: Select the appropriate domain as necessary, or leave it at default
->>>>>>> 49f90da8eb53290375fe23c2e708414c2e7aba38
 
   MeetingAssistService:
     Default: "BEDROCK_LLM"
