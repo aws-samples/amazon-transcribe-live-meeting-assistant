@@ -18,6 +18,14 @@ Transform: AWS::Serverless-2016-10-31
 Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.9) (SO9497)
 
 Parameters:
+  Domain:
+    Default: "Default"
+    Type: String
+    AllowedValues:
+      - "Default"
+      - "Healthcare"
+    Description: Select the appropriate domain as necessary, or leave it at default
+
   MeetingAssistService:
     Default: "BEDROCK_LLM"
     Type: String
@@ -567,7 +575,10 @@ Metadata:
           - PublicSubnet2
           - PrivateSubnet1
           - PrivateSubnet2
-
+      - Label:
+          default: Business Domain
+        Parameters:
+          - Domain
     ParameterLabels:
       CallAudioProcessor:
         default: Call Audio Processor
@@ -714,8 +725,8 @@ Rules:
           is 'BEDROCK_KNOWLEDGE_BASE'
 
 Conditions:
+  IsHealthcareDomainSelected: !Equals [!Ref Domain, "Healthcare"]
   ShouldCreateRecordingBucket: !Equals [!Ref S3BucketName, ""]
-
   ShouldUseExistingBedrockKnowledgeBase:
     !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Use Existing)"]
   ShouldCreateBedrockKnowledgeBase:
@@ -1169,6 +1180,7 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
       Parameters:
+        Domain: !Ref Domain
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
   AISTACK:
@@ -1298,7 +1310,10 @@ Resources:
           ]
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         CloudFrontDistributionId: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
-        QnaMeetingAssistDemoJson: <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
+        QnaMeetingAssistDemoJson: !If
+          - IsHealthcareDomainSelected
+          - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-healthcare-demo.jsonl
+          - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         # Changes to Params below force AgentAssist Setup to update.
         TranscribeLanguageCode: !Ref TranscribeLanguageCode

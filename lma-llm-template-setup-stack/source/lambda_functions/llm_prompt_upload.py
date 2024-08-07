@@ -35,7 +35,15 @@ def lambda_handler(event, context):
         if the_event in ('Create', 'Update'):
             promptTemplateTableName = event['ResourceProperties']['LLMPromptTemplateTableName']
 
-            llm_prompt_summary_template_file = os.environ['LAMBDA_TASK_ROOT'] + "/LLMPromptSummaryTemplate.json"
+            domain = os.environ.get('DOMAIN', '').lower()  # Get the "Domain" value from the environment variable
+
+            # Load the appropriate template.json file based on the user input "Domain" value
+            if domain.lower() == 'healthcare':
+                llm_prompt_summary_template_file = os.environ[
+                                                       'LAMBDA_TASK_ROOT'] + "/LLMPromptHealthcareSummaryTemplate.json"
+            else:
+                llm_prompt_summary_template_file = os.environ['LAMBDA_TASK_ROOT'] + "/LLMPromptSummaryTemplate.json"
+
             llm_prompt_summary_template = open(llm_prompt_summary_template_file).read()
             dynamodb = boto3.resource('dynamodb')
             promptTable = dynamodb.Table(promptTemplateTableName)
