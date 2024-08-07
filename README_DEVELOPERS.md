@@ -120,11 +120,10 @@ else:
 
 ```
 
-6. Finally ensure the qna-ma-yourdomain-demo.jsonl file is copied from local to the s3 bucket with the appropriate permission by adding it to the publish.sh
-Open the publish.sh file and search for qna-ma-demo.jsonl. Add your domain file - qna-ma-yourdomain.jsonl
+6. Finally ensure the qna-ma-yourdomain-demo.jsonl file is copied from local to the s3 bucket with the appropriate permission by adding it to the `publish.sh` in the `lma-meetingassist-setup-stack` directory.
+Open the `lma-meetingassist-setup-stack/publish.sh` file and search for qna-ma-demo.jsonl. Add your domain file - qna-ma-yourdomain.jsonl
 ```
-aws s3 cp ./qna-ma-yourdomain-demo.jsonl s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-meetingassist-setup-stack/qna-ma-yourdomain-demo.jsonl
-
+aws s3 cp ./qna-ma-yourdomain-demo.jsonl s3://${BUCKET}/${PREFIX}/${NAME}/qna-ma-yourdomain-demo.jsonl
 ```
 That's it. Now you can build the package and deploy the new LMA-YOURDOMAIN Solution and test it out. 
 
