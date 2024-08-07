@@ -84,19 +84,19 @@ In this example above, the QnaMeetingAssistDemoJson property will be set to:
   Type: AWS::SomeService::SomeResource
     Properties:
       Name: !If
-        - IsProd
-        - prod-resource
+        - IsInsuranceDomainSelected
+        - insurance-resource
         - !If
-          - IsTest
-          - test-resource
+          - IsFinanceDomainSelected
+          - finance-resource
           - !If
             - IsOther
             - other-resource
             - !Ref 'AWS::NoValue'
   ```
 In this example, the Name property of MyResource will be set to:
-- prod-resource if the EnvironmentName parameter is prod (IsProd condition is true)
-- test-resource if the EnvironmentName parameter is test (IsTest condition is true)
+- insurance-resource if the EnvironmentName parameter is Insurance (IsInsuranceDomainSelected condition is true)
+- finance-resource if the EnvironmentName parameter is Finance (IsFinanceDomainSelected condition is true)
 - other-resource if the EnvironmentName parameter is neither prod nor test (IsOther condition is true)
 The property will be removed if none of the conditions are true (using AWS::NoValue)
 
