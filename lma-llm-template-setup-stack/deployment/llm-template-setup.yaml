@@ -7,11 +7,16 @@ Transform: AWS::Serverless-2016-10-31
 Parameters:
   Domain:
     Type: String
-    Default: ''
+    Default: ""
     AllowedValues:
-      - ''
+      - ""
       - Healthcare
     Description: The domain of the application (optional)
+
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs.
 
 Resources:
   LLMPromptTemplateTable:
@@ -25,7 +30,7 @@ Resources:
           AttributeType: S
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
-        SSEEnabled: True
+        SSEEnabled: true
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
@@ -46,11 +51,11 @@ Resources:
           PolicyDocument:
             Statement:
               Effect: Allow
-              Resource: 
+              Resource:
                 - !GetAtt LLMPromptTemplateTable.Arn
               Action:
-                - 'dynamodb:PutItem'
-                - 'dynamodb:UpdateItem'
+                - "dynamodb:PutItem"
+                - "dynamodb:UpdateItem"
         - PolicyName: SSMGetParameterPolicy
           PolicyDocument:
             Statement:
@@ -63,15 +68,25 @@ Resources:
   LLMPromptUploadFunction:
     Type: "AWS::Lambda::Function"
     Properties:
-      Code:  ../source/lambda_functions
+      Code: ../source/lambda_functions
       Handler: llm_prompt_upload.lambda_handler
       Role: !GetAtt LLMPromptUploadRole.Arn
       Runtime: python3.11
       MemorySize: 128
       Timeout: 60
-      Environment:
-        Variables:
-          DOMAIN: !Ref Domain
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/LLMPromptUploadFunction
+    DependsOn:
+      - LLMPromptUploadFunctionLogGroup
+
+  LLMPromptUploadFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/LLMPromptUploadFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
 
   LLMStorePromptTemplates:
     Type: "AWS::CloudFormation::CustomResource"
@@ -82,7 +97,5 @@ Resources:
       source_hash: f4daa62f4768edfe
 
 Outputs:
-
-    LLMPromptTemplateTableName:
-      Value: !Ref LLMPromptTemplateTable
-
+  LLMPromptTemplateTableName:
+    Value: !Ref LLMPromptTemplateTable

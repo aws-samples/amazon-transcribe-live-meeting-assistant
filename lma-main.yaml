@@ -12,60 +12,99 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ---
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.2)
+Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.9) (SO9497)
 
 Parameters:
-
   Domain:
-    Default: ''
+    Default: ""
     Type: String
     AllowedValues:
-      - ''
-      - 'Healthcare'
+      - ""
+      - "Healthcare"
     Description: Select the Healthcare domain if necessary, or leave it at default
 
   MeetingAssistService:
-    Default: 'BEDROCK_KNOWLEDGE_BASE'
+    Default: "BEDROCK_LLM"
     Type: String
     AllowedValues:
-      - 'BEDROCK_LLM'
-      - 'BEDROCK_KNOWLEDGE_BASE'
-    Description: Choose which knowledge base / LLM service to use
-
-  BedrockKnowledgeBaseId:
-    Type: String
-    Default: ''
-    AllowedPattern: '^(|[0-9a-zA-Z]{10})$'
-    Description: >
-      If MeetingAssistService is BEDROCK_KNOWLEDGE_BASE, provide the knowledge base *Id* (not name) of an existing Bedrock knowledge base to be used for Meeting Assist bot.
+      - "BEDROCK_LLM"
+      - "BEDROCK_KNOWLEDGE_BASE (Create)"
+      - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
+    Description: Choose the knowledge base / LLM service to use
 
   MeetingAssistServiceBedrockModelID:
     Type: String
-    Default: 'anthropic.claude-3-haiku-20240307-v1:0'
+    Default: "anthropic.claude-3-haiku-20240307-v1:0"
     AllowedValues:
-      - 'anthropic.claude-3-haiku-20240307-v1:0'
-      - 'anthropic.claude-3-sonnet-20240229-v1:0'
+      - "anthropic.claude-3-haiku-20240307-v1:0"
+      - "anthropic.claude-3-sonnet-20240229-v1:0"
     Description: >-
-      If MeetingAssistService is BEDROCK_LLM or BEDROCK_KNOWLEDGE_BASE, select a Bedrock LLM model from the list."
+      Select a Bedrock LLM model from the list."
+
+  BedrockKnowledgeBaseId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+    Description: >
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Use Existing)', provide the knowledge base
+      *Id* (not name) of an *existing* Bedrock knowledge base to be used for Meeting
+      Assist bot.
+
+  BedrockKnowledgeBaseS3BucketName:
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide the bucket 
+      name of an existing bucket with documents to ingest, or leave blank if you don't need an S3 data source. If you provide an S3 bucket name an S3 data
+      source will be created for you automatically.
+
+  BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of optional S3 prefixes 
+      with the paths to your source documents e.g. "prefix1/, prefix2/". If you leave blank, all documents in your S3 bucket will be scanned.
+
+  BedrockKnowledgeBaseWebCrawlerURLs:
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
+      or leave blank if you don't need a Web data source. If you provide one or more Web URLs a Web crawler data source will be created for you automatically.
+
+  BedrockKnowledgeBaseWebCrawlerScope:
+    Type: String
+    AllowedValues:
+      - "DEFAULT"
+      - "HOST_ONLY"
+      - "SUBDOMAINS"
+    Default: DEFAULT
+    Description: >-
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', specify the scope of what is crawled for your URLs.
+      Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
+      Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
+      Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
 
   AssistantWakePhraseRegEx:
     Type: String
     Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
     Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant. Default is 'OK Assistant'
+      A regular expression for the wake phrase that invokes the Meeting Assistant.
+      Default is 'OK Assistant'
 
   MeetingAssistQnABotOpenSearchNodeCount:
     Type: String
-    Default: '1'
+    Default: 1
     AllowedValues:
       - 1
       - 2
       - 4
     Description: >
-      Number of nodes in Meeting Assistant QnABot OpenSearch domain - '4' is recommended for fault tolerant production deployments.
+      Number of nodes in Meeting Assistant QnABot OpenSearch domain - '4' is recommended
+      for fault tolerant production deployments.
 
   S3BucketName:
     Type: String
@@ -79,27 +118,31 @@ Parameters:
   AudioFilePrefix:
     Type: String
     Default: lma-audio-recordings/
-    Description: The Amazon S3 prefix where the audio files will be saved (must end in "/")
+    Description:
+      The Amazon S3 prefix where the audio files will be saved (must end
+      in "/")
 
   IsPartialTranscriptEnabled:
     Type: String
-    Default: 'true'
+    Default: "true"
     Description: >-
-      Enable partial transcripts to receive low latency evolving transcriptions for each conversation turn. Set to false to process only the
+      Enable partial transcripts to receive low latency evolving transcriptions for
+      each conversation turn. Set to false to process only the
       final version of each conversation turn.
     AllowedValues:
-      - 'true'
-      - 'false'
+      - "true"
+      - "false"
 
   IsContentRedactionEnabled:
     Type: String
-    Default: 'false'
+    Default: "false"
     Description: >-
-      Enable content redaction from Amazon Transcribe transcription output. This is only used when
+      Enable content redaction from Amazon Transcribe transcription output. This is
+      only used when
       the 'en-US' language is selected in the TranscribeLanguageCode parameter.
     AllowedValues:
-      - 'true'
-      - 'false'
+      - "true"
+      - "false"
 
   TranscribeContentRedactionType:
     Type: String
@@ -112,8 +155,9 @@ Parameters:
   TranscribeLanguageCode:
     Type: String
     Description: >-
-      Language code or language identification setting for Amazon Transcribe. NOTE: Language identification can't 
-      be combined with custom language models or redaction. 
+      Language code or language identification setting for Amazon Transcribe. NOTE:
+      Language identification can't  be combined with custom language models or redaction.
+
     Default: en-US
     AllowedValues:
       - identify-language
@@ -135,20 +179,25 @@ Parameters:
 
   TranscribeLanguageOptions:
     Type: String
-    Default: 'en-US, es-US'
+    Default: "en-US, es-US"
     AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*)*)?$'
     ConstraintDescription: >-
-      Unsupported language code or invalid syntax. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+      Unsupported language code or invalid syntax. Allowed values are: en-US, es-US,
+      en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN,
+      th-TH
     Description: >-
-      When using language identification, specify two or more language codes, e.g. "en-US, es-US" that represent the languages that may be 
-      used in your meeting. Including more than five is not recommended. 
-      Enter only one language dialect per language - e.g. 'en-US, en-AU' is not allowed.
-      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+      When using language identification, specify two or more language codes, e.g.
+      "en-US, es-US" that represent the languages that may be  used in your meeting.
+      Including more than five is not recommended.  Enter only one language dialect
+      per language - e.g. 'en-US, en-AU' is not allowed.
+      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE,
+      pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
 
   TranscribePreferredLanguage:
     Type: String
     Description: >-
-      Optionally select a preferred language when using language identification - must be one of the languages entered for TranscribeLanguageOptions.
+      Optionally select a preferred language when using language identification -
+      must be one of the languages entered for TranscribeLanguageOptions.
     Default: None
     AllowedValues:
       - None
@@ -171,105 +220,123 @@ Parameters:
     Type: String
     Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
     Description: >-
-      Select the PII entity types you want to identify or redact. Remove the values that you don't want to redact from the default. 
-      DO NOT ADD CUSTOM VALUES HERE.
+      Select the PII entity types you want to identify or redact. Remove the values
+      that you don't want to redact from the default.  DO NOT ADD CUSTOM VALUES HERE.
 
   CustomVocabularyName:
     Type: String
-    Default: ''
+    Default: ""
     Description: >-
-      The name of the vocabulary to use when processing the transcription job. Leave blank if no custom vocabulary to be used. If yes, the custom
+      The name of the vocabulary to use when processing the transcription job. Leave
+      blank if no custom vocabulary to be used. If yes, the custom
       vocabulary must pre-exist in your account.
 
   CustomLanguageModelName:
     Type: String
-    Default: ''
+    Default: ""
     Description: >-
-      The name of the custom language model to use when processing the transcription job. Leave blank if no
-      custom language model is to be used. If specified, the custom language model must pre-exist in your account, 
-      match the Language Code selected above, and use the 'Narrow Band' base model.
+      The name of the custom language model to use when processing the transcription
+      job. Leave blank if no
+      custom language model is to be used. If specified, the custom language model
+      must pre-exist in your account,  match the Language Code selected above, and
+      use the 'Narrow Band' base model.
 
   TranscriptLambdaHookFunctionArn:
-    Default: ''
+    Default: ""
     Type: String
-    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    AllowedPattern: "^(|arn:aws:lambda:.*)$"
     Description: >
-      (Optional) If present, the specified Lambda function is invoked by the LMA Call Event Processor Lambda function for each completed 
-      (non-partial) transcript segment. The function can capture and/or modify the text of the transcript, for example to implement custom
-      redaction logic, profanity filtering, or custom rules to highlight patterns in the transcript.
+      (Optional) If present, the specified Lambda function is invoked by the LMA Call
+      Event Processor Lambda function for each completed  (non-partial) transcript
+      segment. The function can capture and/or modify the text of the transcript,
+      for example to implement custom
+      redaction logic, profanity filtering, or custom rules to highlight patterns
+      in the transcript.
 
   TranscriptLambdaHookFunctionNonPartialOnly:
     Type: String
-    Default: 'true'
+    Default: "true"
     AllowedValues:
-      - 'true'
-      - 'false'
+      - "true"
+      - "false"
     Description: >
-      Specifies if Transcript Lambda Hook Function (if specified) is invoked for Non-Partial transcript segments only (true), or for
+      Specifies if Transcript Lambda Hook Function (if specified) is invoked for Non-Partial
+      transcript segments only (true), or for
       both Partial and Non-Partial transcript segments (false).
 
   EndOfCallTranscriptSummary:
-    Default: 'BEDROCK'
+    Default: "BEDROCK"
     Type: String
     AllowedValues:
-      - 'BEDROCK'
-      - 'LAMBDA'
+      - "BEDROCK"
+      - "LAMBDA"
 
     Description: >
-      Set to enable call summarization by a Large Language Model. Currently only BEDROCK and LAMBDA are supported.
-      BEDROCK option requires you to choose one of the supported model IDs from the 
-      provided list (BedrockModelId). The LAMBDA option requires you to provide a function ARN below.
+      Set to enable call summarization by a Large Language Model. Currently only BEDROCK
+      and LAMBDA are supported.
+      BEDROCK option requires you to choose one of the supported model IDs from the  provided
+      list (BedrockModelId). The LAMBDA option requires you to provide a function
+      ARN below.
 
   BedrockModelId:
-    Default: 'anthropic.claude-3-haiku-20240307-v1:0'
+    Default: "anthropic.claude-3-haiku-20240307-v1:0"
     Type: String
     AllowedValues:
-      - 'anthropic.claude-3-haiku-20240307-v1:0'
-      - 'anthropic.claude-3-sonnet-20240229-v1:0'
+      - "anthropic.claude-3-haiku-20240307-v1:0"
+      - "anthropic.claude-3-sonnet-20240229-v1:0"
     Description: >
-      If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list of supported models. 
-      Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
+      If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
+      of supported models.  Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
 
   EndOfCallLambdaHookFunctionArn:
-    Default: ''
+    Default: ""
     Type: String
-    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    AllowedPattern: "^(|arn:aws:lambda:.*)$"
     Description: >
-      (Optional) If 'End Of Call Transcript Summary' is LAMBDA, provide ARN for a Lambda function. The specified Lambda function is invoked by the LMA Call Event Processor Lambda function 
-      for end of call event. The function is passed en event with CallId as input.
-      This function can implement custom logic that is relevant to end of call processing, for example, creating a call summary.
+      (Optional) If 'End Of Call Transcript Summary' is LAMBDA, provide ARN for a
+      Lambda function. The specified Lambda function is invoked by the LMA Call Event
+      Processor Lambda function  for end of call event. The function is passed en
+      event with CallId as input.
+      This function can implement custom logic that is relevant to end of call processing,
+      for example, creating a call summary.
 
   StartOfCallLambdaHookFunctionArn:
-    Default: ''
+    Default: ""
     Type: String
-    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    AllowedPattern: "^(|arn:aws:lambda:.*)$"
     Description: >
-      (Optional) The specified Lambda function is invoked by the LMA Call Event Processor Lambda function for beginning or start of 
-      call event. This function can implement custom logic that is relevant to beginning of call processing, for example, retrieving
+      (Optional) The specified Lambda function is invoked by the LMA Call Event Processor
+      Lambda function for beginning or start of  call event. This function can implement
+      custom logic that is relevant to beginning of call processing, for example,
+      retrieving
       call summary details logged into a case in a CRM.
 
   PostCallSummaryLambdaHookFunctionArn:
-    Default: ''
+    Default: ""
     Type: String
-    AllowedPattern: '^(|arn:aws:lambda:.*)$'
+    AllowedPattern: "^(|arn:aws:lambda:.*)$"
     Description: >
-      (Optional) The specified Lambda function is invoked by the LMA Call Event Processor Lambda function after the call summary is processed.
-      This function can implement custom logic that is relevant to post processing, for example, updating the call summary to a CRM system.
+      (Optional) The specified Lambda function is invoked by the LMA Call Event Processor
+      Lambda function after the call summary is processed.
+      This function can implement custom logic that is relevant to post processing,
+      for example, updating the call summary to a CRM system.
 
   AdminEmail:
     Type: String
     Description: >-
-      Email address of admin user (e.g. jdoe@example.com) used for the API and web UI.
+      Email address of admin user (e.g. jdoe@example.com) used for the API and web
+      UI.
       An initial temporary password will be automatically sent to this user via email.
     AllowedPattern: '^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$'
 
   AllowedSignUpEmailDomain:
     Type: String
-    Default: ''
+    Default: ""
     Description: >-
-      Email address domain (example.com) or comma separated list of email domains 
-      (example1.com, example2.com) allowed to signin and signup using the web UI.
-      If left empty, signup via the web UI is disabled and users will have to be created using
+      Email address domain (example.com) or comma separated list of email domains  (example1.com,
+      example2.com) allowed to signin and signup using the web UI.
+      If left empty, signup via the web UI is disabled and users will have to be created
+      using
       Cognito.
     AllowedPattern: '^(|([\w-]+\.)+[\w-]{2,6}(, *([\w-]+\.)+[\w-]{2,6})*)$'
 
@@ -277,7 +344,8 @@ Parameters:
     Type: String
     Default: PriceClass_100
     Description: >-
-      Specify the CloudFront price class. See https://aws.amazon.com/cloudfront/pricing/ for a
+      Specify the CloudFront price class. See https://aws.amazon.com/cloudfront/pricing/
+      for a
       description of each price class.
     AllowedValues:
       - PriceClass_100
@@ -288,25 +356,148 @@ Parameters:
 
   CloudFrontAllowedGeos:
     Type: String
-    Default: ''
+    Default: ""
     Description: >-
-      Specify a comma separated list of two letter country codes (uppercase ISO 3166-1) that are
-      allowed to access the web user interface via CloudFront. For example: US,CA. Leave empty if
+      Specify a comma separated list of two letter country codes (uppercase ISO 3166-1)
+      that are
+      allowed to access the web user interface via CloudFront. For example: US,CA.
+      Leave empty if
       you do not want geo restrictions to be applied.
-    AllowedPattern: '^(|[A-Z]{2}(,[A-Z]{2})*)$'
+    AllowedPattern: "^(|[A-Z]{2}(,[A-Z]{2})*)$"
     ConstraintDescription: >-
       Comma separated list of uppercase two letter country codes or empty
 
-  DynamoDbExpirationInDays:
+  EnableAudioRecording:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable or disable recording of audio during a meeting. If set to false, the
+      meeting will not be recorded.
+      If set to true, the meeting will be recorded.
+
+  AudioRecordingExpirationInDays:
+    Type: Number
+    Description:
+      "Whole number of days after which audio recordings will be deleted
+      from the Recordings bucket."
+    Default: 90
+
+  MeetingRecordExpirationInDays:
     Type: Number
     Default: 90
     Description: >-
-      Number of days to retain call records. Records will be automatically deleted from LMA after this time.
+      Number of days to retain meeting records. Meetings will be automatically deleted
+      from LMA after this time.
+      Specify partial days like 0.5 to retain meeting records for half a day.
 
-  RecordingsBucketRetentionDays:
+  TranscriptionExpirationInDays:
     Type: Number
-    Description: 'Number of days after which bucket objects will be deleted from the Recordings bucket.'
-    Default: 30
+    Default: 90
+    Description: >-
+      Number of days to retain turn by turn meeting transcriptions.  Transcriptions
+      will be automatically deleted from LMA after this time.
+      Specify partial days like 0.5 to retain transcriptions for half a day.
+
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 90
+    AllowedValues:
+      [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1096,
+        1827,
+        2192,
+        2557,
+        2922,
+        3288,
+        3653,
+      ]
+    Description: >-
+      Number of days to retain CloudWatch log records. Logs will be automatically
+      deleted after this time.
+
+  EnableAppSyncApiCache:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable or disable the AppSync Api Cache.
+
+  AppSyncApiCacheInstanceType:
+    Type: String
+    Default: SMALL
+    AllowedValues:
+      - SMALL
+      - MEDIUM
+      - LARGE
+      - XLARGE
+    Description: >-
+      If you set the EnableAppSyncApiCache is true, choose a value that meets your workload requirements. 
+      This parameter is ignored if the EnableAppSyncApiCache parameter is set to false (default behavior).
+
+  UseExistingVPC:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Use an existing VPC for the solution instead of creating a new one. If set to
+      true, the VPC ID and subnets must be provided. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+
+  VPC:
+    Type: String
+    Description: >-
+      ID of the VPC to use for the solution. Required if UseExistingVPC is true. DO NOT CHANGE VALUE WHEN 
+      UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|vpc-[a-zA-Z0-9-]+)$"
+
+  PublicSubnet1:
+    Type: String
+    Description: >-
+      ID of the public subnet in Availability Zone 1. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
+
+  PublicSubnet2:
+    Type: String
+    Description: >-
+      ID of the public subnet in Availability Zone 2. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
+
+  PrivateSubnet1:
+    Type: String
+    Description: >-
+      ID of the private subnet in Availability Zone 1. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
+
+  PrivateSubnet2:
+    Type: String
+    Description: >-
+      ID of the private subnet in Availability Zone 2. Required if UseExistingVPC is
+      true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
+    AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -321,6 +512,10 @@ Metadata:
         Parameters:
           - MeetingAssistService
           - BedrockKnowledgeBaseId
+          - BedrockKnowledgeBaseS3BucketName
+          - BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
+          - BedrockKnowledgeBaseWebCrawlerURLs
+          - BedrockKnowledgeBaseWebCrawlerScope
           - MeetingAssistServiceBedrockModelID
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
@@ -359,10 +554,27 @@ Metadata:
           - CloudFrontPriceClass
           - CloudFrontAllowedGeos
       - Label:
-          default: Retention
+          default: Retention Settings
         Parameters:
-          - DynamoDbExpirationInDays
-          - RecordingsBucketRetentionDays
+          - EnableAudioRecording
+          - MeetingRecordExpirationInDays
+          - TranscriptionExpirationInDays
+          - AudioRecordingExpirationInDays
+          - CloudWatchLogsExpirationInDays
+      - Label:
+          default: AppSync Configuration
+        Parameters:
+          - EnableAppSyncApiCache
+          - AppSyncApiCacheInstanceType
+      - Label:
+          default: VPC Configuration
+        Parameters:
+          - UseExistingVPC
+          - VPC
+          - PublicSubnet1
+          - PublicSubnet2
+          - PrivateSubnet1
+          - PrivateSubnet2
 
     ParameterLabels:
       CallAudioProcessor:
@@ -379,8 +591,18 @@ Metadata:
         default: Admin Email Address
       AllowedSignUpEmailDomain:
         default: Authorized Account Email Domain(s)
+      MeetingAssistService:
+        default: Meeting Assist Service
       BedrockKnowledgeBaseId:
-        default: Meeting Assist Bedrock Knowledge Base Id (existing)
+        default: Bedrock Knowledge Base Id (existing)
+      BedrockKnowledgeBaseS3BucketName:
+        default: S3 bucket with knowledge base source documents (optional).
+      BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
+        default: S3 prefix(es) for your content (optional)
+      BedrockKnowledgeBaseWebCrawlerURLs:
+        default: Publicly accessible URLs for web crawling (optional)
+      BedrockKnowledgeBaseWebCrawlerScope:
+        default: Web crawling sync scope
       MeetingAssistServiceBedrockModelID:
         default: Meeting Assist Service Bedrock Model ID
       AssistantWakePhraseRegEx:
@@ -406,7 +628,9 @@ Metadata:
       CustomLanguageModelName:
         default: Transcription Custom Language Model Name
       TranscriptLambdaHookFunctionArn:
-        default: Lambda Hook Function ARN for Custom Transcript Segment Processing (existing)
+        default:
+          Lambda Hook Function ARN for Custom Transcript Segment Processing
+          (existing)
       TranscriptLambdaHookFunctionNonPartialOnly:
         default: Lambda Hook Function Mode Non-Partial only
       EndOfCallTranscriptSummary:
@@ -416,18 +640,39 @@ Metadata:
       StartOfCallLambdaHookFunctionArn:
         default: Lambda Hook Function ARN for Custom Start of Call Processing (existing)
       PostCallSummaryLambdaHookFunctionArn:
-        default: Lambda Hook Function ARN for Custom Post Processing, after the Call Transcript Summary is processed (existing)
+        default:
+          Lambda Hook Function ARN for Custom Post Processing, after the Call
+          Transcript Summary is processed (existing)
       CloudFrontPriceClass:
         default: CloudFront Price Class
       CloudFrontAllowedGeos:
         default: CloudFront Allowed Geographies
-      DynamoDbExpirationInDays:
-        default: Record Expiration In Days
-      RecordingsBucketRetentionDays:
-        default: Recording Expiration In Days
+      MeetingRecordExpirationInDays:
+        default: Meeting Record Expiration In Days
+      TranscriptionExpirationInDays:
+        default: Transcription Expiration In Days
+      AudioRecordingExpirationInDays:
+        default: Audio Recording Expiration In Days
+      CloudWatchLogsExpirationInDays:
+        default: CloudWatch Logs Expiration In Days
+      EnableAppSyncApiCache:
+        default: Enable AppSync Api Cache
+      AppSyncApiCacheInstanceType:
+        default: AppSync Api Cache Instance Type
+      UseExistingVPC:
+        default: Use Existing VPC
+      VPC:
+        default: Existing VPC ID
+      PublicSubnet1:
+        default: Existing Public Subnet 1
+      PublicSubnet2:
+        default: Existing Public Subnet 2
+      PrivateSubnet1:
+        default: Existing Private Subnet 1
+      PrivateSubnet2:
+        default: Existing Private Subnet 2
 
 Mappings:
-
   TranscribeToLexLocaleId:
     identify-language:
       Value: en_US
@@ -468,15 +713,27 @@ Rules:
     RuleCondition:
       !Equals [
         !Ref MeetingAssistService,
-        'BEDROCK_KNOWLEDGE_BASE',
+        "BEDROCK_KNOWLEDGE_BASE (Use Existing)",
       ]
     Assertions:
-      - Assert: !Not [!Equals [!Ref BedrockKnowledgeBaseId, '']]
-        AssertDescription: BedrockKnowledgeBaseId is required when MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE'
+      - Assert: !Not [!Equals [!Ref BedrockKnowledgeBaseId, ""]]
+        AssertDescription:
+          BedrockKnowledgeBaseId is required when MeetingAssistService
+          is 'BEDROCK_KNOWLEDGE_BASE'
 
 Conditions:
-  ShouldConfigureBedrockKB: !Equals [!Ref MeetingAssistService, 'BEDROCK_KNOWLEDGE_BASE']
-  IsHealthcareDomainSelected: !Equals [ !Ref Domain, 'Healthcare' ]
+  IsHealthcareDomainSelected: !Equals [!Ref Domain, "Healthcare"]
+  ShouldCreateRecordingBucket: !Equals [!Ref S3BucketName, ""]
+  ShouldUseExistingBedrockKnowledgeBase:
+    !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Use Existing)"]
+  ShouldCreateBedrockKnowledgeBase:
+    !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Create)"]
+  ShouldUseBedrockKnowledgeBase:
+    !Or [
+      !Condition ShouldUseExistingBedrockKnowledgeBase,
+      !Condition ShouldCreateBedrockKnowledgeBase,
+    ]
+  ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -502,6 +759,9 @@ Resources:
             else:
               print(f"Request type is {event['RequestType']} - skipping")
             cfnresponse.send(event, context, status, {}, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Ref: StacknameCheckFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -509,32 +769,95 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    DependsOn:
+      - StacknameCheckFunctionLogGroup
+
+  StacknameCheckFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
 
   IsStacknameLengthOK:
     Type: Custom::StacknameCheck
     Properties:
       ServiceToken: !GetAtt StacknameCheckFunction.Arn
-      InputString: !Ref 'AWS::StackName'
+      InputString: !Ref "AWS::StackName"
       MaxLength: 25
-  
+
   # Custom resource to validate parameters
+
+  ValidateParametersFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
+          PolicyName: BedrockPolicy
+
   ValidateParametersFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
       Runtime: python3.11
+      Role: !GetAtt ValidateParametersFunctionRole.Arn
+      Timeout: 60
       InlineCode: |
         import cfnresponse
         import json
+        import boto3
+        def is_model_available(modelId):
+          try:
+              client = boto3.client('bedrock-runtime')
+              prompt = "Why is the sky blue?"
+              if 'embed' in modelId:
+                  body = {"inputText": prompt}
+              else:
+                  body = {
+                      "anthropic_version": "bedrock-2023-05-31",
+                      "messages": [{"role": "user", "content": [{'type': 'text', 'text': prompt}]}],
+                      "max_tokens": 128
+                  }
+              print(f"Testing model: {modelId} - {body}")
+              client.invoke_model(body=json.dumps(
+                  body), modelId=modelId, accept='application/json', contentType='application/json')
+              print(f"The model '{modelId}' is available and enabled.")
+              return True
+          except Exception as e:
+              print(f"The model '{modelId}' is not available or not enabled. {e}")
+              return False
         def handler(event, context):
             print(json.dumps(event))
-            transcribeLanguageCode = event['ResourceProperties'].get('TranscribeLanguageCode', '')
-            transcribeLanguageOptions = event['ResourceProperties'].get('TranscribeLanguageOptions', '')
-            transcribePreferredLanguage = event['ResourceProperties'].get('TranscribePreferredLanguage', '')
             status = cfnresponse.SUCCESS
             reason = f"Parameters Validated"
-            if event['RequestType'] == "Create":
+            if event['RequestType'] != "Delete":
+              # Validate Transcribe Language options
+              transcribeLanguageCode = event['ResourceProperties'].get('TranscribeLanguageCode', '')
+              transcribeLanguageOptions = event['ResourceProperties'].get('TranscribeLanguageOptions', '')
+              transcribePreferredLanguage = event['ResourceProperties'].get('TranscribePreferredLanguage', '')
+              customVocabularyName = event['ResourceProperties'].get('CustomVocabularyName', '')
+              customLanguageModelName = event['ResourceProperties'].get('CustomLanguageModelName', '')
               if transcribeLanguageCode in ['identify-language', 'identify-multiple-languages']:
+                if customVocabularyName:
+                  status = cfnresponse.FAILED
+                  reason = f"CustomVocabularyName cannot be set when TranscribeLanguageCode is '{transcribeLanguageCode}'"
+                elif customLanguageModelName:
+                  status = cfnresponse.FAILED
+                  reason = f"CustomLanguageModelName cannot be set when TranscribeLanguageCode is '{transcribeLanguageCode}'"
                 if transcribeLanguageOptions == '':
                   status = cfnresponse.FAILED
                   reason = f"At least two languages must be provided for TranscribeLanguageOptions when using language identification"
@@ -553,9 +876,21 @@ Resources:
                     if not transcribePreferredLanguage in lang_codes:
                       status = cfnresponse.FAILED
                       reason = f"TranscribePreferredLanguage '{transcribePreferredLanguage}' is not in TranscribeLanguageOptions '{transcribeLanguageOptions}'"
+              # Validate Bedrock model access
+              failedModels = []
+              requiredmodels = event['ResourceProperties'].get('BedrockModelIds', [])
+              for modelId in requiredmodels: 
+                if not is_model_available(modelId):
+                  failedModels.append(modelId)
+              if failedModels:
+                status = cfnresponse.FAILED
+                reason = f"Model(s) '{failedModels}' not available or not enabled. Check that Amazon Bedrock is available in your region, and that required models ('{requiredmodels}') are activated in your Amazon Bedrock account"
             else:
               print(f"Request type is {event['RequestType']} - skipping")
             cfnresponse.send(event, context, status, {}, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Ref: ValidateParametersFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -563,6 +898,14 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    DependsOn:
+      - ValidateParametersFunctionLogGroup
+
+  ValidateParametersFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
 
   ValidateParameters:
     Type: Custom::ValidateParameters
@@ -571,6 +914,177 @@ Resources:
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
       TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
       TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
+      CustomVocabularyName: !Ref CustomVocabularyName
+      CustomLanguageModelName: !Ref CustomLanguageModelName
+      BedrockModelIds:
+        - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
+        - "amazon.titan-embed-text-v2:0" # Meeting Assistant
+        - !Ref BedrockModelId # Meeting summarization
+        - "amazon.titan-embed-text-v1" # QNABOTBR
+        - "anthropic.claude-instant-v1" # QNABOTBR
+
+  ##########################################################################
+  # Resources shared by multiple nested stacks
+  ##########################################################################
+  CallDataStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      RetentionPeriodHours: 24
+      StreamModeDetails:
+        StreamMode: ON_DEMAND
+      StreamEncryption:
+        EncryptionType: KMS
+        KeyId: alias/aws/kinesis
+
+  # Initialise LMASettingsParameter as empty (so it never gets replaced)
+  # and use CR UpdateLMASettingsFunction to add/update values
+  LMASettingsParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Name: !Sub "${AWS::StackName}-LMASettings"
+      Value: "{}"
+
+  UpdateLMASettingsFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: updateSSMStore
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:PutParameter
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameter}"
+
+  UpdateLMASettingsFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Role: !GetAtt UpdateLMASettingsFunctionRole.Arn
+      Handler: index.handler
+      Runtime: python3.11
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import json
+          ssm = boto3.client('ssm')
+          def updateSSMParameter(props):
+            parameterName = props['LCASettingsName']
+            parameterValues = props['LCASettingsKeyValuePairs']
+            response = ssm.get_parameter(Name=parameterName)
+            settingsJSON = response['Parameter']['Value']
+            settings = json.loads(settingsJSON)
+            print(f"Existing settings: {settings}")
+            for key, value in parameterValues.items():
+              settings[key] = value
+            print(f"Updated settings: {settings}")
+            newSettingsJSON = json.dumps(settings)
+            ssm.put_parameter(Name=parameterName, Value=newSettingsJSON, Overwrite=True)
+                        
+          def handler(event, context):        
+            print(json.dumps(event))
+            status = cfnresponse.SUCCESS
+            responseData = {}
+            reason = "Success"
+            props = event["ResourceProperties"]
+            if event['RequestType'] != 'Delete':
+              try:
+                updateSSMParameter(props)
+              except Exception as e:
+                print(e)
+                reason = f"Exception thrown: {e}"
+                status = cfnresponse.FAILED              
+            cfnresponse.send(event, context, status, responseData, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Ref: UpdateLMASettingsFunctionLogGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W58
+            reason: Managed policy already provides access to CloudWatch logs.
+
+  UpdateLMASettingsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+
+  UpdateLMASettingsWithAssistantWakePhraseRegEx:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt UpdateLMASettingsFunction.Arn
+      LCASettingsName: !Ref LMASettingsParameter
+      LCASettingsKeyValuePairs:
+        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+
+  ## BUCKET TO STORE STEREO RECORDINGS
+  RecordingsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Condition: ShouldCreateRecordingBucket
+    Properties:
+      AccessControl: LogDeliveryWrite
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: ObjectWriter
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: RuleRetention
+            Status: Enabled
+            Prefix: ""
+            ExpirationInDays: !Ref AudioRecordingExpirationInDays
+
+  RecordingsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: ShouldCreateRecordingBucket
+    Properties:
+      Bucket: !Ref RecordingsBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - "s3:*"
+            Effect: "Deny"
+            Principal: "*"
+            Resource:
+              - !GetAtt RecordingsBucket.Arn
+              - !Sub "${RecordingsBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": false
 
   ToJSONFunction:
     Type: AWS::Serverless::Function
@@ -595,6 +1109,9 @@ Resources:
             else:
               print(f"Request type is {event['RequestType']} - skipping")
             cfnresponse.send(event, context, status, result, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Ref: ToJSONFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -602,10 +1119,18 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    DependsOn:
+      - ToJSONFunctionLogGroup
+
+  ToJSONFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
 
   QNABOTBR:
     Type: AWS::CloudFormation::Stack
-    DependsOn: 
+    DependsOn:
       - IsStacknameLengthOK
       - ValidateParameters
     Properties:
@@ -613,12 +1138,12 @@ Resources:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot-plugins/bedrock-embeddings-and-llm.yaml
       # yamllint enable rule:line-length
       Parameters:
-        EmbeddingsModelId: 'amazon.titan-embed-text-v1'
-        LLMModelId: 'anthropic.claude-instant-v1'
+        EmbeddingsModelId: "amazon.titan-embed-text-v1"
+        LLMModelId: "anthropic.claude-instant-v1"
 
   QNABOT:
     Type: AWS::CloudFormation::Stack
-    DependsOn: 
+    DependsOn:
       - IsStacknameLengthOK
       - ValidateParameters
     Properties:
@@ -627,7 +1152,7 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         Email: !Ref AdminEmail
-        Username: 'Admin'
+        Username: "Admin"
         ElasticSearchNodeCount: !Ref MeetingAssistQnABotOpenSearchNodeCount
         LexV2BotLocaleIds:
           !FindInMap [
@@ -637,26 +1162,27 @@ Resources:
           ]
         BootstrapBucket: <ARTIFACT_BUCKET_TOKEN>
         BootstrapPrefix: <ARTIFACT_PREFIX_TOKEN>/aws-qnabot
-        InstallLexResponseBots: 'false'
-        EmbeddingsApi: 'LAMBDA'
+        InstallLexResponseBots: "false"
+        EmbeddingsApi: "LAMBDA"
         EmbeddingsLambdaArn: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaArn
         EmbeddingsLambdaDimensions: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaDimensions
-        LLMApi: 'LAMBDA'
+        LLMApi: "LAMBDA"
         LLMLambdaArn: !GetAtt QNABOTBR.Outputs.LLMLambdaArn
 
   LLMTEMPLATESTACK:
     Type: AWS::CloudFormation::Stack
-    DependsOn: 
+    DependsOn:
       - IsStacknameLengthOK
       - ValidateParameters
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
       Parameters:
         Domain: !Ref Domain
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
   AISTACK:
     Type: AWS::CloudFormation::Stack
-    DependsOn: 
+    DependsOn:
       - IsStacknameLengthOK
       - ValidateParameters
     Properties:
@@ -666,17 +1192,21 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
-        RecordingsBucketRetentionDays: !Ref RecordingsBucketRetentionDays
-        EnableVoiceToneAnalysis: 'false'
-        CallAudioSource: 'Genesys Cloud Audiohook Web Socket'
-        S3BucketName: !Ref S3BucketName
+        AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
+        EnableVoiceToneAnalysis: "false"
+        CallAudioSource: "Genesys Cloud Audiohook Web Socket"
+        S3BucketName: !If
+          - ShouldCreateRecordingBucket
+          - !Ref RecordingsBucket
+          - !Ref S3BucketName
         AdminEmail: !Ref AdminEmail
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
-        IsSentimentAnalysisEnabled: 'false'
+        IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
         IsLexAgentAssistEnabled: true
-        DynamoDbExpirationInDays: !Ref DynamoDbExpirationInDays
+        MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
+        TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
@@ -685,7 +1215,26 @@ Resources:
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CallDataStream: !Ref CallDataStream
+        CallDataStreamArn: !GetAtt CallDataStream.Arn
+        LMASettingsParameterName: !Ref LMASettingsParameter
+        EnableAppSyncApiCache: !Ref EnableAppSyncApiCache
+        AppSyncApiCacheInstanceType: !Ref AppSyncApiCacheInstanceType
 
+  BEDROCKKB:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateBedrockKnowledgeBase
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
+      Parameters:
+        pKnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
+        pInputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
+        pWebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
+        pWebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
 
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
   SettingsJSON:
@@ -697,19 +1246,37 @@ Resources:
       EMBEDDINGS_TEXT_PASSAGE_SCORE_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsTextPassageScoreThreshold
       LLM_GENERATE_QUERY_ENABLE: "FALSE"
       LLM_GENERATE_QUERY_PROMPT_TEMPLATE: ""
+      LLM_CHAT_HISTORY_MAX_MESSAGES: 10
       EMPTYMESSAGE: "No response from meeting assist QnAbot"
       BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "deprecated"
       BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "deprecated"
-      ASSISTANT_QUERY_PROMPT_TEMPLATE: "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. Only output the rephrased question. Do not include any preamble. "
-      ASSISTANT_GENERATE_PROMPT_TEMPLATE:
-        !If
-        - ShouldConfigureBedrockKB
-        - "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a set of search results. Your job is to respond to the user's request using only information from the search results. If search results do not contain information that can answer the question, please state that you could not find an exact answer to the question. Just because the user asserts a fact does not mean it is true, make sure to double check the search results to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
-        - "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting (which may be empty), and a user's request. Your job is to respond to the user's request using any relevant context from the transcript, or from your own world knowledge. Just because the user asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the user's request:<br>{userInput}<br>"
+      ASSISTANT_QUERY_PROMPT_TEMPLATE:
+        "Let's think carefully step by step. Here is
+        the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow
+        up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase
+        the follow up question or statement as a standalone, one sentence question.
+        Only output the rephrased question. Do not include any preamble. "
+      ASSISTANT_GENERATE_PROMPT_TEMPLATE: !If
+        - ShouldUseBedrockKnowledgeBase
+        - "You are an AI assistant helping a human during a meeting. I will provide
+          you with a transcript of the ongoing meeting, and a set of search results.
+          Your job is to respond to the user's request using only information from the
+          search results. If search results do not contain information that can answer
+          the question, please state that you could not find an exact answer to the
+          question. Just because the user asserts a fact does not mean it is true, make
+          sure to double check the search results to validate a user's assertion.<br>Here
+          is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are
+          the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
+        - "You are an AI assistant helping a human during a meeting. I will provide
+          you with a transcript of the ongoing meeting (which may be empty), and a user's
+          request. Your job is to respond to the user's request using any relevant context
+          from the transcript, or from your own world knowledge. Just because the user
+          asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here
+          is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
+          user's request:<br>{userInput}<br>"
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
-    DependsOn: AISTACK
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/template.yaml
@@ -719,10 +1286,17 @@ Resources:
         AISTACK: !Ref AISTACK
         QNABOTSTACK: !Ref QNABOT
         MeetingAssistService: !Ref MeetingAssistService
-        BedrockKnowledgeBaseID: !Ref BedrockKnowledgeBaseId
+        BedrockKnowledgeBaseID: !If
+          - ShouldUseBedrockKnowledgeBase
+          - !If
+            - ShouldCreateBedrockKnowledgeBase
+            - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
+            - !Ref BedrockKnowledgeBaseId
+          - ""
+        BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        AmazonQAppId: 'NOT CURRENTLY USED'
-        AmazonQUserId: 'NOT CURRENTLY USED'
+        AmazonQAppId: ""
+        AmazonQUserId: ""
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
         LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
         LexMeetingAssistLocaleId:
@@ -733,19 +1307,23 @@ Resources:
           ]
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         CloudFrontDistributionId: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
-        #QnaMeetingAssistDemoJson: <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
         QnaMeetingAssistDemoJson: !If
           - IsHealthcareDomainSelected
           - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-healthcare-demo.jsonl
           - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         # Changes to Params below force AgentAssist Setup to update.
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
-        DynamoDbExpirationInDays: !Ref DynamoDbExpirationInDays
+        MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
+        TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         LexMeetingAssistIdentityPoolId: !GetAtt AISTACK.Outputs.LexAgentAssistIdentityPoolId
+        LexMeetingAssistUserPoolClientId: !GetAtt AISTACK.Outputs.CognitoClientId
+        LexMeetingAssistUserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
+        LexMeetingAssistDomainName: !GetAtt AISTACK.Outputs.CognitoLoginUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
@@ -753,21 +1331,35 @@ Resources:
         QnaBotSettings: !GetAtt SettingsJSON.Output
         Version: v0.8.8
 
+  VPCSTACK:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateVPC
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-vpc-stack/template.yaml
+      Parameters:
+        LMAStackName: !Ref "AWS::StackName"
 
-  WEBSOCKETSTACK:
+  WEBSOCKETTRANSCRIBERSTACK:
     Type: AWS::CloudFormation::Stack
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-stack/<VERSION_TOKEN>/template.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-transcriber-stack/<VERSION_TOKEN>/template.yaml
       # yamllint enable rule:line-length
       Parameters:
-        S3BucketName: !GetAtt AISTACK.Outputs.S3BucketName
+        S3BucketName: !If
+          - ShouldCreateRecordingBucket
+          - !Ref RecordingsBucket
+          - !Ref S3BucketName
         AudioFilePrefix: !Ref AudioFilePrefix
         UserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
-        CallDataStreamName: !GetAtt AISTACK.Outputs.CallDataStreamName
-        CallDataStreamArn: !GetAtt AISTACK.Outputs.CallDataStreamArn
+        CallDataStreamName: !Ref CallDataStream
+        CallDataStreamArn: !GetAtt CallDataStream.Arn
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
-        TranscribeApiMode: 'standard'
+        TranscribeApiMode: "standard"
         IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
@@ -776,13 +1368,74 @@ Resources:
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
-        PcaS3BucketName: ''
-        PcaTranscriptsPrefix: ''
-        PcaPlaybackAudioFilePrefix: ''
-        PcaWebAppURL: ''
-        PcaWebAppCallPathPrefix: ''
-        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
-        LMASettingsParameterName: !GetAtt AISTACK.Outputs.LMASettingsParameterName
+        PcaS3BucketName: ""
+        PcaTranscriptsPrefix: ""
+        PcaPlaybackAudioFilePrefix: ""
+        PcaWebAppURL: ""
+        PcaWebAppCallPathPrefix: ""
+        LMASettingsParameterName: !Ref LMASettingsParameter
+        UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        EnableAudioRecording: !Ref EnableAudioRecording
+        VPC: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.VPC
+          - !Ref VPC
+        PublicSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet1
+          - !Ref PublicSubnet1
+        PublicSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet2
+          - !Ref PublicSubnet2
+        PrivateSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet1
+          - !Ref PrivateSubnet1
+        PrivateSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet2
+          - !Ref PrivateSubnet2
+
+  VIRTUALPARTICIPANTSTACK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-virtual-participant-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        LMAStackName: !Ref AWS::StackName
+        S3BucketName: !If
+          - ShouldCreateRecordingBucket
+          - !Ref RecordingsBucket
+          - !Ref S3BucketName
+        AudioFilePrefix: !Ref AudioFilePrefix
+        CallDataStreamName: !Ref CallDataStream
+        TranscribeApiMode: "standard"
+        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
+        TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
+        TranscribeLanguageCode: !Ref TranscribeLanguageCode
+        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
+        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
+        TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
+        CustomVocabularyName: !Ref CustomVocabularyName
+        CustomLanguageModelName: !Ref CustomLanguageModelName
+        SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
+        LMASettingsParameterName: !Ref LMASettingsParameter
+        UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
+        VPC: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.VPC
+          - !Ref VPC
+        PrivateSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet1
+          - !Ref PrivateSubnet1
+        PrivateSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PrivateSubnet2
+          - !Ref PrivateSubnet2
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack
@@ -792,55 +1445,71 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
-        WebSocketEndpoint: !GetAtt WEBSOCKETSTACK.Outputs.WebSocketEndpoint
+        WebSocketEndpoint: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
         CognitoClientId: !GetAtt AISTACK.Outputs.CognitoClientId
         CognitoLoginUrl: !GetAtt AISTACK.Outputs.CognitoLoginUrl
         CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
         WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         SourceCodeLocation: <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
 Outputs:
   ApplicationCloudfrontEndpoint:
     Description: LMA User Interface URL
     Value: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
-  
+
   ChromeExtensionDownloadUrl:
     Description: LMA Chrome Browser extension download link
     Value: !GetAtt BROWSEREXTENSIONSTACK.Outputs.ExtensionDownloadLocation
 
-  CallDataStreamArn:
-    Description: >-
-      The ARN of Kinesis Data Stream for sending Call and Transcription events.
-    Value: !GetAtt AISTACK.Outputs.CallDataStreamArn
-    Export:
-      Name:
-        'Fn::Sub': '${AWS::StackName}-CallDataStreamArn'
-
   LMAWebsocketEndpoint:
     Description: Websocket endpoint for websocket integration
-    Value: !GetAtt WEBSOCKETSTACK.Outputs.WebSocketEndpoint
-      
+    Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
+
   QnaBotContentDesigner:
     Description: Agent Assist Content Designer URL (QnABot on AWS)
     Value: !GetAtt QNABOT.Outputs.ContentDesignerURL
 
   RecordingsS3Bucket:
-    Description: Bucket contains all the call recordings
-    Value: !GetAtt AISTACK.Outputs.S3BucketName
+    Description: Bucket which contains all the call recordings
+    Value: !If
+      - ShouldCreateRecordingBucket
+      - !Ref RecordingsBucket
+      - !Ref S3BucketName
 
   SNSCategoryTopicName:
     Description: The name of the SNS Topic for matched category and alert notifications
     Value: !GetAtt AISTACK.Outputs.SNSTopic
 
   FetchTranscriptLambdaArn:
-    Description: The ARN of a Lambda function that will process and export a call transcript as a string.
+    Description:
+      The ARN of a Lambda function that will process and export a call
+      transcript as a string.
     Value: !GetAtt AISTACK.Outputs.FetchTranscriptArn
 
   LLMDefaultPromptSummaryTemplate:
-    Description: View the *default* summary prompts. Do not edit. To override default prompts, add or edit attributes in the custom summary prompts item.
+    Description:
+      View the *default* summary prompts. Do not edit. To override default
+      prompts, add or edit attributes in the custom summary prompts item.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=DefaultSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
 
   LLMCustomPromptSummaryTemplate:
-    Description: Edit the *custom* summary prompts. Attribite values here override the default summary prompts, and are preserved during stack updates.
+    Description:
+      Edit the *custom* summary prompts. Attribute values here override
+      the default summary prompts, and are preserved during stack updates.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
+
+  CallDataStreamName:
+    Description: >-
+      The Name of Kinesis Data Stream to write the call data to.
+    Value: !Ref CallDataStream
+
+  CallDataStreamArn:
+    Description: >-
+      The ARN of Kinesis Data Stream to write the call data to.
+    Value: !GetAtt CallDataStream.Arn
+
+  LMASettingsParameterName:
+    Description: Name of the Parameter store setting that holds the LMA Settings
+    Value: !Ref LMASettingsParameter
