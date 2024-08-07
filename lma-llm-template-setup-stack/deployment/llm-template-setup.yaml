@@ -74,6 +74,9 @@ Resources:
       Runtime: python3.11
       MemorySize: 128
       Timeout: 60
+      Environment:
+        Variables:
+          DOMAIN: !Ref Domain
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/LLMPromptUploadFunction
@@ -95,7 +98,7 @@ Resources:
       LLMPromptTemplateTableName: !Ref LLMPromptTemplateTable
       Domain: !Ref Domain
       # hash below is updated by publish.sh script- used to force tempate updates when source has changed.
-      source_hash: a943e57ab69f81a9
+      source_hash: 889bf889850f3bb3
 
 Outputs:
   LLMPromptTemplateTableName:
