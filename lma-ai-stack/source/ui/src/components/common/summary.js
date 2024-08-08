@@ -40,4 +40,41 @@ export const getMarkdownSummary = (callSummaryText) => {
   return summary;
 };
 
+export const getEmailFormattedSummary = (callSummaryText) => {
+  if (!callSummaryText) {
+    return 'Not available';
+  }
+  let summary = callSummaryText;
+  try {
+    const jsonSummary = JSON.parse(summary);
+    summary = '';
+    Object.entries(jsonSummary).forEach(([key, value]) => {
+      summary += `${key}%0D%0A%0D%0A${value}%0D%0A%0D%0A`;
+      summary = summary.replace(/\n/g, '%0D%0A');
+      summary = summary.replace(/\*\*/g, '');
+    });
+  } catch (e) {
+    return callSummaryText;
+  }
+  return summary;
+};
+
+export const getTextFileFormattedSummary = (callSummaryText) => {
+  if (!callSummaryText) {
+    return 'Not available';
+  }
+  let summary = callSummaryText;
+  try {
+    const jsonSummary = JSON.parse(summary);
+    summary = '';
+    Object.entries(jsonSummary).forEach(([key, value]) => {
+      summary += `**${key}**\n\n${value}\n\n`;
+      summary = summary.replace(/\*\*/g, '');
+    });
+  } catch (e) {
+    return callSummaryText;
+  }
+  return summary;
+};
+
 export default getTextOnlySummary;

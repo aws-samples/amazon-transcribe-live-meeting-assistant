@@ -22,7 +22,11 @@ import ReactMarkdown from 'react-markdown';
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
 import { Logger } from 'aws-amplify';
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
-import { getMarkdownSummary } from '../common/summary';
+import {
+  getEmailFormattedSummary,
+  getMarkdownSummary,
+  getTextFileFormattedSummary,
+} from '../common/summary';
 import {
   COMPREHEND_PII_TYPES,
   DEFAULT_OTHER_SPEAKER_NAME,
@@ -47,6 +51,7 @@ import { SentimentTrendIcon } from '../sentiment-trend-icon/SentimentTrendIcon';
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
+import { exportToExcel, exportToTextFile } from '../common/download-func';
 
 const logger = new Logger('CallPanel');
 
@@ -148,6 +153,9 @@ const CallAttributes = ({ item, setToolsOpen }) => (
 
 // eslint-disable-next-line arrow-body-style
 const CallSummary = ({ item }) => {
+  const downloadCallSummary = () => {
+    exportToTextFile(getTextFileFormattedSummary(item.callSummaryText), item.callId);
+  };
   return (
     <Container
       header={
@@ -175,12 +183,34 @@ const CallSummary = ({ item }) => {
               id: 'summary',
               content: (
                 <div>
-                  {/* eslint-disable-next-line react/no-array-index-key */}
-                  <TextContent color="gray">
-                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                      {getMarkdownSummary(item.callSummaryText) ?? 'No summary available'}
-                    </ReactMarkdown>
-                  </TextContent>
+                  <div>
+                    {/* eslint-disable-next-line react/no-array-index-key */}
+                    <TextContent color="gray">
+                      <ReactMarkdown rehypePlugins={[rehypeRaw]}>
+                        {getMarkdownSummary(item.callSummaryText)}
+                      </ReactMarkdown>
+                    </TextContent>
+                  </div>
+                  {item.callSummaryText && (
+                    <div style={{ float: 'right' }}>
+                      <Button
+                        href={`mailto:?subject=${item.callId}&body=${getEmailFormattedSummary(
+                          item.callSummaryText,
+                        )}`}
+                        iconName="envelope"
+                        variant="link"
+                      >
+                        Email Summary
+                      </Button>
+                      <Button
+                        onClick={() => downloadCallSummary()}
+                        iconName="download"
+                        variant="link"
+                      >
+                        Download Summary
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ),
             },
@@ -727,6 +757,9 @@ const CallTranscriptContainer = ({
   const [autoScrollDisabled, setAutoScrollDisabled] = useState(
     item.recordingStatusLabel !== IN_PROGRESS_STATUS,
   );
+  const [showDownloadTranscript, setShowDownloadTranscripts] = useState(
+    item.recordingStatusLabel === DONE_STATUS,
+  );
 
   const [translateOn, setTranslateOn] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState(
@@ -742,6 +775,7 @@ const CallTranscriptContainer = ({
   useEffect(() => {
     setAutoScrollDisabled(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
     setAutoScroll(item.recordingStatusLabel === IN_PROGRESS_STATUS);
+    setShowDownloadTranscripts(item.recordingStatusLabel === DONE_STATUS);
   }, [item.recordingStatusLabel]);
 
   const languageChoices = () => {
@@ -757,6 +791,26 @@ const CallTranscriptContainer = ({
       );
     }
     return translateOn;
+  };
+  const downloadTranscript = async () => {
+    const maxChannels = 6;
+    const { callId } = item;
+    const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
+    const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
+
+    const currentTurnByTurnSegments = transcriptChannels
+      .map((c) => {
+        const { segments } = transcriptsForThisCallId[c];
+        return segments;
+      })
+      // sort entries by end time
+      .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), [])
+      // only extract the start time, end time, speaker and transcript
+      .map((c) => {
+        const { startTime, endTime, speaker, transcript } = c;
+        return { startTime, endTime, speaker, transcript };
+      });
+    await exportToExcel(currentTurnByTurnSegments, `Transcript-${callId}`);
   };
   return (
     <Grid
@@ -796,6 +850,17 @@ const CallTranscriptContainer = ({
                 />
                 <span>Enable Translation</span>
                 {languageChoices()}
+                {showDownloadTranscript && (
+                  <span>
+                    <Button
+                      iconName="download"
+                      variant="inline-icon"
+                      disabled={false}
+                      onClick={() => downloadTranscript()}
+                    />
+                    Download Transcript
+                  </span>
+                )}
               </SpaceBetween>
             }
           >
