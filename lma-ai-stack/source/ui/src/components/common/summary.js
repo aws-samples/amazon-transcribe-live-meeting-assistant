@@ -68,7 +68,7 @@ export const getTextFileFormattedSummary = (callSummaryText) => {
     const jsonSummary = JSON.parse(summary);
     summary = '';
     Object.entries(jsonSummary).forEach(([key, value]) => {
-      summary += `**${key}**\n\n${value}\n\n`;
+      summary += `${key}\n\n${value}\n\n`;
       summary = summary.replace(/\*\*/g, '');
     });
   } catch (e) {
