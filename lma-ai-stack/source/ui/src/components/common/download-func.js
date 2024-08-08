@@ -45,12 +45,12 @@ export const exportToExcel = async (data, nameFile) => {
   }
 };
 
-export const exportToTextFile = async (text) => {
+export const exportToTextFile = async (text, nameFile) => {
   const blob = new Blob([text], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'call-summary.txt';
+  link.download = `${nameFile}.txt`;
   link.click();
   URL.revokeObjectURL(url);
 };

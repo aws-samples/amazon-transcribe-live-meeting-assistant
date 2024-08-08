@@ -154,7 +154,7 @@ const CallAttributes = ({ item, setToolsOpen }) => (
 // eslint-disable-next-line arrow-body-style
 const CallSummary = ({ item }) => {
   const downloadCallSummary = () => {
-    exportToTextFile(getTextFileFormattedSummary(item.callSummaryText), item.callId);
+    exportToTextFile(getTextFileFormattedSummary(item.callSummaryText), `Summary-${item.callId}`);
   };
   return (
     <Container
