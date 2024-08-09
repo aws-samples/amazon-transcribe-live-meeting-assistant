@@ -1,5 +1,6 @@
 /* eslint-disable indent */
 import * as XLSX from 'xlsx';
+import { DEFAULT_OTHER_SPEAKER_NAME } from './constants';
 
 // eslint-disable-next-line prettier/prettier
 export const onImportExcelAsync = (file) => new Promise((resolve, reject) => {
@@ -53,4 +54,61 @@ export const exportToTextFile = async (text, nameFile) => {
   link.download = `${nameFile}.txt`;
   link.click();
   URL.revokeObjectURL(url);
+};
+
+const getTimestampFromSeconds = (secs) => {
+  if (!secs || Number.isNaN(secs)) {
+    return '00:00.0';
+  }
+  return new Date(secs * 1000).toISOString().substr(14, 7);
+};
+
+const sortTranscriptByTime = (callTranscriptPerCallId, meeting) => {
+  const { callId, callerPhoneNumber } = meeting;
+
+  const maxChannels = 6;
+  const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
+  const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
+
+  const currentTurnByTurnSegments = transcriptChannels
+    .map((c) => {
+      const { segments } = transcriptsForThisCallId[c];
+      return segments;
+    })
+    // sort entries by end time
+    .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), [])
+    // only extract the start time, end time, speaker and transcript
+    .map((c) => {
+      const { startTime, endTime, transcript } = c;
+      let { speaker } = c;
+
+      // In streaming audio the speaker will just be "Other participant", override this with the
+      // name the user chose if needed
+      if (speaker === DEFAULT_OTHER_SPEAKER_NAME || speaker === '') {
+        speaker = callerPhoneNumber || DEFAULT_OTHER_SPEAKER_NAME;
+      }
+
+      // modify start and end time from seconds to timestamp, e.g. 258.285 to 04:18.2
+      const startTimestamp = getTimestampFromSeconds(startTime);
+      const endTimestamp = getTimestampFromSeconds(endTime);
+      return { startTimestamp, endTimestamp, speaker, transcript };
+    });
+
+  return currentTurnByTurnSegments;
+};
+
+export const downloadTranscriptAsExcel = async (callTranscriptPerCallId, meeting) => {
+  const { callId } = meeting;
+  const currentTurnByTurnSegments = sortTranscriptByTime(callTranscriptPerCallId, meeting);
+  await exportToExcel(currentTurnByTurnSegments, `Transcript-${callId}`);
+};
+
+export const downloadTranscriptAsText = async (callTranscriptPerCallId, meeting) => {
+  const { callId } = meeting;
+  const currentTurnByTurnSegments = sortTranscriptByTime(callTranscriptPerCallId, meeting);
+
+  // convert json to text lines of Speaker [start_timestamp]: transcript segment text
+  const text = currentTurnByTurnSegments.map((c) => `${c.speaker} [${c.startTimestamp}]: ${c.transcript}`).join('\n');
+
+  await exportToTextFile(text, `Transcript-${callId}`);
 };

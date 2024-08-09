@@ -77,4 +77,22 @@ export const getTextFileFormattedSummary = (callSummaryText) => {
   return summary;
 };
 
+export const getTextFileFormattedMeetingDetails = (meeting) => {
+  let meetingDetails = '';
+  meetingDetails += `Title: ${meeting.callId}\n`;
+
+  // Not reformatting date in this iteration as it may change timezone from expected
+  //  consider adding this in future iterations
+  // const date = new Date(call.initiationTimeStamp);
+  const date = meeting.initiationTimeStamp;
+  meetingDetails += `Date: ${date}\n`;
+
+  meetingDetails += `Length: ${meeting.conversationDurationTimeStamp}\n`;
+
+  const summary = getTextFileFormattedSummary(meeting.callSummaryText);
+  meetingDetails += `\n\n${summary}`;
+
+  return meetingDetails;
+};
+
 export default getTextOnlySummary;
