@@ -6,10 +6,12 @@ import {
   Badge,
   Box,
   Button,
+  ButtonDropdown,
   ColumnLayout,
   Container,
   Grid,
   Header,
+  Icon,
   Link,
   Popover,
   SpaceBetween,
@@ -134,8 +136,12 @@ const CallAttributes = ({ item, setToolsOpen }) => (
 
 // eslint-disable-next-line arrow-body-style
 const CallSummary = ({ item }) => {
-  const downloadCallSummary = async () => {
-    await exportToTextFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
+  const downloadCallSummary = async (option) => {
+    if (option.detail.id === 'download') {
+      await exportToTextFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
+    } else if (option.detail.id === 'email') {
+      window.open(`mailto:?subject=${item.callId}&body=${getEmailFormattedSummary(item.callSummaryText)}`);
+    }
   };
   return (
     <Container
@@ -154,18 +160,16 @@ const CallSummary = ({ item }) => {
           actions={
             <div>
               {item.callSummaryText && (
-                <div style={{ float: 'right' }}>
-                  <Button
-                    href={`mailto:?subject=${item.callId}&body=${getEmailFormattedSummary(item.callSummaryText)}`}
-                    iconName="envelope"
-                    variant="link"
-                  >
-                    Email Summary
-                  </Button>
-                  <Button onClick={() => downloadCallSummary()} iconName="download" variant="link">
-                    Download Summary
-                  </Button>
-                </div>
+                <ButtonDropdown
+                  items={[
+                    { text: 'Download summary', id: 'download', disabled: false, iconName: 'download' },
+                    { text: 'Email summary', id: 'email', disabled: false, iconName: 'envelope' },
+                  ]}
+                  variant="normal"
+                  onItemClick={(option) => downloadCallSummary(option)}
+                >
+                  <Icon name="download" variant="primary" />
+                </ButtonDropdown>
               )}
             </div>
           }
@@ -748,6 +752,15 @@ const CallTranscriptContainer = ({
     return translateOn;
   };
 
+  const downloadTranscript = (option) => {
+    console.log('option', option);
+    if (option.detail.id === 'text') {
+      downloadTranscriptAsText(callTranscriptPerCallId, item);
+    } else if (option.detail.id === 'excel') {
+      downloadTranscriptAsExcel(callTranscriptPerCallId, item);
+    }
+  };
+
   return (
     <Grid
       gridDefinition={[
@@ -784,28 +797,27 @@ const CallTranscriptContainer = ({
                   <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn} />
                   <span>Enable Translation</span>
                   {languageChoices()}
+                  {showDownloadTranscript && (
+                    <SpaceBetween direction="horizontal" size="xs">
+                      <ButtonDropdown
+                        items={[
+                          {
+                            text: 'Download as',
+                            iconName: 'download',
+                            items: [
+                              { text: 'Excel', id: 'excel', disabled: false },
+                              { text: 'Text', id: 'text' },
+                            ],
+                          },
+                        ]}
+                        variant="normal"
+                        onItemClick={(option) => downloadTranscript(option)}
+                      >
+                        <Icon name="download" variant="primary" />
+                      </ButtonDropdown>
+                    </SpaceBetween>
+                  )}
                 </SpaceBetween>
-                {showDownloadTranscript && (
-                  <SpaceBetween direction="horizontal" size="xs">
-                    <span>Download Transcript</span>
-                    <Button
-                      iconName="download"
-                      variant="inline-link"
-                      disabled={false}
-                      onClick={() => downloadTranscriptAsText(callTranscriptPerCallId, item)}
-                    >
-                      Text
-                    </Button>
-                    <Button
-                      iconName="download"
-                      variant="inline-link"
-                      disabled={false}
-                      onClick={() => downloadTranscriptAsExcel(callTranscriptPerCallId, item)}
-                    >
-                      Excel
-                    </Button>
-                  </SpaceBetween>
-                )}
               </SpaceBetween>
             }
           >
