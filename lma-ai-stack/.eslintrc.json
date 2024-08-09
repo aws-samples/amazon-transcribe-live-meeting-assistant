@@ -14,7 +14,8 @@
         "ecmaVersion": 12
     },
     "rules": {
-        "max-len": ["error", { "code": 120, "ignoreUrls": true}],
+        "max-len": ["error", { "code": 120, "ignoreUrls": true, "ignoreTemplateLiterals":  true}]
+    }],
         "prettier/prettier": [
             "error",
             {

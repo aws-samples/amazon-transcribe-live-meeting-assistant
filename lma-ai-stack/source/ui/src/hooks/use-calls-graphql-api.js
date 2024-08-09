@@ -45,9 +45,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
       setErrorMessage('failed to get call details - please try again later');
       logger.error('get call promises rejected', getCallRejected);
     }
-    const callValues = getCallResolutions
-      .filter((r) => r.status === 'fulfilled')
-      .map((r) => r.value?.data?.getCall);
+    const callValues = getCallResolutions.filter((r) => r.status === 'fulfilled').map((r) => r.value?.data?.getCall);
 
     return callValues;
   };
@@ -103,12 +101,8 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
       const currentBase = currentChannelEntry?.base || '';
       const currentSegments = currentChannelEntry?.segments || [];
       logger.debug('setCallTrancriptPerCallId current segments: ', currentSegments);
-      const lastSameSegmentId = currentSegments
-        .filter((s) => s.segmentId === transcriptSegment.segmentId)
-        .pop();
-      const dedupedSegments = currentSegments.filter(
-        (s) => s.segmentId !== transcriptSegment.segmentId,
-      );
+      const lastSameSegmentId = currentSegments.filter((s) => s.segmentId === transcriptSegment.segmentId).pop();
+      const dedupedSegments = currentSegments.filter((s) => s.segmentId !== transcriptSegment.segmentId);
 
       const segments = [
         ...dedupedSegments,
@@ -183,9 +177,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
     }
     logger.debug('setting up onAddTranscriptSegment subscription');
 
-    subscription = API.graphql(
-      graphqlOperation(onAddTranscriptSegment, { callId: liveTranscriptCallId }),
-    ).subscribe({
+    subscription = API.graphql(graphqlOperation(onAddTranscriptSegment, { callId: liveTranscriptCallId })).subscribe({
       next: async ({ provider, value }) => {
         logger.debug('call transcript subscription update', { provider, value });
         const transcriptSegmentValue = value?.data?.onAddTranscriptSegment;
@@ -299,10 +291,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
       // reduce array of date/shard pairs into object of shards by date
       // e.g. [ [ '2021-01-01', 3 ], [ '2021-01-01', 4 ] ] -> { '2021-01-01': [ 3, 4 ] }
-      const dateShards = dateShardPairs.reduce(
-        (p, c) => ({ ...p, [c[0]]: [...(p[c[0]] || []), c[1]] }),
-        {},
-      );
+      const dateShards = dateShardPairs.reduce((p, c) => ({ ...p, [c[0]]: [...(p[c[0]] || []), c[1]] }), {});
       logger.debug('call list date shards', dateShards);
 
       // parallelizes listCalls and getCallDetails
@@ -323,9 +312,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
       } else {
         baseDate = new Date(now - periodsToLoad * hoursInShard * 3600 * 1000);
         const residualBaseHour = baseDate.getUTCHours() % hoursInShard;
-        residualHours = [...Array(hoursInShard - residualBaseHour).keys()].map(
-          (h) => baseDate.getUTCHours() + h,
-        );
+        residualHours = [...Array(hoursInShard - residualBaseHour).keys()].map((h) => baseDate.getUTCHours() + h);
       }
       const baseDateString = baseDate.toISOString().split('T')[0];
 
@@ -395,9 +382,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
           .map((t) => mapTranscriptSegmentValue(t))
           .reduce((p, c) => {
             const previousSegments = p[c.channel]?.segments || [];
-            const lastSameSegmentId = previousSegments
-              .filter((s) => s?.segmentId === c?.segmentId)
-              .pop();
+            const lastSameSegmentId = previousSegments.filter((s) => s?.segmentId === c?.segmentId).pop();
             const dedupedSegments = previousSegments.filter((s) => s.segmentId !== c.segmentId);
 
             // prettier-ignore

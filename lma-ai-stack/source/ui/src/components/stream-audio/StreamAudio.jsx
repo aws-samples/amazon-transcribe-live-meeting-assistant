@@ -18,11 +18,7 @@ import {
 import '@awsui/global-styles/index.css';
 import useWebSocket from 'react-use-websocket';
 
-import {
-  DEFAULT_OTHER_SPEAKER_NAME,
-  DEFAULT_LOCAL_SPEAKER_NAME,
-  SYSTEM,
-} from '../common/constants';
+import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '../common/constants';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
@@ -215,9 +211,7 @@ const StreamAudio = () => {
       sendMessage(JSON.stringify(recordingCallMetaData));
       setStreamingStarted(true);
 
-      displayAudioSource.current = audioContext.current.createMediaStreamSource(
-        displayStream.current,
-      );
+      displayAudioSource.current = audioContext.current.createMediaStreamSource(displayStream.current);
       micAudioSource.current = audioContext.current.createMediaStreamSource(micStream.current);
 
       const monoDisplaySource = convertToMono(displayAudioSource.current);
@@ -298,11 +292,7 @@ const StreamAudio = () => {
         <Form
           actions={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button
-                variant={recording ? 'secondary' : 'primary'}
-                onClick={handleRecording}
-                disabled={false}
-              >
+              <Button variant={recording ? 'secondary' : 'primary'} onClick={handleRecording} disabled={false}>
                 {recording ? 'Stop Streaming' : 'Start Streaming'}
               </Button>
             </SpaceBetween>
@@ -315,12 +305,7 @@ const StreamAudio = () => {
                 actions={
                   <div>
                     {recording && (
-                      <Button
-                        href={`#/calls/${callMetaData.callId}`}
-                        variant="link"
-                        iconName="external"
-                        target="blank"
-                      >
+                      <Button href={`#/calls/${callMetaData.callId}`} variant="link" iconName="external" target="blank">
                         Open in progress meeting
                       </Button>
                     )}
@@ -348,11 +333,7 @@ const StreamAudio = () => {
                 description="Label for stream audio"
                 errorText={callMetaData.fromNumber.length < 1 && DEFAULT_BLANK_FIELD_MSG}
               >
-                <Input
-                  value={callMetaData.fromNumber}
-                  onChange={handlefromNumberChange}
-                  disabled={recording}
-                />
+                <Input value={callMetaData.fromNumber} onChange={handlefromNumberChange} disabled={recording} />
               </FormField>
 
               <FormField
@@ -363,11 +344,7 @@ const StreamAudio = () => {
                 errorText={callMetaData.agentId.length < 1 && DEFAULT_BLANK_FIELD_MSG}
               >
                 <Grid gridDefinition={[{ colspan: 10 }, { colspan: 1 }]}>
-                  <Input
-                    value={callMetaData.agentId}
-                    onChange={handleAgentIdChange}
-                    disabled={recording}
-                  />
+                  <Input value={callMetaData.agentId} onChange={handleAgentIdChange} disabled={recording} />
                   <Button
                     variant={micMuted ? 'secondary' : 'primary'}
                     onClick={toggleMicrophoneEnabled}

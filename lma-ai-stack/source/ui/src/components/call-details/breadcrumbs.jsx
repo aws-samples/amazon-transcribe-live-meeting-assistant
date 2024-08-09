@@ -10,10 +10,7 @@ import { callListBreadcrumbItems } from '../call-list/breadcrumbs';
 
 const Breadcrumbs = () => {
   const { callId } = useParams();
-  const callDetailsBreadcrumbItems = [
-    ...callListBreadcrumbItems,
-    { text: callId, href: `#${CALLS_PATH}/${callId}` },
-  ];
+  const callDetailsBreadcrumbItems = [...callListBreadcrumbItems, { text: callId, href: `#${CALLS_PATH}/${callId}` }];
 
   return <BreadcrumbGroup ariaLabel="Breadcrumbs" items={callDetailsBreadcrumbItems} />;
 };

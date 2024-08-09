@@ -24,7 +24,7 @@
     "rules": {
         "no-console": "off",
         "no-alert": "off",
-        "max-len": ["error", { "code": 120, "ignoreUrls": true}],
+        "max-len": ["error", { "code": 120, "ignoreUrls": true, "ignoreTemplateLiterals":  true}],
         "linebreak-style": [
             "error",
             "unix"

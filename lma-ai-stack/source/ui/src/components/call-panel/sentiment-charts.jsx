@@ -25,10 +25,7 @@ export const VoiceToneFluctuationChart = ({ item, callTranscriptPerCallId }) => 
       // eslint-disable-next-line implicit-arrow-linebreak
       transcript.segments
         .filter((t) => t.sentimentWeighted)
-        .reduce(
-          (p, c) => [...p, { x: new Date(c.endTime * 1000), y: c.sentimentWeighted }],
-          [{ x: new Date(0), y: 0 }],
-        )
+        .reduce((p, c) => [...p, { x: new Date(c.endTime * 1000), y: c.sentimentWeighted }], [{ x: new Date(0), y: 0 }])
         .sort((a, b) => a.x - b.x),
     ); // eslint-disable-line function-paren-newline
 
@@ -93,10 +90,7 @@ export const SentimentFluctuationChart = ({ item, callTranscriptPerCallId }) => 
       // eslint-disable-next-line implicit-arrow-linebreak
       transcript.segments
         .filter((t) => t.sentimentWeighted)
-        .reduce(
-          (p, c) => [...p, { x: new Date(c.endTime * 1000), y: c.sentimentWeighted }],
-          [{ x: new Date(0), y: 0 }],
-        )
+        .reduce((p, c) => [...p, { x: new Date(c.endTime * 1000), y: c.sentimentWeighted }], [{ x: new Date(0), y: 0 }])
         .sort((a, b) => a.x - b.x),
     ); // eslint-disable-line function-paren-newline
 
@@ -160,10 +154,7 @@ export const SentimentPerQuarterChart = ({ item, callTranscriptPerCallId }) => {
       // eslint-disable-next-line implicit-arrow-linebreak
       sentimentByQuarter
         .filter((s) => s.EndOffsetMillis > 0)
-        .reduce(
-          (p, c) => [...p, { x: new Date(c.EndOffsetMillis), y: c.Score }],
-          [{ x: new Date(0), y: 0 }],
-        ),
+        .reduce((p, c) => [...p, { x: new Date(c.EndOffsetMillis), y: c.Score }], [{ x: new Date(0), y: 0 }]),
     ); // eslint-disable-line function-paren-newline
 
   logger.debug('sentimentByQuarterPerChannel', sentimentByQuarterPerChannel);

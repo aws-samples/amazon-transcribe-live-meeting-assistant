@@ -73,13 +73,7 @@ const CallDetails = () => {
   }, [calls, callId]);
 
   return (
-    call && (
-      <CallPanel
-        item={call}
-        setToolsOpen={setToolsOpen}
-        callTranscriptPerCallId={callTranscriptPerCallId}
-      />
-    )
+    call && <CallPanel item={call} setToolsOpen={setToolsOpen} callTranscriptPerCallId={callTranscriptPerCallId} />
   );
 };
 
