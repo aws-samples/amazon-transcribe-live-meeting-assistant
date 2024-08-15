@@ -1426,6 +1426,14 @@ Resources:
         TableName: !Ref EventSourcingTable
         AwsRegion: !Ref AWS::Region
 
+  SubscriptionDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: Subscription
+      Description: NONE type data source to set up subscription filtering
+      Type: NONE
+
   AppSyncApiCache:
     Type: AWS::AppSync::ApiCache
     Condition: ShouldEnableAppSyncApiCache
@@ -1446,7 +1454,7 @@ Resources:
       TypeName: Query
       FieldName: getCall
       RequestMappingTemplateS3Location: ../source/appsync/getCall.request.vtl
-      ResponseMappingTemplate: $util.toJson($context.result)
+      ResponseMappingTemplate: ../source/appsync/getCall.response.vtl
 
   CreateCallAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -1510,7 +1518,8 @@ Resources:
                 "CallId": $util.dynamodb.toDynamoDBJson($ctx.args.input.CallId),
                 "CreatedAt": $util.dynamodb.toDynamoDBJson($ctx.args.input.CreatedAt),
                 "UpdatedAt": $util.dynamodb.toDynamoDBJson($ctx.args.input.UpdatedAt),
-                "ExpiresAfter": $util.dynamodb.toDynamoDBJson($ctx.args.input.ExpiresAfter)
+                "ExpiresAfter": $util.dynamodb.toDynamoDBJson($ctx.args.input.ExpiresAfter),
+                "Owner": $util.dynamodb.toDynamoDBJson($ctx.args.input.Owner)
               },
             },
           ],
@@ -1670,6 +1679,47 @@ Resources:
       FieldName: getTranscriptSegmentsWithSentiment
       RequestMappingTemplateS3Location: ../source/appsync/getTranscriptSegmentsWithSentiment.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/getTranscriptSegmentsWithSentiment.response.vtl
+
+  OnCreateCallAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onCreateCall
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  OnUpdateCallAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onUpdateCall
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  OnAddTranscriptSegmentAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onAddTranscriptSegment
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+
   ##########################################################################
   # Cognito
   # Sample Cognito resources
@@ -1724,9 +1774,9 @@ Resources:
           AttributeDataType: String
           Mutable: false
           Required: true
+      UsernameConfiguration:
+        CaseSensitive: false
       UserPoolName: !Sub "${AWS::StackName}-UserPool"
-      UsernameAttributes:
-        - email
 
   GetDomainLambdaRole:
     Type: AWS::IAM::Role

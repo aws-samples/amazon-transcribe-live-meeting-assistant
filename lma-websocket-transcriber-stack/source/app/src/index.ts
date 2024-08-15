@@ -3,6 +3,8 @@
 
 import fastify from 'fastify';
 import websocket from '@fastify/websocket';
+import { FastifyRequest } from 'fastify';
+
 import WebSocket from 'ws'; // type structure for the websocket object used by fastify/websocket
 // import stream from 'stream';
 import os from 'os';
@@ -78,7 +80,7 @@ server.get('/api/v1/ws', { websocket: true, logLevel: 'debug' }, (connection, re
     const clientIP = getClientIP(request.headers);
     server.log.debug(`[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. URI: <${request.url}>, Headers: ${JSON.stringify(request.headers)}`);
 
-    registerHandlers(clientIP, connection.socket); // setup the handler functions for websocket events
+    registerHandlers(clientIP, connection.socket, request); // setup the handler functions for websocket events
 });
 
 type HealthCheckRemoteInfo = {
@@ -119,14 +121,14 @@ server.get('/health/check', { logLevel: 'warn' }, (request, response) => {
 
 
 // Setup handlers for websocket events - 'message', 'close', 'error'
-const registerHandlers = (clientIP: string, ws: WebSocket): void => {
+const registerHandlers = (clientIP: string, ws: WebSocket, request: FastifyRequest): void => {
     ws.on('message', async (data, isBinary): Promise<void> => {
         try {
             if (isBinary) {
                 const audioinput = Buffer.from(data as Uint8Array);
                 await onBinaryMessage(clientIP, ws, audioinput);
             } else {
-                await onTextMessage(clientIP, ws, Buffer.from(data as Uint8Array).toString('utf8'));
+                await onTextMessage(clientIP, ws, Buffer.from(data as Uint8Array).toString('utf8'), request);
             }
         } catch (error) {
             server.log.error(`[ON MESSAGE]: [${clientIP}] - Error processing message: ${normalizeErrorForLogging(error)}`);
@@ -151,8 +153,6 @@ const registerHandlers = (clientIP: string, ws: WebSocket): void => {
 };
 
 const onBinaryMessage = async (clientIP: string, ws: WebSocket, data: Uint8Array): Promise<void> => {
-    // server.log.debug(`Received Binary Message of length ${data.byteLength}`);
-
     const socketData = socketMap.get(ws);
 
     if (socketData !== undefined && socketData.audioInputStream !== undefined &&
@@ -165,9 +165,28 @@ const onBinaryMessage = async (clientIP: string, ws: WebSocket, data: Uint8Array
     }
 };
 
-const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Promise<void> => {
+const onTextMessage = async (clientIP: string, ws: WebSocket, data: string, request: FastifyRequest): Promise<void> => {
+    type queryobj = {
+        authorization: string
+    };
+    
+    type headersobj = {
+        authorization: string
+    };
+    
+    const query = request.query as queryobj;
+    const headers = request.headers as headersobj;
+    const auth = query.authorization || headers.authorization;
 
+    const match = auth?.match(/^Bearer (.+)$/);
     const callMetaData: CallMetaData = JSON.parse(data);
+    if (!match) {
+        server.log.error(`[AUTH]: [${clientIP}] - No Bearer token found in header or query string. URI: <${request.url}>, Headers: ${JSON.stringify(request.headers)}`);
+
+        return;
+    }
+
+    const accessToken = match[1];
 
     try {
         server.log.debug(`[ON TEXT MESSAGE]: [${clientIP}][${callMetaData.callId}] - Call Metadata received from client: ${data}`);
@@ -175,6 +194,8 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string): Pro
         server.log.error(`[ON TEXT MESSAGE]: [${clientIP}][${callMetaData.callId}] - Error parsing call metadata: ${data} ${normalizeErrorForLogging(error)}`);
         callMetaData.callId = randomUUID();
     }
+    
+    callMetaData.accessToken = accessToken;
 
     if (callMetaData.callEvent === 'START') {
         // generate random metadata if none is provided

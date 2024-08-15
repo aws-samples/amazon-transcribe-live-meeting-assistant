@@ -112,7 +112,8 @@ export const writeCallStartEvent = async (callMetaData: CallMetaData, server: Fa
         CustomerPhoneNumber: callMetaData.fromNumber || 'Customer Phone',
         SystemPhoneNumber: callMetaData.toNumber || 'System Phone',
         AgentId: callMetaData.agentId,
-        CreatedAt: new Date().toISOString()
+        CreatedAt: new Date().toISOString(),
+        AccessToken: callMetaData.accessToken
     };
     await writeCallEvent(callStartEvent, server);
 };
@@ -123,6 +124,7 @@ export const writeCallEndEvent = async (callMetaData: CallMetaData, server: Fast
         CallId: callMetaData.callId,
         CustomerPhoneNumber: callMetaData.fromNumber || 'Customer Phone',
         SystemPhoneNumber: callMetaData.toNumber || 'System Phone',
+        AccessToken: callMetaData.accessToken,
     };
     await writeCallEvent(callEndEvent, server);
 };
@@ -131,7 +133,8 @@ export const writeCallRecordingEvent = async (callMetaData: CallMetaData, record
     const callRecordingEvent: CallRecordingEvent = {
         EventType: 'ADD_S3_RECORDING_URL',
         CallId: callMetaData.callId,
-        RecordingUrl: recordingUrl
+        RecordingUrl: recordingUrl,
+        AccessToken: callMetaData.accessToken,
     };
     await writeCallEvent(callRecordingEvent, server);
 };
@@ -316,7 +319,8 @@ export const writeTranscriptionSegment = async function (transcribeMessageJson: 
                 Sentiment: undefined,
                 TranscriptEvent: undefined,
                 UtteranceEvent: undefined,
-                Speaker: (result.ChannelId === 'ch_0' ? callMetadata.activeSpeaker : (callMetadata?.agentId ?? 'n/a'))
+                Speaker: (result.ChannelId === 'ch_0' ? callMetadata.activeSpeaker : (callMetadata?.agentId ?? 'n/a')),
+                AccessToken: callMetadata.accessToken,
             };
 
             const putParams = {
@@ -359,7 +363,8 @@ export const writeUtteranceEvent = async function (utteranceEvent: UtteranceEven
         UtteranceEvent: utteranceEvent,
         CreatedAt: now,
         UpdatedAt: now,
-        Speaker: (isCustomer ? callMetadata.activeSpeaker : (callMetadata?.agentId ?? 'n/a'))
+        Speaker: (isCustomer ? callMetadata.activeSpeaker : (callMetadata?.agentId ?? 'n/a')),
+        AccessToken: callMetadata.accessToken
     };
 
     const putParams = {
@@ -387,6 +392,7 @@ export const writeAddCallCategoryEvent = async function (categoryEvent: Category
             CallId: callMetaData.callId,
             CategoryEvent: categoryEvent,
             CreatedAt: now,
+            AccessToken: callMetaData.accessToken,
         };
 
         const putParams = {
