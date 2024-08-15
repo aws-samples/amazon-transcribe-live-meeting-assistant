@@ -1376,7 +1376,7 @@ Resources:
       TypeName: Query
       FieldName: getCall
       RequestMappingTemplateS3Location: ../source/appsync/getCall.request.vtl
-      ResponseMappingTemplate: ../source/appsync/getCall.response.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/getCall.response.vtl
 
   CreateCallAppSyncResolver:
     Type: AWS::AppSync::Resolver
