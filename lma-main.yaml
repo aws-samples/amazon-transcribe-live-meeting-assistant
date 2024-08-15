@@ -1299,6 +1299,7 @@ Resources:
         LMAStackName: !Ref AWS::StackName
         AISTACK: !Ref AISTACK
         QNABOTSTACK: !Ref QNABOT
+        COGNITOSTACK: !Ref COGNITOSTACK
         MeetingAssistService: !Ref MeetingAssistService
         BedrockKnowledgeBaseID: !If
           - ShouldUseBedrockKnowledgeBase

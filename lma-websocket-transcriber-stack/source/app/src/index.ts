@@ -167,11 +167,15 @@ const onBinaryMessage = async (clientIP: string, ws: WebSocket, data: Uint8Array
 
 const onTextMessage = async (clientIP: string, ws: WebSocket, data: string, request: FastifyRequest): Promise<void> => {
     type queryobj = {
-        authorization: string
+        authorization: string,
+        id_token: string,
+        refresh_token: string,
     };
     
     type headersobj = {
-        authorization: string
+        authorization: string,
+        id_token: string,
+        refresh_token: string,
     };
     
     const query = request.query as queryobj;
