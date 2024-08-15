@@ -177,6 +177,8 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string, requ
     const query = request.query as queryobj;
     const headers = request.headers as headersobj;
     const auth = query.authorization || headers.authorization;
+    const idToken = query.id_token || headers.id_token;
+    const refreshToken = query.refresh_token || headers.refresh_token;
 
     const match = auth?.match(/^Bearer (.+)$/);
     const callMetaData: CallMetaData = JSON.parse(data);
@@ -196,6 +198,8 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string, requ
     }
     
     callMetaData.accessToken = accessToken;
+    callMetaData.idToken = idToken;
+    callMetaData.refreshToken = refreshToken;
 
     if (callMetaData.callEvent === 'START') {
         // generate random metadata if none is provided

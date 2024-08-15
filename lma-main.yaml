@@ -1331,7 +1331,7 @@ Resources:
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
-        LexMeetingAssistIdentityPoolId: !GetAtt AISTACK.Outputs.LexAgentAssistIdentityPoolId
+        LexMeetingAssistIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.LexAgentAssistIdentityPoolId
         LexMeetingAssistUserPoolClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
         LexMeetingAssistUserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
         LexMeetingAssistDomainName: !GetAtt COGNITOSTACK.Outputs.CognitoLoginUrl
