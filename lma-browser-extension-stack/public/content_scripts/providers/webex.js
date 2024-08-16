@@ -12,8 +12,6 @@ const openChatPanel = function () {
   }
 }
 
-// const activeRingClass = "fui-Avatar r81b29z ___l339ri0";
-// const inactiveRingClass = "fui-Avatar r81b29z ___1okzwt8";
 
 const sendChatMessage = function (message) {
   const composerDiv = document.querySelector('div[class="composer"]');
@@ -133,13 +131,12 @@ let activeSpeakerObserver;
 
 // Function to start the MutationObserver
 const startObserver = () => {
-  let targetNodes = document.querySelector('section[aria-label="Participant videos"]');
+  let targetNodes = document.querySelector('main#main-content');
   if (targetNodes && targetNodes.hasAttribute('LMAAttached') && targetNodes.getAttribute('LMAAttached') === 'true') {
     return;
   }
   else if (!targetNodes) {
-    console.log('Target div not found. Retrying in 2 seconds...');
-    setTimeout(startObserver, 5000);
+    console.log('Target div not found. Retrying in 5 seconds...');
     return;
   }
   else {
@@ -147,51 +144,39 @@ const startObserver = () => {
   }
   console.log(targetNodes)
   // Options for the observer (which mutations to observe)
-  const config = { childList: true, subtree: true };
+  const config = {subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['aria-label'] };
 
-  // Callback function to execute when mutations are observed <div class="_1Zsc8OGdx93V4WAdw-A6oQ==" data-test="active-speaker-halo"></div> data-test="MBP-15-video-pane-container"
+  // Callback function to execute when mutations are observed: div aria-label starts with Unmuted
   const callback = (mutationsList, observer) => {
     mutationsList.forEach((mutation) => {
       if (mutation.type === "childList") {
-        mutation.addedNodes.forEach(node => {
-          console.log(node);
-          if (node.nodeName === 'DIV' && node.getAttribute('data-test') === 'active-speaker-halo') {
-            console.log("Active speaker identified.");
-            let parentElement = node.parentElement;
-            if (parentElement && parentElement.hasAttribute('data-test')) {
-              const ariaLabel = parentElement.getAttribute('data-test');
-              console.log(`Found aria-label: ${ariaLabel}`);
-              const activeSpeaker = ariaLabel.replace('-video-pane-container', '');
+        //console.log(mutation);
+      }
+      else if (mutation.type === "attributes"){
+        // console.log(`The ${mutation.attributeName} attribute was modified.`);
+        // console.log(mutation);
+        const targetElement = mutation.target;
+        const isDiv = targetElement.tagName.toLowerCase() === 'div';
+        if (isDiv && mutation.attributeName === 'aria-label') {
+          const oldValue = mutation.oldValue;
+          const newValue = mutation.target.getAttribute(mutation.attributeName);
+          if (newValue.startsWith('Unmuted') && !oldValue.includes('Unmuted')) {
+            const ariaLabel = targetElement.getAttribute('data-test');
+            const activeSpeaker = ariaLabel.replace('-participant-label', '');
+            console.log(`Active Speaker Change: ${activeSpeaker}`);
+            chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: activeSpeaker });
+          }
+          else if (oldValue.startsWith('Unmuted')){
+            //find other active speaker
+            const nextActiveSpeaker = document.querySelector('div[aria-label^="Unmuted"]');
+            if (nextActiveSpeaker) {
+              const ariaLabel = nextActiveSpeaker.getAttribute('data-test');
+              const activeSpeaker = ariaLabel.replace('-participant-label', '');
               console.log(`Active Speaker Change: ${activeSpeaker}`);
               chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: activeSpeaker });
-            } else {
-              console.log('No aria-label found at expected parent level.');
             }
           }
-        });
-        mutation.removedNodes.forEach(node => {
-          if (node.nodeName === 'DIV' && node.getAttribute('data-test') === 'active-speaker-halo') {
-            console.log("Active speaker stopped, try to find other active speakers.");
-            let parentElement = mutation.target.parentElement;
-            const nextActiveSpeaker = parentElement.querySelector('div[data-test="active-speaker-halo"]');
-            if (nextActiveSpeaker) {
-              let parentElement = nextActiveSpeaker.parentElement;
-              if (parentElement && parentElement.hasAttribute('data-test')) {
-                const ariaLabel = parentElement.getAttribute('data-test');
-                console.log(`Found aria-label: ${ariaLabel}`);
-                const activeSpeaker = ariaLabel.replace('-video-pane-container', '');
-                console.log(`Active Speaker Change: ${activeSpeaker}`);
-                chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: activeSpeaker });
-              } else {
-                console.log('No aria-label found at expected parent level.');
-              }
-            }
-            else {
-              console.log('No aria-label found at expected parent level.');
-              chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: "n/a" });
-            }
-          }
-        });
+        }
       }
     });
   };
