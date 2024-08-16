@@ -16,6 +16,7 @@ export default gql`
       Transcript
       IsPartial
       Channel
+      Owner
       Sentiment
       SentimentScore {
         Positive

@@ -47,7 +47,7 @@ def addBotToAistack(props, oldprops):
 
     print("Updating updating Cognito Authenticated Role for Agent Assist...")
     agentAssistBotAuthRole = getStackResource(
-        props["AISTACK"], "AgentAssistBotAuthRole")
+        props["COGNITOSTACK"], "AgentAssistBotAuthRole")
     newArn = f'arn:{aws_partition}:lex:{AWS_REGION}:{aws_account_id}:bot-alias/{props["LexMeetingAssistBotId"]}/{props["LexMeetingAssistAliasId"]}'
     newPolicy = {'Version': '2012-10-17', 'Statement': [{'Action': [
         'lex:RecognizeText', 'lex:RecognizeUtterance', 'lex:DeleteSession', 'lex:PutSession'], 'Resource': newArn, 'Effect': 'Allow'}]}

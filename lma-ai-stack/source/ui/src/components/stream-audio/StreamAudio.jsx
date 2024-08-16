@@ -79,6 +79,8 @@ const StreamAudio = () => {
   const { sendMessage } = useWebSocket(getSocketUrl, {
     queryParams: {
       authorization: `Bearer ${JWT_TOKEN}`,
+      id_token: `${currentSession.idToken.jwtToken}`,
+      refresh_token: `${currentSession.refreshToken.token}`,
     },
     onOpen: (event) => {
       console.log(`

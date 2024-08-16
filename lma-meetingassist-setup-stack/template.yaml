@@ -19,6 +19,10 @@ Parameters:
     Type: String
     Description: QNABOT Stack ARN
 
+  COGNITOSTACK:
+    Type: String
+    Description: COGNITOSTACK Stack ARN
+
   MeetingAssistService:
     Type: String
     Description: Choose which knowledge base / LLM service to use
@@ -483,6 +487,12 @@ Resources:
                 Resource:
                   - !Ref AISTACK
               - Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackResource
+                Effect: Allow
+                Resource:
+                  - !Ref COGNITOSTACK
+              - Action:
                   - lambda:GetFunctionConfiguration
                   - lambda:UpdateFunctionConfiguration
                 Effect: Allow
@@ -579,6 +589,7 @@ Resources:
       ServiceToken: !GetAtt SetupFunction.Arn
       AISTACK: !Ref AISTACK
       QNABOTSTACK: !Ref QNABOTSTACK
+      COGNITOSTACK: !Ref COGNITOSTACK
       MeetingAssistService: !Ref MeetingAssistService
       LexMeetingAssistBotId: !Ref LexMeetingAssistBotId
       LexMeetingAssistAliasId: !Ref LexMeetingAssistAliasId

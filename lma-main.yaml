@@ -1227,7 +1227,27 @@ Resources:
         Domain: !Ref Domain
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
-  AISTACK:
+  COGNITOSTACK:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-cognito-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        LMAStackName: !Ref AWS::StackName
+        S3BucketName: !If
+          - ShouldCreateRecordingBucket
+          - !Ref RecordingsBucket
+          - !Ref S3BucketName
+        AdminEmail: !Ref AdminEmail
+        AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
+        LMASettingsParameterName: !Ref LMASettingsParameter
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+
+  AISTACK: 
     Type: AWS::CloudFormation::Stack
     DependsOn:
       - IsStacknameLengthOK
@@ -1238,6 +1258,7 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
+        AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
         EnableVoiceToneAnalysis: "false"
@@ -1246,8 +1267,6 @@ Resources:
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
           - !Ref S3BucketName
-        AdminEmail: !Ref AdminEmail
-        AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
@@ -1268,6 +1287,10 @@ Resources:
         LMASettingsParameterName: !Ref LMASettingsParameter
         EnableAppSyncApiCache: !Ref EnableAppSyncApiCache
         AppSyncApiCacheInstanceType: !Ref AppSyncApiCacheInstanceType
+        UserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
+        CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
+        AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
+        
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -1332,6 +1355,7 @@ Resources:
         LMAStackName: !Ref AWS::StackName
         AISTACK: !Ref AISTACK
         QNABOTSTACK: !Ref QNABOT
+        COGNITOSTACK: !Ref COGNITOSTACK
         MeetingAssistService: !Ref MeetingAssistService
         BedrockKnowledgeBaseID: !If
           - ShouldUseBedrockKnowledgeBase
@@ -1365,10 +1389,10 @@ Resources:
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
-        LexMeetingAssistIdentityPoolId: !GetAtt AISTACK.Outputs.LexAgentAssistIdentityPoolId
-        LexMeetingAssistUserPoolClientId: !GetAtt AISTACK.Outputs.CognitoClientId
-        LexMeetingAssistUserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
-        LexMeetingAssistDomainName: !GetAtt AISTACK.Outputs.CognitoLoginUrl
+        LexMeetingAssistIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.LexAgentAssistIdentityPoolId
+        LexMeetingAssistUserPoolClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
+        LexMeetingAssistUserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
+        LexMeetingAssistDomainName: !GetAtt COGNITOSTACK.Outputs.CognitoLoginUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
@@ -1405,7 +1429,7 @@ Resources:
           - !Ref RecordingsBucket
           - !Ref S3BucketName
         AudioFilePrefix: !Ref AudioFilePrefix
-        UserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
+        UserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
         CallDataStreamName: !Ref CallDataStream
         CallDataStreamArn: !GetAtt CallDataStream.Arn
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
@@ -1496,8 +1520,8 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         WebSocketEndpoint: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
-        CognitoClientId: !GetAtt AISTACK.Outputs.CognitoClientId
-        CognitoLoginUrl: !GetAtt AISTACK.Outputs.CognitoLoginUrl
+        CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
+        CognitoLoginUrl: !GetAtt COGNITOSTACK.Outputs.CognitoLoginUrl
         CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
         WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket

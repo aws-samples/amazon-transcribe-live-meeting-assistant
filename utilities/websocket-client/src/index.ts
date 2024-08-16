@@ -34,11 +34,15 @@ new Command()
 
         const uri = options.uri ?? serveruri;
         if (uri) {
-            const jwtToken = process.env['LCA_JWT_TOKEN'] || undefined;
+            const jwtToken = process.env['LMA_ACCESS_JWT_TOKEN'] || undefined;
+            const idToken = process.env['LMA_ID_JWT_TOKEN'] || undefined;
+            const refreshToken = process.env['LMA_REFRESH_JWT_TOKEN'] || undefined;
 
             const ws = new WebSocket(uri, {
                 headers: {
-                    authorization: `Bearer ${jwtToken}`
+                    authorization: `Bearer ${jwtToken}`,
+                    id_token: `${idToken}`,
+                    refresh_token: `${refreshToken}`
                 }
             });
 
