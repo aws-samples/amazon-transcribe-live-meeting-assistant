@@ -14,10 +14,12 @@
         "ecmaVersion": 12
     },
     "rules": {
+        "max-len": ["error", { "code": 120, "ignoreUrls": true, "ignoreTemplateLiterals":  true}]
+    }],
         "prettier/prettier": [
             "error",
             {
-                "printWidth": 100,
+                "printWidth": 120,
                 "singleQuote": true,
                 "trailingComma": "all"
             }

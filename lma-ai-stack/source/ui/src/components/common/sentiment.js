@@ -15,9 +15,7 @@ export const getSentimentTrendLabel = (sentimentByQuarter) => {
   if (sentimentByQuarter.length <= 1) {
     return 'FLAT';
   }
-  const sentimentByQuarterValues = sentimentByQuarter
-    .filter((s) => s.EndOffsetMillis > 0)
-    .map((s) => s.Score || 0);
+  const sentimentByQuarterValues = sentimentByQuarter.filter((s) => s.EndOffsetMillis > 0).map((s) => s.Score || 0);
 
   const lastQuarterValue = sentimentByQuarterValues.slice(-1);
   const previousQuarters = sentimentByQuarterValues.slice(0, -1);

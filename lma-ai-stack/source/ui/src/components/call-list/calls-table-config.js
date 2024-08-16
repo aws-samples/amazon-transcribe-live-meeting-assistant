@@ -35,9 +35,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
   {
     id: 'alerts',
     header: '⚠',
-    cell: (item) => (
-      <CategoryAlertPill alertCount={item.alertCount} categories={item.callCategories} />
-    ),
+    cell: (item) => <CategoryAlertPill alertCount={item.alertCount} categories={item.callCategories} />,
     sortingField: 'alertCount',
     width: 85,
   },
@@ -85,9 +83,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
     id: 'recordingStatus',
     header: 'Status',
     cell: (item) => (
-      <StatusIndicator type={item.recordingStatusIcon}>
-        {` ${item.recordingStatusLabel} `}
-      </StatusIndicator>
+      <StatusIndicator type={item.recordingStatusIcon}>{` ${item.recordingStatusLabel} `}</StatusIndicator>
     ),
     sortingField: 'recordingStatusLabel',
     width: 150,
@@ -180,13 +176,7 @@ const VISIBLE_CONTENT_OPTIONS = [
   },
 ];
 
-const VISIBLE_CONTENT = [
-  'agentId',
-  'initiationTimeStamp',
-  'recordingStatus',
-  'summary',
-  'conversationDuration',
-];
+const VISIBLE_CONTENT = ['agentId', 'initiationTimeStamp', 'recordingStatus', 'summary', 'conversationDuration'];
 
 export const DEFAULT_PREFERENCES = {
   pageSize: PAGE_SIZE_OPTIONS[0].value,
@@ -261,11 +251,7 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
       title={resourceName}
       actionButtons={
         <SpaceBetween size="xxs" direction="horizontal">
-          <ButtonDropdown
-            loading={props.loading}
-            onItemClick={onPeriodToLoadChange}
-            items={TIME_PERIOD_DROPDOWN_ITEMS}
-          >
+          <ButtonDropdown loading={props.loading} onItemClick={onPeriodToLoadChange} items={TIME_PERIOD_DROPDOWN_ITEMS}>
             {`Load: ${periodText}`}
           </ButtonDropdown>
           <Button

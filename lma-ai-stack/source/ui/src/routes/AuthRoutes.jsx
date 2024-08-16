@@ -43,9 +43,7 @@ const AuthRoutes = ({ redirectParam }) => {
           <CallsRoutes />
         </Route>
         <Route path={LOGIN_PATH}>
-          <Redirect
-            to={!redirectParam || redirectParam === LOGIN_PATH ? DEFAULT_PATH : `${redirectParam}`}
-          />
+          <Redirect to={!redirectParam || redirectParam === LOGIN_PATH ? DEFAULT_PATH : `${redirectParam}`} />
         </Route>
         <Route path={LOGOUT_PATH}>
           <AmplifySignOut />

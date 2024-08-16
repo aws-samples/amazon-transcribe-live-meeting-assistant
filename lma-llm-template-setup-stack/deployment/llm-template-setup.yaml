@@ -4,16 +4,30 @@ Description: Amazon Transcribe Live Meeting Assistant - LLM Prompts
 
 Transform: AWS::Serverless-2016-10-31
 
+Parameters:
+  Domain:
+    Type: String
+    Default: "Default"
+    AllowedValues:
+      - "Default"
+      - "Healthcare"
+    Description: The domain of the application (optional)
+
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs.
+
 Resources:
   LLMPromptTemplateTable:
     Type: "AWS::DynamoDB::Table"
     Properties:
       KeySchema:
-      - AttributeName: LLMPromptTemplateId
-        KeyType: HASH
+        - AttributeName: LLMPromptTemplateId
+          KeyType: HASH
       AttributeDefinitions:
-      - AttributeName: LLMPromptTemplateId
-        AttributeType: S
+        - AttributeName: LLMPromptTemplateId
+          AttributeType: S
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
@@ -25,31 +39,31 @@ Resources:
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-        - Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-          Action:
-          - "sts:AssumeRole"
-      ManagedPolicyArns:
-      - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-      Policies:
-      - PolicyName: allow-s3-notification-config
-        PolicyDocument:
-          Statement:
-            Effect: Allow
-            Resource:
-            - !GetAtt LLMPromptTemplateTable.Arn
-            Action:
-            - 'dynamodb:PutItem'
-            - 'dynamodb:UpdateItem'
-      - PolicyName: SSMGetParameterPolicy
-        PolicyDocument:
-          Statement:
           - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
             Action:
-            - ssm:GetParameter
-            - ssm:GetParameters
-            Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: allow-s3-notification-config
+          PolicyDocument:
+            Statement:
+              Effect: Allow
+              Resource:
+                - !GetAtt LLMPromptTemplateTable.Arn
+              Action:
+                - "dynamodb:PutItem"
+                - "dynamodb:UpdateItem"
+        - PolicyName: SSMGetParameterPolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*
 
   LLMPromptUploadFunction:
     Type: "AWS::Lambda::Function"
@@ -60,11 +74,14 @@ Resources:
       Runtime: python3.11
       MemorySize: 128
       Timeout: 60
+      Environment:
+        Variables:
+          DOMAIN: !Ref Domain
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/LLMPromptUploadFunction
     DependsOn:
-    - LLMPromptUploadFunctionLogGroup
+      - LLMPromptUploadFunctionLogGroup
 
   LLMPromptUploadFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -73,22 +90,16 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/LLMPromptUploadFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
-        
+
   LLMStorePromptTemplates:
     Type: "AWS::CloudFormation::CustomResource"
     Properties:
       ServiceToken: !GetAtt LLMPromptUploadFunction.Arn
       LLMPromptTemplateTableName: !Ref LLMPromptTemplateTable
+      Domain: !Ref Domain
       # hash below is updated by publish.sh script- used to force tempate updates when source has changed.
-      source_hash: f4daa62f4768edfe
+      source_hash: 889bf889850f3bb3
 
 Outputs:
-
   LLMPromptTemplateTableName:
     Value: !Ref LLMPromptTemplateTable
-
-Parameters:
-  CloudWatchLogsExpirationInDays:
-    Type: Number
-    Default: 14
-    Description: The number of days log events are kept in CloudWatch Logs.

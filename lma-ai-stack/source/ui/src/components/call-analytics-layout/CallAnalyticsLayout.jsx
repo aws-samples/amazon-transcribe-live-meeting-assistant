@@ -21,10 +21,7 @@ import Breadcrumbs from './breadcrumbs';
 import ToolsPanel from './tools-panel';
 import SplitPanel from './calls-split-panel';
 
-import {
-  CALL_LIST_SHARDS_PER_DAY,
-  PERIODS_TO_LOAD_STORAGE_KEY,
-} from '../call-list/calls-table-config';
+import { CALL_LIST_SHARDS_PER_DAY, PERIODS_TO_LOAD_STORAGE_KEY } from '../call-list/calls-table-config';
 
 import useAppContext from '../../contexts/app';
 
@@ -44,9 +41,7 @@ const CallAnalyticsLayout = () => {
     // default to 2 hours - half of one (4hr) shard period
     let periods = 0.5;
     try {
-      const periodsFromStorage = Math.abs(
-        JSON.parse(localStorage.getItem(PERIODS_TO_LOAD_STORAGE_KEY)),
-      );
+      const periodsFromStorage = Math.abs(JSON.parse(localStorage.getItem(PERIODS_TO_LOAD_STORAGE_KEY)));
       // prettier-ignore
       if (
         !Number.isSafeInteger(periodsFromStorage)

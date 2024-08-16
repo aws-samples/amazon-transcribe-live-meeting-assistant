@@ -47,6 +47,85 @@ Done
 
 Follow the deployment directions in the main [README](./README.md), but use your own CF Launch URL instead of our pre-built templates (Launch Stack buttons). 
 
+## Domain expansion
+You can follow the steps below to extend the LMA solution to any particular business domain.
+
+1. Open lma-main.yaml file and add the name under Domain parameter - 
+``` 
+     Domain:
+        Default: ''
+        Type: String
+        AllowedValues:
+            - ''
+            - 'Healthcare'
+```
+2. Add a condition in the lma-main.yaml file to check if the domain you are adding is selected - 
+```
+IsYOURDomainSelected: !Equals [ !Ref Domain, 'DOMAIN_NAME' ]
+
+```
+3. If your domain is selected you can either deploy your own custom stacks or edit exiting ones. In this example we are showing how you can edit the existing stacks to add your own Prompts
+In the lma-main.yaml file there is a MEETINGASSISTSETUP stack information. Go to the section and add the custom jsonl for your domain. 
+The custom .jsonl should be added under lma-meetingassist-setup-stack if you want to have your own custom prompts for the meeting assist feature. 
+For the healthcare domain we have added qna-ma-healthcare-demo.jsonl with custom prompts aligned with Healthcare domain.
+
+```
+        QnaMeetingAssistDemoJson: !If
+          - IsHealthcareDomainSelected
+          - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-healthcare-demo.jsonl
+          - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
+          
+```
+In this example above, the QnaMeetingAssistDemoJson property will be set to:
+- qna-ma-healthcare-demo.jsonl if Healthcare Domain is selected(IsHealthcareDomainSelected)
+- qna-ma-demo.jsonl if Healthcare domain is not selected. 
+- You can add an else section with your domain name selected like - 
+    ```
+  Type: AWS::SomeService::SomeResource
+    Properties:
+      Name: !If
+        - IsInsuranceDomainSelected
+        - insurance-resource
+        - !If
+          - IsFinanceDomainSelected
+          - finance-resource
+          - !If
+            - IsOther
+            - other-resource
+            - !Ref 'AWS::NoValue'
+  ```
+In this example, the Name property of MyResource will be set to:
+- insurance-resource if the EnvironmentName parameter is Insurance (IsInsuranceDomainSelected condition is true)
+- finance-resource if the EnvironmentName parameter is Finance (IsFinanceDomainSelected condition is true)
+- other-resource if the EnvironmentName parameter is neither prod nor test (IsOther condition is true)
+The property will be removed if none of the conditions are true (using AWS::NoValue)
+
+4. The lma-llm-template-setup-stack contains the prompts for the summary, details, SOAP, BIRP notes for Healthcare domain. You may want to add your own *.json file with the prompts you need for your business domain
+To do that add your own template.json file and go to llm_prompt_upload.py file
+5. Edit the file and update the logic to add the domain under the function def lambda_handler(event, context)
+```
+# Load the appropriate template.json file based on the user input "Domain" value
+if domain.lower() == 'healthcare':
+    llm_prompt_summary_template_file = os.environ[
+                                           'LAMBDA_TASK_ROOT'] + "/LLMPromptHealthcareSummaryTemplate.json"
+
+if domain.lower() == 'YOURDOMAIN':
+    llm_prompt_summary_template_file = os.environ[
+                                           'LAMBDA_TASK_ROOT'] + "/LLMPromptYOURDOMAINTemplate.json"
+
+
+else:
+    llm_prompt_summary_template_file = os.environ['LAMBDA_TASK_ROOT'] + "/LLMPromptSummaryTemplate.json"
+
+
+```
+
+6. Finally ensure the qna-ma-yourdomain-demo.jsonl file is copied from local to the s3 bucket with the appropriate permission by adding it to the `publish.sh` in the `lma-meetingassist-setup-stack` directory.
+Open the `lma-meetingassist-setup-stack/publish.sh` file and search for qna-ma-demo.jsonl. Add your domain file - qna-ma-yourdomain.jsonl
+```
+aws s3 cp ./qna-ma-yourdomain-demo.jsonl s3://${BUCKET}/${PREFIX}/${NAME}/qna-ma-yourdomain-demo.jsonl
+```
+That's it. Now you can build the package and deploy the new LMA-YOURDOMAIN Solution and test it out. 
 
 ## Contributing, and reporting issues
 

@@ -24,6 +24,7 @@
     "rules": {
         "no-console": "off",
         "no-alert": "off",
+        "max-len": ["error", { "code": 120, "ignoreUrls": true, "ignoreTemplateLiterals":  true}],
         "linebreak-style": [
             "error",
             "unix"
@@ -40,7 +41,7 @@
         "prettier/prettier": [
             "error",
             {
-                "printWidth": 100,
+                "printWidth": 120,
                 "singleQuote": true,
                 "trailingComma": "all"
             }

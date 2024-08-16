@@ -4,12 +4,7 @@ import React from 'react';
 import { Route, Switch } from 'react-router-dom';
 import { SideNavigation } from '@awsui/components-react';
 
-import {
-  CALLS_PATH,
-  STREAM_AUDIO_PATH,
-  VIRTUAL_PARTICIPANT_PATH,
-  DEFAULT_PATH,
-} from '../../routes/constants';
+import { CALLS_PATH, STREAM_AUDIO_PATH, VIRTUAL_PARTICIPANT_PATH, DEFAULT_PATH } from '../../routes/constants';
 
 export const callsNavHeader = { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` };
 export const callsNavItems = [
