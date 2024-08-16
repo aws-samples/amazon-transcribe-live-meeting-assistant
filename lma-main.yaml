@@ -33,6 +33,7 @@ Parameters:
       - "BEDROCK_LLM"
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
       - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
+      - "Q_BUSINESS (Use Existing)"
     Description: Choose the knowledge base / LLM service to use
 
   MeetingAssistServiceBedrockModelID:
@@ -499,6 +500,30 @@ Parameters:
       true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
     AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
 
+  AmazonQAppId:
+    Type: String
+    AllowedPattern: "^[a-zA-Z0-9][a-zA-Z0-9-]{35}$"
+    Description: Amazon Q Application ID
+
+  IDCApplicationARN:
+    Type: String
+    Description: ARN of the Identity Center customer managed application created for QBusiness
+
+  DynamoDBTableName:
+    Type: String
+    Description: DynamoDB Table Name used for caching QBusiness credentials
+
+  AmazonQRegion:
+    Type: String
+    Default: "us-east-1"
+    AllowedPattern: "^[a-z]{2}-[a-z]+-[0-9]+$"
+    Description: Amazon Q Region
+
+  AmazonQEndpointUrl:
+    Type: String
+    Default: ""
+    Description: (Optional) Amazon Q Endpoint (leave empty for default endpoint)
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -519,6 +544,14 @@ Metadata:
           - MeetingAssistServiceBedrockModelID
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
+      - Label:
+          default: Meeting Assist Q Business Integration
+        Parameters:
+          - AmazonQAppId
+          - IDCApplicationARN
+          - DynamoDBTableName
+          - AmazonQRegion
+          - AmazonQEndpointUrl
       - Label:
           default: Amazon S3 Configuration
         Parameters:
@@ -723,6 +756,17 @@ Rules:
         AssertDescription:
           BedrockKnowledgeBaseId is required when MeetingAssistService
           is 'BEDROCK_KNOWLEDGE_BASE'
+  AmazonQId:
+    RuleCondition:
+      !Equals [
+        !Ref MeetingAssistService,
+        "Q_BUSINESS (Use Existing)",
+      ]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AmazonQAppId, ""]]
+        AssertDescription:
+          AmazonQAppId is required when MeetingAssistService
+          is 'Q_BUSINESS'
 
 Conditions:
   IsHealthcareDomainSelected: !Equals [!Ref Domain, "Healthcare"]
@@ -1298,8 +1342,6 @@ Resources:
           - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        AmazonQAppId: ""
-        AmazonQUserId: ""
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
         LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
         LexMeetingAssistLocaleId:
@@ -1333,6 +1375,11 @@ Resources:
         # QnaBotSettings - JSON param with new settings values based on options selected
         QnaBotSettings: !GetAtt SettingsJSON.Output
         Version: v0.8.8
+        AmazonQAppId: !Ref AmazonQAppId
+        IDCApplicationARN: !Ref IDCApplicationARN
+        DynamoDBTableName: !Ref DynamoDBTableName
+        AmazonQRegion: !Ref AmazonQRegion
+        AmazonQEndpointUrl: !Ref AmazonQEndpointUrl
 
   VPCSTACK:
     Type: AWS::CloudFormation::Stack

@@ -117,10 +117,7 @@ Resources:
       CidrBlock: 10.0.0.0/18
       VpcId:
         Ref: VPC
-      AvailabilityZone:
-        Fn::Select:
-          - 0
-          - Fn::GetAZs: ""
+      AvailabilityZone: "us-east-1a"
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -188,10 +185,7 @@ Resources:
       CidrBlock: 10.0.64.0/18
       VpcId:
         Ref: VPC
-      AvailabilityZone:
-        Fn::Select:
-          - 1
-          - Fn::GetAZs: ""
+      AvailabilityZone: "us-east-1b"
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -259,10 +253,7 @@ Resources:
       CidrBlock: 10.0.128.0/18
       VpcId:
         Ref: VPC
-      AvailabilityZone:
-        Fn::Select:
-          - 0
-          - Fn::GetAZs: ""
+      AvailabilityZone: "us-east-1a"
       MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
@@ -300,10 +291,7 @@ Resources:
       CidrBlock: 10.0.192.0/18
       VpcId:
         Ref: VPC
-      AvailabilityZone:
-        Fn::Select:
-          - 1
-          - Fn::GetAZs: ""
+      AvailabilityZone: "us-east-1b"
       MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
