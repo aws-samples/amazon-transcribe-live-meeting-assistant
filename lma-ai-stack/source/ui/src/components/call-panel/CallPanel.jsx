@@ -163,7 +163,7 @@ const CallSummary = ({ item }) => {
                 <ButtonDropdown
                   items={[
                     { text: 'Download summary', id: 'download', disabled: false, iconName: 'download' },
-                    { text: 'Email summary', id: 'email', disabled: false, iconName: 'envelope' },
+                    { text: 'Email summary (beta)', id: 'email', disabled: false, iconName: 'envelope' },
                   ]}
                   variant="normal"
                   onItemClick={(option) => downloadCallSummary(option)}

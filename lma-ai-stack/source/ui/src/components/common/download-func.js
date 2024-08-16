@@ -79,13 +79,38 @@ const sortTranscriptByTime = (callTranscriptPerCallId, meeting) => {
     .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), [])
     // only extract the start time, end time, speaker and transcript
     .map((c) => {
-      const { startTime, endTime, transcript } = c;
-      let { speaker } = c;
+      const { channel, startTime, endTime } = c;
+      let { speaker, transcript } = c;
 
-      // In streaming audio the speaker will just be "Other participant", override this with the
-      // name the user chose if needed
-      if (speaker === DEFAULT_OTHER_SPEAKER_NAME || speaker === '') {
+      if (channel === 'CALLER' && (speaker === DEFAULT_OTHER_SPEAKER_NAME || speaker === '')) {
+        // In streaming audio the speaker will just be "Other participant", override this with the
+        // name the user chose if needed
         speaker = callerPhoneNumber || DEFAULT_OTHER_SPEAKER_NAME;
+      } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
+        // The speaker for the assistant will just be "Other participant", override this
+        speaker = 'MEETING ASSISTANT';
+
+        // Clean up the transcript for the assistant to replace markdown and html
+        const ASSISTANT_QUERY_STRING = '**Assistant Query:** *';
+        const ASSISTANT_ANSWER_STRING = '*\n\n**Assistant Answer:**\n\n';
+        transcript = transcript.replace(ASSISTANT_QUERY_STRING, '\n(Query): ');
+        transcript = transcript.replace(ASSISTANT_ANSWER_STRING, '\n(Answer): ');
+
+        const parsedTranscript = transcript.split('<details>');
+        // eslint-disable-next-line prefer-const
+        let [answer, sources] = parsedTranscript;
+        // eslint-disable-next-line prefer-destructuring
+        sources = sources.split('</p></details>')[0];
+
+        sources = sources.replace('<summary>Context</summary><p style="white-space: pre-line;"><br>', '(Sources)\n');
+
+        sources = sources.replaceAll(
+          /<a href="([^"]+)">([^<]+)<\/a><br>([^<]+)[br>|^]/g,
+          '- $2 \nLocation: $1\nQuote: $3',
+        );
+        sources = sources.replaceAll('<br>', '');
+
+        transcript = answer + sources;
       }
 
       // modify start and end time from seconds to timestamp, e.g. 258.285 to 04:18.2
