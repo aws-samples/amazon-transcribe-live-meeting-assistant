@@ -93,7 +93,7 @@ function IntegrationProvider({ children }: any) {
   }
 
   const updateMetadata = useCallback((newMetadata: any) => {
-    console.log("ewMetadata.baseUrl" + newMetadata.baseUrl);
+    console.log("newMetadata.baseUrl" + newMetadata.baseUrl);
     if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.zoom.us") {
       setPlatform("Zoom");
     } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.chime.aws") {
