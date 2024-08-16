@@ -11,8 +11,6 @@ export const callListBreadcrumbItems = [
   { text: 'Meetings', href: `#${CALLS_PATH}` },
 ];
 
-const Breadcrumbs = () => (
-  <BreadcrumbGroup ariaLabel="Breadcrumbs" items={callListBreadcrumbItems} />
-);
+const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={callListBreadcrumbItems} />;
 
 export default Breadcrumbs;

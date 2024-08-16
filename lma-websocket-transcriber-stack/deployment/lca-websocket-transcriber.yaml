@@ -4,6 +4,28 @@ Transform: AWS::Serverless-2016-10-31
 Description: Amazon Transcribe Live Meeting Assist - Websocket Server
 
 Parameters:
+
+  # networking parameters
+  VPC:
+    Description: VPC ID
+    Type: String
+
+  PublicSubnet1:
+    Description: Public subnet 1 for Fargate
+    Type: String
+
+  PublicSubnet2:
+    Description: Public subnet 2 for Fargate
+    Type: String
+
+  PrivateSubnet1:
+    Description: Private subnet 1 for Fargate
+    Type: String
+
+  PrivateSubnet2:
+    Description: Private subnet 2 for Fargate
+    Type: String
+
   UserPoolId:
     Type: String
     Description: >
@@ -65,9 +87,8 @@ Parameters:
     Type: String
     Default: "false"
     Description: >-
-      Enable content redaction from Amazon Transcribe transcription output. This is
-      only used when
-      the 'en-US' language is selected in the TranscribeLanguageCode parameter.
+      Enable content redaction from Amazon Transcribe transcription output. This is only used when
+      the 'en-US', 'en-AU', 'en-GB' or 'es-US' languages are selected in the TranscribeLanguageCode parameter.
     AllowedValues:
     - "true"
     - "false"
@@ -206,16 +227,9 @@ Parameters:
     Type: String
     Description: LCA settings SSM Parameter store
 
-  # NOTE: "AssistantWakePhraseRegEx" (wake phrase parameter) is not used by this stack/lambda function. 
-  # It is added to parameters only to force a custom resource update when wake phrase parameter 
-  # in the main stack is changed. The custom resource update then runs UpdateWSEndpointSettings lambda to restore 
-  # "WSEndpoint" and "recordingDisclaimer" fields overwritten by AI Stack (when wake phrase is changed).
-  AssistantWakePhraseRegEx:
+  UpdateLMASettingsFunctionArn:
     Type: String
-    Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
-    Description: >
-      A regular expression for the wake phrase that invokes the Meeting Assistant.
-      Default is 'OK Assistant'.
+    Description: Update LMA Settings Lambda function ARN
 
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
@@ -311,8 +325,12 @@ Metadata:
 
 Conditions:
   ShouldEnableContentRedaction: !And
-  - !Equals [!Ref IsContentRedactionEnabled, 'true']
-  - !Equals [!Ref TranscribeLanguageCode, 'en-US']
+    - !Equals [!Ref IsContentRedactionEnabled, 'true']
+    - !Or 
+      - !Equals [!Ref TranscribeLanguageCode, 'en-US']
+      - !Equals [!Ref TranscribeLanguageCode, 'en-AU']
+      - !Equals [!Ref TranscribeLanguageCode, 'en-GB']
+      - !Equals [!Ref TranscribeLanguageCode, 'es-US']
   ShouldInstallPcaIntegration: !Not [!Equals [!Ref PcaS3BucketName, '']]
 
 Outputs:
@@ -327,6 +345,11 @@ Outputs:
     - - 'wss://'
       - !GetAtt WebSocketCloudFrontDistribution.DomainName
       - '/api/v1/ws'
+
+  TranscriberWebsocketFargateServiceSecurityGroup:
+    Description: Egress security group for ECS 
+    Value: !Ref TranscriberWebsocketFargateServiceSecurityGroup
+
 
 Resources:
 
@@ -515,7 +538,7 @@ Resources:
             cannot be specificed directly.
 
 
-  TranscriberCodeBuildProject:
+  WebsocketTranscriberCodeBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Description: !Sub >-
@@ -602,7 +625,7 @@ Resources:
             Action:
             - codebuild:StartBuild
             - codebuild:BatchGetBuilds
-            Resource: !GetAtt TranscriberCodeBuildProject.Arn
+            Resource: !GetAtt WebsocketTranscriberCodeBuildProject.Arn
           - Effect: Allow
             Action:
             - logs:CreateLogGroup
@@ -635,7 +658,7 @@ Resources:
     Type: Custom::CodeBuildRun
     Properties:
       ServiceToken: !GetAtt LambdaCodeBuildStartBuild.Arn
-      BuildProjectName: !Ref TranscriberCodeBuildProject
+      BuildProjectName: !Ref WebsocketTranscriberCodeBuildProject
       # pass code location to support upgrades
       CodeLocation: !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
 
@@ -698,273 +721,6 @@ Resources:
         StreamViewType: NEW_IMAGE
 
   ##########################################################################
-  # VPC
-  ##########################################################################
-  TranscribingVPC:
-    Type: AWS::EC2::VPC
-    Properties:
-      CidrBlock: 10.0.0.0/16
-      EnableDnsHostnames: true
-      EnableDnsSupport: true
-      InstanceTenancy: default
-
-  TranscribingVPCIGW:
-    Type: AWS::EC2::InternetGateway
-
-  TranscribingVPCVPCGW:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId:
-        Ref: TranscribingVPC
-      InternetGatewayId:
-        Ref: TranscribingVPCIGW
-
-  VPCFlowLogsLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-        - id: W84
-          reason: >-
-            By default CloudWatchLogs LogGroups data is encrypted using the CloudWatch
-            server-side encryption keys (AWS Managed Keys).
-
-  VPCFlowLogsRole:
-    Type: AWS::IAM::Role
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-        - id: W11
-          reason: >-
-            "Allow Resource * for CloudWatch Logs API since the resources are customer
-            defined."
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-            - vpc-flow-logs.amazonaws.com
-          Action:
-          - sts:AssumeRole
-      Path: /
-      Policies:
-      - PolicyName: LogRolePolicy
-        PolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-          - Effect: Allow
-            Action:
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:DescribeLogGroups
-            - logs:DescribeLogStreams
-            - logs:PutLogEvents
-            Resource: "*"
-  VPCFlowLog:
-    Type: AWS::EC2::FlowLog
-    Properties:
-      DeliverLogsPermissionArn: !GetAtt "VPCFlowLogsRole.Arn"
-      LogGroupName: !Ref "VPCFlowLogsLogGroup"
-      ResourceId: !Ref "TranscribingVPC"
-      ResourceType: VPC
-      TrafficType: ALL
-
-  TranscribingVPCPublicSubnet1Subnet:
-    Type: AWS::EC2::Subnet
-    Properties:
-      CidrBlock: 10.0.0.0/18
-      VpcId:
-        Ref: TranscribingVPC
-      AvailabilityZone:
-        Fn::Select:
-        - 0
-        - Fn::GetAZs: ""
-      MapPublicIpOnLaunch: true
-    DependsOn:
-    - TranscribingVPCVPCGW
-
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-        - id: W33
-          reason: Public IP on launch is needed by the solution
-
-  TranscribingVPCPublicSubnet1RouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId:
-        Ref: TranscribingVPC
-
-  TranscribingVPCPublicSubnet1RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId:
-        Ref: TranscribingVPCPublicSubnet1RouteTable
-      SubnetId:
-        Ref: TranscribingVPCPublicSubnet1Subnet
-
-  TranscribingVPCPublicSubnet1DefaultRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId:
-        Ref: TranscribingVPCPublicSubnet1RouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId:
-        Ref: TranscribingVPCIGW
-    DependsOn:
-    - TranscribingVPCVPCGW
-
-  TranscribingVPCPublicSubnet:
-    Type: AWS::EC2::EIP
-    Properties:
-      Domain: vpc
-
-  TranscribingVPCPublicSubnet1NATGateway:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId:
-        Fn::GetAtt:
-        - TranscribingVPCPublicSubnet
-        - AllocationId
-      SubnetId:
-        Ref: TranscribingVPCPublicSubnet1Subnet
-
-  TranscribingVPCPublicSubnet2Subnet:
-    Type: AWS::EC2::Subnet
-    Properties:
-      CidrBlock: 10.0.64.0/18
-      VpcId:
-        Ref: TranscribingVPC
-      AvailabilityZone:
-        Fn::Select:
-        - 1
-        - Fn::GetAZs: ""
-      MapPublicIpOnLaunch: true
-    DependsOn:
-    - TranscribingVPCVPCGW
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-        - id: W33
-          reason: Public IP on launch is needed by the solution
-
-  TranscribingVPCPublicSubnet2RouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId:
-        Ref: TranscribingVPC
-
-  TranscribingVPCPublicSubnet2RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId:
-        Ref: TranscribingVPCPublicSubnet2RouteTable
-      SubnetId:
-        Ref: TranscribingVPCPublicSubnet2Subnet
-
-  TranscribingVPCPublicSubnet2DefaultRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId:
-        Ref: TranscribingVPCPublicSubnet2RouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId:
-        Ref: TranscribingVPCIGW
-    DependsOn:
-    - TranscribingVPCVPCGW
-
-  TranscribingVPCPublicSubnet2:
-    Type: AWS::EC2::EIP
-    Properties:
-      Domain: vpc
-
-  TranscribingVPCPublicSubnet2NATGateway:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId:
-        Fn::GetAtt:
-        - TranscribingVPCPublicSubnet2
-        - AllocationId
-      SubnetId:
-        Ref: TranscribingVPCPublicSubnet2Subnet
-
-  TranscribingVPCPrivateSubnet1Subnet:
-    Type: AWS::EC2::Subnet
-    Properties:
-      CidrBlock: 10.0.128.0/18
-      VpcId:
-        Ref: TranscribingVPC
-      AvailabilityZone:
-        Fn::Select:
-        - 0
-        - Fn::GetAZs: ""
-      MapPublicIpOnLaunch: false
-
-  TranscribingVPCPrivateSubnet1RouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId:
-        Ref: TranscribingVPC
-
-  TranscribingVPCPrivateSubnet1RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId:
-        Ref: TranscribingVPCPrivateSubnet1RouteTable
-      SubnetId:
-        Ref: TranscribingVPCPrivateSubnet1Subnet
-
-  TranscribingVPCPrivateSubnet1DefaultRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId:
-        Ref: TranscribingVPCPrivateSubnet1RouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId:
-        Ref: TranscribingVPCPublicSubnet1NATGateway
-
-  TranscribingVPCPrivateSubnet2Subnet:
-    Type: AWS::EC2::Subnet
-    Properties:
-      CidrBlock: 10.0.192.0/18
-      VpcId:
-        Ref: TranscribingVPC
-      AvailabilityZone:
-        Fn::Select:
-        - 1
-        - Fn::GetAZs: ""
-      MapPublicIpOnLaunch: false
-
-  TranscribingVPCPrivateSubnet2RouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId:
-        Ref: TranscribingVPC
-
-  TranscribingVPCPrivateSubnet2RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId:
-        Ref: TranscribingVPCPrivateSubnet2RouteTable
-      SubnetId:
-        Ref: TranscribingVPCPrivateSubnet2Subnet
-
-  TranscribingVPCPrivateSubnet2DefaultRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId:
-        Ref: TranscribingVPCPrivateSubnet2RouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId:
-        Ref: TranscribingVPCPublicSubnet2NATGateway
-
-
-  ##########################################################################
   # ELB
   ##########################################################################
   TranscribingCluster:
@@ -986,8 +742,8 @@ Resources:
         - TranscribingWebsocketLoadBalancerSecurityGroup
         - GroupId
       Subnets:
-      - !Ref TranscribingVPCPublicSubnet1Subnet
-      - !Ref TranscribingVPCPublicSubnet2Subnet
+      - !Ref PublicSubnet1
+      - !Ref PublicSubnet2
       Type: application
 
   TranscribingWebsocketLoadBalancerSecurityGroup:
@@ -1000,7 +756,7 @@ Resources:
         FromPort: 80
         IpProtocol: tcp
         ToPort: 80
-      VpcId: !Ref TranscribingVPC
+      VpcId: !Ref VPC
 
   TranscribingWebsocketLoadBalancerSecurityGroupEgress:
     Type: AWS::EC2::SecurityGroupEgress
@@ -1051,7 +807,7 @@ Resources:
         Value: '180'
       TargetType: ip
       UnhealthyThresholdCount: 2
-      VpcId: !Ref TranscribingVPC
+      VpcId: !Ref VPC
 
   TranscribingWebsocketLoadBalancerListenerRule1:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
@@ -1398,8 +1154,8 @@ Resources:
             - TranscriberWebsocketFargateServiceSecurityGroup
             - GroupId
           Subnets:
-          - Ref: TranscribingVPCPrivateSubnet1Subnet
-          - Ref: TranscribingVPCPrivateSubnet2Subnet
+          - Ref: PrivateSubnet1
+          - Ref: PrivateSubnet2
       TaskDefinition:
         Ref: TranscriberWebsocketTaskDef
     DependsOn:
@@ -1416,7 +1172,7 @@ Resources:
       - CidrIp: 0.0.0.0/0
         Description: Allow all outbound traffic by default
         IpProtocol: "-1"
-      VpcId: !Ref TranscribingVPC
+      VpcId: !Ref VPC
 
 
   TranscriberWebsocketFargateServiceSecurityGroupIngress:
@@ -1542,107 +1298,18 @@ Resources:
           reason: This is using Cloudfront default TLS, can be changed by customer
             if needed.
 
-  WSEndpointLambdaRole:
-    Type: "AWS::IAM::Role"
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-        - Action: "sts:AssumeRole"
-          Effect: Allow
-          Principal:
-            Service: lambda.amazonaws.com
-        Version: 2012-10-17
-      ManagedPolicyArns:
-      - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-      Policies:
-      - PolicyName: updateSSMStore
-        PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - ssm:GetParameter
-            - ssm:PutParameter
-            Resource:
-            - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
-
-  UpdateWSEndpointSettings:
-    Type: "AWS::Lambda::Function"
-    Properties:
-      Role: !GetAtt WSEndpointLambdaRole.Arn
-      Handler: index.handler
-      Runtime: python3.11
-      Timeout: 900
-      Code:
-        ZipFile: |
-          import boto3
-          import cfnresponse
-          import json
-
-          ssm = boto3.client('ssm')
-          def updateSSMParameter(props):
-            parameterName = props['LCASettings']
-            response = ssm.get_parameter(Name=parameterName)
-            settings = response['Parameter']['Value']
-            settingsJSON = json.loads(settings)
-            settingsJSON['WSEndpoint'] = props['WSEndpoint']
-            settingsJSON['recordingDisclaimer'] = props['recordingDisclaimer']
-            updatedsettings = json.dumps(settingsJSON)
-            ssm.put_parameter(Name=parameterName, Value=updatedsettings, Overwrite=True)
-                        
-          def handler(event, context):        
-            print(json.dumps(event))
-            status = cfnresponse.SUCCESS
-            responseData = {}
-            reason = "Success"
-            props = event["ResourceProperties"]
-            if event['RequestType'] != 'Delete':
-              try:
-                updateSSMParameter(props)
-              except Exception as e:
-                print(e)
-                reason = f"Exception thrown: {e}"
-                status = cfnresponse.FAILED              
-            cfnresponse.send(event, context, status, responseData, reason=reason)
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/UpdateWSEndpointSettings
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-        - id: W89
-          reason: Customer can use VPC if desired
-        - id: W92
-          reason: Customer can choose reserved concurrency based on their requirement.
-        - id: W58
-          reason: Managed policy already provides access to CloudWatch logs.
-    DependsOn:
-    - UpdateWSEndpointSettingsLogGroup
-
-  UpdateWSEndpointSettingsLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/UpdateWSEndpointSettings
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-
-  UpdateWSEndpointSettingsExec:
+  UpdateLMASettingsWithWSEndpoint:
     Type: AWS::CloudFormation::CustomResource
     Properties:
-      ServiceToken: !GetAtt UpdateWSEndpointSettings.Arn
-      LCASettings: !Ref LMASettingsParameterName
-      WSEndpoint: !Join
-      - ''
-      - - 'wss://'
-        - !GetAtt WebSocketCloudFrontDistribution.DomainName
-        - '/api/v1/ws'
-      recordingDisclaimer: !Ref RecordingDisclaimer
-      # "AssistantWakePhraseRegEx" (wake phrase parameter) is not used by this stack/lambda function. 
-      # It is added to parameters only to force a custom resource update when wake phrase parameter 
-      # in the main stack is changed. The custom resource update then runs UpdateWSEndpointSettings lambda to restore 
-      # "WSEndpoint" and "recordingDisclaimer" fields overwritten by AI Stack (when wake phrase is changed).
-      assistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
+      ServiceToken: !Ref UpdateLMASettingsFunctionArn
+      LCASettingsName: !Ref LMASettingsParameterName
+      LCASettingsKeyValuePairs:
+        WSEndpoint: !Join
+          - ''
+          - - 'wss://'
+            - !GetAtt WebSocketCloudFrontDistribution.DomainName
+            - '/api/v1/ws'
+        recordingDisclaimer: !Ref RecordingDisclaimer
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 

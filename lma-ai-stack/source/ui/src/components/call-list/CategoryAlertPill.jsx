@@ -29,13 +29,7 @@ export const CategoryAlertPill = (props) => {
     </>
   ));
   return (
-    <Popover
-      dismissButton={false}
-      position="right"
-      size="small"
-      triggerType="custom"
-      content={popup}
-    >
+    <Popover dismissButton={false} position="right" size="small" triggerType="custom" content={popup}>
       <span className="category-pill-alert-icon">{alertCount}</span>
     </Popover>
   );

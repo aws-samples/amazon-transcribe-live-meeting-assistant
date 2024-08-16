@@ -1,6 +1,6 @@
 {
   "name": "lma-ui",
-  "version": "0.1.6",
+  "version": "0.1.9",
   "private": true,
   "dependencies": {
     "@aws-amplify/ui-components": "^1.9.6",
@@ -8,6 +8,7 @@
     "@aws-crypto/sha256-browser": "^2.0.1",
     "@aws-sdk/client-ssm": "^3.215.0",
     "@aws-sdk/client-translate": "^3.245.0",
+    "@aws-sdk/client-sfn": "^3.252.0",
     "@aws-sdk/hash-node": "^3.78.0",
     "@aws-sdk/middleware-retry": "^3.254.0",
     "@aws-sdk/protocol-http": "^3.78.0",

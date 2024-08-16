@@ -13,8 +13,16 @@ import useAppContext from '../contexts/app';
 
 import CallsRoutes from './CallsRoutes';
 import StreamAudioRoutes from './StreamAudioRoutes';
+import VirtualParticipantRoutes from './VirtualParticipantRoutes';
 
-import { CALLS_PATH, DEFAULT_PATH, LOGIN_PATH, LOGOUT_PATH, STREAM_AUDIO_PATH } from './constants';
+import {
+  CALLS_PATH,
+  DEFAULT_PATH,
+  LOGIN_PATH,
+  LOGOUT_PATH,
+  STREAM_AUDIO_PATH,
+  VIRTUAL_PARTICIPANT_PATH,
+} from './constants';
 
 const logger = new Logger('AuthRoutes');
 
@@ -35,15 +43,16 @@ const AuthRoutes = ({ redirectParam }) => {
           <CallsRoutes />
         </Route>
         <Route path={LOGIN_PATH}>
-          <Redirect
-            to={!redirectParam || redirectParam === LOGIN_PATH ? DEFAULT_PATH : `${redirectParam}`}
-          />
+          <Redirect to={!redirectParam || redirectParam === LOGIN_PATH ? DEFAULT_PATH : `${redirectParam}`} />
         </Route>
         <Route path={LOGOUT_PATH}>
           <AmplifySignOut />
         </Route>
         <Route path={STREAM_AUDIO_PATH}>
           <StreamAudioRoutes />
+        </Route>
+        <Route path={VIRTUAL_PARTICIPANT_PATH}>
+          <VirtualParticipantRoutes />
         </Route>
         <Route>
           <Redirect to={DEFAULT_PATH} />

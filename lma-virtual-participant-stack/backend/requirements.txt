@@ -1,0 +1,6 @@
+
+amazon_transcribe 
+boto3
+pytest-playwright 
+requests
+sounddevice 

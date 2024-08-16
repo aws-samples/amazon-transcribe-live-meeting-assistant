@@ -153,11 +153,12 @@ For the best meeting streaming experience, install the LMA browser plugin - curr
 
 ## Start using LMA
 
-LMA provides two streaming options:
+LMA provides three streaming options:
 
 1. Use the **Chrome browser extension** to stream audio and speaker metadata from your meeting browser app. It currently works with Zoom, Teams and Chime, but we hope to add more meeting apps.
 1. Use the **LMA Stream Audio tab** to stream audio from your microphone and any Chrome browser-based meeting app, softphone, or audio application.
 We show you how to use both options in the following sections.
+1. (New) Use the **LMA Virtual Participant (Preview)** feature to have LMA join the meeting as a separate virtual participant. **Please review the [Virtual Participant README](./lma-virtual-participant-stack/README.md) for more information and known issues.*
 
 ### Option 1: Use the Chrome browser extension to stream a Zoom call
 
@@ -265,7 +266,7 @@ Amazon Transcribe has a default limit of 25 concurrent transcription streams, wh
 
 LMA provides runtime monitoring and logs for each component using CloudWatch:
 
-- **Websocket processing and transcribing Fargate task** – On the [Amazon Elastic Container Service](https://us-east-1.console.aws.amazon.com/ecs/v2/clusters) (Amazon ECS) console, navigate to the Clusters page and open the `LMA-WEBSOCKETSTACK-xxxx-TranscribingCluster` function. Choose the **Tasks** tab and open the task page. Choose **Logs** and **View in CloudWatch** to inspect the WebSocket transcriber task logs.
+- **Websocket processing and transcribing Fargate task** – On the [Amazon Elastic Container Service](https://us-east-1.console.aws.amazon.com/ecs/v2/clusters) (Amazon ECS) console, navigate to the Clusters page and open the `LMA-WEBSOCKETTRANSCRIBERSTACK-xxxx-TranscribingCluster` function. Choose the **Tasks** tab and open the task page. Choose **Logs** and **View in CloudWatch** to inspect the WebSocket transcriber task logs.
 - **Call Event Processor Lambda function** – On the Lambda console, open the `AISTACK-CallEventProcessor` function. Choose the **Monitor** tab to see function metrics. Choose **View logs in CloudWatch** to inspect function logs.
 - **AWS AppSync API** – On the AWS AppSync console, open the `CallAnalytics-LMA` API. Choose Monitoring in the navigation pane to see API metrics. Choose **View logs in CloudWatch** to inspect AWS AppSync API logs.
   

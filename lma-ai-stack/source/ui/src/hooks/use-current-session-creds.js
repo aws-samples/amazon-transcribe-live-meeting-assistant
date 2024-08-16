@@ -9,10 +9,7 @@ const DEFAULT_CREDS_REFRESH_INTERVAL_IN_MS = 60 * 15 * 1000;
 
 const logger = new Logger('useCurrentSessionCreds');
 
-const useCurrentSessionCreds = ({
-  authState,
-  credsIntervalInMs = DEFAULT_CREDS_REFRESH_INTERVAL_IN_MS,
-}) => {
+const useCurrentSessionCreds = ({ authState, credsIntervalInMs = DEFAULT_CREDS_REFRESH_INTERVAL_IN_MS }) => {
   const [currentSession, setCurrentSession] = useState();
   const [currentCredentials, setCurrentCredentials] = useState();
   let interval;

@@ -18,11 +18,7 @@ import {
 import '@awsui/global-styles/index.css';
 import useWebSocket from 'react-use-websocket';
 
-import {
-  DEFAULT_OTHER_SPEAKER_NAME,
-  DEFAULT_LOCAL_SPEAKER_NAME,
-  SYSTEM,
-} from '../common/constants';
+import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '../common/constants';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
@@ -49,7 +45,6 @@ const StreamAudio = () => {
   const [streamingStarted, setStreamingStarted] = useState(false);
   const [isFlashing, setIsFlashing] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
-  const [micInputOption] = useState('agent');
   const [recordedMeetingId, setRecordedMeetingId] = useState('');
 
   useEffect(() => {
@@ -128,34 +123,15 @@ const StreamAudio = () => {
   const displayAudioSource = useRef();
   const micAudioSource = useRef();
   const channelMerger = useRef();
-  const destination = useRef();
-  const audioData = useRef();
   const agreeToRecord = useRef();
 
-  const pcmEncode = (input) => {
-    const buffer = new ArrayBuffer(input.length * 2);
-    const view = new DataView(buffer);
-    for (let i = 0; i < input.length; i += 1) {
-      const s = Math.max(-1, Math.min(1, input[i]));
-      view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-    }
-    return buffer;
-  };
-
-  const interleave = (lbuffer, rbuffer) => {
-    const leftAudioBuffer = pcmEncode(lbuffer);
-    const leftView = new DataView(leftAudioBuffer);
-    const rightAudioBuffer = pcmEncode(rbuffer);
-    const rightView = new DataView(rightAudioBuffer);
-
-    const buffer = new ArrayBuffer(leftAudioBuffer.byteLength * 2);
-    const view = new DataView(buffer);
-
-    for (let i = 0, j = 0; i < leftAudioBuffer.byteLength; i += 2, j += 4) {
-      view.setInt16(j, leftView.getInt16(i, true), true);
-      view.setInt16(j + 2, rightView.getInt16(i, true), true);
-    }
-    return buffer;
+  const convertToMono = (audioSource) => {
+    const splitter = audioContext.current.createChannelSplitter(2);
+    const merger = audioContext.current.createChannelMerger(1);
+    audioSource.connect(splitter);
+    splitter.connect(merger, 0, 0);
+    splitter.connect(merger, 1, 0);
+    return merger;
   };
 
   const stopRecording = async () => {
@@ -194,7 +170,9 @@ const StreamAudio = () => {
   // The callMetaData state is updated so onscreen fields are updated, but a copy is returned
   //  to avoid the scenario of the state not updating before it is used
   const getFinalCallMetadata = () => {
-    const meetingPrefix = meetingTopic || 'Stream Audio';
+    // eslint-disable-next-line no-useless-escape
+    const meetingPrefix = meetingTopic.replace(/[\/?#%\+&]/g, '|') || 'Stream Audio';
+
     setMeetingTopic(meetingPrefix);
     const callMetaDataCopy = {
       ...callMetaData,
@@ -215,21 +193,13 @@ const StreamAudio = () => {
       audioContext.current = new window.AudioContext();
       displayStream.current = await window.navigator.mediaDevices.getDisplayMedia({
         video: true,
-        audio: {
-          noiseSuppression: true,
-          autoGainControl: true,
-          echoCancellation: true,
-        },
+        audio: true,
         selfBrowserSurface: 'exclude',
       });
 
       micStream.current = await window.navigator.mediaDevices.getUserMedia({
         video: false,
-        audio: {
-          noiseSuppression: true,
-          autoGainControl: true,
-          echoCancellation: true,
-        },
+        audio: true,
       });
       SOURCE_SAMPLING_RATE = audioContext.current.sampleRate;
 
@@ -241,16 +211,15 @@ const StreamAudio = () => {
       sendMessage(JSON.stringify(recordingCallMetaData));
       setStreamingStarted(true);
 
-      displayAudioSource.current = audioContext.current.createMediaStreamSource(
-        new MediaStream([displayStream.current.getAudioTracks()[0]]),
-      );
-      micAudioSource.current = audioContext.current.createMediaStreamSource(
-        new MediaStream([micStream.current.getAudioTracks()[0]]),
-      );
+      displayAudioSource.current = audioContext.current.createMediaStreamSource(displayStream.current);
+      micAudioSource.current = audioContext.current.createMediaStreamSource(micStream.current);
+
+      const monoDisplaySource = convertToMono(displayAudioSource.current);
+      const monoMicSource = convertToMono(micAudioSource.current);
 
       channelMerger.current = audioContext.current.createChannelMerger(2);
-      displayAudioSource.current.connect(channelMerger.current, 0, 0);
-      micAudioSource.current.connect(channelMerger.current, 0, 1);
+      monoMicSource.connect(channelMerger.current, 0, 0);
+      monoDisplaySource.connect(channelMerger.current, 0, 1);
 
       console.log(`
         DEBUG - [${new Date().toISOString()}]: Registering and adding AudioWorklet processor to capture audio
@@ -263,21 +232,7 @@ const StreamAudio = () => {
         `);
       }
 
-      audioProcessor.current = new AudioWorkletNode(audioContext.current, 'recording-processor', {
-        processorOptions: {
-          numberOfChannels: 2,
-          sampleRate: SOURCE_SAMPLING_RATE,
-          maxFrameCount: (audioContext.current.sampleRate * 1) / 10,
-        },
-      });
-
-      audioProcessor.current.port.postMessage({
-        message: 'UPDATE_RECORDING_STATE',
-        setRecording: true,
-      });
-
-      destination.current = audioContext.current.createMediaStreamDestination();
-      channelMerger.current.connect(audioProcessor.current).connect(destination.current);
+      audioProcessor.current = new AudioWorkletNode(audioContext.current, 'recording-processor');
 
       audioProcessor.current.port.onmessageerror = (error) => {
         console.log(`
@@ -285,22 +240,11 @@ const StreamAudio = () => {
         `);
       };
 
-      console.log(`
-        DEBUG - [${new Date().toISOString()}]: Sending audio buffer to the websocket server.
-      `);
-      // buffer[0] - display stream,  buffer[1] - mic stream
       audioProcessor.current.port.onmessage = (event) => {
-        if (micInputOption === 'agent') {
-          audioData.current = new Uint8Array(
-            interleave(event.data.buffer[0], event.data.buffer[1]),
-          );
-        } else {
-          audioData.current = new Uint8Array(
-            interleave(event.data.buffer[1], event.data.buffer[0]),
-          );
-        }
-        sendMessage(audioData.current);
+        // this is pcm audio
+        sendMessage(event.data);
       };
+      channelMerger.current.connect(audioProcessor.current);
     } catch (error) {
       alert(`An error occurred while recording: ${error}`);
       await stopRecording();
@@ -348,11 +292,7 @@ const StreamAudio = () => {
         <Form
           actions={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button
-                variant={recording ? 'secondary' : 'primary'}
-                onClick={handleRecording}
-                disabled={false}
-              >
+              <Button variant={recording ? 'secondary' : 'primary'} onClick={handleRecording} disabled={false}>
                 {recording ? 'Stop Streaming' : 'Start Streaming'}
               </Button>
             </SpaceBetween>
@@ -365,12 +305,7 @@ const StreamAudio = () => {
                 actions={
                   <div>
                     {recording && (
-                      <Button
-                        href={`#/calls/${callMetaData.callId}`}
-                        variant="link"
-                        iconName="external"
-                        target="blank"
-                      >
+                      <Button href={`#/calls/${callMetaData.callId}`} variant="link" iconName="external" target="blank">
                         Open in progress meeting
                       </Button>
                     )}
@@ -398,11 +333,7 @@ const StreamAudio = () => {
                 description="Label for stream audio"
                 errorText={callMetaData.fromNumber.length < 1 && DEFAULT_BLANK_FIELD_MSG}
               >
-                <Input
-                  value={callMetaData.fromNumber}
-                  onChange={handlefromNumberChange}
-                  disabled={recording}
-                />
+                <Input value={callMetaData.fromNumber} onChange={handlefromNumberChange} disabled={recording} />
               </FormField>
 
               <FormField
@@ -413,11 +344,7 @@ const StreamAudio = () => {
                 errorText={callMetaData.agentId.length < 1 && DEFAULT_BLANK_FIELD_MSG}
               >
                 <Grid gridDefinition={[{ colspan: 10 }, { colspan: 1 }]}>
-                  <Input
-                    value={callMetaData.agentId}
-                    onChange={handleAgentIdChange}
-                    disabled={recording}
-                  />
+                  <Input value={callMetaData.agentId} onChange={handleAgentIdChange} disabled={recording} />
                   <Button
                     variant={micMuted ? 'secondary' : 'primary'}
                     onClick={toggleMicrophoneEnabled}

@@ -43,10 +43,7 @@ const CallList = () => {
     periodsToLoad,
   } = useCallsContext();
 
-  const [preferences, setPreferences] = useLocalStorage(
-    'call-list-preferences',
-    DEFAULT_PREFERENCES,
-  );
+  const [preferences, setPreferences] = useLocalStorage('call-list-preferences', DEFAULT_PREFERENCES);
 
   // prettier-ignore
   const {

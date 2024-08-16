@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2024-08-05
 ### Fixed
+- #76 Support optional deployment using existing VPC/subnets 
+- #71 Introduce 'Virtual Participant' (Preview) [VP README](./lma-virtual-participant-stack/README.md)
+
+## [0.1.8] - 2024-08-01
+### Fixed
+- Remove unused KMS keys #72
+
+## [0.1.7] - 2024-08-01
+### Fixed
+- Use auth role for Meeting Assistant bot, and remove all permissions for unauthenticated Cognito identities #65
+- Optimize costs by making Appsync API cache optional, with configurable size - default OFF. #66
 
 ## [0.1.6] - 2024-07-24
 ### Fixed
@@ -17,7 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Teams browser extension problem when logged in as guest account. #53
 - Add note to Cognito email regarding the Chrome browser extension #55
 - Meeting assistant bot voice output doesn't work. #39
-
 
 ## [0.1.5] - 2024-07-15
 ### Added
@@ -85,6 +96,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.1.9]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.9
+[0.1.8]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.8
+[0.1.7]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.7
 [0.1.6]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.6
 [0.1.5]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.5
 [0.1.4]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.4

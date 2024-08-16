@@ -1,14 +1,17 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
+
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Badge,
   Box,
   Button,
+  ButtonDropdown,
   ColumnLayout,
   Container,
   Grid,
   Header,
+  Icon,
   Link,
   Popover,
   SpaceBetween,
@@ -22,12 +25,8 @@ import ReactMarkdown from 'react-markdown';
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
 import { Logger } from 'aws-amplify';
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
-import { getMarkdownSummary } from '../common/summary';
-import {
-  COMPREHEND_PII_TYPES,
-  DEFAULT_OTHER_SPEAKER_NAME,
-  LANGUAGE_CODES,
-} from '../common/constants';
+import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
+import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
 
 import RecordingPlayer from '../recording-player';
 import useSettingsContext from '../../contexts/settings';
@@ -36,17 +35,14 @@ import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status'
 import { InfoLink } from '../common/info-link';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 
-import {
-  VoiceToneFluctuationChart,
-  SentimentFluctuationChart,
-  SentimentPerQuarterChart,
-} from './sentiment-charts';
+import { VoiceToneFluctuationChart, SentimentFluctuationChart, SentimentPerQuarterChart } from './sentiment-charts';
 
 import './CallPanel.css';
 import { SentimentTrendIcon } from '../sentiment-trend-icon/SentimentTrendIcon';
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
+import { downloadTranscriptAsExcel, downloadTranscriptAsText, exportToTextFile } from '../common/download-func';
 
 const logger = new Logger('CallPanel');
 
@@ -109,9 +105,7 @@ const CallAttributes = ({ item, setToolsOpen }) => (
           <Box margin={{ bottom: 'xxxs' }} color="text-label">
             <strong>Status</strong>
           </Box>
-          <StatusIndicator type={item.recordingStatusIcon}>
-            {` ${item.recordingStatusLabel} `}
-          </StatusIndicator>
+          <StatusIndicator type={item.recordingStatusIcon}>{` ${item.recordingStatusLabel} `}</StatusIndicator>
         </div>
       </SpaceBetween>
       {item?.pcaUrl?.length && (
@@ -120,13 +114,7 @@ const CallAttributes = ({ item, setToolsOpen }) => (
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
               <strong>Post Meeting Analytics</strong>
             </Box>
-            <Button
-              variant="normal"
-              href={item.pcaUrl}
-              target="_blank"
-              iconAlign="right"
-              iconName="external"
-            >
+            <Button variant="normal" href={item.pcaUrl} target="_blank" iconAlign="right" iconName="external">
               Open in Post Call Analytics
             </Button>
           </div>
@@ -148,6 +136,13 @@ const CallAttributes = ({ item, setToolsOpen }) => (
 
 // eslint-disable-next-line arrow-body-style
 const CallSummary = ({ item }) => {
+  const downloadCallSummary = async (option) => {
+    if (option.detail.id === 'download') {
+      await exportToTextFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
+    } else if (option.detail.id === 'email') {
+      window.open(`mailto:?subject=${item.callId}&body=${getEmailFormattedSummary(item.callSummaryText)}`);
+    }
+  };
   return (
     <Container
       header={
@@ -162,6 +157,22 @@ const CallSummary = ({ item }) => {
               Info
             </Link>
           }
+          actions={
+            <div>
+              {item.callSummaryText && (
+                <ButtonDropdown
+                  items={[
+                    { text: 'Download summary', id: 'download', disabled: false, iconName: 'download' },
+                    { text: 'Email summary (beta)', id: 'email', disabled: false, iconName: 'envelope' },
+                  ]}
+                  variant="normal"
+                  onItemClick={(option) => downloadCallSummary(option)}
+                >
+                  <Icon name="download" variant="primary" />
+                </ButtonDropdown>
+              )}
+            </div>
+          }
         >
           Meeting Summary
         </Header>
@@ -175,12 +186,14 @@ const CallSummary = ({ item }) => {
               id: 'summary',
               content: (
                 <div>
-                  {/* eslint-disable-next-line react/no-array-index-key */}
-                  <TextContent color="gray">
-                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                      {getMarkdownSummary(item.callSummaryText) ?? 'No summary available'}
-                    </ReactMarkdown>
-                  </TextContent>
+                  <div>
+                    {/* eslint-disable-next-line react/no-array-index-key */}
+                    <TextContent color="gray">
+                      <ReactMarkdown rehypePlugins={[rehypeRaw]}>
+                        {getMarkdownSummary(item.callSummaryText)}
+                      </ReactMarkdown>
+                    </TextContent>
+                  </div>
                 </div>
               ),
             },
@@ -311,12 +324,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
   );
 };
 
-const TranscriptSegment = ({
-  segment,
-  translateCache,
-  enableSentimentAnalysis,
-  participantName,
-}) => {
+const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis }) => {
   const { channel } = segment;
 
   if (channel === 'CATEGORY_MATCH') {
@@ -325,11 +333,7 @@ const TranscriptSegment = ({
     newSegment.transcript = categoryText;
     // We will return a special version of the grid that's specifically only for category.
     return (
-      <Grid
-        className="transcript-segment"
-        disableGutters
-        gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}
-      >
+      <Grid className="transcript-segment" disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}>
         {getSentimentImage(segment, enableSentimentAnalysis)}
         <SpaceBetween direction="vertical" size="xxs">
           <TranscriptContent segment={newSegment} translateCache={translateCache} />
@@ -347,16 +351,9 @@ const TranscriptSegment = ({
     displayChannel = 'MEETING_ASSISTANT';
     channelClass = 'transcript-segment-agent-assist';
   }
-  if (displayChannel === DEFAULT_OTHER_SPEAKER_NAME || displayChannel === '') {
-    displayChannel = participantName || DEFAULT_OTHER_SPEAKER_NAME;
-  }
 
   return (
-    <Grid
-      className="transcript-segment"
-      disableGutters
-      gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}
-    >
+    <Grid className="transcript-segment" disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}>
       {getSentimentImage(segment, enableSentimentAnalysis)}
       <SpaceBetween direction="vertical" size="xxs" className={channelClass}>
         <SpaceBetween direction="horizontal" size="xs">
@@ -586,6 +583,12 @@ const CallInProgressTranscript = ({
         t.agentTranscript = agentTranscript;
         t.targetLanguage = targetLanguage;
         t.translateOn = translateOn;
+        // In streaming audio the speaker will just be "Other participant", override this with the
+        // name the user chose if needed
+        if (t.speaker === DEFAULT_OTHER_SPEAKER_NAME || t.speaker === '') {
+          t.speaker = item.callerPhoneNumber || DEFAULT_OTHER_SPEAKER_NAME;
+        }
+
         return t;
       })
       .map(
@@ -597,7 +600,13 @@ const CallInProgressTranscript = ({
             || s.agentTranscript || s.channel !== 'AGENT')
           && (s.channel !== 'AGENT_VOICETONE')
           && (s.channel !== 'CALLER_VOICETONE')
-          && <TranscriptSegment key={`${s.segmentId}-${s.createdAt}`} segment={s} translateCache={translateCache} enableSentimentAnalysis={enableSentimentAnalysis} participantName={item.callerPhoneNumber} />
+          && <TranscriptSegment
+            key={`${s.segmentId}-${s.createdAt}`}
+            segment={s}
+            translateCache={translateCache}
+            enableSentimentAnalysis={enableSentimentAnalysis}
+            participantName={item.callerPhoneNumber}
+          />
         ),
       );
 
@@ -608,14 +617,7 @@ const CallInProgressTranscript = ({
 
   useEffect(() => {
     setTurnByTurnSegments(getTurnByTurnSegments);
-  }, [
-    callTranscriptPerCallId,
-    item.recordingStatusLabel,
-    targetLanguage,
-    agentTranscript,
-    translateOn,
-    updateFlag,
-  ]);
+  }, [callTranscriptPerCallId, item.recordingStatusLabel, targetLanguage, agentTranscript, translateOn, updateFlag]);
 
   useEffect(() => {
     // prettier-ignore
@@ -626,14 +628,7 @@ const CallInProgressTranscript = ({
     ) {
       bottomRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, [
-    turnByTurnSegments,
-    autoScroll,
-    item.recordingStatusLabel,
-    targetLanguage,
-    agentTranscript,
-    translateOn,
-  ]);
+  }, [turnByTurnSegments, autoScroll, item.recordingStatusLabel, targetLanguage, agentTranscript, translateOn]);
 
   return (
     <div
@@ -724,14 +719,11 @@ const CallTranscriptContainer = ({
 }) => {
   // defaults to auto scroll when call is in progress
   const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
-  const [autoScrollDisabled, setAutoScrollDisabled] = useState(
-    item.recordingStatusLabel !== IN_PROGRESS_STATUS,
-  );
+  const [autoScrollDisabled, setAutoScrollDisabled] = useState(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
+  const [showDownloadTranscript, setShowDownloadTranscripts] = useState(item.recordingStatusLabel === DONE_STATUS);
 
   const [translateOn, setTranslateOn] = useState(false);
-  const [targetLanguage, setTargetLanguage] = useState(
-    localStorage.getItem('targetLanguage') || '',
-  );
+  const [targetLanguage, setTargetLanguage] = useState(localStorage.getItem('targetLanguage') || '');
   const [agentTranscript] = useState(true);
 
   const handleLanguageSelect = (event) => {
@@ -742,6 +734,7 @@ const CallTranscriptContainer = ({
   useEffect(() => {
     setAutoScrollDisabled(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
     setAutoScroll(item.recordingStatusLabel === IN_PROGRESS_STATUS);
+    setShowDownloadTranscripts(item.recordingStatusLabel === DONE_STATUS);
   }, [item.recordingStatusLabel]);
 
   const languageChoices = () => {
@@ -758,6 +751,16 @@ const CallTranscriptContainer = ({
     }
     return translateOn;
   };
+
+  const downloadTranscript = (option) => {
+    console.log('option', option);
+    if (option.detail.id === 'text') {
+      downloadTranscriptAsText(callTranscriptPerCallId, item);
+    } else if (option.detail.id === 'excel') {
+      downloadTranscriptAsExcel(callTranscriptPerCallId, item);
+    }
+  };
+
   return (
     <Grid
       gridDefinition={[
@@ -783,19 +786,38 @@ const CallTranscriptContainer = ({
             variant="h4"
             info={<InfoLink onFollow={() => setToolsOpen(true)} />}
             actions={
-              <SpaceBetween direction="horizontal" size="xs">
-                <Toggle
-                  onChange={({ detail }) => setAutoScroll(detail.checked)}
-                  checked={autoScroll}
-                  disabled={autoScrollDisabled}
-                />
-                <span>Auto Scroll</span>
-                <Toggle
-                  onChange={({ detail }) => setTranslateOn(detail.checked)}
-                  checked={translateOn}
-                />
-                <span>Enable Translation</span>
-                {languageChoices()}
+              <SpaceBetween direction="vertical" size="xs">
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Toggle
+                    onChange={({ detail }) => setAutoScroll(detail.checked)}
+                    checked={autoScroll}
+                    disabled={autoScrollDisabled}
+                  />
+                  <span>Auto Scroll</span>
+                  <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn} />
+                  <span>Enable Translation</span>
+                  {languageChoices()}
+                  {showDownloadTranscript && (
+                    <SpaceBetween direction="horizontal" size="xs">
+                      <ButtonDropdown
+                        items={[
+                          {
+                            text: 'Download as',
+                            iconName: 'download',
+                            items: [
+                              { text: 'Excel', id: 'excel', disabled: false },
+                              { text: 'Text', id: 'text' },
+                            ],
+                          },
+                        ]}
+                        variant="normal"
+                        onItemClick={(option) => downloadTranscript(option)}
+                      >
+                        <Icon name="download" variant="primary" />
+                      </ButtonDropdown>
+                    </SpaceBetween>
+                  )}
+                </SpaceBetween>
               </SpaceBetween>
             }
           >
@@ -820,12 +842,7 @@ const CallTranscriptContainer = ({
   );
 };
 
-const VoiceToneContainer = ({
-  item,
-  callTranscriptPerCallId,
-  collapseSentiment,
-  setCollapseSentiment,
-}) => (
+const VoiceToneContainer = ({ item, callTranscriptPerCallId, collapseSentiment, setCollapseSentiment }) => (
   <Container
     fitHeight="true"
     disableContentPaddings={collapseSentiment ? '' : 'true'}
@@ -861,12 +878,7 @@ const VoiceToneContainer = ({
   </Container>
 );
 
-const CallStatsContainer = ({
-  item,
-  callTranscriptPerCallId,
-  collapseSentiment,
-  setCollapseSentiment,
-}) => (
+const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, setCollapseSentiment }) => (
   <>
     <Container
       disableContentPaddings={collapseSentiment ? '' : 'true'}
@@ -898,10 +910,7 @@ const CallStatsContainer = ({
     >
       {collapseSentiment ? (
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-          <SentimentFluctuationChart
-            item={item}
-            callTranscriptPerCallId={callTranscriptPerCallId}
-          />
+          <SentimentFluctuationChart item={item} callTranscriptPerCallId={callTranscriptPerCallId} />
           <SentimentPerQuarterChart item={item} callTranscriptPerCallId={callTranscriptPerCallId} />
         </Grid>
       ) : null}

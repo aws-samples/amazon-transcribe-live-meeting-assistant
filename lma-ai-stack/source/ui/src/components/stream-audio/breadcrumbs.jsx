@@ -11,8 +11,6 @@ export const callListBreadcrumbItems = [
   { text: 'Stream Audio', href: `#${STREAM_AUDIO_PATH}` },
 ];
 
-const Breadcrumbs = () => (
-  <BreadcrumbGroup ariaLabel="Breadcrumbs" items={callListBreadcrumbItems} />
-);
+const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={callListBreadcrumbItems} />;
 
 export default Breadcrumbs;

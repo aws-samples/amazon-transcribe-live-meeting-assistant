@@ -65,10 +65,7 @@ const CallAnalyticsTopNavigation = () => {
                   id: 'signout',
                   type: 'button',
                   text: (
-                    <Button
-                      variant="primary"
-                      onClick={() => setIsSignOutModalVisiblesetVisible(true)}
-                    >
+                    <Button variant="primary" onClick={() => setIsSignOutModalVisiblesetVisible(true)}>
                       Sign out
                     </Button>
                   ),
@@ -98,10 +95,7 @@ const CallAnalyticsTopNavigation = () => {
           ]}
         />
       </div>
-      <SignOutModal
-        visible={isSignOutModalVisible}
-        setVisible={setIsSignOutModalVisiblesetVisible}
-      />
+      <SignOutModal visible={isSignOutModalVisible} setVisible={setIsSignOutModalVisiblesetVisible} />
     </>
   );
 };

@@ -53,9 +53,7 @@ const mapCallsAttributes = (calls, settings) => {
       recordingUrl,
       pcaUrl,
       totalConversationDurationMillis,
-      conversationDurationTimeStamp: new Date(totalConversationDurationMillis)
-        .toISOString()
-        .substr(11, 8),
+      conversationDurationTimeStamp: new Date(totalConversationDurationMillis).toISOString().substr(11, 8),
       sentiment,
       // change callTimestamp to a sortable date format
       initiationTimeStamp: new Date(callTimestamp).toISOString(),

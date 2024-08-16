@@ -4,12 +4,7 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import { Redirect, Route, Switch } from 'react-router-dom';
 
-import {
-  AmplifyAuthContainer,
-  AmplifyAuthenticator,
-  AmplifySignIn,
-  AmplifySignUp,
-} from '@aws-amplify/ui-react';
+import { AmplifyAuthContainer, AmplifyAuthenticator, AmplifySignIn, AmplifySignUp } from '@aws-amplify/ui-react';
 
 import { LOGIN_PATH, LOGOUT_PATH, REDIRECT_URL_PARAM } from './constants';
 
