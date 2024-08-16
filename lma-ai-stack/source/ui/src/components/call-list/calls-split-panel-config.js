@@ -35,13 +35,7 @@ const getPanelContentSingle = ({ items, setToolsOpen, callTranscriptPerCallId })
 
   return {
     header: 'Meeting Details',
-    body: (
-      <CallPanel
-        item={item}
-        setToolsOpen={setToolsOpen}
-        callTranscriptPerCallId={callTranscriptPerCallId}
-      />
-    ),
+    body: <CallPanel item={item} setToolsOpen={setToolsOpen} callTranscriptPerCallId={callTranscriptPerCallId} />,
   };
 };
 
@@ -64,11 +58,7 @@ const getPanelContentMultiple = ({ items, setToolsOpen, callTranscriptPerCallId 
           </Box>
           <Link fontSize="display-l" href={`#${CALLS_PATH}`}>
             <span className="custom-link-font-weight-light">
-              {
-                items.filter(
-                  ({ recordingStatusLabel }) => recordingStatusLabel === IN_PROGRESS_STATUS,
-                ).length
-              }
+              {items.filter(({ recordingStatusLabel }) => recordingStatusLabel === IN_PROGRESS_STATUS).length}
             </span>
           </Link>
         </div>
