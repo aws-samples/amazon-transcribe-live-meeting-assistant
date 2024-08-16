@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial support for WebEx web client in the browser extension
-- Download button for exporting call summary and call transcript #22
+- Initial support for WebEx web client in the browser extension PR #81
+- Download button for exporting call summary and call transcript PR #80
 - Optional specialized prompts for Healthcare use cases (SOAP/BIRP notes, etc.) by selecting 'Healthcare' from new 'Domain' parameter - PR #20
 
 ## [0.1.9] - 2024-08-05
