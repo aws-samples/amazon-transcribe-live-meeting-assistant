@@ -689,6 +689,7 @@ Resources:
     Type: AWS::IAM::Role
     Condition: ShouldCreateQPlugin
     Properties:
+      RoleName: !Sub "QNA-${LMAStackName}-QBusiness-LambdaHook-FunctionRole"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -802,3 +803,7 @@ Resources:
             reason: No VPC resources.
           - id: W92
             reason: No requirements to set reserved concurrencies.
+            
+Outputs:
+  QBusinessLambdaHookFunctionRoleArn:
+    Value: !If [ShouldCreateQPlugin,  !GetAtt "LambdaFunctionRole.Arn", "NA"]

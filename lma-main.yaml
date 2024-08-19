@@ -1587,3 +1587,18 @@ Outputs:
   LMASettingsParameterName:
     Description: Name of the Parameter store setting that holds the LMA Settings
     Value: !Ref LMASettingsParameter
+
+  CognitoUserPoolTokenIssuerUrl:
+    Description: Cognito User Pool Token Issuer URL (only used for QBusiness integration)
+    Value: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${COGNITOSTACK.Outputs.UserPoolId}
+   
+  CognitoUserPoolClientId:
+    Description: Cognito User Pool Client Id (only used for QBusiness integration)
+    Value: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
+    
+  QBusinessLambdaHookFunctionRoleArn:
+    Description: Function role for Lambda QBusiness plugin (only used for QBusiness integration)
+    Value: !GetAtt MEETINGASSISTSETUP.Outputs.QBusinessLambdaHookFunctionRoleArn
+  
+  
+  
