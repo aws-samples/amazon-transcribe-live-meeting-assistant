@@ -1,8 +1,7 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Description: Amazon Transcribe Live Meeting Assistant - Virtual Participant
 
 Parameters:
-
   LMAStackName:
     Type: String
     Description: LMA Stack Name
@@ -24,7 +23,7 @@ Parameters:
     Type: String
     Default: >-
       Live Meeting Assistant started.
-      
+
   StopRecordingMessage:
     Type: String
     Default: >
@@ -61,11 +60,11 @@ Parameters:
     Type: String
     Description: S3 location of the browser extension source code zipfile
 
-# transcibe parameters
+  # transcibe parameters
   S3BucketName:
     Type: String
     Description: >
-      Existing bucket where call recording files will be stored. 
+      Existing bucket where call recording files will be stored.
     # yamllint disable rule:line-length
     AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
     # yamllint enable rule:line-length
@@ -90,8 +89,8 @@ Parameters:
     Type: String
     Default: standard
     AllowedValues:
-        - standard
-        - analytics
+      - standard
+      - analytics
     Description: Set the default operational mode for Transcribe
 
   IsContentRedactionEnabled:
@@ -116,7 +115,7 @@ Parameters:
     Type: String
     Description: >-
       Language code or language detection setting for Amazon Transcribe. NOTE: Streaming language identification can't 
-      be combined with custom language models or redaction. 
+      be combined with custom language models or redaction.
     Default: en-US
     AllowedValues:
       - identify-language
@@ -138,7 +137,7 @@ Parameters:
 
   TranscribeLanguageOptions:
     Type: String
-    Default: 'en-US, es-US'
+    Default: "en-US, es-US"
     AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*)*)?$'
     ConstraintDescription: >-
       Unsupported language code. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
@@ -153,7 +152,7 @@ Parameters:
     Type: String
     Description: >-
       Select a preferred language from the set of language codes you provide for TranscribeLanguageOptions, when 
-      TranscribeLanguageCode is set to identify-language or identify-multiple-languages. 
+      TranscribeLanguageCode is set to identify-language or identify-multiple-languages.
     Default: None
     AllowedValues:
       - None
@@ -183,42 +182,46 @@ Parameters:
 
   CustomVocabularyName:
     Type: String
-    Default: ''
+    Default: ""
     Description: >-
       The name of the vocabulary to use when processing the transcription job. Leave blank if no
       custom vocabulary to be used. If yes, the custom vocabulary must pre-exist in your account.
 
   CustomLanguageModelName:
     Type: String
-    Default: ''
+    Default: ""
     Description: >-
       The name of the custom language model to use when processing the transcription job. Leave blank if no
       custom language model is to be used. If yes, the custom language model must pre-exist in your account.
 
   ShowSpeakerLabel:
     Type: String
-    Default: 'false'
+    Default: "false"
     Description: >-
       Enable diarization on Transcribe streaming
     AllowedValues:
-      - 'true'
-      - 'false'
+      - "true"
+      - "false"
+
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs.
 
 Conditions:
   ShouldEnableContentRedaction: !And
-    - !Equals [!Ref IsContentRedactionEnabled, 'true']
-    - !Equals [!Ref TranscribeLanguageCode, 'en-US']
+    - !Equals [!Ref IsContentRedactionEnabled, "true"]
+    - !Equals [!Ref TranscribeLanguageCode, "en-US"]
 
 Resources:
-
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Websocket-fargate/service/Service/SecurityGroup
       SecurityGroupEgress:
-      - CidrIp: 0.0.0.0/0
-        Description: Allow all outbound traffic by default
-        IpProtocol: "-1"
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: "-1"
       VpcId: !Ref VPC
 
   LogsPolicy:
@@ -226,16 +229,16 @@ Resources:
     Properties:
       Path: /
       PolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
-          - Effect: 'Allow'
+          - Effect: "Allow"
             Action:
-              - 'logs:CreateLogGroup'
-              - 'logs:CreateLogStream'
-              - 'logs:PutLogEvents'
-            Resource: '*'
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: "*"
 
-### Build Resources ###
+  ### Build Resources ###
   ImageRepo:
     Type: AWS::ECR::Repository
     Properties:
@@ -243,43 +246,43 @@ Resources:
       ImageTagMutability: MUTABLE
 
   BuildRole:
-    Type: 'AWS::IAM::Role'
+    Type: "AWS::IAM::Role"
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
-          - Effect: 'Allow'
+          - Effect: "Allow"
             Principal:
               Service:
-                - 'codebuild.amazonaws.com'
+                - "codebuild.amazonaws.com"
             Action:
-              - 'sts:AssumeRole'
+              - "sts:AssumeRole"
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
       Policies:
-        - PolicyName: 'ECRPolicy'
+        - PolicyName: "ECRPolicy"
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
-                - s3:GetObject
+                  - s3:GetObject
                 Resource:
-                - !Sub "arn:aws:s3:::${SourceCodeLocation}"
-              - Effect: 'Allow'
+                  - !Sub "arn:aws:s3:::${SourceCodeLocation}"
+              - Effect: "Allow"
                 Action:
-                  - 'ecr:BatchCheckLayerAvailability'
-                  - 'ecr:CompleteLayerUpload'
-                  - 'ecr:InitiateLayerUpload'
-                  - 'ecr:PutImage'
-                  - 'ecr:UploadLayerPart'
+                  - "ecr:BatchCheckLayerAvailability"
+                  - "ecr:CompleteLayerUpload"
+                  - "ecr:InitiateLayerUpload"
+                  - "ecr:PutImage"
+                  - "ecr:UploadLayerPart"
                 Resource:
                   - !GetAtt ImageRepo.Arn
-              - Effect: 'Allow'
+              - Effect: "Allow"
                 Action:
-                  - 'ecr:GetAuthorizationToken'
+                  - "ecr:GetAuthorizationToken"
                 Resource:
-                  - '*'
+                  - "*"
 
   VirtualParticipantBuildProject:
     Type: AWS::CodeBuild::Project
@@ -287,68 +290,65 @@ Resources:
       Source:
         Location: !Sub "arn:aws:s3:::${SourceCodeLocation}"
         Type: S3
-        BuildSpec: 
-          !Sub
-            - |
-              version: 0.2
-              phases:
-                pre_build:
-                  commands:
-                    - pip3 install awscli --upgrade --user
-                    - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
-                build:
-                  commands:
-                    - echo Build started on `date`
-                    - echo `pwd`
-                    - echo `ls -altr`
-                    - docker build -t ${ImageRepo} backend
-                    - docker tag ${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
-                post_build:
-                  commands:
-                    - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
-                    - echo Build completed on `date`
-            - { 
-                ImageRepo: !Ref ImageRepo
-              }
+        BuildSpec: !Sub
+          - |
+            version: 0.2
+            phases:
+              pre_build:
+                commands:
+                  - pip3 install awscli --upgrade --user
+                  - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+              build:
+                commands:
+                  - echo Build started on `date`
+                  - echo `pwd`
+                  - echo `ls -altr`
+                  - docker build -t ${ImageRepo} backend
+                  - docker tag ${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+              post_build:
+                commands:
+                  - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                  - echo Build completed on `date`
+          - { ImageRepo: !Ref ImageRepo }
       Environment:
         Type: LINUX_CONTAINER
         Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
         ComputeType: BUILD_GENERAL1_SMALL
         EnvironmentVariables:
-        - Name: SOURCE_CODE_LOCATION
-          Value: !Sub "${SourceCodeLocation}"
+          - Name: SOURCE_CODE_LOCATION
+            Value: !Sub "${SourceCodeLocation}"
       ServiceRole: !GetAtt BuildRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
 
-### Custom Resources ###
+  ### Custom Resources ###
 
   BuildCustomResourceRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
-          - Effect: 'Allow'
+          - Effect: "Allow"
             Principal:
               Service:
                 - lambda.amazonaws.com
             Action:
-              - 'sts:AssumeRole'
+              - "sts:AssumeRole"
       Path: "/"
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
       Policies:
         - PolicyName: BuildPolicy
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
                   - codebuild:StartBuild
                   - codebuild:BatchGetBuilds
                 Resource:
-                  - '*'
+                  - "*"
 
   BuildCustomResourceFunction:
     Type: "AWS::Lambda::Function"
@@ -397,21 +397,21 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
-          - Effect: 'Allow'
+          - Effect: "Allow"
             Principal:
               Service:
                 - lambda.amazonaws.com
             Action:
-              - 'sts:AssumeRole'
+              - "sts:AssumeRole"
       Path: "/"
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
       Policies:
         - PolicyName: IAMPolicy
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
@@ -420,7 +420,7 @@ Resources:
                   - iam:ListRoles
                   - iam:AttachRolePolicy
                 Resource:
-                  - '*'
+                  - "*"
 
   ECSRoleCustomResourceFunction:
     Type: "AWS::Lambda::Function"
@@ -464,7 +464,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt ECSRoleCustomResourceFunction.Arn
 
-### Bot Resources ###
+  ### Bot Resources ###
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -478,7 +478,6 @@ Resources:
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
       Policies:
-
         - PolicyName: LMAPolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -505,8 +504,8 @@ Resources:
               - Effect: Allow
                 Action:
                   - kinesis:PutRecord
-                Resource:  
-                  - !Sub 
+                Resource:
+                  - !Sub
                     - "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${streamName}"
                     - streamName: !Ref CallDataStreamName
         - PolicyName: TranscribePolicy
@@ -515,24 +514,24 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - 'transcribe:*'
-                Resource: '*'
+                  - "transcribe:*"
+                Resource: "*"
         - PolicyName: DetectPIIPolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
-                  - 'comprehend:DetectPiiEntities'
-                Resource: '*'
+                  - "comprehend:DetectPiiEntities"
+                Resource: "*"
         - PolicyName: InvokeModelPolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
-                  - 'bedrock:InvokeModel'
-                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0'
+                  - "bedrock:InvokeModel"
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0"
         - PolicyName: SendRawEmailPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -560,7 +559,7 @@ Resources:
         - !GetAtt LogsPolicy.PolicyArn
 
   Cluster:
-    Type: 'AWS::ECS::Cluster'
+    Type: "AWS::ECS::Cluster"
     Properties:
       CapacityProviders:
         - FARGATE
@@ -581,11 +580,11 @@ Resources:
             - Name: CALL_ANALYTICS_FILE_PREFIX
               Value: !Ref CallAnalyticsPrefix
             - Name: POST_CALL_CONTENT_REDACTION_OUTPUT
-              Value: 'redacted'
+              Value: "redacted"
             - Name: SERVERHOST
-              Value: '0.0.0.0'
+              Value: "0.0.0.0"
             - Name: SERVERPORT
-              Value: '8080'
+              Value: "8080"
             - Name: KINESIS_STREAM_NAME
               Value: !Ref CallDataStreamName
             - Name: SAVE_PARTIAL_TRANSCRIPTS
@@ -597,12 +596,12 @@ Resources:
             - Name: IS_CONTENT_REDACTION_ENABLED
               Value: !If
                 - ShouldEnableContentRedaction
-                - 'true'
-                - 'false'
+                - "true"
+                - "false"
             - Name: CONTENT_REDACTION_TYPE
-              Value: !Ref TranscribeContentRedactionType      
+              Value: !Ref TranscribeContentRedactionType
             - Name: TRANSCRIBE_PII_ENTITY_TYPES
-              Value: !Ref TranscribePiiEntityTypes      
+              Value: !Ref TranscribePiiEntityTypes
             - Name: TRANSCRIBE_LANGUAGE_CODE
               Value: !Ref TranscribeLanguageCode
             - Name: TRANSCRIBE_LANGUAGE_OPTIONS
@@ -616,7 +615,7 @@ Resources:
             - Name: LMA_IDENTITY
               Value: !Ref LMAIdentity
             - Name: INTRO_MESSAGE
-              Value: !Ref IntroMessage              
+              Value: !Ref IntroMessage
             - Name: START_RECORDING_MESSAGE
               Value: !Ref StartRecordingMessage
             - Name: STOP_RECORDING_MESSAGE
@@ -628,10 +627,11 @@ Resources:
           LogConfiguration:
             LogDriver: "awslogs"
             Options:
-              awslogs-create-group: "true"
-              awslogs-group: "/ecs/scribe"
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: "ecs"
+              awslogs-group:
+                Ref: VirtualParticipantTaskDefContainerLogGroup
+              awslogs-stream-prefix: lmavirtualparticipant
+              awslogs-region:
+                Ref: AWS::Region
           Name: "scribe"
       Family: "scribe_family"
       TaskRoleArn: !Ref TaskRole
@@ -645,7 +645,24 @@ Resources:
       - Cluster
       - BuildCustomResource
 
-### Scheduler Resources ###
+  VirtualParticipantTaskDefContainerLogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/fargate/VirtualParticipant
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: >-
+              By default CloudWatchLogs LogGroups data is encrypted using the CloudWatch
+              server-side encryption keys (AWS Managed Keys).
+
+  ### Scheduler Resources ###
 
   ScheduleGroup:
     Type: AWS::Scheduler::ScheduleGroup
@@ -658,8 +675,8 @@ Resources:
         Statement:
           - Effect: Allow
             Action:
-              - 'ecs:RunTask'
-            Resource: '*'
+              - "ecs:RunTask"
+            Resource: "*"
           - Effect: Allow
             Action: iam:PassRole
             Resource: "*"
@@ -675,7 +692,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: 
+              Service:
                 - lambda.amazonaws.com
                 - scheduler.amazonaws.com
                 - events.amazonaws.com
@@ -697,12 +714,12 @@ Resources:
                       - RunTask
 
   SchedulerStateMachineLogGroup:
-    Type: 'AWS::Logs::LogGroup'
+    Type: "AWS::Logs::LogGroup"
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
       RetentionInDays: 7
-      LogGroupName: !Sub '/aws/vendedlogs/states/${AWS::StackName}'
+      LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}"
 
   LMAVirtualParticipantSchedulerStateMachineRole:
     Type: "AWS::IAM::Role"
@@ -720,32 +737,32 @@ Resources:
       Policies:
         - PolicyName: ExpandedLogsPolicy
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
-              - Effect: 'Allow'
+              - Effect: "Allow"
                 Action:
-                  - 'logs:CreateLogDelivery'
-                  - 'logs:CreateLogStream'
-                  - 'logs:GetLogDelivery'
-                  - 'logs:UpdateLogDelivery'
-                  - 'logs:DeleteLogDelivery'
-                  - 'logs:ListLogDeliveries'
-                  - 'logs:PutLogEvents'
-                  - 'logs:PutResourcePolicy'
-                  - 'logs:DescribeResourcePolicies'
-                  - 'logs:DescribeLogGroups'
-                Resource: '*'
+                  - "logs:CreateLogDelivery"
+                  - "logs:CreateLogStream"
+                  - "logs:GetLogDelivery"
+                  - "logs:UpdateLogDelivery"
+                  - "logs:DeleteLogDelivery"
+                  - "logs:ListLogDeliveries"
+                  - "logs:PutLogEvents"
+                  - "logs:PutResourcePolicy"
+                  - "logs:DescribeResourcePolicies"
+                  - "logs:DescribeLogGroups"
+                Resource: "*"
         - PolicyName: TracesPolicy
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
-              - Effect: 'Allow'
+              - Effect: "Allow"
                 Action:
                   - xray:PutTraceSegments
                   - xray:PutTelemetryRecords
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
-                Resource: '*'
+                Resource: "*"
         - PolicyName: SchedulePolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -775,98 +792,167 @@ Resources:
     Type: "AWS::StepFunctions::StateMachine"
     Properties:
       # StateMachine name is used in policy in AISTACK template
-      StateMachineName: !Sub '${LMAStackName}-LMAVirtualParticipantScheduler'
-      RoleArn: !GetAtt [ LMAVirtualParticipantSchedulerStateMachineRole, Arn ]
+      StateMachineName: !Sub "${LMAStackName}-LMAVirtualParticipantScheduler"
+      RoleArn: !GetAtt [LMAVirtualParticipantSchedulerStateMachineRole, Arn]
       LoggingConfiguration:
         Destinations:
           - CloudWatchLogsLogGroup:
-              LogGroupArn: !GetAtt 
+              LogGroupArn: !GetAtt
                 - SchedulerStateMachineLogGroup
                 - Arn
         IncludeExecutionData: true
         Level: ALL
       StateMachineType: EXPRESS
-      TracingConfiguration: 
-         Enabled: true
-      DefinitionString:
-        !Sub
-          - |
-            {
-              "StartAt": "Method Choice",
-              "States": {
-                "Method Choice": {
-                  "Type": "Choice",
-                  "Choices": [
-                    {
-                      "Variable": "$.apiInfo.httpMethod",
-                      "StringEquals": "POST",
-                      "Next": "Time Choice"
+      TracingConfiguration:
+        Enabled: true
+      DefinitionString: !Sub
+        - |
+          {
+            "StartAt": "Method Choice",
+            "States": {
+              "Method Choice": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.apiInfo.httpMethod",
+                    "StringEquals": "POST",
+                    "Next": "Time Choice"
+                  },
+                  {
+                    "Variable": "$.apiInfo.httpMethod",
+                    "StringEquals": "GET",
+                    "Next": "ListSchedules"
+                  },
+                  {
+                    "Variable": "$.apiInfo.httpMethod",
+                    "StringEquals": "DELETE",
+                    "Next": "DeleteSchedule"
+                  }
+                ],
+                "Default": "Pass"
+              },
+              "Time Choice": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Not": {
+                      "Variable": "$.data.meetingTime",
+                      "StringMatches": ""
                     },
-                    {
-                      "Variable": "$.apiInfo.httpMethod",
-                      "StringEquals": "GET",
-                      "Next": "ListSchedules"
-                    },
-                    {
-                      "Variable": "$.apiInfo.httpMethod",
-                      "StringEquals": "DELETE",
-                      "Next": "DeleteSchedule"
+                    "Next": "CreateSchedule"
+                  }
+                ],
+                "Default": "RunTask"
+              },
+              "RunTask": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::ecs:runTask",
+                "Parameters": {
+                  "Cluster": "${ClusterArn}",
+                  "TaskDefinition": "${TaskDefinition}",
+                  "LaunchType": "FARGATE",
+                  "NetworkConfiguration": {
+                    "AwsvpcConfiguration": {
+                      "AssignPublicIp": "DISABLED",
+                      "SecurityGroups": [
+                        "${SecurityGroup}"
+                      ],
+                      "Subnets": [
+                        "${PrivateSubnet1}",
+                        "${PrivateSubnet2}"
+                      ]
                     }
-                  ],
-                  "Default": "Pass"
-                },
-                "Time Choice": {
-                  "Type": "Choice",
-                  "Choices": [
-                    {
-                      "Not": {
-                        "Variable": "$.data.meetingTime",
-                        "StringMatches": ""
-                      },
-                      "Next": "CreateSchedule"
-                    }
-                  ],
-                  "Default": "RunTask"
-                },
-                "RunTask": {
-                  "Type": "Task",
-                  "Resource": "arn:${AWS::Partition}:states:::ecs:runTask",
-                  "Parameters": {
-                    "Cluster": "${ClusterArn}",
-                    "TaskDefinition": "${TaskDefinition}",
-                    "LaunchType": "FARGATE",
-                    "NetworkConfiguration": {
-                      "AwsvpcConfiguration": {
-                        "AssignPublicIp": "DISABLED",
-                        "SecurityGroups": [
-                          "${SecurityGroup}"
-                        ],
-                        "Subnets": [
-                          "${PrivateSubnet1}",
-                          "${PrivateSubnet2}"
+                  },
+                  "Overrides": {
+                    "ContainerOverrides": [
+                      {
+                        "Name": "scribe",
+                        "Environment": [
+                          {
+                            "Name": "MEETING_PLATFORM",
+                            "Value.$": "$.data.meetingPlatform"
+                          },
+                          {
+                            "Name": "MEETING_ID",
+                            "Value.$": "$.data.meetingID"
+                          },
+                          {
+                            "Name": "MEETING_PASSWORD",
+                            "Value.$": "$.data.meetingPassword"
+                          },
+                          {
+                            "Name": "MEETING_NAME",
+                            "Value.$": "$.data.meetingName"
+                          },
+                          {
+                            "Name": "LMA_USER",
+                            "Value.$": "$.data.userName"
+                          }
                         ]
                       }
+                    ]
+                  }
+                },
+                "End": true,
+                "ResultSelector": {
+                  "failures.$": "$.Failures"
+                }
+              },
+              "CreateSchedule": {
+                "Type": "Task",
+                "Parameters": {
+                  "ActionAfterCompletion": "DELETE",
+                  "Description.$": "States.Format('{}_{}', $.data.meetingPlatform, $.data.meetingName)",
+                  "FlexibleTimeWindow": {
+                    "Mode": "OFF"
+                  },
+                  "GroupName": "${ScheduleGroup}",
+                  "Name.$": "States.Format('{}_{}_{}_{}', $.data.meetingPlatform, $.data.meetingName, $.data.meetingID, States.MathRandom(0, 1000000))",
+                  "ScheduleExpression.$": "States.Format('at({})', $.data.meetingTime)",
+                  "ScheduleExpressionTimezone": "UTC",
+                  "State": "ENABLED",
+                  "Target": {
+                    "Arn": "${ClusterArn}",
+                    "RoleArn": "${TargetECSRoleArn}",
+                    "EcsParameters": {
+                      "EnableECSManagedTags": false,
+                      "EnableExecuteCommand": false,
+                      "LaunchType": "FARGATE",
+                      "NetworkConfiguration": {
+                        "AwsvpcConfiguration": {
+                          "AssignPublicIp": "DISABLED",
+                          "SecurityGroups": [
+                            "${SecurityGroup}"
+                          ],
+                          "Subnets": [
+                            "${PrivateSubnet1}",
+                            "${PrivateSubnet2}"
+                          ]
+                        }
+                      },
+                      "TaskCount": 1,
+                      "TaskDefinitionArn": "${TaskDefinition}"
                     },
-                    "Overrides": {
-                      "ContainerOverrides": [
+                    "Input": {
+                      "containerOverrides": [
                         {
-                          "Name": "scribe",
-                          "Environment": [
+                          "name": "scribe",
+                          "environment": [
                             {
-                              "Name": "MEETING_PLATFORM",
-                              "Value.$": "$.data.meetingPlatform"
+                              "name": "MEETING_PLATFORM",
+                              "value.$": "$.data.meetingPlatform"
                             },
                             {
-                              "Name": "MEETING_ID",
-                              "Value.$": "$.data.meetingID"
+                              "name": "MEETING_ID",
+                              "value.$": "$.data.meetingID"
                             },
                             {
-                              "Name": "MEETING_PASSWORD",
-                              "Value.$": "$.data.meetingPassword"
+                              "name": "MEETING_PASSWORD",
+                              "value.$": "$.data.meetingPassword"
                             },
                             {
-                              "Name": "MEETING_NAME",
-                              "Value.$": "$.data.meetingName"
+                              "name": "MEETING_NAME",
+                              "value.$": "$.data.meetingName"
                             },
                             {
                               "Name": "LMA_USER",
@@ -876,138 +962,68 @@ Resources:
                         }
                       ]
                     }
-                  },
-                  "End": true,
-                  "ResultSelector": {
-                    "failures.$": "$.Failures"
                   }
                 },
-                "CreateSchedule": {
-                  "Type": "Task",
-                  "Parameters": {
-                    "ActionAfterCompletion": "DELETE",
-                    "Description.$": "States.Format('{}_{}', $.data.meetingPlatform, $.data.meetingName)",
-                    "FlexibleTimeWindow": {
-                      "Mode": "OFF"
-                    },
-                    "GroupName": "${ScheduleGroup}",
-                    "Name.$": "States.Format('{}_{}_{}_{}', $.data.meetingPlatform, $.data.meetingName, $.data.meetingID, States.MathRandom(0, 1000000))",
-                    "ScheduleExpression.$": "States.Format('at({})', $.data.meetingTime)",
-                    "ScheduleExpressionTimezone": "UTC",
-                    "State": "ENABLED",
-                    "Target": {
-                      "Arn": "${ClusterArn}",
-                      "RoleArn": "${TargetECSRoleArn}",
-                      "EcsParameters": {
-                        "EnableECSManagedTags": false,
-                        "EnableExecuteCommand": false,
-                        "LaunchType": "FARGATE",
-                        "NetworkConfiguration": {
-                          "AwsvpcConfiguration": {
-                            "AssignPublicIp": "DISABLED",
-                            "SecurityGroups": [
-                              "${SecurityGroup}"
-                            ],
-                            "Subnets": [
-                              "${PrivateSubnet1}",
-                              "${PrivateSubnet2}"
-                            ]
-                          }
-                        },
-                        "TaskCount": 1,
-                        "TaskDefinitionArn": "${TaskDefinition}"
+                "Resource": "arn:${AWS::Partition}:states:::aws-sdk:scheduler:createSchedule",
+                "End": true
+              },
+              "ListSchedules": {
+                "Type": "Task",
+                "Parameters": {
+                  "GroupName": "${ScheduleGroup}"
+                },
+                "Resource": "arn:${AWS::Partition}:states:::aws-sdk:scheduler:listSchedules",
+                "Next": "Map"
+              },
+              "Map": {
+                "Type": "Map",
+                "ItemProcessor": {
+                  "ProcessorConfig": {
+                    "Mode": "INLINE"
+                  },
+                  "StartAt": "GetSchedule",
+                  "States": {
+                    "GetSchedule": {
+                      "Type": "Task",
+                      "End": true,
+                      "Parameters": {
+                        "GroupName.$": "$.GroupName",
+                        "Name.$": "$.Name"
                       },
-                      "Input": {
-                        "containerOverrides": [
-                          {
-                            "name": "scribe",
-                            "environment": [
-                              {
-                                "name": "MEETING_PLATFORM",
-                                "value.$": "$.data.meetingPlatform"
-                              },
-                              {
-                                "name": "MEETING_ID",
-                                "value.$": "$.data.meetingID"
-                              },
-                              {
-                                "name": "MEETING_PASSWORD",
-                                "value.$": "$.data.meetingPassword"
-                              },
-                              {
-                                "name": "MEETING_NAME",
-                                "value.$": "$.data.meetingName"
-                              },
-                              {
-                                "Name": "LMA_USER",
-                                "Value.$": "$.data.userName"
-                              }
-                            ]
-                          }
-                        ]
+                      "Resource": "arn:${AWS::Partition}:states:::aws-sdk:scheduler:getSchedule",
+                      "ResultSelector": {
+                        "CreationDate.$": "$.CreationDate",
+                        "Description.$": "$.Description",
+                        "GroupName.$": "$.GroupName",
+                        "Name.$": "$.Name",
+                        "ScheduleExpression.$": "$.ScheduleExpression",
+                        "ScheduleExpressionTimezone.$": "$.ScheduleExpressionTimezone"
                       }
                     }
-                  },
-                  "Resource": "arn:${AWS::Partition}:states:::aws-sdk:scheduler:createSchedule",
-                  "End": true
+                  }
                 },
-                "ListSchedules": {
-                  "Type": "Task",
-                  "Parameters": {
-                    "GroupName": "${ScheduleGroup}"
-                  },
-                  "Resource": "arn:${AWS::Partition}:states:::aws-sdk:scheduler:listSchedules",
-                  "Next": "Map"
+                "End": true,
+                "ItemsPath": "$.Schedules"
+              },
+              "DeleteSchedule": {
+                "Type": "Task",
+                "Parameters": {
+                  "GroupName": "${ScheduleGroup}",
+                  "Name.$": "$.data.source.meetingName"
                 },
-                "Map": {
-                  "Type": "Map",
-                  "ItemProcessor": {
-                    "ProcessorConfig": {
-                      "Mode": "INLINE"
-                    },
-                    "StartAt": "GetSchedule",
-                    "States": {
-                      "GetSchedule": {
-                        "Type": "Task",
-                        "End": true,
-                        "Parameters": {
-                          "GroupName.$": "$.GroupName",
-                          "Name.$": "$.Name"
-                        },
-                        "Resource": "arn:${AWS::Partition}:states:::aws-sdk:scheduler:getSchedule",
-                        "ResultSelector": {
-                          "CreationDate.$": "$.CreationDate",
-                          "Description.$": "$.Description",
-                          "GroupName.$": "$.GroupName",
-                          "Name.$": "$.Name",
-                          "ScheduleExpression.$": "$.ScheduleExpression",
-                          "ScheduleExpressionTimezone.$": "$.ScheduleExpressionTimezone"
-                        }
-                      }
-                    }
-                  },
-                  "End": true,
-                  "ItemsPath": "$.Schedules"
-                },
-                "DeleteSchedule": {
-                  "Type": "Task",
-                  "Parameters": {
-                    "GroupName": "${ScheduleGroup}",
-                    "Name.$": "$.data.source.meetingName"
-                  },
-                  "Resource": "arn:${AWS::Partition}:states:::aws-sdk:scheduler:deleteSchedule",
-                  "End": true
-                },
-                "Pass": {
-                  "Type": "Pass",
-                  "End": true
-                }
+                "Resource": "arn:${AWS::Partition}:states:::aws-sdk:scheduler:deleteSchedule",
+                "End": true
+              },
+              "Pass": {
+                "Type": "Pass",
+                "End": true
               }
             }
-          - {
-              ClusterArn: !GetAtt [ Cluster, Arn ],
-              TargetECSRoleArn: !GetAtt [ TargetECSRole, Arn ]
-            }
+          }
+        - {
+            ClusterArn: !GetAtt [Cluster, Arn],
+            TargetECSRoleArn: !GetAtt [TargetECSRole, Arn],
+          }
 
   UpdateLMASettingsWithStateMachine:
     Type: AWS::CloudFormation::CustomResource
@@ -1015,11 +1031,11 @@ Resources:
       ServiceToken: !Ref UpdateLMASettingsFunctionArn
       LCASettingsName: !Ref LMASettingsParameterName
       LCASettingsKeyValuePairs:
-        LMAVirtualParticipantSchedulerStateMachine: !GetAtt [ LMAVirtualParticipantSchedulerStateMachine, Arn ]
+        LMAVirtualParticipantSchedulerStateMachine:
+          !GetAtt [LMAVirtualParticipantSchedulerStateMachine, Arn]
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
 Outputs:
-  
   StepFunctions:
     Value: !Ref LMAVirtualParticipantSchedulerStateMachine
