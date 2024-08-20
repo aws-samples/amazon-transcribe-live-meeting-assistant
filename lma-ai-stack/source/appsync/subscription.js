@@ -23,7 +23,11 @@ export function response(ctx) {
     util.unauthorized();
   }
 
-  const filter = { Owner: { eq: ctx.identity.username } };
-  extensions.setSubscriptionFilter(util.transform.toSubscriptionFilter(filter));
+  const { groups } = ctx.identity;
+  if((groups === undefined) || !ctx.identity.groups.includes("Admin")) {
+    console.debug(`Setting subscription filter with Owner`);
+    const filter = { Owner: { eq: ctx.identity.username } };
+    extensions.setSubscriptionFilter(util.transform.toSubscriptionFilter(filter));
+  }
   return null;
 }
