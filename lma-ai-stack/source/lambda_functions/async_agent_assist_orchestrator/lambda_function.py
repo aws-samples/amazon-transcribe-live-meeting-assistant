@@ -156,11 +156,10 @@ def get_lex_agent_assist_transcript(
     content: str,
 ):
     """Sends Lex Agent Assist Requests"""
-    call_id = transcript_segment_args["CallId"]
-
     LOGGER.info("Bot Request: %s", content)
     
-    session_attributes = {
+    request_attributes = {
+        "callid": transcript_segment_args["CallId"],
         "idtokenjwt": transcript_segment_args["IdToken"],
         "accesstokenjwt": transcript_segment_args["AccessToken"],
         "refreshtoken": transcript_segment_args["RefreshToken"],
@@ -168,13 +167,12 @@ def get_lex_agent_assist_transcript(
 
     bot_response: RecognizeTextResponseTypeDef = recognize_text_lex(
         text=content,
-        session_id=str(hash(call_id)),
+        session_id=str(hash(transcript_segment_args["CallId"])),
         lex_client=LEXV2_CLIENT,
         bot_id=LEX_BOT_ID,
         bot_alias_id=LEX_BOT_ALIAS_ID,
         locale_id=LEX_BOT_LOCALE_ID,
-        call_id=call_id,
-        session_attributes=session_attributes
+        request_attributes=request_attributes,
     )
 
     LOGGER.info("Bot Response: ", extra=bot_response)

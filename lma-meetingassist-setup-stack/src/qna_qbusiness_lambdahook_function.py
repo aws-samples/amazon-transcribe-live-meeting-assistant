@@ -315,7 +315,12 @@ def handler(event, context):
 
     # Get the IDC IAM credentials
     # Parse session JWT token to get the jti
-    token = (event['req']['session']['idtokenjwt'])
+    if token := event.get("req", {}).get("session", {}).get("idtokenjwt"):
+        print('Found token from chat interface')
+    else:
+        token = event['req']['_event']['requestAttributes'].get('idtokenjwt')
+        print('Found token from voice interface')
+
     decoded_token = json.loads(base64.b64decode(token.split('.')[1] + '==').decode())
     jti = decoded_token['jti']
 
