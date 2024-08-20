@@ -95,13 +95,16 @@ function IntegrationProvider({ children }: any) {
   }
 
   const updateMetadata = useCallback((newMetadata: any) => {
+    console.log("newMetadata.baseUrl" + newMetadata.baseUrl);
     if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.zoom.us") {
       setPlatform("Zoom");
     } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.chime.aws") {
       setPlatform("Amazon Chime");
     } else if (newMetadata.baseUrl === "https://teams.microsoft.com" || newMetadata.baseUrl === "https://teams.live.com") {
-        setPlatform("Microsoft Teams");
-    }
+      setPlatform("Microsoft Teams");
+    } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl.includes("webex.com")) {
+      setPlatform("Cisco Webex");
+    } 
     setMetadata(newMetadata);
   }, [metadata, setMetadata, platform, setPlatform]);
 

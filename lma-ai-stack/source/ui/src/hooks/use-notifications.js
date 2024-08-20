@@ -29,9 +29,7 @@ const useNotifications = () => {
     const getDissmissedNotificationIdsFromStorage = () => {
       let dismissedInitialNotificationIds = [];
       try {
-        const dismissedStored = JSON.parse(
-          localStorage.getItem(dismissedInitialNotificationsStorageKey) || '[]',
-        );
+        const dismissedStored = JSON.parse(localStorage.getItem(dismissedInitialNotificationsStorageKey) || '[]');
         if (!Array.isArray(dismissedStored)) {
           logger.warn('invalid format of dismisssed notifications from local storage');
         } else {
@@ -67,10 +65,7 @@ const useNotifications = () => {
       onDismiss: () => {
         setNotifications((current) => current.filter((i) => i.id !== n.id));
         const storedIds = getDissmissedNotificationIdsFromStorage();
-        localStorage.setItem(
-          dismissedInitialNotificationsStorageKey,
-          JSON.stringify([...storedIds, n.id]),
-        );
+        localStorage.setItem(dismissedInitialNotificationsStorageKey, JSON.stringify([...storedIds, n.id]));
       },
     }));
 
