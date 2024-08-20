@@ -633,7 +633,7 @@ Resources:
               awslogs-region:
                 Ref: AWS::Region
           Name: "scribe"
-      Family: "scribe_family"
+      Family: !Sub ${AWS::StackName}VirtualParticipantTaskDef
       TaskRoleArn: !Ref TaskRole
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       NetworkMode: "awsvpc"
