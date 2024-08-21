@@ -18,8 +18,8 @@ For information on managing users in your user pool see
 If you are deploying LMA for the first time, under "Admin Email Address", enter an email address that you would 
 use only to log in occasionally to troubleshoot any issues users may be experiencing. If you need to use the same
 email address for both administrative and personal use, we recommend that you enter your email address in the 
-format jdoe+admin@example.com. Once the stack successfully deploys, you can sign-up using the Web UI link with your 
-email address (jdoe@example.com).
+jdoe+admin@example.com format. Once the stack successfully deploys, you can sign-up using the Web UI link with your 
+email address (jdoe@example.com format).
 
 ### Changing your Admin user password
 You will receive an email to the address you entered under "Admin Email Address". This has the temporary password. Follow
@@ -28,7 +28,6 @@ these instructions to login to the LMA Web UI and changing your password:
 2. Navigate to your Stack's Outputs section and copy the value associated with the ApplicationCloudfrontEndpoint key.
 3. This is your LMA Web UI.
 4. Log in to the Web UI with the temporary password and create a new password when prompted.
-
 
 ## Updating an existing LMA stack (from 0.1.9 or prior versions)
 
@@ -65,4 +64,5 @@ As an administrator, you have access to all the previous meetings. There is no c
 
 ## Developer testing / troubleshooting notes
 
-To run LMA UI locally, see [How to run LMA UI Locally](./source/ui/README.md)
+- To run LMA UI locally, see [How to run LMA UI Locally](./source/ui/README.md)
+- To contribute to the solution, report bugs or issues, see [Contributing Guidelines](../CONTRIBUTING.md)
