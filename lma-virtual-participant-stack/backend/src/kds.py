@@ -52,18 +52,23 @@ def process_transcription_results(speaker_name, result):
     global current_speaker_name, speakers, starttimes
     segments = {}
     if current_speaker_name != speaker_name:
+        # start time of new speaker is the start time of the last item in the results
         current_speaker_name = speaker_name
         speakers.append(speaker_name)
-        starttimes.append(result.start_time)
+        last_item = result.alternatives[0].items[-1]
+        starttimes.append(last_item.start_time)
     alternative = result.alternatives[0]
     for item in alternative.items:
         segments = add_item_to_segment(item, segments)
-        print(f"DEBUG: Item {item.start_time, item.end_time, item.content}")
-        print(f"DEBUG: Speakers {speakers}")
-        print(f"DEBUG: Starttimes {starttimes}")
-        print(f"DEBUG: Segments {segments}")
+        if os.getenv('DEBUG'):
+            print(
+                f"DEBUG: Item {item.start_time, item.end_time, item.content}")
+            print(f"DEBUG: Speakers {speakers}")
+            print(f"DEBUG: Starttimes {starttimes}")
+            print(f"DEBUG: Segments {segments}")
     # if it's a non partial result, then re-initialize globals
     if not result.is_partial:
+        print("INFO: Non partial result")
         current_speaker_name = None
         speakers = []
         starttimes = []
@@ -74,7 +79,9 @@ def send_add_transcript_segment(speaker_name, result):
     print("Process speaker changes to identify segments within result")
     segments = process_transcription_results(speaker_name, result)
     for segment in segments.values():
-        print(f"Sending add transcript segment event to Kinesis: {segment}")
+        if os.getenv('DEBUG'):
+            print(
+                f"Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment: {segment}")
         try:
             add_transcript_segment = {
                 'EventType': 'ADD_TRANSCRIPT_SEGMENT',
@@ -90,7 +97,7 @@ def send_add_transcript_segment(speaker_name, result):
                 'Sentiment': None,
                 'TranscriptEvent': None,
                 'UtteranceEvent': None,
-                'Speaker': speaker_name
+                'Speaker': segment['Speaker']
             }
             # Write the messages to the Kinesis Data Stream
             response = KINESIS.put_record(
@@ -99,10 +106,10 @@ def send_add_transcript_segment(speaker_name, result):
                 Data=json.dumps(add_transcript_segment).encode('utf-8')
             )
             print(
-                f"Sent add transcript segment event to Kinesis.")
+                f"Sent ADD_TRANSCRIPT_SEGMENT event to Kinesis.")
         except Exception as e:
             print(
-                f"Error sending add transcript segment event to Kinesis: {e}")
+                f"Error sending ADD_TRANSCRIPT_SEGMENT event to Kinesis: {e}")
 
 
 def send_start_meeting():
