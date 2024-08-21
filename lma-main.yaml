@@ -316,8 +316,8 @@ Parameters:
   AdminEmail:
     Type: String
     Description: >-
-      Email address of admin user (e.g. jdoe@example.com) used for the API and web
-      UI.
+      Email address of the admin user (e.g. jdoe+admin@example.com) that has access to all meetings 
+      for administrative purposes. 
       An initial temporary password will be automatically sent to this user via email.
     AllowedPattern: '^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$'
 
