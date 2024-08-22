@@ -509,21 +509,6 @@ Parameters:
     Type: String
     Description: ARN of the Identity Center customer managed application created for QBusiness
 
-  DynamoDBTableName:
-    Type: String
-    Description: DynamoDB Table Name used for caching QBusiness credentials
-
-  AmazonQRegion:
-    Type: String
-    Default: "us-east-1"
-    AllowedPattern: "^[a-z]{2}-[a-z]+-[0-9]+$"
-    Description: Amazon Q Region
-
-  AmazonQEndpointUrl:
-    Type: String
-    Default: ""
-    Description: (Optional) Amazon Q Endpoint (leave empty for default endpoint)
-
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -549,9 +534,6 @@ Metadata:
         Parameters:
           - AmazonQAppId
           - IDCApplicationARN
-          - DynamoDBTableName
-          - AmazonQRegion
-          - AmazonQEndpointUrl
       - Label:
           default: Amazon S3 Configuration
         Parameters:
@@ -1401,9 +1383,6 @@ Resources:
         Version: v0.8.8
         AmazonQAppId: !Ref AmazonQAppId
         IDCApplicationARN: !Ref IDCApplicationARN
-        DynamoDBTableName: !Ref DynamoDBTableName
-        AmazonQRegion: !Ref AmazonQRegion
-        AmazonQEndpointUrl: !Ref AmazonQEndpointUrl
 
   VPCSTACK:
     Type: AWS::CloudFormation::Stack

@@ -158,21 +158,6 @@ Parameters:
     Type: String
     Description: ARN of the Identity Center customer managed application created for QBusiness
 
-  DynamoDBTableName:
-    Type: String
-    Description: DynamoDB Table Name used for caching QBusiness credentials
-
-  AmazonQRegion:
-    Type: String
-    Default: "us-east-1"
-    AllowedPattern: "^[a-z]{2}-[a-z]+-[0-9]+$"
-    Description: Amazon Q Region
-
-  AmazonQEndpointUrl:
-    Type: String
-    Default: ""
-    Description: (Optional) Amazon Q Endpoint (leave empty for default endpoint)
-
 Conditions:
   ShouldConfigureQnabot: !Not [!Equals [!Ref QNABOTSTACK, ""]]
   ShouldConfigureBedrockKB: !Not [!Equals [!Ref BedrockKnowledgeBaseID, ""]]
@@ -680,7 +665,7 @@ Resources:
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: True
-      TableName: !Ref DynamoDBTableName
+      TableName: !Sub "${LMAStackName}-QBusiness-CredentialsTable"
       TimeToLiveSpecification:
         AttributeName: ExpiresAt
         Enabled: true
@@ -791,8 +776,8 @@ Resources:
           DYNAMODB_CACHE_TABLE_NAME: !Ref CredentialsTable
           KMS_KEY_ID: !Ref KMSKey
           IDC_CLIENT_ID: !Ref IDCApplicationARN
-          AMAZONQ_REGION: !Ref AmazonQRegion
-          AMAZONQ_ENDPOINT_URL: !Ref AmazonQEndpointUrl
+          AMAZONQ_REGION: !Ref "AWS::Region"
+          AMAZONQ_ENDPOINT_URL: ""
           MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
       Code: ./src
