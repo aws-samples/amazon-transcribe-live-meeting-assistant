@@ -1038,6 +1038,8 @@ Resources:
               Value: !Ref CustomLanguageModelName
             - Name: SHOULD_RECORD_CALL
               Value: !Ref EnableAudioRecording
+            - Name: CodeLocation
+              Value: !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${TranscriberECRRepository}:${BootstrapVersion}"
           LogConfiguration:

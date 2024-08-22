@@ -29,7 +29,7 @@ fi
 OUT_DIR="../out"
 export RELEASE_S3_BUCKET_BASE="$1"
 
-export RELEASE_S3_PREFIX="${2:-artifacts/lca/lca-websocket}"
+export RELEASE_S3_PREFIX="${2:-artifacts/lma/lma-websocket}"
 
 if [ ! -z "$3" ]; then
     export RELEASE_VERSION="${3}"
@@ -54,7 +54,7 @@ HASH=$(
   cut -d" " -f1 | 
   cut -c1-16
   )
-ZIPFILE=lca-websocket-${HASH}.zip
+ZIPFILE=lma-websocket-${HASH}.zip
 
 
 zip -r out/${ZIPFILE} source/ -x source/app/node_modules/**\* source/app/dist/**\*
@@ -64,7 +64,7 @@ cd deployment
 export RELEASE_S3_BUCKET=${RELEASE_S3_BUCKET_BASE}-${AWS_REGION}
 aws s3 cp ${OUT_DIR}/${ZIPFILE} s3://${RELEASE_S3_BUCKET}/${RELEASE_S3_PREFIX}/${RELEASE_VERSION}/${ZIPFILE}
 
-TEMPLATE_FILE="./lca-websocket-transcriber.yaml"
+TEMPLATE_FILE="./lma-websocket-transcriber.yaml"
 RELEASE_S3_PREFIX_SUB=${RELEASE_S3_PREFIX////_}
 PACKAGE_RELEASE_REPLACE_OUT_FILE=${OUT_DIR}/template-replaced-${RELEASE_S3_BUCKET}-${RELEASE_S3_PREFIX_SUB}-${RELEASE_VERSION}.yaml
 sed -E \
