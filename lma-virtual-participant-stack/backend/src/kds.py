@@ -43,7 +43,7 @@ def add_item_to_segment(item, segments):
     elif item.item_type == 'pronunciation':
         # add a space between words
         segments[segment_id]['Transcript'] += " "
-        segments[segment_id]['EndTime'] = item.end_time
+    segments[segment_id]['EndTime'] = item.end_time
     segments[segment_id]['Transcript'] += item.content
     return segments
 
