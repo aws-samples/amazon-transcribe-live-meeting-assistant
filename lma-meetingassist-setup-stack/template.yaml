@@ -709,7 +709,7 @@ Resources:
                   - "dynamodb:PutItem"
                   - "dynamodb:GetItem"
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTableName}"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LMAStackName}-QBusiness-CredentialsTable"
           PolicyName: DynamoDbPolicy
         - PolicyDocument:
             Version: 2012-10-17

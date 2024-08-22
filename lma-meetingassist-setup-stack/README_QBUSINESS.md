@@ -5,12 +5,10 @@ Amazon Q is a new generative AI-powered application that helps users get work do
 ## Deploy Amazon Q (your business expert) as a fallback source of answers, using Lambda hooks with CustomNoMatches/no_hits
 
 1. Before proceeding, you will need an existing deployment of a Q Business application. Please reference the AWS docs for creating a new [Q Business application](https://docs.aws.amazon.com/amazonq/latest/qbusiness-ug/create-application.html)
-3. When launching or updating the LMA stack, make the following parameter changes:
+2. When launching or updating the LMA stack, make the following parameter changes:
     1. `Meeting Assist Service`: Located under `Meeting Assist Options` Select 'Q_Business (use existing)'
     2. `AmazonQAppId`: Located under `Meeting Assist Q Business Integration`. Existing Amazon Q Application ID
-    3. `AmazonQRegion`: Amazon Q Region (us-east-1, or us-west-2)
-    4. `DynamoDBTableName`: DynamoDB table that will be used to cache encrypted user credentials for question answering with QBusiness.
-    5. `IDCApplicationARN`: ARN of the Identity Center customer managed application created for QBusiness. This will be blank on your first launch of LMA and you will need to update this after initial deployment using `Update Stack`, if you have previously created an LMA stack you may create the application before updating. Please see steps x-x for what is required.
+    3. `IDCApplicationARN`: ARN of the Identity Center customer managed application created for QBusiness. This will be blank on your first launch of LMA and you will need to update this after initial deployment using `Update Stack`, if you have previously created an LMA stack you may create the application before updating.
 3. Once the stack has completed, check the Outputs section of CloudFormation. You will need the following outputs.
     1. CognitoUserPoolClientId
     2. CognitoUserPoolTokenIssuerUrl
