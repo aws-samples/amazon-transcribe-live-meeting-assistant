@@ -8,7 +8,10 @@ Amazon Q is a new generative AI-powered application that helps users get work do
 2. When launching or updating the LMA stack, make the following parameter changes:
     1. `Meeting Assist Service`: Located under `Meeting Assist Options` Select 'Q_Business (use existing)'
     2. `AmazonQAppId`: Located under `Meeting Assist Q Business Integration`. Existing Amazon Q Application ID
-    3. `IDCApplicationARN`: ARN of the Identity Center customer managed application created for QBusiness. This will be blank on your first launch of LMA and you will need to update this after initial deployment using `Update Stack`, if you have previously created an LMA stack you may create the application before updating.
+    3. `IDCApplicationARN`: ARN of the Identity Center customer managed application created for QBusiness. This will be blank on your first launch of LMA and you will need to update this after creating a custom application in Identity Center (see step 5 below). Once you have obtained that application, you will copy the ARN into this parameter below and update the stack. The process for a new deployment of LMA w/ Q Business follows these steps...
+        1. Initial deployment (only filling in `AmazonQAppId`)
+        2. Create IDC application (follow steps below)
+        3. Update LMA stack providing `IDCApplicationARN` from step 5
 3. Once the stack has completed, check the Outputs section of CloudFormation. You will need the following outputs.
     1. CognitoUserPoolClientId
     2. CognitoUserPoolTokenIssuerUrl
@@ -23,6 +26,8 @@ Amazon Q is a new generative AI-powered application that helps users get work do
     3. For `Application URL`, provide the **Web experience URL** of your Q Business application (if you have a custom domain for your Q Business application, you would use the URL of that domain). You can either opt to assign specific users/groups to this application or allow any Identity Center users/groups to access the application. Your Q Business subscriptions will still apply however so only users with a subscription can successfully chat with the application. Then hit `Next`
     4. Select the Trusted token issuer that was created in the previous section of these instructions, you will now need an aud claim so that the token issuer can identify the application. This is the `CognitoUserPoolClientId` obtained from deploying LMA.
     5. On application credentials, you will provide the IAM role of the Lambda function that is used to make calls to Q Business. This is the `QBusinessLambdaHookFunctionRoleArn` from deploying the LMA application.
+    6. Once completed, your application will be visible in the `Customer managed` tab of Identity Center Applications. You will need to copy the `Application ARN` found in the Details section and update the LMA stack, providing this value as the `IDCApplicationARN` parameter
+        ![IDCApp](../images/icd-application.png)
 
 ## After your Amazon Q Plugin stack is deployed
 After setup, Live Meeting Assistant will use Q Business as a fallback for answering questions asked by the Meeting Assist Bot and the 'Okay Assistant' queries asked during meetings. 
