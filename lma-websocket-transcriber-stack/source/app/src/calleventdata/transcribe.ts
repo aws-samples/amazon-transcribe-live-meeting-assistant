@@ -31,6 +31,7 @@ import {
     AddTranscriptSegmentEvent,
     SocketCallData,
     CallMetaData,
+    ChannelSpeakerData
 } from './eventtypes';
 
 import { normalizeErrorForLogging } from '../utils';
@@ -77,7 +78,8 @@ const POST_CALL_CONTENT_REDACTION_OUTPUT =
   process.env['POST_CALL_CONTENT_REDACTION_OUTPUT'] || 'redacted';
 const kdsStreamName = process.env['KINESIS_STREAM_NAME'] || '';
 const showSpeakerLabel =
-  (process.env['SHOW_SPEAKER_LABEL'] || 'true') === 'true';
+    (process.env['SHOW_SPEAKER_LABEL'] || 'true') === 'true';
+const DEBUG = (process.env['DEBUG'] || 'false') === 'true';
 
 const tcaOutputLocation = `s3://${RECORDINGS_BUCKET_NAME}/${CALL_ANALYTICS_FILE_PREFIX}`;
 
@@ -365,13 +367,6 @@ export const startTranscribe = async (
     }
 };
 
-// Extend the CallMetaData interface
-interface ExtendedCallMetaData extends CallMetaData {
-    currentSpeakerName?: string | null;
-    speakers?: string[];
-    startTimes?: number[];
-}
-
 interface Segment {
     SegmentId: string;
     Speaker: string;
@@ -380,16 +375,72 @@ interface Segment {
     Transcript: string;
 }
 
+function processTranscriptionResults(
+    speakerName: string,
+    result: Result,
+    callMetadata: CallMetaData,
+    server: FastifyInstance
+): Record<string, Segment> {
+    const segments: Record<string, Segment> = {};
+    const channelId = result.ChannelId ?? 'ch_0';
+  
+    // Initialize channel data if it doesn't exist
+    if (!callMetadata.channels) {
+        callMetadata.channels = {};
+    }
+    if (!callMetadata.channels[channelId]) {
+        callMetadata.channels[channelId] = {
+            currentSpeakerName: null,
+            speakers: [],
+            startTimes: [],
+        };
+    }
+  
+    const channelData = callMetadata.channels[channelId];
+  
+    if (channelData.currentSpeakerName !== speakerName) {
+        channelData.currentSpeakerName = speakerName;
+        channelData.speakers.push(speakerName);
+        const lastItem = result.Alternatives?.[0]?.Items?.[result.Alternatives[0].Items.length - 1];
+        if (lastItem) {
+            channelData.startTimes.push(lastItem.StartTime ?? 0);
+        }
+    }
+  
+    const alternative = result.Alternatives?.[0];
+    if (alternative?.Items) {
+        for (const item of alternative.Items) {
+            addItemToSegment(item, segments, channelData, channelId);
+            if (DEBUG) {
+                server.log.debug(`[${callMetadata.callId}] Item ${item.StartTime}, ${item.EndTime}, ${item.Content}`);
+                server.log.debug(`[${callMetadata.callId}] Speakers ${JSON.stringify(channelData.speakers)}`);
+                server.log.debug(`[${callMetadata.callId}] Starttimes ${JSON.stringify(channelData.startTimes)}`);
+                server.log.debug(`[${callMetadata.callId}] Segments ${JSON.stringify(segments)}`);
+            }
+        }
+    }
+  
+    if (!result.IsPartial) {
+        server.log.debug(`[${callMetadata.callId}] Non partial result - Resetting channel speaker data for ${channelId}`);
+        channelData.currentSpeakerName = null;
+        channelData.speakers = [];
+        channelData.startTimes = [];
+    }
+  
+    return segments;
+}
+  
 function addItemToSegment(
     item: Item,
     segments: Record<string, Segment>,
-    callMetadata: ExtendedCallMetaData
-): Record<string, Segment> {
-    const startTimes = callMetadata.startTimes ?? [];
-    const speakers = callMetadata.speakers ?? [];
+    channelData: ChannelSpeakerData,
+    channelId: string
+): void {
+    const { speakers, startTimes } = channelData;
     const segmentIndex = startTimes.findIndex((time) => time > (item.StartTime ?? 0)) - 1;
     const index = segmentIndex < 0 ? 0 : segmentIndex;
-    const segmentId = `${speakers[index] ?? 'unknown'}-${startTimes[index] ?? 'unknown'}`;
+    const segmentId = `${speakers[index] ?? 'unknown'}-${startTimes[index] ?? 'unknown'}-${channelId}`;
+  
     if (!segments[segmentId]) {
         segments[segmentId] = {
             SegmentId: segmentId,
@@ -401,49 +452,14 @@ function addItemToSegment(
     } else if (item.Type === 'pronunciation') {
         segments[segmentId].Transcript += ' ';
     }
+  
     segments[segmentId].EndTime = item.EndTime ?? 0;
     segments[segmentId].Transcript += item.Content;
-    return segments;
-}
-
-
-function processTranscriptionResults(
-    speakerName: string,
-    result: Result,
-    callMetadata: ExtendedCallMetaData
-): Record<string, Segment> {
-    const segments: Record<string, Segment> = {};
-    if (callMetadata.currentSpeakerName !== speakerName) {
-        callMetadata.currentSpeakerName = speakerName;
-        callMetadata.speakers = callMetadata.speakers || [];
-        callMetadata.startTimes = callMetadata.startTimes || [];
-        callMetadata.speakers.push(speakerName);
-        const lastItem =
-            result.Alternatives?.[0]?.Items?.[result.Alternatives?.[0]?.Items?.length - 1];
-        if (lastItem) {
-            callMetadata.startTimes.push(lastItem.StartTime ?? 0);
-        }
-    }
-
-    const alternative = result.Alternatives?.[0];
-    if (alternative?.Items) {
-        for (const item of alternative.Items) {
-            addItemToSegment(item, segments, callMetadata);
-        }
-    }
-
-    if (!result.IsPartial) {
-        callMetadata.currentSpeakerName = null;
-        callMetadata.speakers = [];
-        callMetadata.startTimes = [];
-    }
-
-    return segments;
 }
 
 export const writeTranscriptionSegment = async function (
     transcribeMessageJson: TranscriptEvent,
-    callMetadata: ExtendedCallMetaData,
+    callMetadata: CallMetaData,
     server: FastifyInstance
 ) {
     if (
@@ -459,7 +475,8 @@ export const writeTranscriptionSegment = async function (
             const segments = processTranscriptionResults(
                 speakerName,
                 result,
-                callMetadata
+                callMetadata,
+                server
             );
 
             for (const segment of Object.values(segments)) {

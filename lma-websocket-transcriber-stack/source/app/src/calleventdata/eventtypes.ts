@@ -59,6 +59,12 @@ export type AddCallCategoryEvent = CallEventBase<'ADD_CALL_CATEGORY'> & {
     CategoryEvent: CategoryEvent,
 };
 
+export interface ChannelSpeakerData {
+    currentSpeakerName: string | null;
+    speakers: string[];
+    startTimes: number[];
+}
+
 export type CallMetaData = {
     callId: Uuid,
     fromNumber?: string,
@@ -68,6 +74,9 @@ export type CallMetaData = {
     samplingRate: number,
     callEvent: string,
     activeSpeaker: string,
+    channels: {
+        [channelId: string]: ChannelSpeakerData;
+    };
 };
 
 export type SocketCallData = {
