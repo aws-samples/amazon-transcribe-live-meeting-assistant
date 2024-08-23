@@ -437,8 +437,14 @@ function addItemToSegment(
     channelId: string
 ): void {
     const { speakers, startTimes } = channelData;
-    const segmentIndex = startTimes.findIndex((time) => time > (item.StartTime ?? 0)) - 1;
-    const index = segmentIndex < 0 ? 0 : segmentIndex;
+    let index = startTimes.findIndex((time) => time > (item.StartTime ?? 0));
+    if (index == -1) {
+        // -1 means item.Starttime is greater than all speaker startimes, so use the last speaker
+        index = startTimes.length - 1;
+    } else if (index > 0) {
+        // choose prior speaker starttime, unless we're already at the start of the list
+        index = index - 1;
+    }
     const segmentId = `${speakers[index] ?? 'unknown'}-${startTimes[index] ?? 'unknown'}-${channelId}`;
   
     if (!segments[segmentId]) {
