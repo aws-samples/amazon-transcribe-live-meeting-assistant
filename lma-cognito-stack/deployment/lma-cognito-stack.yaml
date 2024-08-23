@@ -1,0 +1,515 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License").
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: Amazon Transcribe Live Meeting Assist - Cognito Stack
+
+Parameters:
+  # Required
+  LMAStackName:
+    Type: String
+    Description: LMA Stack Name
+
+  LMASettingsParameterName:
+    Type: String
+    Description: LMA settings SSM Parameter store
+
+  S3BucketName:
+    Type: String
+    Default: ""
+    Description: >
+      Existing bucket where call recording files will be stored.
+    # yamllint disable rule:line-length
+    AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
+    # yamllint enable rule:line-length
+
+  AdminEmail:
+    Type: String
+    Description: >-
+      Email address of the admin user (e.g. jdoe+admin@example.com) that has access to all meetings 
+      for administrative purposes. 
+      An initial temporary password will be automatically sent to this user via email.
+    AllowedPattern: '^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$'
+
+  AllowedSignUpEmailDomain:
+    Type: String
+    Default: ""
+    Description: >-
+      Email address domain (example.com) or comma separated list of email domains  (example1.com,
+      example2.com) allowed to signin and signup using the web UI.
+      If left empty, signup via the web UI is disabled and users will have to be created
+      using
+      Cognito.
+    AllowedPattern: '^(|([\w-]+\.)+[\w-]{2,6}(, *([\w-]+\.)+[\w-]{2,6})*)$'
+
+  # NOTE: These parameters are dynamically updated during release
+  BootstrapBucketBaseName:
+    Type: String
+    Default: aws-bigdata-blog
+    Description: >-
+      Base name of bootstrap S3 bucket. The region is appended to the bucket name.
+      For example if
+      you provide a base name `mybucket`, a bucket with a region suffix must exist
+      in the region
+      you are deploying (e.g. `mybucket-us-east-1`)
+      The bucket contains pre-staged packaged templates and source artifacts
+    # yamllint disable rule:line-length
+    AllowedPattern: '(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$)'
+    # yamllint enable rule:line-length
+
+  BootstrapS3Prefix:
+    Type: String
+    Default: artifacts/lca
+    Description: >
+      S3 prefix where the templates and source are stored under
+
+  BootstrapVersion:
+    Type: String
+    Default: 0.1.9
+    Description: >
+      Artifacts version (semver). Used to point to a specific release in the S3
+      bootstrap bucket
+
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs.
+
+Conditions:
+  ShouldAllowSignUpEmailDomain:
+    !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
+
+Outputs:
+  CognitoLoginUrl:
+    Value: !Sub https://${LMAUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
+  CognitoClientId:
+    Value: !Ref UserPoolClient
+  CognitoAuthRoleArn:
+    Value: !GetAtt CognitoAuthorizedRole.Arn
+  UserPoolId:
+    Description: >-
+      The id of Cognito user pool.
+    Value: !Ref UserPool
+  AppIdentityPoolId:
+    Description: The Id for the App Cognito Identity Pool 
+    Value: !Ref IdentityPool
+  LexAgentAssistIdentityPoolId:
+    Description: The Id for the Cognito Identity Pool created for the agent assist
+    Value: !Ref AgentAssistBotIdentityPool
+  LexAgentAssistUnauthRoleArn:
+    Description: The arn for the Agent Assist Bot Identity Pool Cognito role
+    Value: !GetAtt AgentAssistBotUnauthRole.Arn
+
+Resources:
+
+  ##########################################################################
+  # Cognito
+  # Sample Cognito resources
+  ##########################################################################
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: !If
+          - ShouldAllowSignUpEmailDomain
+          - false
+          - true
+        InviteMessageTemplate:
+          EmailSubject: Welcome to Live Meeting Assistant!
+          EmailMessage: !Sub |-
+            <p>Hello {username},
+            <p>Welcome to Live Meeting Assistant (LMA)! Your temporary password is:
+            <p>     {####}<p>
+            <p>When the CloudFormation stack is COMPLETE, navigate to the Outputs 
+            <p> tab of your CloudFormation stack and get URL associated with 
+            <p> ApplicationCloudfrontEndpoint. This is your LMA web interface.
+            <p> When you first login, it will prompt you to set a permanent password. 
+            <p>
+            <p>Don't attempt to download the Chrome browser extension from LMA until the 
+            CloudFormation stack status is CREATE_COMPLETE or UPDATE_COMPLETE, as the 
+            extension will not be available until then.
+            <p>
+            <p>Thanks,
+            <p>Live Meeting Assistant (amazon.com/live-meeting-assistant)
+      AutoVerifiedAttributes:
+        - email
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      EmailVerificationMessage: >-
+        Please verify your email to complete account registration. Confirmation Code
+        {####}.
+      EmailVerificationSubject: >-
+        Account Verification
+      LambdaConfig: !If
+        - ShouldAllowSignUpEmailDomain
+        - PreAuthentication: !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
+          PreSignUp: !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
+        - !Ref AWS::NoValue
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: false
+          Required: true
+      UsernameConfiguration:
+        CaseSensitive: false
+      UserPoolName: !Sub "${AWS::StackName}-UserPool"
+
+  GetDomainLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  GetDomainLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: Returns the lowercase version of a string
+      MemorySize: 256
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt GetDomainLambdaRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import cfnresponse
+          import time
+          def lambda_handler(event, context):                                                    
+              output = event['ResourceProperties'].get('InputString', '').lower()
+              output = f"{output}-{time.time_ns()}" # make unique
+              responseData = {'OutputString': output}                                            
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/GetDomainLambda
+    DependsOn:
+      - GetDomainLambdaLogGroup
+
+  GetDomainLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/GetDomainLambda
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+
+  GetDomain:
+    Type: Custom::GetDomain
+    Properties:
+      ServiceToken: !GetAtt GetDomainLambda.Arn
+      InputString: !Ref LMAStackName
+
+  LMAUserPoolDomain:
+    Type: "AWS::Cognito::UserPoolDomain"
+    Properties:
+      Domain: !GetAtt GetDomain.OutputString
+      UserPoolId: !Ref UserPool
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - phone
+        - profile
+      CallbackURLs:
+        - http://localhost:3000/
+        - https://bmpfinegchjaiocjnfjfcgeohdiblomp.chromiumapp.org/
+      AccessTokenValidity: 1
+      ClientName: !Sub "${AWS::StackName}-Client"
+      EnableTokenRevocation: true
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      GenerateSecret: false
+      IdTokenValidity: 1
+      PreventUserExistenceErrors: ENABLED
+      ReadAttributes:
+        - email
+        - email_verified
+        - preferred_username
+      RefreshTokenValidity: 30
+      SupportedIdentityProviders:
+        - COGNITO
+      UserPoolId: !Ref UserPool
+
+  IdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName: !Sub "${AWS::StackName}-IdentityPool"
+      AllowUnauthenticatedIdentities: false
+      CognitoIdentityProviders:
+        - ClientId: !Ref UserPoolClient
+          ProviderName: !GetAtt UserPool.ProviderName
+
+  CognitoIdentityPoolSetRole:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref IdentityPool
+      Roles:
+        authenticated: !GetAtt CognitoAuthorizedRole.Arn
+
+  CognitoAuthorizedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "cognito-identity.amazonaws.com:aud": !Ref IdentityPool
+              "ForAnyValue:StringLike":
+                "cognito-identity.amazonaws.com:amr": authenticated
+      Policies:
+        - PolicyName: accessS3RecordingsPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource:
+                  - !Sub
+                    - "arn:aws:s3:::${bucket}"
+                    - bucket: !Ref S3BucketName
+                  - !Sub
+                    - "arn:aws:s3:::${bucket}/*"
+                    - bucket: !Ref S3BucketName
+        - PolicyName: accessParameterStore
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
+        - PolicyName: accessTranslateAPI
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - translate:TranslateText
+                  - comprehend:DetectDominantLanguage
+                Resource: "*"
+        - PolicyName: executeStepfunctions
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartSyncExecution
+                  - states:StartExecution
+                Resource:
+                  - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
+
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason:
+              comprehend, translate, and connect do not support resource-level
+              permissions
+
+  AdminUser:
+    Type: AWS::Cognito::UserPoolUser
+    DependsOn: CognitoUserPoolEmailDomainVerifyPermissionReady
+    Properties:
+      DesiredDeliveryMediums:
+        - EMAIL
+      UserAttributes:
+        - Name: email
+          Value: !Ref AdminEmail
+      Username: !Ref AdminEmail
+      UserPoolId: !Ref UserPool
+
+  CognitoUserPoolEmailDomainVerifyPermissionReady:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Metadata:
+      SecondaryCIDRready:
+        !If [
+          ShouldAllowSignUpEmailDomain,
+          !Ref CognitoUserPoolEmailDomainVerifyPermission,
+          "",
+        ]
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      Description: Administrators
+      GroupName: Admin
+      Precedence: 0
+      UserPoolId: !Ref UserPool
+
+  AdminUserToGroupAttachment:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      GroupName: !Ref AdminGroup
+      Username: !Ref AdminUser
+      UserPoolId: !Ref UserPool
+
+  CognitoUserPoolEmailDomainVerifyFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldAllowSignUpEmailDomain
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Timeout: 3
+      Environment:
+        Variables:
+          ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
+      InlineCode: |
+        exports.handler = async (event, context) => {
+          console.log(event);
+          const allowed_domains = (
+              process.env?.ALLOWED_SIGNUP_EMAIL_DOMAINS
+              .split(",").map(domain => {return domain.trim()})
+          );
+          const { email } = event.request?.userAttributes;
+          if (!email || !email.includes('@')) {
+            throw Error('Username does not exists or invalid email address');
+          }
+          const emailDomain = email?.split('@')[1];
+          if (!emailDomain || !allowed_domains) {
+            throw new Error('Server error - invalid configuration');
+          }
+          if (!allowed_domains.includes(emailDomain)) {
+            throw new Error('Invalid email address domain');
+          }
+          return event;
+        };
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/CognitoUserPoolEmailDomainVerifyFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    DependsOn:
+      - CognitoUserPoolEmailDomainVerifyFunctionLogGroup
+
+  CognitoUserPoolEmailDomainVerifyFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/CognitoUserPoolEmailDomainVerifyFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+
+  CognitoUserPoolEmailDomainVerifyPermission:
+    Type: AWS::Lambda::Permission
+    Condition: ShouldAllowSignUpEmailDomain
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CognitoUserPoolEmailDomainVerifyFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt UserPool.Arn
+
+  ##########################################################################
+  # LexWebUI / Agent Assist Bot
+  ##########################################################################
+
+  AgentAssistBotIdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W57
+            reason: Using cognito assume role with web identity and scoped permissions.
+    Properties:
+      IdentityPoolName: !Sub "${AWS::StackName}-AgentAssistBot-IdentityPool"
+      AllowUnauthenticatedIdentities: true
+      CognitoIdentityProviders:
+        - ClientId: !Ref UserPoolClient
+          ProviderName: !GetAtt UserPool.ProviderName
+
+  AgentAssistBotIdentityPoolSetRole:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref AgentAssistBotIdentityPool
+      Roles:
+        authenticated: !GetAtt AgentAssistBotAuthRole.Arn
+        unauthenticated: !GetAtt AgentAssistBotUnauthRole.Arn
+
+  AgentAssistBotUnauthRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "cognito-identity.amazonaws.com:aud": !Ref AgentAssistBotIdentityPool
+              "ForAnyValue:StringLike":
+                "cognito-identity.amazonaws.com:amr": unauthenticated
+
+  AgentAssistBotAuthRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "cognito-identity.amazonaws.com:aud": !Ref AgentAssistBotIdentityPool
+              "ForAnyValue:StringLike":
+                "cognito-identity.amazonaws.com:amr": authenticated
+      Policies:
+        - PolicyName: AgentAssistBotAuthPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lex:RecognizeText
+                Resource: !Sub "arn:${AWS::Partition}:lex:${AWS::Region}:${AWS::AccountId}:bot-alias/PLCHLDR/PLCHLDR"

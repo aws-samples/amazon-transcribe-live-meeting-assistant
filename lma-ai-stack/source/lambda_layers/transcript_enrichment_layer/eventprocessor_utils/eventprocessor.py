@@ -7,6 +7,7 @@ from os import getenv
 import uuid
 import asyncio
 from sentiment import ComprehendWeightedSentiment
+import jwt
 
 if TYPE_CHECKING:
     from mypy_boto3_comprehend.type_defs import DetectSentimentResponseTypeDef
@@ -48,6 +49,11 @@ def get_meeting_ttl():
 def get_transcription_ttl():
     return get_ttl(TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS)
 
+def get_owner_from_jwt(jwt_token):
+    decoded_jwt = jwt.decode(jwt_token, options={"verify_signature": False})
+    print("DECODED JWT", decoded_jwt)
+    return decoded_jwt['username']
+    
 
 def transform_segment_to_categories_agent_assist(
     category: str,
@@ -231,6 +237,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
     status: str = "TRANSCRIBING"
     expires_afer = get_transcription_ttl()
     created_at = datetime.utcnow().astimezone().isoformat()
+    owner: str = None
     segments = []
 
     utteranceEvent = message.get("UtteranceEvent", None)
@@ -355,6 +362,10 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
 
         if message.get("Sentiment", None):
             sentiment = message["Sentiment"]
+        
+        if message.get("AccessToken", None):
+            owner = get_owner_from_jwt(message.get("AccessToken"))
+
         segments.append(
             dict(
                 CallId=call_id,
@@ -371,6 +382,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 Status=status,
                 ExpiresAfter=expires_afer,
                 CreatedAt=created_at,
+                Owner=owner,
             )
         )
 

@@ -6,6 +6,7 @@ export default gql`
   subscription Subscription {
     onCreateCall {
       CallId
+      Owner
     }
   }
 `;

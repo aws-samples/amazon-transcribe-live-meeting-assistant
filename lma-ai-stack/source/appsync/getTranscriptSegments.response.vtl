@@ -1,4 +1,16 @@
 #if ( $ctx.error )
   $util.error($ctx.error.message, $ctx.error.type)
 #end
-$util.toJson({"TranscriptSegments": $ctx.result.items, "nextToken": $ctx.result.nextToken})
+
+#if(!$context.identity.groups.contains("Admin"))
+  #set($myResults = [])
+  #foreach($item in $context.result.items)
+    #if($item.Owner == $context.identity.username)
+      #set($added = $myResults.add($item))
+    #end
+  #end
+  $util.toJson({"TranscriptSegments": $myResults, "nextToken": $ctx.result.nextToken})
+#else
+  $util.toJson({"TranscriptSegments": $ctx.result.items, "nextToken": $ctx.result.nextToken})
+#end
+

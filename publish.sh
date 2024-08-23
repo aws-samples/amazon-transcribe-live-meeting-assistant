@@ -176,7 +176,6 @@ else
 echo "SKIPPING $dir (unchanged)"
 fi
 
-
 dir=lma-virtual-participant-stack
 echo "PACKAGING $dir"
 pushd $dir
@@ -204,6 +203,23 @@ aws cloudformation package \
 --template-file ${template} \
 --output-template-file ${tmpdir}/${template} \
 --s3-bucket $BUCKET --s3-prefix ${PREFIX_AND_VERSION}/lma-vpc-stack \
+--region ${REGION} || exit 1
+echo "Uploading template file to: ${s3_template}"
+aws s3 cp ${tmpdir}/${template} ${s3_template}
+echo "Validating template"
+aws cloudformation validate-template --template-url ${https_template} > /dev/null || exit 1
+popd
+
+dir=lma-cognito-stack
+echo "PACKAGING $dir"
+pushd $dir/deployment
+template=lma-cognito-stack.yaml
+s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-cognito-stack/template.yaml"
+https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX_AND_VERSION}/lma-cognito-stack/template.yaml"
+aws cloudformation package \
+--template-file ${template} \
+--output-template-file ${tmpdir}/${template} \
+--s3-bucket $BUCKET --s3-prefix ${PREFIX_AND_VERSION}/lma-cognito-stack \
 --region ${REGION} || exit 1
 echo "Uploading template file to: ${s3_template}"
 aws s3 cp ${tmpdir}/${template} ${s3_template}
@@ -388,7 +404,7 @@ fi
 echo "OUTPUTS"
 echo Template URL: $template
 echo CF Launch URL: https://${REGION}.console.aws.amazon.com/cloudformation/home?region=${REGION}#/stacks/create/review?templateURL=${template}\&stackName=LMA
-echo CLI Deploy: aws cloudformation deploy --region $REGION --template-file $tmpdir/$MAIN_TEMPLATE --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --stack-name LMA --parameter-overrides S3BucketName=\"\" AdminEmail='jdoe@example.com' BedrockKnowledgeBaseId='xxxxxxxxxx'
+echo CLI Deploy: aws cloudformation deploy --region $REGION --template-file $tmpdir/$MAIN_TEMPLATE --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --stack-name LMA --parameter-overrides S3BucketName=\"\" AdminEmail='jdoe+admin@example.com' BedrockKnowledgeBaseId='xxxxxxxxxx'
 echo Done
 exit 0
 
