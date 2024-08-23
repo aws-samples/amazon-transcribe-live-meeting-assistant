@@ -30,15 +30,24 @@ export type CallStartEvent = CallEventBase<'START'> & {
     CustomerPhoneNumber: string,
     SystemPhoneNumber: string,
     AgentId: string | undefined,
+    AccessToken?: string,
+    IdToken?: string,
+    RefreshToken?: string,
 };
 
 export type CallEndEvent = CallEventBase<'END'> & {
     CustomerPhoneNumber: string,
-    SystemPhoneNumber: string
+    SystemPhoneNumber: string,
+    AccessToken?: string,
+    IdToken?: string,
+    RefreshToken?: string,
 };
 
 export type CallRecordingEvent = CallEventBase<'ADD_S3_RECORDING_URL'> & {
     RecordingUrl: string,
+    AccessToken?: string,
+    IdToken?: string,
+    RefreshToken?: string,
 };
 
 export type AddTranscriptSegmentEvent = CallEventBase<'ADD_TRANSCRIPT_SEGMENT'> & {
@@ -53,10 +62,16 @@ export type AddTranscriptSegmentEvent = CallEventBase<'ADD_TRANSCRIPT_SEGMENT'> 
     TranscriptEvent?: TranscriptEvent,
     UtteranceEvent?: UtteranceEvent,
     Speaker: string,
+    AccessToken?: string,
+    IdToken?: string,
+    RefreshToken?: string,
 };
 
 export type AddCallCategoryEvent = CallEventBase<'ADD_CALL_CATEGORY'> & {
     CategoryEvent: CategoryEvent,
+    AccessToken?: string,
+    IdToken?: string,
+    RefreshToken?: string,
 };
 
 export interface ChannelSpeakerData {
@@ -77,6 +92,9 @@ export type CallMetaData = {
     channels: {
         [channelId: string]: ChannelSpeakerData;
     };
+    accessToken?: string,
+    idToken?: string,
+    refreshToken?: string,
 };
 
 export type SocketCallData = {

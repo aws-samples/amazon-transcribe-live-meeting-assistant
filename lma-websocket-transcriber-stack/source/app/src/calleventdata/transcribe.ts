@@ -130,6 +130,9 @@ export const writeCallStartEvent = async (
         SystemPhoneNumber: callMetaData.toNumber || 'System Phone',
         AgentId: callMetaData.agentId,
         CreatedAt: new Date().toISOString(),
+        AccessToken: callMetaData.accessToken,
+        IdToken: callMetaData.idToken,
+        RefreshToken: callMetaData.refreshToken,
     };
     await writeCallEvent(callStartEvent, server);
 };
@@ -143,6 +146,9 @@ export const writeCallEndEvent = async (
         CallId: callMetaData.callId,
         CustomerPhoneNumber: callMetaData.fromNumber || 'Customer Phone',
         SystemPhoneNumber: callMetaData.toNumber || 'System Phone',
+        AccessToken: callMetaData.accessToken,
+        IdToken: callMetaData.idToken,
+        RefreshToken: callMetaData.refreshToken,
     };
     await writeCallEvent(callEndEvent, server);
 };
@@ -156,6 +162,9 @@ export const writeCallRecordingEvent = async (
         EventType: 'ADD_S3_RECORDING_URL',
         CallId: callMetaData.callId,
         RecordingUrl: recordingUrl,
+        AccessToken: callMetaData.accessToken,
+        IdToken: callMetaData.idToken,
+        RefreshToken: callMetaData.refreshToken,
     };
     await writeCallEvent(callRecordingEvent, server);
 };
@@ -502,6 +511,9 @@ export const writeTranscriptionSegment = async function (
                     TranscriptEvent: undefined,
                     UtteranceEvent: undefined,
                     Speaker: segment.Speaker,
+                    AccessToken: callMetadata.accessToken,
+                    IdToken: callMetadata.idToken,
+                    RefreshToken: callMetadata.refreshToken,
                 };
 
                 const putParams = {
