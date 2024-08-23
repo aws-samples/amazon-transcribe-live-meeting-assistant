@@ -57,6 +57,7 @@ async def meeting(page):
     async def attendee_change(number: int):
         if number <= 1:
             print("Your scribe got lonely and left.")
+            details.start = False
             await page.goto("about:blank")
 
     await page.expose_function("attendeeChange", attendee_change)
@@ -107,6 +108,7 @@ async def meeting(page):
         print('New Message:', message)
         if details.end_command in message:
             print("Your scribe has been removed from the meeting.")
+            details.start = False
             await send_messages(details.exit_messages)
             await page.goto("about:blank")
         elif details.start and details.pause_command in message:

@@ -53,7 +53,6 @@ async def transcribe():
         MyEventHandler(stream.output_stream).handle_events()
     )
     print("Transcribe stopped")
-    kds.send_end_meeting()
 
 
 async def speaker_change(speaker):

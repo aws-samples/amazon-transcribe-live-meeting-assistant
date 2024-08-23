@@ -29,9 +29,15 @@ To get started, cd to `utilities/websocket-client` directory in LCA repo.
 
     `AGENT_ID='BabuS'`
 
-    `LCA_JWT_TOKEN=`
+    `LMA_ACCESS_JWT_TOKEN=`
+    
+    `LMA_ID_JWT_TOKEN=`
 
-    Get the `LCA_JWT_TOKEN` from your LCA Cognito credentials.  
+    `LMA_REFRESH_JWT_TOKEN=`
+
+    Update LMA_ACCESS_JWT_TOKEN, LMA_ID_JWT_TOKEN and LMA_REFRESH_JWT_TOKEN with the 
+    access token, identity token and refresh token respectively from the LMA 
+    user authenticted session.
 
 4. Run the websocket client using npm run command 
 

@@ -238,15 +238,17 @@ def format_response(event, kb_response, query):
         markdown = f"**{queryprefix}** *{query}*\n\n{markdown}"
     if showContextText:
         contextText = ""
+        refCount = 0
         for source in kb_response.get("citations", []):
             for reference in source.get("retrievedReferences", []):
+                refCount += 1
                 snippet = reference.get("content", {}).get(
                     "text", "no reference text")
                 url = get_url_from_reference(reference)
                 if url:
                     # get title from url - handle presigned urls by ignoring path after '?'
-                    title = os.path.basename(url.split('?')[0])
-                    title = os.path.basename(url)
+                    title = os.path.basename(
+                        url.split('?')[0]) or f'Ref{refCount}'
                     contextText = f'{contextText}<br><a href="{url}">{title}</a>'
                 else:
                     contextText = f"{contextText}<br>{snippet}\n"
@@ -255,12 +257,15 @@ def format_response(event, kb_response, query):
             markdown = f'{markdown}\n<details><summary>Context</summary><p style="white-space: pre-line;">{contextText}</p></details>'
     if showSourceLinks:
         sourceLinks = []
+        refCount = 0
         for source in kb_response.get("citations", []):
             for reference in source.get("retrievedReferences", []):
+                refCount += 1
                 url = get_url_from_reference(reference)
                 if url:
                     # get title from url - handle presigned urls by ignoring path after '?'
-                    title = os.path.basename(url.split('?')[0])
+                    title = os.path.basename(
+                        url.split('?')[0]) or f'Ref{refCount}'
                     sourceLinks.append(f'<a href="{url}">{title}</a>')
         if len(sourceLinks):
             markdown = f'{markdown}<br>Sources: ' + ", ".join(sourceLinks)

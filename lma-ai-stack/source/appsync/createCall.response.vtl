@@ -5,4 +5,4 @@
     $util.error($ctx.error.message, $ctx.error.type)
   #end
 #end
-$util.toJson({"CallId": $ctx.result.keys[0].PK.substring(2)})
+$util.toJson({"CallId": $ctx.result.keys[0].PK.substring(2), "Owner": $ctx.args.input.Owner})

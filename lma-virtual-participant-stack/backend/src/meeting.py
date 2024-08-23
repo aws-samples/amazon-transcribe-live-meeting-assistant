@@ -3,6 +3,7 @@ from details import meeting_platform
 import asyncio
 from playwright.async_api import async_playwright
 import sys
+import kds
 
 if meeting_platform == "Chime":
     from chime import meeting
@@ -33,4 +34,6 @@ async def app():
         await browser.close()
 
 asyncio.run(app())
+kds.send_end_meeting()
+print("Ending Task. Bye.")
 sys.exit

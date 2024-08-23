@@ -1,5 +1,4 @@
-
-amazon_transcribe 
+amazon-transcribe 
 boto3
 pytest-playwright 
 requests
