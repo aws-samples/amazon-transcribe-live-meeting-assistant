@@ -64,7 +64,8 @@ Finally, LMA uses Amazon Bedrock LLM models for its live meeting assistant and m
 
 We’ve provided pre-built [AWS CloudFormation](http://aws.amazon.com/cloudformation) templates that deploy everything you need in your AWS account.
 
-If you’re a developer and you want to build, deploy, or publish the solution from code, refer to the [Developer README](./README_DEVELOPERS.md).
+If you’re a developer, and you want to build, deploy, or publish the solution from code, refer to the [Developer README](./README_DEVELOPERS.md).
+If you're an administrator or a developer, and you want to understand the newer User-Based Access Control capabilities, refer to [User-Based Access Control README](./lma-ai-stack/README_UBAC.md)
 
 Complete the following steps to launch the CloudFormation stack:
 
@@ -77,7 +78,8 @@ Complete the following steps to launch the CloudFormation stack:
    | US West (Oregon)      | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-west-2.console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/create/review?templateURL=https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml&stackName=LMA) |
 
 1. For **Stack name**, use the default value, `LMA`.
-1. For **Admin Email Address**, use a valid email address—your temporary password is emailed to this address during the deployment.
+1. For **Admin Email Address**, use a valid email address—your temporary password is emailed to this address during the deployment. Refer to [New LMA stack deployment](./lma-ai-stack/README_UBAC.md#new-lma-stack-deployment) for recommendations on choosing an email address.
+   )
 1. For **Authorized Account Email Domain**, use the domain name part of your corporate email address to allow users with email addresses in the same domain to create their own new UI accounts, or leave blank to prevent users from directly creating their own accounts. You can enter multiple domains as a comma separated list.
 1. For **MeetingAssistService** choose `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, `BEDROCK_KNOWLEDGE_BASE (Create)`, or `BEDROCK_LLM` (if you do not need a knowledge base)
    1. If you select `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, then:
@@ -313,6 +315,9 @@ Use the following CloudFormation template parameters when creating or updating y
 LMA is an open-source project. You can fork the LMA GitHub repository, enhance the code, and send us pull requests so we can incorporate and share your improvements!
 
 ## Update an existing LMA stack
+
+**Note:** If you are upgrading to version 0.2.0 from any of the prior versions (0.1.9 and below), refer to [User-Based Access Control README](./lma-ai-stack/README_UBAC.md) to understand User-Based Access Control
+features, recommendations on choosing an email for the admin persona, and limitations before proceeding.
 
 1. Log into the [AWS console](https://console.aws.amazon.com/) if you are not already.
    _Note: If you are logged in as an IAM user, ensure your account has permissions to create and manage the necessary resources and components for this application._
