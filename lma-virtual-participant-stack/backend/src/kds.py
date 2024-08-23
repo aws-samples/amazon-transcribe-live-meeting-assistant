@@ -68,7 +68,7 @@ def process_transcription_results(speaker_name, result):
             print(f"DEBUG: Segments {segments}")
     # if it's a non partial result, then re-initialize globals
     if not result.is_partial:
-        print("INFO: Non partial result")
+        print("INFO: Non partial result - Resetting speaker and start times")
         current_speaker_name = None
         speakers = []
         starttimes = []
