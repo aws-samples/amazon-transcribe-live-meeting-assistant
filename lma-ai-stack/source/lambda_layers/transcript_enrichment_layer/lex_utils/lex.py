@@ -28,13 +28,14 @@ def recognize_text_lex(
     bot_alias_id: str,
     locale_id: str,
     max_retries: int = 3,
-    call_id: str = None,
+    request_attributes: dict = None,
 ) -> RecognizeTextResponseTypeDef:
     """Runs Lex Recognize Text in the Async Event Loop"""
     # pylint: disable=too-many-arguments
     retry_count = 0
     bot_responded: bool = False
     bot_response: RecognizeTextResponseTypeDef
+
     while not bot_responded and retry_count < max_retries:
         try:
             # we do not set sessionAttributes here, since client is stateless and we want to 
@@ -45,7 +46,12 @@ def recognize_text_lex(
                     botId=bot_id,
                     botAliasId=bot_alias_id,
                     localeId=locale_id,
-                    requestAttributes={'callId':call_id}
+                    requestAttributes={
+                        "callid": request_attributes["callid"],
+                        "idtokenjwt": request_attributes["idtokenjwt"],
+                        "accesstokenjwt": request_attributes["accesstokenjwt"],
+                        "refreshtoken": request_attributes["refreshtoken"]
+                    }
                 )
             bot_responded = True
         except lex_client.exceptions.ConflictException as error:

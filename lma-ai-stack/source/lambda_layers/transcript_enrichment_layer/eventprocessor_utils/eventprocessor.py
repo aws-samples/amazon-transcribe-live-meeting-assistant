@@ -365,7 +365,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
         
         if message.get("AccessToken", None):
             owner = get_owner_from_jwt(message.get("AccessToken"))
-
+            
         segments.append(
             dict(
                 CallId=call_id,
@@ -383,6 +383,9 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 ExpiresAfter=expires_afer,
                 CreatedAt=created_at,
                 Owner=owner,
+                IdToken=message.get("IdToken", None),
+                AccessToken=message.get("AccessToken", None),
+                RefreshToken=message.get("RefreshToken", None)
             )
         )
 

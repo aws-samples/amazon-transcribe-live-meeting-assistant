@@ -33,6 +33,7 @@ Parameters:
       - "BEDROCK_LLM"
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
       - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
+      - "Q_BUSINESS (Use Existing)"
     Description: Choose the knowledge base / LLM service to use
 
   MeetingAssistServiceBedrockModelID:
@@ -499,6 +500,15 @@ Parameters:
       true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
     AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
 
+  AmazonQAppId:
+    Type: String
+    AllowedPattern: "^[a-zA-Z0-9][a-zA-Z0-9-]{35}$"
+    Description: Amazon Q Application ID
+
+  IDCApplicationARN:
+    Type: String
+    Description: ARN of the Identity Center customer managed application created for QBusiness
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -519,6 +529,11 @@ Metadata:
           - MeetingAssistServiceBedrockModelID
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
+      - Label:
+          default: Meeting Assist Q Business Integration
+        Parameters:
+          - AmazonQAppId
+          - IDCApplicationARN
       - Label:
           default: Amazon S3 Configuration
         Parameters:
@@ -723,6 +738,17 @@ Rules:
         AssertDescription:
           BedrockKnowledgeBaseId is required when MeetingAssistService
           is 'BEDROCK_KNOWLEDGE_BASE'
+  AmazonQId:
+    RuleCondition:
+      !Equals [
+        !Ref MeetingAssistService,
+        "Q_BUSINESS (Use Existing)",
+      ]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AmazonQAppId, ""]]
+        AssertDescription:
+          AmazonQAppId is required when MeetingAssistService
+          is 'Q_BUSINESS'
 
 Conditions:
   IsHealthcareDomainSelected: !Equals [!Ref Domain, "Healthcare"]
@@ -1322,8 +1348,6 @@ Resources:
           - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        AmazonQAppId: ""
-        AmazonQUserId: ""
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
         LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
         LexMeetingAssistLocaleId:
@@ -1357,6 +1381,8 @@ Resources:
         # QnaBotSettings - JSON param with new settings values based on options selected
         QnaBotSettings: !GetAtt SettingsJSON.Output
         Version: v0.8.8
+        AmazonQAppId: !Ref AmazonQAppId
+        IDCApplicationARN: !Ref IDCApplicationARN
 
   VPCSTACK:
     Type: AWS::CloudFormation::Stack
@@ -1540,3 +1566,18 @@ Outputs:
   LMASettingsParameterName:
     Description: Name of the Parameter store setting that holds the LMA Settings
     Value: !Ref LMASettingsParameter
+
+  CognitoUserPoolTokenIssuerUrl:
+    Description: Cognito User Pool Token Issuer URL (only used for QBusiness integration)
+    Value: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${COGNITOSTACK.Outputs.UserPoolId}
+   
+  CognitoUserPoolClientId:
+    Description: Cognito User Pool Client Id (only used for QBusiness integration)
+    Value: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
+    
+  QBusinessLambdaHookFunctionRoleArn:
+    Description: Function role for Lambda QBusiness plugin (only used for QBusiness integration)
+    Value: !GetAtt MEETINGASSISTSETUP.Outputs.QBusinessLambdaHookFunctionRoleArn
+  
+  
+  
