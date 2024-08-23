@@ -26,7 +26,6 @@ Your virtual participant will join your meeting in about 1 minute (after the Far
 ## Known issues with the beta, will be addressed in later releases.
 
 - The "Virtual Participant (Preview)" UI currently lacks error handling, user feedback, status visibility, and controls (pause/resume, leave meeting, etc.). If it fails to join your meeting after about 1m, you will need to troubleshoot using the logs from StepFunctions and/or the Fargate tasks.
-- Speaker assignment fidelity is not great. If multiple participants speak simultaneously, or with insufficient pauses between speakers, the virtual participant may confuse speaker name assignments.
 - Limited currently to just Chime and Zoom meetings.
 
 ## Developer testing / troubleshooting notes
