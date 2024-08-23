@@ -210,6 +210,7 @@ const onTextMessage = async (clientIP: string, ws: WebSocket, data: string, requ
         callMetaData.callId = callMetaData.callId || randomUUID();
         callMetaData.fromNumber = callMetaData.fromNumber || 'Customer Phone';
         callMetaData.toNumber = callMetaData.toNumber || 'System Phone';
+        callMetaData.activeSpeaker = callMetaData.activeSpeaker ?? callMetaData?.fromNumber ?? 'unknown';
 
         // if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
         //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);

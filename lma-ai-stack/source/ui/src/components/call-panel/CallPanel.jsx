@@ -656,7 +656,7 @@ const getAgentAssistPanel = (item, collapseSentiment) => {
           <Header
             variant="h4"
             info={
-              <Link variant="info" target="_blank" href="https://amazon.com/live-call-analytics">
+              <Link variant="info" target="_blank" href="https://amazon.com/live-meeting-assistant">
                 Info
               </Link>
             }
