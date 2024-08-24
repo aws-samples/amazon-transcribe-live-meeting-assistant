@@ -1,6 +1,6 @@
-# Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Bedrock, and Knowledge Bases for Amazon Bedrock
+# Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Bedrock, and Amazon Q Business / Knowledge Bases for Amazon Bedrock
 
-_Companion AWS blog post: [Live Meeting Assistant with Amazon Transcribe, Amazon Bedrock, and Knowledge Bases for Amazon Bedrock](http://www.amazon.com/live-meeting-assistant)_
+_Companion AWS blog post: [Live Meeting Assistant with Amazon Transcribe, Amazon Bedrock, and Amazon Q Business / Knowledge Bases for Amazon Bedrock](http://www.amazon.com/live-meeting-assistant)_
 
 _See [CHANGELOG](./CHANGELOG.md) for latest features and fixes._
 
@@ -20,7 +20,7 @@ https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/assets/1
 
 ## Solution overview
 
-The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom, Teams, WebEx, and Chime currently), or audio only from any other browser-based meeting app, softphone or audio source. It uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries.
+The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom, Teams, WebEx, and Chime currently), or audio only from any other browser-based meeting app, softphone or audio source. It uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, your choice of [Amazon Q Business](https://aws.amazon.com/q/business/) or [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries.
 
 Everything you need is provided as open source in this [GitHub repo](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant). It’s straightforward to deploy in your AWS account. When you’re done, you’ll wonder how you ever managed without it!
 
@@ -30,7 +30,7 @@ The following are some of the things LMA can do:
    <p align="left"><img src="./images/readme-transcription.png" alt="Transcription" /></p>
 - **Live translation** - It uses Amazon Translate to optionally show each segment of the conversation translated into your language of choice, from a selection of 75 languages.
   <p align="left"><img src="./images/readme-translation.png" alt="Translation" width=400/></p>
-- **Context aware meeting assistant** - It uses Knowledge Bases for Amazon Bedrock to provide answers from your trusted sources, or a Bedrock LLM if you don't have or need a knowledge base, using the live transcript as context for fact-checking and follow-up questions. To activate the assistant, just say “_Okay, Assistant_,” choose the **ASK ASSISTANT!** button, or enter your own question in the UI.
+- **Context aware meeting assistant** - It uses your choice of Amazon Q Business or Knowledge Bases for Amazon Bedrock to provide answers from your trusted sources, or a Bedrock LLM if you don't have or need a knowledge base, using the live transcript as context for fact-checking and follow-up questions. To activate the assistant, just say “_Okay, Assistant_,” choose the **ASK ASSISTANT!** button, or enter your own question in the UI.
   <p align="left"><img src="./images/readme-OK-Assistant.png" alt="OK Q" width=400/></p>
 - **On demand summaries of the meeting** - With the click of a button on the UI, you can generate a summary, which is useful when someone joins late and needs to get caught up. The summaries are generated from the transcript by Amazon Bedrock. LMA also provides options for identifying the current meeting topic, and for generating a list of action items with owners and due dates. You can also create your own custom prompts and corresponding options.
   <p align="left"><img src="./images/readme-action-items.png" alt="Action Items" /></p>
@@ -49,11 +49,14 @@ You are responsible for complying with legal, corporate, and ethical restriction
 
 You need to have an AWS account and an [AWS Identity and Access Management](https://aws.amazon.com/iam/) (IAM) role and user with permissions to create and manage the necessary resources and components for this application. If you don’t have an AWS account, see [How do I create and activate a new Amazon Web Services account?](https://aws.amazon.com/premiumsupport/knowledge-center/create-and-activate-aws-account/)
 
-If you want LMA to use your own trusted documents to power the context aware meeting assistant then you will use a Knowledge Base on Amazon Bedrock. You choose to have LMA either:
+If you want LMA to use your own trusted documents to power the context aware meeting assistant then you will use choose either Amazon Q Business or Knowledge Base on Amazon Bedrock. You choose to have LMA either:
 
-1. Automatically create a new knowledge base and populate it from documents in an S3 bucket in your AWS account, or from publicly accessible Web pages. Be prepared to specify your document location when you deploy LMA.
-2. Or, use an existing knowledge base that you have previously created and populated. See [Create a knowledge base](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-create.html).  
-   If you choose not to have LMA use your own documents, then no knowledge base is needed, and the LMA meeting assistant relies directly on the 'world knowledge' of the LLM model.
+1. Automatically create a new Bedrock knowledge base and populate it from documents in an S3 bucket in your AWS account, or from publicly accessible Web pages. Be prepared to specify your document location when you deploy LMA.
+2. Or, use an existing Bedrock knowledge base that you have previously created and populated. See [Create a knowledge base](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-create.html).  
+3. Or, use an existing Amazon Q Business application that you have previously created and populated. See [Amazon Q Business integration in LMA](./lma-meetingassist-setup-stack/README_QBUSINESS.md).
+
+If you choose not to have LMA use your own documents, then no Q Business application or knowledge base is needed, and the LMA meeting assistant relies directly on the 'world knowledge' of the LLM model.
+
 
 Finally, LMA uses Amazon Bedrock LLM models for its live meeting assistant and meeting summarization features. Before proceeding, if you have not previously done so, you must [request access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to the following Amazon Bedrock models:
 
@@ -65,7 +68,7 @@ Finally, LMA uses Amazon Bedrock LLM models for its live meeting assistant and m
 We’ve provided pre-built [AWS CloudFormation](http://aws.amazon.com/cloudformation) templates that deploy everything you need in your AWS account.
 
 If you’re a developer, and you want to build, deploy, or publish the solution from code, refer to the [Developer README](./README_DEVELOPERS.md).
-If you're an administrator or a developer, and you want to understand the newer User-Based Access Control capabilities, refer to [User-Based Access Control README](./lma-ai-stack/README_UBAC.md)
+If you're an administrator or a developer, and you want to understand the new User-Based Access Control capabilities (v0.2.0 and later), refer to [User-Based Access Control README](./lma-ai-stack/README_UBAC.md)
 
 Complete the following steps to launch the CloudFormation stack:
 
@@ -80,8 +83,8 @@ Complete the following steps to launch the CloudFormation stack:
 1. For **Stack name**, use the default value, `LMA`.
 1. For **Admin Email Address**, use a valid email address—your temporary password is emailed to this address during the deployment. Refer to [New LMA stack deployment](./lma-ai-stack/README_UBAC.md#new-lma-stack-deployment) for recommendations on choosing an email address.
    )
-1. For **Authorized Account Email Domain**, use the domain name part of your corporate email address to allow users with email addresses in the same domain to create their own new UI accounts, or leave blank to prevent users from directly creating their own accounts. You can enter multiple domains as a comma separated list.
-1. For **MeetingAssistService** choose `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, `BEDROCK_KNOWLEDGE_BASE (Create)`, or `BEDROCK_LLM` (if you do not need a knowledge base)
+1. For **Authorized Account Email Domain**, use the domain name part of your corporate email address to allow users with email addresses in the same domain to create their own new, non-admin, UI accounts, or leave blank to prevent users from directly creating their own accounts. You can enter multiple domains as a comma separated list. Each non-admin user will be able to see their own meetings in LMA, but not other users' meetings - see [User Based Access Control (Preview)](./lma-ai-stack/README_UBAC.md).
+1. For **MeetingAssistService** choose `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, `BEDROCK_KNOWLEDGE_BASE (Create)`, `Q_BUSINESS (Use Existing)`, or `BEDROCK_LLM` (if you do not need a knowledge base)
    1. If you select `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, then:
       - For **Bedrock Knowledge Base Id (existing)**, enter your existing Knowledge base ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Knowledge bases console.
          <p align="left"><img src="./images/readme-knowledgebase-id.png" alt="KB ID" width=350/></p>
@@ -92,6 +95,10 @@ Complete the following steps to launch the CloudFormation stack:
       - To optionally populate your new knowledge base with web site content from public web pages:
         1. For **Publicly accessible URLs for web crawling**, enter a comma separated list of web site Urls
         2. For **Web crawling sync scope**, select the choice that best matches how you want the web crawler to navigate out from the Urls you specified.
+    1. If you select `Q_BUSINESS (Use Existing)`, then:
+       - For **Amazon Q Application ID (existing)** enter your existing Q Business application ID (a UUID). You can copy it from the Amazon Q Business console.
+         <p align="left"><img src="./images/readme-qbusinessapp-id.png" alt="QB App ID" width=350/></p>
+       - Additional steps are required later. Carefully read the detailed directions documented in [Amazon Q Business integration in LMA](./lma-meetingassist-setup-stack/README_QBUSINESS.md) which guides you to complete identity management setup and QBusiness integration.
 1. For **all other parameters**, use the default values. If you want to customize the settings later, for example to add your own lambda functions, to use custom vocabularies and language models to improve accuracy, enable PII redaction, and more, you can update the stack for these parameters.
 1. Check the acknowledgement boxes, and choose Create stack.
 
@@ -108,6 +115,8 @@ The main CloudFormation stack uses nested stacks to create the following resourc
 
 The stacks take about 35-40 minutes to deploy. The main stack status shows CREATE_COMPLETE when everything is deployed. You may want to skip ahead to review “Processing flow overview” while you wait for it, and then come back here when it’s deployed.
 
+If you selected `Q_BUSINESS (Use Existing)`, refer again now to [Amazon Q Business integration in LMA](./lma-meetingassist-setup-stack/README_QBUSINESS.md) to complete identity management setup.
+
 ## Set your password
 
 After you deploy the stack, you need to open the LMA web user interface and set your password.
@@ -118,14 +127,14 @@ After you deploy the stack, you need to open the LMA web user interface and set 
 
  <img src="./images/readme-app-login.png" alt="App Login" />
 
-1. The email contains a generated temporary password that you use to log in and create your own password. Your username is your email address.
+1. The email contains a generated temporary password that you use to log in and create your own admin user password. Your username is your admin email address.
 
 1. Set a new password.  
    Your new password must have a length of at least eight characters, and contain uppercase and lowercase characters, plus numbers and special characters.
 
 Follow the directions to verify your email address, or choose **Skip** to do it later.
 
-You’re now logged in to LMA.
+You’re now logged in to LMA as an administrator. See [User Based Access Control (Preview)](./lma-ai-stack/README_UBAC.md) for more information on user based access control, and the difference between admin and non-admin users.
 
 <img src="./images/readme-lma-first-login.png" alt="First Login" width="700"/>
 
@@ -189,7 +198,7 @@ LMA provides three streaming options:
    <img src="./images/readme-browser-extension-listening.png" alt="Browser Extension Listening" width="500"/>
 
 1. Choose **Open in LMA** to see your live transcript in a new tab.
-1. Choose your preferred transcript language, and interact with the meeting assistant using the wake phrase _"OK Assistant!"_ or the **Meeting Assist Bot** pane on the right. The **ASK ASSISTANT** button is fun to try – it asks the meeting assistant service (Bedrock knowledge base or Bedrock LLM) to suggest a ‘good response’ based on the transcript of the recent interactions in the meeting. Your mileage may vary, so experiment!
+1. Choose your preferred transcript language, and interact with the meeting assistant using the wake phrase _"OK Assistant!"_ or the **Meeting Assist Bot** pane on the right. The **ASK ASSISTANT** button is fun to try – it asks the meeting assistant service (Bedrock knowledge base, Q Business, or Bedrock LLM) to suggest a ‘good response’ based on the transcript of the recent interactions in the meeting. Your mileage may vary, so experiment!
 
    <img src="./images/readme-lma-meeting-detail.png" alt="Meeting Detail page" width="500"/>
 
@@ -249,7 +258,7 @@ The WebSocket server running in Fargate consumes the real-time two-channel audio
 
 Each meeting processing session runs until the user chooses Stop Listening in the LMA extension pane, or ends the meeting and closes the tab. At the end of the call, the function creates a stereo recording file in Amazon S3 (if recording was enabled when the stack was deployed).
 
-An AWS Lambda function, the Call Event Processor, fed by Kinesis Data Streams, processes and optionally enriches meeting metadata and transcription segments. The Call Event Processor integrates with the Meeting Assist services. LMA meeting assist is powered by Amazon Lex, Bedrock knowledge bases, and Amazon Bedrock large language models using the open source [QnABot on AWS solution](https://aws.amazon.com/solutions/implementations/qnabot-on-aws/) for answers based on FAQs and as an orchestrator for request routing to the appropriate AI service. The Call Event Processor also invokes the Transcript Summarization lambda when the call ends, to generate a summary of the call from the full transcript.
+An AWS Lambda function, the Call Event Processor, fed by Kinesis Data Streams, processes and optionally enriches meeting metadata and transcription segments. The Call Event Processor integrates with the Meeting Assist services. LMA meeting assist is powered by Amazon Lex, Bedrock knowledge bases or Q Business, and Amazon Bedrock large language models using the open source [QnABot on AWS solution](https://aws.amazon.com/solutions/implementations/qnabot-on-aws/) for answers based on FAQs and as an orchestrator for request routing to the appropriate AI service. The Call Event Processor also invokes the Transcript Summarization lambda when the call ends, to generate a summary of the call from the full transcript.
 
 The Call Event Processor function interfaces with AWS AppSync to persist changes (mutations) in DynamoDB and to send real-time updates to the LMA user's logged in web clients (conveniently opened by choosing the Open in LMA option shown in the browser extension.)
 
@@ -277,8 +286,8 @@ For QnABot on AWS for Meeting Assist, refer to the [Meeting Assist README](./lma
 
 LMA provides a websocket server using Fargate (0.25vCPU) and VPC networking resources costing about $0.014/hr (~$10/mth) - see [Fargate pricing](https://aws.amazon.com/fargate/pricing/).
 
-Meeting Assist is enabled using QnABot and Knowledge bases for Amazon Bedrock. You create your own Knowledge base which you use for LMA and potentially other use cases – see [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/) for more, or you can choose, when you deploy, to use a Bedrock LLM without a knowledge base.
-Additional AWS services used by the QnABot solution as configured (with Opensearch node count default of '1') cost about $0.14/hour ($100/mth) – see [QnABot on AWS solution costs](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/cost.html).
+Meeting Assist is enabled using QnABot and Amazon Q Business or Knowledge bases for Amazon Bedrock. You create your own Q Business application or Bedrock knowledge base which you use for LMA and potentially other use cases – see [Amazon Q Business pricing](https://aws.amazon.com/q/business/pricing/) or [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/) for more, or you can choose, when you deploy, to use a Bedrock LLM without a knowledge base.
+Additional AWS services used by the QnABot solution as configured (with Opensearch node count default of '1') cost about $0.14/hour ($100/mth) – see [QnABot on AWS solution costs](https://docs.aws.amazon.com/solutions/latest/qnabot-on-aws/cost.html). 
 
 The remaining solution costs are based on usage.
 

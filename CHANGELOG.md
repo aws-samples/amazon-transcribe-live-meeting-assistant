@@ -9,8 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2024-08-24
 
+### Notes
+- When you update an existing stack from v0.1.x to v0.2.x the existing admin user is recreated. You are emailed a temporary password and must set a new permanent password as you did when you first deployed the stack. See [User Based Access Control (Preview)](./lma-ai-stack/README_UBAC.md) for more information, and recommendations on how to differentiate your admin username/email from you non-admin username/email (e.g joe+admin@acme.com vs joe@acme.com) if you are configuring LMA for multiple users.
+
 ### Added
-- User Based Access Control (UBAC) adds multi-user access where each user can access only meetings that they initiated. #67
+- User Based Access Control (UBAC) (Preview) adds multi-user access where each user can access only meetings that they initiated. #67
 - Amazon Q Business can now be used as the meeting assistant knowledge base service. #68
 
 ### Fixed
