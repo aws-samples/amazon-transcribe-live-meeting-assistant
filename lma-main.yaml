@@ -502,7 +502,7 @@ Parameters:
 
   AmazonQAppId:
     Type: String
-    AllowedPattern: "^[a-zA-Z0-9][a-zA-Z0-9-]{35}$"
+    Default: ''
     Description: Amazon Q Application ID
 
   IDCApplicationARN:
