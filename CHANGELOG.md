@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2024-08-24
+
+### Added
+- User Based Access Control (UBAC) adds multi-user access where each user can access only meetings that they initiated. #67
+- Amazon Q Business can now be used as the meeting assistant knowledge base service. #68
+
+### Fixed
+- Virtual Participant is status "In Progress" after Chime meeting ended and no call summary generated #84
+- Speaker attribution lacks fidelity when multiple users are talking #92
+- Knowledge base citation source links occasionally blank #93
+- Use version number in browsers extension download zip file name to avoid download of older version due to cache.
+- Miscellaneous security patches from dependabot
+
+
 ## [0.1.10] - 2024-08-15
 
 ### Added
@@ -128,6 +142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.2.0]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.0
 [0.1.10]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.10
 [0.1.9]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.9
 [0.1.8]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.8
