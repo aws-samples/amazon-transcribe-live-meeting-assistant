@@ -4,20 +4,23 @@ Amazon Q is a new generative AI-powered application that helps users get work do
 
 ## Overall Flow of integrating with Q Business in LMA
 
-1. First, install new LMA stack or update LMA
-2. Then create an Identity Center Application for your Q Business
+1. Start with an existing working QBusiness application with active subscriptions for LMA user(s)
+2. First, install new LMA stack or update LMA
+2. Then create an Identity Center Application for your Q Business application
 3. Finally, update the LMA stack with the ARN of your Identity Center application
 
 The below instructions walk through this implementation step-by-step, including the manual creation of the IDC Application.
 
 ## Deploy Amazon Q (your business expert) as a fallback source of answers
 
-1. Before proceeding, you will need an existing deployment of a Q Business application. Please reference the AWS docs for creating a new [Q Business application](https://docs.aws.amazon.com/amazonq/latest/qbusiness-ug/create-application.html)
-2. When launching or updating the LMA stack, make the following parameter changes:
+1. Before proceeding, you need an existing Q Business application. Each LMA user, including the admin user, must have a valid subscription for the Q Business application using IAM Identity Center (IDC), with email addresses that match the emails that have been (or will be) used for their LMA user accounts. Please reference the AWS docs for creating a new [Q Business application](https://docs.aws.amazon.com/amazonq/latest/qbusiness-ug/create-application.html).
+    1. `Web Experience URL`
+    2. `Application ID` (a UUID that looks like ac12345d-0f79-404d-82e0-d920f1a1234c)
+2. Deploy a new LMA stack, or update an existing LMA stack:
     1. For `Meeting Assist Service` Select 'Q_Business (use existing)'
     2. For `AmazonQAppId` enter your existing Amazon Q Application ID (a UUID)
     3. Initially leave `IDC Application ARN`empty - later, after you create the IDC Application, you will update the stack with its ARN.
-3. Once the stack update or creation has completed, open the Outputs tab of the CloudFormation stack to note the values of the following outputs.
+3. Once the stack update or creation has completed, open the `Outputs` tab of the CloudFormation stack and note the following output values:
     1. CognitoUserPoolClientId
     2. CognitoUserPoolTokenIssuerUrl
     3. QBusinessLambdaHookFunctionRoleArn
