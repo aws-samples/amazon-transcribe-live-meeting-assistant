@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 from aws_lambda_powertools import Logger
 
 
-LOGGER = Logger(child=True, location="%(filename)s:%(lineno)d - %(funcName)s()")
+LOGGER = Logger(
+    child=True, location="%(filename)s:%(lineno)d - %(funcName)s()")
 
 
 if TYPE_CHECKING:
@@ -38,21 +39,21 @@ def recognize_text_lex(
 
     while not bot_responded and retry_count < max_retries:
         try:
-            # we do not set sessionAttributes here, since client is stateless and we want to 
+            # we do not set sessionAttributes here, since client is stateless and we want to
             # preserve Lex sessionAttribute state. Use requestAttributes for callId.
             bot_response = lex_client.recognize_text(
-                    text=text,
-                    sessionId=session_id,
-                    botId=bot_id,
-                    botAliasId=bot_alias_id,
-                    localeId=locale_id,
-                    requestAttributes={
-                        "callid": request_attributes["callid"],
-                        "idtokenjwt": request_attributes["idtokenjwt"],
-                        "accesstokenjwt": request_attributes["accesstokenjwt"],
-                        "refreshtoken": request_attributes["refreshtoken"]
-                    }
-                )
+                text=text,
+                sessionId=session_id,
+                botId=bot_id,
+                botAliasId=bot_alias_id,
+                localeId=locale_id,
+                requestAttributes={
+                    "callId": request_attributes["callId"],
+                    "idtokenjwt": request_attributes["idtokenjwt"],
+                    "accesstokenjwt": request_attributes["accesstokenjwt"],
+                    "refreshtoken": request_attributes["refreshtoken"]
+                }
+            )
             bot_responded = True
         except lex_client.exceptions.ConflictException as error:
             retry_count = retry_count + 1
