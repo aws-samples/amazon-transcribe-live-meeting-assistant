@@ -157,9 +157,9 @@ def get_lex_agent_assist_transcript(
 ):
     """Sends Lex Agent Assist Requests"""
     LOGGER.info("Bot Request: %s", content)
-    
+
     request_attributes = {
-        "callid": transcript_segment_args["CallId"],
+        "callId": transcript_segment_args["CallId"],
         "idtokenjwt": transcript_segment_args["IdToken"],
         "accesstokenjwt": transcript_segment_args["AccessToken"],
         "refreshtoken": transcript_segment_args["RefreshToken"],
