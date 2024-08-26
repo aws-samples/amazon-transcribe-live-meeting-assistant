@@ -201,8 +201,10 @@ def format_response(event, amazonq_response, query):
         markdown = f"**{queryprefix}** *{query}*\n\n{markdown}"
     if showContextText:
         contextText = ""
+        refCount = 0
         for source in amazonq_response.get("sourceAttributions", []):
-            title = source.get("title", "title missing")
+            refCount += 1
+            title = source.get("title", f'Ref{refCount}')
             snippet = source.get("snippet", "snippet missing")
             url = source.get("url")
             if url:
@@ -215,8 +217,10 @@ def format_response(event, amazonq_response, query):
             markdown = f'{markdown}\n<details><summary>Context</summary><p style="white-space: pre-line;">{contextText}</p></details>'
     if showSourceLinks:
         sourceLinks = []
-        for source in amazonq_response.get("sourceAttribution", []):
-            title = source.get("title", "link (no title)")
+        refCount = 0
+        for source in amazonq_response.get("sourceAttributions", []):
+            refCount += 1
+            title = source.get("title", f'Ref{refCount}')
             url = source.get("url")
             if url:
                 sourceLinks.append(f'<a href="{url}">{title}</a>')
