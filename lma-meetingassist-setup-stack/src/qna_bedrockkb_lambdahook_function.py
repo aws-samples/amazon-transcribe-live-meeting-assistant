@@ -292,7 +292,7 @@ def format_response(event, kb_response, query):
 
 def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput):
     print("Use Bedrock to generate a relevant search query based on the transcript and input")
-    promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {history}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. If the caller is just engaging in small talk or saying thanks, respond with \"small talk\". Only output the rephrased question. Do not include any preamble."
+    promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. If the caller is just engaging in small talk or saying thanks, respond with \"small talk\". Only output the rephrased question. Do not include any preamble."
     prompt = promptTemplate.format(
         transcript=json.dumps(transcript), input=userInput)
     prompt = prompt.replace("<br>", "\n")

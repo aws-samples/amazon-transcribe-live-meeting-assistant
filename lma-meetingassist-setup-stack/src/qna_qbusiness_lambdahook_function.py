@@ -13,7 +13,8 @@ FETCH_TRANSCRIPT_FUNCTION_ARN = os.environ['FETCH_TRANSCRIPT_FUNCTION_ARN']
 
 AMAZONQ_APP_ID = os.environ.get("AMAZONQ_APP_ID")
 AMAZONQ_REGION = os.environ.get("AMAZONQ_REGION") or os.environ["AWS_REGION"]
-AMAZONQ_ENDPOINT_URL = os.environ.get("AMAZONQ_ENDPOINT_URL") or f'https://qbusiness.{AMAZONQ_REGION}.api.aws'
+AMAZONQ_ENDPOINT_URL = os.environ.get(
+    "AMAZONQ_ENDPOINT_URL") or f'https://qbusiness.{AMAZONQ_REGION}.api.aws'
 print("AMAZONQ_ENDPOINT_URL:", AMAZONQ_ENDPOINT_URL)
 
 MODEL_ID = os.environ.get("MODEL_ID")
@@ -25,6 +26,7 @@ BEDROCK_CLIENT = boto3.client(
     service_name="bedrock-runtime",
     region_name=AMAZONQ_REGION
 )
+
 
 def get_call_transcript(callId, userInput, maxMessages):
     payload = {
@@ -61,6 +63,7 @@ def get_call_transcript(callId, userInput, maxMessages):
         print(f'No transcript for callId {callId}')
 
     return transcript
+
 
 def get_request_body(modelId, prompt):
     provider = modelId.split(".")[0]
@@ -240,17 +243,20 @@ def format_response(event, amazonq_response, query):
     event["res"]["got_hits"] = 1
     return event
 
+
 def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput):
     print("Use Bedrock to generate a relevant search query based on the transcript and input")
-    promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {history}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. If the caller is just engaging in small talk or saying thanks, respond with \"small talk\". Only output the rephrased question. Do not include any preamble."
+    promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. If the caller is just engaging in small talk or saying thanks, respond with \"small talk\". Only output the rephrased question. Do not include any preamble."
     prompt = promptTemplate.format(
         transcript=json.dumps(transcript), input=userInput)
     prompt = prompt.replace("<br>", "\n")
     query = get_bedrock_response(prompt)
     return query
 
+
 def get_amazonq_response(prompt, context, qbusiness_client):
-    print(f"get_amazonq_response: prompt={prompt}, app_id={AMAZONQ_APP_ID}, context={context}")
+    print(
+        f"get_amazonq_response: prompt={prompt}, app_id={AMAZONQ_APP_ID}, context={context}")
     input = {
         "applicationId": AMAZONQ_APP_ID,
         "userMessage": prompt
@@ -263,7 +269,6 @@ def get_amazonq_response(prompt, context, qbusiness_client):
     else:
         input["clientToken"] = str(uuid.uuid4())
 
-
     print("Amazon Q Input: ", input)
     try:
         resp = qbusiness_client.chat_sync(**input)
@@ -275,6 +280,7 @@ def get_amazonq_response(prompt, context, qbusiness_client):
     print("Amazon Q Response: ", json.dumps(resp, default=str))
     return resp
 
+
 def get_idc_iam_credentials(jwt):
     sso_oidc_client = boto3.client('sso-oidc')
     idc_sso_resp = sso_oidc_client.create_token_with_iam(
@@ -284,7 +290,8 @@ def get_idc_iam_credentials(jwt):
     )
 
     print(idc_sso_resp)
-    idc_sso_id_token_jwt = json.loads(base64.b64decode(idc_sso_resp['idToken'].split('.')[1] + '==').decode())
+    idc_sso_id_token_jwt = json.loads(base64.b64decode(
+        idc_sso_resp['idToken'].split('.')[1] + '==').decode())
 
     sts_context = idc_sso_id_token_jwt["sts:identity_context"]
     sts_client = boto3.client('sts')
@@ -302,6 +309,7 @@ def get_idc_iam_credentials(jwt):
     creds_object = assumed_role_object['Credentials']
 
     return creds_object
+
 
 def handler(event, context):
     print("Received event: %s" % json.dumps(event))
@@ -321,11 +329,13 @@ def handler(event, context):
         token = event['req']['_event']['requestAttributes'].get('idtokenjwt')
         print('Found token from voice interface')
 
-    decoded_token = json.loads(base64.b64decode(token.split('.')[1] + '==').decode())
+    decoded_token = json.loads(base64.b64decode(
+        token.split('.')[1] + '==').decode())
     jti = decoded_token['jti']
 
     dynamo_resource = boto3.resource('dynamodb')
-    dynamo_table = dynamo_resource.Table(os.environ.get('DYNAMODB_CACHE_TABLE_NAME'))
+    dynamo_table = dynamo_resource.Table(
+        os.environ.get('DYNAMODB_CACHE_TABLE_NAME'))
 
     kms_client = boto3.client('kms')
     kms_key_id = os.environ.get("KMS_KEY_ID")
@@ -345,7 +355,8 @@ def handler(event, context):
         encrypted_creds = \
             kms_client.encrypt(KeyId=kms_key_id,
                                Plaintext=bytes(json.dumps(creds).encode()))['CiphertextBlob']
-        dynamo_table.put_item(Item={'jti': jti, 'ExpiresAt': int(exp), 'Credentials': encrypted_creds})
+        dynamo_table.put_item(
+            Item={'jti': jti, 'ExpiresAt': int(exp), 'Credentials': encrypted_creds})
 
     # Assume the qbusiness role with the IDC IAM credentials to create the qbusiness client
     assumed_session = boto3.Session(
@@ -378,7 +389,8 @@ def handler(event, context):
     query = generateRetrieveQuery(
         retrievePromptTemplate, transcript, userInput)
 
-    amazonq_response = get_amazonq_response(query, amazonq_context, qbusiness_client)
+    amazonq_response = get_amazonq_response(
+        query, amazonq_context, qbusiness_client)
     event = format_response(event, amazonq_response, query)
     print("Returning response: %s" % json.dumps(event))
     return event
