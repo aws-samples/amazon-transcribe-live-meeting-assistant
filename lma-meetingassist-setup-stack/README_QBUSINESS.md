@@ -129,7 +129,7 @@ Congratulations. You have now created a trust relationship between LMA and IAM I
 **It is necessary that LMA users have an active subscription for the Amazon Q Business application, and that their LMA email address matches their registered Amazon Q Business user (Identity Center) user email address. LMA users that do not have matching Amazon Q Business subscriptions will see a error messages when attempting to use LMA meeting assistant features.**
 
 
-## Using the Q Business powered meeting assistant
+## Use the Q Business powered meeting assistant
 
 Try using the "OK Assistant" wake phrase in a call, or use the Meeting assist bot panel, to answer a question during a meeting using Amazon Q Business.
 
