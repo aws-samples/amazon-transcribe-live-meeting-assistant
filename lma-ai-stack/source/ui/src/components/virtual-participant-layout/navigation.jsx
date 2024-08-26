@@ -3,8 +3,8 @@
 import React from 'react';
 import { Route, Switch } from 'react-router-dom';
 import { SideNavigation } from '@awsui/components-react';
-
 import { CALLS_PATH, DEFAULT_PATH, STREAM_AUDIO_PATH, VIRTUAL_PARTICIPANT_PATH } from '../../routes/constants';
+import { LMA_VERSION } from '../common/constants';
 
 export const callsNavHeader = { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` };
 export const callsNavItems = [
@@ -16,7 +16,7 @@ export const callsNavItems = [
       {
         type: 'link',
         text: 'Download Chrome Extension',
-        href: '/lma-chrome-extension.zip',
+        href: `/lma-chrome-extension-${LMA_VERSION}.zip`,
       },
       {
         type: 'link',
@@ -26,7 +26,7 @@ export const callsNavItems = [
       },
       {
         type: 'link',
-        text: 'Virtual Participant',
+        text: 'Virtual Participant (Preview)',
         href: `#${VIRTUAL_PARTICIPANT_PATH}`,
         external: true,
       },
@@ -39,13 +39,13 @@ export const callsNavItems = [
       {
         type: 'link',
         text: 'Blog Post',
-        href: 'https://www.amazon.com/live-call-analytics',
+        href: 'https://www.amazon.com/live-meeting-assistant',
         external: true,
       },
       {
         type: 'link',
         text: 'Source Code',
-        href: 'https://github.com/aws-samples/amazon-transcribe-live-call-analytics',
+        href: 'https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant',
         external: true,
       },
     ],

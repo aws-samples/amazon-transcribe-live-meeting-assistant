@@ -35,6 +35,7 @@ from eventprocessor_utils import (
     get_transcription_ttl,
     transform_segment_to_add_sentiment,
     transform_segment_to_categories_agent_assist,
+    get_owner_from_jwt,
 )
 # pylint: enable=import-error
 if TYPE_CHECKING:
@@ -254,6 +255,9 @@ async def execute_create_call_mutation(
     CUSTOMER_PHONE_NUMBER = message.get("CustomerPhoneNumber", "")
     CALL_ID = message.get("CallId", "")
 
+    owner = get_owner_from_jwt(message.get("AccessToken"))
+    message.update({"Owner": owner})
+
     # Contact Lens STARTED event type doesn't provide customer and system phone numbers, nor does it
     # have CreatedAt, so we will create a new message structure that conforms to other KDS channels.
 
@@ -266,7 +270,7 @@ async def execute_create_call_mutation(
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.createCall.args(input=message).select(
-                schema.CreateCallOutput.CallId
+                schema.CreateCallOutput.CallId, schema.CreateCallOutput.Owner
             )
         )
     )

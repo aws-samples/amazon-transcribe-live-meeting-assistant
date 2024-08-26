@@ -54,6 +54,8 @@ function IntegrationProvider({ children }: any) {
   const { sendMessage, readyState, getWebSocket } = useWebSocket(settings.wssEndpoint as string, {
     queryParams: {
       authorization: `Bearer ${user.access_token}`,
+      id_token: `${user.id_token}`,
+      refresh_token: `${user.refresh_token}`
     },
     onOpen: (event) => {
       console.log(event);

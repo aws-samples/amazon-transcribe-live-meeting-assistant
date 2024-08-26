@@ -15,7 +15,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.10) (SO9497)
+Description: Amazon Transcribe Live Meeting Assist - LMA (v0.2.0) (SO9497)
 
 Parameters:
   Domain:
@@ -33,6 +33,7 @@ Parameters:
       - "BEDROCK_LLM"
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
       - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
+      - "Q_BUSINESS (Use Existing)"
     Description: Choose the knowledge base / LLM service to use
 
   MeetingAssistServiceBedrockModelID:
@@ -87,6 +88,20 @@ Parameters:
       Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
       Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
       Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
+
+  AmazonQAppId:
+    Type: String
+    Default: ''
+    AllowedPattern: "^(|[a-zA-Z0-9][a-zA-Z0-9-]{35})$"
+    Description: If MeetingAssistService is 'Q_BUSINESS (Use Existing)', provide the Q Business Application
+      *Id* (not name) of an *existing* Q Business Applictaion to be used for Meeting
+      Assist bot.
+
+  IDCApplicationARN:
+    Type: String
+    Description: >-
+      After creating an Identity Center customer managed application for QBusiness, UPDATE your stack with its ARN entered here. 
+      See Q Business setup README for directions. 
 
   AssistantWakePhraseRegEx:
     Type: String
@@ -324,8 +339,8 @@ Parameters:
   AdminEmail:
     Type: String
     Description: >-
-      Email address of admin user (e.g. jdoe@example.com) used for the API and web
-      UI.
+      Email address of the admin user (e.g. jdoe+admin@example.com) that has access to all meetings 
+      for administrative purposes. 
       An initial temporary password will be automatically sent to this user via email.
     AllowedPattern: '^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$'
 
@@ -511,14 +526,22 @@ Metadata:
           default: Meeting Assist Options
         Parameters:
           - MeetingAssistService
+          - MeetingAssistServiceBedrockModelID
+          - AssistantWakePhraseRegEx
+          - MeetingAssistQnABotOpenSearchNodeCount
+      - Label:
+          default: Meeting Assist Bedrock Knowledge Base Integration
+        Parameters:
           - BedrockKnowledgeBaseId
           - BedrockKnowledgeBaseS3BucketName
           - BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
           - BedrockKnowledgeBaseWebCrawlerURLs
           - BedrockKnowledgeBaseWebCrawlerScope
-          - MeetingAssistServiceBedrockModelID
-          - AssistantWakePhraseRegEx
-          - MeetingAssistQnABotOpenSearchNodeCount
+      - Label:
+          default: Meeting Assist Q Business Integration
+        Parameters:
+          - AmazonQAppId
+          - IDCApplicationARN
       - Label:
           default: Amazon S3 Configuration
         Parameters:
@@ -596,6 +619,12 @@ Metadata:
         default: Authorized Account Email Domain(s)
       MeetingAssistService:
         default: Meeting Assist Service
+      MeetingAssistServiceBedrockModelID:
+        default: Meeting Assist Service Bedrock Model ID
+      AssistantWakePhraseRegEx:
+        default: Meeting Assist Wake Phrase Regular Expression
+      MeetingAssistQnABotOpenSearchNodeCount:
+        default: Meeting Assist QnABot OpenSearch Node Count
       BedrockKnowledgeBaseId:
         default: Bedrock Knowledge Base Id (existing)
       BedrockKnowledgeBaseS3BucketName:
@@ -606,12 +635,10 @@ Metadata:
         default: Publicly accessible URLs for web crawling (optional)
       BedrockKnowledgeBaseWebCrawlerScope:
         default: Web crawling sync scope
-      MeetingAssistServiceBedrockModelID:
-        default: Meeting Assist Service Bedrock Model ID
-      AssistantWakePhraseRegEx:
-        default: Meeting Assist Wake Phrase Regular Expression
-      MeetingAssistQnABotOpenSearchNodeCount:
-        default: Meeting Assist QnABot OpenSearch Node Count
+      AmazonQAppId:
+        default: Amazon Q Application ID (existing)
+      IDCApplicationARN:
+        default: IDC Application ARN (existing)
       IsPartialTranscriptEnabled:
         default: Enable Partial Transcripts
       IsContentRedactionEnabled:
@@ -723,6 +750,17 @@ Rules:
         AssertDescription:
           BedrockKnowledgeBaseId is required when MeetingAssistService
           is 'BEDROCK_KNOWLEDGE_BASE'
+  AmazonQId:
+    RuleCondition:
+      !Equals [
+        !Ref MeetingAssistService,
+        "Q_BUSINESS (Use Existing)",
+      ]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AmazonQAppId, ""]]
+        AssertDescription:
+          AmazonQAppId is required when MeetingAssistService
+          is 'Q_BUSINESS'
 
 Conditions:
   IsHealthcareDomainSelected: !Equals [!Ref Domain, "Healthcare"]
@@ -736,6 +774,8 @@ Conditions:
       !Condition ShouldUseExistingBedrockKnowledgeBase,
       !Condition ShouldCreateBedrockKnowledgeBase,
     ]
+  ShouldUseQBusiness:
+    !Equals [!Ref MeetingAssistService, "Q_BUSINESS (Use Existing)"]
   ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
 
 Resources:
@@ -1183,7 +1223,27 @@ Resources:
         Domain: !Ref Domain
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
-  AISTACK:
+  COGNITOSTACK:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-cognito-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        LMAStackName: !Ref AWS::StackName
+        S3BucketName: !If
+          - ShouldCreateRecordingBucket
+          - !Ref RecordingsBucket
+          - !Ref S3BucketName
+        AdminEmail: !Ref AdminEmail
+        AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
+        LMASettingsParameterName: !Ref LMASettingsParameter
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+
+  AISTACK: 
     Type: AWS::CloudFormation::Stack
     DependsOn:
       - IsStacknameLengthOK
@@ -1194,6 +1254,7 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
+        AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
         AudioRecordingExpirationInDays: !Ref AudioRecordingExpirationInDays
         EnableVoiceToneAnalysis: "false"
@@ -1202,8 +1263,6 @@ Resources:
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
           - !Ref S3BucketName
-        AdminEmail: !Ref AdminEmail
-        AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
@@ -1224,6 +1283,10 @@ Resources:
         LMASettingsParameterName: !Ref LMASettingsParameter
         EnableAppSyncApiCache: !Ref EnableAppSyncApiCache
         AppSyncApiCacheInstanceType: !Ref AppSyncApiCacheInstanceType
+        UserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
+        CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
+        AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
+        
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -1288,6 +1351,7 @@ Resources:
         LMAStackName: !Ref AWS::StackName
         AISTACK: !Ref AISTACK
         QNABOTSTACK: !Ref QNABOT
+        COGNITOSTACK: !Ref COGNITOSTACK
         MeetingAssistService: !Ref MeetingAssistService
         BedrockKnowledgeBaseID: !If
           - ShouldUseBedrockKnowledgeBase
@@ -1297,9 +1361,12 @@ Resources:
             - !Ref BedrockKnowledgeBaseId
           - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
+        AmazonQAppId: !If
+          - ShouldUseQBusiness
+          - !Ref AmazonQAppId
+          - ""
+        IDCApplicationARN: !Ref IDCApplicationARN
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        AmazonQAppId: ""
-        AmazonQUserId: ""
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
         LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
         LexMeetingAssistLocaleId:
@@ -1323,10 +1390,10 @@ Resources:
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
-        LexMeetingAssistIdentityPoolId: !GetAtt AISTACK.Outputs.LexAgentAssistIdentityPoolId
-        LexMeetingAssistUserPoolClientId: !GetAtt AISTACK.Outputs.CognitoClientId
-        LexMeetingAssistUserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
-        LexMeetingAssistDomainName: !GetAtt AISTACK.Outputs.CognitoLoginUrl
+        LexMeetingAssistIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.LexAgentAssistIdentityPoolId
+        LexMeetingAssistUserPoolClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
+        LexMeetingAssistUserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
+        LexMeetingAssistDomainName: !GetAtt COGNITOSTACK.Outputs.CognitoLoginUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
@@ -1358,7 +1425,7 @@ Resources:
           - !Ref RecordingsBucket
           - !Ref S3BucketName
         AudioFilePrefix: !Ref AudioFilePrefix
-        UserPoolId: !GetAtt AISTACK.Outputs.UserPoolId
+        UserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
         CallDataStreamName: !Ref CallDataStream
         CallDataStreamArn: !GetAtt CallDataStream.Arn
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
@@ -1449,8 +1516,8 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         WebSocketEndpoint: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
-        CognitoClientId: !GetAtt AISTACK.Outputs.CognitoClientId
-        CognitoLoginUrl: !GetAtt AISTACK.Outputs.CognitoLoginUrl
+        CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
+        CognitoLoginUrl: !GetAtt COGNITOSTACK.Outputs.CognitoLoginUrl
         CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
         WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
@@ -1516,3 +1583,18 @@ Outputs:
   LMASettingsParameterName:
     Description: Name of the Parameter store setting that holds the LMA Settings
     Value: !Ref LMASettingsParameter
+
+  CognitoUserPoolTokenIssuerUrl:
+    Description: Cognito User Pool Token Issuer URL (only used for QBusiness integration)
+    Value: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${COGNITOSTACK.Outputs.UserPoolId}
+   
+  CognitoUserPoolClientId:
+    Description: Cognito User Pool Client Id (only used for QBusiness integration)
+    Value: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
+    
+  QBusinessLambdaHookFunctionRoleArn:
+    Description: Function role for Lambda QBusiness plugin (only used for QBusiness integration)
+    Value: !GetAtt MEETINGASSISTSETUP.Outputs.QBusinessLambdaHookFunctionRoleArn
+  
+  
+  

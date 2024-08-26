@@ -32,6 +32,8 @@ UI_PACKAGE_LOCK_JSON_FILE=${UI_PACKAGE_LOCK_JSON_FILE:-"${AI_STACK_DIR}/source/u
 
 EXTENSION_PACKAGE_JSON_FILE=${EXTENSION_PACKAGE_JSON_FILE:-"${EXTENSION_STACK_DIR}/package.json"}
 EXTENSION_MANIFEST_FILE=${EXTENSION_MANIFEST_FILE:-"${EXTENSION_STACK_DIR}/public/manifest.json"}
+EXTENSION_TEMPLATE_FILE=${EXTENSION_TEMPLATE_FILE:-"${EXTENSION_STACK_DIR}/template.yaml"}
+UI_CONSTANTS_FILE=${UI_CONSTANTS_FILE:-"${AI_STACK_DIR}/source/ui//src/components/common/constants.js"}
 
 export VERSION_REGEX="${VERSION_REGEX:-$'([0-9]+)\.([0-9]+)\.([0-9]+)'}"
 
@@ -157,4 +159,30 @@ if [[ -f "$EXTENSION_MANIFEST_FILE" ]] ; then
     )" "$EXTENSION_MANIFEST_FILE"
 else
     echo "[WARNING] ${EXTENSION_MANIFEST_FILE} file does not exist" >&2
+fi
+
+if [[ -f "$EXTENSION_TEMPLATE_FILE" ]] ; then
+    echo "Updating version in ${EXTENSION_TEMPLATE_FILE} file"
+    sed --in-place --regexp-extended --expression "$(
+        # shellcheck disable=SC2016
+        echo '
+        s/^(.*lma-chrome-extension-v)${VERSION_REGEX}(.*)$/\1${NEW_VERSION}\5/;
+        ' | \
+        envsubst '${VERSION_REGEX} ${NEW_VERSION}' \
+    )" "$EXTENSION_TEMPLATE_FILE"
+else
+    echo "[WARNING] ${EXTENSION_TEMPLATE_FILE} file does not exist" >&2
+fi
+
+if [[ -f "$UI_CONSTANTS_FILE" ]] ; then
+    echo "Updating version in ${UI_CONSTANTS_FILE} file"
+    sed --in-place --regexp-extended --expression "$(
+        # shellcheck disable=SC2016
+        echo '
+        s/^(export const LMA_VERSION = .v)${VERSION_REGEX}(.*)$/\1${NEW_VERSION}\5/;
+        ' | \
+        envsubst '${VERSION_REGEX} ${NEW_VERSION}' \
+    )" "$UI_CONSTANTS_FILE"
+else
+    echo "[WARNING] ${UI_CONSTANTS_FILE} file does not exist" >&2
 fi

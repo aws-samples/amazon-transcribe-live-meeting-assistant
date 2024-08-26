@@ -29,7 +29,7 @@ fi
 
 export RELEASE_S3_BUCKET_BASE="$1"
 
-export RELEASE_S3_PREFIX="${2:-artifacts/lca}"
+export RELEASE_S3_PREFIX="${2:-artifacts/lma}"
 
 if [ ! -z "$3" ]; then
     export RELEASE_VERSION="${3}"

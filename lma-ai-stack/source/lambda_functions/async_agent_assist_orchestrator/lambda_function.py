@@ -116,6 +116,9 @@ def publish_lex_agent_assist_transcript_segment(
     transcript: str = message.get("OriginalTranscript", message["Transcript"])
     created_at = datetime.utcnow().astimezone().isoformat()
     status: str = message["Status"]
+    idToken: str = message["IdToken"]
+    refreshToken: str = message["RefreshToken"]
+    accessToken: str = message["AccessToken"]
 
     transcript_segment_args = dict(
         CallId=call_id,
@@ -127,6 +130,9 @@ def publish_lex_agent_assist_transcript_segment(
         SegmentId=str(uuid.uuid4()),
         StartTime=start_time,
         Status="TRANSCRIBING",
+        IdToken=idToken,
+        RefreshToken=refreshToken,
+        AccessToken=accessToken
     )
     lex_agent_assist_input = dict(
         content=transcript,
@@ -150,18 +156,23 @@ def get_lex_agent_assist_transcript(
     content: str,
 ):
     """Sends Lex Agent Assist Requests"""
-    call_id = transcript_segment_args["CallId"]
-
     LOGGER.info("Bot Request: %s", content)
+
+    request_attributes = {
+        "callId": transcript_segment_args["CallId"],
+        "idtokenjwt": transcript_segment_args["IdToken"],
+        "accesstokenjwt": transcript_segment_args["AccessToken"],
+        "refreshtoken": transcript_segment_args["RefreshToken"],
+    }
 
     bot_response: RecognizeTextResponseTypeDef = recognize_text_lex(
         text=content,
-        session_id=str(hash(call_id)),
+        session_id=str(hash(transcript_segment_args["CallId"])),
         lex_client=LEXV2_CLIENT,
         bot_id=LEX_BOT_ID,
         bot_alias_id=LEX_BOT_ALIAS_ID,
         locale_id=LEX_BOT_LOCALE_ID,
-        call_id=call_id,
+        request_attributes=request_attributes,
     )
 
     LOGGER.info("Bot Response: ", extra=bot_response)

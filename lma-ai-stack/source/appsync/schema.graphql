@@ -13,6 +13,7 @@ input AddTranscriptSegmentInput {
 	Sentiment: Sentiment
 	SentimentScore: SentimentScoreInput
 	SentimentWeighted: Float
+	Owner: String
 }
 
 type Call implements DynamoDbBase @aws_cognito_user_pools
@@ -34,7 +35,8 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	Metadatajson: String
 	CallCategories: [String]
 	IssuesDetected: String
-	CallSummaryText: String
+	CallSummaryText: String,
+	Owner: String,
 }
 
 type CallList @aws_cognito_user_pools
@@ -77,10 +79,12 @@ input CreateCallInput {
 	SystemPhoneNumber: String
 	Metadatajson: String
 	ExpiresAfter: AWSTimestamp
+	Owner: String
 }
 
 type CreateCallOutput @aws_iam {
 	CallId: ID!
+	Owner: String
 }
 
 interface DynamoDbBase {
@@ -226,6 +230,7 @@ type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
 	Sentiment: Sentiment
 	SentimentScore: SentimentScore
 	SentimentWeighted: Float
+	Owner: String
 }
 
 type TranscriptSegmentList @aws_cognito_user_pools
@@ -249,6 +254,7 @@ type TranscriptSegmentWithSentiment implements DynamoDbBase @aws_cognito_user_po
 	Speaker: String!
 	Sentiment: Sentiment
 	SentimentWeighted: Float
+	Owner: String
 }
 type TranscriptSegmentsWithSentimentList @aws_cognito_user_pools
 @aws_iam {
@@ -259,24 +265,28 @@ input UpdateAgentInput {
 	CallId: ID!
 	AgentId: String!
 	UpdatedAt: AWSDateTime
+	Owner: String
 }
 
 input AddCallCategoryInput {
 	CallId: ID!
 	CallCategories: [String]
 	UpdatedAt: AWSDateTime
+	Owner: String
 }
 
 input AddIssuesDetectedInput {
 	CallId: ID!
 	IssuesDetected: String!
 	UpdatedAt: AWSDateTime
+	Owner: String
 }
 
 input AddCallSummaryTextInput {
 	CallId: ID!
 	CallSummaryText: String!
 	UpdatedAt: AWSDateTime
+	Owner: String
 }
 
 input UpdateCallAggregationInput {
@@ -284,24 +294,28 @@ input UpdateCallAggregationInput {
 	UpdatedAt: AWSDateTime
 	TotalConversationDurationMillis: Float
 	Sentiment: SentimentAggregationInput
+	Owner: String
 }
 
 input UpdateCallStatusInput {
 	CallId: ID!
 	Status: CallStatus!
 	UpdatedAt: AWSDateTime
+	Owner: String
 }
 
 input UpdateRecordingUrlInput {
 	CallId: ID!
 	RecordingUrl: String!
 	UpdatedAt: AWSDateTime
+	Owner: String
 }
 
 input UpdatePcaUrlInput {
 	CallId: ID!
 	PcaUrl: String!
 	UpdatedAt: AWSDateTime
+	Owner: String
 }
 
 schema {

@@ -3,6 +3,7 @@
 import React from 'react';
 import { Route, Switch } from 'react-router-dom';
 import { SideNavigation } from '@awsui/components-react';
+import { LMA_VERSION } from '../common/constants';
 
 import { CALLS_PATH, STREAM_AUDIO_PATH, VIRTUAL_PARTICIPANT_PATH, DEFAULT_PATH } from '../../routes/constants';
 
@@ -16,7 +17,7 @@ export const callsNavItems = [
       {
         type: 'link',
         text: 'Download Chrome Extension',
-        href: '/lma-chrome-extension.zip',
+        href: `/lma-chrome-extension-${LMA_VERSION}.zip`,
       },
       {
         type: 'link',
