@@ -890,15 +890,15 @@ Resources:
                           },
                           {
                             "Name": "USER_ACCESS_TOKEN",
-                            "Value.$": "$.data.accesstoken"
+                            "Value.$": "$.data.accessToken"
                           },
                           {
                             "Name": "USER_ID_TOKEN",
-                            "Value.$": "$.data.idtoken"
+                            "Value.$": "$.data.idToken"
                           },
                           {
                             "Name": "USER_REFRESH_TOKEN",
-                            "Value.$": "$.data.refreshtoken"
+                            "Value.$": "$.data.rereshToken"
                           }
                         ]
                       }

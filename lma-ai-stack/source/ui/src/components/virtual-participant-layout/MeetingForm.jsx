@@ -48,9 +48,9 @@ const MeetingForm = () => {
           meetingName,
           meetingTime: meetingDateTimeFormatted,
           userName,
-          accesstoken: user.signInUserSession.accesstoken,
-          idtoken: user.signInUserSession.idToken.jwtToken,
-          refreshtoken: user.signInUserSession.refreshToken.token,
+          accessToken: user.signInUserSession.accessToken.jwtToken,
+          idToken: user.signInUserSession.idToken.jwtToken,
+          rereshToken: user.signInUserSession.refreshToken.token,
         },
       }),
     };
