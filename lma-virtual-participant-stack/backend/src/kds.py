@@ -10,6 +10,9 @@ KINESIS_STREAM_NAME = os.getenv("KINESIS_STREAM_NAME")
 MEETING_NAME = details.meeting_name
 LMA_MEETING_NAME = MEETING_NAME + '-' + \
     datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S.%f')[:-3]
+USER_ACCESS_TOKEN = os.getenv("USER_ACCESS_TOKEN")
+USER_ID_TOKEN = os.getenv("USER_ID_TOKEN")
+USER_REFRESH_TOKEN = os.getenv("USER_REFRESH_TOKEN")
 
 KINESIS = boto3.client('kinesis', region_name=REGION)
 
@@ -97,7 +100,10 @@ def send_add_transcript_segment(speaker_name, result):
                 'Sentiment': None,
                 'TranscriptEvent': None,
                 'UtteranceEvent': None,
-                'Speaker': segment['Speaker']
+                'Speaker': segment['Speaker'],
+                'AccessToken': USER_ACCESS_TOKEN,
+                'IdToken': USER_ID_TOKEN,
+                'RefreshToken': USER_REFRESH_TOKEN,
             }
             # Write the messages to the Kinesis Data Stream
             response = KINESIS.put_record(
@@ -120,7 +126,10 @@ def send_start_meeting():
             'CustomerPhoneNumber': 'Customer Phone',
             'SystemPhoneNumber': 'System Phone',
             'AgentId': 'test-agent',
-            'CreatedAt': get_aws_date_now()
+            'CreatedAt': get_aws_date_now(),
+            'AccessToken': USER_ACCESS_TOKEN,
+            'IdToken': USER_ID_TOKEN,
+            'RefreshToken': USER_REFRESH_TOKEN,
         }
         print(
             f"Sending start meeting event to Kinesis. Event: {start_call_event}")
@@ -144,7 +153,10 @@ def send_end_meeting():
             'CallId': LMA_MEETING_NAME,
             'CustomerPhoneNumber': 'Customer Phone',
             'SystemPhoneNumber': 'System Phone',
-            'CreatedAt': get_aws_date_now()
+            'CreatedAt': get_aws_date_now(),
+            'AccessToken': USER_ACCESS_TOKEN,
+            'IdToken': USER_ID_TOKEN,
+            'RefreshToken': USER_REFRESH_TOKEN,
         }
         print(
             f"Sending end meeting event to Kinesis. Event: {start_call_event}")
