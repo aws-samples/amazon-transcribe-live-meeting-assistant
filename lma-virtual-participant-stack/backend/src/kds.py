@@ -10,6 +10,7 @@ KINESIS_STREAM_NAME = os.getenv("KINESIS_STREAM_NAME")
 MEETING_NAME = details.meeting_name
 LMA_MEETING_NAME = MEETING_NAME + '-' + \
     datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S.%f')[:-3]
+USER_NAME = details.lma_identity
 USER_ACCESS_TOKEN = os.getenv("USER_ACCESS_TOKEN")
 USER_ID_TOKEN = os.getenv("USER_ID_TOKEN")
 USER_REFRESH_TOKEN = os.getenv("USER_REFRESH_TOKEN")
@@ -125,7 +126,7 @@ def send_start_meeting():
             'CallId': LMA_MEETING_NAME,
             'CustomerPhoneNumber': 'Customer Phone',
             'SystemPhoneNumber': 'System Phone',
-            'AgentId': 'test-agent',
+            'AgentId': USER_NAME,
             'CreatedAt': get_aws_date_now(),
             'AccessToken': USER_ACCESS_TOKEN,
             'IdToken': USER_ID_TOKEN,
