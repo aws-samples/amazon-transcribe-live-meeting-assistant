@@ -464,7 +464,6 @@ Resources:
     Properties:
       ServiceToken: !GetAtt ECSRoleCustomResourceFunction.Arn
 
-  ### Bot Resources ###
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -523,22 +522,6 @@ Resources:
               - Effect: Allow
                 Action:
                   - "comprehend:DetectPiiEntities"
-                Resource: "*"
-        - PolicyName: InvokeModelPolicy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "bedrock:InvokeModel"
-                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0"
-        - PolicyName: SendRawEmailPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "ses:SendRawEmail"
                 Resource: "*"
 
   TaskExecutionRole:
