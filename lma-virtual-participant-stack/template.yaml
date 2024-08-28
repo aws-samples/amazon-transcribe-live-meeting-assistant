@@ -887,6 +887,18 @@ Resources:
                           {
                             "Name": "LMA_USER",
                             "Value.$": "$.data.userName"
+                          },
+                          {
+                            "Name": "USER_ACCESS_TOKEN",
+                            "Value.$": "$.data.accessToken"
+                          },
+                          {
+                            "Name": "USER_ID_TOKEN",
+                            "Value.$": "$.data.idToken"
+                          },
+                          {
+                            "Name": "USER_REFRESH_TOKEN",
+                            "Value.$": "$.data.rereshToken"
                           }
                         ]
                       }

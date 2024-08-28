@@ -16,7 +16,7 @@ async def meeting(page):
     try:
         name_text_element = await page.wait_for_selector('#name')
     except TimeoutError:
-        print("Your scribe was unable to join the meeting.")
+        print("LMA Virtual Participant was unable to join the meeting.")
         return
     else:
         await name_text_element.type(details.lma_identity)
@@ -40,7 +40,7 @@ async def meeting(page):
             timeout=details.waiting_timeout
         )
     except TimeoutError:
-        print("Your scribe was not admitted into the meeting.")
+        print("LMA Virtual Participant was not admitted into the meeting.")
         return
     else:
         await chat_panel_element.click()
@@ -64,7 +64,7 @@ async def meeting(page):
 
     async def attendee_change(number: int):
         if number <= 1:
-            print("Your scribe got lonely and left.")
+            print("LMA Virtual Participant got lonely and left.")
             details.start = False
             await page.goto("about:blank")
 
@@ -116,7 +116,7 @@ async def meeting(page):
             sender = prev_sender
         prev_sender = sender
         if text == details.end_command:
-            print("Your scribe has been removed from the meeting.")
+            print("LMA Virtual Participant has been removed from the meeting.")
             await send_messages(details.exit_messages)
             details.start = False
             await page.goto("about:blank")
