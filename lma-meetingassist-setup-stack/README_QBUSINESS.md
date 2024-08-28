@@ -1,8 +1,8 @@
 # Amazon Q Business integration in LMA
 
-Amazon Q is a new generative AI-powered application that helps users get work done. Amazon Q can become your tailored business expert and let you discover content, brainstorm ideas, or create summaries using your company’s data safely and securely. For more information see: [Introducing Amazon Q, a new generative AI-powered assistant](https://aws.amazon.com/blogs/aws/introducing-amazon-q-a-new-generative-ai-powered-assistant-preview). 
+Amazon Q is a generative AI-powered application that helps users get work done. Amazon Q Business can become your tailored business expert and let you discover content, brainstorm ideas, or create summaries using your company’s data safely and securely. For more information see: [Introducing Amazon Q, a new generative AI-powered assistant](https://aws.amazon.com/blogs/aws/introducing-amazon-q-a-new-generative-ai-powered-assistant-preview). 
 
-Now you can bring Amazon Q into your online meetings using Live Meeting Assistant (LMA) - to get answers to questions or to fact check what's said, based on your company data.
+Now you can bring Amazon Q Business into your online meetings using Live Meeting Assistant (LMA) - to get answers to questions or to fact check what's said, based on your company data.
 
 ## Overall Flow of integrating with Q Business in LMA
 
