@@ -387,14 +387,18 @@ def handler(event, context):
         transcript = get_call_transcript(callId, userInput, maxMessages)
     else:
         print("no callId in request or session attributes")
-
+        
     retrievePromptTemplate = event["req"]["_settings"].get(
         "ASSISTANT_QUERY_PROMPT_TEMPLATE")
     query = generateRetrieveQuery(
         retrievePromptTemplate, transcript, userInput)
-
-    amazonq_response = get_amazonq_response(
-        query, amazonq_context, qbusiness_client)
+    
+    prompt = query
+    if transcript:
+        prompt = f'You are an AI assistant helping a human during a meeting. Here is the meeting transcript: {json.dumps(transcript)}.'
+        prompt = f'{prompt}\nPlease respond to the following request from the human, using the transcript and any additional information as context.\n{query}'
+        
+    amazonq_response = get_amazonq_response(prompt, amazonq_context, qbusiness_client)
     event = format_response(event, amazonq_response, query)
     print("Returning response: %s" % json.dumps(event))
     return event
