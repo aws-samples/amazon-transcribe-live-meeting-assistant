@@ -339,6 +339,16 @@ Resources:
                   - states:StartExecution
                 Resource:
                   - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
+        - PolicyName: executeShareMeetingLambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}-LMAShareMeetingLambda"
+
 
     Metadata:
       cfn_nag:
