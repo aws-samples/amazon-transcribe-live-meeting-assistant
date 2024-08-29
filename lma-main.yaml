@@ -15,7 +15,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Meeting Assist - LMA (v0.1.10) (SO9497)
+Description: Amazon Transcribe Live Meeting Assist - LMA (v0.2.0) (SO9497)
 
 Parameters:
   Domain:
@@ -42,6 +42,7 @@ Parameters:
     AllowedValues:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
+      - "anthropic.claude-3-5-sonnet-20240620-v1:0"
     Description: >-
       Select a Bedrock LLM model from the list."
 
@@ -88,6 +89,20 @@ Parameters:
       Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
       Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
       Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
+
+  AmazonQAppId:
+    Type: String
+    Default: ''
+    AllowedPattern: "^(|[a-zA-Z0-9][a-zA-Z0-9-]{35})$"
+    Description: If MeetingAssistService is 'Q_BUSINESS (Use Existing)', provide the Q Business Application
+      *Id* (not name) of an *existing* Q Business Applictaion to be used for Meeting
+      Assist bot.
+
+  IDCApplicationARN:
+    Type: String
+    Description: >-
+      After creating an Identity Center customer managed application for QBusiness, UPDATE your stack with its ARN entered here. 
+      See Q Business setup README for directions. 
 
   AssistantWakePhraseRegEx:
     Type: String
@@ -285,6 +300,7 @@ Parameters:
     AllowedValues:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
+      - "anthropic.claude-3-5-sonnet-20240620-v1:0"
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models.  Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
@@ -325,8 +341,8 @@ Parameters:
   AdminEmail:
     Type: String
     Description: >-
-      Email address of admin user (e.g. jdoe@example.com) used for the API and web
-      UI.
+      Email address of the admin user (e.g. jdoe+admin@example.com) that has access to all meetings 
+      for administrative purposes. 
       An initial temporary password will be automatically sent to this user via email.
     AllowedPattern: '^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$'
 
@@ -500,15 +516,6 @@ Parameters:
       true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
     AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
 
-  AmazonQAppId:
-    Type: String
-    Default: ''
-    Description: Amazon Q Application ID
-
-  IDCApplicationARN:
-    Type: String
-    Description: ARN of the Identity Center customer managed application created for QBusiness
-
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -521,14 +528,17 @@ Metadata:
           default: Meeting Assist Options
         Parameters:
           - MeetingAssistService
+          - MeetingAssistServiceBedrockModelID
+          - AssistantWakePhraseRegEx
+          - MeetingAssistQnABotOpenSearchNodeCount
+      - Label:
+          default: Meeting Assist Bedrock Knowledge Base Integration
+        Parameters:
           - BedrockKnowledgeBaseId
           - BedrockKnowledgeBaseS3BucketName
           - BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
           - BedrockKnowledgeBaseWebCrawlerURLs
           - BedrockKnowledgeBaseWebCrawlerScope
-          - MeetingAssistServiceBedrockModelID
-          - AssistantWakePhraseRegEx
-          - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
           default: Meeting Assist Q Business Integration
         Parameters:
@@ -611,6 +621,12 @@ Metadata:
         default: Authorized Account Email Domain(s)
       MeetingAssistService:
         default: Meeting Assist Service
+      MeetingAssistServiceBedrockModelID:
+        default: Meeting Assist Service Bedrock Model ID
+      AssistantWakePhraseRegEx:
+        default: Meeting Assist Wake Phrase Regular Expression
+      MeetingAssistQnABotOpenSearchNodeCount:
+        default: Meeting Assist QnABot OpenSearch Node Count
       BedrockKnowledgeBaseId:
         default: Bedrock Knowledge Base Id (existing)
       BedrockKnowledgeBaseS3BucketName:
@@ -621,12 +637,10 @@ Metadata:
         default: Publicly accessible URLs for web crawling (optional)
       BedrockKnowledgeBaseWebCrawlerScope:
         default: Web crawling sync scope
-      MeetingAssistServiceBedrockModelID:
-        default: Meeting Assist Service Bedrock Model ID
-      AssistantWakePhraseRegEx:
-        default: Meeting Assist Wake Phrase Regular Expression
-      MeetingAssistQnABotOpenSearchNodeCount:
-        default: Meeting Assist QnABot OpenSearch Node Count
+      AmazonQAppId:
+        default: Amazon Q Application ID (existing)
+      IDCApplicationARN:
+        default: IDC Application ARN (existing)
       IsPartialTranscriptEnabled:
         default: Enable Partial Transcripts
       IsContentRedactionEnabled:
@@ -762,6 +776,8 @@ Conditions:
       !Condition ShouldUseExistingBedrockKnowledgeBase,
       !Condition ShouldCreateBedrockKnowledgeBase,
     ]
+  ShouldUseQBusiness:
+    !Equals [!Ref MeetingAssistService, "Q_BUSINESS (Use Existing)"]
   ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
 
 Resources:
@@ -1347,6 +1363,11 @@ Resources:
             - !Ref BedrockKnowledgeBaseId
           - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
+        AmazonQAppId: !If
+          - ShouldUseQBusiness
+          - !Ref AmazonQAppId
+          - ""
+        IDCApplicationARN: !Ref IDCApplicationARN
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
         LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
         LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
@@ -1381,8 +1402,6 @@ Resources:
         # QnaBotSettings - JSON param with new settings values based on options selected
         QnaBotSettings: !GetAtt SettingsJSON.Output
         Version: v0.8.8
-        AmazonQAppId: !Ref AmazonQAppId
-        IDCApplicationARN: !Ref IDCApplicationARN
 
   VPCSTACK:
     Type: AWS::CloudFormation::Stack

@@ -77,14 +77,14 @@ const CallAnalyticsTopNavigation = () => {
                     {
                       id: 'documentation',
                       text: 'Blog Post',
-                      href: 'https://www.amazon.com/live-call-analytics',
+                      href: 'https://www.amazon.com/live-meeting-assistant',
                       external: true,
                       externalIconAriaLabel: ' (opens in new tab)',
                     },
                     {
                       id: 'source',
                       text: 'Source Code',
-                      href: 'https://github.com/aws-samples/amazon-transcribe-live-call-analytics',
+                      href: 'https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant',
                       external: true,
                       externalIconAriaLabel: ' (opens in new tab)',
                     },
