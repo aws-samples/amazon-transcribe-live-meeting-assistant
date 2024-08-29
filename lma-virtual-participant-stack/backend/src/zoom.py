@@ -14,7 +14,7 @@ async def meeting(page):
     try:
         password_text_element = await page.wait_for_selector('#input-for-pwd')
     except TimeoutError:
-        print("Your scribe was unable to join the meeting.")
+        print("LMA Virtual Participant was unable to join the meeting.")
         return
     else:
         await password_text_element.type(details.meeting_password)
@@ -31,7 +31,7 @@ async def meeting(page):
             timeout=details.waiting_timeout
         )
     except TimeoutError:
-        print("Your scribe was not admitted into the meeting.")
+        print("LMA Virtual Participant was not admitted into the meeting.")
         return
     else:
         await audio_button_element.click()
@@ -56,7 +56,7 @@ async def meeting(page):
 
     async def attendee_change(number: int):
         if number <= 1:
-            print("Your scribe got lonely and left.")
+            print("LMA Virtual Participant got lonely and left.")
             details.start = False
             await page.goto("about:blank")
 
@@ -107,7 +107,7 @@ async def meeting(page):
     async def message_change(message):
         print('New Message:', message)
         if details.end_command in message:
-            print("Your scribe has been removed from the meeting.")
+            print("LMA Virtual Participant has been removed from the meeting.")
             details.start = False
             await send_messages(details.exit_messages)
             await page.goto("about:blank")

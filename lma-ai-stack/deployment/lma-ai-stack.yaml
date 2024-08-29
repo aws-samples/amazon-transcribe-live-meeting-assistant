@@ -160,6 +160,7 @@ Parameters:
     AllowedValues:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
+      - "anthropic.claude-3-5-sonnet-20240620-v1:0"
 
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
@@ -291,7 +292,7 @@ Parameters:
 
   BootstrapVersion:
     Type: String
-    Default: 0.2.0
+    Default: 0.2.1
     Description: >
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket

@@ -3,7 +3,7 @@
 
 // eslint-disable import/prefer-default-export
 
-export const LMA_VERSION = 'v0.2.0';
+export const LMA_VERSION = 'v0.2.1';
 export const DEFAULT_OTHER_SPEAKER_NAME = 'Other Participant';
 export const DEFAULT_LOCAL_SPEAKER_NAME = 'Me';
 export const SYSTEM = 'System';
