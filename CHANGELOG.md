@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2024-08-29
+
+### Added
+- Support for Anthropic Claude 3.5 Sonnet #94
+
+### Fixed
+- With Q Business as the Meeting Assistant, the ASK ASSISTANT button responses are missing meeting transcript context #97
+- Non admin users are unable to see meetings started with Virtual Participant #98
+
+
 ## [0.2.0] - 2024-08-24
 
 ### Notes
@@ -145,6 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.2.1]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.1
 [0.2.0]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.0
 [0.1.10]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.10
 [0.1.9]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.9
