@@ -9,6 +9,7 @@
     "@aws-sdk/client-ssm": "^3.215.0",
     "@aws-sdk/client-translate": "^3.245.0",
     "@aws-sdk/client-sfn": "^3.252.0",
+    "@aws-sdk/client-lambda": "3.637.0",
     "@aws-sdk/hash-node": "^3.78.0",
     "@aws-sdk/middleware-retry": "^3.254.0",
     "@aws-sdk/protocol-http": "^3.78.0",
