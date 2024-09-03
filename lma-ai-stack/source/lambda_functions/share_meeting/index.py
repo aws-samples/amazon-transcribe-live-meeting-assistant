@@ -7,6 +7,10 @@ import json
 import csv
 import logging
 import re
+from eventprocessor_utils import (
+    get_owner_from_jwt,
+)
+
 
 # grab environment variables
 LCA_CALL_EVENTS_TABLE = os.environ['LCA_CALL_EVENTS_TABLE']
@@ -42,6 +46,10 @@ def lambda_handler(event, context):
     # response = {'transcript': transcript_string}
     # # print(transcript_string)
     # return response
+
+    owner = get_owner_from_jwt(event['accessToken'], True)
+    print("DECODED JWT", owner)
+    return owner
 
 # Test case
 if __name__ == '__main__':

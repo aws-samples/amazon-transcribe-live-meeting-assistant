@@ -255,7 +255,7 @@ async def execute_create_call_mutation(
     CUSTOMER_PHONE_NUMBER = message.get("CustomerPhoneNumber", "")
     CALL_ID = message.get("CallId", "")
 
-    owner = get_owner_from_jwt(message.get("AccessToken"))
+    owner = get_owner_from_jwt(message.get("AccessToken"), False)
     message.update({"Owner": owner})
 
     # Contact Lens STARTED event type doesn't provide customer and system phone numbers, nor does it

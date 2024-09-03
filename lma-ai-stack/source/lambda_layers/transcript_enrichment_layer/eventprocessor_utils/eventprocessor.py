@@ -49,8 +49,8 @@ def get_meeting_ttl():
 def get_transcription_ttl():
     return get_ttl(TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS)
 
-def get_owner_from_jwt(jwt_token):
-    decoded_jwt = jwt.decode(jwt_token, options={"verify_signature": False})
+def get_owner_from_jwt(jwt_token, verifySignature):
+    decoded_jwt = jwt.decode(jwt_token, options={"verify_signature": verifySignature})
     print("DECODED JWT", decoded_jwt)
     return decoded_jwt['username']
     
@@ -364,7 +364,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
             sentiment = message["Sentiment"]
         
         if message.get("AccessToken", None):
-            owner = get_owner_from_jwt(message.get("AccessToken"))
+            owner = get_owner_from_jwt(message.get("AccessToken"), False)
             
         segments.append(
             dict(

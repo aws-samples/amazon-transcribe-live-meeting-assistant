@@ -46,7 +46,7 @@ const CallList = () => {
   } = useCallsContext();
 
   const [preferences, setPreferences] = useLocalStorage('call-list-preferences', DEFAULT_PREFERENCES);
-  const { currentCredentials } = useAppContext();
+  const { currentSession, currentCredentials } = useAppContext();
 
   // prettier-ignore
   const {
@@ -93,7 +93,8 @@ const CallList = () => {
           periodsToLoad={periodsToLoad}
           setPeriodsToLoad={setPeriodsToLoad}
           downloadToExcel={() => exportToExcel(callList, 'Meeting-List')}
-          shareMeeting={(recipients) => shareMeetings(collectionProps, recipients, settings, currentCredentials)}
+          // eslint-disable-next-line max-len, prettier/prettier
+          shareMeeting={(recipients) => shareMeetings(collectionProps, recipients, settings, currentCredentials, currentSession)}
         />
       }
       columnDefinitions={COLUMN_DEFINITIONS_MAIN}

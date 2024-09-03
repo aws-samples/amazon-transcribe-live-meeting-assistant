@@ -1,22 +1,61 @@
 import { InvokeCommand, LambdaClient, LogType } from '@aws-sdk/client-lambda';
+import { Sha256 } from '@aws-crypto/sha256-js';
 
-export const shareMeetings = async (collectionProps, meetingRecipients, settings, currentCredentials) => {
+async function calculateSha256(payload) {
+  const sha256 = new Sha256();
+  sha256.update(payload);
+  const hashArrayBuffer = await sha256.digest();
+  const hashHex = Array.from(new Uint8Array(hashArrayBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  return hashHex;
+}
+
+export const shareMeetings = async (
+  collectionProps,
+  meetingRecipients,
+  settings,
+  currentCredentials,
+  currentSession,
+) => {
   console.debug('collectionProps - KISH', collectionProps);
   console.log('Settings', settings);
   console.log('Recipients', meetingRecipients);
+  console.log('session', currentSession);
 
   const { REACT_APP_AWS_REGION } = process.env;
   const funcName = settings.LMAShareMeetingLambda;
-  const payload = { collectionProps, meetingRecipients };
+  const payload = {
+    callIds: collectionProps.selectedItems.map(({ callId }) => callId),
+    meetingRecipients,
+    accessToken: currentSession.accessToken.jwtToken,
+  };
 
-  // add region to client params if not present
-  const params = { region: REACT_APP_AWS_REGION, credentials: currentCredentials };
+  console.log(
+    'Invoking Lambda:',
+    funcName,
+    'with payload:',
+    payload,
+    'region:',
+    REACT_APP_AWS_REGION,
+    'creds:',
+    currentCredentials,
+  );
 
-  const client = new LambdaClient(params);
+  const sha256Hash = await calculateSha256(payload);
+
+  const client = new LambdaClient({
+    region: REACT_APP_AWS_REGION,
+    credentials: currentCredentials,
+  });
+
   const command = new InvokeCommand({
     FunctionName: funcName,
-    Payload: payload,
     LogType: LogType.Tail,
+    Payload: JSON.stringify(payload),
+    CustomHeaders: {
+      'x-amz-content-sha256': sha256Hash,
+    },
   });
 
   const { Payload, LogResult } = await client.send(command);

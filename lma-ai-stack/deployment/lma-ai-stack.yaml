@@ -1267,6 +1267,8 @@ Resources:
       MemorySize: 128
       Handler: index.lambda_handler
       FunctionName: !Sub '${LMAStackName}-LMAShareMeetingLambda'
+      Layers:
+        - !Ref TranscriptEnrichmentPythonLayer
       CodeUri: ../source/lambda_functions/share_meeting
       Description: This AWS Lambda Function shares meetings with recipients after verifying the owner.
       LoggingConfig:
