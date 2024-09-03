@@ -1,6 +1,8 @@
 import { InvokeCommand, LambdaClient, LogType } from '@aws-sdk/client-lambda';
 import { Sha256 } from '@aws-crypto/sha256-js';
 
+import { Buffer } from 'buffer';
+
 async function calculateSha256(payload) {
   const sha256 = new Sha256();
   sha256.update(payload);
@@ -31,17 +33,6 @@ export const shareMeetings = async (
     accessToken: currentSession.accessToken.jwtToken,
   };
 
-  console.log(
-    'Invoking Lambda:',
-    funcName,
-    'with payload:',
-    payload,
-    'region:',
-    REACT_APP_AWS_REGION,
-    'creds:',
-    currentCredentials,
-  );
-
   const sha256Hash = await calculateSha256(payload);
 
   const client = new LambdaClient({
@@ -63,7 +54,6 @@ export const shareMeetings = async (
   const logs = Buffer.from(LogResult, 'base64').toString();
 
   console.log('Lambda result:', result);
-  console.log('Lambda log:', logs);
 
   return { logs, result };
 };

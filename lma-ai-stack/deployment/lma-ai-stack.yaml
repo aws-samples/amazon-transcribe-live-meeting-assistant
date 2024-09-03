@@ -1263,6 +1263,8 @@ Resources:
       Environment:
         Variables:
           LCA_CALL_EVENTS_TABLE: !Ref EventSourcingTable
+          REACT_APP_AWS_REGION: !Ref AWS::Region
+          REACT_APP_USER_POOL_ID: !Ref UserPoolId
       Timeout: 60
       MemorySize: 128
       Handler: index.lambda_handler
