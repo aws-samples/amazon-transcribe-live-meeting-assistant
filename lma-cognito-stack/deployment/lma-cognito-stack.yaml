@@ -133,7 +133,7 @@ Resources:
           EmailMessage: !Sub |-
             <p>Hello {username},</p>
             <p>Welcome to Live Meeting Assistant (LMA)! Your temporary password is: <strong>{####}</strong></p>
-            <p>When the CloudFormation stack is COMPLETE, navigate to the Outputs tab of your CloudFormation stack and get URL associated with ApplicationCloudfrontEndpoint. This is your LMA web interface. When you first login, it will prompt you to set a permanent password.</p> 
+            <p>When the CloudFormation stack is COMPLETE, navigate to the Outputs tab of your CloudFormation stack and get the URL associated with ApplicationCloudfrontEndpoint. This is your LMA web interface. When you first login, it will prompt you to set a permanent password.</p> 
             <p>Don't attempt to download the Chrome browser extension from LMA until the 
             CloudFormation stack status is CREATE_COMPLETE or UPDATE_COMPLETE, as the 
             extension will not be available until then.</p>
