@@ -18,6 +18,9 @@
 #
 #  - version-code: version of the package
 
+# Stop the publish process on failures
+set -e
+
 # Check to see if input has been provided:
 if [ -z "$1" ]; then
     echo "usage: $0 <base source bucket name> [<solution name or s3 prefix>] [<version>] [<region>]"
