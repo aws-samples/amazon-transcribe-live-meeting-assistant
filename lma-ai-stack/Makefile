@@ -127,7 +127,7 @@ install: install-python-venv install-python-requirements install-node-dependenci
 # prepend python virtual env bin directories to path
 VIRTUALENV_DEV_BIN_DIR ?= "$(VIRTUALENV_DEV_DIR)/bin"
 VIRTUALENV_BUILD_BIN_DIR ?= "$(VIRTUALENV_BUILD_DIR)/bin"
-export PATH := "$(VIRTUALENV_BUILD_BIN_DIR):$(VIRTUALENV_DEV_BIN_DIR):$(PATH)"
+export PATH := $(VIRTUALENV_BUILD_BIN_DIR):$(VIRTUALENV_DEV_BIN_DIR):$(PATH)
 export VIRTUALENV_DIR
 
 ##########################################################################
