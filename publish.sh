@@ -337,6 +337,9 @@ cat > config.json <<_EOF
 _EOF
 npm install
 npm run build || exit 1
+# Force replacement of opensearch domain during version changes as in-place upgrades cannot be reversed
+# which can create a problem with ROLLBACK if there is a stack failure during the upgrade.
+cat ./build/templates/master.json | sed -e 's%{"EnableVersionUpgrade": true}%{"EnableVersionUpgrade": false}%g' > ./build/templates/qnabot-main.json
 aws s3 sync ./build/ s3://${BUCKET}/${PREFIX_AND_VERSION}/aws-qnabot/ --delete 
 popd
 update_checksum $dir
