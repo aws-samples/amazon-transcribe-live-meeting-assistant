@@ -44,7 +44,7 @@ async def transcribe():
     print("Transcribe starting")
     kds.send_start_meeting()
     stream = await TranscribeStreamingClient(region="us-east-1").start_stream_transcription(
-        language_code="en-US",
+        language_code=details.trunscribe_language_code,
         media_sample_rate_hz=16000,
         media_encoding="pcm",
     )
