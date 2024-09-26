@@ -308,41 +308,23 @@ else
 echo "SKIPPING $dir (unchanged)"
 fi
 
-echo "Initialize and update git submodules"
-git submodule init
-git submodule update
-
-dir=submodule-aws-qnabot-plugins
-if haschanged $dir; then
-echo "PACKAGING $dir"
-pushd $dir
-chmod +x ./publish.sh
-./publish.sh $BUCKET $PREFIX_AND_VERSION/aws-qnabot-plugins || exit 1
-popd
-update_checksum $dir
-else
-echo "SKIPPING $dir (unchanged)"
-fi
-
 dir=submodule-aws-qnabot
 if haschanged $dir; then
 echo "PACKAGING $dir"
 git submodule init
 git submodule update
-echo "Applying patch files to simplify UX by removing some QnABot options not needed for lma"
 # lma customizations
-cp -v ./patches/qnabot/Makefile $dir/Makefile
-cp -v ./patches/qnabot/templates_examples_examples_index.js $dir/templates/examples/examples/index.js
-cp -v ./patches/qnabot/templates_examples_extensions_index.js $dir/templates/examples/extensions/index.js
+echo "Applying patch files to remove unused KMS keys from QnABot"
+#cp -v ./patches/qnabot/templates_examples_examples_index.js $dir/source/templates/examples/examples/index.js
+#cp -v ./patches/qnabot/templates_examples_extensions_index.js $dir/source/templates/examples/extensions/index.js
 echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lma'"
 # Detection of differences. sed varies betwen GNU sed and BSD sed
 if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
-  sed -i 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/package.json
+  sed -i 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/source/package.json
 else # BSD like sed
-  sed -i '' 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/package.json
+  sed -i '' 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/source/package.json
 fi
-pushd $dir
-rm -fr ./ml_model/llm-qa-summarize # remove deleted folder if left over from previous build.
+pushd $dir/source
 mkdir -p build/templates/dev
 cat > config.json <<_EOF
 {
