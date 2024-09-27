@@ -208,6 +208,8 @@ Parameters:
       per language - e.g. 'en-US, en-AU' is not allowed.
       Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE,
       pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+      NOTE: The identify-language feature has not yet been applied to the virtual participant. 
+      If selected, the virtual participant will use the value of TranscribePreferredLanguage (if set) or 'en-US' (by default).
 
   TranscribePreferredLanguage:
     Type: String
