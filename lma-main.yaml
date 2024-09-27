@@ -963,10 +963,8 @@ Resources:
       CustomLanguageModelName: !Ref CustomLanguageModelName
       BedrockModelIds:
         - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
-        - "amazon.titan-embed-text-v2:0" # Meeting Assistant
+        - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB & QnABot
         - !Ref BedrockModelId # Meeting summarization
-        - "amazon.titan-embed-text-v1" # QNABOTBR
-        - "anthropic.claude-instant-v1" # QNABOTBR
 
   ##########################################################################
   # Resources shared by multiple nested stacks
@@ -1173,19 +1171,6 @@ Resources:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
 
-  QNABOTBR:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - IsStacknameLengthOK
-      - ValidateParameters
-    Properties:
-      # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot-plugins/bedrock-embeddings-and-llm.yaml
-      # yamllint enable rule:line-length
-      Parameters:
-        EmbeddingsModelId: "amazon.titan-embed-text-v1"
-        LLMModelId: "anthropic.claude-instant-v1"
-
   QNABOT:
     Type: AWS::CloudFormation::Stack
     DependsOn:
@@ -1193,12 +1178,13 @@ Resources:
       - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot/templates/master.json
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot/templates/qnabot-main.json
       # yamllint enable rule:line-length
       Parameters:
         Email: !Ref AdminEmail
         Username: "Admin"
-        ElasticSearchNodeCount: !Ref MeetingAssistQnABotOpenSearchNodeCount
+        OpenSearchNodeCount: !Ref MeetingAssistQnABotOpenSearchNodeCount
+        OpenSearchFineGrainAccessControl: "FALSE"
         LexV2BotLocaleIds:
           !FindInMap [
             TranscribeToLexLocaleId,
@@ -1208,11 +1194,10 @@ Resources:
         BootstrapBucket: <ARTIFACT_BUCKET_TOKEN>
         BootstrapPrefix: <ARTIFACT_PREFIX_TOKEN>/aws-qnabot
         InstallLexResponseBots: "false"
-        EmbeddingsApi: "LAMBDA"
-        EmbeddingsLambdaArn: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaArn
-        EmbeddingsLambdaDimensions: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaDimensions
-        LLMApi: "LAMBDA"
-        LLMLambdaArn: !GetAtt QNABOTBR.Outputs.LLMLambdaArn
+        EmbeddingsApi: "BEDROCK"
+        EmbeddingsBedrockModelId: "amazon.titan-embed-text-v2"
+        LLMApi: "DISABLED"  # LMA configures its own KB/QBusiness LambdaHooks
+        LogRetentionPeriod: !Ref CloudWatchLogsExpirationInDays
 
   LLMTEMPLATESTACK:
     Type: AWS::CloudFormation::Stack
@@ -1309,9 +1294,6 @@ Resources:
     Type: Custom::ToJSON
     Properties:
       ServiceToken: !GetAtt ToJSONFunction.Arn
-      EMBEDDINGS_SCORE_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsScoreThreshold
-      EMBEDDINGS_SCORE_ANSWER_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsScoreAnswerThreshold
-      EMBEDDINGS_TEXT_PASSAGE_SCORE_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsTextPassageScoreThreshold
       LLM_GENERATE_QUERY_ENABLE: "FALSE"
       LLM_GENERATE_QUERY_PROMPT_TEMPLATE: ""
       LLM_CHAT_HISTORY_MAX_MESSAGES: 10

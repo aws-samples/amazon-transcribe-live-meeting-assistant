@@ -23,6 +23,8 @@ const js = fs.readdirSync(`${__dirname}/js_lambda_hooks`)
                 resource: jslambda(name),
                 codeVersionName: `CodeVersion${name}`,
                 codeVersionResource: codeVersion(name),
+                logGroupName: `${name}LogGroup`,
+                logGroupResource: lambdaLogGroup(name),
                 id: `${name}JS`,
             };
         }
@@ -34,12 +36,15 @@ const py = fs.readdirSync(`${__dirname}/py_lambda_hooks`)
         resource: pylambda(name),
         codeVersionName: `CodeVersion${name}`,
         codeVersionResource: codeVersion(name),
+        logGroupName: `${name}LogGroup`,
+        logGroupResource: lambdaLogGroup(name),
         id: `${name}PY`,
     }));
 
 const lambda_hooks = js.concat(py);
 
 module.exports = Object.assign(
+    _.fromPairs(lambda_hooks.map((x) => [x.logGroupName, x.logGroupResource])),
     _.fromPairs(lambda_hooks.map((x) => [x.name, x.resource])),
     _.fromPairs(lambda_hooks.map((x) => [x.codeVersionName, x.codeVersionResource])),
     {
@@ -54,6 +59,30 @@ module.exports = Object.assign(
                     version: { Ref: 'EXTUiImportVersion' },
                 },
             ),
+        },
+        EXTUiImportLambdaLogGroup: {
+            Type: 'AWS::Logs::LogGroup',
+            Properties: {
+                LogGroupName: {
+                    'Fn::Join': [
+                        '-',
+                        [
+                            { 'Fn::Sub': '/aws/lambda/${AWS::StackName}-EXTUiImportLambda' },
+                            { 'Fn::Select': ['2', { 'Fn::Split': ['/', { Ref: 'AWS::StackId' }] }] },
+                        ],
+                    ],
+                },
+                RetentionInDays: {
+                    'Fn::If': [
+                        'LogRetentionPeriodIsNotZero',
+                        { Ref: 'LogRetentionPeriod' },
+                        { Ref: 'AWS::NoValue' },
+                    ],
+                },
+            },
+            Metadata: {
+                guard: util.cfnGuard('CLOUDWATCH_LOG_GROUP_ENCRYPTED', 'CW_LOGGROUP_RETENTION_PERIOD_CHECK'),
+            },
         },
         EXTUiImportLambda: {
             Type: 'AWS::Lambda::Function',
@@ -74,6 +103,9 @@ module.exports = Object.assign(
                     },
                 },
                 Handler: 'ui_import.handler',
+                LoggingConfig: {
+                    LogGroup: { Ref: 'EXTUiImportLambdaLogGroup' },
+                },
                 MemorySize: '128',
                 Role: { Ref: 'CFNLambdaRole' },
                 Runtime: process.env.npm_package_config_lambdaRuntime,
@@ -96,7 +128,10 @@ module.exports = Object.assign(
                     Value: 'CustomResource',
                 }],
             },
-            Metadata: util.cfnNag(['W92', 'W58']),
+            Metadata: {
+                cfn_nag: util.cfnNag(['W92', 'W58']),
+                guard: util.cfnGuard('LAMBDA_CONCURRENCY_CHECK', 'LAMBDA_INSIDE_VPC'),
+            },
         },
         EXTUiImportVersion: {
             Type: 'Custom::S3Version',
@@ -179,7 +214,7 @@ module.exports = Object.assign(
                     util.lambdaVPCAccessExecutionRole(),
                     util.xrayDaemonWriteAccess(),
                     {
-                        PolicyName: 'LambdaFeedbackFirehoseQNALambda',
+                        PolicyName: 'LambdaFeedbackKinesisFirehoseQNALambda',
                         PolicyDocument: {
                             Version: '2012-10-17',
                             Statement: [
@@ -201,52 +236,18 @@ module.exports = Object.assign(
                                         'firehose:PutRecordBatch',
                                     ],
                                     Resource: [
-                                        { Ref: 'FeedbackFirehose' },
+                                        { Ref: 'FeedbackKinesisFirehose' },
                                     ],
                                 },
                             ],
                         },
                     },
-                    {
-                        PolicyName: 'LexQNALambda',
-                        PolicyDocument: {
-                            Version: '2012-10-17',
-                            Statement: [
-                                {
-                                    Effect: 'Allow',
-                                    Action: [
-                                        'lex:PostText',
-                                    ],
-                                    Resource: [
-                                        { 'Fn::Join': ['', ['arn:aws:lex:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':bot:*', ':qna*']] },
-                                        { 'Fn::Join': ['', ['arn:aws:lex:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':bot:*', ':QNA*']] },
-                                    ],
-                                },
-                            ],
-                        },
-                    },
-                    {
-                        PolicyName: 'QNASecretsManagerLambda',
-                        PolicyDocument: {
-                            Version: '2012-10-17',
-                            Statement: [
-                                {
-                                    Effect: 'Allow',
-                                    Action: [
-                                        'secretsmanager:GetResourcePolicy',
-                                        'secretsmanager:GetSecretValue',
-                                        'secretsmanager:DescribeSecret',
-                                    ],
-                                    Resource: [
-                                        { 'Fn::Join': ['', ['arn:aws:secretsmanager:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':secret:qna-*']] },
-                                        { 'Fn::Join': ['', ['arn:aws:secretsmanager:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':secret:QNA-*']] },
-                                    ],
-                                },
-                            ],
-                        },
-                    }],
+                ],
             },
-            Metadata: util.cfnNag(['W11', 'W12']),
+            Metadata: {
+                cfn_nag: util.cfnNag(['W11', 'W12']),
+                guard: util.cfnGuard('IAM_NO_INLINE_POLICY_CHECK'),
+            },
         },
     },
 );
@@ -267,11 +268,14 @@ function jslambda(name) {
             Environment: {
                 Variables: {
                     ES_INDEX: { Ref: 'Index' },
-                    FIREHOSE_NAME: { Ref: 'FeedbackFirehoseName' },
+                    FIREHOSE_NAME: { Ref: 'FeedbackKinesisFirehoseName' },
                     ES_ADDRESS: { Ref: 'ESAddress' },
                 },
             },
             Handler: `${name}.handler`,
+            LoggingConfig: {
+                LogGroup: { Ref: `${name}LogGroup` },
+            },
             MemorySize: '2048',
             Role: { 'Fn::GetAtt': ['ExtensionLambdaRole', 'Arn'] },
             Runtime: process.env.npm_package_config_lambdaRuntime,
@@ -295,7 +299,10 @@ function jslambda(name) {
                 Value: 'LambdaHook',
             }],
         },
-        Metadata: util.cfnNag(['W92']),
+        Metadata: {
+            cfn_nag: util.cfnNag(['W92']),
+            guard: util.cfnGuard('LAMBDA_CONCURRENCY_CHECK', 'LAMBDA_INSIDE_VPC'),
+        },
     };
 }
 function pylambda(name) {
@@ -315,13 +322,16 @@ function pylambda(name) {
             Environment: {
                 Variables: {
                     ES_INDEX: { Ref: 'Index' },
-                    FIREHOSE_NAME: { Ref: 'FeedbackFirehoseName' },
+                    FIREHOSE_NAME: { Ref: 'FeedbackKinesisFirehoseName' },
                     ES_ADDRESS: { Ref: 'ESAddress' },
                     PYTHONPATH: '/var/task/py_modules:/var/runtime:/opt/python',
                     ...util.getCommonEnvironmentVariables()
                 },
             },
             Handler: `${name}.handler`,
+            LoggingConfig: {
+                LogGroup: { Ref: `${name}LogGroup` },
+            },
             MemorySize: '2048',
             Role: { 'Fn::GetAtt': ['ExtensionLambdaRole', 'Arn'] },
             Runtime: process.env.npm_package_config_pythonRuntime,
@@ -341,7 +351,10 @@ function pylambda(name) {
                 Value: 'LambdaHook',
             }],
         },
-        Metadata: util.cfnNag(['W92']),
+        Metadata: {
+            cfn_nag: util.cfnNag(['W92']),
+            guard: util.cfnGuard('LAMBDA_CONCURRENCY_CHECK', 'LAMBDA_INSIDE_VPC'),
+        },
     };
 }
 
@@ -353,6 +366,34 @@ function codeVersion(name) {
             Bucket: { Ref: 'BootstrapBucket' },
             Key: { 'Fn::Sub': `\${BootstrapPrefix}/lambda/EXT${name}.zip` },
             BuildDate: (new Date()).toISOString(),
+        },
+    };
+}
+
+function lambdaLogGroup(name) {
+    return {
+        Type: 'AWS::Logs::LogGroup',
+        Properties: {
+            LogGroupName: {
+                'Fn::Join': [
+                    '-',
+                    [
+                        { 'Fn::Sub': '/aws/lambda/${AWS::StackName}' },
+                        `EXT${name}`,
+                        { 'Fn::Select': ['2', { 'Fn::Split': ['/', { Ref: 'AWS::StackId' }] }] },
+                    ],
+                ],
+            },
+            RetentionInDays: {
+                'Fn::If': [
+                    'LogRetentionPeriodIsNotZero',
+                    { Ref: 'LogRetentionPeriod' },
+                    { Ref: 'AWS::NoValue' },
+                ],
+            },
+        },
+        Metadata: {
+            guard: util.cfnGuard('CLOUDWATCH_LOG_GROUP_ENCRYPTED', 'CW_LOGGROUP_RETENTION_PERIOD_CHECK'),
         },
     };
 }

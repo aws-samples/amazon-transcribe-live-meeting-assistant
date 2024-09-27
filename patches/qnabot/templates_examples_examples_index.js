@@ -14,7 +14,6 @@
 const fs = require('fs');
 const _ = require('lodash');
 const util = require('../../util');
-const responsebots = require('./responsebots.js').resources;
 const responsebots_lexv2 = require('./responsebots-lexv2.js').resources;
 
 const js = fs.readdirSync(`${__dirname}/js`)
@@ -25,6 +24,8 @@ const js = fs.readdirSync(`${__dirname}/js`)
         return {
             name: `ExampleJSLambda${name}`,
             resource: jslambda(name),
+            logGroupName: `${name}LogGroup`,
+            logGroupResource: jsLambdaLogGroup(name),
             id: `${name}JS`,
         };
     });
@@ -38,23 +39,26 @@ const py = fs.readdirSync(`${__dirname}/py`, { withFileTypes: true })
         return {
             name: `ExamplePYTHONLambda${name}`,
             resource: pylambda(name),
+            logGroupName: `${name}LogGroup`,
+            logGroupResource: pyLambdaLogGroup(name),
             id: `${name}PY`,
         };
     });
 
 module.exports = Object.assign(
-    responsebots,
     responsebots_lexv2,
+    _.fromPairs(js.map((x) => [x.logGroupName, x.logGroupResource])),
     _.fromPairs(js.map((x) => [x.name, x.resource])),
+    _.fromPairs(py.map((x) => [x.logGroupName, x.logGroupResource])),
     _.fromPairs(py.map((x) => [x.name, x.resource])),
     {
         FeedbackSNS: {
             Type: 'AWS::SNS::Topic',
             Properties: {
-                KmsMasterKeyId: 'alias/aws/sns',
+                KmsMasterKeyId : 'alias/aws/sns',
             },
         },
-        feedbacksnspolicy: {
+        feedbacksnspolicy: { // https://docs.aws.amazon.com/dtconsole/latest/userguide/set-up-sns.html
             Type: 'AWS::SNS::TopicPolicy',
             Properties: {
                 PolicyDocument: {
@@ -77,7 +81,7 @@ module.exports = Object.assign(
                             'SNS:Publish',
                             'SNS:Receive',
                         ],
-                        Resource: '*',
+                        Resource: [{ 'Fn::Sub': 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:*' }],
                     }],
                 },
                 Topics: [{ Ref: 'FeedbackSNS' }],
@@ -122,6 +126,30 @@ module.exports = Object.assign(
                 BuildDate: (new Date()).toISOString(),
             },
         },
+        ExampleWriteLambdaLogGroup: {
+            Type: 'AWS::Logs::LogGroup',
+            Properties: {
+                LogGroupName: {
+                    'Fn::Join': [
+                        '-',
+                        [
+                            { 'Fn::Sub': '/aws/lambda/${AWS::StackName}-ExampleWriteLambda' },
+                            { 'Fn::Select': ['2', { 'Fn::Split': ['/', { Ref: 'AWS::StackId' }] }] },
+                        ],
+                    ],
+                },
+                RetentionInDays: {
+                    'Fn::If': [
+                        'LogRetentionPeriodIsNotZero',
+                        { Ref: 'LogRetentionPeriod' },
+                        { Ref: 'AWS::NoValue' },
+                    ],
+                },
+            },
+            Metadata: {
+                guard: util.cfnGuard('CLOUDWATCH_LOG_GROUP_ENCRYPTED', 'CW_LOGGROUP_RETENTION_PERIOD_CHECK'),
+            },
+        },
         ExampleWriteLambda: {
             Type: 'AWS::Lambda::Function',
             Properties: {
@@ -141,6 +169,9 @@ module.exports = Object.assign(
                     }
                 },
                 Handler: 'cfn.handler',
+                LoggingConfig: {
+                    LogGroup: { Ref: 'ExampleWriteLambdaLogGroup' },
+                },
                 MemorySize: '128',
                 Role: { Ref: 'CFNLambdaRole' },
                 Runtime: process.env.npm_package_config_lambdaRuntime,
@@ -163,7 +194,10 @@ module.exports = Object.assign(
                     Value: 'CustomResource',
                 }],
             },
-            Metadata: util.cfnNag(['W92', 'W58']),
+            Metadata: {
+                cfn_nag: util.cfnNag(['W92', 'W58']),
+                guard: util.cfnGuard('LAMBDA_CONCURRENCY_CHECK', 'LAMBDA_INSIDE_VPC'),
+            },
         },
         ExampleLambdaRole: {
             Type: 'AWS::IAM::Role',
@@ -187,7 +221,7 @@ module.exports = Object.assign(
                     util.xrayDaemonWriteAccess(),
                     util.amazonKendraReadOnlyAccess(),
                     {
-                        PolicyName: 'LambdaFeedbackFirehoseQNALambda',
+                        PolicyName: 'LambdaFeedbackKinesisFirehoseQNALambda',
                         PolicyDocument: {
                             Version: '2012-10-17',
                             Statement: [
@@ -209,7 +243,7 @@ module.exports = Object.assign(
                                         'firehose:PutRecordBatch',
                                     ],
                                     Resource: [
-                                        { Ref: 'FeedbackFirehose' },
+                                        { Ref: 'FeedbackKinesisFirehose' },
                                     ],
                                 },
                             ],
@@ -226,24 +260,6 @@ module.exports = Object.assign(
                                         'sns:Publish',
                                     ],
                                     Resource: { Ref: 'FeedbackSNS' },
-                                },
-                            ],
-                        },
-                    },
-                    {
-                        PolicyName: 'LexQNALambda',
-                        PolicyDocument: {
-                            Version: '2012-10-17',
-                            Statement: [
-                                {
-                                    Effect: 'Allow',
-                                    Action: [
-                                        'lex:PostText',
-                                    ],
-                                    Resource: [
-                                        { 'Fn::Join': ['', ['arn:aws:lex:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':bot:*', ':qna*']] },
-                                        { 'Fn::Join': ['', ['arn:aws:lex:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':bot:*', ':QNA*']] },
-                                    ],
                                 },
                             ],
                         },
@@ -285,14 +301,17 @@ module.exports = Object.assign(
                                     Action: [
                                         'kendra:SubmitFeedback',
                                     ],
-                                    Resource: '*',
+                                    Resource: [{ 'Fn::Sub': 'arn:${AWS::Partition}:kendra:${AWS::Region}:${AWS::AccountId}:index/*' }],
                                 },
                             ],
                         },
                     },
                 ],
             },
-            Metadata: util.cfnNag(['W11', 'W12']),
+            Metadata: {
+                cfn_nag: util.cfnNag(['W11', 'W12']),
+                guard: util.cfnGuard('IAM_NO_INLINE_POLICY_CHECK'),
+            },
         },
     },
 );
@@ -314,13 +333,16 @@ function jslambda(name) {
             Environment: {
                 Variables: {
                     ES_INDEX: { Ref: 'Index' },
-                    FIREHOSE_NAME: { Ref: 'FeedbackFirehoseName' },
+                    FIREHOSE_NAME: { Ref: 'FeedbackKinesisFirehoseName' },
                     ES_ADDRESS: { Ref: 'ESAddress' },
                     CFSTACK: { Ref: 'AWS::StackName' },
                     ...util.getCommonEnvironmentVariables()
                 },
             },
             Handler: `js/${name}.handler`,
+            LoggingConfig: {
+                LogGroup: { Ref: `${name}LogGroup` },
+            },
             MemorySize: '128',
             Role: { 'Fn::GetAtt': ['ExampleLambdaRole', 'Arn'] },
             Runtime: process.env.npm_package_config_lambdaRuntime,
@@ -343,7 +365,10 @@ function jslambda(name) {
                 Value: 'Example',
             }],
         },
-        Metadata: util.cfnNag(['W92']),
+        Metadata: {
+            cfn_nag: util.cfnNag(['W92']),
+            guard: util.cfnGuard('LAMBDA_CONCURRENCY_CHECK', 'LAMBDA_INSIDE_VPC'),
+        },
     };
 }
 function pylambda(name) {
@@ -363,7 +388,7 @@ function pylambda(name) {
             Environment: {
                 Variables: {
                     ES_INDEX: { Ref: 'Index' },
-                    FIREHOSE_NAME: { Ref: 'FeedbackFirehoseName' },
+                    FIREHOSE_NAME: { Ref: 'FeedbackKinesisFirehoseName' },
                     ES_ADDRESS: { Ref: 'ESAddress' },
                     SNS_TOPIC_ARN: { Ref: 'FeedbackSNS' },
                     CFSTACK: { Ref: 'AWS::StackName' },
@@ -371,6 +396,9 @@ function pylambda(name) {
                 },
             },
             Handler: `py/${name}.handler`,
+            LoggingConfig: {
+                LogGroup: { Ref: `${name}LogGroup` },
+            },
             MemorySize: '128',
             Role: { 'Fn::GetAtt': ['ExampleLambdaRole', 'Arn'] },
             Runtime: process.env.npm_package_config_pythonRuntime,
@@ -390,6 +418,65 @@ function pylambda(name) {
                 Value: 'Example',
             }],
         },
-        Metadata: util.cfnNag(['W92']),
+        Metadata: {
+            cfn_nag: util.cfnNag(['W92']),
+            guard: util.cfnGuard('LAMBDA_CONCURRENCY_CHECK', 'LAMBDA_INSIDE_VPC'),
+        },
+    };
+}
+
+function jsLambdaLogGroup(name) {
+    return {
+        Type: 'AWS::Logs::LogGroup',
+        Properties: {
+            LogGroupName: {
+                'Fn::Join': [
+                    '-',
+                    [
+                        { 'Fn::Sub': '/aws/lambda/${AWS::StackName}' },
+                        `ExampleJSLambda${name}`,
+                        { 'Fn::Select': ['2', { 'Fn::Split': ['/', { Ref: 'AWS::StackId' }] }] },
+                    ],
+                ],
+            },
+            RetentionInDays: {
+                'Fn::If': [
+                    'LogRetentionPeriodIsNotZero',
+                    { Ref: 'LogRetentionPeriod' },
+                    { Ref: 'AWS::NoValue' },
+                ],
+            },
+        },
+        Metadata: {
+            guard: util.cfnGuard('CLOUDWATCH_LOG_GROUP_ENCRYPTED', 'CW_LOGGROUP_RETENTION_PERIOD_CHECK'),
+        },
+    };
+}
+
+function pyLambdaLogGroup(name) {
+    return {
+        Type: 'AWS::Logs::LogGroup',
+        Properties: {
+            LogGroupName: {
+                'Fn::Join': [
+                    '-',
+                    [
+                        { 'Fn::Sub': '/aws/lambda/${AWS::StackName}' },
+                        `ExamplePYTHONLambda${name}`,
+                        { 'Fn::Select': ['2', { 'Fn::Split': ['/', { Ref: 'AWS::StackId' }] }] },
+                    ],
+                ],
+            },
+            RetentionInDays: {
+                'Fn::If': [
+                    'LogRetentionPeriodIsNotZero',
+                    { Ref: 'LogRetentionPeriod' },
+                    { Ref: 'AWS::NoValue' },
+                ],
+            },
+        },
+        Metadata: {
+            guard: util.cfnGuard('CLOUDWATCH_LOG_GROUP_ENCRYPTED', 'CW_LOGGROUP_RETENTION_PERIOD_CHECK'),
+        },
     };
 }
