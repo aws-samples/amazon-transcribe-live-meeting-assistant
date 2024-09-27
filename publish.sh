@@ -312,6 +312,8 @@ dir=submodule-aws-qnabot
 if haschanged $dir; then
 echo "PACKAGING $dir"
 git submodule init
+echo "Removing any QnAbot changes from previous builds"
+pushd $dir && git checkout . && popd
 git submodule update
 # lma customizations
 echo "Applying patch files to remove unused KMS keys from QnABot and customize designer settings page"
