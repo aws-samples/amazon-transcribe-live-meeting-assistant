@@ -43,8 +43,18 @@ async def write_audio(stream):
 async def transcribe():
     print("Transcribe starting")
     kds.send_start_meeting()
+    
+    if details.transcribe_language_code in ["identify-language", "identify-multiple-languages"]:
+        print("WARNING: Language identification option has been selected.")
+        if details.transcribe_preferred_language == "None":
+            language_code = "en-US"
+        else:
+            language_code = details.transcribe_preferred_language
+    else:
+        language_code = details.transcribe_language_code
+            
     stream = await TranscribeStreamingClient(region="us-east-1").start_stream_transcription(
-        language_code=details.transcribe_language_code,
+        language_code=language_code,
         media_sample_rate_hz=16000,
         media_encoding="pcm",
     )

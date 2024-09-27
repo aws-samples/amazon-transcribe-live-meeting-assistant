@@ -12,6 +12,7 @@ email_receiver = os.getenv('EMAIL_RECEIVER', '')
 lma_user = os.getenv('LMA_USER', 'unknown user')
 
 transcribe_language_code = os.getenv('TRANSCRIBE_LANGUAGE_CODE', 'en-US')
+transcribe_preferred_language = os.getenv('TRANSCRIBE_PREFERRED_LANGUAGE', 'en-US')
 
 intro_message = os.environ['INTRO_MESSAGE'].replace('{LMA_USER}', lma_user)
 start_recording_message = os.environ['START_RECORDING_MESSAGE'].replace(
