@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Use selected Transcribe language for virtual-participant - PR #118 
 - Updated QnABot nested stack to QnABot v6.1.1 - PR #119
 - Publish script fails to detect make failure in lca-ai-stack during build - Issue #111
 - When publishing, AISTACK `make` fails to find bash with new version of gnu make (4.3) - Issue #110
