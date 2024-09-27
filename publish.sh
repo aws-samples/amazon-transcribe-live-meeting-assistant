@@ -314,9 +314,10 @@ echo "PACKAGING $dir"
 git submodule init
 git submodule update
 # lma customizations
-echo "Applying patch files to remove unused KMS keys from QnABot"
-#cp -v ./patches/qnabot/templates_examples_examples_index.js $dir/source/templates/examples/examples/index.js
-#cp -v ./patches/qnabot/templates_examples_extensions_index.js $dir/source/templates/examples/extensions/index.js
+echo "Applying patch files to remove unused KMS keys from QnABot and customize designer settings page"
+cp -v ./patches/qnabot/templates_examples_examples_index.js $dir/source/templates/examples/examples/index.js
+cp -v ./patches/qnabot/templates_examples_extensions_index.js $dir/source/templates/examples/extensions/index.js
+cp -v ./patches/qnabot/website_js_lib_store_api_actions_settings.js $dir/source/website/js/lib/store/api/actions/settings.js
 echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lma'"
 # Detection of differences. sed varies betwen GNU sed and BSD sed
 if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
@@ -337,9 +338,10 @@ cat > config.json <<_EOF
 _EOF
 npm install
 npm run build || exit 1
-# Force replacement of opensearch domain during version changes as in-place upgrades cannot be reversed
+# Rename OpenbsearchDomain resource in template to force resource replacement during upgrade/downgrade
+# If the resource name is not changed, then CloudFomration does an inline upgrade from OpenSearch 1.3 to 2.1, but this upgrade cannot be reversed
 # which can create a problem with ROLLBACK if there is a stack failure during the upgrade.
-cat ./build/templates/master.json | sed -e 's%{"EnableVersionUpgrade": true}%{"EnableVersionUpgrade": false}%g' > ./build/templates/qnabot-main.json
+cat ./build/templates/master.json | sed -e "s%OpensearchDomain%LMAQnaBotOpensearchDomain%g" > ./build/templates/qnabot-main.json
 aws s3 sync ./build/ s3://${BUCKET}/${PREFIX_AND_VERSION}/aws-qnabot/ --delete 
 popd
 update_checksum $dir
