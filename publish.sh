@@ -309,7 +309,6 @@ echo "SKIPPING $dir (unchanged)"
 fi
 
 dir=submodule-aws-qnabot
-if haschanged $dir; then
 echo "PACKAGING $dir"
 git submodule init
 echo "Removing any QnAbot changes from previous builds"
@@ -327,6 +326,7 @@ if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
 else # BSD like sed
   sed -i '' 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/source/package.json
 fi
+if haschanged $dir; then
 pushd $dir/source
 mkdir -p build/templates/dev
 cat > config.json <<_EOF
