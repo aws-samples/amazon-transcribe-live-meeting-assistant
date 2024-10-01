@@ -495,6 +495,14 @@ const settingsMap = {
                         type: 'textarea',
                         hint: 'LLM prompt template for generating an answer to the query, using the transcript and either KB search results and/or LLM knowledge. Not used when the Meeting Assistant service is Q_BUSINESS.',
                     },
+                    {
+                        id: 'ASSISTANT_BEDROCK_GUARDRAIL_ID',
+                        hint: 'Id (not name) of an existing Bedrock Guardrail to be used for Meeting Assist bot. Not used when the Meeting Assistant service is Q_BUSINESS.',
+                    },
+                    {
+                        id: 'ASSISTANT_BEDROCK_GUARDRAIL_VERSION',
+                        hint: 'Version of the above Bedrock Guardrail to be used for Meeting Assist bot. Not used when the Meeting Assistant service is Q_BUSINESS.',
+                    },
                 ],
             },
         },

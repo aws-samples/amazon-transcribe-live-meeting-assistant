@@ -54,12 +54,15 @@ def get_call_transcript(callId, userInput, maxMessages):
     return transcript
 
 
-def get_br_response(generatePromptTemplate, transcript, query):
-    promptTemplate = generatePromptTemplate or "You are an AI assistant helping a human during a meeting. I will provide you with a transcript of the ongoing meeting, and a user's request. Your job is to respond to the user's request. If you cannot confidently respond to the user, please state that you could not find an exact answer. Just because the user asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the user's request:<br>{userInput}<br>"
+def get_br_response(transcript, query, settings):
+
+    promptTemplate = settings.get(
+        "ASSISTANT_GENERATE_PROMPT_TEMPLATE")
+
     prompt = promptTemplate.format(
         transcript=json.dumps(transcript), userInput=query)
     prompt = prompt.replace("<br>", "\n")
-    resp = get_bedrock_response(prompt)
+    resp = get_bedrock_response(prompt, settings)
     return resp
 
 
@@ -100,12 +103,24 @@ def get_generate_text(modelId, response):
     return generated_text
 
 
-def get_bedrock_response(prompt):
+def get_bedrock_response(prompt, settings):
     modelId = MODEL_ID
     body = get_request_body(modelId, prompt)
-    print("Bedrock request - ModelId", modelId, "-  Body: ", body)
-    response = BEDROCK_CLIENT.invoke_model(body=json.dumps(
-        body), modelId=modelId, accept='application/json', contentType='application/json')
+    args = dict(
+        body=json.dumps(body),
+        modelId=modelId,
+        accept='application/json',
+        contentType='application/json'
+    )
+    # optional guardrails config
+    guardrailIdentifier = settings.get(
+        "ASSISTANT_BEDROCK_GUARDRAIL_ID", "")
+    if guardrailIdentifier:
+        args["guardrailIdentifier"] = guardrailIdentifier
+        args["guardrailVersion"] = settings.get(
+            "ASSISTANT_BEDROCK_GUARDRAIL_VERSION", "DRAFT")
+    print("Bedrock request args - ", args)
+    response = BEDROCK_CLIENT.invoke_model(**args)
     generated_text = get_generate_text(modelId, response)
     print("Bedrock response: ", generated_text)
     return generated_text
@@ -170,19 +185,20 @@ def format_response(event, message, query):
     return event
 
 
-def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput):
+def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput, settings):
     print("Use Bedrock to generate a relevant disambiguated query based on the transcript and input")
     promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. Only output the rephrased question. Do not include any preamble. "
     prompt = promptTemplate.format(
         transcript=json.dumps(transcript), input=userInput)
     prompt = prompt.replace("<br>", "\n")
-    query = get_bedrock_response(prompt)
+    query = get_bedrock_response(prompt, settings)
     return query
 
 
 def handler(event, context):
     print("Received event: %s" % json.dumps(event))
     args = get_args_from_lambdahook_args(event)
+    settings = event["req"]["_settings"]
     # Any prompt value defined in the lambdahook args is used as UserInput, e.g used by
     # 'easy button' QIDs like 'Ask Assistant' where user didn't type a question, and we
     # just want a suggested reponse based on the transcript so far..
@@ -199,21 +215,18 @@ def handler(event, context):
     callId = event["req"]["session"].get("callId") or event["req"]["_event"].get(
         "requestAttributes", {}).get("callId")
     if callId:
-        maxMessages = int(event["req"]["_settings"].get(
+        maxMessages = int(settings.get(
             "LLM_CHAT_HISTORY_MAX_MESSAGES", 20))
         transcript = get_call_transcript(callId, userInput, maxMessages)
     else:
         print("no callId in request or session attributes")
 
-    queryPromptTemplate = event["req"]["_settings"].get(
+    queryPromptTemplate = settings.get(
         "ASSISTANT_QUERY_PROMPT_TEMPLATE")
     query = generateRetrieveQuery(
-        queryPromptTemplate, transcript, userInput)
+        queryPromptTemplate, transcript, userInput, settings)
 
-    generatePromptTemplate = event["req"]["_settings"].get(
-        "ASSISTANT_GENERATE_PROMPT_TEMPLATE")
-    br_response = get_br_response(
-        generatePromptTemplate, transcript, query)
+    br_response = get_br_response(transcript, query, settings)
     event = format_response(event, br_response, query)
     print("Returning response: %s" % json.dumps(event))
     return event

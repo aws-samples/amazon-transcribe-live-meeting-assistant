@@ -46,6 +46,22 @@ Parameters:
     Description: >-
       Select a Bedrock LLM model from the list."
 
+  BedrockGuardrailId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[a-z0-9]+)$"
+    Description: >
+      If MeetingAssistService is 'BEDROCK_LLM' or 'BEDROCK_KNOWLEDGE_BASE', optionally provide the *Id* (not name) of an *existing* 
+      Bedrock Guardrail to be used for Meeting Assist bot.
+
+  BedrockGuardrailVersion:
+    Type: String
+    Default: "DRAFT"
+    AllowedPattern: "^(|(([1-9][0-9]{0,7})|(DRAFT)))$"
+    Description: >
+      If MeetingAssistService is 'BEDROCK_LLM' or 'BEDROCK_KNOWLEDGE_BASE', and you provided a Bedrock Guardrail Id above, provide the 
+      corresponding Guardrail version here.
+
   BedrockKnowledgeBaseId:
     Type: String
     Default: ""
@@ -534,6 +550,11 @@ Metadata:
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
+          default: Meeting Assist Bedrock Guardrails Integration
+        Parameters:
+          - BedrockGuardrailId
+          - BedrockGuardrailVersion
+      - Label:
           default: Meeting Assist Bedrock Knowledge Base Integration
         Parameters:
           - BedrockKnowledgeBaseId
@@ -629,6 +650,10 @@ Metadata:
         default: Meeting Assist Wake Phrase Regular Expression
       MeetingAssistQnABotOpenSearchNodeCount:
         default: Meeting Assist QnABot OpenSearch Node Count
+      BedrockGuardrailId:
+        default: Bedrock Guardrail Id (optional)
+      BedrockGuardrailVersion:
+        default: Bedrock Guardrail Version (optional)
       BedrockKnowledgeBaseId:
         default: Bedrock Knowledge Base Id (existing)
       BedrockKnowledgeBaseS3BucketName:
@@ -1302,6 +1327,8 @@ Resources:
       EMPTYMESSAGE: "No response from meeting assist QnAbot"
       BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "deprecated"
       BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "deprecated"
+      ASSISTANT_BEDROCK_GUARDRAIL_ID: !Ref BedrockGuardrailId
+      ASSISTANT_BEDROCK_GUARDRAIL_VERSION: !Ref BedrockGuardrailVersion
       ASSISTANT_QUERY_PROMPT_TEMPLATE:
         "Let's think carefully step by step. Here is
         the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow
