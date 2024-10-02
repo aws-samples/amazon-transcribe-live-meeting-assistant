@@ -310,6 +310,10 @@ Resources:
                 Action:
                   - "bedrock:InvokeModel"
                 Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${MeetingAssistServiceBedrockModelID}"
+              - Effect: Allow
+                Action:
+                  - "bedrock:ApplyGuardrail"
+                Resource: '*'
           PolicyName: BedrockPolicy
         - PolicyDocument:
             Version: 2012-10-17
@@ -392,6 +396,10 @@ Resources:
                 Action:
                   - "bedrock:InvokeModel"
                 Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${MeetingAssistServiceBedrockModelID}"
+              - Effect: Allow
+                Action:
+                  - "bedrock:ApplyGuardrail"
+                Resource: '*'
           PolicyName: BedrockPolicy
         - PolicyDocument:
             Version: 2012-10-17
@@ -742,6 +750,10 @@ Resources:
                 Action:
                   - "bedrock:InvokeModel"
                 Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${MeetingAssistServiceBedrockModelID}"
+              - Effect: Allow
+                Action:
+                  - "bedrock:ApplyGuardrail"
+                Resource: '*'
           PolicyName: BedrockInvoke
         - PolicyDocument:
             Version: 2012-10-17
