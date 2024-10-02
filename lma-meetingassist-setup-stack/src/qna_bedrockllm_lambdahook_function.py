@@ -117,8 +117,8 @@ def get_bedrock_response(prompt, settings):
         "ASSISTANT_BEDROCK_GUARDRAIL_ID", "")
     if guardrailIdentifier:
         args["guardrailIdentifier"] = guardrailIdentifier
-        args["guardrailVersion"] = settings.get(
-            "ASSISTANT_BEDROCK_GUARDRAIL_VERSION", "DRAFT")
+        args["guardrailVersion"] = str(settings.get(
+            "ASSISTANT_BEDROCK_GUARDRAIL_VERSION", "DRAFT"))
     print("Bedrock request args - ", args)
     response = BEDROCK_CLIENT.invoke_model(**args)
     generated_text = get_generate_text(modelId, response)
