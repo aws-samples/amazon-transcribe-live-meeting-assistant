@@ -71,7 +71,7 @@ Resources:
       Code: ../source/lambda_functions
       Handler: llm_prompt_upload.lambda_handler
       Role: !GetAtt LLMPromptUploadRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       MemorySize: 128
       Timeout: 60
       Environment:

@@ -295,6 +295,7 @@ $(PACKAGE_RELEASE_OUT_FILE): $(PACKAGE_RELEASE_REPLACE_OUT_FILE) | $(OUT_DIR)
 	@echo '[INFO] sam building template file for release $(RELEASE_VERSION)'
 	sam build \
 		--use-container \
+		--build-image public.ecr.aws/sam/build-python3.12:latest-x86_64 \
 		--parallel \
 		--cached \
 		--template-file '$(PACKAGE_RELEASE_REPLACE_OUT_FILE)' \
