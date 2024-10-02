@@ -1352,7 +1352,7 @@ Resources:
           from the transcript, or from your own world knowledge. Just because the user
           asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here
           is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
-          user's request:<br>{userInput}<br>"
+          user's request:<br>{userInput}<br>Respond in 100 words or less."
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
