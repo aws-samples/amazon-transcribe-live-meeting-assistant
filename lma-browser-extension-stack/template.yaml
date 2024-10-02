@@ -217,7 +217,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       Role: !GetAtt LambdaExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 300
       MemorySize: 128
       Handler: index.handler

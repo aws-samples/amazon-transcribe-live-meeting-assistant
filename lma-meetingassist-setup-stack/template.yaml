@@ -181,7 +181,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 30
       InlineCode: |
         import cfnresponse
@@ -248,7 +248,7 @@ Resources:
       FunctionName: !Sub "QNA-SummarizeCall-${LMAStackName}"
       Role: !GetAtt LambdaHookSummarizeCallRole.Arn
       Handler: qna_summarize_call_function.handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 900
       Environment:
         Variables:
@@ -282,7 +282,7 @@ Resources:
     Properties:
       Content: ./boto3_layer
       CompatibleRuntimes:
-        - python3.11
+        - python3.12
 
   QNABedrockKnowledgeBaseFunctionRole:
     Condition: ShouldConfigureBedrockKB
@@ -344,7 +344,7 @@ Resources:
       FunctionName: !Sub "QNA-${LMAStackName}-BedrockKB-LambdaHook"
       Role: !GetAtt QNABedrockKnowledgeBaseFunctionRole.Arn
       Handler: qna_bedrockkb_lambdahook_function.handler
-      Runtime: python3.11
+      Runtime: python3.12
       Layers:
         - !Ref Boto3Layer
       Timeout: 900
@@ -425,7 +425,7 @@ Resources:
       FunctionName: !Sub "QNA-${LMAStackName}-BedrockLLM-LambdaHook"
       Role: !GetAtt QNABedrockLLMFunctionRole.Arn
       Handler: qna_bedrockllm_lambdahook_function.handler
-      Runtime: python3.11
+      Runtime: python3.12
       Layers:
         - !Ref Boto3Layer
       Timeout: 900
@@ -549,7 +549,7 @@ Resources:
     Properties:
       Role: !GetAtt SetupFunctionRole.Arn
       Handler: setup_function.handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 900
       Code: ./src
       LoggingConfig:

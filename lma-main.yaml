@@ -813,7 +813,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       InlineCode: |
         import cfnresponse
         import time
@@ -885,7 +885,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       Role: !GetAtt ValidateParametersFunctionRole.Arn
       Timeout: 60
       InlineCode: |
@@ -1044,7 +1044,7 @@ Resources:
     Properties:
       Role: !GetAtt UpdateLMASettingsFunctionRole.Arn
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 900
       Code:
         ZipFile: |
@@ -1160,7 +1160,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       InlineCode: |
         import cfnresponse
         import json

@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Publish script fails to detect make failure in lca-ai-stack during build - Issue #111
 - When publishing, AISTACK `make` fails to find bash with new version of gnu make (4.3) - Issue #110
 - Muliple dependabot PRs
-
+- Upgrade all python Lambda functions to python3.12 (latest)
+- Publish script hangs in lma-ui-stack in sam build when using arm64 container image, on new EC2 and Cloud9 instances #124
 
 ## [0.2.1] - 2024-08-29
 
