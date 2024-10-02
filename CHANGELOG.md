@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Ability to apply optional Bedrock Guardrail when MeetingAssistant is BEDROCK_KNOWLEDGE_BASE or BEDROCK_LLM - Issue #53 
+
 ### Fixed
 
 - Use selected Transcribe language for virtual-participant - PR #118 
