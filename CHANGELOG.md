@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- When using Virtual Participant (preview) no audio recording is created. #126
 - Use selected Transcribe language for virtual-participant - PR #118 
 - Updated QnABot nested stack to QnABot v6.1.1 - PR #119
 - Publish script fails to detect make failure in lca-ai-stack during build - Issue #111
