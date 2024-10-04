@@ -138,6 +138,8 @@ def configureQnabotSettings(props):
 
 def loadQnABotSamplePackage(props):
     importBucket = getStackResource(props["QNABOTSTACK"], "ImportBucket")
+    statusBucket = getStackResource(
+        props["QNABOTSTACK"], "ContentDesignerOutputBucket")
     demoPath = props["QnaMeetingAssistDemoJson"]
     demoparts = demoPath.split('/', 1)
     demobucket = demoparts[0]
@@ -157,15 +159,15 @@ def loadQnABotSamplePackage(props):
     with open(demoFileTmp, 'w') as f:
         f.write(filedata)
     # Upload edited file to import bucket to trigger import
-    statusFile = f'status/{demoFile}'
-    s3.put_object(Bucket=importBucket,
+    statusFile = f'status-import/{demoFile}'
+    s3.put_object(Bucket=statusBucket,
                   Key=f'{statusFile}', Body='{"status":"Starting"}')
     s3.upload_file(demoFileTmp, importBucket, f'data/{demoFile}')
     print(f"...waiting for {demoFile} import to be complete...")
     status = "Starting"
     while status != "Complete":
         time.sleep(2)
-        status = get_status(bucket=importBucket, statusFile=statusFile)
+        status = get_status(bucket=statusBucket, statusFile=statusFile)
         print(f'Import Status: {status}')
         if status.startswith("FAILED"):
             raise ValueError(status)

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3.12
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 """ Transcription Passthrough Lambda Function
@@ -44,7 +44,8 @@ else:
     SSMClient = object
 
 APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
-APPSYNC_CLIENT = AppsyncAioGqlClient(url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
+APPSYNC_CLIENT = AppsyncAioGqlClient(
+    url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
 
 BOTO3_SESSION: Boto3Session = boto3.Session()
 CLIENT_CONFIG = BotoCoreConfig(
@@ -56,32 +57,40 @@ STATE_DYNAMODB_RESOURCE: DynamoDBServiceResource = BOTO3_SESSION.resource(
     "dynamodb",
     config=CLIENT_CONFIG,
 )
-STATE_DYNAMODB_TABLE: DynamoDbTable = STATE_DYNAMODB_RESOURCE.Table(STATE_DYNAMODB_TABLE_NAME)
+STATE_DYNAMODB_TABLE: DynamoDbTable = STATE_DYNAMODB_RESOURCE.Table(
+    STATE_DYNAMODB_TABLE_NAME)
 
-IS_LEX_AGENT_ASSIST_ENABLED = getenv("IS_LEX_AGENT_ASSIST_ENABLED", "true").lower() == "true"
+IS_LEX_AGENT_ASSIST_ENABLED = getenv(
+    "IS_LEX_AGENT_ASSIST_ENABLED", "true").lower() == "true"
 
-IS_LAMBDA_AGENT_ASSIST_ENABLED = getenv("IS_LAMBDA_AGENT_ASSIST_ENABLED", "true").lower() == "true"
+IS_LAMBDA_AGENT_ASSIST_ENABLED = getenv(
+    "IS_LAMBDA_AGENT_ASSIST_ENABLED", "true").lower() == "true"
 
-IS_SENTIMENT_ANALYSIS_ENABLED = getenv("IS_SENTIMENT_ANALYSIS_ENABLED", "true").lower() == "true"
+IS_SENTIMENT_ANALYSIS_ENABLED = getenv(
+    "IS_SENTIMENT_ANALYSIS_ENABLED", "true").lower() == "true"
 if IS_SENTIMENT_ANALYSIS_ENABLED:
-    COMPREHEND_CLIENT: ComprehendClient = BOTO3_SESSION.client("comprehend", config=CLIENT_CONFIG)
+    COMPREHEND_CLIENT: ComprehendClient = BOTO3_SESSION.client(
+        "comprehend", config=CLIENT_CONFIG)
 else:
     COMPREHEND_CLIENT = None
 COMPREHEND_LANGUAGE_CODE = getenv("COMPREHEND_LANGUAGE_CODE", "en")
 
-SNS_CLIENT:SNSClient = BOTO3_SESSION.client("sns", config=CLIENT_CONFIG)
-SSM_CLIENT:SSMClient = BOTO3_SESSION.client("ssm", config=CLIENT_CONFIG)
+SNS_CLIENT: SNSClient = BOTO3_SESSION.client("sns", config=CLIENT_CONFIG)
+SSM_CLIENT: SSMClient = BOTO3_SESSION.client("ssm", config=CLIENT_CONFIG)
 
 LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
 
 EVENT_LOOP = asyncio.get_event_loop()
 
-setting_response = SSM_CLIENT.get_parameter(Name=getenv("PARAMETER_STORE_NAME"))
+setting_response = SSM_CLIENT.get_parameter(
+    Name=getenv("PARAMETER_STORE_NAME"))
 SETTINGS = json.loads(setting_response["Parameter"]["Value"])
 if "CategoryAlertRegex" in SETTINGS:
     SETTINGS['AlertRegEx'] = re.compile(SETTINGS["CategoryAlertRegex"])
 if "AssistantWakePhraseRegEx" in SETTINGS:
-    SETTINGS['AssistantWakePhraseRegEx'] = re.compile(SETTINGS["AssistantWakePhraseRegEx"])
+    SETTINGS['AssistantWakePhraseRegEx'] = re.compile(
+        SETTINGS["AssistantWakePhraseRegEx"])
+
 
 async def process_event(event) -> Dict[str, List]:
     """Processes a Batch of Transcript Records"""
@@ -104,14 +113,17 @@ async def process_event(event) -> Dict[str, List]:
 
     return processor.results
 
+
 @LOGGER.inject_lambda_context
 def handler(event, context: LambdaContext):
     # pylint: disable=unused-argument
     """Lambda handler"""
     LOGGER.debug("lambda event", extra={"event": event})
 
-    event_processor_results = EVENT_LOOP.run_until_complete(process_event(event=event))
-    LOGGER.debug("event processor results", extra=dict(event_results=event_processor_results))
+    event_processor_results = EVENT_LOOP.run_until_complete(
+        process_event(event=event))
+    LOGGER.debug("event processor results", extra=dict(
+        event_results=event_processor_results))
 
     for error in event_processor_results.get("errors", []):
         LOGGER.error("event processor error: %s", error)
@@ -121,4 +133,4 @@ def handler(event, context: LambdaContext):
             except Exception:  # pylint: disable=broad-except
                 LOGGER.exception("event processor exception")
 
-    return 
+    return

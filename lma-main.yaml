@@ -15,7 +15,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Meeting Assist - LMA (v0.2.1) (SO9497)
+Description: Amazon Transcribe Live Meeting Assist - LMA (v0.2.2) (SO9497)
 
 Parameters:
   Domain:
@@ -45,6 +45,22 @@ Parameters:
       - "anthropic.claude-3-5-sonnet-20240620-v1:0"
     Description: >-
       Select a Bedrock LLM model from the list."
+
+  BedrockGuardrailId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[a-z0-9]+)$"
+    Description: >
+      If MeetingAssistService is 'BEDROCK_LLM' or 'BEDROCK_KNOWLEDGE_BASE', optionally provide the *Id* (not name) of an *existing* 
+      Bedrock Guardrail to be used for Meeting Assist bot.
+
+  BedrockGuardrailVersion:
+    Type: String
+    Default: "DRAFT"
+    AllowedPattern: "^(|(([1-9][0-9]{0,7})|(DRAFT)))$"
+    Description: >
+      If MeetingAssistService is 'BEDROCK_LLM' or 'BEDROCK_KNOWLEDGE_BASE', and you provided a Bedrock Guardrail Id above, provide the 
+      corresponding Guardrail version here.
 
   BedrockKnowledgeBaseId:
     Type: String
@@ -208,6 +224,8 @@ Parameters:
       per language - e.g. 'en-US, en-AU' is not allowed.
       Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE,
       pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+      NOTE: The identify-language feature has not yet been applied to the virtual participant. 
+      If selected, the virtual participant will use the value of TranscribePreferredLanguage (if set) or 'en-US' (by default).
 
   TranscribePreferredLanguage:
     Type: String
@@ -532,6 +550,11 @@ Metadata:
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
+          default: Meeting Assist Bedrock Guardrails Integration
+        Parameters:
+          - BedrockGuardrailId
+          - BedrockGuardrailVersion
+      - Label:
           default: Meeting Assist Bedrock Knowledge Base Integration
         Parameters:
           - BedrockKnowledgeBaseId
@@ -627,6 +650,10 @@ Metadata:
         default: Meeting Assist Wake Phrase Regular Expression
       MeetingAssistQnABotOpenSearchNodeCount:
         default: Meeting Assist QnABot OpenSearch Node Count
+      BedrockGuardrailId:
+        default: Bedrock Guardrail Id (optional)
+      BedrockGuardrailVersion:
+        default: Bedrock Guardrail Version (optional)
       BedrockKnowledgeBaseId:
         default: Bedrock Knowledge Base Id (existing)
       BedrockKnowledgeBaseS3BucketName:
@@ -786,7 +813,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       InlineCode: |
         import cfnresponse
         import time
@@ -858,7 +885,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       Role: !GetAtt ValidateParametersFunctionRole.Arn
       Timeout: 60
       InlineCode: |
@@ -963,10 +990,8 @@ Resources:
       CustomLanguageModelName: !Ref CustomLanguageModelName
       BedrockModelIds:
         - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
-        - "amazon.titan-embed-text-v2:0" # Meeting Assistant
+        - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB & QnABot
         - !Ref BedrockModelId # Meeting summarization
-        - "amazon.titan-embed-text-v1" # QNABOTBR
-        - "anthropic.claude-instant-v1" # QNABOTBR
 
   ##########################################################################
   # Resources shared by multiple nested stacks
@@ -1019,7 +1044,7 @@ Resources:
     Properties:
       Role: !GetAtt UpdateLMASettingsFunctionRole.Arn
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 900
       Code:
         ZipFile: |
@@ -1135,7 +1160,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       InlineCode: |
         import cfnresponse
         import json
@@ -1173,19 +1198,6 @@ Resources:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
 
-  QNABOTBR:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - IsStacknameLengthOK
-      - ValidateParameters
-    Properties:
-      # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot-plugins/bedrock-embeddings-and-llm.yaml
-      # yamllint enable rule:line-length
-      Parameters:
-        EmbeddingsModelId: "amazon.titan-embed-text-v1"
-        LLMModelId: "anthropic.claude-instant-v1"
-
   QNABOT:
     Type: AWS::CloudFormation::Stack
     DependsOn:
@@ -1193,12 +1205,13 @@ Resources:
       - ValidateParameters
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot/templates/master.json
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/aws-qnabot/templates/qnabot-main.json
       # yamllint enable rule:line-length
       Parameters:
         Email: !Ref AdminEmail
         Username: "Admin"
-        ElasticSearchNodeCount: !Ref MeetingAssistQnABotOpenSearchNodeCount
+        OpenSearchNodeCount: !Ref MeetingAssistQnABotOpenSearchNodeCount
+        OpenSearchFineGrainAccessControl: "FALSE"
         LexV2BotLocaleIds:
           !FindInMap [
             TranscribeToLexLocaleId,
@@ -1208,11 +1221,10 @@ Resources:
         BootstrapBucket: <ARTIFACT_BUCKET_TOKEN>
         BootstrapPrefix: <ARTIFACT_PREFIX_TOKEN>/aws-qnabot
         InstallLexResponseBots: "false"
-        EmbeddingsApi: "LAMBDA"
-        EmbeddingsLambdaArn: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaArn
-        EmbeddingsLambdaDimensions: !GetAtt QNABOTBR.Outputs.EmbeddingsLambdaDimensions
-        LLMApi: "LAMBDA"
-        LLMLambdaArn: !GetAtt QNABOTBR.Outputs.LLMLambdaArn
+        EmbeddingsApi: "BEDROCK"
+        EmbeddingsBedrockModelId: "amazon.titan-embed-text-v2"
+        LLMApi: "DISABLED"  # LMA configures its own KB/QBusiness LambdaHooks
+        LogRetentionPeriod: !Ref CloudWatchLogsExpirationInDays
 
   LLMTEMPLATESTACK:
     Type: AWS::CloudFormation::Stack
@@ -1309,15 +1321,14 @@ Resources:
     Type: Custom::ToJSON
     Properties:
       ServiceToken: !GetAtt ToJSONFunction.Arn
-      EMBEDDINGS_SCORE_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsScoreThreshold
-      EMBEDDINGS_SCORE_ANSWER_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsScoreAnswerThreshold
-      EMBEDDINGS_TEXT_PASSAGE_SCORE_THRESHOLD: !GetAtt QNABOTBR.Outputs.QnABotSettingEmbeddingsTextPassageScoreThreshold
       LLM_GENERATE_QUERY_ENABLE: "FALSE"
       LLM_GENERATE_QUERY_PROMPT_TEMPLATE: ""
       LLM_CHAT_HISTORY_MAX_MESSAGES: 10
       EMPTYMESSAGE: "No response from meeting assist QnAbot"
       BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "deprecated"
       BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "deprecated"
+      ASSISTANT_BEDROCK_GUARDRAIL_ID: !Ref BedrockGuardrailId
+      ASSISTANT_BEDROCK_GUARDRAIL_VERSION: !Ref BedrockGuardrailVersion
       ASSISTANT_QUERY_PROMPT_TEMPLATE:
         "Let's think carefully step by step. Here is
         the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow
@@ -1341,7 +1352,7 @@ Resources:
           from the transcript, or from your own world knowledge. Just because the user
           asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here
           is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
-          user's request:<br>{userInput}<br>"
+          user's request:<br>{userInput}<br>Respond in 100 words or less."
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
@@ -1478,6 +1489,7 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
+        EnableAudioRecording: !Ref EnableAudioRecording
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket

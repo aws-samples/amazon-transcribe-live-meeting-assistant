@@ -2,4 +2,5 @@ amazon-transcribe
 boto3
 pytest-playwright 
 requests
-sounddevice 
+sounddevice
+wave

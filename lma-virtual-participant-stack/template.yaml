@@ -61,6 +61,18 @@ Parameters:
     Description: S3 location of the browser extension source code zipfile
 
   # transcibe parameters
+
+  EnableAudioRecording:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable or disable recording of audio during a meeting. If set to false, the
+      meeting will not be recorded.
+      If set to true, the meeting will be recorded.
+
   S3BucketName:
     Type: String
     Description: >
@@ -556,6 +568,8 @@ Resources:
         - Environment:
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            - Name: SHOULD_RECORD_CALL
+              Value: !Ref EnableAudioRecording
             - Name: RECORDINGS_BUCKET_NAME
               Value: !Ref S3BucketName
             - Name: RECORDINGS_KEY_PREFIX
