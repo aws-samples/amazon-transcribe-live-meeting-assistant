@@ -1489,6 +1489,7 @@ Resources:
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
+        EnableAudioRecording: !Ref EnableAudioRecording
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket

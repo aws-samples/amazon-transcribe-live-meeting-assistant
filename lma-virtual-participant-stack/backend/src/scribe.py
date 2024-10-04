@@ -6,7 +6,6 @@ from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent
 import sounddevice as sd
-from datetime import datetime
 
 # globals
 current_speaker = "none"
@@ -19,7 +18,7 @@ class MyEventHandler(TranscriptResultStreamHandler):
             kds.send_add_transcript_segment(current_speaker, result)
 
 
-async def write_audio(stream):
+async def write_audio(transcribe_stream, recording_stream):
     loop = asyncio.get_event_loop()
     input_queue = asyncio.Queue()
 
@@ -36,8 +35,10 @@ async def write_audio(stream):
     ):
         while details.start:
             indata, status = await input_queue.get()
-            await stream.input_stream.send_audio_event(audio_chunk=indata)
-        await stream.input_stream.end_stream()
+            await transcribe_stream.input_stream.send_audio_event(audio_chunk=indata)
+            recording_stream.write(indata)
+        await transcribe_stream.input_stream.end_stream()
+        recording_stream.close()
 
 
 async def transcribe():
@@ -55,14 +56,15 @@ async def transcribe():
 
     print(f"Using Transcribe language code: {language_code}")
 
-    stream = await TranscribeStreamingClient(region="us-east-1").start_stream_transcription(
+    transcribe_stream = await TranscribeStreamingClient(region="us-east-1").start_stream_transcription(
         language_code=language_code,
         media_sample_rate_hz=16000,
         media_encoding="pcm",
     )
+    recording_stream = open(details.tmp_recording_filename, "wb")
     await asyncio.gather(
-        write_audio(stream),
-        MyEventHandler(stream.output_stream).handle_events()
+        write_audio(transcribe_stream, recording_stream),
+        MyEventHandler(transcribe_stream.output_stream).handle_events()
     )
     print("Transcribe stopped")
 
