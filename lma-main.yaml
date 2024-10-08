@@ -31,9 +31,11 @@ Parameters:
     Type: String
     AllowedValues:
       - "BEDROCK_LLM"
-      - "BEDROCK_KNOWLEDGE_BASE (Create)"
       - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
+      - "BEDROCK_AGENT (Use Existing)"
       - "Q_BUSINESS (Use Existing)"
+      - "BEDROCK_KNOWLEDGE_BASE (Create)"
+
     Description: Choose the knowledge base / LLM service to use
 
   MeetingAssistServiceBedrockModelID:
@@ -69,6 +71,24 @@ Parameters:
     Description: >
       If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Use Existing)', provide the knowledge base
       *Id* (not name) of an *existing* Bedrock knowledge base to be used for Meeting
+      Assist bot.
+
+  BedrockAgentId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+    Description: >
+      If MeetingAssistService is 'BEDROCK_AGENT (Use Existing)', provide the agent
+      *ID* (not name) of an *existing* Bedrock agent to be used for Meeting
+      Assist bot.
+
+  BedrockAgentAliasId:
+    Type: String
+    Default: "TSTALIASID"
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+    Description: >
+      If MeetingAssistService is 'BEDROCK_AGENT (Use Existing)', provide the agent
+      Alias *ID* (not the Alias name) of an *existing* Bedrock agent to be used for Meeting
       Assist bot.
 
   BedrockKnowledgeBaseS3BucketName:
@@ -563,6 +583,11 @@ Metadata:
           - BedrockKnowledgeBaseWebCrawlerURLs
           - BedrockKnowledgeBaseWebCrawlerScope
       - Label:
+          default: Meeting Assist Bedrock Agent Integration
+        Parameters:
+          - BedrockAgentId
+          - BedrockAgentAliasId
+      - Label:
           default: Meeting Assist Q Business Integration
         Parameters:
           - AmazonQAppId
@@ -656,6 +681,10 @@ Metadata:
         default: Bedrock Guardrail Version (optional)
       BedrockKnowledgeBaseId:
         default: Bedrock Knowledge Base Id (existing)
+      BedrockAgentId:
+        default: Bedrock Agent Id (existing)
+      BedrockAgentAliasId:
+        default: Bedrock Agent Alias Id (existing)
       BedrockKnowledgeBaseS3BucketName:
         default: S3 bucket with knowledge base source documents (optional).
       BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
@@ -778,7 +807,29 @@ Rules:
       - Assert: !Not [!Equals [!Ref BedrockKnowledgeBaseId, ""]]
         AssertDescription:
           BedrockKnowledgeBaseId is required when MeetingAssistService
-          is 'BEDROCK_KNOWLEDGE_BASE'
+          is 'BEDROCK_KNOWLEDGE_BASE (Use Existing)'
+  BedrockAgentId:
+    RuleCondition:
+      !Equals [
+        !Ref MeetingAssistService,
+        "BEDROCK_AGENT (Use Existing)",
+      ]   
+    Assertions:
+      - Assert: !Not [!Equals [!Ref BedrockAgentId, ""]]
+        AssertDescription:
+          BedrockAgentId is required when MeetingAssistService
+          is 'BEDROCK_AGENT (Use Existing)'
+  BedrockAgentAliasId:
+    RuleCondition:
+      !Equals [
+        !Ref MeetingAssistService,
+        "BEDROCK_AGENT (Use Existing)",
+      ]   
+    Assertions:
+      - Assert: !Not [!Equals [!Ref BedrockAgentAliasId, ""]]
+        AssertDescription:
+          BedrockAgentAliasId is required when MeetingAssistService
+          is 'BEDROCK_AGENT (Use Existing)'
   AmazonQId:
     RuleCondition:
       !Equals [
@@ -789,7 +840,7 @@ Rules:
       - Assert: !Not [!Equals [!Ref AmazonQAppId, ""]]
         AssertDescription:
           AmazonQAppId is required when MeetingAssistService
-          is 'Q_BUSINESS'
+          is 'Q_BUSINESS (Use Existing)'
 
 Conditions:
   IsHealthcareDomainSelected: !Equals [!Ref Domain, "Healthcare"]
@@ -803,6 +854,8 @@ Conditions:
       !Condition ShouldUseExistingBedrockKnowledgeBase,
       !Condition ShouldCreateBedrockKnowledgeBase,
     ]
+  ShouldUseBedrockAgent:
+    !Equals [!Ref MeetingAssistService, "BEDROCK_AGENT (Use Existing)"]
   ShouldUseQBusiness:
     !Equals [!Ref MeetingAssistService, "Q_BUSINESS (Use Existing)"]
   ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
@@ -1346,13 +1399,18 @@ Resources:
           sure to double check the search results to validate a user's assertion.<br>Here
           is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are
           the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
-        - "You are an AI assistant helping a human during a meeting. I will provide
-          you with a transcript of the ongoing meeting (which may be empty), and a user's
-          request. Your job is to respond to the user's request using any relevant context
-          from the transcript, or from your own world knowledge. Just because the user
-          asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here
-          is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
-          user's request:<br>{userInput}<br>Respond in 100 words or less."
+        - !If 
+          - ShouldUseBedrockAgent
+          - "You are an AI assistant helping a human during a meeting. Here
+            is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
+            user's request:<br>{userInput}<br>"
+          - "You are an AI assistant helping a human during a meeting. I will provide
+            you with a transcript of the ongoing meeting (which may be empty), and a user's
+            request. Your job is to respond to the user's request using any relevant context
+            from the transcript, or from your own knowledge. Just because the user
+            asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here
+            is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
+            user's request:<br>{userInput}<br>Respond in 100 words or less." # LLM only (default)
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
@@ -1366,12 +1424,20 @@ Resources:
         QNABOTSTACK: !Ref QNABOT
         COGNITOSTACK: !Ref COGNITOSTACK
         MeetingAssistService: !Ref MeetingAssistService
-        BedrockKnowledgeBaseID: !If
+        BedrockKnowledgeBaseId: !If
           - ShouldUseBedrockKnowledgeBase
           - !If
             - ShouldCreateBedrockKnowledgeBase
             - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
             - !Ref BedrockKnowledgeBaseId
+          - ""
+        BedrockAgentId: !If
+          - ShouldUseBedrockAgent
+          - !Ref BedrockAgentId
+          - ""
+        BedrockAgentAliasId: !If 
+          - ShouldUseBedrockAgent
+          - !Ref BedrockAgentAliasId
           - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
         AmazonQAppId: !If

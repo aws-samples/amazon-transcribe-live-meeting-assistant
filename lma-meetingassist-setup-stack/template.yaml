@@ -27,9 +27,19 @@ Parameters:
     Type: String
     Description: Choose which knowledge base / LLM service to use
 
-  BedrockKnowledgeBaseID:
+  BedrockKnowledgeBaseId:
     Type: String
     Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+
+  BedrockAgentId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+
+  BedrockAgentAliasId:
+    Type: String
+    Default: "TSTALIASID"
     AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
 
   BedrockKnowledgeBaseS3BucketName:
@@ -159,7 +169,8 @@ Parameters:
 
 Conditions:
   ShouldConfigureQnabot: !Not [!Equals [!Ref QNABOTSTACK, ""]]
-  ShouldConfigureBedrockKB: !Not [!Equals [!Ref BedrockKnowledgeBaseID, ""]]
+  ShouldConfigureBedrockKB: !Not [!Equals [!Ref BedrockKnowledgeBaseId, ""]]
+  ShouldConfigureBedrockAgent: !Not [!Equals [!Ref BedrockAgentId, ""]]
   ShouldCreateQPlugin: !Not [!Equals [!Ref AmazonQAppId, ""]]
   ShouldConfigureBedrockLLM:
     !And [
@@ -305,7 +316,7 @@ Resources:
                 Action:
                   - "bedrock:Retrieve"
                   - "bedrock:RetrieveAndGenerate"
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseID}"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseId}"
               - Effect: Allow
                 Action:
                   - "bedrock:InvokeModel"
@@ -351,7 +362,7 @@ Resources:
       Environment:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
-          KB_ID: !Ref BedrockKnowledgeBaseID
+          KB_ID: !Ref BedrockKnowledgeBaseId
           MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
       Code: ./src
       LoggingConfig:
@@ -372,6 +383,97 @@ Resources:
     Properties:
       LogGroupName:
         Fn::Sub: /${AWS::StackName}/lambda/QNABedrockKnowledgeBaseFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+
+  QNABedrockAgentFunctionRole:
+    Condition: ShouldConfigureBedrockAgent
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeAgent"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent-alias/${BedrockAgentId}/${BedrockAgentAliasId}"
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${MeetingAssistServiceBedrockModelID}"
+              - Effect: Allow
+                Action:
+                  - "bedrock:ApplyGuardrail"
+                Resource: '*'
+          PolicyName: BedrockPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource:
+                  - "arn:aws:s3:::*-importbucket-*/*"
+                  - !If
+                    - IsBedrockKnowledgeBaseS3BucketName
+                    - !Sub "arn:aws:s3:::${BedrockKnowledgeBaseS3BucketName}/*"
+                    - !Ref AWS::NoValue
+          PolicyName: S3BucketPolicy
+        - PolicyName: InlinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: lambda:InvokeFunction
+                Effect: Allow
+                Resource: !Ref FetchTranscriptFunctionArn
+
+  QNABedrockAgentFunction:
+    Condition: ShouldConfigureBedrockAgent
+    Type: "AWS::Lambda::Function"
+    Properties:
+      # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
+      FunctionName: !Sub "QNA-${LMAStackName}-BedrockAgent-LambdaHook"
+      Role: !GetAtt QNABedrockAgentFunctionRole.Arn
+      Handler: qna_bedrockagent_lambdahook_function.handler
+      Runtime: python3.12
+      Layers:
+        - !Ref Boto3Layer
+      Timeout: 900
+      Environment:
+        Variables:
+          FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
+          AGENT_ID: !Ref BedrockAgentId
+          AGENT_ALIAS_ID: !Ref BedrockAgentAliasId
+          MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
+      Code: ./src
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/QNABedrockAgentFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    DependsOn:
+      - QNABedrockAgentFunctionLogGroup
+
+  QNABedrockAgentFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/QNABedrockAgentFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
 
@@ -598,7 +700,10 @@ Resources:
         - !If
           - ShouldConfigureBedrockKB
           - !Ref QNABedrockKnowledgeBaseFunction
-          - !Ref QNABedrockLLMFunction
+          - !If 
+            - ShouldConfigureBedrockAgent
+            - !Ref QNABedrockAgentFunction
+            - !Ref QNABedrockLLMFunction
       QnaBotSettings: !Ref QnaBotSettings
       # Changes to Params below force MeetingAssist Setup to execute.
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
