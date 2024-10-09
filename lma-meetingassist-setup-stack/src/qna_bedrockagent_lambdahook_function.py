@@ -63,7 +63,7 @@ def get_call_transcript(callId, userInput, maxMessages):
     return transcript
 
 
-def get_agent_response(transcript, query, settings):
+def get_agent_response(transcript, query, callId, settings):
 
     # if the query has been labeled "small talk", we can skip
     # ensure the reponse matches the default ASSISTANT_NO_HITS_REGEX value ("Sorry,")
@@ -86,7 +86,12 @@ def get_agent_response(transcript, query, settings):
             "agentAliasId": AGENT_ALIAS_ID,
             "agentId": AGENT_ID,
             "inputText": inputText,
-            "sessionId": sessionId
+            "sessionId": sessionId,
+            "sessionState": {
+                "sessionAttributes": {
+                    "callId": callId
+                }
+            }
         }
         print("Amazon Bedrock Invoke Agent Request: ", input)
         try:
@@ -361,7 +366,7 @@ def handler(event, context):
     query = generateRetrieveQuery(
         retrievePromptTemplate, transcript, userInput, settings)
 
-    agent_response = get_agent_response(transcript, query, settings)
+    agent_response = get_agent_response(transcript, query, callId, settings)
 
     event = format_response(event, agent_response, query)
     print("Returning response: %s" % json.dumps(event))
