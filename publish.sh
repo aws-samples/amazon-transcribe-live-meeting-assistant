@@ -280,6 +280,18 @@ else
 echo "SKIPPING $dir (unchanged)"
 fi
 
+dir=lma-bedrockagent-stack
+if haschanged $dir; then
+echo "PACKAGING $dir"
+pushd $dir
+chmod +x ./publish.sh
+./publish.sh $BUCKET $PREFIX_AND_VERSION $REGION || exit 1
+popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
+
 dir=lma-websocket-transcriber-stack
 if haschanged $dir; then
 echo "PACKAGING $dir"
@@ -374,7 +386,7 @@ pushd $dir/source
 mkdir -p build/templates/dev
 npm install
 npm run build || exit 1
-# Rename OpenbsearchDomain resource in template to force resource replacement during upgrade/downgrade
+# Rename OpensearchDomain resource in template to force resource replacement during upgrade/downgrade
 # If the resource name is not changed, then CloudFomration does an inline upgrade from OpenSearch 1.3 to 2.1, but this upgrade cannot be reversed
 # which can create a problem with ROLLBACK if there is a stack failure during the upgrade.
 cat ./build/templates/master.json | sed -e "s%OpensearchDomain%LMAQnaBotOpensearchDomain%g" > ./build/templates/qnabot-main.json

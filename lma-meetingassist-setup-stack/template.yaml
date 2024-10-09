@@ -176,6 +176,7 @@ Conditions:
     !And [
       !Condition ShouldConfigureQnabot,
       !Not [!Condition ShouldConfigureBedrockKB],
+      !Not [!Condition ShouldConfigureBedrockAgent],
       !Not [!Condition ShouldCreateQPlugin]
     ]
   HasSummaryLambdaFunction:
@@ -380,6 +381,7 @@ Resources:
 
   QNABedrockKnowledgeBaseFunctionLogGroup:
     Type: AWS::Logs::LogGroup
+    Condition: ShouldConfigureBedrockKB
     Properties:
       LogGroupName:
         Fn::Sub: /${AWS::StackName}/lambda/QNABedrockKnowledgeBaseFunction
@@ -471,6 +473,7 @@ Resources:
 
   QNABedrockAgentFunctionLogGroup:
     Type: AWS::Logs::LogGroup
+    Condition: ShouldConfigureBedrockAgent
     Properties:
       LogGroupName:
         Fn::Sub: /${AWS::StackName}/lambda/QNABedrockAgentFunction
@@ -551,6 +554,7 @@ Resources:
 
   QNABedrockLLMFunctionLogGroup:
     Type: AWS::Logs::LogGroup
+    Condition: ShouldConfigureBedrockLLM
     Properties:
       LogGroupName:
         Fn::Sub: /${AWS::StackName}/lambda/QNABedrockLLMFunction

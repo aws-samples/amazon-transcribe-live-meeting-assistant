@@ -35,7 +35,7 @@ Parameters:
       - "BEDROCK_AGENT (Use Existing)"
       - "Q_BUSINESS (Use Existing)"
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
-
+      - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)"
     Description: Choose the knowledge base / LLM service to use
 
   MeetingAssistServiceBedrockModelID:
@@ -71,7 +71,9 @@ Parameters:
     Description: >
       If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Use Existing)', provide the knowledge base
       *Id* (not name) of an *existing* Bedrock knowledge base to be used for Meeting
-      Assist bot.
+      Assist bot. If MeetingAssistService is 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', optionally provide 
+      the knowledge base *Id* of an existing Bedrock knowledge base for the new Bedrock Agent, or leave blank to
+      create a new knowledge base.
 
   BedrockAgentId:
     Type: String
@@ -95,7 +97,7 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide the bucket 
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide the bucket 
       name of an existing bucket with documents to ingest, or leave blank if you don't need an S3 data source. If you provide an S3 bucket name an S3 data
       source will be created for you automatically.
 
@@ -103,14 +105,14 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of optional S3 prefixes 
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide comma separated list of optional S3 prefixes 
       with the paths to your source documents e.g. "prefix1/, prefix2/". If you leave blank, all documents in your S3 bucket will be scanned.
 
   BedrockKnowledgeBaseWebCrawlerURLs:
     Type: String
     Default: ""
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
       or leave blank if you don't need a Web data source. If you provide one or more Web URLs a Web crawler data source will be created for you automatically.
 
   BedrockKnowledgeBaseWebCrawlerScope:
@@ -121,7 +123,7 @@ Parameters:
       - "SUBDOMAINS"
     Default: DEFAULT
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', specify the scope of what is crawled for your URLs.
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', specify the scope of what is crawled for your URLs.
       Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
       Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
       Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
@@ -570,12 +572,12 @@ Metadata:
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
-          default: Meeting Assist Bedrock Guardrails Integration
+          default: Meeting Assist Bedrock Guardrails
         Parameters:
           - BedrockGuardrailId
           - BedrockGuardrailVersion
       - Label:
-          default: Meeting Assist Bedrock Knowledge Base Integration
+          default: Meeting Assist Bedrock Knowledge Base
         Parameters:
           - BedrockKnowledgeBaseId
           - BedrockKnowledgeBaseS3BucketName
@@ -583,12 +585,12 @@ Metadata:
           - BedrockKnowledgeBaseWebCrawlerURLs
           - BedrockKnowledgeBaseWebCrawlerScope
       - Label:
-          default: Meeting Assist Bedrock Agent Integration
+          default: Meeting Assist Bedrock Agent
         Parameters:
           - BedrockAgentId
           - BedrockAgentAliasId
       - Label:
-          default: Meeting Assist Q Business Integration
+          default: Meeting Assist Q Business
         Parameters:
           - AmazonQAppId
           - IDCApplicationARN
@@ -854,8 +856,15 @@ Conditions:
       !Condition ShouldUseExistingBedrockKnowledgeBase,
       !Condition ShouldCreateBedrockKnowledgeBase,
     ]
-  ShouldUseBedrockAgent:
+  ShouldUseExistingBedrockAgent:
     !Equals [!Ref MeetingAssistService, "BEDROCK_AGENT (Use Existing)"]
+  ShouldCreateBedrockAgent:
+    !Equals [!Ref MeetingAssistService, "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)"]
+  ShouldUseBedrockAgent:
+    !Or [
+      !Condition ShouldUseExistingBedrockAgent,
+      !Condition ShouldCreateBedrockAgent,
+    ]
   ShouldUseQBusiness:
     !Equals [!Ref MeetingAssistService, "Q_BUSINESS (Use Existing)"]
   ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
@@ -1369,6 +1378,22 @@ Resources:
         pWebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
         pWebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
 
+  BEDROCKAGENT:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateBedrockAgent
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockagent-stack/template.yaml
+      Parameters:
+        BedrockModelID: !Ref MeetingAssistServiceBedrockModelID
+        BedrockKnowledgeBaseId: !Ref BedrockKnowledgeBaseId
+        KnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
+        InputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
+        WebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
+        WebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
+
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
   SettingsJSON:
     Type: Custom::ToJSON
@@ -1433,11 +1458,17 @@ Resources:
           - ""
         BedrockAgentId: !If
           - ShouldUseBedrockAgent
-          - !Ref BedrockAgentId
+          - !If
+            - ShouldCreateBedrockAgent
+            - !GetAtt BEDROCKAGENT.Outputs.AgentId
+            - !Ref BedrockAgentId
           - ""
         BedrockAgentAliasId: !If 
           - ShouldUseBedrockAgent
-          - !Ref BedrockAgentAliasId
+          - !If
+            - ShouldCreateBedrockAgent
+            - !GetAtt BEDROCKAGENT.Outputs.AgentAliasId
+            - !Ref BedrockAgentAliasId
           - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
         AmazonQAppId: !If
