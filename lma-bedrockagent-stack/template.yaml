@@ -1,0 +1,298 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Amazon Transcribe Live Meeting Assist - Bedrock Agent setup
+
+Parameters:
+  
+  BedrockModelID:
+    Type: String
+    Default: "anthropic.claude-3-haiku-20240307-v1:0"
+    Description: >-
+      Selected LLM Model to use for agent
+
+  BedrockKnowledgeBaseId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+    Description: >
+      If populated, use existing KB. Otherwise create new KB
+
+  KnowledgeBaseBucketName:
+    Type: String
+    Default: ""
+    Description: >-
+      Enter the bucket name of an existing bucket with documents to ingest, or leave blank if you don't need an S3 data source.
+
+  InputDocumentUploadFolderPrefix:
+    Type: String
+    Default: ""
+    Description: >-
+      Comma separated list of S3 prefixes with path to your source documents e.g. "my/documents/here/", "prefix1/, prefix2/"
+
+  WebCrawlerURLs:
+    Type: String
+    Default: ""
+    Description: >-
+      Comma separated list of public web sites to crawl, or leave blank if you don't need a Web data source.
+
+  WebCrawlerScope:
+    Type: String
+    AllowedValues:
+      - "DEFAULT"
+      - "HOST_ONLY"
+      - "SUBDOMAINS"
+    Default: DEFAULT
+    Description: >-
+      The scope of what is crawled for your URLs.
+      Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
+      Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
+      Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
+
+  SNSEmailAddress:
+    Type: String
+    Description: >-
+      Enter an email address to receive notifications from the SendMessage action group
+
+Conditions:
+  ShouldCreateBedrockKnowledgeBase:
+    !Equals [!Ref BedrockKnowledgeBaseId, ""]
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Knowledge Base Data Sources
+        Parameters:
+          - KnowledgeBaseBucketName
+          - InputDocumentUploadFolderPrefix
+          - WebCrawlerURLs
+          - WebCrawlerScope
+
+    ParameterLabels:
+      KnowledgeBaseBucketName:
+        default: Existing S3 bucket with knowledge base source documents (optional).
+      InputDocumentUploadFolderPrefix:
+        default: S3 prefix(es) for your content (optional)
+      WebCrawlerURLs:
+        default: Publicly accessible URLs for web crawling (optional)
+      WebCrawlerScope:
+        default: Web crawl sync scope
+
+Resources:
+
+  BEDROCKKB:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateBedrockKnowledgeBase
+    Properties:
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
+      Parameters:
+        pKnowledgeBaseBucketName: !Ref KnowledgeBaseBucketName
+        pInputDocumentUploadFolderPrefix: !Ref InputDocumentUploadFolderPrefix
+        pWebCrawlerURLs: !Ref WebCrawlerURLs
+        pWebCrawlerScope: !Ref WebCrawlerScope
+
+  # Resourcs for SendMessage action group
+
+  SendMessageTopic:
+    Type: AWS::SNS::Topic
+
+  SendMessageTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      Endpoint: !Ref SNSEmailAddress
+      TopicArn: !Ref SendMessageTopic
+
+  SendMessageFunctionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'sns:Publish'
+                  - 'sns:SetSMSAttributes'
+                  - 'sns:GetSMSAttributes'
+                Resource: !Ref SendMessageTopic
+
+  SendMessageFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: 'index.lambda_handler'
+      Role: !GetAtt SendMessageFunctionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          from botocore.exceptions import ClientError
+
+          def lambda_handler(event, context):
+              print("Event: ", json.dumps(event))
+              agent = event['agent']
+              actionGroup = event['actionGroup']
+              function = event['function']
+              parameters = event.get('parameters', [])
+
+              # Parse parameters
+              message = next((param['value'] for param in parameters if param['name'] == 'message'), "No message provided.")
+              subject = next((param['value'] for param in parameters if param['name'] == 'subject'), os.environ['DEFAULT_SUBJECT'])
+
+              # Create a new SNS resource
+              sns = boto3.client('sns')
+
+              # Publish the message to the topic
+              sns_topic_arn = os.environ['SNS_TOPIC_ARN']
+              try:
+                  message_format = {
+                      "default": message,
+                      "email": f"Subject: {subject}\n\n{message}"
+                  }
+                  snsArgs = dict(
+                      TopicArn=sns_topic_arn,
+                      Message=json.dumps(message_format),
+                      MessageStructure='json',
+                      Subject=subject
+                  )
+                  print(f"SNS Args: {snsArgs}")
+                  response = sns.publish(**snsArgs)
+                  print(f"Message sent! Message ID: {response['MessageId']}"),
+                  responseBody =  {
+                      "TEXT": {
+                          "body": f"Message sent to subscribers."
+                      }
+                  }
+              except ClientError as e:
+                  print(e.response['Error']['Message'])
+                  responseBody =  {
+                      "TEXT": {
+                          "body": f"Error sending message: {e.response['Error']['Message']}"
+                      }
+                  }
+                  pass
+
+              action_response = {
+                  'actionGroup': actionGroup,
+                  'function': function,
+                  'functionResponse': {
+                      'responseBody': responseBody
+                  }
+              }
+              function_response = {'response': action_response, 'messageVersion': event['messageVersion']}
+              print("Response: {}".format(function_response))
+              return function_response
+
+      Runtime: python3.12
+      Timeout: 60
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref SendMessageTopic
+          DEFAULT_SUBJECT: "Message from Live Meeting Assistant (LMA)"
+
+  BedrockAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - bedrock.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName: BedrockInvokeModel
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - bedrock:InvokeModel
+            Resource:
+            - Fn::Sub: arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelID}
+          - Effect: Allow
+            Action:
+            - bedrock:Retrieve
+            Resource: !If
+            - ShouldCreateBedrockKnowledgeBase
+            - Fn::Sub: arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BEDROCKKB.Outputs.KnowledgeBaseID}
+            - Fn::Sub: arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseId}
+
+  BedrockAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub "${AWS::StackName}"
+      Description: Bedrock Agent for Live Meeting Assistant stack
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      AutoPrepare: true
+      Instruction: "You are an AI Meeting assistant who responds to instructions and questions from meeting participants using the provided tools, and the meeting transcript as context."
+      FoundationModel: !Ref BedrockModelID
+      KnowledgeBases: 
+        - Description: Knowledge Base used for looking up answers or fact checking statements using trusted sources
+          KnowledgeBaseId: !If
+          - ShouldCreateBedrockKnowledgeBase
+          - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
+          - !Ref BedrockKnowledgeBaseId
+      ActionGroups:
+        - ActionGroupName: SendMessage
+          Description: Send a message by SMS or Email
+          ActionGroupExecutor:
+            Lambda: !GetAtt SendMessageFunction.Arn
+          FunctionSchema:
+            Functions: 
+              - Name: SendMessage
+                Description: Send a message by SMS text, or email
+                Parameters:
+                  message:
+                    Type: string
+                    Required: true
+                    Description: The text of the message to send
+                  subject:
+                    Type: string
+                    Required: false
+                    Description: The subject of the message to send
+          SkipResourceInUseCheckOnDelete: true
+
+  SendMessageFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SendMessageFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !GetAtt BedrockAgent.AgentArn
+
+  BedrockAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      Description: !Sub "Alias for Agent update: ${BedrockAgent.UpdatedAt}" 
+      AgentId: !Ref BedrockAgent
+      AgentAliasName: lma-agent
+
+Outputs:
+
+  AgentId:
+    Value: !GetAtt BedrockAgent.AgentId
+    Description: Bedrock Agent Id
+
+  AgentAliasId:
+    Value: !GetAtt BedrockAgentAlias.AgentAliasId
+    Description: Bedrock Agent Alias Id
+
+  SNSTopicForAgentMessages:
+    Value: !GetAtt SendMessageTopic.TopicName
+    Description: Agent SendMessage SNS Topic ARN - Add subscriptions to this topic to receive messages from the agent
+
