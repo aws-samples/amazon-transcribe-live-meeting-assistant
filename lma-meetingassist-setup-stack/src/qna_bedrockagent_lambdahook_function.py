@@ -53,69 +53,66 @@ def get_call_transcript(callId, userInput, maxMessages):
             transcript.pop()
 
     if transcript:
-        print(
-            f"Using last {maxMessages} conversation turns (LLM_CHAT_HISTORY_MAX_MESSAGES)")
-        transcript = transcript[-maxMessages:]
+        if maxMessages > 0:
+            print(
+                f"Using last {maxMessages} conversation turns (LLM_CHAT_HISTORY_MAX_MESSAGES)")
+            transcript = transcript[-maxMessages:]
         print(f"Transcript: {json.dumps(transcript)}")
     else:
         print(f'No transcript for callId {callId}')
-
+    print("Transcript Length: ", len(json.dumps(transcript)))
     return transcript
 
 
-def get_agent_response(transcript, query, callId, settings):
+def get_agent_response(transcript, userInput, callId, settings):
 
-    # if the query has been labeled "small talk", we can skip
-    # ensure the reponse matches the default ASSISTANT_NO_HITS_REGEX value ("Sorry,")
-    if query == "small talk":
+    # create generate prompt
+    promptTemplate = settings.get(
+        "ASSISTANT_GENERATE_PROMPT_TEMPLATE", "{userInput}")
+    inputText = promptTemplate.format(
+        transcript=json.dumps(transcript), userInput=userInput)
+    inputText = inputText.replace("<br>", "\n")
+    # make a unique sessionId for each agent invocation.. we do not need agent to retain conversation
+    # memory since we will pass the latest meeting transcript in promptSessionAttributes for
+    # context, rather than the interaction history with the agent.
+    sessionId = "UniqueSessionId:" + str(time.time())
+    input = {
+        "agentAliasId": AGENT_ALIAS_ID,
+        "agentId": AGENT_ID,
+        "inputText": inputText,
+        "sessionId": sessionId,
+        "sessionState": {
+            "sessionAttributes": {
+                "callId": callId
+            },
+            "promptSessionAttributes": {
+                "Meeting Transcript:": json.dumps(transcript)
+            }
+        }
+    }
+    print("Amazon Bedrock Invoke Agent Request: ", input)
+    try:
+        response = AGENT_CLIENT.invoke_agent(**input)
+        completion = ""
+        citations = []
+        c = 0
+        for event in response.get("completion"):
+            chunk = event["chunk"]
+            print(f"Amazon Bedrock Agent Response Chunk ({c}): ", chunk)
+            c = c + 1
+            completion = completion + chunk["bytes"].decode()
+            citations.extend(
+                chunk.get("attribution", {}).get("citations", []))
         resp = {
-            "systemMessage": "Sorry, I cannot respond to small talk"
+            "completion": completion,
+            "citations": citations
         }
-        print("Small talk response: ", json.dumps(resp))
-    else:
-        # create generate prompt
-        promptTemplate = settings.get("ASSISTANT_GENERATE_PROMPT_TEMPLATE")
-        inputText = promptTemplate.format(
-            transcript=json.dumps(transcript), userInput=query)
-        inputText = inputText.replace("<br>", "\n")
-        # make a unique sessionId for each agent invocation.. we do not need agent to retain conversation
-        # memory since we will pass the latest meeting transcript for
-        # context, rather than the interaction history with the agent.
-        sessionId = "UniqueSessionId:" + str(time.time())
-        input = {
-            "agentAliasId": AGENT_ALIAS_ID,
-            "agentId": AGENT_ID,
-            "inputText": inputText,
-            "sessionId": sessionId,
-            "sessionState": {
-                "sessionAttributes": {
-                    "callId": callId
-                }
-            }
+    except Exception as e:
+        print("Amazon Bedrock Agent Exception: ", e)
+        resp = {
+            "systemMessage": "Amazon Bedrock Agent Error: " + str(e)
         }
-        print("Amazon Bedrock Invoke Agent Request: ", input)
-        try:
-            response = AGENT_CLIENT.invoke_agent(**input)
-            completion = ""
-            citations = []
-            c = 0
-            for event in response.get("completion"):
-                chunk = event["chunk"]
-                print(f"Amazon Bedrock Agent Response Chunk ({c}): ", chunk)
-                c = c + 1
-                completion = completion + chunk["bytes"].decode()
-                citations.extend(
-                    chunk.get("attribution", {}).get("citations", []))
-            resp = {
-                "completion": completion,
-                "citations": citations
-            }
-        except Exception as e:
-            print("Amazon Bedrock Agent Exception: ", e)
-            resp = {
-                "systemMessage": "Amazon Bedrock Agent Error: " + str(e)
-            }
-        print("Amazon Bedrock Agent Response: ", json.dumps(resp))
+    print("Amazon Bedrock Agent Response: ", json.dumps(resp))
     return resp
 
 
@@ -249,14 +246,13 @@ def get_url_from_reference(reference):
     return url
 
 
-def format_response(event, agent_response, query):
+def format_response(event, agent_response):
     # get settings, if any, from lambda hook args
     # e.g: {"AnswerPrefix":"<custom prefix heading>", "ShowContext": False}
     lambdahook_settings = get_settings_from_lambdahook_args(event)
     answerprefix = lambdahook_settings.get("AnswerPrefix", "Assistant Answer:")
     showContextText = lambdahook_settings.get("ShowContextText", True)
     showSourceLinks = lambdahook_settings.get("ShowSourceLinks", True)
-    queryprefix = lambdahook_settings.get("QueryPrefix")
     message = agent_response.get("completion") or "No answer found"
     # set plaintext, markdown, & ssml response
     if answerprefix in ["None", "N/A", "Empty"]:
@@ -267,9 +263,6 @@ def format_response(event, agent_response, query):
     if answerprefix:
         plainttext = f"{answerprefix}\n\n{plainttext}"
         markdown = f"**{answerprefix}**\n\n{markdown}"
-    if queryprefix:
-        plainttext = f"{queryprefix} {query}\n\n{plainttext}"
-        markdown = f"**{queryprefix}** *{query}*\n\n{markdown}"
     if showContextText:
         contextText = ""
         refCount = 0
@@ -324,16 +317,6 @@ def format_response(event, agent_response, query):
     return event
 
 
-def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput, settings):
-    print("Use Bedrock to generate a relevant search query based on the transcript and input")
-    promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. If the caller is just engaging in small talk or saying thanks, respond with \"small talk\". Only output the rephrased question. Do not include any preamble."
-    prompt = promptTemplate.format(
-        transcript=json.dumps(transcript), input=userInput)
-    prompt = prompt.replace("<br>", "\n")
-    query = get_bedrock_response(prompt, settings)
-    return query
-
-
 def handler(event, context):
     print("Received event: %s" % json.dumps(event))
     settings = event["req"]["_settings"]
@@ -355,19 +338,14 @@ def handler(event, context):
         "requestAttributes", {}).get("callId")
     if callId:
         maxMessages = int(settings.get(
-            "LLM_CHAT_HISTORY_MAX_MESSAGES", 20))
+            "LLM_CHAT_HISTORY_MAX_MESSAGES", 0))
         transcript = get_call_transcript(callId, userInput, maxMessages)
     else:
         print("no callId in request or session attributes")
 
-    # create retrieve query
-    retrievePromptTemplate = settings.get(
-        "ASSISTANT_QUERY_PROMPT_TEMPLATE")
-    query = generateRetrieveQuery(
-        retrievePromptTemplate, transcript, userInput, settings)
+    agent_response = get_agent_response(
+        transcript, userInput, callId, settings)
 
-    agent_response = get_agent_response(transcript, query, callId, settings)
-
-    event = format_response(event, agent_response, query)
+    event = format_response(event, agent_response)
     print("Returning response: %s" % json.dumps(event))
     return event

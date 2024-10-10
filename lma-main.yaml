@@ -110,7 +110,7 @@ Parameters:
 
   BedrockKnowledgeBaseWebCrawlerURLs:
     Type: String
-    Default: ""
+    Default: https://en.wikipedia.org/wiki/Life_insurance, https://en.wikipedia.org/wiki/Mortgage_loan
     Description: >-
       If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
       or leave blank if you don't need a Web data source. If you provide one or more Web URLs a Web crawler data source will be created for you automatically.
@@ -867,6 +867,14 @@ Conditions:
     ]
   ShouldUseQBusiness:
     !Equals [!Ref MeetingAssistService, "Q_BUSINESS (Use Existing)"]
+  ShouldUseLLMOnly:
+    !Not [
+      !Or [
+        !Condition ShouldUseBedrockKnowledgeBase,
+        !Condition ShouldUseBedrockAgent,
+        !Condition ShouldUseQBusiness,
+      ],
+    ]
   ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
 
 Resources:
@@ -1393,6 +1401,7 @@ Resources:
         InputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
         WebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
         WebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
+        SNSEmailAddress: !Ref AdminEmail
 
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
   SettingsJSON:
@@ -1401,7 +1410,13 @@ Resources:
       ServiceToken: !GetAtt ToJSONFunction.Arn
       LLM_GENERATE_QUERY_ENABLE: "FALSE"
       LLM_GENERATE_QUERY_PROMPT_TEMPLATE: ""
-      LLM_CHAT_HISTORY_MAX_MESSAGES: 10
+      LLM_CHAT_HISTORY_MAX_MESSAGES: !If
+        - ShouldUseBedrockKnowledgeBase
+        - 10 # knowledge base retrieveAndGenerate api has input text max length of 1000, so the transcript context needs to be truncated
+        - !If 
+          - ShouldUseQBusiness
+          - 50 # Q Business ChatSync API has input text max length of 7000, so the transcript context needs to be truncated less aggressively
+          - 50 # Limits for Anthropic LLMs and Agents are much larger, but we'll truncate anyway to keep prompt length (cost & latency) manageable.
       EMPTYMESSAGE: "No response from meeting assist QnAbot"
       BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "deprecated"
       BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "deprecated"
@@ -1425,17 +1440,15 @@ Resources:
           is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are
           the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
         - !If 
-          - ShouldUseBedrockAgent
-          - "You are an AI assistant helping a human during a meeting. Here
-            is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
-            user's request:<br>{userInput}<br>"
+          - ShouldUseLLMOnly
           - "You are an AI assistant helping a human during a meeting. I will provide
             you with a transcript of the ongoing meeting (which may be empty), and a user's
             request. Your job is to respond to the user's request using any relevant context
             from the transcript, or from your own knowledge. Just because the user
             asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here
             is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
-            user's request:<br>{userInput}<br>Respond in 100 words or less." # LLM only (default)
+            user's request:<br>{userInput}<br>Respond in 100 words or less."
+          - "{userInput}" # minimal input used for agents (1) they have their own prompts, (2) transcript passed seperately in API session_attributes 
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
@@ -1707,5 +1720,10 @@ Outputs:
     Description: Function role for Lambda QBusiness plugin (only used for QBusiness integration)
     Value: !GetAtt MEETINGASSISTSETUP.Outputs.QBusinessLambdaHookFunctionRoleArn
   
-  
+  SNSTopicForAgentMessages:
+    Value: !If
+    - ShouldCreateBedrockAgent
+    - !GetAtt BEDROCKAGENT.Outputs.SNSTopicForAgentMessages
+    - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create) option not selected"
+    Description: Agent SendMessage SNS Topic ARN - Add subscriptions to this topic to receive messages from the LMA meeting assistant agent
   
