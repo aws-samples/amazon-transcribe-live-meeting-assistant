@@ -7,6 +7,12 @@ Now you can bring Amazon Bedrock Agents into your online meetings using Live Mee
 ## Use cases for agents in LMA
 If you want LMA to be able to do more than answer questions or fact checking, you might want to implement an agent to power your LMA Meeting Assistant. In addition to these things, an agent can be designed to 'use tools' in the form of API calls or Lambda functions that allow it to interact with your own company systems and with the world in general, in many ways. For example, use agents to enable your LMA assistant to book appointments, send emails or instant messages, check the weather, look up balances, and much much more! 
 
+Here's a demo of a very simple agent that can use a knowledge base and send emails. 
+
+https://github.com/user-attachments/assets/0bb2b087-89ed-4114-ab9c-1ec5b376dbfc
+
+
+
 ## Current Limitations
 Be aware of some limitations when using agents in LMA:
 - Using an agent makes the Meeting Assistant slower than integrating directly with a knowledge base or Q Business application. The extra power to do actions comes at the cost of increased latency. 
