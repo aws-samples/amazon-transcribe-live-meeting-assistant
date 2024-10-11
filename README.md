@@ -20,7 +20,7 @@ https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/assets/1
 
 ## Solution overview
 
-The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom, Teams, WebEx, and Chime currently), or audio only from any other browser-based meeting app, softphone or audio source. It uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, your choice of [Amazon Q Business](https://aws.amazon.com/q/business/) or [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, and [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries.
+The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom, Teams, WebEx, and Chime currently), or audio only from any other browser-based meeting app, softphone or audio source. It uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, your choice of [Amazon Q Business](https://aws.amazon.com/q/business/) or [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries, and (opionally) [Amazon Bedrock Agents](https://aws.amazon.com/bedrock/agents/) to enable orchestration of actions with knowledge base queries.
 
 Everything you need is provided as open source in this [GitHub repo](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant). It’s straightforward to deploy in your AWS account. When you’re done, you’ll wonder how you ever managed without it!
 
@@ -51,7 +51,7 @@ You need to have an AWS account and an [AWS Identity and Access Management](http
 
 If you want LMA to use your own trusted documents to power the context aware meeting assistant then you will use choose either Amazon Q Business or Knowledge Base on Amazon Bedrock. You choose to have LMA either:
 
-1. Automatically create a new Bedrock knowledge base and populate it from documents in an S3 bucket in your AWS account, or from publicly accessible Web pages. Be prepared to specify your document location when you deploy LMA.
+1. Automatically create a new Bedrock knowledge base and populate it from documents in an S3 bucket in your AWS account, or from publicly accessible Web pages. Be prepared to specify your document location when you deploy LMA. You can have LMA create a standalone Knowledge Base, or create a Knowledge Base along with a Bedrock Agent with added ability to perform actions such as sending emails.
 2. Or, use an existing Bedrock knowledge base that you have previously created and populated. See [Create a knowledge base](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-create.html).  
 3. Or, use an existing Amazon Q Business application that you have previously created and populated. See [Amazon Q Business integration in LMA](./lma-meetingassist-setup-stack/README_QBUSINESS.md).
 
@@ -60,8 +60,8 @@ If you choose not to have LMA use your own documents, then no Q Business applica
 
 Finally, LMA uses Amazon Bedrock LLM models for its live meeting assistant and meeting summarization features. Before proceeding, if you have not previously done so, you must [request access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to the following Amazon Bedrock models:
 
-- Amazon: All Titan Embeddings models (Titan Embeddings G1 - Text, and Titan Text Embeddings V2)
-- Anthropic: All Claude models (Claude Instant v1, Claude 3 Sonnet and Claude 3 Haiku)
+- Amazon: Titan Text Embeddings V2
+- Anthropic: Claude 3.x models (Claude 3 Sonnet, Claude 3 Haiku, or Claude 3.5 Sonnet)
 
 ## Deploy the CloudFormation stack
 
@@ -84,7 +84,7 @@ Complete the following steps to launch the CloudFormation stack:
 1. For **Admin Email Address**, use a valid email address—your temporary password is emailed to this address during the deployment. Refer to [New LMA stack deployment](./lma-ai-stack/README_UBAC.md#new-lma-stack-deployment) for recommendations on choosing an email address.
    )
 1. For **Authorized Account Email Domain**, use the domain name part of your corporate email address to allow users with email addresses in the same domain to create their own new, non-admin, UI accounts, or leave blank to prevent users from directly creating their own accounts. You can enter multiple domains as a comma separated list. Each non-admin user will be able to see their own meetings in LMA, but not other users' meetings - see [User Based Access Control (Preview)](./lma-ai-stack/README_UBAC.md).
-1. For **MeetingAssistService** choose `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, `BEDROCK_KNOWLEDGE_BASE (Create)`, `Q_BUSINESS (Use Existing)`, or `BEDROCK_LLM` (if you do not need a knowledge base)
+1. For **MeetingAssistService** choose `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, `BEDROCK_KNOWLEDGE_BASE (Create)`, `BEDROCK_AGENT (Use Existing)`, `BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)`, `Q_BUSINESS (Use Existing)`, or `BEDROCK_LLM` (if you do not need a knowledge base)
    1. If you select `BEDROCK_KNOWLEDGE_BASE (Use Existing)`, then:
       - For **Bedrock Knowledge Base Id (existing)**, enter your existing Knowledge base ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Knowledge bases console.
          <p align="left"><img src="./images/readme-knowledgebase-id.png" alt="KB ID" width=350/></p>
@@ -93,8 +93,14 @@ Complete the following steps to launch the CloudFormation stack:
         1. For **S3 bucket with knowledge base source documents**, enter the name of an existing Amazon S3 bucket containing the documents you want to ingest into your new knowledge base.
         1. For **S3 prefix(es) for your content**, enter any S3 prefixes (paths) to the documents in the S3 bucket, or leave it blank to ingest all documents in the bucket.
       - To optionally populate your new knowledge base with web site content from public web pages:
-        1. For **Publicly accessible URLs for web crawling**, enter a comma separated list of web site Urls
+        1. For **Publicly accessible URLs for web crawling**, enter a comma separated list of web site Urls, or leave the defaults to crawl the default demo wikipedia pages.
         2. For **Web crawling sync scope**, select the choice that best matches how you want the web crawler to navigate out from the Urls you specified.
+    1. If you select `BEDROCK_AGENT (Use Existing)`, then:
+       - For **Bedrock Agent Id (existing)**, enter your existing Agent ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Agent console.
+       - For **Bedrock Agent Alias Id (existing)**, enter your existing Agent Alias ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Agent console. Use the default `TSTALIASID` to test with the DRAFT version of your agent.
+    1. If you select `BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)`, a new agent is created for you automatically:
+       - Optionally populate  **Bedrock Knowledge Base Id (existing)** to have your new agent use an existing Bedrock Knowledge base (see above)
+       - Or leave **Bedrock Knowledge Base Id (existing)** blank to create a new knowledge base for your agent. Use the knowledge base parameters described above to have the new knowledge base automatically populated. 
     1. If you select `Q_BUSINESS (Use Existing)`, then:
        - For **Amazon Q Application ID (existing)** enter your existing Q Business application ID (a UUID). You can copy it from the Amazon Q Business console.
          <p align="left"><img src="./images/readme-qbusinessapp-id.png" alt="QB App ID" width=350/></p>
