@@ -280,6 +280,18 @@ else
 echo "SKIPPING $dir (unchanged)"
 fi
 
+dir=lma-bedrockagent-stack
+if haschanged $dir; then
+echo "PACKAGING $dir"
+pushd $dir
+chmod +x ./publish.sh
+./publish.sh $BUCKET $PREFIX_AND_VERSION $REGION || exit 1
+popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
+
 dir=lma-websocket-transcriber-stack
 if haschanged $dir; then
 echo "PACKAGING $dir"
@@ -374,7 +386,7 @@ pushd $dir/source
 mkdir -p build/templates/dev
 npm install
 npm run build || exit 1
-# Rename OpenbsearchDomain resource in template to force resource replacement during upgrade/downgrade
+# Rename OpensearchDomain resource in template to force resource replacement during upgrade/downgrade
 # If the resource name is not changed, then CloudFomration does an inline upgrade from OpenSearch 1.3 to 2.1, but this upgrade cannot be reversed
 # which can create a problem with ROLLBACK if there is a stack failure during the upgrade.
 cat ./build/templates/master.json | sed -e "s%OpensearchDomain%LMAQnaBotOpensearchDomain%g" > ./build/templates/qnabot-main.json
@@ -395,6 +407,7 @@ echo "   <ARTIFACT_PREFIX_TOKEN> with prefix: $PREFIX_AND_VERSION"
 echo "   <VERSION_TOKEN> with version: $VERSION"
 echo "   <REGION_TOKEN> with region: $REGION"
 echo "   <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN> with public: $BROWSER_EXTENSION_SRC_S3_LOCATION"
+echo "   <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN> with public: $VIRTUAL_PARTICIPANT_SRC_S3_LOCATION"
 cat ./$MAIN_TEMPLATE | 
 sed -e "s%<ARTIFACT_BUCKET_TOKEN>%$BUCKET%g" | 
 sed -e "s%<ARTIFACT_PREFIX_TOKEN>%$PREFIX_AND_VERSION%g" |

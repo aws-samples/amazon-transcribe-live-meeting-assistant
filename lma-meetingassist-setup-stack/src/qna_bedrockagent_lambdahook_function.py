@@ -2,25 +2,27 @@ import json
 import os
 import boto3
 import re
+import time
 
 print("Boto3 version: ", boto3.__version__)
 
 FETCH_TRANSCRIPT_FUNCTION_ARN = os.environ['FETCH_TRANSCRIPT_FUNCTION_ARN']
 
-KB_REGION = os.environ.get("KB_REGION") or os.environ["AWS_REGION"]
-KB_ID = os.environ.get("KB_ID")
+BEDROCK_REGION = os.environ.get("BEDROCK_REGION") or os.environ["AWS_REGION"]
+AGENT_ID = os.environ.get("AGENT_ID")
+AGENT_ALIAS_ID = os.environ.get("AGENT_ALIAS_ID")
 MODEL_ID = os.environ.get("MODEL_ID")
-MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}::foundation-model/{MODEL_ID}"
+MODEL_ARN = f"arn:aws:bedrock:{BEDROCK_REGION}::foundation-model/{MODEL_ID}"
 DEFAULT_MAX_TOKENS = 256
 
 LAMBDA_CLIENT = boto3.client("lambda")
-KB_CLIENT = boto3.client(
+AGENT_CLIENT = boto3.client(
     service_name="bedrock-agent-runtime",
-    region_name=KB_REGION
+    region_name=BEDROCK_REGION
 )
 BEDROCK_CLIENT = boto3.client(
     service_name="bedrock-runtime",
-    region_name=KB_REGION
+    region_name=BEDROCK_REGION
 )
 
 
@@ -62,54 +64,55 @@ def get_call_transcript(callId, userInput, maxMessages):
     return transcript
 
 
-def get_kb_response(transcript, query, settings):
+def get_agent_response(transcript, userInput, callId, settings):
 
-    # if the query has been labeled "small talk", we can skip
-    # ensure the reponse matches the default ASSISTANT_NO_HITS_REGEX value ("Sorry,")
-    if query == "small talk":
-        resp = {
-            "systemMessage": "Sorry, I cannot respond to small talk"
-        }
-        print("Small talk response: ", json.dumps(resp))
-    else:
-        # create generate prompt
-        promptTemplate = settings.get("ASSISTANT_GENERATE_PROMPT_TEMPLATE")
-        promptTemplate = promptTemplate.format(transcript=json.dumps(
-            transcript))
-        input = {
-            "input": {
-                'text': query
+    # create generate prompt
+    promptTemplate = settings.get(
+        "ASSISTANT_GENERATE_PROMPT_TEMPLATE", "{userInput}")
+    inputText = promptTemplate.format(
+        transcript=json.dumps(transcript), userInput=userInput)
+    inputText = inputText.replace("<br>", "\n")
+    # make a unique sessionId for each agent invocation.. we do not need agent to retain conversation
+    # memory since we will pass the latest meeting transcript in promptSessionAttributes for
+    # context, rather than the interaction history with the agent.
+    sessionId = "UniqueSessionId:" + str(time.time())
+    input = {
+        "agentAliasId": AGENT_ALIAS_ID,
+        "agentId": AGENT_ID,
+        "inputText": inputText,
+        "sessionId": sessionId,
+        "sessionState": {
+            "sessionAttributes": {
+                "callId": callId
             },
-            "retrieveAndGenerateConfiguration": {
-                'knowledgeBaseConfiguration': {
-                    "generationConfiguration": {
-                        "promptTemplate": {
-                            "textPromptTemplate": promptTemplate
-                        }
-                    },
-                    'knowledgeBaseId': KB_ID,
-                    'modelArn': MODEL_ARN
-                },
-                'type': 'KNOWLEDGE_BASE'
+            "promptSessionAttributes": {
+                "Meeting Transcript:": json.dumps(transcript)
             }
         }
-        # optional guardrails config
-        guardrailIdentifier = settings.get(
-            "ASSISTANT_BEDROCK_GUARDRAIL_ID", "")
-        if guardrailIdentifier:
-            input["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["generationConfiguration"]["guardrailConfiguration"] = {
-                "guardrailId": guardrailIdentifier,
-                "guardrailVersion": str(settings.get("ASSISTANT_BEDROCK_GUARDRAIL_VERSION", "DRAFT"))
-            }
-        print("Amazon Bedrock KB Request: ", input)
-        try:
-            resp = KB_CLIENT.retrieve_and_generate(**input)
-        except Exception as e:
-            print("Amazon Bedrock KB Exception: ", e)
-            resp = {
-                "systemMessage": "Amazon Bedrock KB Error: " + str(e)
-            }
-        print("Amazon Bedrock KB Response: ", json.dumps(resp))
+    }
+    print("Amazon Bedrock Invoke Agent Request: ", input)
+    try:
+        response = AGENT_CLIENT.invoke_agent(**input)
+        completion = ""
+        citations = []
+        c = 0
+        for event in response.get("completion"):
+            chunk = event["chunk"]
+            print(f"Amazon Bedrock Agent Response Chunk ({c}): ", chunk)
+            c = c + 1
+            completion = completion + chunk["bytes"].decode()
+            citations.extend(
+                chunk.get("attribution", {}).get("citations", []))
+        resp = {
+            "completion": completion,
+            "citations": citations
+        }
+    except Exception as e:
+        print("Amazon Bedrock Agent Exception: ", e)
+        resp = {
+            "systemMessage": "Amazon Bedrock Agent Error: " + str(e)
+        }
+    print("Amazon Bedrock Agent Response: ", json.dumps(resp))
     return resp
 
 
@@ -203,14 +206,20 @@ def s3_uri_to_presigned_url(s3_uri, expiration=3600):
     # Extract bucket name and object key from S3 URI
     bucket_name, object_key = s3_uri[5:].split('/', 1)
     s3_client = boto3.client('s3')
-    return s3_client.generate_presigned_url(
-        'get_object',
-        Params={
-            'Bucket': bucket_name,
-            'Key': object_key
-        },
-        ExpiresIn=expiration
-    )
+    try:
+        signed_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': bucket_name,
+                'Key': object_key
+            },
+            ExpiresIn=expiration
+        )
+    except Exception as e:
+        print(f"Error generating presigned URL: {e}")
+        print("..continuing with unsigned URL")
+        signed_url = s3_uri
+    return signed_url
 
 
 def get_url_from_reference(reference):
@@ -237,16 +246,14 @@ def get_url_from_reference(reference):
     return url
 
 
-def format_response(event, kb_response, query):
+def format_response(event, agent_response):
     # get settings, if any, from lambda hook args
     # e.g: {"AnswerPrefix":"<custom prefix heading>", "ShowContext": False}
     lambdahook_settings = get_settings_from_lambdahook_args(event)
     answerprefix = lambdahook_settings.get("AnswerPrefix", "Assistant Answer:")
     showContextText = lambdahook_settings.get("ShowContextText", True)
     showSourceLinks = lambdahook_settings.get("ShowSourceLinks", True)
-    queryprefix = lambdahook_settings.get("QueryPrefix")
-    message = kb_response.get("output", {}).get("text", {}) or kb_response.get(
-        "systemMessage") or "No answer found"
+    message = agent_response.get("completion") or "No answer found"
     # set plaintext, markdown, & ssml response
     if answerprefix in ["None", "N/A", "Empty"]:
         answerprefix = None
@@ -256,13 +263,10 @@ def format_response(event, kb_response, query):
     if answerprefix:
         plainttext = f"{answerprefix}\n\n{plainttext}"
         markdown = f"**{answerprefix}**\n\n{markdown}"
-    if queryprefix:
-        plainttext = f"{queryprefix} {query}\n\n{plainttext}"
-        markdown = f"**{queryprefix}** *{query}*\n\n{markdown}"
     if showContextText:
         contextText = ""
         refCount = 0
-        for source in kb_response.get("citations", []):
+        for source in agent_response.get("citations", []):
             for reference in source.get("retrievedReferences", []):
                 refCount += 1
                 snippet = reference.get("content", {}).get(
@@ -281,7 +285,7 @@ def format_response(event, kb_response, query):
     if showSourceLinks:
         sourceLinks = []
         refCount = 0
-        for source in kb_response.get("citations", []):
+        for source in agent_response.get("citations", []):
             for reference in source.get("retrievedReferences", []):
                 refCount += 1
                 url = get_url_from_reference(reference)
@@ -313,16 +317,6 @@ def format_response(event, kb_response, query):
     return event
 
 
-def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput, settings):
-    print("Use Bedrock to generate a relevant search query based on the transcript and input")
-    promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. If the caller is just engaging in small talk or saying thanks, respond with \"small talk\". Only output the rephrased question. Do not include any preamble."
-    prompt = promptTemplate.format(
-        transcript=json.dumps(transcript), input=userInput)
-    prompt = prompt.replace("<br>", "\n")
-    query = get_bedrock_response(prompt, settings)
-    return query
-
-
 def handler(event, context):
     print("Received event: %s" % json.dumps(event))
     settings = event["req"]["_settings"]
@@ -344,19 +338,14 @@ def handler(event, context):
         "requestAttributes", {}).get("callId")
     if callId:
         maxMessages = int(settings.get(
-            "LLM_CHAT_HISTORY_MAX_MESSAGES", 20))
+            "LLM_CHAT_HISTORY_MAX_MESSAGES", 0))
         transcript = get_call_transcript(callId, userInput, maxMessages)
     else:
         print("no callId in request or session attributes")
 
-    # create retrieve query
-    retrievePromptTemplate = settings.get(
-        "ASSISTANT_QUERY_PROMPT_TEMPLATE")
-    query = generateRetrieveQuery(
-        retrievePromptTemplate, transcript, userInput, settings)
+    agent_response = get_agent_response(
+        transcript, userInput, callId, settings)
 
-    kb_response = get_kb_response(transcript, query, settings)
-
-    event = format_response(event, kb_response, query)
+    event = format_response(event, agent_response)
     print("Returning response: %s" % json.dumps(event))
     return event

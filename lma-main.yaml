@@ -15,7 +15,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Amazon Transcribe Live Meeting Assist - LMA (v0.2.2) (SO9497)
+Description: Amazon Transcribe Live Meeting Assist - LMA (v0.2.3) (SO9497)
 
 Parameters:
   Domain:
@@ -31,9 +31,11 @@ Parameters:
     Type: String
     AllowedValues:
       - "BEDROCK_LLM"
-      - "BEDROCK_KNOWLEDGE_BASE (Create)"
       - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
+      - "BEDROCK_AGENT (Use Existing)"
       - "Q_BUSINESS (Use Existing)"
+      - "BEDROCK_KNOWLEDGE_BASE (Create)"
+      - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)"
     Description: Choose the knowledge base / LLM service to use
 
   MeetingAssistServiceBedrockModelID:
@@ -69,13 +71,33 @@ Parameters:
     Description: >
       If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Use Existing)', provide the knowledge base
       *Id* (not name) of an *existing* Bedrock knowledge base to be used for Meeting
+      Assist bot. If MeetingAssistService is 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', optionally provide 
+      the knowledge base *Id* of an existing Bedrock knowledge base for the new Bedrock Agent, or leave blank to
+      create a new knowledge base.
+
+  BedrockAgentId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+    Description: >
+      If MeetingAssistService is 'BEDROCK_AGENT (Use Existing)', provide the agent
+      *ID* (not name) of an *existing* Bedrock agent to be used for Meeting
+      Assist bot.
+
+  BedrockAgentAliasId:
+    Type: String
+    Default: "TSTALIASID"
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+    Description: >
+      If MeetingAssistService is 'BEDROCK_AGENT (Use Existing)', provide the agent
+      Alias *ID* (not the Alias name) of an *existing* Bedrock agent to be used for Meeting
       Assist bot.
 
   BedrockKnowledgeBaseS3BucketName:
     Type: String
     Default: ""
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide the bucket 
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide the bucket 
       name of an existing bucket with documents to ingest, or leave blank if you don't need an S3 data source. If you provide an S3 bucket name an S3 data
       source will be created for you automatically.
 
@@ -83,14 +105,14 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of optional S3 prefixes 
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide comma separated list of optional S3 prefixes 
       with the paths to your source documents e.g. "prefix1/, prefix2/". If you leave blank, all documents in your S3 bucket will be scanned.
 
   BedrockKnowledgeBaseWebCrawlerURLs:
     Type: String
-    Default: ""
+    Default: https://en.wikipedia.org/wiki/Life_insurance, https://en.wikipedia.org/wiki/Mortgage_loan
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
       or leave blank if you don't need a Web data source. If you provide one or more Web URLs a Web crawler data source will be created for you automatically.
 
   BedrockKnowledgeBaseWebCrawlerScope:
@@ -101,7 +123,7 @@ Parameters:
       - "SUBDOMAINS"
     Default: DEFAULT
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', specify the scope of what is crawled for your URLs.
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', specify the scope of what is crawled for your URLs.
       Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
       Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
       Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
@@ -550,12 +572,12 @@ Metadata:
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
-          default: Meeting Assist Bedrock Guardrails Integration
+          default: Meeting Assist Bedrock Guardrails
         Parameters:
           - BedrockGuardrailId
           - BedrockGuardrailVersion
       - Label:
-          default: Meeting Assist Bedrock Knowledge Base Integration
+          default: Meeting Assist Bedrock Knowledge Base
         Parameters:
           - BedrockKnowledgeBaseId
           - BedrockKnowledgeBaseS3BucketName
@@ -563,7 +585,12 @@ Metadata:
           - BedrockKnowledgeBaseWebCrawlerURLs
           - BedrockKnowledgeBaseWebCrawlerScope
       - Label:
-          default: Meeting Assist Q Business Integration
+          default: Meeting Assist Bedrock Agent
+        Parameters:
+          - BedrockAgentId
+          - BedrockAgentAliasId
+      - Label:
+          default: Meeting Assist Q Business
         Parameters:
           - AmazonQAppId
           - IDCApplicationARN
@@ -656,6 +683,10 @@ Metadata:
         default: Bedrock Guardrail Version (optional)
       BedrockKnowledgeBaseId:
         default: Bedrock Knowledge Base Id (existing)
+      BedrockAgentId:
+        default: Bedrock Agent Id (existing)
+      BedrockAgentAliasId:
+        default: Bedrock Agent Alias Id (existing)
       BedrockKnowledgeBaseS3BucketName:
         default: S3 bucket with knowledge base source documents (optional).
       BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
@@ -778,7 +809,29 @@ Rules:
       - Assert: !Not [!Equals [!Ref BedrockKnowledgeBaseId, ""]]
         AssertDescription:
           BedrockKnowledgeBaseId is required when MeetingAssistService
-          is 'BEDROCK_KNOWLEDGE_BASE'
+          is 'BEDROCK_KNOWLEDGE_BASE (Use Existing)'
+  BedrockAgentId:
+    RuleCondition:
+      !Equals [
+        !Ref MeetingAssistService,
+        "BEDROCK_AGENT (Use Existing)",
+      ]   
+    Assertions:
+      - Assert: !Not [!Equals [!Ref BedrockAgentId, ""]]
+        AssertDescription:
+          BedrockAgentId is required when MeetingAssistService
+          is 'BEDROCK_AGENT (Use Existing)'
+  BedrockAgentAliasId:
+    RuleCondition:
+      !Equals [
+        !Ref MeetingAssistService,
+        "BEDROCK_AGENT (Use Existing)",
+      ]   
+    Assertions:
+      - Assert: !Not [!Equals [!Ref BedrockAgentAliasId, ""]]
+        AssertDescription:
+          BedrockAgentAliasId is required when MeetingAssistService
+          is 'BEDROCK_AGENT (Use Existing)'
   AmazonQId:
     RuleCondition:
       !Equals [
@@ -789,7 +842,7 @@ Rules:
       - Assert: !Not [!Equals [!Ref AmazonQAppId, ""]]
         AssertDescription:
           AmazonQAppId is required when MeetingAssistService
-          is 'Q_BUSINESS'
+          is 'Q_BUSINESS (Use Existing)'
 
 Conditions:
   IsHealthcareDomainSelected: !Equals [!Ref Domain, "Healthcare"]
@@ -803,8 +856,25 @@ Conditions:
       !Condition ShouldUseExistingBedrockKnowledgeBase,
       !Condition ShouldCreateBedrockKnowledgeBase,
     ]
+  ShouldUseExistingBedrockAgent:
+    !Equals [!Ref MeetingAssistService, "BEDROCK_AGENT (Use Existing)"]
+  ShouldCreateBedrockAgent:
+    !Equals [!Ref MeetingAssistService, "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)"]
+  ShouldUseBedrockAgent:
+    !Or [
+      !Condition ShouldUseExistingBedrockAgent,
+      !Condition ShouldCreateBedrockAgent,
+    ]
   ShouldUseQBusiness:
     !Equals [!Ref MeetingAssistService, "Q_BUSINESS (Use Existing)"]
+  ShouldUseLLMOnly:
+    !Not [
+      !Or [
+        !Condition ShouldUseBedrockKnowledgeBase,
+        !Condition ShouldUseBedrockAgent,
+        !Condition ShouldUseQBusiness,
+      ],
+    ]
   ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
 
 Resources:
@@ -1316,6 +1386,23 @@ Resources:
         pWebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
         pWebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
 
+  BEDROCKAGENT:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateBedrockAgent
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockagent-stack/template.yaml
+      Parameters:
+        BedrockModelID: !Ref MeetingAssistServiceBedrockModelID
+        BedrockKnowledgeBaseId: !Ref BedrockKnowledgeBaseId
+        KnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
+        InputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
+        WebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
+        WebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
+        SNSEmailAddress: !Ref AdminEmail
+
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
   SettingsJSON:
     Type: Custom::ToJSON
@@ -1323,7 +1410,13 @@ Resources:
       ServiceToken: !GetAtt ToJSONFunction.Arn
       LLM_GENERATE_QUERY_ENABLE: "FALSE"
       LLM_GENERATE_QUERY_PROMPT_TEMPLATE: ""
-      LLM_CHAT_HISTORY_MAX_MESSAGES: 10
+      LLM_CHAT_HISTORY_MAX_MESSAGES: !If
+        - ShouldUseBedrockKnowledgeBase
+        - 10 # knowledge base retrieveAndGenerate api has input text max length of 1000, so the transcript context needs to be truncated
+        - !If 
+          - ShouldUseQBusiness
+          - 50 # Q Business ChatSync API has input text max length of 7000, so the transcript context needs to be truncated less aggressively
+          - 50 # Limits for Anthropic LLMs and Agents are much larger, but we'll truncate anyway to keep prompt length (cost & latency) manageable.
       EMPTYMESSAGE: "No response from meeting assist QnAbot"
       BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "deprecated"
       BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "deprecated"
@@ -1346,13 +1439,16 @@ Resources:
           sure to double check the search results to validate a user's assertion.<br>Here
           is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are
           the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
-        - "You are an AI assistant helping a human during a meeting. I will provide
-          you with a transcript of the ongoing meeting (which may be empty), and a user's
-          request. Your job is to respond to the user's request using any relevant context
-          from the transcript, or from your own world knowledge. Just because the user
-          asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here
-          is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
-          user's request:<br>{userInput}<br>Respond in 100 words or less."
+        - !If 
+          - ShouldUseLLMOnly
+          - "You are an AI assistant helping a human during a meeting. I will provide
+            you with a transcript of the ongoing meeting (which may be empty), and a user's
+            request. Your job is to respond to the user's request using any relevant context
+            from the transcript, or from your own knowledge. Just because the user
+            asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here
+            is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
+            user's request:<br>{userInput}<br>Respond in 100 words or less."
+          - "{userInput}" # minimal input used for agents (1) they have their own prompts, (2) transcript passed seperately in API session_attributes 
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
@@ -1366,12 +1462,26 @@ Resources:
         QNABOTSTACK: !Ref QNABOT
         COGNITOSTACK: !Ref COGNITOSTACK
         MeetingAssistService: !Ref MeetingAssistService
-        BedrockKnowledgeBaseID: !If
+        BedrockKnowledgeBaseId: !If
           - ShouldUseBedrockKnowledgeBase
           - !If
             - ShouldCreateBedrockKnowledgeBase
             - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
             - !Ref BedrockKnowledgeBaseId
+          - ""
+        BedrockAgentId: !If
+          - ShouldUseBedrockAgent
+          - !If
+            - ShouldCreateBedrockAgent
+            - !GetAtt BEDROCKAGENT.Outputs.AgentId
+            - !Ref BedrockAgentId
+          - ""
+        BedrockAgentAliasId: !If 
+          - ShouldUseBedrockAgent
+          - !If
+            - ShouldCreateBedrockAgent
+            - !GetAtt BEDROCKAGENT.Outputs.AgentAliasId
+            - !Ref BedrockAgentAliasId
           - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
         AmazonQAppId: !If
@@ -1610,5 +1720,10 @@ Outputs:
     Description: Function role for Lambda QBusiness plugin (only used for QBusiness integration)
     Value: !GetAtt MEETINGASSISTSETUP.Outputs.QBusinessLambdaHookFunctionRoleArn
   
-  
+  SNSTopicForAgentMessages:
+    Value: !If
+    - ShouldCreateBedrockAgent
+    - !GetAtt BEDROCKAGENT.Outputs.SNSTopicForAgentMessages
+    - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create) option not selected"
+    Description: Agent SendMessage SNS Topic ARN - Add subscriptions to this topic to receive messages from the LMA meeting assistant agent
   
