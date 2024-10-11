@@ -4,18 +4,18 @@ Amazon Bedrock Agents can orchestrate and execute multistep tasks across company
 
 Now you can bring Amazon Bedrock Agents into your online meetings using Live Meeting Assistant (LMA) - to get answers to questions, to fact check what's said, based on your company data, and now also, to automate tasks like sending an email, creating a ticket, scheduling an appointment, and much more.
 
-## Use cases of for agents in LMA
-If you want LMA to be able to do more than answer questions of fact checking, you might want to implement an agent to power your LMA Meeting Assistant. In addition to these things, an agent can be designed to 'use tools' in the form of API calls or Lambda functions that allow it to interact with your own company systems and with the world in general, in many ways. For example, use agents to enable your LMA assistant to book appointments, send emails or instant messages, check the weather, look up balances, and much much more! 
+## Use cases for agents in LMA
+If you want LMA to be able to do more than answer questions or fact checking, you might want to implement an agent to power your LMA Meeting Assistant. In addition to these things, an agent can be designed to 'use tools' in the form of API calls or Lambda functions that allow it to interact with your own company systems and with the world in general, in many ways. For example, use agents to enable your LMA assistant to book appointments, send emails or instant messages, check the weather, look up balances, and much much more! 
 
 ## Current Limitations
 Be aware of some limitations when using agents in LMA:
 - Using an agent makes the Meeting Assistant slower than integrating directly with a knowledge base or Q Business application. The extra power to do actions comes at the cost of increased latency. 
     - You can minimize this latency by carefully designing your agent to be as efficient as possible, and to use the fastest LLM models.
-- LMA requires your agent to return a completed response for each invocation request - it does not support muli-turn interactions currently. Specifically your agent should not:
-   - ask for additional information after being invoked, rather it should simply say what information is missing in it's reponse, and the user can try again with a more complete "OK Assistant/Ask Assistant" request.
+- LMA requires your agent to return a completed response for each invocation request - it does not support multi-turn interactions currently. Specifically your agent should not:
+   - ask for additional information after being invoked, rather it should simply say what information is missing in its response, and the user can try again with a more complete "OK Assistant/Ask Assistant" request.
    - ask the user to confirm actions before executing them
    - return control to the client application
-- LMA does not currently use agent session or multi-session memory. Each Meeting Assistant request is a discrete agent invocaton, where the cumulative meeting transcript serves as the context (rather than the agent's memory of prior interactions).
+- LMA does not currently use agent session or multi-session memory. Each Meeting Assistant request is a discrete agent invocation, where the cumulative meeting transcript serves as the context (rather than the agent's memory of prior interactions).
 
 We provide two easy options for you to get started:
 1. Bring your own agent
@@ -35,7 +35,7 @@ and that's it..  Your LMA stack will be configured to use the QnABot Lambda Hook
 
 1. For **Meeting Assist Service**, choose `BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)`
 2. Optionally, for **BedrockKnowledgeBaseId**, provide the knowledge base *Id* of an existing Bedrock knowledge base for the new Bedrock Agent, or leave blank to have a new knowledge base created for you.
-3. Optionally, for **BedrockKnowledgeBaseWebCrawlerURLs**, or any of the other knowledge base data source parameters, modify the defaults to determine how your new knowledge base in initially populated.  
+3. Optionally, for **BedrockKnowledgeBaseWebCrawlerURLs**, or any of the other knowledge base data source parameters, modify the defaults to determine how your new knowledge base is initially populated.  
 
 and that's it..  Your LMA stack will create a simple Bedrock agent for you, and configure it the QnABot Lambda Hook `BedrockAgent-LambdaHook` to invoke this agent when the Meeting Assistant is invoked.
 
@@ -53,7 +53,7 @@ Here's the email it sent me after the interaction above:
 
 <img src="../images/meetingassist-agent-example-email.png" border="1" alt="meetingassist-agent-example-email" width="500">
 
-Also try the "ASK ASSISTANT" button to have the meeting assistant agent respond silently to the most recent questions of instructions from the transcript.
+Also try the "ASK ASSISTANT" button to have the meeting assistant agent respond silently to the most recent questions or instructions from the transcript.
 
 <img src="../images/meetingassist-agent-query-action2.png" alt="meetingassist-agent-query-action2" width="900">
 
@@ -63,8 +63,8 @@ Now try your own examples. Get it to fact check incorrect statements, email a su
 
 ## Experiment
 
-Use the Cloudwatch logs from the `BedrockAgent-LambdaHook` function to get additonal insights and troubleshooting context for how these prompts are used, and how LMA is interacting with your agent.
+Use the CloudWatch logs from the `BedrockAgent-LambdaHook` function to get additional insights and troubleshooting context for how these prompts are used, and how LMA is interacting with your agent.
 
 ## Contributing
 
-Consider this a starting point for you to build on! LMA is open source - we hope it will get you started quickly, but you will discover gaps, and identify opportunities to improve the power of using agents as meeting assistants. Help us make it better by contributing your fixes and enhancements to th eproject in GitHub.
+Consider this a starting point for you to build on! LMA is open source - we hope it will get you started quickly, but you will discover gaps, and identify opportunities to improve the power of using agents as meeting assistants. Help us make it better by contributing your fixes and enhancements to the project in GitHub.
