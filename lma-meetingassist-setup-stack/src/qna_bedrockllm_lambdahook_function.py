@@ -44,13 +44,14 @@ def get_call_transcript(callId, userInput, maxMessages):
             transcript.pop()
 
     if transcript:
-        print(
-            f"Using last {maxMessages} conversation turns (LLM_CHAT_HISTORY_MAX_MESSAGES)")
-        transcript = transcript[-maxMessages:]
+        if maxMessages > 0:
+            print(
+                f"Using last {maxMessages} conversation turns (LLM_CHAT_HISTORY_MAX_MESSAGES)")
+            transcript = transcript[-maxMessages:]
         print(f"Transcript: {json.dumps(transcript)}")
     else:
         print(f'No transcript for callId {callId}')
-
+    print("Transcript Length: ", len(json.dumps(transcript)))
     return transcript
 
 

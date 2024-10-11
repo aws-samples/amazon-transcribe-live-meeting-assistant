@@ -122,7 +122,9 @@ Select `CustomNoMatches` item in Designer:
 
   <img src="../images/meetingassist-qnabot-designer-no_hits_qid.png" alt="Bot No_hits" style="display: block; margin-left: 0; margin-right: auto;"/> 
 
-This item, too, has a Lambda Hook function. It also uses either the 'BedrockKB-LambdaHook' or the 'BedrockLLM-LambdaHook' function, but note that here, unlike in the previous 'AA.AskAssistant' item, there is no value for "Prompt" in the Lambda Hook Argument JSON value.  Rather than using a predefined value for Prompt, the prompt is the actual question that you typed or spoke.  Your question is used in the context of the meeting transcription, so it can refer to recent statements and topics being discussed. 
+This item, too, has a Lambda Hook function. It also uses either the 'BedrockKB-LambdaHook' or the 'BedrockLLM-LambdaHook' function, but note that here, unlike in the previous 'AA.AskAssistant' item, there is no value for "Prompt" in the Lambda Hook Argument JSON value.  Rather than using a predefined value for Prompt, the prompt is the actual question that you typed or spoke.  Your question is used in the context of the meeting transcription, so it can refer to recent statements and topics being discussed. You can experiment with the prompts used to extract the question from the transcript, and to generate an answer to the question, by examining and editing the prompt templates in the QnABot Settings:
+
+![prompt settings](../images/qnabot-prompt-settings.png)
 
 ## Start Message
 
