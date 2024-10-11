@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Allow meeting assistant to perform custom actions using a Bedrock Agent #128
 
+### Fixed
+
+- Fixes for differences between Zoom and Zoom Enterprise - PR #132
 
 ## [0.2.2] - 2024-10-03
 
