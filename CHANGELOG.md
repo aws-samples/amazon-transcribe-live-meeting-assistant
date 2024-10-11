@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2024-10-11
+
+### Added
+
+- Allow meeting assistant to perform custom actions using a Bedrock Agent #128
+
+
 ## [0.2.2] - 2024-10-03
 
 ### Added
@@ -172,6 +179,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.2.3]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.3
 [0.2.2]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.2
 [0.2.1]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.1
 [0.2.0]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.0
