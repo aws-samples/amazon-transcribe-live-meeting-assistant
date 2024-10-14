@@ -3,10 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from os import getenv
+from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Any
 import json
 import re
-
+import markdown
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 # third-party imports from Lambda layer
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.utilities.typing import LambdaContext
@@ -50,6 +54,11 @@ CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 def get_call_summary(
     message: Dict[str, Any]
 ):
+    print(message)
+    meeting_title = message["CallId"]
+    meeting_datetime = meeting_title.split('- ')[-1]
+    meeting_datetime = datetime.strptime(meeting_datetime, '%Y-%m-%d-%H:%M:%S.%f').strftime('%B %d, %Y %I:%M %p')
+    subject = f"{meeting_title} Summary Information"
     lambda_response = LAMBDA_CLIENT.invoke(
         FunctionName=TRANSCRIPT_SUMMARY_FUNCTION_ARN,
         InvocationType='RequestResponse',
@@ -63,6 +72,39 @@ def get_call_summary(
             "Transcript summary result payload parsing exception. Lambda must return JSON object with (modified) input event fields",
             extra=error,
         )
+    try:
+        email_pw = getenv("EMAIL_PW","")
+        support_email = "support@kaipartners.com"
+        recipients = ['mherrera@kaipartners.com','rshah@kaipartners.com']
+        
+        summary = f"## Meeting Title\n{meeting_title}\n\n## Date\n{meeting_datetime}\n\n"
+        summary_dict = json.loads(message["summary"])
+        # Loop over the JSON key-value pairs
+        for key, value in summary_dict.items():
+            # Append the key and value to the summary string with line breaks for Markdown
+            summary += f"## {key}\n\n{value}\n\n"
+        
+        # Replace escaped newline (\n) characters with actual newlines
+        summary = summary.replace('\\n', '\n')
+
+        html_content = markdown.markdown(summary)
+
+        msg = MIMEMultipart("alternative")
+        msg['Subject'] = subject
+        msg['From'] = support_email
+        msg['To'] = ', '.join(recipients)
+
+        part1 = MIMEText(summary, "plain")
+        part2 = MIMEText(html_content, "html")
+        msg.attach(part1)
+        msg.attach(part2)
+        with smtplib.SMTP("smtp.office365.com", 587) as server:
+            server.starttls()  # Secure the connection
+            server.login(support_email, email_pw)
+            server.sendmail(support_email, recipients, msg.as_string())
+            print("Message sent!")
+    except Exception as error:
+        print(error)
     return message
 
 

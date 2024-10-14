@@ -38,11 +38,11 @@ function LoginCognito() {
         <SpaceBetween size={'l'}>
           <div></div>
           <Grid gridDefinition={[{ colspan: 4, offset: 4 }]}>
-            <img className='logo' src='q_svg.svg'></img>
+            <img className='logo' src='kaip_logo.png'></img>
           </Grid>
           <Grid gridDefinition={[{ colspan: 10, offset: 1 }]}>
             <SpaceBetween size={'xs'}>
-              <h2 className='header'>Amazon Live<br />Meeting Assistant</h2>
+              <h2 className='header'>KAI Partners<br />Meeting Assistant</h2>
               <p className='headerDesc'>Powered by Amazon Transcribe and Amazon Bedrock</p>
             </SpaceBetween>
           </Grid>

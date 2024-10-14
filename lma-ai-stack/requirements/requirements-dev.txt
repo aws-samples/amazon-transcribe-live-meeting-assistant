@@ -8,6 +8,7 @@ mypy~=0.950
 pylint~=2.13.8
 toml>=0.10.2
 yamllint~=1.26.3
+markdown
 
 # runtime and typing dependencies included to hint IDEs and make it easier to test/debug locally
 boto3~=1.22.12

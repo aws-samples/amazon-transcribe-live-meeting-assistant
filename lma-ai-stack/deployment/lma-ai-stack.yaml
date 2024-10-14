@@ -1023,6 +1023,7 @@ Resources:
             ]
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           BOTO_READ_TIMEOUT: 60
+          EMAIL_PW: MP6Xe_~t%As4c;fP-T==aPW~XP|T2tUr
       Timeout: 240
       MemorySize: 128
       Handler: lambda_function.handler

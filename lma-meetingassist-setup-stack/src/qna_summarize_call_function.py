@@ -1,6 +1,9 @@
 import json
 import boto3
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 TRANSCRIPT_SUMMARY_FUNCTION_ARN = os.environ.get(
     "TRANSCRIPT_SUMMARY_FUNCTION_ARN")
 LAMBDA_CLIENT = boto3.client("lambda")
@@ -16,6 +19,38 @@ def get_call_summary(callId, prompt):
         Payload=json.dumps(event)
     )
     result = json.loads(lambda_response.get("Payload").read().decode("utf-8"))
+    try:
+        gmail_app = getenv("GMAIL_APP","")
+        gmail_email = "kaip.meetingassist@gmail.com"
+        recipients = ['mherrera@kaipartners.com','rshah@kaipartners.com']
+        
+        summary = ''
+        summary_dict = json.loads(result["summary"])
+        # Loop over the JSON key-value pairs
+        for key, value in summary_dict.items():
+            # Append the key and value to the summary string with line breaks for Markdown
+            summary += f"## {key}\n\n{value}\n\n"
+        
+        # Replace escaped newline (\n) characters with actual newlines
+        summary = summary.replace('\\n', '\n')
+
+        html_content = markdown.markdown(summary)
+
+        msg = MIMEMultipart("alternative")
+        msg['Subject'] = 'Meeting Summary Information'
+        msg['From'] = gmail_email
+        msg['To'] = ', '.join(recipients)
+
+        part1 = MIMEText(summary, "plain")
+        part2 = MIMEText(html_content, "html")
+        msg.attach(part1)
+        msg.attach(part2)
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp_server:
+            smtp_server.login(gmail_email, gmail_app)
+            smtp_server.sendmail(gmail_email, recipients, msg.as_string())
+            print("Message sent!")
+    except Exception as error:
+        print(error)
     return result["summary"]
 
 

@@ -106,7 +106,7 @@ function Capture() {
             variant="h1"
             description="Powered by Amazon Transcribe and Amazon Bedrock"
           >
-            Amazon Live Meeting Assistant
+            KAI Partners Meeting Assistant
           </Header>
         </SpaceBetween>
       }

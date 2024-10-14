@@ -21,7 +21,7 @@ function Meeting() {
               variant="h1"
               description="With Amazon Q for Business"
             >
-              Amazon Live Meeting Assistant
+              KAI Partners Meeting Assistant
             </Header>
           </SpaceBetween>
 

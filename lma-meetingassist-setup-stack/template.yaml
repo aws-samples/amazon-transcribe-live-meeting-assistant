@@ -253,6 +253,7 @@ Resources:
       Environment:
         Variables:
           TRANSCRIPT_SUMMARY_FUNCTION_ARN: !Ref TranscriptSummaryFunctionArn
+          GMAIL_APP: ferd axda likd miqt
       Code: ./src
       LoggingConfig:
         LogGroup:

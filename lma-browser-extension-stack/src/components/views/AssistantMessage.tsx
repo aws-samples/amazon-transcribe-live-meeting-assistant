@@ -8,7 +8,7 @@ import { applyMode, Mode } from '@cloudscape-design/global-styles';
 function AssistantMessage({ responseTo, message }: any) {
   return (  
     <Grid disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }, { colspan: 1 }]}>
-      <img className='assistantLogo' src='q_svg.svg'></img>
+      <img className='assistantLogo' src='kaip_logo.png'></img>
       <div className='assistantBox'>
         <Box>{message}</Box>
       </div>

@@ -1,11 +1,11 @@
 {
-  "name": "Amazon Live Meeting Assistant",
-  "description": "Amazon Live Meeting Assistant, powered by Amazon Transcribe and Amazon Bedrock",
+  "name": "KAI Partners Meeting Assistant",
+  "description": "KAI Partners Meeting Assistant, powered by Amazon Transcribe and Amazon Bedrock",
   "version": "0.2.1",
   "manifest_version": 3,
   "action": {
-    "default_title": "Click to open Amazon Live Meeting Assistant",
-    "default_icon": "icon.png"
+    "default_title": "Click to open KAI Partners Meeting Assistant",
+    "default_icon": "kaip_logo.png"
   },
   "permissions": [
     "storage",
