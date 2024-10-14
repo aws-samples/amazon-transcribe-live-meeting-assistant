@@ -1,4 +1,3 @@
-
 import asyncio
 import details
 import scribe
@@ -12,7 +11,7 @@ async def meeting(page):
 
     print("Typing meeting password.")
     try:
-        password_text_element = await page.wait_for_selector('#input-for-pwd')
+        password_text_element = await page.wait_for_selector("#input-for-pwd")
     except TimeoutError:
         print("LMA Virtual Participant was unable to join the meeting.")
         return
@@ -20,15 +19,14 @@ async def meeting(page):
         await password_text_element.type(details.meeting_password)
 
     print("Entering name.")
-    name_text_element = await page.wait_for_selector('#input-for-name')
+    name_text_element = await page.wait_for_selector("#input-for-name")
     await name_text_element.type(details.lma_identity)
     await name_text_element.press("Enter")
 
     print("Adding audio.")
     try:
         audio_button_element = await page.wait_for_selector(
-            "text=Join Audio by Computer",
-            timeout=details.waiting_timeout
+            "text=Join Audio by Computer", timeout=details.waiting_timeout
         )
     except TimeoutError:
         print("LMA Virtual Participant was not admitted into the meeting.")
@@ -38,18 +36,21 @@ async def meeting(page):
 
     print("Opening chat panel.")
     chat_button_element = await page.wait_for_selector(
-        'button[aria-label^="open the chat panel"]'
+        'button[aria-label="open the chat panel"]'
     )
     await chat_button_element.hover()
     await chat_button_element.click()
 
     async def send_messages(messages):
-        message_element = await page.wait_for_selector(
-            'div[aria-placeholder="Type message here..."]'
-        )
-        for message in messages:
-            await message_element.fill(message)
-            await message_element.press('Enter')
+        try:
+            message_element = await page.wait_for_selector(
+                'div[aria-placeholder="Type message here..."], textarea[placeholder="Type message here ..."]'
+            )
+            for message in messages:
+                await message_element.fill(message)
+                await message_element.press("Enter")
+        except Exception as e:
+            print(f"Ran into exception attempting to send a message, {e}")
 
     print("Sending introduction messages.")
     await send_messages(details.intro_messages)
@@ -63,7 +64,8 @@ async def meeting(page):
     await page.expose_function("attendeeChange", attendee_change)
 
     print("Listening for attendee changes.")
-    await page.evaluate('''
+    await page.evaluate(
+        """
         const targetNode = document.querySelector('.footer-button__number-counter')
         const config = { characterData: true, subtree: true }
 
@@ -73,14 +75,17 @@ async def meeting(page):
 
         const observer = new MutationObserver(callback)
         observer.observe(targetNode, config)
-    ''')
+    """
+    )
 
     await page.expose_function("speakerChange", scribe.speaker_change)
 
     print("Listening for speaker changes.")
-    await page.evaluate('''
+    await page.evaluate(
+        """
+        // NOTE: This is not yet correct.  Works in both Personal and Enterprise, but doesn't respond to speaker changes
         const targetNode = document.querySelector(
-            '.speaker-active-container__video-frame .video-avatar__avatar .video-avatar__avatar-title'
+            '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer, .speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-title'
         )
         const config = { childList: true, subtree: true }
 
@@ -96,7 +101,8 @@ async def meeting(page):
                         
         const initial_speaker = targetNode.textContent
         if (initial_speaker) speakerChange(initial_speaker)
-    ''')
+    """
+    )
 
     # start the transcription if details.start flag is true
     if details.start:
@@ -105,7 +111,7 @@ async def meeting(page):
         asyncio.create_task(scribe.transcribe())
 
     async def message_change(message):
-        print('New Message:', message)
+        print("New Message:", message)
         if details.end_command in message:
             print("LMA Virtual Participant has been removed from the meeting.")
             details.start = False
@@ -126,7 +132,8 @@ async def meeting(page):
     await page.expose_function("messageChange", message_change)
 
     print("Listening for message changes.")
-    await page.evaluate('''
+    await page.evaluate(
+        """
         const targetNode = document.querySelector('div[aria-label="Chat Message List"]')
         const config = { childList: true, subtree: true }
 
@@ -142,19 +149,31 @@ async def meeting(page):
 
         const observer = new MutationObserver(callback)
         observer.observe(targetNode, config)
-    ''')
+    """
+    )
 
     print("Waiting for meeting end.")
     try:
         done, pending = await asyncio.wait(
             fs=[
-                asyncio.create_task(page.wait_for_selector(
-                    'button[aria-label="Leave"]', state="detached", timeout=0)),
-                asyncio.create_task(page.wait_for_selector(
-                    'div[class="zm-modal zm-modal-legacy"]', timeout=0))
+                asyncio.create_task(
+                    page.wait_for_selector(
+                        'button[aria-label="Leave"], button[aria-label="End"]',
+                        state="detached",
+                        timeout=0,
+                    )
+                ),
+                asyncio.create_task(
+                    page.wait_for_selector(
+                        # 'div[class="zm-modal zm-modal-legacy"]', timeout=0
+                        # Note - recent UI changes may result in clicking the "End Meeting for All" as opposed to "Leave Meeting"
+                        "button.leave-meeting-options__btn",
+                        timeout=0,
+                    )
+                ),
             ],
             return_when=asyncio.FIRST_COMPLETED,
-            timeout=details.meeting_timeout
+            timeout=details.meeting_timeout,
         )
         [task.cancel() for task in pending]
         print("Meeting ended.")

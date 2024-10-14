@@ -170,7 +170,7 @@ Resources:
                   }'
                   $WEBSOCKET_ENDPOINT $COGNITO_CLIENT_ID $COGNITO_LOGIN_URL $CLOUDFRONT_ENDPOINT "$RECORDING_DISCLAIMER" "$START_RECORDING_MESSAGE" "$STOP_RECORDING_MESSAGE" > ./build/lma_config.json
                 - echo Packaging extension for Chrome - other browsers to come later
-                - zipfile=lma-chrome-extension-v0.2.1.zip
+                - zipfile=lma-chrome-extension-v0.2.3.zip
                 - (cd ./build && zip -r ../${zipfile} .)
                 - aws s3 cp ${zipfile} s3://${WEBAPP_BUCKET}/
                 - echo Artifact Location - s3://${WEBAPP_BUCKET}/${zipfile}
@@ -217,7 +217,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       Role: !GetAtt LambdaExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 300
       MemorySize: 128
       Handler: index.handler

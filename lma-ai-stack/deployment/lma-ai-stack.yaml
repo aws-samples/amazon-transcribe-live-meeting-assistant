@@ -292,7 +292,7 @@ Parameters:
 
   BootstrapVersion:
     Type: String
-    Default: 0.2.1
+    Default: 0.2.3
     Description: >
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket
@@ -746,7 +746,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt LambdaCodeBuildStartBuildExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 60
       MemorySize: 128
       Handler: lambda_start_codebuild.handler
@@ -791,7 +791,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt LambdaFetchTranscriptExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Environment:
         Variables:
           LCA_CALL_EVENTS_TABLE: !Ref EventSourcingTable
@@ -849,7 +849,7 @@ Resources:
     Condition: ShouldEnableBedrockSummarizer
     Properties:
       Role: !GetAtt BedrockSummaryLambdaExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Environment:
         Variables:
           BEDROCK_MODEL_ID: !Ref BedrockModelId
@@ -932,7 +932,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt AsyncAgentAssistOrchestratorExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Environment:
         Variables:
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
@@ -1012,7 +1012,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt AsyncTranscriptSummaryOrchestratorExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Environment:
         Variables:
           TRANSCRIPT_SUMMARY_FUNCTION_ARN:
@@ -1202,7 +1202,7 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt AsyncAgentAssistOrchestrator.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 900
       Environment:
         Variables:
@@ -1256,14 +1256,14 @@ Resources:
   TranscriptEnrichmentPythonLayer:
     Type: AWS::Serverless::LayerVersion
     Metadata:
-      BuildMethod: python3.11
+      BuildMethod: python3.12
     Properties:
       Description: !Sub "Transcript Enrichment Python Layer for stack: ${AWS::StackName}"
       ContentUri: ../source/lambda_layers/transcript_enrichment_layer
       CompatibleArchitectures:
         - arm64
       CompatibleRuntimes:
-        - python3.11
+        - python3.12
       RetentionPolicy: Delete
 
   ##########################################################################
@@ -1688,7 +1688,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       Handler: "index.lambda_handler"
-      Runtime: python3.11
+      Runtime: python3.12
       MemorySize: 128
       Timeout: 60
       Role: !GetAtt BucketDeleteLambdaRole.Arn

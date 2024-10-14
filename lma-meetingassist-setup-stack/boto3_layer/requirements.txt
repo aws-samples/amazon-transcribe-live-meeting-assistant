@@ -1,2 +1,2 @@
-boto3==1.34.144
 markdown
+boto3==1.35.34

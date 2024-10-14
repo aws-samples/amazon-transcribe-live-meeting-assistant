@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2024-10-11
+
+### Added
+
+- Allow meeting assistant to perform custom actions using a Bedrock Agent #128
+
+### Fixed
+
+- Fixes for differences between Zoom and Zoom Enterprise - PR #132
+
+## [0.2.2] - 2024-10-03
+
+### Added
+
+- Ability to apply optional Bedrock Guardrail when MeetingAssistant is BEDROCK_KNOWLEDGE_BASE or BEDROCK_LLM - Issue #53 
+
+### Fixed
+
+- When using Virtual Participant (preview) no audio recording is created. #126
+- Use selected Transcribe language for virtual-participant - PR #118 
+- Updated QnABot nested stack to QnABot v6.1.1 - PR #119
+- Publish script fails to detect make failure in lca-ai-stack during build - Issue #111
+- When publishing, AISTACK `make` fails to find bash with new version of gnu make (4.3) - Issue #110
+- Muliple dependabot PRs
+- Upgrade all python Lambda functions to python3.12 (latest)
+- Publish script hangs in lma-ui-stack in sam build when using arm64 container image, on new EC2 and Cloud9 instances #124
+
 ## [0.2.1] - 2024-08-29
 
 ### Added
@@ -155,6 +182,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.2.3]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.3
+[0.2.2]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.2
 [0.2.1]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.1
 [0.2.0]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.0
 [0.1.10]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.10
