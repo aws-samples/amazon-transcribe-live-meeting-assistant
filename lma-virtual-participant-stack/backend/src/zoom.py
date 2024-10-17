@@ -85,7 +85,7 @@ async def meeting(page):
         """
         // NOTE: This is not yet correct.  Works in both Personal and Enterprise, but doesn't respond to speaker changes
         const targetNode = document.querySelector(
-            '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer, .speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-title'
+            '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
         )
         const config = { childList: true, subtree: true }
 
@@ -158,7 +158,7 @@ async def meeting(page):
             fs=[
                 asyncio.create_task(
                     page.wait_for_selector(
-                        'button[aria-label="Leave"], button[aria-label="End"]',
+                        'button[aria-label="Leave"],[aria-label="End"]',
                         state="detached",
                         timeout=0,
                     )
