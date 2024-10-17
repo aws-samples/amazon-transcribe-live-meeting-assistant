@@ -28,7 +28,7 @@ lma_identity = os.environ['LMA_IDENTITY'].replace('{LMA_USER}', lma_user)
 
 should_record_call = os.getenv('SHOULD_RECORD_CALL', 'true') == 'true'
 recordings_bucket_name = os.getenv('RECORDINGS_BUCKET_NAME')
-recording_file_prefix = os.getenv('RECORDING_FILE_PREFIX', 'lma-audio-wav/')
+recording_file_prefix = os.getenv('RECORDING_FILE_PREFIX', 'lma-audio-recordings/')
 if should_record_call:
     tmp_recording_filename = "/tmp/chunk_recording.bin"
     tmp_wav_filename = "/tmp/chunk_recording.wav"
