@@ -69,6 +69,21 @@ Parameters:
     AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
     # yamllint enable rule:line-length
 
+  TranscriptFilePrefix:
+    Type: String
+    Default: lma-transcripts/
+    Description: >-
+      The Amazon S3 prefix where the transript files will be saved (must end in "/")
+
+  TranscriptFileBucketName:
+    Type: String
+    Default: ""
+    Description: >
+      Existing bucket where transcript files will be stored.
+    # yamllint disable rule:line-length
+    AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
+    # yamllint enable rule:line-length
+
   IsSentimentAnalysisEnabled:
     Type: String
     Default: "true"
@@ -857,7 +872,8 @@ Resources:
           TOKEN_COUNT: "0"
           PROCESS_TRANSCRIPT: "True"
           LLM_PROMPT_TEMPLATE_TABLE_NAME: !Ref LLMPromptTemplateTableName
-
+          S3_BUCKET_NAME: !Ref S3BucketName
+          S3_PREFIX: !Ref TranscriptFilePrefix
       Timeout: 900
       MemorySize: 512
       Handler: index.handler
@@ -916,7 +932,6 @@ Resources:
                   - "dynamodb:GetItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
-
         - PolicyName: !Sub ${AWS::StackName}-BedrockSummary
           PolicyDocument:
             Version: 2012-10-17
@@ -927,6 +942,16 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
+        - PolicyName: !Sub ${AWS::StackName}-S3
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:PutObject"
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}"
+                  - !Sub "arn:aws:s3:::${S3BucketName}/*"
 
   AsyncAgentAssistOrchestrator:
     Type: AWS::Serverless::Function
