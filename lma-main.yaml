@@ -130,9 +130,10 @@ Parameters:
 
   AmazonQAppId:
     Type: String
-    Default: ''
+    Default: ""
     AllowedPattern: "^(|[a-zA-Z0-9][a-zA-Z0-9-]{35})$"
-    Description: If MeetingAssistService is 'Q_BUSINESS (Use Existing)', provide the Q Business Application
+    Description:
+      If MeetingAssistService is 'Q_BUSINESS (Use Existing)', provide the Q Business Application
       *Id* (not name) of an *existing* Q Business Applictaion to be used for Meeting
       Assist bot.
 
@@ -140,7 +141,7 @@ Parameters:
     Type: String
     Description: >-
       After creating an Identity Center customer managed application for QBusiness, UPDATE your stack with its ARN entered here. 
-      See Q Business setup README for directions. 
+      See Q Business setup README for directions.
 
   AssistantWakePhraseRegEx:
     Type: String
@@ -160,6 +161,14 @@ Parameters:
       Number of nodes in Meeting Assistant QnABot OpenSearch domain - '4' is recommended
       for fault tolerant production deployments.
 
+  TranscriptKnowledgeBase:
+    Default: "BEDROCK_KNOWLEDGE_BASE (Create)"
+    Type: String
+    AllowedValues:
+      - "DISABLED"
+      - "BEDROCK_KNOWLEDGE_BASE (Create)"
+    Description: Use meeting transcripts as knowledge base content
+
   S3BucketName:
     Type: String
     Description: >
@@ -172,8 +181,15 @@ Parameters:
   AudioFilePrefix:
     Type: String
     Default: lma-audio-recordings/
-    Description:
+    Description: >-
       The Amazon S3 prefix where the audio files will be saved (must end
+      in "/")
+
+  TranscriptFilePrefix:
+    Type: String
+    Default: lma-transcripts/
+    Description: >-
+      The Amazon S3 prefix where the transript files will be saved (must end
       in "/")
 
   IsPartialTranscriptEnabled:
@@ -595,10 +611,15 @@ Metadata:
           - AmazonQAppId
           - IDCApplicationARN
       - Label:
+          default: Transcript Knowledge Base Configuration
+        Parameters:
+          - TranscriptKnowledgeBase
+      - Label:
           default: Amazon S3 Configuration
         Parameters:
           - S3BucketName
           - AudioFilePrefix
+          - TranscriptFilePrefix
       - Label:
           default: Amazon Transcribe Configuration
         Parameters:
@@ -663,6 +684,8 @@ Metadata:
         default: Call Audio Recordings Bucket Name
       AudioFilePrefix:
         default: Audio File Prefix
+      TranscriptFilePrefix:
+        default: Transcript File Prefix
       CustomVoiceConnectorId:
         default: Amazon Chime SDK Voice Connector ID (existing)
       AdminEmail:
@@ -699,6 +722,8 @@ Metadata:
         default: Amazon Q Application ID (existing)
       IDCApplicationARN:
         default: IDC Application ARN (existing)
+      TranscriptKnowledgeBase:
+        default: Transcript Knowledge Base
       IsPartialTranscriptEnabled:
         default: Enable Partial Transcripts
       IsContentRedactionEnabled:
@@ -812,21 +837,14 @@ Rules:
           is 'BEDROCK_KNOWLEDGE_BASE (Use Existing)'
   BedrockAgentId:
     RuleCondition:
-      !Equals [
-        !Ref MeetingAssistService,
-        "BEDROCK_AGENT (Use Existing)",
-      ]   
+      !Equals [!Ref MeetingAssistService, "BEDROCK_AGENT (Use Existing)"]
     Assertions:
       - Assert: !Not [!Equals [!Ref BedrockAgentId, ""]]
-        AssertDescription:
-          BedrockAgentId is required when MeetingAssistService
+        AssertDescription: BedrockAgentId is required when MeetingAssistService
           is 'BEDROCK_AGENT (Use Existing)'
   BedrockAgentAliasId:
     RuleCondition:
-      !Equals [
-        !Ref MeetingAssistService,
-        "BEDROCK_AGENT (Use Existing)",
-      ]   
+      !Equals [!Ref MeetingAssistService, "BEDROCK_AGENT (Use Existing)"]
     Assertions:
       - Assert: !Not [!Equals [!Ref BedrockAgentAliasId, ""]]
         AssertDescription:
@@ -834,14 +852,10 @@ Rules:
           is 'BEDROCK_AGENT (Use Existing)'
   AmazonQId:
     RuleCondition:
-      !Equals [
-        !Ref MeetingAssistService,
-        "Q_BUSINESS (Use Existing)",
-      ]
+      !Equals [!Ref MeetingAssistService, "Q_BUSINESS (Use Existing)"]
     Assertions:
       - Assert: !Not [!Equals [!Ref AmazonQAppId, ""]]
-        AssertDescription:
-          AmazonQAppId is required when MeetingAssistService
+        AssertDescription: AmazonQAppId is required when MeetingAssistService
           is 'Q_BUSINESS (Use Existing)'
 
 Conditions:
@@ -859,7 +873,10 @@ Conditions:
   ShouldUseExistingBedrockAgent:
     !Equals [!Ref MeetingAssistService, "BEDROCK_AGENT (Use Existing)"]
   ShouldCreateBedrockAgent:
-    !Equals [!Ref MeetingAssistService, "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)"]
+    !Equals [
+      !Ref MeetingAssistService,
+      "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)",
+    ]
   ShouldUseBedrockAgent:
     !Or [
       !Condition ShouldUseExistingBedrockAgent,
@@ -876,6 +893,9 @@ Conditions:
       ],
     ]
   ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
+  ShouldCreateTranscriptKnowledgeBase:
+    !Equals [!Ref TranscriptKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)"]
+  ShouldUseTranscriptKnowledgeBase: !Condition ShouldCreateTranscriptKnowledgeBase
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -1178,7 +1198,7 @@ Resources:
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
-  ## BUCKET TO STORE STEREO RECORDINGS
+  ## BUCKET TO STORE STEREO RECORDINGS AND TRANSCRIPTS FILES
   RecordingsBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -1202,10 +1222,14 @@ Resources:
               SSEAlgorithm: AES256
       LifecycleConfiguration:
         Rules:
-          - Id: RuleRetention
+          - Id: AudioRetention
             Status: Enabled
-            Prefix: ""
+            Prefix: !Ref AudioFilePrefix
             ExpirationInDays: !Ref AudioRecordingExpirationInDays
+          - Id: TranscriptRetention
+            Status: Enabled
+            Prefix: !Ref TranscriptFilePrefix
+            ExpirationInDays: !Ref TranscriptionExpirationInDays
 
   RecordingsBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -1293,7 +1317,7 @@ Resources:
         InstallLexResponseBots: "false"
         EmbeddingsApi: "BEDROCK"
         EmbeddingsBedrockModelId: "amazon.titan-embed-text-v2"
-        LLMApi: "DISABLED"  # LMA configures its own KB/QBusiness LambdaHooks
+        LLMApi: "DISABLED" # LMA configures its own KB/QBusiness LambdaHooks
         LogRetentionPeriod: !Ref CloudWatchLogsExpirationInDays
 
   LLMTEMPLATESTACK:
@@ -1327,7 +1351,7 @@ Resources:
         LMASettingsParameterName: !Ref LMASettingsParameter
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
-  AISTACK: 
+  AISTACK:
     Type: AWS::CloudFormation::Stack
     DependsOn:
       - IsStacknameLengthOK
@@ -1347,6 +1371,7 @@ Resources:
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
           - !Ref S3BucketName
+        TranscriptFilePrefix: !Ref TranscriptFilePrefix
         IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
@@ -1370,7 +1395,6 @@ Resources:
         UserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
         CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
         AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
-        
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -1383,8 +1407,10 @@ Resources:
       Parameters:
         pKnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
         pInputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
+        pS3SyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
         pWebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
         pWebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
+        pWebSyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
 
   BEDROCKAGENT:
     Type: AWS::CloudFormation::Stack
@@ -1403,6 +1429,20 @@ Resources:
         WebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
         SNSEmailAddress: !Ref AdminEmail
 
+  TRANSCRIPTBEDROCKKB:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateTranscriptKnowledgeBase
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
+      Parameters:
+        pKnowledgeBaseBucketName: !Ref RecordingsBucket
+        pInputDocumentUploadFolderPrefix: !Ref TranscriptFilePrefix
+        pS3SyncScheduleExpression: "cron(0/15 0 ? * * *)"  # default is to sync transcripts every 15 minutes
+
+
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
   SettingsJSON:
     Type: Custom::ToJSON
@@ -1413,7 +1453,7 @@ Resources:
       LLM_CHAT_HISTORY_MAX_MESSAGES: !If
         - ShouldUseBedrockKnowledgeBase
         - 10 # knowledge base retrieveAndGenerate api has input text max length of 1000, so the transcript context needs to be truncated
-        - !If 
+        - !If
           - ShouldUseQBusiness
           - 50 # Q Business ChatSync API has input text max length of 7000, so the transcript context needs to be truncated less aggressively
           - 50 # Limits for Anthropic LLMs and Agents are much larger, but we'll truncate anyway to keep prompt length (cost & latency) manageable.
@@ -1439,7 +1479,7 @@ Resources:
           sure to double check the search results to validate a user's assertion.<br>Here
           is the JSON transcript of the meeting so far:<br>{transcript}<br>Here are
           the search results in numbered order:<br>$search_results$<br>$output_format_instructions$"
-        - !If 
+        - !If
           - ShouldUseLLMOnly
           - "You are an AI assistant helping a human during a meeting. I will provide
             you with a transcript of the ongoing meeting (which may be empty), and a user's
@@ -1448,7 +1488,7 @@ Resources:
             asserts a fact does not mean it is true, make sure to validate a user's assertion.<br>Here
             is the JSON transcript of the meeting so far:<br>{transcript}<br>Here is the
             user's request:<br>{userInput}<br>Respond in 100 words or less."
-          - "{userInput}" # minimal input used for agents (1) they have their own prompts, (2) transcript passed seperately in API session_attributes 
+          - "{userInput}" # minimal input used for agents (1) they have their own prompts, (2) transcript passed seperately in API session_attributes
 
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
@@ -1476,7 +1516,7 @@ Resources:
             - !GetAtt BEDROCKAGENT.Outputs.AgentId
             - !Ref BedrockAgentId
           - ""
-        BedrockAgentAliasId: !If 
+        BedrockAgentAliasId: !If
           - ShouldUseBedrockAgent
           - !If
             - ShouldCreateBedrockAgent
@@ -1504,6 +1544,10 @@ Resources:
           - IsHealthcareDomainSelected
           - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-healthcare-demo.jsonl
           - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
+        TranscriptBedrockKnowledgeBaseId: !If
+          - ShouldUseTranscriptKnowledgeBase
+          - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
+          - ""
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         # Changes to Params below force AgentAssist Setup to update.
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
@@ -1711,19 +1755,18 @@ Outputs:
   CognitoUserPoolTokenIssuerUrl:
     Description: Cognito User Pool Token Issuer URL (only used for QBusiness integration)
     Value: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${COGNITOSTACK.Outputs.UserPoolId}
-   
+
   CognitoUserPoolClientId:
     Description: Cognito User Pool Client Id (only used for QBusiness integration)
     Value: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
-    
+
   QBusinessLambdaHookFunctionRoleArn:
     Description: Function role for Lambda QBusiness plugin (only used for QBusiness integration)
     Value: !GetAtt MEETINGASSISTSETUP.Outputs.QBusinessLambdaHookFunctionRoleArn
-  
+
   SNSTopicForAgentMessages:
     Value: !If
-    - ShouldCreateBedrockAgent
-    - !GetAtt BEDROCKAGENT.Outputs.SNSTopicForAgentMessages
-    - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create) option not selected"
+      - ShouldCreateBedrockAgent
+      - !GetAtt BEDROCKAGENT.Outputs.SNSTopicForAgentMessages
+      - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create) option not selected"
     Description: Agent SendMessage SNS Topic ARN - Add subscriptions to this topic to receive messages from the LMA meeting assistant agent
-  
