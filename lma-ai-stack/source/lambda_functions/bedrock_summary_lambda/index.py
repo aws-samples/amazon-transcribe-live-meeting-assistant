@@ -1,22 +1,18 @@
 # Invokes Anthropic generate text API using requests module
 # see https://console.anthropic.com/docs/api/reference for more details
 
-import sys
 import os
 import json
 import re
 import boto3
-import requests
-
-import logging
-logger = logging.getLogger()
-logger.setLevel(logging.ERROR)
 
 # grab environment variables
 BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
 FETCH_TRANSCRIPT_LAMBDA_ARN = os.environ['FETCH_TRANSCRIPT_LAMBDA_ARN']
 PROCESS_TRANSCRIPT = (os.getenv('PROCESS_TRANSCRIPT', 'False') == 'True')
 TOKEN_COUNT = int(os.getenv('TOKEN_COUNT', '0')) # default 0 - do not truncate.
+S3_BUCKET_NAME = os.environ['S3_BUCKET_NAME']
+S3_PREFIX = os.environ['S3_PREFIX']
 
 # Table name and keys used for default and custom prompt templates items in DDB
 LLM_PROMPT_TEMPLATE_TABLE_NAME = os.environ["LLM_PROMPT_TEMPLATE_TABLE_NAME"]
@@ -164,6 +160,26 @@ def generate_summary(transcript, prompt_override):
         return result[list(result.keys())[0]]
     return json.dumps(result)
 
+def posixify_filename(filename: str) -> str:
+    # Replace all invalid characters with underscores
+    regex = r'[^a-zA-Z0-9_.]'
+    posix_filename = re.sub(regex, '_', filename)
+    # Remove leading and trailing underscores
+    posix_filename = re.sub(r'^_+', '', posix_filename)
+    posix_filename = re.sub(r'_+$', '', posix_filename)
+    return posix_filename
+
+def write_to_s3(summary, transcript, callId):
+    s3 = boto3.client('s3')
+    filename = posixify_filename(f"{callId}")
+    summary_file_key = f"{S3_PREFIX}/{filename}-SUMMARY.txt"
+    transcript_file_key = f"{S3_PREFIX}/{filename}-TRANSCRIPT.txt"
+    s3.put_object(Bucket=S3_BUCKET_NAME, Key=summary_file_key, Body=summary)
+    print(f"Wrote summary to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}")
+    s3.put_object(Bucket=S3_BUCKET_NAME, Key=transcript_file_key, Body=transcript)
+    print(f"Wrote transcript to S3: s3://{S3_BUCKET_NAME}/{transcript_file_key}")
+    # TODO Figure out metadata
+
 def handler(event, context):
     print("Received event: ", json.dumps(event))
     callId = event['CallId']
@@ -177,14 +193,13 @@ def handler(event, context):
     prompt_override = None
     if 'Prompt' in event:
         prompt_override = event['Prompt']
-
     try:
         summary = generate_summary(transcript, prompt_override)
     except Exception as e:
         print(e)
         summary = 'An error occurred generating summary.'
-
     print("Summary: ", summary)
+    write_to_s3(summary, transcript, callId)
     return {"summary": summary}
     
 # for testing on terminal
