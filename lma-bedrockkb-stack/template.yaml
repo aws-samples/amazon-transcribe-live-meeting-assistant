@@ -22,20 +22,6 @@ Parameters:
     Description: >-
       Enter a schedule expression for when the S3 sync should be triggered. See https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/ScheduledEvents.html for examples.
 
-  pWebCrawlerStartUrls:
-    Type: String
-    Default: ""
-    Description: >-
-      Comma separated list of public web sites to crawl, or leave blank if you don't need a Web data source.
-
-  pWebCrawlerDepth:
-    Type: Number
-    MinValue: 1
-    MaxValue: 5
-    Default: 2
-    Description: >-
-      The depth to crawl from the start URLs, up to 5 levels deep.
-
   pWebCrawlerURLs:
     Type: String
     Default: ""
@@ -126,8 +112,10 @@ Metadata:
         Parameters:
           - pKnowledgeBaseBucketName
           - pInputDocumentUploadFolderPrefix
+          - pS3SyncScheduleExpression
           - pWebCrawlerURLs
           - pWebCrawlerScope
+          - pWebSyncScheduleExpression
       - Label:
           default: Embedding Model
         Parameters:
@@ -151,10 +139,14 @@ Metadata:
         default: Existing S3 bucket with knowledge base source documents (optional).
       pInputDocumentUploadFolderPrefix:
         default: S3 prefix(es) for your content (optional)
+      pS3SyncScheduleExpression:
+        default: S3 sync schedule expression
       pWebCrawlerURLs:
         default: Publicly accessible URLs for web crawling (optional)
       pWebCrawlerScope:
         default: Web crawl sync scope
+      pWebSyncScheduleExpression:
+        default: Web sync schedule expression
       pEmbedModel:
         default: Choose an embedding model
       pChunkingStrategy:
@@ -247,7 +239,7 @@ Resources:
         def handler(event, context):
           print(event)
           urls = event['ResourceProperties'].get('WebCrawlerURLs', '').split(',')
-          seedUrls = [{'url': url.strip()} for url in urls]
+          seedUrls = [{'Url': url.strip()} for url in urls]
           responseData = {'SeedUrls': seedUrls}
           cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
 
@@ -670,7 +662,6 @@ Resources:
     Type: AWS::Scheduler::Schedule
     Condition: IsS3DataSource
     Properties:
-      Name: S3KBDataSourceStartIngestionJobRule
       Description: "Rule to start LMA Bedrock KB S3 datasource ingestion job on a schedule"
       FlexibleTimeWindow: 
         Mode: "OFF"
@@ -682,7 +673,7 @@ Resources:
         RoleArn: !GetAtt  KBDataSourceSchedulerRole.Arn
         Input: !Sub |
               {
-                "DataSourceId": "${S3KBDataSource}",
+                "DataSourceId": "${S3KBDataSource.DataSourceId}",
                 "KnowledgeBaseId": "${KnowledgeBase}"
               }
 
@@ -691,7 +682,6 @@ Resources:
     Type: AWS::Scheduler::Schedule
     Condition: IsWebDataSource
     Properties:
-      Name: S3KBDataSourceStartIngestionJobRule
       Description: "Rule to start LMA Bedrock KB S3 datasource ingestion job on a schedule"
       FlexibleTimeWindow: 
         Mode: "OFF"
@@ -703,7 +693,7 @@ Resources:
         RoleArn: !GetAtt  KBDataSourceSchedulerRole.Arn
         Input: !Sub |
               {
-                "DataSourceId": "${S3KBDataSource}",
+                "DataSourceId": "${WebKBDataSource.DataSourceId}",
                 "KnowledgeBaseId": "${KnowledgeBase}"
               }
 
