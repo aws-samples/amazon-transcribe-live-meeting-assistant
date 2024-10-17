@@ -856,7 +856,9 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: "Allow"
-                Action: "dynamodb:Query"
+                Action: 
+                  - dynamodb:Query
+                  - dynamodb:GetItem
                 Resource: !GetAtt EventSourcingTable.Arn
 
   BedrockSummaryLambda:

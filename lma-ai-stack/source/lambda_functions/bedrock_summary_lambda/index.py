@@ -91,7 +91,10 @@ def get_transcripts(callId):
         Payload=json.dumps(payload)
     )
     print("Lambda response:", response)
-    return response
+    transcript_data = response['Payload'].read().decode()
+    transcript_json = json.loads(transcript_data)
+    print("Transcript JSON:", transcript_json)
+    return transcript_json
 
 def get_request_body(modelId, prompt, max_tokens, temperature):
     provider = modelId.split(".")[0]
@@ -169,37 +172,47 @@ def posixify_filename(filename: str) -> str:
     posix_filename = re.sub(r'_+$', '', posix_filename)
     return posix_filename
 
-def write_to_s3(summary, transcript, callId):
+def getKBMetadata(metadata):
+    # Keys to include
+    keys_to_include = ["CallId", "CreatedAt", "UpdatedAt", "Owner", "TotalConversationDurationMillis"]
+    # Create a new dictionary with only the specified keys
+    filtered_metadata = {key: metadata[key] for key in keys_to_include if key in metadata}
+    kbMetadata = {
+        "metadataAttributes": filtered_metadata
+    }
+    return json.dumps(kbMetadata)
+
+def write_to_s3(callId, kbMetadata, transcript, summary):
     s3 = boto3.client('s3')
     filename = posixify_filename(f"{callId}")
-    summary_file_key = f"{S3_PREFIX}/{filename}-SUMMARY.txt"
-    transcript_file_key = f"{S3_PREFIX}/{filename}-TRANSCRIPT.txt"
+    summary_file_key = f"{S3_PREFIX}{filename}-SUMMARY.txt"
+    transcript_file_key = f"{S3_PREFIX}{filename}-TRANSCRIPT.txt"
     s3.put_object(Bucket=S3_BUCKET_NAME, Key=summary_file_key, Body=summary)
     print(f"Wrote summary to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}")
+    s3.put_object(Bucket=S3_BUCKET_NAME, Key=f"{summary_file_key}.metadata.json", Body=kbMetadata)
+    print(f"Wrote summary metadata to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}.metadata.json")
     s3.put_object(Bucket=S3_BUCKET_NAME, Key=transcript_file_key, Body=transcript)
     print(f"Wrote transcript to S3: s3://{S3_BUCKET_NAME}/{transcript_file_key}")
-    # TODO Figure out metadata
+    s3.put_object(Bucket=S3_BUCKET_NAME, Key=f"{transcript_file_key}.metadata.json", Body=kbMetadata)
+    print(f"Wrote transcript metadata to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}.metadata.json")
 
 def handler(event, context):
     print("Received event: ", json.dumps(event))
     callId = event['CallId']
-    transcript_response = get_transcripts(callId)
-    transcript_data = transcript_response['Payload'].read().decode()
-    print("Transcript data:", transcript_data)
-    transcript_json = json.loads(transcript_data)
-    transcript = transcript_json['transcript']
-    summary = "No summary available"
-
-    prompt_override = None
-    if 'Prompt' in event:
-        prompt_override = event['Prompt']
     try:
+        transcript_json = get_transcripts(callId)
+        transcript = transcript_json['transcript']
+        kbMetadata = getKBMetadata(transcript_json['metadata'])
+        summary = "No summary available"
+        prompt_override = None
+        if 'Prompt' in event:
+            prompt_override = event['Prompt']
         summary = generate_summary(transcript, prompt_override)
+        print("Summary: ", summary)
+        write_to_s3(callId, kbMetadata, transcript, summary)
     except Exception as e:
         print(e)
-        summary = 'An error occurred generating summary.'
-    print("Summary: ", summary)
-    write_to_s3(summary, transcript, callId)
+        summary = 'An error occurred.'
     return {"summary": summary}
     
 # for testing on terminal
