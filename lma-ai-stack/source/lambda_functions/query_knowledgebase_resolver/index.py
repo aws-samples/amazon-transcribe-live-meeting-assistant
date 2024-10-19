@@ -14,7 +14,7 @@ KB_CLIENT = boto3.client(
     region_name=KB_REGION
 )
 
-def get_kb_response(query, userId, sessionId):
+def get_kb_response(query, userId, isAdminUser, sessionId):
     input = {
         "input": {
             'text': query
@@ -37,6 +37,9 @@ def get_kb_response(query, userId, sessionId):
             'type': 'KNOWLEDGE_BASE'
         }
     }
+    if isAdminUser:
+        print("Admin user, no retrieval filters")
+        input["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"].pop("retrievalConfiguration", None)
     if sessionId:
         input["sessionId"] = sessionId
     print("Amazon Bedrock KB Request: ", input)
@@ -80,8 +83,8 @@ def handler(event, context):
     query = event["arguments"]["input"]
     sessionId = event["arguments"].get("sessionId") or None
     userId = event["identity"]["username"]
-    # future enhancements could allow additional metadata filters specified in the UI
-    kb_response = get_kb_response(query, userId, sessionId)
+    isAdminUser = "Admin" in event["identity"]["groups"]
+    kb_response = get_kb_response(query, userId, isAdminUser, sessionId)
     kb_response["markdown"] = markdown_response(kb_response)
     print("Returning response: %s" % json.dumps(kb_response))
     return json.dumps(kb_response)
