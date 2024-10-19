@@ -3,7 +3,7 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  query Query($input: String!) {
-    queryKnowledgeBase(input: $input)
+  query Query($input: String!, $sessionId: String) {
+    queryKnowledgeBase(input: $input, sessionId: $sessionId)
   }
 `;

@@ -182,11 +182,22 @@ def getKBMetadata(metadata):
     }
     return json.dumps(kbMetadata)
 
-def write_to_s3(callId, kbMetadata, transcript, summary):
+def format_summary(summary, metadata):
+    summary_dict = json.loads(summary)
+    summary_dict["MEETING NAME"]=metadata["CallId"]
+    summary_dict["MEETING DATE AND TIME"]=metadata["CreatedAt"]
+    summary_dict["MEETING DURATION (SECONDS)"]=int(metadata["TotalConversationDurationMillis"]/1000)
+    return json.dumps(summary_dict)
+
+def write_to_s3(callId, metadata, transcript, summary):
     s3 = boto3.client('s3')
     filename = posixify_filename(f"{callId}")
     summary_file_key = f"{S3_PREFIX}{filename}-SUMMARY.txt"
     transcript_file_key = f"{S3_PREFIX}{filename}-TRANSCRIPT.txt"
+    summary = format_summary(summary, metadata)
+    kbMetadata = getKBMetadata(metadata)
+    print(f"KB Summary: {summary}")
+    print(f"KB Metadata: {kbMetadata}")
     s3.put_object(Bucket=S3_BUCKET_NAME, Key=summary_file_key, Body=summary)
     print(f"Wrote summary to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}")
     s3.put_object(Bucket=S3_BUCKET_NAME, Key=f"{summary_file_key}.metadata.json", Body=kbMetadata)
@@ -202,17 +213,17 @@ def handler(event, context):
     try:
         transcript_json = get_transcripts(callId)
         transcript = transcript_json['transcript']
-        kbMetadata = getKBMetadata(transcript_json['metadata'])
+        metadata = transcript_json['metadata']
         summary = "No summary available"
         prompt_override = None
         if 'Prompt' in event:
             prompt_override = event['Prompt']
         summary = generate_summary(transcript, prompt_override)
-        print("Summary: ", summary)
-        write_to_s3(callId, kbMetadata, transcript, summary)
+        write_to_s3(callId, metadata, transcript, summary)
     except Exception as e:
         print(e)
         summary = 'An error occurred.'
+    print("Returning: ", json.dumps({"summary": summary}))
     return {"summary": summary}
     
 # for testing on terminal

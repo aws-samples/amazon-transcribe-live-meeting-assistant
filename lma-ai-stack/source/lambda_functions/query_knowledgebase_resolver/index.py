@@ -14,7 +14,7 @@ KB_CLIENT = boto3.client(
     region_name=KB_REGION
 )
 
-def get_kb_response(query, userId):
+def get_kb_response(query, userId, sessionId):
     input = {
         "input": {
             'text': query
@@ -37,6 +37,8 @@ def get_kb_response(query, userId):
             'type': 'KNOWLEDGE_BASE'
         }
     }
+    if sessionId:
+        input["sessionId"] = sessionId
     print("Amazon Bedrock KB Request: ", input)
     try:
         resp = KB_CLIENT.retrieve_and_generate(**input)
@@ -48,11 +50,38 @@ def get_kb_response(query, userId):
     print("Amazon Bedrock KB Response: ", json.dumps(resp))
     return resp
 
+
+def markdown_response(kb_response):
+    showContextText = True
+    message = kb_response.get("output", {}).get("text", {}) or kb_response.get(
+        "systemMessage") or "No answer found"
+    markdown = message
+    if showContextText:
+        contextText = ""
+        sourceLinks = []
+        for source in kb_response.get("citations", []):
+            for reference in source.get("retrievedReferences", []):
+                snippet = reference.get("content", {}).get(
+                    "text", "no reference text")
+                callId = reference.get("metadata",{}).get("CallId")
+                url = f"{callId}"
+                title = callId
+                contextText = f'{contextText}<br><callid href="{url}">{title}</callid><br>{snippet}\n'
+                sourceLinks.append(f'<callid href="{url}">{title}</callid>')
+        if contextText:
+            markdown = f'{markdown}\n<details><summary>Context</summary><p style="white-space: pre-line;">{contextText}</p></details>'
+        if len(sourceLinks):
+            markdown = f'{markdown}<br>Sources: ' + ", ".join(sourceLinks)
+    return markdown
+
+
 def handler(event, context):
     print("Received event: %s" % json.dumps(event))
     query = event["arguments"]["input"]
+    sessionId = event["arguments"].get("sessionId") or None
     userId = event["identity"]["username"]
     # future enhancements could allow additional metadata filters specified in the UI
-    kb_response = json.dumps(get_kb_response(query, userId))
-    print("Returning response: %s" % kb_response)
-    return kb_response
+    kb_response = get_kb_response(query, userId, sessionId)
+    kb_response["markdown"] = markdown_response(kb_response)
+    print("Returning response: %s" % json.dumps(kb_response))
+    return json.dumps(kb_response)
