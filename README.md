@@ -40,6 +40,7 @@ The following are some of the things LMA can do:
   <p align="left"><img src="./images/readme-recording.png" alt="recording" /></p>
 - **Inventory list of meetings** - LMA keeps track of all your meetings in a searchable list.
   <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" /></p>
+- **Gen AI queries across all your meetings** - LMA stores all your meeting transcripts and summaries in a separate Bedrock Knowledge base, and provides a chat interface where you can search for answers and references across all your meetings.
 - **Browser extension captures audio and meeting metadata from popular meeting apps** - The browser extension captures meeting metadata — the meeting title and names of active speakers — and audio from you (your microphone) and others (from the meeting browser tab). As of this writing, LMA supports Chrome for the browser extension, and Zoom, Teams, WebEx, and Chime for meeting apps (with others coming soon). _Standalone meeting apps don’t work with LMA — instead, launch your meetings in the browser._
   <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" width=200/></p>
 
@@ -99,6 +100,7 @@ Complete the following steps to launch the CloudFormation stack:
        - For **Amazon Q Application ID (existing)** enter your existing Q Business application ID (a UUID). You can copy it from the Amazon Q Business console.
          <p align="left"><img src="./images/readme-qbusinessapp-id.png" alt="QB App ID" width=350/></p>
        - Additional steps are required later. Carefully read the detailed directions documented in [Amazon Q Business integration in LMA](./lma-meetingassist-setup-stack/README_QBUSINESS.md) which guides you to complete identity management setup and QBusiness integration.
+1. For **Transcript Knowledge Base**, choose the default `BEDROCK_KNOWLEDGE_BASE (Use Existing)` (recommended) to enable generative AI queries on meeting transcripts (the new Meetings Query Tool), or choose `DISABLED` if you don't need this feature.
 1. For **all other parameters**, use the default values. If you want to customize the settings later, for example to add your own lambda functions, to use custom vocabularies and language models to improve accuracy, enable PII redaction, and more, you can update the stack for these parameters.
 1. Check the acknowledgement boxes, and choose Create stack.
 
@@ -108,6 +110,7 @@ The main CloudFormation stack uses nested stacks to create the following resourc
 - An [AWS Fargate](https://aws.amazon.com/fargate/) task with an [Application Load Balancer](https://aws.amazon.com/elasticloadbalancing/application-load-balancer/) providing a websocket server running code to consume stereo audio streams and relay to Amazon Transcribe, publish transcription segments in Kinesis Data Streams, and create and store stereo call recordings.
 - [Amazon Kinesis Data Stream](https://aws.amazon.com/kinesis/data-streams/) to relay call events and transcription segments to the enrichment processing function.
 - Meeting assist resources including the [QnABot on AWS solution](https://aws.amazon.com/solutions/implementations/aws-qnabot/) stack which interacts with [Amazon OpenSearch service](https://aws.amazon.com/opensearch-service/) and Amazon Bedrock.
+- [Amazon Bedrock Knowledge Bases](https://aws.amazon.com/bedrock/knowledge-bases/) to hold (1) documents and websites used by the Meeting Assistant, and (2) summaries, transcripts, and metadata used by the Meetings Query Tool to allow you to find information from your past meetings.
 - [AWS AppSync API](https://aws.amazon.com/appsync), which provides a GraphQL endpoint to support queries and real-time updates
 - Website components including S3 bucket, [Amazon CloudFront](https://aws.amazon.com/cloudfront/) distribution, and [Amazon Cognito](https://aws.amazon.com/cognito) user pool
 - A downloadable pre-configured browser extension application for Chrome browsers.
@@ -243,6 +246,21 @@ The browser extension is the most convenient way to stream metadata and audio fr
 <img src="./images/readme-stream-audio-open-recorded.png" alt="Stream audio open recorded meeting link" width="400"/>
 
 Use the **Stream Audio** feature to stream from any softphone app, meeting app, or any other streaming audio playing in the browser, along with your own audio captured from your selected microphone. Always obtain permission from others before recording them using LMA, or any other recording application.
+
+## Meetings Query Tool - query past meetings from the transcript knowledge base
+
+LMA now uses a Bedrock Knowledge Base to store all your meeting summaries, transcripts, and metadata. The new **Query Meetings Tool** in the UI provides a convenient chat interface where you can ask questions about past meetings, and get answers along with citations and links to the detailed meeting record.
+
+The transcript knowledge base is created for you if you did not disable it when you deploed the LMA stack. 
+
+When each meeting is ended, at the same time the summary is created LMA also writes a copy of the summary, the transcript, and metadata (owner, callId, timestamps, duration) into the same S3 bucket as the call recordings. The retention of these files is managed by an S3 lifecycle policy based on the stack parameter value for transcript retention (default 90 days).  The transcript knowledge base has a datasource that crawls these files in the S3 bucket to add new meetings and remove  meetings that have been deleted. An EventBridge scheduler starts the datasource sync every 15 minutes, so new meetings should be available in the knowledgebase within 15-30 minutes after the meeting is over. 
+
+Afer you've completed a few meetings, use the new **Meetings Query Tool** in the LMA UI to chat with your meetings transcript knowledge base. User based access control is enforced - LMA uses your authenticated username to match the metadata owner field, so you will query only meetings that you own unless you are the administrator user - the administrator user can query all meetings.
+
+<img src="./images/readme-meetings-query-tool.png" alt="readme-meetings-query-tool.png" width="600"/>
+
+
+Open the Context to see the references, and Shift+Click on the links to open the meeting details in a new browser tab.
 
 ## Processing flow overview
 
