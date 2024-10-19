@@ -30,7 +30,7 @@ def propsChanged(props, oldprops, fields):
     return False
 
 
-def addBotToAistack(props, oldprops):
+def configureAiStack(props, oldprops):
     asyncAgentAssistOrchestratorFunction = getStackResource(
         props["AISTACK"], "AsyncAgentAssistOrchestrator")
     response = lam.get_function_configuration(
@@ -44,6 +44,20 @@ def addBotToAistack(props, oldprops):
         Environment={"Variables": envVars}
     )
     print("Updated AsyncAgentAssistOrchestratorFunction Environment variable to add Lex bot.")
+
+    # Add Bedrock KB ID to the resolver function
+    kbId = props.get("TranscriptBedrockKnowledgeBaseId","Transcript KnowledgeBase is not enabled")
+    queryKnowledgeBaseResolverFunction = getStackResource(
+        props["AISTACK"], "QueryKnowledgeBaseResolverFunction")
+    response = lam.get_function_configuration(
+        FunctionName=queryKnowledgeBaseResolverFunction)
+    envVars = response["Environment"]["Variables"]
+    envVars["KB_ID"] = kbId
+    response = lam.update_function_configuration(
+        FunctionName=queryKnowledgeBaseResolverFunction,
+        Environment={"Variables": envVars}
+    )
+    print(f"Updated QueryKnowledgeBaseResolverFunction Environment variable to add Transcript KB_ID: {kbId}")
 
     print("Updating updating Cognito Authenticated Role for Agent Assist...")
     agentAssistBotAuthRole = getStackResource(
@@ -227,7 +241,7 @@ def handler(event, context):
         props = event["ResourceProperties"]
         oldprops = event.get("OldResourceProperties", {})
         try:
-            addBotToAistack(props, oldprops)
+            configureAiStack(props, oldprops)
             if props["QNABOTSTACK"]:
                 setupQnABot(props, oldprops)
         except Exception as e:

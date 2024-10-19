@@ -7,3 +7,4 @@ export const STREAM_AUDIO_PATH = '/stream';
 export const VIRTUAL_PARTICIPANT_PATH = '/virtual-participant';
 export const DEFAULT_PATH = CALLS_PATH;
 export const REDIRECT_URL_PARAM = 'redirect';
+export const MEETINGS_QUERY_PATH = `${CALLS_PATH}/query`;
