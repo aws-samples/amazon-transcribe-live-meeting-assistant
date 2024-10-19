@@ -1337,6 +1337,86 @@ Resources:
                   - dynamodb:UpdateItem
                 Resource: !GetAtt EventSourcingTable.Arn
 
+  QueryKnowledgeBaseResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt QueryKnowledgeBaseResolverFunctionExecutionRole.Arn
+      Runtime: python3.9
+      CodeUri: ../source/lambda_functions/query_knowledgebase_resolver
+      Description: Lambda function to query the meeting transcript knowledge base
+      MemorySize: 512
+      Timeout: 60
+      Environment:
+        Variables:
+          KB_ID: !Sub "<Placeholder>"
+          MODEL_ID: !Ref BedrockModelId
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/QueryKnowledgeBaseResolverFunction
+    DependsOn:
+      - QueryKnowledgeBaseResolverFunctionLogGroup
+
+  QueryKnowledgeBaseResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/QueryKnowledgeBaseResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+
+  QueryKnowledgeBaseResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: QueryKnowledgeBaseResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-BedrockKnowledgeBase
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:Retrieve"
+                  - "bedrock:RetrieveAndGenerate"
+                #TODO: Figure out how to restrict to target Transcript KB - created in a parallel nested stack
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+
+  AppSyncLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt QueryKnowledgeBaseResolverFunction.Arn
+
   AppSyncApiEncrypted:
     Type: AWS::AppSync::GraphQLApi
     Properties:
@@ -1383,6 +1463,17 @@ Resources:
       Name: Subscription
       Description: NONE type data source to set up subscription filtering
       Type: NONE
+
+  KnowledgeBaseDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: KnowledgeBase
+      Description: Interface to Bedrock KB for meeting transcript queries
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt QueryKnowledgeBaseResolverFunction.Arn
 
   AppSyncApiCache:
     Type: AWS::AppSync::ApiCache
@@ -1668,6 +1759,32 @@ Resources:
       Runtime:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
+
+  QueryKnowledgeBaseResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt KnowledgeBaseDataSource.Name
+      TypeName: Query
+      FieldName: queryKnowledgeBase
+      Runtime: 
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/queryKnowledgeBase.js
+
+  QueryKnowledgeBaseResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt KnowledgeBaseDataSource.Name
+      TypeName: Query
+      FieldName: queryKnowledgeBase
+      Runtime: 
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/queryKnowledgeBase.js
 
   ##########################################################################
   # Web Site

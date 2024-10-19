@@ -1188,13 +1188,17 @@ Resources:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
 
-  UpdateLMASettingsWithAssistantWakePhraseRegEx:
+  UpdateLMASettingsValues:
     Type: AWS::CloudFormation::CustomResource
     Properties:
       ServiceToken: !GetAtt UpdateLMASettingsFunction.Arn
       LCASettingsName: !Ref LMASettingsParameter
       LCASettingsKeyValuePairs:
         AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
+        ShouldUseTranscriptKnowledgeBase: !If
+        - ShouldUseTranscriptKnowledgeBase
+        - True
+        - False
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 

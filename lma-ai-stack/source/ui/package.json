@@ -6,9 +6,9 @@
     "@aws-amplify/ui-components": "^1.9.6",
     "@aws-amplify/ui-react": "^1.2.26",
     "@aws-crypto/sha256-browser": "^2.0.1",
+    "@aws-sdk/client-sfn": "^3.252.0",
     "@aws-sdk/client-ssm": "^3.215.0",
     "@aws-sdk/client-translate": "^3.245.0",
-    "@aws-sdk/client-sfn": "^3.252.0",
     "@aws-sdk/hash-node": "^3.78.0",
     "@aws-sdk/middleware-retry": "^3.254.0",
     "@aws-sdk/protocol-http": "^3.78.0",
@@ -22,6 +22,7 @@
     "@testing-library/react": "^12.1.5",
     "@testing-library/user-event": "^13.5.0",
     "aws-amplify": "^4.3.21",
+    "axios": "^0.28.0",
     "graphql-tag": "^2.12.6",
     "prop-types": "^15.8.1",
     "react": "^17.0.2",
@@ -34,8 +35,7 @@
     "react-use-websocket": "^3.0.0",
     "rehype-raw": "^6.1.1",
     "vuera": "^0.2.7",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.0/xlsx-0.20.0.tgz",
-    "axios": "^0.28.0"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.0/xlsx-0.20.0.tgz"
   },
   "scripts": {
     "start": "./download-lexwebui.sh && ./generate-lexwebui-json.sh && react-scripts start",
@@ -63,13 +63,14 @@
     ]
   },
   "devDependencies": {
+    "@babel/plugin-proposal-private-property-in-object": "^7.18.6",
     "eslint": "^8.14.0",
     "eslint-config-airbnb": "^19.0.4",
     "eslint-config-prettier": "^8.5.0",
     "eslint-plugin-import": "^2.26.0",
     "eslint-plugin-jest": "^26.1.5",
     "eslint-plugin-jsx-a11y": "^6.5.1",
-    "eslint-plugin-prettier": "^4.0.0",
+    "eslint-plugin-prettier": "^4.2.1",
     "eslint-plugin-react": "^7.29.4",
     "eslint-plugin-react-hooks": "^4.4.0",
     "prettier": "^2.6.2"
