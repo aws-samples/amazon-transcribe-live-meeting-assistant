@@ -5,11 +5,18 @@ import { Route, Switch } from 'react-router-dom';
 import { SideNavigation } from '@awsui/components-react';
 import { LMA_VERSION } from '../common/constants';
 
-import { CALLS_PATH, DEFAULT_PATH, STREAM_AUDIO_PATH, VIRTUAL_PARTICIPANT_PATH } from '../../routes/constants';
+import {
+  CALLS_PATH,
+  MEETINGS_QUERY_PATH,
+  DEFAULT_PATH,
+  STREAM_AUDIO_PATH,
+  VIRTUAL_PARTICIPANT_PATH,
+} from '../../routes/constants';
 
 export const callsNavHeader = { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` };
 export const callsNavItems = [
   { type: 'link', text: 'Meetings', href: `#${CALLS_PATH}` },
+  { type: 'link', text: 'Meetings Query Tool', href: `#${MEETINGS_QUERY_PATH}` },
   {
     type: 'section',
     text: 'Sources',

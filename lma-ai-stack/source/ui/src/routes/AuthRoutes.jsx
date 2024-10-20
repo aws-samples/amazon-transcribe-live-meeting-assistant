@@ -14,6 +14,7 @@ import useAppContext from '../contexts/app';
 import CallsRoutes from './CallsRoutes';
 import StreamAudioRoutes from './StreamAudioRoutes';
 import VirtualParticipantRoutes from './VirtualParticipantRoutes';
+import MeetingsQueryRoutes from './MeetingsQueryRoutes';
 
 import {
   CALLS_PATH,
@@ -22,6 +23,7 @@ import {
   LOGOUT_PATH,
   STREAM_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
+  MEETINGS_QUERY_PATH,
 } from './constants';
 
 const logger = new Logger('AuthRoutes');
@@ -47,6 +49,9 @@ const AuthRoutes = ({ redirectParam }) => {
         </Route>
         <Route path={LOGOUT_PATH}>
           <AmplifySignOut />
+        </Route>
+        <Route path={MEETINGS_QUERY_PATH}>
+          <MeetingsQueryRoutes />
         </Route>
         <Route path={STREAM_AUDIO_PATH}>
           <StreamAudioRoutes />

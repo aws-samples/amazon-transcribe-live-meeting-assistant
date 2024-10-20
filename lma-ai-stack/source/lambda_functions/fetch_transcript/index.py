@@ -13,45 +13,52 @@ LCA_CALL_EVENTS_TABLE = os.environ['LCA_CALL_EVENTS_TABLE']
 
 runtime = boto3.client('runtime.sagemaker')
 logger = logging.getLogger(__name__)
-ddb = boto3.resource('dynamodb')
 
 issue_remover = re.compile('<span class=\'issue-pill\'>Issue Detected</span>')
 html_remover = re.compile('<[^>]*>')
 filler_remover = re.compile('(^| )([Uu]m|[Uu]h|[Ll]ike|[Mm]hm)[,]?')
 
-lca_call_events = ddb.Table(LCA_CALL_EVENTS_TABLE)
+ddb = boto3.resource('dynamodb')
+ddbTable = ddb.Table(LCA_CALL_EVENTS_TABLE)
 
+def get_call_metadata(callid):
+    pk = 'c#'+callid
+    print(f"Call metadata PK: {pk}")
+    try:
+        metadata = ddbTable.get_item(
+            Key={'PK': pk, 'SK': pk},
+            TableName=LCA_CALL_EVENTS_TABLE
+            )
+    except ClientError as err:
+        logger.error("Error getting metadata from LCA Call Events table %s: %s",
+                     err.response['Error']['Code'], err.response['Error']['Message'])
+        raise
+    else:
+        return metadata['Item']
 
 def get_transcripts(callid):
-
     pk = 'trs#'+callid
-    print(pk)
-
+    print(f"Call transcripts PK: {pk}")
     try:
-        response = lca_call_events.query(KeyConditionExpression=Key('PK').eq(pk), FilterExpression=(
+        response = ddbTable.query(KeyConditionExpression=Key('PK').eq(pk), FilterExpression=(
             Attr('Channel').eq('AGENT') | Attr('Channel').eq('CALLER')) & Attr('IsPartial').eq(False))
-        # response = lca_call_events.query(KeyConditionExpression=Key('PK').eq(pk))
+        # response = ddbTable.query(KeyConditionExpression=Key('PK').eq(pk))
     except ClientError as err:
         logger.error("Error getting transcripts from LCA Call Events table %s: %s",
                      err.response['Error']['Code'], err.response['Error']['Message'])
         raise
     else:
-        # print(response['Items'])
         return response['Items']
 
 
 def preprocess_transcripts(transcripts, condense, includeSpeaker):
     data = []
-
     transcripts.sort(key=lambda x: x['EndTime'])
-
-    last_channel = 'start'
     for row in transcripts:
-        transcript = row['Transcript']
-        
+        transcript = row['Transcript']        
         # prefix Speaker name to transcript segments if "IncludeSpeaker" parameter is set to True. 
         if includeSpeaker == True:
-            # For LMA 'Hey Q' answers, we should keep assistant replies as part of the transcript for any contextual followup 'Hey Q' questions.
+            # For LMA 'OK Assistant' answers, we should keep assistant replies as part of the transcript for any contextual followup 'OK Assistant' questions.
             if row['Channel'] == 'AGENT_ASSISTANT':
                 # Add the 'MeetingAssistant:' prefix for assistant messages
                 transcript = "MeetingAssistant: " + transcript
@@ -65,14 +72,11 @@ def preprocess_transcripts(transcripts, condense, includeSpeaker):
             transcript = remove_issues(transcript)
             transcript = remove_html(transcript)
             transcript = remove_filler_words(transcript).strip()
-
             if len(transcript) > 1:
                 transcript = '\n' + transcript
         else:
             transcript = '\n' + transcript
-
         data.append(transcript)
-
     return data
 
 
@@ -119,8 +123,12 @@ def lambda_handler(event, context):
     transcripts = preprocess_transcripts(transcripts, preProcess, includeSpeaker)
     transcript_string = ''.join(transcripts)
     transcript_string = truncate_number_of_words(transcript_string, tokenCount)
-    response = {'transcript': transcript_string}
-    # print(transcript_string)
+    metadata = get_call_metadata(callid)
+    response = {
+        'transcript': transcript_string,
+        'metadata': metadata
+    }
+    print("Fetch Transcript response:", response)
     return response
 
 

@@ -100,6 +100,11 @@ Parameters:
       JSON string specifying key/value pairs to configure new defaults
       for QnAbot Settings
 
+  TranscriptBedrockKnowledgeBaseId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+
   WebAppBucket:
     Type: String
     Description: The LMA Web App Bucket Name.
@@ -177,7 +182,7 @@ Conditions:
       !Condition ShouldConfigureQnabot,
       !Not [!Condition ShouldConfigureBedrockKB],
       !Not [!Condition ShouldConfigureBedrockAgent],
-      !Not [!Condition ShouldCreateQPlugin]
+      !Not [!Condition ShouldCreateQPlugin],
     ]
   HasSummaryLambdaFunction:
     !Not [!Equals [!Ref TranscriptSummaryFunctionArn, ""]]
@@ -186,6 +191,8 @@ Conditions:
       - Fn::Equals:
           - ""
           - Ref: BedrockKnowledgeBaseS3BucketName
+  ShouldConfigureTranscriptBedrockKB:
+    !Not [!Equals [!Ref TranscriptBedrockKnowledgeBaseId, ""]]
 
 Resources:
   # Custom resource to transform input to lowercase.
@@ -325,7 +332,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - "bedrock:ApplyGuardrail"
-                Resource: '*'
+                Resource: "*"
           PolicyName: BedrockPolicy
         - PolicyDocument:
             Version: 2012-10-17
@@ -416,7 +423,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - "bedrock:ApplyGuardrail"
-                Resource: '*'
+                Resource: "*"
           PolicyName: BedrockPolicy
         - PolicyDocument:
             Version: 2012-10-17
@@ -504,7 +511,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - "bedrock:ApplyGuardrail"
-                Resource: '*'
+                Resource: "*"
           PolicyName: BedrockPolicy
         - PolicyDocument:
             Version: 2012-10-17
@@ -704,11 +711,15 @@ Resources:
         - !If
           - ShouldConfigureBedrockKB
           - !Ref QNABedrockKnowledgeBaseFunction
-          - !If 
+          - !If
             - ShouldConfigureBedrockAgent
             - !Ref QNABedrockAgentFunction
             - !Ref QNABedrockLLMFunction
       QnaBotSettings: !Ref QnaBotSettings
+      TranscriptBedrockKnowledgeBaseId: !If
+      - ShouldConfigureBedrockKB
+      - !Ref TranscriptBedrockKnowledgeBaseId
+      - !Ref AWS::NoValue
       # Changes to Params below force MeetingAssist Setup to execute.
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
       TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
@@ -862,7 +873,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - "bedrock:ApplyGuardrail"
-                Resource: '*'
+                Resource: "*"
           PolicyName: BedrockInvoke
         - PolicyDocument:
             Version: 2012-10-17
@@ -908,7 +919,7 @@ Resources:
             reason: No VPC resources.
           - id: W92
             reason: No requirements to set reserved concurrencies.
-            
+
 Outputs:
   QBusinessLambdaHookFunctionRoleArn:
-    Value: !If [ShouldCreateQPlugin,  !GetAtt "LambdaFunctionRole.Arn", "NA"]
+    Value: !If [ShouldCreateQPlugin, !GetAtt "LambdaFunctionRole.Arn", "NA"]

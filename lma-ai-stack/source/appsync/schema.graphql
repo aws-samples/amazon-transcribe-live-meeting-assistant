@@ -131,6 +131,7 @@ type Query @aws_cognito_user_pools
 	listCalls(endDateTime: AWSDateTime, startDateTime: AWSDateTime): CallList
 	listCallsDateHour(date: AWSDate, hour: Int): CallList
 	listCallsDateShard(date: AWSDate, shard: Int): CallList
+    queryKnowledgeBase(input: String!, sessionId: String): String
 }
 
 enum Sentiment {

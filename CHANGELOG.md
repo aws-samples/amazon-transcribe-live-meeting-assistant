@@ -7,24 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2024-10-20
+
+### Added
+- Knowledge base of meeting transcripts #129
+- Meetings Query Tool for running GenAI queries across the new meetings knowledge base [README](./README.md#meetings-query-tool---query-past-meetings-from-the-transcript-knowledge-base)
+
+### Fixed
+- Stops transcribing calls without error messaging - added exception catch and retry for Transcribe sessions - Issue #137
+- Virtual Participant meeting won't open in UI if meeting name has &, /, or + symbols #142
+- Fixes for differences between Zoom and Zoom Enterprise #132
+
 ## [0.2.3] - 2024-10-11
 
 ### Added
-
 - Allow meeting assistant to perform custom actions using a Bedrock Agent #128
 
 ### Fixed
-
 - Fixes for differences between Zoom and Zoom Enterprise - PR #132
 
 ## [0.2.2] - 2024-10-03
 
 ### Added
-
 - Ability to apply optional Bedrock Guardrail when MeetingAssistant is BEDROCK_KNOWLEDGE_BASE or BEDROCK_LLM - Issue #53 
 
 ### Fixed
-
 - When using Virtual Participant (preview) no audio recording is created. #126
 - Use selected Transcribe language for virtual-participant - PR #118 
 - Updated QnABot nested stack to QnABot v6.1.1 - PR #119
@@ -182,6 +189,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.2.4]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.4
 [0.2.3]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.3
 [0.2.2]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.2
 [0.2.1]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.1
