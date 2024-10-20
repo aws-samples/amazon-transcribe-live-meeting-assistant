@@ -244,6 +244,17 @@ export const startTranscribe = async (
 
             if (sessionId) {
                 tsParams.SessionId = sessionId;
+                server.log.info(
+                    `[TRANSCRIBING]: [${
+                        callMetaData.callId
+                    }] - Retry Transcribe streaming attempt ${retryCount} - use existing sessionId: ${sessionId}`
+                );
+            } else {
+                server.log.info(
+                    `[TRANSCRIBING]: [${
+                        callMetaData.callId
+                    }] - Initializing Transcribe streaming - no existing sessionId`
+                );  
             }
 
             if (TRANSCRIBE_LANGUAGE_CODE === 'identify-language') {
