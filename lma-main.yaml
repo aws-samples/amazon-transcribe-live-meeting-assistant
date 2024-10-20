@@ -1223,6 +1223,9 @@ Resources:
         Domain: !Ref Domain
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
+  LMACommunnicationSNSTopic:
+    Type: AWS::SNS::Topic
+
   COGNITOSTACK:
     Type: AWS::CloudFormation::Stack
     DependsOn:
@@ -1241,6 +1244,7 @@ Resources:
         AdminEmail: !Ref AdminEmail
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         LMASettingsParameterName: !Ref LMASettingsParameter
+        LMACommunnicationSNSTopic: !Ref LMACommunnicationSNSTopic
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
   AISTACK: 

@@ -28,6 +28,10 @@ Parameters:
     Type: String
     Description: LMA settings SSM Parameter store
 
+  LMACommunnicationSNSTopic:
+    Type: String
+    Description: SNA Topic to send notifications to users
+
   S3BucketName:
     Type: String
     Default: ""
@@ -399,31 +403,53 @@ Resources:
     Condition: ShouldAllowSignUpEmailDomain
     Properties:
       Handler: index.handler
-      Runtime: nodejs18.x
-      Timeout: 3
+      Runtime: python3.11
+      Timeout: 10
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Subscribe
+              Resource: !Ref LMACommunnicationSNSTopic
       Environment:
         Variables:
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
+          LMA_COMMUNICATION_SNS_TOPIC: !Ref LMACommunnicationSNSTopic
       InlineCode: |
-        exports.handler = async (event, context) => {
-          console.log(event);
-          const allowed_domains = (
-              process.env?.ALLOWED_SIGNUP_EMAIL_DOMAINS
-              .split(",").map(domain => {return domain.trim()})
-          );
-          const { email } = event.request?.userAttributes;
-          if (!email || !email.includes('@')) {
-            throw Error('Username does not exists or invalid email address');
-          }
-          const emailDomain = email?.split('@')[1];
-          if (!emailDomain || !allowed_domains) {
-            throw new Error('Server error - invalid configuration');
-          }
-          if (!allowed_domains.includes(emailDomain)) {
-            throw new Error('Invalid email address domain');
-          }
-          return event;
-        };
+        import os
+        import boto3
+        import json
+        
+        def lambda_handler(event, context):
+            print(json.dumps(event))
+        
+            allowed_domains = [
+                domain.strip() 
+                for domain in os.environ.get('ALLOWED_SIGNUP_EMAIL_DOMAINS', '').split(',')
+            ]
+        
+            user_attributes = event.get('request', {}).get('userAttributes', {})
+            email = user_attributes.get('email')
+        
+            if not email or '@' not in email:
+                raise ValueError('Username does not exist or invalid email address')
+        
+            email_domain = email.split('@')[1]
+        
+            if not email_domain or not allowed_domains:
+                raise ValueError('Server error - invalid configuration')
+        
+            if email_domain not in allowed_domains:
+                raise ValueError('Invalid email address domain')
+        
+            sns_client = boto3.client('sns')
+            response = sns_client.subscribe(
+                TopicArn=os.environ.get('LMA_COMMUNICATION_SNS_TOPIC'),
+                Protocol="email",
+                Endpoint=email
+            )
+        
+            return event
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/CognitoUserPoolEmailDomainVerifyFunction

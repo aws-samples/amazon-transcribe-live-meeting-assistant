@@ -76,12 +76,12 @@ def verify_cognito_token(token):
             token,
             signing_key.key,
             algorithms=["RS256"],
+            issuer=f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}",
             options={
                 "verify_exp": True,  # Verify expiration
                 "verify_iss": True,  # Verify issuer
                 "verify_aud": False,  # Don't verify audience as it's not present
-            }
-            issuer=f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}"
+            },
         )
 
         print("Token is valid:", decoded_token)
