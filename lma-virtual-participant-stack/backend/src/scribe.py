@@ -6,7 +6,7 @@ from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent
 import sounddevice as sd
-from datetime import datetime
+from botocore.exceptions import BotoCoreError, ClientError
 
 # globals
 current_speaker = "none"
@@ -15,11 +15,10 @@ current_speaker = "none"
 class MyEventHandler(TranscriptResultStreamHandler):
     async def handle_transcript_event(self, transcript_event: TranscriptEvent):
         for result in transcript_event.transcript.results:
-            print(f'Transcribe result: {result}')
             kds.send_add_transcript_segment(current_speaker, result)
 
 
-async def write_audio(stream):
+async def write_audio(transcribe_stream, recording_stream):
     loop = asyncio.get_event_loop()
     input_queue = asyncio.Queue()
 
@@ -36,23 +35,70 @@ async def write_audio(stream):
     ):
         while details.start:
             indata, status = await input_queue.get()
-            await stream.input_stream.send_audio_event(audio_chunk=indata)
-        await stream.input_stream.end_stream()
+            await transcribe_stream.input_stream.send_audio_event(audio_chunk=indata)
+            recording_stream.write(indata)
+        await transcribe_stream.input_stream.end_stream()
+        recording_stream.close()
 
 
 async def transcribe():
     print("Transcribe starting")
     kds.send_start_meeting()
-    stream = await TranscribeStreamingClient(region="us-east-1").start_stream_transcription(
-        language_code="en-US",
-        media_sample_rate_hz=16000,
-        media_encoding="pcm",
-    )
-    await asyncio.gather(
-        write_audio(stream),
-        MyEventHandler(stream.output_stream).handle_events()
-    )
-    print("Transcribe stopped")
+
+    if details.transcribe_language_code in ["identify-language", "identify-multiple-languages"]:
+        print("WARNING: Language identification option has been selected, but is not supported in Virtual Participant")
+        language_code = details.transcribe_preferred_language if details.transcribe_preferred_language != "None" else "en-US"
+    else:
+        language_code = details.transcribe_language_code
+
+    print(f"Using Transcribe language code: {language_code}")
+
+    max_retries = 5
+    retry_delay = 5  # seconds
+    session_id = None
+    transcribe_client = TranscribeStreamingClient(region="us-east-1")
+
+    for attempt in range(max_retries):
+        try:
+            if session_id is None:
+                # Initial attempt without session_id
+                transcribe_stream = await transcribe_client.start_stream_transcription(
+                    language_code=language_code,
+                    media_sample_rate_hz=16000,
+                    media_encoding="pcm"
+                )
+                session_id = transcribe_stream.response.session_id
+                print(f"Started new transcription session with ID: {session_id}")
+            else:
+                # Retry attempt with existing session_id
+                transcribe_stream = await transcribe_client.start_stream_transcription(
+                    language_code=language_code,
+                    media_sample_rate_hz=16000,
+                    media_encoding="pcm",
+                    session_id=session_id
+                )
+                print(f"Resumed transcription session with ID: {session_id}")
+
+            recording_stream = open(details.tmp_recording_filename, "wb")
+            await asyncio.gather(
+                write_audio(transcribe_stream, recording_stream),
+                MyEventHandler(transcribe_stream.output_stream).handle_events()
+            )
+            print("Transcribe completed successfully")
+            break
+        except (BotoCoreError, ClientError) as e:
+            print(f"Transcribe error (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            if attempt < max_retries - 1:
+                print(f"Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+            else:
+                print("Max retries reached. Transcribe stopped.")
+        except Exception as e:
+            print(f"Unexpected error: {str(e)}")
+            print("Transcribe stopped due to unexpected error.")
+            break
+
+    print("Transcribe function completed")
 
 
 async def speaker_change(speaker):

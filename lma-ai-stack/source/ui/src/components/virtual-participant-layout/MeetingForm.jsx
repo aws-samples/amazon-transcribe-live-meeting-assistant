@@ -48,6 +48,9 @@ const MeetingForm = () => {
           meetingName,
           meetingTime: meetingDateTimeFormatted,
           userName,
+          accessToken: user.signInUserSession.accessToken.jwtToken,
+          idToken: user.signInUserSession.idToken.jwtToken,
+          rereshToken: user.signInUserSession.refreshToken.token,
         },
       }),
     };
@@ -78,7 +81,10 @@ const MeetingForm = () => {
       <Form variant="embedded">
         <SpaceBetween direction="vertical" size="l">
           <FormField label="Meeting Name">
-            <Input onChange={({ detail }) => setMeetingName(detail.value)} value={meetingName} />
+            <Input
+              onChange={({ detail }) => setMeetingName(detail.value.replace(/[/?#%+&]/g, '|'))}
+              value={meetingName}
+            />
           </FormField>
           <FormField label="Meeting Platform">
             <Select

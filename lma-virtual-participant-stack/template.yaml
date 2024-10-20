@@ -61,6 +61,18 @@ Parameters:
     Description: S3 location of the browser extension source code zipfile
 
   # transcibe parameters
+
+  EnableAudioRecording:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable or disable recording of audio during a meeting. If set to false, the
+      meeting will not be recorded.
+      If set to true, the meeting will be recorded.
+
   S3BucketName:
     Type: String
     Description: >
@@ -71,7 +83,7 @@ Parameters:
 
   AudioFilePrefix:
     Type: String
-    Default: lca-audio-recordings/
+    Default: lma-audio-recordings/
     Description: >-
       The Amazon S3 prefix where the merged output audio files will be saved (must end in "/")
 
@@ -464,7 +476,6 @@ Resources:
     Properties:
       ServiceToken: !GetAtt ECSRoleCustomResourceFunction.Arn
 
-  ### Bot Resources ###
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -524,22 +535,6 @@ Resources:
                 Action:
                   - "comprehend:DetectPiiEntities"
                 Resource: "*"
-        - PolicyName: InvokeModelPolicy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "bedrock:InvokeModel"
-                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0"
-        - PolicyName: SendRawEmailPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "ses:SendRawEmail"
-                Resource: "*"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -573,6 +568,8 @@ Resources:
         - Environment:
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            - Name: SHOULD_RECORD_CALL
+              Value: !Ref EnableAudioRecording
             - Name: RECORDINGS_BUCKET_NAME
               Value: !Ref S3BucketName
             - Name: RECORDINGS_KEY_PREFIX
@@ -887,6 +884,18 @@ Resources:
                           {
                             "Name": "LMA_USER",
                             "Value.$": "$.data.userName"
+                          },
+                          {
+                            "Name": "USER_ACCESS_TOKEN",
+                            "Value.$": "$.data.accessToken"
+                          },
+                          {
+                            "Name": "USER_ID_TOKEN",
+                            "Value.$": "$.data.idToken"
+                          },
+                          {
+                            "Name": "USER_REFRESH_TOKEN",
+                            "Value.$": "$.data.rereshToken"
                           }
                         ]
                       }

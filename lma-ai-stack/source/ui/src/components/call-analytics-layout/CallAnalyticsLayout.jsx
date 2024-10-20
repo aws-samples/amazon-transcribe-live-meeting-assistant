@@ -14,6 +14,7 @@ import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
 
 import CallList from '../call-list';
 import CallDetails from '../call-details';
+import MeetingsQueryLayout from '../meetings-query-layout';
 import { appLayoutLabels } from '../common/labels';
 
 import Navigation from './navigation';
@@ -119,6 +120,9 @@ const CallAnalyticsLayout = () => {
           <Switch>
             <Route exact path={path}>
               <CallList />
+            </Route>
+            <Route path={`${path}/query`}>
+              <MeetingsQueryLayout />
             </Route>
             <Route path={`${path}/:callId`}>
               <CallDetails />

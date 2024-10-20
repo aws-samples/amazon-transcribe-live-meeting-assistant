@@ -16,6 +16,12 @@ Parameters:
     Description: >-
       Comma separated list of S3 prefixes with path to your source documents e.g. "my/documents/here/", "prefix1/, prefix2/"
 
+  pS3SyncScheduleExpression:
+    Type: String
+    Default: "cron(0 0 * * ? *)"
+    Description: >-
+      Enter a schedule expression for when the S3 sync should be triggered. See https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/ScheduledEvents.html for examples.
+
   pWebCrawlerURLs:
     Type: String
     Default: ""
@@ -34,6 +40,12 @@ Parameters:
       Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
       Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
       Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
+
+  pWebSyncScheduleExpression:
+    Type: String
+    Default: "cron(0 0 * * ? *)"
+    Description: >-
+      Enter a schedule expression for when the Web sync should be triggered, or leave blank for no sync. See https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/ScheduledEvents.html for examples.
 
   pEmbedModel:
     Type: String
@@ -100,8 +112,10 @@ Metadata:
         Parameters:
           - pKnowledgeBaseBucketName
           - pInputDocumentUploadFolderPrefix
+          - pS3SyncScheduleExpression
           - pWebCrawlerURLs
           - pWebCrawlerScope
+          - pWebSyncScheduleExpression
       - Label:
           default: Embedding Model
         Parameters:
@@ -125,10 +139,14 @@ Metadata:
         default: Existing S3 bucket with knowledge base source documents (optional).
       pInputDocumentUploadFolderPrefix:
         default: S3 prefix(es) for your content (optional)
+      pS3SyncScheduleExpression:
+        default: S3 sync schedule expression
       pWebCrawlerURLs:
         default: Publicly accessible URLs for web crawling (optional)
       pWebCrawlerScope:
         default: Web crawl sync scope
+      pWebSyncScheduleExpression:
+        default: Web sync schedule expression
       pEmbedModel:
         default: Choose an embedding model
       pChunkingStrategy:
@@ -190,7 +208,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 30
       InlineCode: |
         import cfnresponse
@@ -213,7 +231,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 30
       InlineCode: |
         import cfnresponse
@@ -221,7 +239,7 @@ Resources:
         def handler(event, context):
           print(event)
           urls = event['ResourceProperties'].get('WebCrawlerURLs', '').split(',')
-          seedUrls = [{'url': url.strip()} for url in urls]
+          seedUrls = [{'Url': url.strip()} for url in urls]
           responseData = {'SeedUrls': seedUrls}
           cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
 
@@ -289,7 +307,7 @@ Resources:
     Type: AWS::Lambda::LayerVersion
     Properties:
       CompatibleRuntimes:
-        - python3.11
+        - python3.12
       Content: ./opensearchpy_layer
       Description: opensearchpy layer including requests, requests-aws4auth, and boto3-1.34.82
       LicenseInfo: Apache-2.0
@@ -376,7 +394,7 @@ Resources:
         Fn::GetAtt:
           - OSSSetupLambdaFunctionRole
           - Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 840
       Code: ./src/oss_setup
       Layers:
@@ -549,6 +567,7 @@ Resources:
       - KnowledgeBase
       - OSSIndexCustomResource
     Properties:
+      DataDeletionPolicy: DELETE
       DataSourceConfiguration:
         Type: S3
         S3Configuration:
@@ -588,82 +607,40 @@ Resources:
                     - 20
                     - Ref: AWS::NoValue
 
-  # Custom Resource to create Web Crawler
-  # TODO replace custom resource when WebCrawler is supported by CloudFormation
-  WebCrawlerKBDataSourceFunctionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "bedrock:CreateDataSource"
-                  - "bedrock:DeleteDataSource"
-                  - "bedrock:UpdateDataSource"
-                  - "bedrock:StartIngestionJob"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:knowledge-base/${KnowledgeBase}"
-          PolicyName: BedrockPolicy
-
-  WebCrawlerKBDataSourceFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      Handler: handler.lambda_handler
-      Role: !GetAtt "WebCrawlerKBDataSourceFunctionRole.Arn"
-      Runtime: python3.11
-      Layers:
-        - !Ref OpenSearchPyLayer
-      Timeout: 600
-      MemorySize: 128
-      Code: ./src/kb_web_crawler_custom_resource
-
-  WebCrawlerKBDataSource:
-    #Type: AWS::Bedrock::DataSource
-    Type: AWS::CloudFormation::CustomResource
+  WebKBDataSource:
+    Type: AWS::Bedrock::DataSource
     Condition: IsWebDataSource
     DependsOn:
       - KnowledgeBase
       - OSSIndexCustomResource
     Properties:
-      ServiceToken: !GetAtt WebCrawlerKBDataSourceFunction.Arn
-      dataDeletionPolicy: DELETE
-      dataSourceConfiguration:
-        type: WEB
-        webConfiguration:
-          crawlerConfiguration:
-            crawlerLimits:
-              rateLimit: 300
-            scope: !If
+      DataDeletionPolicy: DELETE
+      DataSourceConfiguration:
+        Type: WEB
+        WebConfiguration:
+          CrawlerConfiguration:
+            CrawlerLimits:
+              RateLimit: 300
+            Scope: !If
               - HasWebCrawlerScope
               - Ref: pWebCrawlerScope
               - Ref: AWS::NoValue
-          sourceConfiguration:
-            urlConfiguration:
-              seedUrls: !GetAtt GetSeedUrls.SeedUrls
-      description: Web KnowKnowledge Base Data Source
-      knowledgeBaseId:
+          SourceConfiguration:
+            UrlConfiguration:
+              SeedUrls: !GetAtt GetSeedUrls.SeedUrls
+      Description: Web KnowKnowledge Base Data Source
+      KnowledgeBaseId:
         Ref: KnowledgeBase
-      name: !Sub "WebDataSource-${AWS::StackName}"
-      vectorIngestionConfiguration:
-        chunkingConfiguration:
-          chunkingStrategy:
+      Name: !Sub "WebDataSource-${AWS::StackName}"
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy:
             Fn::If:
               - IsChunkingStrategyFixedOrDefault
               - FIXED_SIZE
               - NONE
-          fixedSizeChunkingConfiguration:
-            maxTokens:
+          FixedSizeChunkingConfiguration:
+            MaxTokens:
               Fn::If:
                 - IsChunkingStrategyFixed
                 - Ref: pMaxTokens
@@ -671,7 +648,7 @@ Resources:
                     - IsChunkingStrategyDefault
                     - 300
                     - Ref: AWS::NoValue
-            overlapPercentage:
+            OverlapPercentage:
               Fn::If:
                 - IsChunkingStrategyFixed
                 - Ref: pOverlapPercentage
@@ -679,6 +656,67 @@ Resources:
                     - IsChunkingStrategyDefault
                     - 20
                     - Ref: AWS::NoValue
+
+  # EventBridge schedulers for data sources
+  S3KBDataSourceScheduler:
+    Type: AWS::Scheduler::Schedule
+    Condition: IsS3DataSource
+    Properties:
+      Description: "Rule to start LMA Bedrock KB S3 datasource ingestion job on a schedule"
+      FlexibleTimeWindow: 
+        Mode: "OFF"
+      ScheduleExpression: !Ref pS3SyncScheduleExpression
+      ScheduleExpressionTimezone: "UTC"
+      State: "ENABLED"
+      Target:
+        Arn: "arn:aws:scheduler:::aws-sdk:bedrockagent:startIngestionJob"
+        RoleArn: !GetAtt  KBDataSourceSchedulerRole.Arn
+        Input: !Sub |
+              {
+                "DataSourceId": "${S3KBDataSource.DataSourceId}",
+                "KnowledgeBaseId": "${KnowledgeBase}"
+              }
+
+  # EventBridge schedulers for data sources
+  WebKBDataSourceScheduler:
+    Type: AWS::Scheduler::Schedule
+    Condition: IsWebDataSource
+    Properties:
+      Description: "Rule to start LMA Bedrock KB S3 datasource ingestion job on a schedule"
+      FlexibleTimeWindow: 
+        Mode: "OFF"
+      ScheduleExpression: !Ref pWebSyncScheduleExpression
+      ScheduleExpressionTimezone: "UTC"
+      State: "ENABLED"
+      Target:
+        Arn: "arn:aws:scheduler:::aws-sdk:bedrockagent:startIngestionJob"
+        RoleArn: !GetAtt  KBDataSourceSchedulerRole.Arn
+        Input: !Sub |
+              {
+                "DataSourceId": "${WebKBDataSource.DataSourceId}",
+                "KnowledgeBaseId": "${KnowledgeBase}"
+              }
+
+  KBDataSourceSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BedrockAgentStartIngestionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:StartIngestionJob"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:knowledge-base/${KnowledgeBase}"
 
 Outputs:
   KnowledgeBaseS3BucketName:

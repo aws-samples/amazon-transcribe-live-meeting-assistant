@@ -127,7 +127,7 @@ install: install-python-venv install-python-requirements install-node-dependenci
 # prepend python virtual env bin directories to path
 VIRTUALENV_DEV_BIN_DIR ?= "$(VIRTUALENV_DEV_DIR)/bin"
 VIRTUALENV_BUILD_BIN_DIR ?= "$(VIRTUALENV_BUILD_DIR)/bin"
-export PATH := "$(VIRTUALENV_BUILD_BIN_DIR):$(VIRTUALENV_DEV_BIN_DIR):$(PATH)"
+export PATH := $(VIRTUALENV_BUILD_BIN_DIR):$(VIRTUALENV_DEV_BIN_DIR):$(PATH)
 export VIRTUALENV_DIR
 
 ##########################################################################
@@ -295,6 +295,7 @@ $(PACKAGE_RELEASE_OUT_FILE): $(PACKAGE_RELEASE_REPLACE_OUT_FILE) | $(OUT_DIR)
 	@echo '[INFO] sam building template file for release $(RELEASE_VERSION)'
 	sam build \
 		--use-container \
+		--build-image public.ecr.aws/sam/build-python3.12:latest-x86_64 \
 		--parallel \
 		--cached \
 		--template-file '$(PACKAGE_RELEASE_REPLACE_OUT_FILE)' \

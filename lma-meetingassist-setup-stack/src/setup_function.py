@@ -30,7 +30,7 @@ def propsChanged(props, oldprops, fields):
     return False
 
 
-def addBotToAistack(props, oldprops):
+def configureAiStack(props, oldprops):
     asyncAgentAssistOrchestratorFunction = getStackResource(
         props["AISTACK"], "AsyncAgentAssistOrchestrator")
     response = lam.get_function_configuration(
@@ -44,6 +44,20 @@ def addBotToAistack(props, oldprops):
         Environment={"Variables": envVars}
     )
     print("Updated AsyncAgentAssistOrchestratorFunction Environment variable to add Lex bot.")
+
+    # Add Bedrock KB ID to the resolver function
+    kbId = props.get("TranscriptBedrockKnowledgeBaseId","Transcript KnowledgeBase is not enabled")
+    queryKnowledgeBaseResolverFunction = getStackResource(
+        props["AISTACK"], "QueryKnowledgeBaseResolverFunction")
+    response = lam.get_function_configuration(
+        FunctionName=queryKnowledgeBaseResolverFunction)
+    envVars = response["Environment"]["Variables"]
+    envVars["KB_ID"] = kbId
+    response = lam.update_function_configuration(
+        FunctionName=queryKnowledgeBaseResolverFunction,
+        Environment={"Variables": envVars}
+    )
+    print(f"Updated QueryKnowledgeBaseResolverFunction Environment variable to add Transcript KB_ID: {kbId}")
 
     print("Updating updating Cognito Authenticated Role for Agent Assist...")
     agentAssistBotAuthRole = getStackResource(
@@ -138,6 +152,8 @@ def configureQnabotSettings(props):
 
 def loadQnABotSamplePackage(props):
     importBucket = getStackResource(props["QNABOTSTACK"], "ImportBucket")
+    statusBucket = getStackResource(
+        props["QNABOTSTACK"], "ContentDesignerOutputBucket")
     demoPath = props["QnaMeetingAssistDemoJson"]
     demoparts = demoPath.split('/', 1)
     demobucket = demoparts[0]
@@ -157,15 +173,15 @@ def loadQnABotSamplePackage(props):
     with open(demoFileTmp, 'w') as f:
         f.write(filedata)
     # Upload edited file to import bucket to trigger import
-    statusFile = f'status/{demoFile}'
-    s3.put_object(Bucket=importBucket,
+    statusFile = f'status-import/{demoFile}'
+    s3.put_object(Bucket=statusBucket,
                   Key=f'{statusFile}', Body='{"status":"Starting"}')
     s3.upload_file(demoFileTmp, importBucket, f'data/{demoFile}')
     print(f"...waiting for {demoFile} import to be complete...")
     status = "Starting"
     while status != "Complete":
         time.sleep(2)
-        status = get_status(bucket=importBucket, statusFile=statusFile)
+        status = get_status(bucket=statusBucket, statusFile=statusFile)
         print(f'Import Status: {status}')
         if status.startswith("FAILED"):
             raise ValueError(status)
@@ -225,7 +241,7 @@ def handler(event, context):
         props = event["ResourceProperties"]
         oldprops = event.get("OldResourceProperties", {})
         try:
-            addBotToAistack(props, oldprops)
+            configureAiStack(props, oldprops)
             if props["QNABOTSTACK"]:
                 setupQnABot(props, oldprops)
         except Exception as e:

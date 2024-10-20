@@ -7,9 +7,11 @@ import bisect
 
 REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 KINESIS_STREAM_NAME = os.getenv("KINESIS_STREAM_NAME")
-MEETING_NAME = details.meeting_name
-LMA_MEETING_NAME = MEETING_NAME + '-' + \
-    datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S.%f')[:-3]
+CALLID = details.meeting_name_with_timestamp
+USER_NAME = details.lma_identity
+USER_ACCESS_TOKEN = os.getenv("USER_ACCESS_TOKEN")
+USER_ID_TOKEN = os.getenv("USER_ID_TOKEN")
+USER_REFRESH_TOKEN = os.getenv("USER_REFRESH_TOKEN")
 
 KINESIS = boto3.client('kinesis', region_name=REGION)
 
@@ -85,7 +87,7 @@ def send_add_transcript_segment(speaker_name, result):
         try:
             add_transcript_segment = {
                 'EventType': 'ADD_TRANSCRIPT_SEGMENT',
-                'CallId': LMA_MEETING_NAME,
+                'CallId': CALLID,
                 'Channel': 'CALLER',
                 'SegmentId': segment['SegmentId'],
                 'StartTime': segment['StartTime'] if segment['StartTime'] is not None else 0,
@@ -97,12 +99,15 @@ def send_add_transcript_segment(speaker_name, result):
                 'Sentiment': None,
                 'TranscriptEvent': None,
                 'UtteranceEvent': None,
-                'Speaker': segment['Speaker']
+                'Speaker': segment['Speaker'],
+                'AccessToken': USER_ACCESS_TOKEN,
+                'IdToken': USER_ID_TOKEN,
+                'RefreshToken': USER_REFRESH_TOKEN,
             }
             # Write the messages to the Kinesis Data Stream
             response = KINESIS.put_record(
                 StreamName=KINESIS_STREAM_NAME,
-                PartitionKey=LMA_MEETING_NAME,
+                PartitionKey=CALLID,
                 Data=json.dumps(add_transcript_segment).encode('utf-8')
             )
             print(
@@ -116,11 +121,14 @@ def send_start_meeting():
     try:
         start_call_event = {
             'EventType': 'START',
-            'CallId': LMA_MEETING_NAME,
+            'CallId': CALLID,
             'CustomerPhoneNumber': 'Customer Phone',
             'SystemPhoneNumber': 'System Phone',
-            'AgentId': 'test-agent',
-            'CreatedAt': get_aws_date_now()
+            'AgentId': USER_NAME,
+            'CreatedAt': get_aws_date_now(),
+            'AccessToken': USER_ACCESS_TOKEN,
+            'IdToken': USER_ID_TOKEN,
+            'RefreshToken': USER_REFRESH_TOKEN,
         }
         print(
             f"Sending start meeting event to Kinesis. Event: {start_call_event}")
@@ -128,7 +136,7 @@ def send_start_meeting():
         # Write the messages to the Kinesis Data Stream
         response = KINESIS.put_record(
             StreamName=KINESIS_STREAM_NAME,
-            PartitionKey=LMA_MEETING_NAME,
+            PartitionKey=CALLID,
             Data=json.dumps(start_call_event).encode('utf-8')
         )
         print(
@@ -141,10 +149,13 @@ def send_end_meeting():
     try:
         start_call_event = {
             'EventType': 'END',
-            'CallId': LMA_MEETING_NAME,
+            'CallId': CALLID,
             'CustomerPhoneNumber': 'Customer Phone',
             'SystemPhoneNumber': 'System Phone',
-            'CreatedAt': get_aws_date_now()
+            'CreatedAt': get_aws_date_now(),
+            'AccessToken': USER_ACCESS_TOKEN,
+            'IdToken': USER_ID_TOKEN,
+            'RefreshToken': USER_REFRESH_TOKEN,
         }
         print(
             f"Sending end meeting event to Kinesis. Event: {start_call_event}")
@@ -152,10 +163,35 @@ def send_end_meeting():
         # Write the messages to the Kinesis Data Stream
         response = KINESIS.put_record(
             StreamName=KINESIS_STREAM_NAME,
-            PartitionKey=LMA_MEETING_NAME,
+            PartitionKey=CALLID,
             Data=json.dumps(start_call_event).encode('utf-8')
         )
         print(
             f"Sent end meeting event to Kinesis.")
     except Exception as e:
         print(f"Error sending start meeting event to Kinesis: {e}")
+
+
+def send_call_recording(url):
+    try:
+        call_recording_event = {
+            'EventType': 'ADD_S3_RECORDING_URL',
+            'CallId': CALLID,
+            'RecordingUrl': url,
+            'AccessToken': USER_ACCESS_TOKEN,
+            'IdToken': USER_ID_TOKEN,
+            'RefreshToken': USER_REFRESH_TOKEN,
+        }
+        print(
+            f"Sending call recording event to Kinesis. Event: {call_recording_event}")
+
+        # Write the messages to the Kinesis Data Stream
+        response = KINESIS.put_record(
+            StreamName=KINESIS_STREAM_NAME,
+            PartitionKey=CALLID,
+            Data=json.dumps(call_recording_event).encode('utf-8')
+        )
+        print(
+            f"Sent call recording event to Kinesis.")
+    except Exception as e:
+        print(f"Error sending call recording event to Kinesis: {e}")

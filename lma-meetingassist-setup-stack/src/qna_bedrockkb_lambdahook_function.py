@@ -51,18 +51,20 @@ def get_call_transcript(callId, userInput, maxMessages):
             transcript.pop()
 
     if transcript:
-        print(
-            f"Using last {maxMessages} conversation turns (LLM_CHAT_HISTORY_MAX_MESSAGES)")
-        transcript = transcript[-maxMessages:]
+        if maxMessages > 0:
+            print(
+                f"Using last {maxMessages} conversation turns (LLM_CHAT_HISTORY_MAX_MESSAGES)")
+            transcript = transcript[-maxMessages:]
         print(f"Transcript: {json.dumps(transcript)}")
     else:
         print(f'No transcript for callId {callId}')
-
+    print("Transcript Length: ", len(json.dumps(transcript)))
     return transcript
 
 
-def get_kb_response(generatePromptTemplate, transcript, query):
-    # if the query has already been labeled "small talk", we can skip
+def get_kb_response(transcript, query, settings):
+
+    # if the query has been labeled "small talk", we can skip
     # ensure the reponse matches the default ASSISTANT_NO_HITS_REGEX value ("Sorry,")
     if query == "small talk":
         resp = {
@@ -70,7 +72,8 @@ def get_kb_response(generatePromptTemplate, transcript, query):
         }
         print("Small talk response: ", json.dumps(resp))
     else:
-        promptTemplate = generatePromptTemplate
+        # create generate prompt
+        promptTemplate = settings.get("ASSISTANT_GENERATE_PROMPT_TEMPLATE")
         promptTemplate = promptTemplate.format(transcript=json.dumps(
             transcript))
         input = {
@@ -90,6 +93,14 @@ def get_kb_response(generatePromptTemplate, transcript, query):
                 'type': 'KNOWLEDGE_BASE'
             }
         }
+        # optional guardrails config
+        guardrailIdentifier = settings.get(
+            "ASSISTANT_BEDROCK_GUARDRAIL_ID", "")
+        if guardrailIdentifier:
+            input["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["generationConfiguration"]["guardrailConfiguration"] = {
+                "guardrailId": guardrailIdentifier,
+                "guardrailVersion": str(settings.get("ASSISTANT_BEDROCK_GUARDRAIL_VERSION", "DRAFT"))
+            }
         print("Amazon Bedrock KB Request: ", input)
         try:
             resp = KB_CLIENT.retrieve_and_generate(**input)
@@ -139,12 +150,24 @@ def get_generate_text(modelId, response):
     return generated_text
 
 
-def get_bedrock_response(prompt):
+def get_bedrock_response(prompt, settings):
     modelId = MODEL_ID
     body = get_request_body(modelId, prompt)
-    print("Bedrock request - ModelId", modelId, "-  Body: ", body)
-    response = BEDROCK_CLIENT.invoke_model(body=json.dumps(
-        body), modelId=modelId, accept='application/json', contentType='application/json')
+    args = dict(
+        body=json.dumps(body),
+        modelId=modelId,
+        accept='application/json',
+        contentType='application/json'
+    )
+    # optional guardrails config
+    guardrailIdentifier = settings.get(
+        "ASSISTANT_BEDROCK_GUARDRAIL_ID", "")
+    if guardrailIdentifier:
+        args["guardrailIdentifier"] = guardrailIdentifier
+        args["guardrailVersion"] = str(settings.get(
+            "ASSISTANT_BEDROCK_GUARDRAIL_VERSION", "DRAFT"))
+    print("Bedrock request args - ", args)
+    response = BEDROCK_CLIENT.invoke_model(**args)
     generated_text = get_generate_text(modelId, response)
     print("Bedrock response: ", generated_text)
     return generated_text
@@ -290,18 +313,19 @@ def format_response(event, kb_response, query):
     return event
 
 
-def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput):
+def generateRetrieveQuery(retrievePromptTemplate, transcript, userInput, settings):
     print("Use Bedrock to generate a relevant search query based on the transcript and input")
     promptTemplate = retrievePromptTemplate or "Let's think carefully step by step. Here is the JSON transcript of an ongoing meeting: {transcript}<br>And here is a follow up question or statement in <followUpMessage> tags:<br> <followUpMessage>{input}</followUpMessage><br>Rephrase the follow up question or statement as a standalone, one sentence question. If the caller is just engaging in small talk or saying thanks, respond with \"small talk\". Only output the rephrased question. Do not include any preamble."
     prompt = promptTemplate.format(
         transcript=json.dumps(transcript), input=userInput)
     prompt = prompt.replace("<br>", "\n")
-    query = get_bedrock_response(prompt)
+    query = get_bedrock_response(prompt, settings)
     return query
 
 
 def handler(event, context):
     print("Received event: %s" % json.dumps(event))
+    settings = event["req"]["_settings"]
     args = get_args_from_lambdahook_args(event)
     # Any prompt value defined in the lambdahook args is used as UserInput, e.g used by
     # 'easy button' QIDs like 'Ask Assistant' where user didn't type a question, and we
@@ -319,21 +343,19 @@ def handler(event, context):
     callId = event["req"]["session"].get("callId") or event["req"]["_event"].get(
         "requestAttributes", {}).get("callId")
     if callId:
-        maxMessages = int(event["req"]["_settings"].get(
+        maxMessages = int(settings.get(
             "LLM_CHAT_HISTORY_MAX_MESSAGES", 20))
         transcript = get_call_transcript(callId, userInput, maxMessages)
     else:
         print("no callId in request or session attributes")
 
-    retrievePromptTemplate = event["req"]["_settings"].get(
+    # create retrieve query
+    retrievePromptTemplate = settings.get(
         "ASSISTANT_QUERY_PROMPT_TEMPLATE")
     query = generateRetrieveQuery(
-        retrievePromptTemplate, transcript, userInput)
+        retrievePromptTemplate, transcript, userInput, settings)
 
-    generatePromptTemplate = event["req"]["_settings"].get(
-        "ASSISTANT_GENERATE_PROMPT_TEMPLATE")
-    kb_response = get_kb_response(
-        generatePromptTemplate, transcript, query)
+    kb_response = get_kb_response(transcript, query, settings)
 
     event = format_response(event, kb_response, query)
     print("Returning response: %s" % json.dumps(event))

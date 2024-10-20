@@ -69,6 +69,21 @@ Parameters:
     AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
     # yamllint enable rule:line-length
 
+  TranscriptFilePrefix:
+    Type: String
+    Default: lma-transcripts/
+    Description: >-
+      The Amazon S3 prefix where the transript files will be saved (must end in "/")
+
+  TranscriptFileBucketName:
+    Type: String
+    Default: ""
+    Description: >
+      Existing bucket where transcript files will be stored.
+    # yamllint disable rule:line-length
+    AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
+    # yamllint enable rule:line-length
+
   IsSentimentAnalysisEnabled:
     Type: String
     Default: "true"
@@ -160,6 +175,7 @@ Parameters:
     AllowedValues:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
+      - "anthropic.claude-3-5-sonnet-20240620-v1:0"
 
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
@@ -295,7 +311,7 @@ Parameters:
 
   BootstrapVersion:
     Type: String
-    Default: 0.2.0
+    Default: 0.2.3
     Description: >
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket
@@ -749,7 +765,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt LambdaCodeBuildStartBuildExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 60
       MemorySize: 128
       Handler: lambda_start_codebuild.handler
@@ -794,7 +810,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt LambdaFetchTranscriptExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Environment:
         Variables:
           LCA_CALL_EVENTS_TABLE: !Ref EventSourcingTable
@@ -844,7 +860,9 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: "Allow"
-                Action: "dynamodb:Query"
+                Action: 
+                  - dynamodb:Query
+                  - dynamodb:GetItem
                 Resource: !GetAtt EventSourcingTable.Arn
 
   BedrockSummaryLambda:
@@ -852,7 +870,7 @@ Resources:
     Condition: ShouldEnableBedrockSummarizer
     Properties:
       Role: !GetAtt BedrockSummaryLambdaExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Environment:
         Variables:
           BEDROCK_MODEL_ID: !Ref BedrockModelId
@@ -860,7 +878,8 @@ Resources:
           TOKEN_COUNT: "0"
           PROCESS_TRANSCRIPT: "True"
           LLM_PROMPT_TEMPLATE_TABLE_NAME: !Ref LLMPromptTemplateTableName
-
+          S3_BUCKET_NAME: !Ref S3BucketName
+          S3_PREFIX: !Ref TranscriptFilePrefix
       Timeout: 900
       MemorySize: 512
       Handler: index.handler
@@ -919,7 +938,6 @@ Resources:
                   - "dynamodb:GetItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
-
         - PolicyName: !Sub ${AWS::StackName}-BedrockSummary
           PolicyDocument:
             Version: 2012-10-17
@@ -930,12 +948,22 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
+        - PolicyName: !Sub ${AWS::StackName}-S3
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:PutObject"
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}"
+                  - !Sub "arn:aws:s3:::${S3BucketName}/*"
 
   AsyncAgentAssistOrchestrator:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt AsyncAgentAssistOrchestratorExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Environment:
         Variables:
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
@@ -1015,7 +1043,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt AsyncTranscriptSummaryOrchestratorExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Environment:
         Variables:
           TRANSCRIPT_SUMMARY_FUNCTION_ARN:
@@ -1204,7 +1232,7 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt AsyncAgentAssistOrchestrator.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 900
       Environment:
         Variables:
@@ -1333,14 +1361,14 @@ Resources:
   TranscriptEnrichmentPythonLayer:
     Type: AWS::Serverless::LayerVersion
     Metadata:
-      BuildMethod: python3.11
+      BuildMethod: python3.12
     Properties:
       Description: !Sub "Transcript Enrichment Python Layer for stack: ${AWS::StackName}"
       ContentUri: ../source/lambda_layers/transcript_enrichment_layer
       CompatibleArchitectures:
         - arm64
       CompatibleRuntimes:
-        - python3.11
+        - python3.12
       RetentionPolicy: Delete
 
   ##########################################################################
@@ -1388,6 +1416,86 @@ Resources:
                   - dynamodb:UpdateItem
                 Resource: !GetAtt EventSourcingTable.Arn
 
+  QueryKnowledgeBaseResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt QueryKnowledgeBaseResolverFunctionExecutionRole.Arn
+      Runtime: python3.9
+      CodeUri: ../source/lambda_functions/query_knowledgebase_resolver
+      Description: Lambda function to query the meeting transcript knowledge base
+      MemorySize: 512
+      Timeout: 60
+      Environment:
+        Variables:
+          KB_ID: !Sub "<Placeholder>"
+          MODEL_ID: !Ref BedrockModelId
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/QueryKnowledgeBaseResolverFunction
+    DependsOn:
+      - QueryKnowledgeBaseResolverFunctionLogGroup
+
+  QueryKnowledgeBaseResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/QueryKnowledgeBaseResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+
+  QueryKnowledgeBaseResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: QueryKnowledgeBaseResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-BedrockKnowledgeBase
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:Retrieve"
+                  - "bedrock:RetrieveAndGenerate"
+                #TODO: Figure out how to restrict to target Transcript KB - created in a parallel nested stack
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+
+  AppSyncLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt QueryKnowledgeBaseResolverFunction.Arn
+
   AppSyncApiEncrypted:
     Type: AWS::AppSync::GraphQLApi
     Properties:
@@ -1434,6 +1542,17 @@ Resources:
       Name: Subscription
       Description: NONE type data source to set up subscription filtering
       Type: NONE
+
+  KnowledgeBaseDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: KnowledgeBase
+      Description: Interface to Bedrock KB for meeting transcript queries
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt QueryKnowledgeBaseResolverFunction.Arn
 
   AppSyncApiCache:
     Type: AWS::AppSync::ApiCache
@@ -1720,6 +1839,32 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
 
+  QueryKnowledgeBaseResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt KnowledgeBaseDataSource.Name
+      TypeName: Query
+      FieldName: queryKnowledgeBase
+      Runtime: 
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/queryKnowledgeBase.js
+
+  QueryKnowledgeBaseResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt KnowledgeBaseDataSource.Name
+      TypeName: Query
+      FieldName: queryKnowledgeBase
+      Runtime: 
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/queryKnowledgeBase.js
+
   ##########################################################################
   # Web Site
   ##########################################################################
@@ -1765,7 +1910,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       Handler: "index.lambda_handler"
-      Runtime: python3.11
+      Runtime: python3.12
       MemorySize: 128
       Timeout: 60
       Role: !GetAtt BucketDeleteLambdaRole.Arn
