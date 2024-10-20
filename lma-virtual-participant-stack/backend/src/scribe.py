@@ -6,6 +6,7 @@ from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent
 import sounddevice as sd
+from botocore.exceptions import BotoCoreError, ClientError
 
 # globals
 current_speaker = "none"
@@ -14,7 +15,6 @@ current_speaker = "none"
 class MyEventHandler(TranscriptResultStreamHandler):
     async def handle_transcript_event(self, transcript_event: TranscriptEvent):
         for result in transcript_event.transcript.results:
-            print(f'Transcribe result: {result}')
             kds.send_add_transcript_segment(current_speaker, result)
 
 
@@ -67,7 +67,7 @@ async def transcribe():
                     media_sample_rate_hz=16000,
                     media_encoding="pcm"
                 )
-                session_id = transcribe_stream.session_id
+                session_id = transcribe_stream.response.session_id
                 print(f"Started new transcription session with ID: {session_id}")
             else:
                 # Retry attempt with existing session_id
