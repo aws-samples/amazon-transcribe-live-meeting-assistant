@@ -175,205 +175,197 @@ export const startTranscribe = async (
 ) => {
     const callMetaData = socketCallMap.callMetadata;
     const audioInputStream = socketCallMap.audioInputStream;
+    const MAX_RETRIES = 5;
+    let sessionId: string | undefined;
 
-    server.log.debug(
-        `[${callMetaData.callEvent}]: [${
-            callMetaData.callId
-        }] - Starting transcribe:  ${JSON.stringify(callMetaData)}`
-    );
-    const transcribeInput = async function* () {
-        if (isTCAEnabled) {
-            const channel0: ChannelDefinition = {
-                ChannelId: 0,
-                ParticipantRole: ParticipantRole.CUSTOMER,
-            };
-            const channel1: ChannelDefinition = {
-                ChannelId: 1,
-                ParticipantRole: ParticipantRole.AGENT,
-            };
-            const channel_definitions: ChannelDefinition[] = [];
-            channel_definitions.push(channel0);
-            channel_definitions.push(channel1);
-            const configuration_event: ConfigurationEvent = {
-                ChannelDefinitions: channel_definitions,
-            };
-            if (IS_TCA_POST_CALL_ANALYTICS_ENABLED) {
-                configuration_event.PostCallAnalyticsSettings = {
-                    OutputLocation: tcaOutputLocation,
-                    DataAccessRoleArn: TCA_DATA_ACCESS_ROLE_ARN,
-                };
-                if (IS_CONTENT_REDACTION_ENABLED) {
-                    configuration_event.PostCallAnalyticsSettings.ContentRedactionOutput =
-            POST_CALL_CONTENT_REDACTION_OUTPUT as ContentRedactionOutput;
+    const startTranscribeSession = async (retryCount = 0): Promise<void> => {
+        if (retryCount >= MAX_RETRIES) {
+            server.log.error(`[TRANSCRIBING]: [${callMetaData.callId}] - Max retries reached. Aborting transcription.`);
+            return;
+        }
+
+        try {
+            server.log.debug(
+                `[${callMetaData.callEvent}]: [${
+                    callMetaData.callId
+                }] - Starting transcribe:  ${JSON.stringify(callMetaData)}`
+            );
+
+            const transcribeInput = async function* () {
+                if (isTCAEnabled) {
+                    const channel0: ChannelDefinition = {
+                        ChannelId: 0,
+                        ParticipantRole: ParticipantRole.CUSTOMER,
+                    };
+                    const channel1: ChannelDefinition = {
+                        ChannelId: 1,
+                        ParticipantRole: ParticipantRole.AGENT,
+                    };
+                    const channel_definitions: ChannelDefinition[] = [];
+                    channel_definitions.push(channel0);
+                    channel_definitions.push(channel1);
+                    const configuration_event: ConfigurationEvent = {
+                        ChannelDefinitions: channel_definitions,
+                    };
+                    if (IS_TCA_POST_CALL_ANALYTICS_ENABLED) {
+                        configuration_event.PostCallAnalyticsSettings = {
+                            OutputLocation: tcaOutputLocation,
+                            DataAccessRoleArn: TCA_DATA_ACCESS_ROLE_ARN,
+                        };
+                        if (IS_CONTENT_REDACTION_ENABLED) {
+                            configuration_event.PostCallAnalyticsSettings.ContentRedactionOutput =
+                    POST_CALL_CONTENT_REDACTION_OUTPUT as ContentRedactionOutput;
+                        }
+                    }
+                    yield { ConfigurationEvent: configuration_event };
                 }
-            }
-            yield { ConfigurationEvent: configuration_event };
-        }
-        if (audioInputStream != undefined) {
-            for await (const chunk of audioInputStream) {
-                yield { AudioEvent: { AudioChunk: chunk } };
-                // yield { AudioEvent: { AudioChunk:Uint8Array.from(new Array(2).fill([0x00, 0x00]).flat()), EndOfStream: true } };
-            }
-        } else {
-            server.log.error(
-                `[TRANSCRIBING]: [${callMetaData.callId}] - audioInputStream undefined`
-            );
-        }
-    };
-
-    let tsStream;
-    let outputCallAnalyticsStream:
-    | AsyncIterable<CallAnalyticsTranscriptResultStream>
-    | undefined;
-    let outputTranscriptStream: AsyncIterable<TranscriptResultStream> | undefined;
-
-    const tsParams: transcriptionCommandInput<typeof isTCAEnabled> = {
-        MediaSampleRateHertz: callMetaData.samplingRate,
-        MediaEncoding: 'pcm',
-        AudioStream: transcribeInput(),
-    };
-
-    if (TRANSCRIBE_LANGUAGE_CODE === 'identify-language') {
-        tsParams.IdentifyLanguage = true;
-        if (TRANSCRIBE_LANGUAGE_OPTIONS) {
-            tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
-            if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
-                tsParams.PreferredLanguage =
-          TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
-            }
-        }
-    } else if (TRANSCRIBE_LANGUAGE_CODE === 'identify-multiple-languages') {
-        tsParams.IdentifyMultipleLanguages = true;
-        if (TRANSCRIBE_LANGUAGE_OPTIONS) {
-            tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
-            if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
-                tsParams.PreferredLanguage =
-          TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
-            }
-        }
-    } else {
-        tsParams.LanguageCode = TRANSCRIBE_LANGUAGE_CODE as LanguageCode;
-    }
-
-    if (
-        IS_CONTENT_REDACTION_ENABLED &&
-    (TRANSCRIBE_LANGUAGE_CODE === 'en-US' ||
-      TRANSCRIBE_LANGUAGE_CODE === 'en-AU' ||
-      TRANSCRIBE_LANGUAGE_CODE === 'en-GB' ||
-      TRANSCRIBE_LANGUAGE_CODE === 'es-US')
-    ) {
-        tsParams.ContentRedactionType =
-      CONTENT_REDACTION_TYPE as ContentRedactionType;
-        if (TRANSCRIBE_PII_ENTITY_TYPES) {
-            tsParams.PiiEntityTypes = TRANSCRIBE_PII_ENTITY_TYPES;
-        }
-    }
-    if (CUSTOM_VOCABULARY_NAME) {
-        tsParams.VocabularyName = CUSTOM_VOCABULARY_NAME;
-    }
-    if (CUSTOM_LANGUAGE_MODEL_NAME) {
-        tsParams.LanguageModelName = CUSTOM_LANGUAGE_MODEL_NAME;
-    }
-
-    if (isTCAEnabled) {
-        server.log.debug(
-            `[TRANSCRIBING]: [${
-                callMetaData.callId
-            }] -StartCallAnalyticsStreamTranscriptionCommand args: ${JSON.stringify(
-                tsParams
-            )}`
-        );
-        try {
-            const response = await transcribeClient.send(
-                new StartCallAnalyticsStreamTranscriptionCommand(
-                    tsParams as StartCallAnalyticsStreamTranscriptionCommandInput
-                )
-            );
-            server.log.debug(
-                `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from TCA. Session Id: ${response.SessionId} ===`
-            );
-
-            outputCallAnalyticsStream = response.CallAnalyticsTranscriptResultStream;
-        } catch (err) {
-            server.log.error(
-                `[TRANSCRIBING]: [${
-                    callMetaData.callId
-                }] - Error in StartCallAnalyticsStreamTranscriptionCommand: ${normalizeErrorForLogging(
-                    err
-                )}`
-            );
-            return;
-        }
-    } else {
-        (
-            tsParams as StartStreamTranscriptionCommandInput
-        ).EnableChannelIdentification = true;
-        (tsParams as StartStreamTranscriptionCommandInput).NumberOfChannels = 2;
-        if (showSpeakerLabel) {
-            tsParams.ShowSpeakerLabel = true;
-        }
-        server.log.debug(
-            `[TRANSCRIBING]: [${
-                callMetaData.callId
-            }] -Transcribe StartStreamTranscriptionCommand args: ${JSON.stringify(
-                tsParams
-            )}`
-        );
-        try {
-            const response = await transcribeClient.send(
-                new StartStreamTranscriptionCommand(tsParams)
-            );
-            server.log.debug(
-                `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from Transcribe. Session Id: ${response.SessionId} ===`
-            );
-
-            outputTranscriptStream = response.TranscriptResultStream;
-        } catch (err) {
-            server.log.error(
-                `[TRANSCRIBING]: [${
-                    callMetaData.callId
-                }] - Error in StartStreamTranscription: ${normalizeErrorForLogging(
-                    err
-                )}`
-            );
-            return;
-        }
-    }
-    socketCallMap.startStreamTime = new Date();
-
-    if (outputCallAnalyticsStream) {
-        tsStream = stream.Readable.from(outputCallAnalyticsStream);
-    } else if (outputTranscriptStream) {
-        tsStream = stream.Readable.from(outputTranscriptStream);
-    }
-
-    try {
-        if (tsStream) {
-            for await (const event of tsStream) {
-                if (event.TranscriptEvent) {
-                    await writeTranscriptionSegment(
-                        event.TranscriptEvent,
-                        callMetaData,
-                        server
+                if (audioInputStream != undefined) {
+                    for await (const chunk of audioInputStream) {
+                        yield { AudioEvent: { AudioChunk: chunk } };
+                    }
+                } else {
+                    server.log.error(
+                        `[TRANSCRIBING]: [${callMetaData.callId}] - audioInputStream undefined`
                     );
                 }
+            };
+
+            let tsStream;
+            let outputCallAnalyticsStream:
+            | AsyncIterable<CallAnalyticsTranscriptResultStream>
+            | undefined;
+            let outputTranscriptStream: AsyncIterable<TranscriptResultStream> | undefined;
+
+            const tsParams: transcriptionCommandInput<typeof isTCAEnabled> = {
+                MediaSampleRateHertz: callMetaData.samplingRate,
+                MediaEncoding: 'pcm',
+                AudioStream: transcribeInput(),
+            };
+
+            if (sessionId) {
+                tsParams.SessionId = sessionId;
             }
-        } else {
+
+            if (TRANSCRIBE_LANGUAGE_CODE === 'identify-language') {
+                tsParams.IdentifyLanguage = true;
+                if (TRANSCRIBE_LANGUAGE_OPTIONS) {
+                    tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
+                    if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
+                        tsParams.PreferredLanguage =
+                  TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
+                    }
+                }
+            } else if (TRANSCRIBE_LANGUAGE_CODE === 'identify-multiple-languages') {
+                tsParams.IdentifyMultipleLanguages = true;
+                if (TRANSCRIBE_LANGUAGE_OPTIONS) {
+                    tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
+                    if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
+                        tsParams.PreferredLanguage =
+                  TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
+                    }
+                }
+            } else {
+                tsParams.LanguageCode = TRANSCRIBE_LANGUAGE_CODE as LanguageCode;
+            }
+
+            if (
+                IS_CONTENT_REDACTION_ENABLED &&
+            (TRANSCRIBE_LANGUAGE_CODE === 'en-US' ||
+              TRANSCRIBE_LANGUAGE_CODE === 'en-AU' ||
+              TRANSCRIBE_LANGUAGE_CODE === 'en-GB' ||
+              TRANSCRIBE_LANGUAGE_CODE === 'es-US')
+            ) {
+                tsParams.ContentRedactionType =
+              CONTENT_REDACTION_TYPE as ContentRedactionType;
+                if (TRANSCRIBE_PII_ENTITY_TYPES) {
+                    tsParams.PiiEntityTypes = TRANSCRIBE_PII_ENTITY_TYPES;
+                }
+            }
+            if (CUSTOM_VOCABULARY_NAME) {
+                tsParams.VocabularyName = CUSTOM_VOCABULARY_NAME;
+            }
+            if (CUSTOM_LANGUAGE_MODEL_NAME) {
+                tsParams.LanguageModelName = CUSTOM_LANGUAGE_MODEL_NAME;
+            }
+
+            if (isTCAEnabled) {
+                server.log.debug(
+                    `[TRANSCRIBING]: [${
+                        callMetaData.callId
+                    }] -StartCallAnalyticsStreamTranscriptionCommand args: ${JSON.stringify(
+                        tsParams
+                    )}`
+                );
+                const response = await transcribeClient.send(
+                    new StartCallAnalyticsStreamTranscriptionCommand(
+                        tsParams as StartCallAnalyticsStreamTranscriptionCommandInput
+                    )
+                );
+                sessionId = response.SessionId;
+                server.log.debug(
+                    `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from TCA. Session Id: ${sessionId} ===`
+                );
+
+                outputCallAnalyticsStream = response.CallAnalyticsTranscriptResultStream;
+            } else {
+                (
+                    tsParams as StartStreamTranscriptionCommandInput
+                ).EnableChannelIdentification = true;
+                (tsParams as StartStreamTranscriptionCommandInput).NumberOfChannels = 2;
+                if (showSpeakerLabel) {
+                    tsParams.ShowSpeakerLabel = true;
+                }
+                server.log.debug(
+                    `[TRANSCRIBING]: [${
+                        callMetaData.callId
+                    }] -Transcribe StartStreamTranscriptionCommand args: ${JSON.stringify(
+                        tsParams
+                    )}`
+                );
+                const response = await transcribeClient.send(
+                    new StartStreamTranscriptionCommand(tsParams)
+                );
+                sessionId = response.SessionId;
+                server.log.debug(
+                    `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from Transcribe. Session Id: ${sessionId} ===`
+                );
+
+                outputTranscriptStream = response.TranscriptResultStream;
+            }
+
+            socketCallMap.startStreamTime = new Date();
+
+            if (outputCallAnalyticsStream) {
+                tsStream = stream.Readable.from(outputCallAnalyticsStream);
+            } else if (outputTranscriptStream) {
+                tsStream = stream.Readable.from(outputTranscriptStream);
+            }
+
+            if (tsStream) {
+                for await (const event of tsStream) {
+                    if (event.TranscriptEvent) {
+                        await writeTranscriptionSegment(
+                            event.TranscriptEvent,
+                            callMetaData,
+                            server
+                        );
+                    }
+                }
+            } else {
+                throw new Error('Transcribe stream is empty');
+            }
+        } catch (error) {
             server.log.error(
-                `[TRANSCRIBING]: [${callMetaData.callId}] - Transcribe stream is empty`
+                `[TRANSCRIBING]: [${
+                    callMetaData.callId
+                }] - Error in transcription session: ${normalizeErrorForLogging(error)}`
             );
+            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Attempting to restart session. Retry count: ${retryCount + 1}`);
+            await startTranscribeSession(retryCount + 1);
         }
-    } catch (error) {
-        server.log.error(
-            `[TRANSCRIBING]: [${
-                callMetaData.callId
-            }] - Error processing Transcribe results stream ${normalizeErrorForLogging(
-                error
-            )}`
-        );
-    } finally {
-    // writeCallEndEvent(callMetaData);
-    }
+    };
+
+    await startTranscribeSession();
 };
 
 interface Segment {
