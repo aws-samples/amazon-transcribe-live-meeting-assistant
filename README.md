@@ -41,6 +41,8 @@ The following are some of the things LMA can do:
 - **Inventory list of meetings** - LMA keeps track of all your meetings in a searchable list.
   <p align="left"><img src="./images/readme-meeting-list.png" alt="Transcription" /></p>
 - **Gen AI queries across all your meetings** - LMA stores all your meeting transcripts and summaries in a separate Bedrock Knowledge base, and provides a chat interface where you can search for answers and references across all your meetings.
+    <p align="left"><img style="border:2px solid #000000" src="./images/readme-meetings-query-tool.png" alt="readme-meetings-query-tool.png" width="500"/></p>
+
 - **Browser extension captures audio and meeting metadata from popular meeting apps** - The browser extension captures meeting metadata — the meeting title and names of active speakers — and audio from you (your microphone) and others (from the meeting browser tab). As of this writing, LMA supports Chrome for the browser extension, and Zoom, Teams, WebEx, and Chime for meeting apps (with others coming soon). _Standalone meeting apps don’t work with LMA — instead, launch your meetings in the browser._
   <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" width=200/></p>
 
