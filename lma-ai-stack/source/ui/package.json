@@ -21,7 +21,7 @@
     "@testing-library/jest-dom": "^5.16.4",
     "@testing-library/react": "^12.1.5",
     "@testing-library/user-event": "^13.5.0",
-    "aws-amplify": "^4.3.21",
+    "aws-amplify": "^6.6.5",
     "axios": "^0.28.0",
     "graphql-tag": "^2.12.6",
     "prop-types": "^15.8.1",
