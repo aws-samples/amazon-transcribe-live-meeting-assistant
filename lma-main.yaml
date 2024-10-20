@@ -209,7 +209,7 @@ Parameters:
     Description: >-
       Enable content redaction from Amazon Transcribe transcription output. This is
       only used when
-      the 'en-US' language is selected in the TranscribeLanguageCode parameter.
+      the 'en-US'. 'en-GB', 'en-AU', or 'es-US' language is selected in the TranscribeLanguageCode parameter.
     AllowedValues:
       - "true"
       - "false"
@@ -233,19 +233,59 @@ Parameters:
       - identify-language
       - identify-multiple-languages
       - en-US
-      - es-US
       - en-GB
+      - en-AU
+      - en-IN
+      - en-IE
+      - en-NZ
+      - en-AB
+      - en-ZA
+      - en-WL
+      - af-ZA
+      - ar-AE
+      - ar-SA
+      - ca-ES
+      - cs-CZ
+      - da-DK
+      - de-CH
+      - de-DE
+      - el-GR
+      - en-WL
+      - es-US
+      - eu-ES
+      - fa-IR
+      - fi-FI
       - fr-CA
       - fr-FR
-      - en-AU
+      - gl-ES
+      - he-IL
+      - hi-IN
+      - hr-HR
+      - id-ID
       - it-IT
-      - de-DE
-      - pt-BR
       - ja-JP
       - ko-KR
-      - zh-CN
-      - hi-IN
+      - lv-LV
+      - ms-MY
+      - nl-NL
+      - no-NO
+      - pl-PL
+      - pt-BR
+      - pt-PT
+      - ro-RO
+      - ru-RU
+      - sk-SK
+      - so-SO
+      - sr-RS
+      - sv-SE
       - th-TH
+      - tl-PH
+      - tr-TR
+      - uk-UA
+      - vi-VN
+      - zh-CN
+      - zh-TW
+      - zu-ZA
 
   TranscribeLanguageOptions:
     Type: String
