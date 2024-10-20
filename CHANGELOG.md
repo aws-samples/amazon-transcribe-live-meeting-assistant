@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Stops transcribing calls without error messaging - added exception catch and retry for Transcribe sessions - Issue #137
-
+- Virtual Participant meeting won't open in UI if meeting name has &, /, or + symbols #142
 
 ## [0.2.3] - 2024-10-11
 
