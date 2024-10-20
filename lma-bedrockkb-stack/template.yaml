@@ -607,7 +607,7 @@ Resources:
                     - 20
                     - Ref: AWS::NoValue
 
-  WebCrawlerKBDataSource:
+  WebKBDataSource:
     Type: AWS::Bedrock::DataSource
     Condition: IsWebDataSource
     DependsOn:
@@ -631,7 +631,7 @@ Resources:
       Description: Web KnowKnowledge Base Data Source
       KnowledgeBaseId:
         Ref: KnowledgeBase
-      Name: !Sub "WebDataSource-${AWS::StackName}"
+      Name: !Sub "WebKBDataSource-${AWS::StackName}"
       VectorIngestionConfiguration:
         ChunkingConfiguration:
           ChunkingStrategy:
@@ -678,7 +678,7 @@ Resources:
               }
 
   # EventBridge schedulers for data sources
-  WebCrawlerKBDataSourceScheduler:
+  WebKBDataSourceScheduler:
     Type: AWS::Scheduler::Schedule
     Condition: IsWebDataSource
     Properties:
@@ -693,7 +693,7 @@ Resources:
         RoleArn: !GetAtt  KBDataSourceSchedulerRole.Arn
         Input: !Sub |
               {
-                "DataSourceId": "${WebCrawlerKBDataSource.DataSourceId}",
+                "DataSourceId": "${WebKBDataSource.DataSourceId}",
                 "KnowledgeBaseId": "${KnowledgeBase}"
               }
 
