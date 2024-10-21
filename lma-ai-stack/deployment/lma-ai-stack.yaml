@@ -1287,7 +1287,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt ShareMeetingExecutionRole.Arn
-      Runtime: python3.11
+      Runtime: python3.12
       Environment:
         Variables:
           LCA_CALL_EVENTS_TABLE: !Ref EventSourcingTable
@@ -1342,7 +1342,11 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: "Allow"
-                Action: "dynamodb:Query"
+                Action: 
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
                 Resource: !GetAtt EventSourcingTable.Arn
 
   UpdateLMASettingsWithShareMeeting:

@@ -17,6 +17,7 @@ export default gql`
       IsPartial
       Channel
       Owner
+      PeopleCanAccess
       Sentiment
       SentimentScore {
         Positive

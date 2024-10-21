@@ -396,7 +396,7 @@ Resources:
     Type: AWS::Serverless::Function
     Condition: ShouldAllowSignUpEmailDomain
     Properties:
-      Handler: index.handler
+      Handler: index.lambda_handler
       Runtime: python3.11
       Timeout: 10
       Policies:

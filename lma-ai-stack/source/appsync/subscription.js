@@ -25,8 +25,13 @@ export function response(ctx) {
 
   const { groups } = ctx.identity;
   if((groups === undefined) || !ctx.identity.groups.includes("Admin")) {
-    console.debug(`Setting subscription filter with Owner`);
-    const filter = { Owner: { eq: ctx.identity.username } };
+    console.debug(`Setting subscription filter with Owner or User that have been give access`);
+    const filter = {
+      or: [
+        { Owner: { eq: ctx.identity.username } },
+        { PeopleCanAccess: { contains: ctx.identity.username } }
+      ]
+    };
     extensions.setSubscriptionFilter(util.transform.toSubscriptionFilter(filter));
   }
   return null;
