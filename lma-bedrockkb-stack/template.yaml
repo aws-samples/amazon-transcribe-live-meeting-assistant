@@ -631,7 +631,7 @@ Resources:
       Description: Web KnowKnowledge Base Data Source
       KnowledgeBaseId:
         Ref: KnowledgeBase
-      Name: !Sub "WebDataSource-${AWS::StackName}"
+      Name: !Sub "WebKBDataSource-${AWS::StackName}"
       VectorIngestionConfiguration:
         ChunkingConfiguration:
           ChunkingStrategy:
@@ -656,6 +656,56 @@ Resources:
                     - IsChunkingStrategyDefault
                     - 20
                     - Ref: AWS::NoValue
+
+  # Start sync jobs for datasources
+  StartIngestionJobFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:StartIngestionJob"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:knowledge-base/${KnowledgeBase}"
+          PolicyName: BedrockPolicy
+
+  StartIngestionJobFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: handler.lambda_handler
+      Role: !GetAtt "StartIngestionJobFunctionRole.Arn"
+      Runtime: python3.12
+      Timeout: 600
+      MemorySize: 128
+      Code: ./src/start_ingestion_job_custom_resource
+
+  StartWebIngestionJob:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: IsWebDataSource
+    Properties:
+      ServiceToken: !GetAtt StartIngestionJobFunction.Arn
+      knowledgeBaseId: !Ref KnowledgeBase
+      dataSourceId: !GetAtt WebKBDataSource.DataSourceId
+
+  StartS3IngestionJob:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: IsS3DataSource
+    Properties:
+      ServiceToken: !GetAtt StartIngestionJobFunction.Arn
+      knowledgeBaseId: !Ref KnowledgeBase
+      dataSourceId: !GetAtt S3KBDataSource.DataSourceId
 
   # EventBridge schedulers for data sources
   S3KBDataSourceScheduler:
