@@ -1288,6 +1288,8 @@ Resources:
     Properties:
       Role: !GetAtt ShareMeetingExecutionRole.Arn
       Runtime: python3.12
+      Architectures:
+        - arm64
       Environment:
         Variables:
           LCA_CALL_EVENTS_TABLE: !Ref EventSourcingTable
