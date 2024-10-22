@@ -20,7 +20,7 @@ export default gql`
       RecordingUrl
       PcaUrl
       Owner
-      PeopleCanAccess
+      SharedWith
       TotalConversationDurationMillis
       Sentiment {
         OverallSentiment {

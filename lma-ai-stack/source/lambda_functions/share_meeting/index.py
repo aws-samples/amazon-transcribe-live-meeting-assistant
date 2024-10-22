@@ -27,10 +27,10 @@ def update_meeting_permissions(callid, recipients):
     try:
         response = ddbTable.get_item(
             Key={'PK': pk, 'SK': pk},
-            ProjectionExpression='PeopleCanAccess'
+            ProjectionExpression='SharedWith'
         )
         
-        current_recipients = response.get('Item', {}).get('PeopleCanAccess', [])
+        current_recipients = response.get('Item', {}).get('SharedWith', [])
 
         if set(new_recipients).issubset(set(current_recipients)):
             print(f"Recipients already have access for {callid}")
@@ -57,7 +57,7 @@ def update_meeting_permissions(callid, recipients):
                     'PK': item['PK'],
                     'SK': item['SK']
                 },
-                UpdateExpression="SET PeopleCanAccess = :val",
+                UpdateExpression="SET SharedWith = :val",
                 ExpressionAttributeValues={':val': combined_recipients},
             )
             updated_count += 1
@@ -67,7 +67,7 @@ def update_meeting_permissions(callid, recipients):
 
         # response = ddbTable.update_item(
         #     Key={'PK': pk, 'SK': pk},
-        #     UpdateExpression="SET PeopleCanAccess = :val",
+        #     UpdateExpression="SET SharedWith = :val",
         #     ExpressionAttributeValues={':val': combined_recipients},
         #     ReturnValues="UPDATED_NEW"
         # )

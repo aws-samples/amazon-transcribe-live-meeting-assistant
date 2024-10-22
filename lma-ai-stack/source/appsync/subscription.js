@@ -29,7 +29,7 @@ export function response(ctx) {
     const filter = {
       or: [
         { Owner: { eq: ctx.identity.username } },
-        { PeopleCanAccess: { contains: ctx.identity.username } }
+        { SharedWith: { contains: ctx.identity.username } }
       ]
     };
     extensions.setSubscriptionFilter(util.transform.toSubscriptionFilter(filter));

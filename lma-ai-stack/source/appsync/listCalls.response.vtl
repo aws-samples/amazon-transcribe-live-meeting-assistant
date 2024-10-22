@@ -5,7 +5,7 @@
 #if(!$context.identity.groups.contains("Admin"))
   #set($myResults = [])
   #foreach($item in $context.result.items)
-      #if($item.Owner == $context.identity.username || $item.PeopleCanAccess.contains($context.identity.username))
+      #if($item.Owner == $context.identity.username || $item.SharedWith.contains($context.identity.username))
           #set($added = $myResults.add($item))
       #end
   #end

@@ -7,7 +7,7 @@ export default gql`
     onCreateCall {
       CallId
       Owner
-      PeopleCanAccess
+      SharedWith
     }
   }
 `;

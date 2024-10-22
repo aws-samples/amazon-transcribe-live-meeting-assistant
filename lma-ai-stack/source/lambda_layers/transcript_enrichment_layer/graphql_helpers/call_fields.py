@@ -45,7 +45,7 @@ def call_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:
         schema.Call.RecordingUrl,
         schema.Call.PcaUrl,
         schema.Call.Owner,
-        schema.Call.PeopleCanAccess,
+        schema.Call.SharedWith,
         schema.Call.TotalConversationDurationMillis,
         schema.Call.Sentiment.select(
             overall_sentiment_select,

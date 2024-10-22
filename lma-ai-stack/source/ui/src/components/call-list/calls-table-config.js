@@ -249,6 +249,7 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
 
   const [shareMeeting, setShareMeeting] = useState(false);
   const [meetingRecipients, setMeetingRecipients] = React.useState('');
+  const [submit, setSubmit] = useState(false);
 
   const openShareSettings = () => {
     setShareMeeting(true);
@@ -305,7 +306,9 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
+                  setSubmit(true);
                   handleSubmit(e);
+                  setSubmit(false);
                 }}
               >
                 <Form
@@ -316,9 +319,12 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
                       </Button>
                       <Button
                         variant="primary"
+                        disabled={submit}
                         onclick={(e) => {
                           e.preventDefault();
+                          setSubmit(true);
                           handleSubmit(e);
+                          setSubmit(false);
                         }}
                       >
                         Submit

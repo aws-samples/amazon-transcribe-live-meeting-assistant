@@ -179,7 +179,7 @@ def add_transcript_segments(
             transcript = f"{transcript[:start]}<span class='issue-span'>{transcript[start:end]}</span>{transcript[end:]}<br/><span class='issue-pill'>Issue Detected</span>"
             message["Transcript"] = transcript
 
-        message["PeopleCanAccess"] = people_can_access
+        message["SharedWith"] = people_can_access
         
         query = dsl_gql(
             DSLMutation(
@@ -1107,14 +1107,14 @@ async def get_call_details(
     CUSTOMER_PHONE_NUMBER = result['CustomerPhoneNumber']
     CALL_ID = result['CallId']
     call_summary = result.get("CallSummaryText", "")
-    people_can_access = result.get("PeopleCanAccess", None)
+    people_can_access = result.get("SharedWith", None)
 
     return dict(
         CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
         CallId=CALL_ID,
         CallDataStream=CALL_DATA_STREAM_NAME,
         CallSummaryText=call_summary,
-        PeopleCanAccess=people_can_access,
+        SharedWith=people_can_access,
     )
 
 def get_caller_and_system_phone_numbers_from_connect(
@@ -1463,7 +1463,7 @@ async def execute_process_event_api_mutation(
                 message=normalized_message,
                 appsync_session=appsync_session)
                 
-            people_can_access = payload.get("PeopleCanAccess", None)
+            people_can_access = payload.get("SharedWith", None)
                 
 
             LOGGER.debug("Add Transcript Segment")
