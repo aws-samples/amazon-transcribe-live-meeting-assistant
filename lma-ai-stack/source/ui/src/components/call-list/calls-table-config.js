@@ -14,6 +14,7 @@ import {
   Form,
   FormField,
   Input,
+  Alert,
 } from '@awsui/components-react';
 
 import rehypeRaw from 'rehype-raw';
@@ -256,14 +257,14 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
   const closeShareSettings = () => {
     setShareMeeting(false);
     setMeetingRecipients('');
+    props.setShareResult(null);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     console.log('Meeting Recipients: ', meetingRecipients);
-    setShareMeeting(false);
+    await props.shareMeeting(meetingRecipients);
     setMeetingRecipients('');
-    props.shareMeeting(meetingRecipients);
   };
 
   // eslint-disable-next-line
@@ -313,7 +314,13 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
                       <Button formAction="none" variant="link" onClick={closeShareSettings}>
                         Cancel
                       </Button>
-                      <Button variant="primary" onclick={handleSubmit}>
+                      <Button
+                        variant="primary"
+                        onclick={(e) => {
+                          e.preventDefault();
+                          handleSubmit(e);
+                        }}
+                      >
                         Submit
                       </Button>
                     </SpaceBetween>
@@ -322,6 +329,9 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
                   <FormField>
                     <Input value={meetingRecipients} onChange={(event) => setMeetingRecipients(event.detail.value)} />
                   </FormField>
+                  <Alert type="info" visible={props.shareResult}>
+                    {props.shareResult}
+                  </Alert>
                 </Form>
               </form>
             }

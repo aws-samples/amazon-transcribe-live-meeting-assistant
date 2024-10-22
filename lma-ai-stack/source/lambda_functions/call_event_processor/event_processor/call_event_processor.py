@@ -156,6 +156,7 @@ class Sentiment(TypedDict):
 
 def add_transcript_segments(
     message: Dict[str, object],
+    people_can_access: List[str],
     appsync_session: AppsyncAsyncClientSession,
 ) -> List[Coroutine]:
     """Add Transcript Segment GraphQL Mutation"""
@@ -165,13 +166,6 @@ def add_transcript_segments(
 
     tasks = []
     if message:
-        
-        call_details = get_call_details(
-            message=message,
-            appsync_session=appsync_session)
-            
-        people_can_access = call_details.get("PeopleCanAccess", None)
-
         issues_detected = message.get("IssuesDetected", None)
         transcript = message["Transcript"]
         if "OriginalTranscript" not in message:
@@ -1465,10 +1459,18 @@ async def execute_process_event_api_mutation(
                 else:
                     return_value["successes"].append(response)
 
+            payload = await get_call_details(
+                message=normalized_message,
+                appsync_session=appsync_session)
+                
+            people_can_access = payload.get("PeopleCanAccess", None)
+                
+
             LOGGER.debug("Add Transcript Segment")
             add_transcript_tasks.extend(
                 add_transcript_segments(
                     message=normalized_message,
+                    people_can_access=people_can_access,
                     appsync_session=appsync_session,
                 )
             )

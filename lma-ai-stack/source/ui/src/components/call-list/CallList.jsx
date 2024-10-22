@@ -78,6 +78,8 @@ const CallList = () => {
     setSelectedItems(collectionProps.selectedItems);
   }, [collectionProps.selectedItems]);
 
+  const [shareResult, setShareResult] = useState(null);
+
   /* eslint-disable react/jsx-props-no-spreading */
   return (
     <Table
@@ -94,7 +96,18 @@ const CallList = () => {
           setPeriodsToLoad={setPeriodsToLoad}
           downloadToExcel={() => exportToExcel(callList, 'Meeting-List')}
           // eslint-disable-next-line max-len, prettier/prettier
-          shareMeeting={(recipients) => shareMeetings(collectionProps, recipients, settings, currentCredentials, currentSession)}
+          shareMeeting={async (recipients) => {
+            const result = await shareMeetings(
+              collectionProps,
+              recipients,
+              settings,
+              currentCredentials,
+              currentSession,
+            );
+            setShareResult(result);
+          }}
+          shareResult={shareResult}
+          setShareResult={setShareResult}
         />
       }
       columnDefinitions={COLUMN_DEFINITIONS_MAIN}

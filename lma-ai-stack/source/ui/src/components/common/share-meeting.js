@@ -49,13 +49,13 @@ export const shareMeetings = async (
     },
   });
 
-  const { Payload, LogResult } = await client.send(command);
+  const { Payload } = await client.send(command);
   const result = Buffer.from(Payload).toString();
-  const logs = Buffer.from(LogResult, 'base64').toString();
+  // const logs = Buffer.from(LogResult, 'base64').toString();
 
   console.log('Lambda result:', result);
 
-  return { logs, result };
+  return result;
 };
 
 export default shareMeetings;
