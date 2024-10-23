@@ -9,7 +9,7 @@ import { useNavigation } from './context/NavigationContext';
 import Capture from './components/screens/Capture';
 import LoginCognito from './components/screens/LoginCognito';
 import { useUserContext } from './context/UserContext';
-
+/* test */
 function App() {
 
   const { currentScreen } = useNavigation();

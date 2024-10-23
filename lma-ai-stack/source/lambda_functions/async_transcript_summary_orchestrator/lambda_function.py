@@ -19,7 +19,7 @@ from botocore.config import Config as BotoCoreConfig
 from eventprocessor_utils import (
     get_meeting_ttl
 )
-
+import jwt
 
 # pylint: enable=import-error
 LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
@@ -55,6 +55,10 @@ def get_call_summary(
     message: Dict[str, Any]
 ):
     print(message)
+    decoded_jwt = jwt.decode(message["AccessToken"], options={"verify_signature": False})
+    user_email = decoded_jwt['username']
+    print(decoded_jwt)
+    print(user_email)
     meeting_title = message["CallId"]
     meeting_datetime = meeting_title.split('- ')[-1]
     meeting_datetime = datetime.strptime(meeting_datetime, '%Y-%m-%d-%H:%M:%S.%f').strftime('%B %d, %Y %I:%M %p')
@@ -75,8 +79,9 @@ def get_call_summary(
     try:
         email_pw = getenv("EMAIL_PW","")
         support_email = "support@kaipartners.com"
-        recipients = ['mherrera@kaipartners.com','rshah@kaipartners.com']
-        
+        recipients = []
+        if user_email not in recipients:
+            recipients.append(user_email)
         summary = f"## Meeting Title\n{meeting_title}\n\n## Date\n{meeting_datetime}\n\n"
         summary_dict = json.loads(message["summary"])
         # Loop over the JSON key-value pairs

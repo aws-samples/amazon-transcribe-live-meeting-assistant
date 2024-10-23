@@ -138,7 +138,7 @@ function UserProvider({ children }: any) {
     console.log("start auth flow");
 
     if (chrome.identity) {
-      const cognitoUrl = `${settings.cognitoDomain}/login?response_type=code&client_id=${settings.clientId}&redirect_uri=https://${chrome.runtime.id}.chromiumapp.org/&scope=email+openid+profile`;
+      const cognitoUrl = `${settings.cognitoDomain}/login?response_type=code&client_id=${settings.clientId}&redirect_uri=${settings.cognitoDomain}/&scope=email+openid+profile`;
       const redirectURL = await chrome.identity.launchWebAuthFlow({
         url: cognitoUrl,
         interactive: true
