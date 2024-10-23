@@ -20,7 +20,7 @@ https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/assets/1
 
 ## Solution overview
 
-The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom, Teams, WebEx, and Chime currently), or audio only from any other browser-based meeting app, softphone or audio source. It uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, your choice of [Amazon Q Business](https://aws.amazon.com/q/business/) or [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, [Amazon Bedrock](https://aws.amazon.com/bedrock/) for customizable transcription insights and summaries, and (opionally) [Amazon Bedrock Agents](https://aws.amazon.com/bedrock/agents/) to enable orchestration of actions with knowledge base queries.
+The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom, Teams, WebEx, and Chime currently), or audio only from any other browser-based meeting app, softphone or audio source. It uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, your choice of [Amazon Q Business](https://aws.amazon.com/q/business/) or [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, [Amazon Bedrock](https://aws.amazon.com/bedrock/) models for customizable transcription insights and summaries, and (opionally) [Amazon Bedrock Agents](https://aws.amazon.com/bedrock/agents/) to enable orchestration of actions with knowledge base queries.
 
 Everything you need is provided as open source in this [GitHub repo](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant). It’s straightforward to deploy in your AWS account. When you’re done, you’ll wonder how you ever managed without it!
 
@@ -64,7 +64,7 @@ If you choose not to have LMA use your own documents, then no Q Business applica
 Finally, LMA uses Amazon Bedrock LLM models for its live meeting assistant and meeting summarization features. Before proceeding, if you have not previously done so, you must [request access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to the following Amazon Bedrock models:
 
 - Amazon: Titan Text Embeddings V2
-- Anthropic: Claude 3.x models (Claude 3 Sonnet, Claude 3 Haiku, or Claude 3.5 Sonnet)
+- Anthropic: Claude 3.x models
 
 ## Deploy the CloudFormation stack
 
@@ -101,14 +101,16 @@ Complete the following steps to launch the CloudFormation stack:
     1. If you select `BEDROCK_AGENT (Use Existing)`, then:
        - For **Bedrock Agent Id (existing)**, enter your existing Agent ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Agent console.
        - For **Bedrock Agent Alias Id (existing)**, enter your existing Agent Alias ID (for example, JSXXXXX3D8). You can copy it from the Amazon Bedrock Agent console. Use the default `TSTALIASID` to test with the DRAFT version of your agent.
+       - For additional information please see: [Amazon Bedrock Agent integration in LMA (preview)](./lma-meetingassist-setup-stack/README_BEDROCK_AGENT.md)].
     1. If you select `BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)`, a new agent is created for you automatically:
        - Optionally populate  **Bedrock Knowledge Base Id (existing)** to have your new agent use an existing Bedrock Knowledge base (see above)
-       - Or leave **Bedrock Knowledge Base Id (existing)** blank to create a new knowledge base for your agent. Use the knowledge base parameters described above to have the new knowledge base automatically populated. 
+       - Or leave **Bedrock Knowledge Base Id (existing)** blank to create a new knowledge base for your agent. Use the knowledge base parameters described above to have the new knowledge base automatically populated.
+       - For additional information please see: [Amazon Bedrock Agent integration in LMA (preview)](./lma-meetingassist-setup-stack/README_BEDROCK_AGENT.md)]. 
     1. If you select `Q_BUSINESS (Use Existing)`, then:
        - For **Amazon Q Application ID (existing)** enter your existing Q Business application ID (a UUID). You can copy it from the Amazon Q Business console.
          <p align="left"><img src="./images/readme-qbusinessapp-id.png" alt="QB App ID" width=350/></p>
        - Additional steps are required later. Carefully read the detailed directions documented in [Amazon Q Business integration in LMA](./lma-meetingassist-setup-stack/README_QBUSINESS.md) which guides you to complete identity management setup and QBusiness integration.
-1. For **Transcript Knowledge Base**, choose the default `BEDROCK_KNOWLEDGE_BASE (Use Existing)` (recommended) to enable generative AI queries on meeting transcripts (the new Meetings Query Tool), or choose `DISABLED` if you don't need this feature.
+1. For **Transcript Knowledge Base**, choose the default `BEDROCK_KNOWLEDGE_BASE (Use Existing)` (recommended) to enable generative AI queries across meeting transcripts using the new Meetings Query Tool, or choose `DISABLED` if you don't need this feature.
 1. For **all other parameters**, use the default values. If you want to customize the settings later, for example to add your own lambda functions, to use custom vocabularies and language models to improve accuracy, enable PII redaction, and more, you can update the stack for these parameters.
 1. Check the acknowledgement boxes, and choose Create stack.
 
@@ -117,8 +119,8 @@ The main CloudFormation stack uses nested stacks to create the following resourc
 - • [Amazon Simple Storage Service](http://aws.amazon.com/s3) (Amazon S3) to hold build artifacts and call recordings
 - An [AWS Fargate](https://aws.amazon.com/fargate/) task with an [Application Load Balancer](https://aws.amazon.com/elasticloadbalancing/application-load-balancer/) providing a websocket server running code to consume stereo audio streams and relay to Amazon Transcribe, publish transcription segments in Kinesis Data Streams, and create and store stereo call recordings.
 - [Amazon Kinesis Data Stream](https://aws.amazon.com/kinesis/data-streams/) to relay call events and transcription segments to the enrichment processing function.
-- Meeting assist resources including the [QnABot on AWS solution](https://aws.amazon.com/solutions/implementations/aws-qnabot/) stack which interacts with [Amazon OpenSearch service](https://aws.amazon.com/opensearch-service/) and Amazon Bedrock.
-- [Amazon Bedrock Knowledge Bases](https://aws.amazon.com/bedrock/knowledge-bases/) to hold (1) documents and websites used by the Meeting Assistant, and (2) summaries, transcripts, and metadata used by the Meetings Query Tool to allow you to find information from your past meetings.
+- LMA resources, including the [QnABot on AWS solution](https://aws.amazon.com/solutions/implementations/aws-qnabot/) stack which interacts with [Amazon OpenSearch service](https://aws.amazon.com/opensearch-service/) and Amazon Bedrock.
+- Optional [Amazon Bedrock Knowledge Bases](https://aws.amazon.com/bedrock/knowledge-bases/) to hold (1) documents and websites used by the Meeting Assistant, and (2) summaries, transcripts, and metadata used by the Meetings Query Tool.
 - [AWS AppSync API](https://aws.amazon.com/appsync), which provides a GraphQL endpoint to support queries and real-time updates
 - Website components including S3 bucket, [Amazon CloudFront](https://aws.amazon.com/cloudfront/) distribution, and [Amazon Cognito](https://aws.amazon.com/cognito) user pool
 - A downloadable pre-configured browser extension application for Chrome browsers.
@@ -257,13 +259,13 @@ Use the **Stream Audio** feature to stream from any softphone app, meeting app, 
 
 ## Meetings Query Tool - query past meetings from the transcript knowledge base
 
-LMA now uses a Bedrock Knowledge Base to store all your meeting summaries, transcripts, and metadata. The new **Query Meetings Tool** in the UI provides a convenient chat interface where you can ask questions about past meetings, and get answers along with citations and links to the detailed meeting record.
+LMA now uses a Bedrock Knowledge Base to store all your meeting summaries, transcripts, and metadata. The new Query Meetings Tool in the UI provides a convenient chat interface where you can ask questions about past meetings and get answers along with citations and links to the detailed meeting record.
 
-The transcript knowledge base is created for you if you did not disable it when you deploed the LMA stack. 
+The transcript knowledge base is created for you if you did not disable it when you deployed the LMA stack.
 
-When each meeting is ended, at the same time the summary is created LMA also writes a copy of the summary, the transcript, and metadata (owner, callId, timestamps, duration) into the same S3 bucket as the call recordings. The retention of these files is managed by an S3 lifecycle policy based on the stack parameter value for transcript retention (default 90 days).  The transcript knowledge base has a datasource that crawls these files in the S3 bucket to add new meetings and remove  meetings that have been deleted. An EventBridge scheduler starts the datasource sync every 15 minutes, so new meetings should be available in the knowledgebase within 15-30 minutes after the meeting is over. 
+When each meeting ends, at the same time the summary is created, LMA also writes a copy of the summary, the transcript, and metadata (owner, callId, timestamps, duration) into the same S3 bucket as the call recordings. The retention of these files is managed by an S3 lifecycle policy based on the stack parameter value for transcript retention (default 90 days). The transcript knowledge base has a datasource that crawls these files in the S3 bucket to add new meetings and remove meetings that have been deleted. An EventBridge scheduler starts the datasource sync every 15 minutes, so new meetings should be available in the knowledge base within 15-30 minutes after the meeting is over.
 
-Afer you've completed a few meetings, use the new **Meetings Query Tool** in the LMA UI to chat with your meetings transcript knowledge base. User based access control is enforced - LMA uses your authenticated username to match the metadata owner field, so you will query only meetings that you own unless you are the administrator user - the administrator user can query all meetings.
+After you've completed a few meetings, use the new **Meetings Query Tool** in the LMA UI to chat with your meetings transcript knowledge base. User-based access control is enforced - LMA uses your authenticated username to match the metadata owner field, so you will query only meetings that you own unless you are the administrator user - the administrator user can query all meetings.
 
 <img src="./images/readme-meetings-query-tool.png" alt="readme-meetings-query-tool.png" width="600"/>
 
