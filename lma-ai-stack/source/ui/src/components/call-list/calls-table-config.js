@@ -59,6 +59,18 @@ export const COLUMN_DEFINITIONS_MAIN = [
     width: 225,
   },
   {
+    id: 'owner',
+    header: 'Owner',
+    cell: (item) => item.owner,
+    sortingField: 'owner',
+  },
+  {
+    id: 'sharedWith',
+    header: 'Shared With',
+    cell: (item) => item.sharedWith,
+    sortingField: 'sharedWith',
+  },
+  {
     id: 'summary',
     header: 'Summary',
     cell: (item) => {
@@ -173,6 +185,8 @@ const VISIBLE_CONTENT_OPTIONS = [
     options: [
       { id: 'callId', label: 'Meeting ID', editable: false },
       { id: 'agentId', label: 'Name' },
+      { id: 'owner', label: 'Owner' },
+      { id: 'sharedWith', label: 'Shared With' },
       { id: 'initiationTimeStamp', label: 'Initiation Timestamp' },
       { id: 'recordingStatus', label: 'Status' },
       { id: 'summary', label: 'Summary' },
@@ -181,7 +195,15 @@ const VISIBLE_CONTENT_OPTIONS = [
   },
 ];
 
-const VISIBLE_CONTENT = ['agentId', 'initiationTimeStamp', 'recordingStatus', 'summary', 'conversationDuration'];
+const VISIBLE_CONTENT = [
+  'agentId',
+  'owner',
+  'sharedWith',
+  'initiationTimeStamp',
+  'recordingStatus',
+  'summary',
+  'conversationDuration',
+];
 
 export const DEFAULT_PREFERENCES = {
   pageSize: PAGE_SIZE_OPTIONS[0].value,
