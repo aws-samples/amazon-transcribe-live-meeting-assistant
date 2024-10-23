@@ -81,7 +81,10 @@ const MeetingForm = () => {
       <Form variant="embedded">
         <SpaceBetween direction="vertical" size="l">
           <FormField label="Meeting Name">
-            <Input onChange={({ detail }) => setMeetingName(detail.value)} value={meetingName} />
+            <Input
+              onChange={({ detail }) => setMeetingName(detail.value.replace(/[/?#%+&]/g, '|'))}
+              value={meetingName}
+            />
           </FormField>
           <FormField label="Meeting Platform">
             <Select
