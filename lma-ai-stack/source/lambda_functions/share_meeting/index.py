@@ -38,14 +38,35 @@ def update_meeting_permissions(callid, recipients):
         
         combined_recipients = list(set(current_recipients + new_recipients))
 
-        response = ddbTable.scan(
-            FilterExpression=Attr('CallId').eq(callid)
+        updated_count = update_recipients(pk, combined_recipients)
+        
+        pk = 'trs#' + callid
+        updated_count += update_recipients(pk, combined_recipients)
+
+        pk = 'cls#' + callid
+        updated_count += update_recipients(pk, combined_recipients)
+
+        print(f"Successfully updated {updated_count} items for CallId: {callid}")
+        return f"Updated {updated_count} items"
+
+    except ClientError as err:
+        logger.error("Error updating people can access %s: %s",
+                     err.response['Error']['Code'], err.response['Error']['Message'])
+        raise
+    else:
+        return response['Attributes']
+
+def update_recipients(pk, recipients):
+    try:
+        response = ddbTable.query(
+            KeyConditionExpression=Key('PK').eq(pk)
         )
         items = response['Items']
         
+
         while 'LastEvaluatedKey' in response:
-            response = ddbTable.scan(
-                FilterExpression=Attr('CallId').eq(callid),
+            response = ddbTable.query(
+                KeyConditionExpression=Key('PK').eq(pk),
                 ExclusiveStartKey=response['LastEvaluatedKey']
             )
             items.extend(response['Items'])
@@ -58,26 +79,16 @@ def update_meeting_permissions(callid, recipients):
                     'SK': item['SK']
                 },
                 UpdateExpression="SET SharedWith = :val",
-                ExpressionAttributeValues={':val': combined_recipients},
+                ExpressionAttributeValues={':val': recipients}
             )
             updated_count += 1
 
-        print(f"Successfully updated {updated_count} items for CallId: {callid}")
-        return f"Updated {updated_count} items"
-
-        # response = ddbTable.update_item(
-        #     Key={'PK': pk, 'SK': pk},
-        #     UpdateExpression="SET SharedWith = :val",
-        #     ExpressionAttributeValues={':val': combined_recipients},
-        #     ReturnValues="UPDATED_NEW"
-        # )
-        
     except ClientError as err:
-        logger.error("Error updating people can access %s: %s",
+        logger.error("Error updating recipients for %s: %s",
                      err.response['Error']['Code'], err.response['Error']['Message'])
         raise
     else:
-        return response['Attributes']
+        return updated_count
 
 def get_call_metadata(callid):
     pk = 'c#'+callid
