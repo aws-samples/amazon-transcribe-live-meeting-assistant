@@ -7,6 +7,8 @@ export default gql`
     getCall(CallId: $callId) {
       CallId
       AgentId
+      Owner
+      SharedWith
       CallCategories
       IssuesDetected
       CallSummaryText

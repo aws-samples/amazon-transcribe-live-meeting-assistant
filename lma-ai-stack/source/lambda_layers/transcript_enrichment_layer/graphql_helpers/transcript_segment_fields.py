@@ -22,4 +22,5 @@ def transcript_segment_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:
         schema.TranscriptSegment.Transcript,
         schema.TranscriptSegment.IsPartial,
         schema.TranscriptSegment.Owner,
+        schema.TranscriptSegment.SharedWith,
     )
