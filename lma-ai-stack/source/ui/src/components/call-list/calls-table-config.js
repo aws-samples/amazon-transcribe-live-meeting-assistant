@@ -46,7 +46,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
   },
   {
     id: 'agentId',
-    header: 'Name',
+    header: 'Owner Name',
     cell: (item) => item.agentId,
     sortingField: 'agentId',
   },
@@ -60,7 +60,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
   },
   {
     id: 'owner',
-    header: 'Owner',
+    header: 'Owner Email',
     cell: (item) => item.owner,
     sortingField: 'owner',
   },

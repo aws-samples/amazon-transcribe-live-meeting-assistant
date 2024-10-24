@@ -98,6 +98,7 @@ const CallList = () => {
           // eslint-disable-next-line max-len, prettier/prettier
           shareMeeting={async (recipients) => {
             const result = await shareMeetings(
+              calls,
               collectionProps,
               recipients,
               settings,

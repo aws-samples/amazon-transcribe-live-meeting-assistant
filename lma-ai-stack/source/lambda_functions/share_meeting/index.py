@@ -19,9 +19,8 @@ logger = logging.getLogger(__name__)
 ddb = boto3.resource('dynamodb')
 ddbTable = ddb.Table(LCA_CALL_EVENTS_TABLE)
 
-def update_meeting_permissions(callid, recipients):
+def update_meeting_permissions(callid, shardPK, shardSK, recipients):
     pk = 'c#' + callid
-    
     new_recipients = list(set(email.strip() for email in recipients.split(',') if email.strip()))
 
     try:
@@ -38,13 +37,12 @@ def update_meeting_permissions(callid, recipients):
         
         combined_recipients = list(set(current_recipients + new_recipients))
 
-        updated_count = update_recipients(pk, combined_recipients)
+        updated_count = update_recipients(pk, combined_recipients, None)
         
         pk = 'trs#' + callid
-        updated_count += update_recipients(pk, combined_recipients)
+        updated_count += update_recipients(pk, combined_recipients, None)
 
-        pk = 'cls#' + callid
-        updated_count += update_recipients(pk, combined_recipients)
+        updated_count += update_recipients(shardPK, combined_recipients, shardSK)
 
         print(f"Successfully updated {updated_count} items for CallId: {callid}")
         return f"Updated {updated_count} items"
@@ -56,20 +54,27 @@ def update_meeting_permissions(callid, recipients):
     else:
         return response['Attributes']
 
-def update_recipients(pk, recipients):
+def update_recipients(pk, recipients, sk):
     try:
-        response = ddbTable.query(
-            KeyConditionExpression=Key('PK').eq(pk)
-        )
-        items = response['Items']
-        
-
-        while 'LastEvaluatedKey' in response:
+        if (sk):
+            items = [
+                {
+                    'PK': pk,
+                    'SK': sk
+                }
+            ]
+        else:
             response = ddbTable.query(
-                KeyConditionExpression=Key('PK').eq(pk),
-                ExclusiveStartKey=response['LastEvaluatedKey']
+                KeyConditionExpression=Key('PK').eq(pk)
             )
-            items.extend(response['Items'])
+            items = response['Items']
+            
+            while 'LastEvaluatedKey' in response:
+                response = ddbTable.query(
+                    KeyConditionExpression=Key('PK').eq(pk),
+                    ExclusiveStartKey=response['LastEvaluatedKey']
+                )
+                items.extend(response['Items'])
 
         updated_count = 0
         for item in items:
@@ -128,16 +133,27 @@ def lambda_handler(event, context):
 
 
     data = json.loads(json.dumps(event))
-    callIds = data['callIds']
+    calls = data['calls']
     
-    for callid in callIds:
-        print("CallID: ", callid)
+    for call in calls:        
+        callid = call['callId']
+        shardPK = call['PK']
+        shardSK = call['SK']
+
+        print("CallID: ", callid, shardPK, shardSK)
         transcripts = get_transcripts(callid)
         metadata = get_call_metadata(callid)
         print("Fetch Transcript response:", metadata)
         if(metadata.get('Owner', '') != request_owner):
             return "You don't have permission to share one or more of the requested calls"
-        update_meeting_permissions(callid, event['meetingRecipients'])
+
+        recipients = event['meetingRecipients']
+        if not recipients:
+            return "No recipients provided"
+        if not all(re.match(r"[^@]+@[^@]+\.[^@]+", email) for email in recipients.split(', ')):
+            return "Invalid email address provided"
+
+        update_meeting_permissions(callid, shardPK, shardSK, recipients)
         
     return "Meetings shared successfully"
 

@@ -14,21 +14,34 @@ async function calculateSha256(payload) {
 }
 
 export const shareMeetings = async (
+  calls,
   collectionProps,
   meetingRecipients,
   settings,
   currentCredentials,
   currentSession,
 ) => {
-  console.debug('collectionProps - KISH', collectionProps);
-  console.log('Settings', settings);
-  console.log('Recipients', meetingRecipients);
-  console.log('session', currentSession);
+  console.log('collectionProps - KISH', collectionProps);
+  console.log('CALLS', calls);
+
+  // Get PK and SK from calls
+  const callsWithKeys = collectionProps.selectedItems.map(({ callId }) => {
+    console.log('callId', callId);
+    const call = calls.find((c) => c.CallId === callId);
+    console.log('call', call);
+    return {
+      PK: call.PK,
+      SK: call.SK,
+      callId: call.CallId,
+    };
+  });
+
+  console.log('Calls with PK and SK:', callsWithKeys);
 
   const { REACT_APP_AWS_REGION } = process.env;
   const funcName = settings.LMAShareMeetingLambda;
   const payload = {
-    callIds: collectionProps.selectedItems.map(({ callId }) => callId),
+    calls: callsWithKeys,
     meetingRecipients,
     accessToken: currentSession.accessToken.jwtToken,
   };
