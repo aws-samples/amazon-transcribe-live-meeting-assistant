@@ -285,9 +285,11 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setSubmit(true);
     console.log('Meeting Recipients: ', meetingRecipients);
     await props.shareMeeting(meetingRecipients);
     setMeetingRecipients('');
+    setSubmit(false);
   };
 
   // eslint-disable-next-line
@@ -328,25 +330,21 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  setSubmit(true);
                   handleSubmit(e);
-                  setSubmit(false);
                 }}
               >
                 <Form
                   actions={
                     <SpaceBetween direction="horizontal" size="xs">
-                      <Button formAction="none" variant="link" onClick={closeShareSettings}>
-                        Cancel
+                      <Button formAction="none" onClick={closeShareSettings}>
+                        Close
                       </Button>
                       <Button
                         variant="primary"
-                        disabled={submit}
+                        disabled={submit || !meetingRecipients.trim()}
                         onclick={(e) => {
                           e.preventDefault();
-                          setSubmit(true);
                           handleSubmit(e);
-                          setSubmit(false);
                         }}
                       >
                         Submit
