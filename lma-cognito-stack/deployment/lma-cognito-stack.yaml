@@ -28,10 +28,6 @@ Parameters:
     Type: String
     Description: LMA settings SSM Parameter store
 
-  LMACommunnicationSNSTopic:
-    Type: String
-    Description: SNA Topic to send notifications to users
-
   S3BucketName:
     Type: String
     Default: ""
@@ -399,16 +395,9 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.11
       Timeout: 10
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action:
-                - sns:Subscribe
-              Resource: !Ref LMACommunnicationSNSTopic
       Environment:
         Variables:
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
-          LMA_COMMUNICATION_SNS_TOPIC: !Ref LMACommunnicationSNSTopic
       InlineCode: |
         import os
         import boto3
@@ -435,13 +424,6 @@ Resources:
         
             if email_domain not in allowed_domains:
                 raise ValueError('Invalid email address domain')
-        
-            sns_client = boto3.client('sns')
-            response = sns_client.subscribe(
-                TopicArn=os.environ.get('LMA_COMMUNICATION_SNS_TOPIC'),
-                Protocol="email",
-                Endpoint=email
-            )
         
             return event
       LoggingConfig:
