@@ -1401,6 +1401,7 @@ Resources:
         UserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
         CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
         AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
+        UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack

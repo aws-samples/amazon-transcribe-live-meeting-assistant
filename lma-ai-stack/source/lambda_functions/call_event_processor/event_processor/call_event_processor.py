@@ -156,6 +156,7 @@ class Sentiment(TypedDict):
 
 def add_transcript_segments(
     message: Dict[str, object],
+    people_can_access: List[str],
     appsync_session: AppsyncAsyncClientSession,
 ) -> List[Coroutine]:
     """Add Transcript Segment GraphQL Mutation"""
@@ -178,6 +179,8 @@ def add_transcript_segments(
             transcript = f"{transcript[:start]}<span class='issue-span'>{transcript[start:end]}</span>{transcript[end:]}<br/><span class='issue-pill'>Issue Detected</span>"
             message["Transcript"] = transcript
 
+        message["SharedWith"] = people_can_access
+        
         query = dsl_gql(
             DSLMutation(
                 schema.Mutation.addTranscriptSegment.args(input=message).select(
@@ -255,7 +258,7 @@ async def execute_create_call_mutation(
     CUSTOMER_PHONE_NUMBER = message.get("CustomerPhoneNumber", "")
     CALL_ID = message.get("CallId", "")
 
-    owner = get_owner_from_jwt(message.get("AccessToken"))
+    owner = get_owner_from_jwt(message.get("AccessToken"), False)
     message.update({"Owner": owner})
 
     # Contact Lens STARTED event type doesn't provide customer and system phone numbers, nor does it
@@ -1104,14 +1107,15 @@ async def get_call_details(
     CUSTOMER_PHONE_NUMBER = result['CustomerPhoneNumber']
     CALL_ID = result['CallId']
     call_summary = result.get("CallSummaryText", "")
+    people_can_access = result.get("SharedWith", None)
 
     return dict(
         CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
         CallId=CALL_ID,
         CallDataStream=CALL_DATA_STREAM_NAME,
-        CallSummaryText=call_summary
+        CallSummaryText=call_summary,
+        SharedWith=people_can_access,
     )
-
 
 def get_caller_and_system_phone_numbers_from_connect(
     message: Dict[str, Any]
@@ -1455,10 +1459,18 @@ async def execute_process_event_api_mutation(
                 else:
                     return_value["successes"].append(response)
 
+            payload = await get_call_details(
+                message=normalized_message,
+                appsync_session=appsync_session)
+                
+            people_can_access = payload.get("SharedWith", None)
+                
+
             LOGGER.debug("Add Transcript Segment")
             add_transcript_tasks.extend(
                 add_transcript_segments(
                     message=normalized_message,
+                    people_can_access=people_can_access,
                     appsync_session=appsync_session,
                 )
             )

@@ -1,6 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Button,
   ButtonDropdown,
@@ -10,6 +10,11 @@ import {
   SpaceBetween,
   StatusIndicator,
   Popover,
+  Modal,
+  Form,
+  FormField,
+  Input,
+  Alert,
 } from '@awsui/components-react';
 
 import rehypeRaw from 'rehype-raw';
@@ -41,7 +46,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
   },
   {
     id: 'agentId',
-    header: 'Name',
+    header: 'Owner Name',
     cell: (item) => item.agentId,
     sortingField: 'agentId',
   },
@@ -52,6 +57,18 @@ export const COLUMN_DEFINITIONS_MAIN = [
     sortingField: 'initiationTimeStamp',
     isDescending: false,
     width: 225,
+  },
+  {
+    id: 'owner',
+    header: 'Owner Email',
+    cell: (item) => item.owner,
+    sortingField: 'owner',
+  },
+  {
+    id: 'sharedWith',
+    header: 'Shared With',
+    cell: (item) => item.sharedWith,
+    sortingField: 'sharedWith',
   },
   {
     id: 'summary',
@@ -168,6 +185,8 @@ const VISIBLE_CONTENT_OPTIONS = [
     options: [
       { id: 'callId', label: 'Meeting ID', editable: false },
       { id: 'agentId', label: 'Name' },
+      { id: 'owner', label: 'Owner' },
+      { id: 'sharedWith', label: 'Shared With' },
       { id: 'initiationTimeStamp', label: 'Initiation Timestamp' },
       { id: 'recordingStatus', label: 'Status' },
       { id: 'summary', label: 'Summary' },
@@ -176,7 +195,15 @@ const VISIBLE_CONTENT_OPTIONS = [
   },
 ];
 
-const VISIBLE_CONTENT = ['agentId', 'initiationTimeStamp', 'recordingStatus', 'summary', 'conversationDuration'];
+const VISIBLE_CONTENT = [
+  'agentId',
+  'owner',
+  'sharedWith',
+  'initiationTimeStamp',
+  'recordingStatus',
+  'summary',
+  'conversationDuration',
+];
 
 export const DEFAULT_PREFERENCES = {
   pageSize: PAGE_SIZE_OPTIONS[0].value,
@@ -242,6 +269,29 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
     localStorage.setItem(PERIODS_TO_LOAD_STORAGE_KEY, JSON.stringify(shardCount));
   };
 
+  const [shareMeeting, setShareMeeting] = useState(false);
+  const [meetingRecipients, setMeetingRecipients] = React.useState('');
+  const [submit, setSubmit] = useState(false);
+
+  const openShareSettings = () => {
+    setShareMeeting(true);
+  };
+
+  const closeShareSettings = () => {
+    setShareMeeting(false);
+    setMeetingRecipients('');
+    props.setShareResult(null);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmit(true);
+    console.log('Meeting Recipients: ', meetingRecipients);
+    await props.shareMeeting(meetingRecipients);
+    setMeetingRecipients('');
+    setSubmit(false);
+  };
+
   // eslint-disable-next-line
   const periodText =
     TIME_PERIOD_DROPDOWN_ITEMS.filter((i) => i.count === props.periodsToLoad)[0]?.text || '';
@@ -266,6 +316,58 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
             loading={props.loading}
             onClick={() => props.downloadToExcel()}
           />
+          <Button
+            iconName="share"
+            variant="normal"
+            loading={props.loading}
+            onClick={openShareSettings}
+            disabled={props.selectedItems.length === 0}
+          />
+          <Modal
+            onDismiss={closeShareSettings}
+            visible={shareMeeting}
+            footer={
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }}
+              >
+                <Form
+                  actions={
+                    <SpaceBetween direction="horizontal" size="xs">
+                      <Button formAction="none" onClick={closeShareSettings}>
+                        Close
+                      </Button>
+                      <Button
+                        variant="primary"
+                        disabled={submit || !meetingRecipients.trim()}
+                        onclick={(e) => {
+                          e.preventDefault();
+                          handleSubmit(e);
+                        }}
+                      >
+                        Submit
+                      </Button>
+                    </SpaceBetween>
+                  }
+                >
+                  <FormField>
+                    <Input value={meetingRecipients} onChange={(event) => setMeetingRecipients(event.detail.value)} />
+                  </FormField>
+                  <Alert type="info" visible={props.shareResult}>
+                    {props.shareResult}
+                  </Alert>
+                </Form>
+              </form>
+            }
+            header={<h3>Share Meeting</h3>}
+          >
+            You are sharing&#xA0;
+            {props.selectedItems.length}
+            {props.selectedItems.length === 1 ? ' meeting' : ' meetings'}
+            &#x2e; Enter a comma separated list of email addresses.
+          </Modal>
         </SpaceBetween>
       }
       {...props}

@@ -215,6 +215,10 @@ Parameters:
       This function can implement custom logic that is relevant to post processing,
       for example, updating the call summary to a CRM system.
 
+  UpdateLMASettingsFunctionArn:
+    Type: String
+    Description: Update LMA Settings Lambda function ARN
+
   CloudFrontPriceClass:
     Type: String
     Default: PriceClass_100
@@ -1276,6 +1280,87 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/CallEventProcessorFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+
+  ##########################################################################
+  # Meeting Sharing Lambda
+  ##########################################################################
+  ShareMeeting:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt ShareMeetingExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          LCA_CALL_EVENTS_TABLE: !Ref EventSourcingTable
+          REACT_APP_AWS_REGION: !Ref AWS::Region
+          REACT_APP_USER_POOL_ID: !Ref UserPoolId
+      Timeout: 60
+      MemorySize: 128
+      Handler: index.lambda_handler
+      FunctionName: !Sub '${LMAStackName}-LMAShareMeetingLambda'
+      Layers:
+        - !Ref TranscriptEnrichmentPythonLayer
+      CodeUri: ../source/lambda_functions/share_meeting
+      Description: This AWS Lambda Function shares meetings with recipients after verifying the owner.
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/ShareMeeting
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    DependsOn:
+      - ShareMeetingLogGroup
+
+  ShareMeetingLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/ShareMeeting
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+
+  ShareMeetingExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Share Meeting Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-ShareMeeting
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: 
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt EventSourcingTable.Arn
+
+  UpdateLMASettingsWithShareMeeting:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !Ref UpdateLMASettingsFunctionArn
+      LCASettingsName: !Ref LMASettingsParameterName
+      LCASettingsKeyValuePairs:
+        LMAShareMeetingLambda: !Ref ShareMeeting
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
 
   ##########################################################################
   # Transcript Enrichment Lambda Layers

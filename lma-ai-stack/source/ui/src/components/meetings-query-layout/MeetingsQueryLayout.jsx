@@ -54,6 +54,7 @@ export const MeetingsQueryLayout = () => {
   const { settings } = useSettingsContext();
 
   const getElementByIdAsync = (id) =>
+    // eslint-disable-next-line
     new Promise((resolve) => {
       const getElement = () => {
         const element = document.getElementById(id);
@@ -122,10 +123,13 @@ export const MeetingsQueryLayout = () => {
     e.preventDefault();
     return true;
   };
+
+  // eslint-disable-next-line
   const placeholder =
     settings.ShouldUseTranscriptKnowledgeBase === 'true'
       ? 'Enter a question to query your meeting transcripts knowledge base.'
       : 'Transcript Knowledge Base is set to DISABLED for this LMA deployment.';
+  // eslint-disable-next-line
   const initialMsg =
     settings.ShouldUseTranscriptKnowledgeBase === 'true'
       ? 'Ask a question below.'

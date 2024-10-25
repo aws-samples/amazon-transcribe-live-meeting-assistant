@@ -8,6 +8,7 @@ import uuid
 import asyncio
 from sentiment import ComprehendWeightedSentiment
 import jwt
+from jwt import PyJWKClient
 
 if TYPE_CHECKING:
     from mypy_boto3_comprehend.type_defs import DetectSentimentResponseTypeDef
@@ -20,6 +21,12 @@ MEETING_RECORD_EXPIRATION_IN_DAYS = getenv(
     "MEETING_RECORD_EXPIRATION_IN_DAYS", "90")
 TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS = getenv(
     "TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+
+region = getenv("REACT_APP_AWS_REGION", "us-east-1")
+user_pool_id = getenv("REACT_APP_USER_POOL_ID", '')
+
+jwks_url = f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}/.well-known/jwks.json"
+jwks_client = PyJWKClient(jwks_url)
 
 SENTIMENT_WEIGHT = dict(POSITIVE=5, NEGATIVE=-5, NEUTRAL=0, MIXED=0)
 
@@ -49,11 +56,39 @@ def get_meeting_ttl():
 def get_transcription_ttl():
     return get_ttl(TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS)
 
-def get_owner_from_jwt(jwt_token):
-    decoded_jwt = jwt.decode(jwt_token, options={"verify_signature": False})
-    print("DECODED JWT", decoded_jwt)
-    return decoded_jwt['username']
+def get_owner_from_jwt(jwt_token, verifySignature):
     
+    if (verifySignature == False):
+        decoded_jwt = jwt.decode(jwt_token, options={"verify_signature": False})
+        print("DECODED JWT", decoded_jwt)
+    else:
+        decoded_jwt = verify_cognito_token(jwt_token)
+        
+    return decoded_jwt['username']
+
+def verify_cognito_token(token):
+    try:
+        # Get the signing key
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
+
+        # Decode the token
+        decoded_token = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            issuer=f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}",
+            options={
+                "verify_exp": True,  # Verify expiration
+                "verify_iss": True,  # Verify issuer
+                "verify_aud": False,  # Don't verify audience as it's not present
+            },
+        )
+
+        print("Token is valid:", decoded_token)
+        return decoded_token
+    except jwt.exceptions.InvalidTokenError as e:
+        print("Token verification failed:", e)
+        return None
 
 def transform_segment_to_categories_agent_assist(
     category: str,
@@ -364,7 +399,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
             sentiment = message["Sentiment"]
         
         if message.get("AccessToken", None):
-            owner = get_owner_from_jwt(message.get("AccessToken"))
+            owner = get_owner_from_jwt(message.get("AccessToken"), False)
             
         segments.append(
             dict(
