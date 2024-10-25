@@ -7,11 +7,13 @@ import { Logger } from 'aws-amplify';
 
 import useCallsContext from '../../contexts/calls';
 import useSettingsContext from '../../contexts/settings';
+import useAppContext from '../../contexts/app';
 
 import mapCallsAttributes from '../common/map-call-attributes';
 import { paginationLabels } from '../common/labels';
 import useLocalStorage from '../common/local-storage';
 import { exportToExcel } from '../common/download-func';
+import { shareMeetings } from '../common/share-meeting';
 
 import {
   CallsPreferences,
@@ -44,6 +46,7 @@ const CallList = () => {
   } = useCallsContext();
 
   const [preferences, setPreferences] = useLocalStorage('call-list-preferences', DEFAULT_PREFERENCES);
+  const { currentSession, currentCredentials } = useAppContext();
 
   // prettier-ignore
   const {
@@ -75,6 +78,8 @@ const CallList = () => {
     setSelectedItems(collectionProps.selectedItems);
   }, [collectionProps.selectedItems]);
 
+  const [shareResult, setShareResult] = useState(null);
+
   /* eslint-disable react/jsx-props-no-spreading */
   return (
     <Table
@@ -90,6 +95,20 @@ const CallList = () => {
           periodsToLoad={periodsToLoad}
           setPeriodsToLoad={setPeriodsToLoad}
           downloadToExcel={() => exportToExcel(callList, 'Meeting-List')}
+          // eslint-disable-next-line max-len, prettier/prettier
+          shareMeeting={async (recipients) => {
+            const result = await shareMeetings(
+              calls,
+              collectionProps,
+              recipients,
+              settings,
+              currentCredentials,
+              currentSession,
+            );
+            setShareResult(result);
+          }}
+          shareResult={shareResult}
+          setShareResult={setShareResult}
         />
       }
       columnDefinitions={COLUMN_DEFINITIONS_MAIN}

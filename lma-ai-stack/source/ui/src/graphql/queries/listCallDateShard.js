@@ -8,6 +8,7 @@ export default gql`
       Calls {
         CallId
         PK
+        SK
       }
       nextToken
     }

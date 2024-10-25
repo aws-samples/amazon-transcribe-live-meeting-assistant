@@ -14,6 +14,7 @@ input AddTranscriptSegmentInput {
 	SentimentScore: SentimentScoreInput
 	SentimentWeighted: Float
 	Owner: String
+	SharedWith: String
 }
 
 type Call implements DynamoDbBase @aws_cognito_user_pools
@@ -35,8 +36,9 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	Metadatajson: String
 	CallCategories: [String]
 	IssuesDetected: String
-	CallSummaryText: String,
-	Owner: String,
+	CallSummaryText: String
+	Owner: String
+	SharedWith: String
 }
 
 type CallList @aws_cognito_user_pools
@@ -80,11 +82,13 @@ input CreateCallInput {
 	Metadatajson: String
 	ExpiresAfter: AWSTimestamp
 	Owner: String
+	SharedWith: String
 }
 
 type CreateCallOutput @aws_iam {
 	CallId: ID!
 	Owner: String
+	SharedWith: String
 }
 
 interface DynamoDbBase {
@@ -232,6 +236,7 @@ type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
 	SentimentScore: SentimentScore
 	SentimentWeighted: Float
 	Owner: String
+	SharedWith: String
 }
 
 type TranscriptSegmentList @aws_cognito_user_pools
@@ -256,6 +261,7 @@ type TranscriptSegmentWithSentiment implements DynamoDbBase @aws_cognito_user_po
 	Sentiment: Sentiment
 	SentimentWeighted: Float
 	Owner: String
+	SharedWith: String
 }
 type TranscriptSegmentsWithSentimentList @aws_cognito_user_pools
 @aws_iam {
@@ -267,6 +273,7 @@ input UpdateAgentInput {
 	AgentId: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input AddCallCategoryInput {
@@ -274,6 +281,7 @@ input AddCallCategoryInput {
 	CallCategories: [String]
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input AddIssuesDetectedInput {
@@ -281,6 +289,7 @@ input AddIssuesDetectedInput {
 	IssuesDetected: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input AddCallSummaryTextInput {
@@ -288,6 +297,7 @@ input AddCallSummaryTextInput {
 	CallSummaryText: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input UpdateCallAggregationInput {
@@ -296,6 +306,7 @@ input UpdateCallAggregationInput {
 	TotalConversationDurationMillis: Float
 	Sentiment: SentimentAggregationInput
 	Owner: String
+	SharedWith: String
 }
 
 input UpdateCallStatusInput {
@@ -303,6 +314,7 @@ input UpdateCallStatusInput {
 	Status: CallStatus!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input UpdateRecordingUrlInput {
@@ -310,6 +322,7 @@ input UpdateRecordingUrlInput {
 	RecordingUrl: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input UpdatePcaUrlInput {
@@ -317,6 +330,7 @@ input UpdatePcaUrlInput {
 	PcaUrl: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 schema {

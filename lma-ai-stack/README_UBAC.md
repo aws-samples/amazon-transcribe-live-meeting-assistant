@@ -1,6 +1,6 @@
 # User Based Access Control (Preview)
 
-The latest release (0.2.0) of LMA has a new User-Based Access Control (UBAC, beta) feature. Previous versions of LMA 
+Starting with version 0.2.0, LMA has a new User-Based Access Control (UBAC, beta) feature. Previous versions of LMA 
 supported multiple users (if email domain is enabled) by allowing any user in your organization to sign-up for access. 
 However, it lacked fine-grained access controls in the UI. This meant that every user was able to see every other users'
 meetings. UBAC allows each user to only see their own meetings to ensure user privacy and reduce noise. With UBAC, meetings 
@@ -12,6 +12,8 @@ and is able to see all the calls. You may need this for any administrative or tr
 you can either delete the Cognito User associated with the stack creation/update or remove the user from the "Admin" role. 
 For information on managing users in your user pool see 
 [Managing users in your user pool](https://docs.aws.amazon.com/cognito/latest/developerguide/managing-users.html)
+
+In v0.2.5, LMA introduces a *Meeting Sharing* capability that allows users to share meetings they own with others. For more information on how this works, see [User-Based Access Control: Meeting Sharing Feature](./README_UBAC_MEETING_SHARING.md)
 
 ## New LMA stack deployment
 
@@ -48,6 +50,10 @@ your previous deployment, follow the instructions under
 
 As an administrator, you have access to all the previous meetings. There is no change in functionality for this user.
 
+## Features
+- Fine-grained access control that restricts each user to their own meetings.
+- Users can share meetings they own with others. For more information, see [User-Based Access Control: Meeting Sharing Feature](./README_UBAC_MEETING_SHARING.md)
+
 ## Limitations
 - This is a beta feature and may have bugs. Use it with caution. If you encounter any issues, please open a GitHub issue.
 - This feature upgrade (if upgrading from versions 0.1.9 or earlier) a breaking change. Existing users will not be able 
@@ -55,9 +61,6 @@ As an administrator, you have access to all the previous meetings. There is no c
   other users/participants at which time you will be able to see your meetings created in previous versions 
   (versions 0.1.9 or earlier) natively in the Web UI. In the interim, administrators can see your meetings and will be 
   able to retrieve the transcripts, summaries and other information manually.
-- Users (unless they are designated as "Admin" via Cognito - default for the user created with the stack) will not be
-  able to share their meetings with other users. A future release will address this by providing an option to share 
-  meetings with other users.
 - Service limits apply. For example, Amazon Transcribe Streaming by default only allows you to stream up to 25 calls at
   a given time. You can request an increase to this through support. For Amazon Transcribe quotas and limits see
   [Amazon Transcribe endpoints and quotas](https://docs.aws.amazon.com/general/latest/gr/transcribe.html). Similar limits may apply to other services.

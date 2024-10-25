@@ -45,6 +45,7 @@ Parameters:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
       - "anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "anthropic.claude-3-5-sonnet-20241022-v2:0"
     Description: >-
       Select a Bedrock LLM model from the list."
 
@@ -357,6 +358,7 @@ Parameters:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
       - "anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "anthropic.claude-3-5-sonnet-20241022-v2:0"
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models.  Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
@@ -1399,6 +1401,7 @@ Resources:
         UserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
         CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
         AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
+        UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
