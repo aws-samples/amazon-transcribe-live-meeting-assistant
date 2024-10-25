@@ -61,9 +61,6 @@ As an administrator, you have access to all the previous meetings. There is no c
   other users/participants at which time you will be able to see your meetings created in previous versions 
   (versions 0.1.9 or earlier) natively in the Web UI. In the interim, administrators can see your meetings and will be 
   able to retrieve the transcripts, summaries and other information manually.
-- Users (unless they are designated as "Admin" via Cognito - default for the user created with the stack) will not be
-  able to share their meetings with other users. A future release will address this by providing an option to share 
-  meetings with other users.
 - Service limits apply. For example, Amazon Transcribe Streaming by default only allows you to stream up to 25 calls at
   a given time. You can request an increase to this through support. For Amazon Transcribe quotas and limits see
   [Amazon Transcribe endpoints and quotas](https://docs.aws.amazon.com/general/latest/gr/transcribe.html). Similar limits may apply to other services.
