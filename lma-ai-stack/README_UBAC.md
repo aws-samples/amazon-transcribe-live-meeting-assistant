@@ -13,7 +13,7 @@ you can either delete the Cognito User associated with the stack creation/update
 For information on managing users in your user pool see 
 [Managing users in your user pool](https://docs.aws.amazon.com/cognito/latest/developerguide/managing-users.html)
 
-Version 0.2.5 of LMA introduces a *Meeting Sharing* capability that allows users to share meetings they own with others. For more information on how this works, see [User-Based Access Control: Meeting Sharing Feature](./README_UBAC_MEETING_SHARING.md)
+In v0.2.5, LMA introduces a *Meeting Sharing* capability that allows users to share meetings they own with others. For more information on how this works, see [User-Based Access Control: Meeting Sharing Feature](./README_UBAC_MEETING_SHARING.md)
 
 ## New LMA stack deployment
 
@@ -52,7 +52,7 @@ As an administrator, you have access to all the previous meetings. There is no c
 
 ## Features
 - Fine-grained access control that restricts each user to their own meetings.
-- Starting with version 0.2.5, users can share meetings they own with others. For more information on how this works, see [User-Based Access Control: Meeting Sharing Feature](./README_UBAC_MEETING_SHARING.md)
+- Users can share meetings they own with others. For more information, see [User-Based Access Control: Meeting Sharing Feature](./README_UBAC_MEETING_SHARING.md)
 
 ## Limitations
 - This is a beta feature and may have bugs. Use it with caution. If you encounter any issues, please open a GitHub issue.
