@@ -83,7 +83,8 @@ def handler(event, context):
     query = event["arguments"]["input"]
     sessionId = event["arguments"].get("sessionId") or None
     userId = event["identity"]["username"]
-    isAdminUser = "Admin" in event["identity"]["groups"]
+    groups = event["identity"].get("groups",[])
+    isAdminUser = "Admin" in groups
     kb_response = get_kb_response(query, userId, isAdminUser, sessionId)
     kb_response["markdown"] = markdown_response(kb_response)
     print("Returning response: %s" % json.dumps(kb_response))
