@@ -1,6 +1,6 @@
 # User Based Access Control (Preview)
 
-The latest release (0.2.0) of LMA has a new User-Based Access Control (UBAC, beta) feature. Previous versions of LMA 
+Starting with version 0.2.0, LMA has a new User-Based Access Control (UBAC, beta) feature. Previous versions of LMA 
 supported multiple users (if email domain is enabled) by allowing any user in your organization to sign-up for access. 
 However, it lacked fine-grained access controls in the UI. This meant that every user was able to see every other users'
 meetings. UBAC allows each user to only see their own meetings to ensure user privacy and reduce noise. With UBAC, meetings 
@@ -13,7 +13,7 @@ you can either delete the Cognito User associated with the stack creation/update
 For information on managing users in your user pool see 
 [Managing users in your user pool](https://docs.aws.amazon.com/cognito/latest/developerguide/managing-users.html)
 
-Starting version 0.2.5 LMA introduces *Meeting Sharing* capability that allows you to share meetings that you own with others. For more information on how this works, see [User Based Access Control: Meeting Sharing Feature](./README_UBAC_MEETING_SHARING.md)
+Version 0.2.5 of LMA introduces a *Meeting Sharing* capability that allows users to share meetings they own with others. For more information on how this works, see [User-Based Access Control: Meeting Sharing Feature](./README_UBAC_MEETING_SHARING.md)
 
 ## New LMA stack deployment
 
@@ -52,7 +52,7 @@ As an administrator, you have access to all the previous meetings. There is no c
 
 ## Features
 - Fine-grained access control that restricts each user to their own meetings.
-- Starting version 0.2.5, users can share meeting with others for one or more meetings that they own.
+- Starting with version 0.2.5, users can share meetings they own with others. For more information on how this works, see [User-Based Access Control: Meeting Sharing Feature](./README_UBAC_MEETING_SHARING.md)
 
 ## Limitations
 - This is a beta feature and may have bugs. Use it with caution. If you encounter any issues, please open a GitHub issue.
