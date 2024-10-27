@@ -21,17 +21,14 @@ export const shareMeetings = async (
   currentCredentials,
   currentSession,
 ) => {
-  console.log('collectionProps - KISH', collectionProps);
-  console.log('CALLS', calls);
-
   // Get PK and SK from calls
   const callsWithKeys = collectionProps.selectedItems.map(({ callId }) => {
     console.log('callId', callId);
     const call = calls.find((c) => c.CallId === callId);
     console.log('call', call);
     return {
-      PK: call.PK,
-      SK: call.SK,
+      PK: call.ShardPK,
+      SK: call.ShardSK,
       callId: call.CallId,
     };
   });
