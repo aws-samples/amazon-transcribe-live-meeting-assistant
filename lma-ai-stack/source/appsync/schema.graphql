@@ -51,6 +51,8 @@ type CallList @aws_cognito_user_pools
 
 type CallListItem implements DynamoDbBase @aws_cognito_user_pools
 @aws_iam {
+	PK: ID!
+	SK: ID!
 	CreatedAt: AWSDateTime!
 	UpdatedAt: AWSDateTime!
 	ExpiresAfter: AWSTimestamp
