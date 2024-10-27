@@ -39,6 +39,8 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	CallSummaryText: String
 	Owner: String
 	SharedWith: String
+	ShardPK: String
+	ShardSK: String
 }
 
 type CallList @aws_cognito_user_pools
@@ -49,8 +51,6 @@ type CallList @aws_cognito_user_pools
 
 type CallListItem implements DynamoDbBase @aws_cognito_user_pools
 @aws_iam {
-	PK: ID!
-	SK: ID!
 	CreatedAt: AWSDateTime!
 	UpdatedAt: AWSDateTime!
 	ExpiresAfter: AWSTimestamp
@@ -83,12 +83,16 @@ input CreateCallInput {
 	ExpiresAfter: AWSTimestamp
 	Owner: String
 	SharedWith: String
+	ShardPK: String
+	ShardSK: String
 }
 
 type CreateCallOutput @aws_iam {
 	CallId: ID!
 	Owner: String
 	SharedWith: String
+	ShardPK: String
+	ShardSK: String
 }
 
 interface DynamoDbBase {

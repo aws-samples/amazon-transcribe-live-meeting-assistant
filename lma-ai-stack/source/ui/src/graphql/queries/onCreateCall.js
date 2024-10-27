@@ -8,6 +8,8 @@ export default gql`
       CallId
       Owner
       SharedWith
+      ShardPK
+      ShardSK
     }
   }
 `;

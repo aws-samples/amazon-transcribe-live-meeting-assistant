@@ -30,8 +30,8 @@ export const shareMeetings = async (
     const call = calls.find((c) => c.CallId === callId);
     console.log('call', call);
     return {
-      PK: call.PK,
-      SK: call.SK,
+      PK: call.ShardPK,
+      SK: call.ShardSK,
       callId: call.CallId,
     };
   });

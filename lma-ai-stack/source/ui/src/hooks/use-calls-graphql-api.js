@@ -30,14 +30,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
   const setCallsDeduped = (callValues) => {
     setCalls((currentCalls) => {
       const callValuesCallIds = callValues.map((c) => c.CallId);
-      return [
-        ...currentCalls.filter((c) => !callValuesCallIds.includes(c.CallId)),
-        ...callValues.map((call) => ({
-          ...call,
-          PK: call.PK || currentCalls.find((c) => c.CallId === call.CallId)?.PK,
-          SK: call.SK || currentCalls.find((c) => c.CallId === call.CallId)?.SK,
-        })),
-      ];
+      return [...currentCalls.filter((c) => !callValuesCallIds.includes(c.CallId)), ...callValues];
     });
   };
 
@@ -214,7 +207,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
   const listCallIdsByDateShards = async ({ date, shards }) => {
     const listCallDateShardPromises = shards.map((i) => {
-      logger.debug('sending list call date shard', date, i);
+      logger.debug('sendig list call date shard', date, i);
       return API.graphql({ query: listCallDateShard, variables: { date, shard: i } });
     });
     const listCallDateShardResolutions = await Promise.allSettled(listCallDateShardPromises);
@@ -224,17 +217,19 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
       setErrorMessage('failed to list calls - please try again later');
       logger.error('list call promises rejected', listRejected);
     }
-    const callData = listCallDateShardResolutions
+
+    const callIds = listCallDateShardResolutions
       .filter((r) => r.status === 'fulfilled')
       .map((r) => r.value?.data?.listCallsDateShard?.Calls || [])
+      .map((items) => items.map((item) => item?.CallId))
       .reduce((pv, cv) => [...cv, ...pv], []);
 
-    return callData;
+    return callIds;
   };
 
   const listCallIdsByDateHours = async ({ date, hours }) => {
     const listCallDateHourPromises = hours.map((i) => {
-      logger.debug('sending list call date hour', date, i);
+      logger.debug('sendig list call date hour', date, i);
       return API.graphql({ query: listCallDateHour, variables: { date, hour: i } });
     });
     const listCallDateHourResolutions = await Promise.allSettled(listCallDateHourPromises);
@@ -245,12 +240,13 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
       logger.error('list call promises rejected', listRejected);
     }
 
-    const callData = listCallDateHourResolutions
+    const callIds = listCallDateHourResolutions
       .filter((r) => r.status === 'fulfilled')
       .map((r) => r.value?.data?.listCallsDateHour?.Calls || [])
+      .map((items) => items.map((item) => item?.CallId))
       .reduce((pv, cv) => [...cv, ...pv], []);
 
-    return callData;
+    return callIds;
   };
 
   // eslint-disable-next-line no-unused-vars
@@ -300,7 +296,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
       // parallelizes listCalls and getCallDetails
       // alternatively we could implement it by sending multiple graphql queries in 1 request
-      const callDataDateShardPromises = Object.keys(dateShards).map(
+      const callIdsDateShardPromises = Object.keys(dateShards).map(
         // pretttier-ignore
         async (d) => listCallIdsByDateShards({ date: d, shards: dateShards[d] }),
       );
@@ -322,22 +318,14 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
       const residualDateHours = { date: baseDateString, hours: residualHours };
       logger.debug('call list date hours', residualDateHours);
+      const callIdsDateHourPromise = listCallIdsByDateHours(residualDateHours);
 
-      const callDataDateHourPromise = listCallIdsByDateHours(residualDateHours);
-
-      const callDataPromises = [...callDataDateShardPromises, callDataDateHourPromise];
-      const callDetailsPromises = callDataPromises.map(async (callDataPromise) => {
-        const callData = await callDataPromise;
-        const callIds = callData.map((item) => item.CallId);
-        const callDetails = await getCallDetailsFromCallIds(callIds);
-
-        // Merge call details with PK and SK
-        return callDetails.map((detail) => {
-          const matchingData = callData.find((item) => item.CallId === detail.CallId);
-          return { ...detail, PK: matchingData.PK, SK: matchingData.SK };
-        });
+      const callIdsPromises = [...callIdsDateShardPromises, callIdsDateHourPromise];
+      const callDetailsPromises = callIdsPromises.map(async (callIdsPromise) => {
+        const callIds = await callIdsPromise;
+        logger.debug('callIds', callIds);
+        return getCallDetailsFromCallIds(callIds);
       });
-
       const callValuesPromises = callDetailsPromises.map(async (callValuesPromise) => {
         const callValues = await callValuesPromise;
         logger.debug('callValues', callValues);

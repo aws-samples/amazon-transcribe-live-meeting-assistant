@@ -9,6 +9,8 @@ export default gql`
       AgentId
       Owner
       SharedWith
+      ShardPK
+      ShardSK
       CallCategories
       IssuesDetected
       CallSummaryText

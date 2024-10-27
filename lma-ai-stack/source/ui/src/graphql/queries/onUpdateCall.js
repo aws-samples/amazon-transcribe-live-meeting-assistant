@@ -21,6 +21,8 @@ export default gql`
       PcaUrl
       Owner
       SharedWith
+      ShardPK
+      ShardSK
       TotalConversationDurationMillis
       Sentiment {
         OverallSentiment {

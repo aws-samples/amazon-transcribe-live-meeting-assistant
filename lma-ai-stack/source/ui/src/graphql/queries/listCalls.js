@@ -7,7 +7,6 @@ export default gql`
     listCalls(endDateTime: $endDateTime, startDateTime: $startDateTime) {
       Calls {
         CallId
-        PK
       }
       nextToken
     }

@@ -7,8 +7,6 @@ export default gql`
     listCallsDateHour(date: $date, hour: $hour) {
       Calls {
         CallId
-        PK
-        SK
       }
       nextToken
     }
