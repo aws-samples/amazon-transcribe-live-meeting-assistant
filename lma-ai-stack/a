@@ -1,0 +1,518 @@
+[
+    {
+        "CallId": "Stream Audio - 2024-10-26-20:16:24.802",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-27#s#00",
+        "ShardSK": "ts#2024-10-27T01:16:33.580Z#id#Stream Audio - 2024-10-26-20:16:24.802",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The meeting transcript consists of two messages from kkdaws@amazon.com. They said \\\"Hello\\\" and then \\\"It\\\".\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- It\", \"ACTIONS\": \"There are no actionable items in the provided meeting transcript. The transcript only contains two lines of text: \\\"kkdaws@amazon.com: Hello\\\" and \\\"kkdaws@amazon.com: It\\\". There are no clear action items or tasks that can be extracted from this limited information.\"}",
+        "CreatedAt": "2024-10-27T01:16:29.656Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-27T01:18:56.670Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 119765,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-20:22:01.893",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-27#s#00",
+        "ShardSK": "ts#2024-10-27T01:22:08.022Z#id#Stream Audio - 2024-10-26-20:22:01.893",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The transcript consists of a single message from kkdaws@amazon.com, which simply states \\\"It.\\\"\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- It.\", \"ACTIONS\": \"There are no actionable items in the given transcript. The transcript only contains the text \\\"It.\\\" and does not provide enough information to extract any meaningful action items.\"}",
+        "CreatedAt": "2024-10-27T01:22:07.743Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-27T01:24:11.877Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 73035,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-20:25:03.521",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-27#s#00",
+        "ShardSK": "ts#2024-10-27T01:25:07.863Z#id#Stream Audio - 2024-10-26-20:25:03.521",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The transcript appears to be a one-sided conversation with an individual, kkdaws@amazon.com, who greets the other party multiple times, asks how they are, and responds with \\\"OK, fine.\\\" The individual also says \\\"36\\\" at the end.\", \"DETAILS\": \"**Participants**\\n\\nkkdaws@amazon.com\\n\\n**Key Topics**\\n\\n1. Greetings and status updates\", \"ACTIONS\": \"There are no clear action items in the provided transcript. The transcript appears to be a series of greetings and short responses, without any indication of specific tasks or action items that need to be completed.\"}",
+        "CreatedAt": "2024-10-27T01:25:07.640Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-27T01:36:35.615Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 671045,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-27-11:18:21.320",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-27#s#04",
+        "ShardSK": "ts#2024-10-27T16:18:29.149Z#id#Stream Audio - 2024-10-27-11:18:21.320",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The transcript indicates a brief exchange where the only participant is kkdaws@amazon.com, who simply responds \\\"Yes.\\\"\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- No key topics can be determined from the provided transcript.\", \"ACTIONS\": \"There are no actionable items in the given transcript. The transcript only contains the text \\\"kkdaws@amazon.com: Yes.\\\" and does not provide any information about action items.\"}",
+        "CreatedAt": "2024-10-27T16:18:25.945Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-27T16:20:02.688Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 14705,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-27-11:39:32.211",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-27#s#04",
+        "ShardSK": "ts#2024-10-27T16:39:40.069Z#id#Stream Audio - 2024-10-27-11:39:32.211",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The meeting transcript consists of a single line, where kkdaws@amazon.com says \\\"Hello.\\\"\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- No key topics identified\", \"ACTIONS\": \"There are no actionable items in the given meeting transcript. The transcript only contains a greeting from \\\"kkdaws@amazon.com\\\" and does not include any discussion of tasks or action items.\"}",
+        "CreatedAt": "2024-10-27T16:39:36.908Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-27T16:43:19.594Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 128475,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-27-11:47:00.875",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-27#s#04",
+        "ShardSK": "ts#2024-10-27T16:47:05.342Z#id#Stream Audio - 2024-10-27-11:47:00.875",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": null,
+        "CreatedAt": "2024-10-27T16:47:04.977Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "STARTED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-27T16:47:05.342Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": null,
+        "Sentiment": null
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-10:53:37.550",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": "[kkdaws+user1@amazon.com, dkishore18@gmail.com]",
+        "ShardPK": "cls#2024-10-26#s#03",
+        "ShardSK": "ts#2024-10-26T15:53:44.579Z#id#Stream Audio - 2024-10-26-10:53:37.550",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The transcript shows a brief exchange where kkdaws@amazon.com sends three messages: \\\"Hello, how are you?\\\", \\\"123.\\\", and \\\"Testing 123.\\\".\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- Testing\\n- Numeric values\", \"ACTIONS\": \"There are no actionable items in the provided transcript. The transcript only contains a series of messages from the user \\\"kkdaws@amazon.com\\\" that do not appear to contain any specific action items.\"}",
+        "CreatedAt": "2024-10-26T15:53:41.146Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-26T15:54:06.462Z",
+        "RecordingUrl": "https://lma-share-recordingsbucket-ydcfmepmbo0z.s3.us-west-2.amazonaws.com/lma-audio-recordings/Stream_Audio___2024_10_26_10_53_37.550.wav",
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 11095,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-11:10:56.611",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": "[kkdaws+1@amazon.com]",
+        "ShardPK": "cls#2024-10-26#s#04",
+        "ShardSK": "ts#2024-10-26T16:11:03.586Z#id#Stream Audio - 2024-10-26-11:10:56.611",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The meeting was a brief exchange between one person. They greeted the other party, acknowledged the response, and then said goodbye.\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- Greeting\\n- Acknowledgment\\n- Farewell\", \"ACTIONS\": \"There are no actionable items in the given transcript. The transcript only contains a brief exchange of greetings and a farewell, with no discussion of any tasks or action items.\"}",
+        "CreatedAt": "2024-10-26T16:11:00.154Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-26T16:11:20.037Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 9745,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-11:15:06.831",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": "[kkdaws+1@amazon.com]",
+        "ShardPK": "cls#2024-10-26#s#04",
+        "ShardSK": "ts#2024-10-26T16:15:10.329Z#id#Stream Audio - 2024-10-26-11:15:06.831",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The transcript shows a brief exchange where kkdaws@amazon.com states \\\"I don't\\\", followed by \\\"Yeah, good. Bye.\\\"\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- No clear key topics identified\", \"ACTIONS\": \"There are no actionable items in the given transcript. The transcript only contains a brief exchange with no clear action items.\"}",
+        "CreatedAt": "2024-10-26T16:15:10.092Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-26T16:15:22.316Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 7475,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-11:16:50.933",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": "[kkdaws+user1@amazon.com]",
+        "ShardPK": "cls#2024-10-26#s#04",
+        "ShardSK": "ts#2024-10-26T16:16:54.546Z#id#Stream Audio - 2024-10-26-11:16:50.933",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The meeting transcript consists of three messages from kkdaws@amazon.com. They first greeted the other participant, then asked how they were doing, and finally provided the number \\\"123\\\".\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- Greeting\\n- Checking in\\n- Unspecified topic (123)\", \"ACTIONS\": \"There are no actionable items in the provided transcript. The transcript only contains a greeting, a question, and a number, with no clear tasks or action items.\"}",
+        "CreatedAt": "2024-10-26T16:16:54.310Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-26T16:17:07.054Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 5755,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-11:25:03.276",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-26#s#04",
+        "ShardSK": "ts#2024-10-26T16:25:10.450Z#id#Stream Audio - 2024-10-26-11:25:03.276",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The meeting was a brief exchange between two individuals. One person greeted the other, and then the meeting concluded with the same person saying goodbye.\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- Greeting\\n- Farewell\", \"ACTIONS\": \"There are no actionable items in the given transcript. The transcript only contains a greeting and a goodbye from the same person, with no discussion of any tasks or action items.\"}",
+        "CreatedAt": "2024-10-26T16:25:07.294Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-26T16:25:30.675Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 10515,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-12:14:16.868",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-26#s#04",
+        "ShardSK": "ts#2024-10-26T17:14:23.587Z#id#Stream Audio - 2024-10-26-12:14:16.868",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The transcript shows a brief exchange between two individuals, where one person asks the other how they are and then asks them to \\\"tell me about it.\\\" No further details or context are provided.\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- It (unspecified)\", \"ACTIONS\": \"There are no actionable items in the given transcript. The transcript only contains a greeting and a request to \\\"Tell me about it\\\", which do not contain any specific tasks or action items.\"}",
+        "CreatedAt": "2024-10-26T17:14:20.122Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-26T17:14:47.090Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 8915,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-12:14:54.555",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-26#s#04",
+        "ShardSK": "ts#2024-10-26T17:14:58.365Z#id#Stream Audio - 2024-10-26-12:14:54.555",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The transcript shows a brief exchange where kkdaws@amazon.com greeted the other participant, asked how they were, and then requested they tell them about something, but the other participant did not respond.\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- Greeting and inquiry about the other person's well-being\", \"ACTIONS\": \"There are no actionable items in the given transcript. The transcript only contains a greeting and a request to \\\"tell me about it\\\", but does not contain any specific tasks or action items that need to be completed.\"}",
+        "CreatedAt": "2024-10-26T17:14:58.222Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-26T17:16:50.931Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 71515,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-12:25:33.295",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-26#s#04",
+        "ShardSK": "ts#2024-10-26T17:25:40.541Z#id#Stream Audio - 2024-10-26-12:25:33.295",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The meeting was a brief exchange between two individuals. One person, kkdaws@amazon.com, greeted the other and then said goodbye.\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- Greeting\\n- Farewell\", \"ACTIONS\": \"There are no actionable items in the given transcript. The transcript only contains a greeting and a farewell, with no discussion of any tasks or action items.\"}",
+        "CreatedAt": "2024-10-26T17:25:37.225Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-26T17:25:56.613Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 9315,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-13:01:13.283",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-26#s#04",
+        "ShardSK": "ts#2024-10-26T18:01:20.767Z#id#Stream Audio - 2024-10-26-13:01:13.283",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The meeting transcript consists of a single message from kkdaws@amazon.com stating \\\"No test 123.\\\"\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- No test 123\", \"ACTIONS\": \"There are no actionable items in the provided meeting transcript.\"}",
+        "CreatedAt": "2024-10-26T18:01:17.159Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-26T18:01:33.421Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 4115,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-26-13:04:04.822",
+        "AgentId": "kkdaws@amazon.com",
+        "Owner": "kkdaws@amazon.com",
+        "SharedWith": "[asdasd@aaa.com]",
+        "ShardPK": "cls#2024-10-26#s#04",
+        "ShardSK": "ts#2024-10-26T18:04:10.620Z#id#Stream Audio - 2024-10-26-13:04:04.822",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The meeting transcript consists of two messages from kkdaws@amazon.com. They first tested the system by saying \\\"Hello, testing 123.\\\" Then they confirmed with \\\"OK, fine.\\\"\", \"DETAILS\": \"**Participants**\\n\\n- kkdaws@amazon.com\\n\\n**Key Topics**\\n\\n- Testing\", \"ACTIONS\": \"There are no actionable items in the provided meeting transcript. The transcript only contains a test message and a confirmation, with no tasks or action items mentioned.\"}",
+        "CreatedAt": "2024-10-26T18:04:10.377Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-26T18:07:07.177Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 148795,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    },
+    {
+        "CallId": "Stream Audio - 2024-10-25-15:59:48.208",
+        "AgentId": "kkdaws+user1@amazon.com",
+        "Owner": "kkdaws+user1@amazon.com",
+        "SharedWith": null,
+        "ShardPK": "cls#2024-10-25#s#05",
+        "ShardSK": "ts#2024-10-25T21:00:06.959Z#id#Stream Audio - 2024-10-25-15:59:48.208",
+        "CallCategories": null,
+        "IssuesDetected": null,
+        "CallSummaryText": "{\"SUMMARY\": \"The meeting was about testing LMA (the topic of the meeting). The participants discussed casting Elame.\", \"DETAILS\": \"**Participants**\\n\\nkkdaws+user1@amazon.com\\n\\n**Key Topics**\\n\\n1. Casting Elame\\n2. Testing LMA\", \"ACTIONS\": \"**1. Test LMA**\\n\\nThe topic of the meeting is to test LMA.\\n\\n**Owner:** TBD\\n\\n**Due Date:** TBD\"}",
+        "CreatedAt": "2024-10-25T21:00:03.141Z",
+        "CustomerPhoneNumber": "Other Participant",
+        "Status": "ENDED",
+        "SystemPhoneNumber": "System",
+        "UpdatedAt": "2024-10-25T21:00:34.455Z",
+        "RecordingUrl": null,
+        "PcaUrl": null,
+        "TotalConversationDurationMillis": 18665,
+        "Sentiment": {
+            "OverallSentiment": {
+                "AGENT": null,
+                "CALLER": null
+            },
+            "SentimentByPeriod": {
+                "QUARTER": {
+                    "AGENT": null,
+                    "CALLER": null
+                }
+            }
+        }
+    }
+]

@@ -7,6 +7,8 @@ export default gql`
     listCallsDateShard(date: $date, shard: $shard) {
       Calls {
         CallId
+        PK
+        SK
       }
       nextToken
     }
