@@ -24,14 +24,41 @@ export const shareMeetings = async (
   console.log('collectionProps - KISH', collectionProps);
   console.log('CALLS', calls);
 
+  const getListKeys = (callId, createdAt) => {
+    const SHARDS_IN_DAY = 6;
+    const SHARD_DIVIDER = 24 / SHARDS_IN_DAY;
+
+    const now = new Date(createdAt);
+    const date = now.toISOString().split('T')[0];
+    const hour = now.getHours();
+
+    const hourShard = Math.floor(hour / SHARD_DIVIDER);
+    const shardPad = hourShard.toString().padStart(2, '0');
+
+    const listPK = `cls#${date}#s#${shardPad}`;
+    const listSK = `ts#${createdAt}#id#${callId}`;
+
+    console.log('Keys PK/SK LIST', listPK, listSK);
+
+    return { listPK, listSK };
+  };
+
   // Get PK and SK from calls
   const callsWithKeys = collectionProps.selectedItems.map(({ callId }) => {
     console.log('callId', callId);
     const call = calls.find((c) => c.CallId === callId);
     console.log('call', call);
+    let listPK = call.ListPK;
+    let listSK = call.ListSK;
+
+    if (!listPK || !listSK) {
+      const result = getListKeys(call.CallId, call.CreatedAt);
+      listPK = result.listPK;
+      listSK = result.listSK;
+    }
     return {
-      PK: call.PK,
-      SK: call.SK,
+      listPK,
+      listSK,
       callId: call.CallId,
     };
   });

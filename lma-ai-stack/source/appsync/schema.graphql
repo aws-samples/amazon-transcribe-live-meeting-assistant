@@ -55,6 +55,8 @@ type CallListItem implements DynamoDbBase @aws_cognito_user_pools
 	UpdatedAt: AWSDateTime!
 	ExpiresAfter: AWSTimestamp
 	CallId: ID!
+	Owner: String
+	SharedWith: String
 }
 
 enum CallStatus {
