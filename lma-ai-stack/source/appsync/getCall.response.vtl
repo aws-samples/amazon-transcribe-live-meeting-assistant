@@ -2,17 +2,10 @@
   $util.error($ctx.error.message, $ctx.error.type)
 #end
 
-#if($context.result.items.size() > 0 && !$context.identity.groups.contains("Admin"))
-  #set($ownerFilter = [])
-  #foreach($item in $context.result.items)
-    #if("$item.owner" == "$context.identity.username")
-      $util.qr($ownerFilter.add($item))
-    #end
-  #end
-  {
-    "items": $ownerFilter,
-    "nextToken": "$context.result.nextToken"
-  }
+#if(!$context.identity.groups.contains("Admin")
+    && $context.result.Owner != $context.identity.username
+    && !$context.result.SharedWith.contains($context.identity.username))
+      $util.error("User $context.identity.username is not authorized", "AuthorizationError")
 #else
   $utils.toJson($context.result)
 #end
