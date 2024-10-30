@@ -29,8 +29,8 @@ export const shareMeetings = async (
     const SHARD_DIVIDER = 24 / SHARDS_IN_DAY;
 
     const now = new Date(createdAt);
-    const date = now.toISOString().split('T')[0];
-    const hour = now.getHours();
+    const date = now.toISOString().substring(0, 10);
+    const hour = now.getUTCHours();
 
     const hourShard = Math.floor(hour / SHARD_DIVIDER);
     const shardPad = hourShard.toString().padStart(2, '0');

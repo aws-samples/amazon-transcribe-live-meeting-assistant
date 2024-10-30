@@ -2,7 +2,22 @@
   $util.error($ctx.error.message, $ctx.error.type)
 #end
 
-#if(!$context.identity.groups.contains("Admin")
+## This resolver can be invoked by either a Lambda function with IAM authentication
+## or a User authenticated using Cognito. The Lambda function gets unrestricted access
+## to all the call records stored in the DynamoDB to perform the backend operations in the 
+## Call Event Processor function. 
+
+#set($isLambda = false)
+#if($context.identity.userArn && $context.identity.userArn.contains(":assumed-role/"))
+  #set($isLambda = true)
+#end
+
+## If this record isn't being requested by Lambda or any of the authorized users
+## (Admin, meeting owner or user that the meeting has been shared with) throw
+## an unauthorized exception.
+
+#if(!$isLambda 
+    && !$context.identity.groups.contains("Admin")
     && $context.result.Owner != $context.identity.username
     && !$context.result.SharedWith.contains($context.identity.username))
       $util.error("User $context.identity.username is not authorized", "AuthorizationError")
