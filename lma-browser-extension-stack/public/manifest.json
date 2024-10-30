@@ -79,6 +79,17 @@
     },
     {
       "matches": [
+        "https://meet.google.com/*"
+      ],
+      "js": [
+        "content_scripts/mutation-summary.js",
+        "content_scripts/providers/google.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "<all_urls>"
       ],
       "js": [
@@ -96,7 +107,8 @@
         "content_scripts/providers/zoom-injection.js",
         "content_scripts/providers/teams-injection.js",
         "content_scripts/providers/teams-live-injection.js",
-        "content_scripts/providers/webex-injection.js"
+        "content_scripts/providers/webex-injection.js",
+        "content_scripts/providers/google-injection.js"
       ],
       "matches": [
         "<all_urls>"
