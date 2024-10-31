@@ -26,8 +26,8 @@ const mapCallsAttributes = (calls, settings) => {
       PcaUrl: pcaUrl,
       Owner: owner,
       SharedWith: sharedWith,
-      ShardPK: shardPK,
-      ShardSK: shardSK,
+      ListPK: listPK,
+      ListSK: listSK,
     } = item;
     const recordingStatus = getRecordingStatus(item);
 
@@ -71,8 +71,8 @@ const mapCallsAttributes = (calls, settings) => {
       agentSentimentTrendLabel,
       owner,
       sharedWith,
-      shardPK,
-      shardSK,
+      listPK,
+      listSK,
     };
   });
 };

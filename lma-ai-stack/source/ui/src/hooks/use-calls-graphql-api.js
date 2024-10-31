@@ -34,8 +34,8 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
         ...currentCalls.filter((c) => !callValuesCallIds.includes(c.CallId)),
         ...callValues.map((call) => ({
           ...call,
-          ShardPK: call.ShardPK || currentCalls.find((c) => c.CallId === call.CallId)?.ShardPK,
-          ShardSK: call.ShardSK || currentCalls.find((c) => c.CallId === call.CallId)?.ShardSK,
+          ListPK: call.ListPK || currentCalls.find((c) => c.CallId === call.CallId)?.ListPK,
+          ListSK: call.ListSK || currentCalls.find((c) => c.CallId === call.CallId)?.ListSK,
         })),
       ];
     });
@@ -333,7 +333,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
         // Merge call details with PK and SK
         return callDetails.map((detail) => {
           const matchingData = callData.find((item) => item.CallId === detail.CallId);
-          return { ...detail, ShardPK: matchingData.PK, ShardSK: matchingData.SK };
+          return { ...detail, ListPK: matchingData.PK, ListSK: matchingData.SK };
         });
       });
 
