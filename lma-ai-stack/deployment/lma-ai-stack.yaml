@@ -1612,6 +1612,8 @@ Resources:
 
         $util.qr($ctx.args.input.put("UpdatedAt", $now))
         $util.qr($ctx.args.input.put("Status", "STARTED"))
+        $util.qr($ctx.args.input.put("ShardPK", $listPk))
+        $util.qr($ctx.args.input.put("ShardSK", $listSk))
 
         {
           "version" : "2018-05-29",
