@@ -21,9 +21,6 @@ export const shareMeetings = async (
   currentCredentials,
   currentSession,
 ) => {
-  console.log('collectionProps - KISH', collectionProps);
-  console.log('CALLS', calls);
-
   const getListKeys = (callId, createdAt) => {
     const SHARDS_IN_DAY = 6;
     const SHARD_DIVIDER = 24 / SHARDS_IN_DAY;
