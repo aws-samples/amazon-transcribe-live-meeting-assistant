@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2024-11-01
+### Fixed
+- Fixed a bug that allowed non-Admin users to see other user call details if they had (or could guess) the callId.
+- Fixed a bug that prevented calls from being shared for live calls.
+- Added share meeting button to call split panel and call details pages.
+
 ## [0.2.5] - 2024-10-25
 
 ### Added
@@ -198,6 +204,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.2.6]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.6
 [0.2.5]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.5
 [0.2.4]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.4
 [0.2.3]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.3

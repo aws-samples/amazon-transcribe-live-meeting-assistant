@@ -312,7 +312,7 @@ Parameters:
 
   BootstrapVersion:
     Type: String
-    Default: 0.2.5
+    Default: 0.2.6
     Description: >
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket
@@ -1596,7 +1596,7 @@ Resources:
         #set( $shardsInDay = 6 )
         #set( $shardDivider = 24 / $shardsInDay )
         #set( $Integer = 0 )
-        #set( $now = $util.time.nowISO8601() )
+        #set( $now = $ctx.args.input.CreatedAt )
 
         #set( $date = $now.substring(0, 10) )
         #set( $hourString = $now.substring(11, 13) )
@@ -1609,8 +1609,6 @@ Resources:
 
         #set( $listPk = "cls#${!date}#s#${!shardPad}" )
         #set( $listSk = "ts#${!now}#id#${!ctx.args.input.CallId}" )
-
-        #set( $CreatedAt = $util.defaultIfNullOrBlank($ctx.args.input.CreatedAt, $util.time.nowISO8601()) )
 
         $util.qr($ctx.args.input.put("UpdatedAt", $now))
         $util.qr($ctx.args.input.put("Status", "STARTED"))

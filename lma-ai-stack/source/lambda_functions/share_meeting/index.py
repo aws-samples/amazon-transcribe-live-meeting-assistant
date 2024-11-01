@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 ddb = boto3.resource('dynamodb')
 ddbTable = ddb.Table(LCA_CALL_EVENTS_TABLE)
 
-def update_meeting_permissions(callid, shardPK, shardSK, recipients):
+def update_meeting_permissions(callid, listPK, listSK, recipients):
     pk = 'c#' + callid
     new_recipients = list(set(email.strip() for email in recipients.split(',') if email.strip()))
 
@@ -42,7 +42,7 @@ def update_meeting_permissions(callid, shardPK, shardSK, recipients):
         pk = 'trs#' + callid
         updated_count += update_recipients(pk, combined_recipients, None)
 
-        updated_count += update_recipients(shardPK, combined_recipients, shardSK)
+        updated_count += update_recipients(listPK, combined_recipients, listSK)
 
         print(f"Successfully updated {updated_count} items for CallId: {callid}")
         return f"Updated {updated_count} items"
@@ -137,10 +137,10 @@ def lambda_handler(event, context):
     
     for call in calls:        
         callid = call['callId']
-        shardPK = call['PK']
-        shardSK = call['SK']
+        listPK = call['listPK']
+        listSK = call['listSK']
 
-        print("CallID: ", callid, shardPK, shardSK)
+        print("CallID: ", callid, listPK, listSK)
         transcripts = get_transcripts(callid)
         metadata = get_call_metadata(callid)
         print("Fetch Transcript response:", metadata)
@@ -153,7 +153,7 @@ def lambda_handler(event, context):
         if not all(re.match(r"[^@]+@[^@]+\.[^@]+", email) for email in recipients.split(', ')):
             return "Invalid email address provided"
 
-        update_meeting_permissions(callid, shardPK, shardSK, recipients)
+        update_meeting_permissions(callid, listPK, listSK, recipients)
         
     return "Meetings shared successfully"
 

@@ -1,7 +1,7 @@
 {
   "name": "Amazon Live Meeting Assistant",
   "description": "Amazon Live Meeting Assistant, powered by Amazon Transcribe and Amazon Bedrock",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "manifest_version": 3,
   "action": {
     "default_title": "Click to open Amazon Live Meeting Assistant",
