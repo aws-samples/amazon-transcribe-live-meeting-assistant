@@ -93,6 +93,18 @@ type CreateCallOutput @aws_iam {
 	SharedWith: String
 }
 
+input MeetingControlsInput {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+}
+
+type MeetingControlsOutput @aws_iam {
+	CallId: ID!
+	Owner: String
+	SharedWith: String
+}
+
 interface DynamoDbBase {
 	PK: ID!
 	SK: ID!
@@ -112,6 +124,7 @@ type Mutation @aws_iam {
 	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
+    meetingControls(input: MeetingControlsInput!): MeetingControlsOutput @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools

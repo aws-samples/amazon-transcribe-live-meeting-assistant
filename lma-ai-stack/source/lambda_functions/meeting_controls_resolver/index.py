@@ -11,7 +11,6 @@ from eventprocessor_utils import (
     get_owner_from_jwt,
 )
 
-
 # grab environment variables
 LCA_CALL_EVENTS_TABLE = os.environ['LCA_CALL_EVENTS_TABLE']
 
@@ -130,7 +129,6 @@ def lambda_handler(event, context):
     print("Received event: " + json.dumps(event, indent=2))
     request_owner = get_owner_from_jwt(event['accessToken'], True)
     print("DECODED JWT", request_owner)
-
 
     data = json.loads(json.dumps(event))
     calls = data['calls']
