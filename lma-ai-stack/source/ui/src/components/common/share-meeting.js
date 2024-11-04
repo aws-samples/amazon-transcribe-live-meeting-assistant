@@ -1,6 +1,6 @@
 import { API } from 'aws-amplify';
 import React, { useState } from 'react';
-import { Alert, Button, Modal, SpaceBetween, FormField, Input, Form } from '@awsui/components-react';
+import { Alert, Button, Modal, Multiselect, SpaceBetween, FormField, Input, Form } from '@awsui/components-react';
 import meetingControls from '../../graphql/queries/meetingControls';
 
 export const shareMeetings = async (props, meetingRecipients) => {
@@ -55,26 +55,45 @@ export const shareMeetings = async (props, meetingRecipients) => {
 
 export const shareModal = (props) => {
   const [share, setShare] = useState(false);
-  const [meetingRecipients, setMeetingRecipients] = React.useState('');
+  const [meetingRecipients, setMeetingRecipients] = useState([]);
+  const [newRecipients, setNewRecipients] = useState('');
   const [submit, setSubmit] = useState(false);
   const [shareResult, setShareResult] = useState(null);
 
-  const openShareSettings = () => {
+  const { getCallDetailsFromCallIds } = props;
+
+  const openShareSettings = async () => {
     setShare(true);
+    const response = await getCallDetailsFromCallIds(props.selectedItems.map((c) => c.callId));
+    console.log('CALL SHARE MEETINGS RESPONSE:', response);
   };
 
   const closeShareSettings = () => {
     setShare(false);
-    setMeetingRecipients('');
+    setMeetingRecipients([]);
+    setNewRecipients('');
     setShareResult(null);
+  };
+
+  const handleAddRecipients = () => {
+    if (newRecipients.trim()) {
+      const emailList = newRecipients.split(',').map((email) => email.trim());
+      const validEmails = emailList.filter((email) => {
+        // Basic email validation regex
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email) && !meetingRecipients.includes(email);
+      });
+      setMeetingRecipients([...meetingRecipients, ...validEmails]);
+      setNewRecipients('');
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmit(true);
     console.log('Meeting Recipients: ', meetingRecipients);
-    const result = await shareMeetings(props, meetingRecipients);
-    setMeetingRecipients('');
+    const result = await shareMeetings(props, meetingRecipients.join(','));
+    setMeetingRecipients([]);
     setSubmit(false);
     setShareResult(result);
   };
@@ -92,46 +111,49 @@ export const shareModal = (props) => {
         onDismiss={closeShareSettings}
         visible={share}
         footer={
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSubmit(e);
-            }}
+          <Form
+            actions={
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button formAction="none" onClick={closeShareSettings}>
+                  Close
+                </Button>
+                <Button variant="primary" disabled={submit || meetingRecipients.length === 0} onClick={handleSubmit}>
+                  Submit
+                </Button>
+              </SpaceBetween>
+            }
           >
-            <Form
-              actions={
-                <SpaceBetween direction="horizontal" size="xs">
-                  <Button formAction="none" onClick={closeShareSettings}>
-                    Close
-                  </Button>
-                  <Button
-                    variant="primary"
-                    disabled={submit || !meetingRecipients.trim()}
-                    onclick={(e) => {
-                      e.preventDefault();
-                      handleSubmit(e);
-                    }}
-                  >
-                    Submit
-                  </Button>
-                </SpaceBetween>
-              }
-            >
-              <FormField>
-                <Input value={meetingRecipients} onChange={(event) => setMeetingRecipients(event.detail.value)} />
-              </FormField>
-              <Alert type="info" visible={shareResult}>
-                {shareResult}
-              </Alert>
-            </Form>
-          </form>
+            <Alert type="info" visible={shareResult}>
+              {shareResult}
+            </Alert>
+          </Form>
         }
         header={<h3>Share Meeting</h3>}
       >
-        You are sharing&#xA0;
-        {props.selectedItems.length}
-        {props.selectedItems.length === 1 ? ' meeting' : ' meetings'}
-        &#x2e; Enter a comma separated list of email addresses.
+        <SpaceBetween size="m">
+          <div>
+            You are sharing {props.selectedItems.length} {props.selectedItems.length === 1 ? 'meeting' : 'meetings'}.
+          </div>
+          <FormField label="Recipients">
+            <Multiselect
+              selectedOptions={meetingRecipients.map((r) => ({ label: r, value: r }))}
+              onChange={({ detail }) => setMeetingRecipients(detail.selectedOptions.map((o) => o.value))}
+              options={meetingRecipients.map((r) => ({ label: r, value: r }))}
+              removeSelectedOptions
+              placeholder="No recipients added"
+            />
+          </FormField>
+          <FormField label="Add recipient">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Input
+                value={newRecipients}
+                onChange={(event) => setNewRecipients(event.detail.value)}
+                placeholder="Enter email address"
+              />
+              <Button onClick={handleAddRecipients}>Add</Button>
+            </SpaceBetween>
+          </FormField>
+        </SpaceBetween>
       </Modal>
     </SpaceBetween>
   );

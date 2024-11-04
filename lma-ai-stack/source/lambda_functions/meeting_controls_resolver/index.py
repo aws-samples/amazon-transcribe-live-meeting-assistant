@@ -136,7 +136,7 @@ def lambda_handler(event, context):
 
     if not recipients:
         return { 'Result': "No recipients provided" }
-    if not all(re.match(r"[^@]+@[^@]+\.[^@]+", email) for email in recipients.split(', ')):
+    if not all(re.match(r"[^@]+@[^@]+\.[^@]+", email) for email in recipients.split(',')):
         return { 'Result': "Invalid email address provided" }
 
     for call in calls:        
