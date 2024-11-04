@@ -3,11 +3,9 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  mutation Mutation($input: MeetingControlsInput!) {
+  mutation MeetingControlsMutation($input: MeetingControlsInput!) {
     meetingControls(input: $input) {
-      CallId
-      PK
-      SK
+      Result
     }
   }
 `;

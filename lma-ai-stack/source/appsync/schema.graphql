@@ -93,16 +93,19 @@ type CreateCallOutput @aws_iam {
 	SharedWith: String
 }
 
-input MeetingControlsInput {
+input MeetingControlsItem {
 	CallId: ID!
 	ListPK: ID!
 	ListSK: ID!
 }
 
-type MeetingControlsOutput @aws_iam {
-	CallId: ID!
-	Owner: String
-	SharedWith: String
+input MeetingControlsInput {
+	Calls: [MeetingControlsItem]
+	MeetingRecipients: String
+}
+
+type MeetingControlsOutput {
+	Result: String
 }
 
 interface DynamoDbBase {

@@ -1,14 +1,10 @@
 import { API } from 'aws-amplify';
+import React, { useState } from 'react';
+import { Alert, Button, Modal, SpaceBetween, FormField, Input, Form } from '@awsui/components-react';
 import meetingControls from '../../graphql/queries/meetingControls';
 
-export const shareMeetings = async (
-  calls,
-  collectionProps,
-  meetingRecipients,
-  settings,
-  currentCredentials,
-  currentSession,
-) => {
+export const shareMeetings = async (props, meetingRecipients) => {
+  const { calls } = props;
   const getListKeys = (callId, createdAt) => {
     const SHARDS_IN_DAY = 6;
     const SHARD_DIVIDER = 24 / SHARDS_IN_DAY;
@@ -23,16 +19,13 @@ export const shareMeetings = async (
     const listPK = `cls#${date}#s#${shardPad}`;
     const listSK = `ts#${createdAt}#id#${callId}`;
 
-    console.log('Keys PK/SK LIST', listPK, listSK);
-
     return { listPK, listSK };
   };
 
   // Get PK and SK from calls
-  const callsWithKeys = collectionProps.selectedItems.map(({ callId }) => {
-    console.log('callId', callId);
+  const callsWithKeys = props.selectedItems.map(({ callId }) => {
     const call = calls.find((c) => c.CallId === callId);
-    console.log('call', call);
+
     let listPK = call.ListPK;
     let listSK = call.ListSK;
 
@@ -42,29 +35,104 @@ export const shareMeetings = async (
       listSK = result.listSK;
     }
     return {
-      listPK,
-      listSK,
-      callId: call.CallId,
+      ListPK: listPK,
+      ListSK: listSK,
+      CallId: call.CallId,
     };
   });
 
-  console.log('Calls with PK and SK:', callsWithKeys);
-
-  const payload = {
-    calls: callsWithKeys,
-    meetingRecipients,
-    accessToken: currentSession.accessToken.jwtToken,
-  };
-
   const response = await API.graphql({
     query: meetingControls,
-    variables: payload,
+    variables: {
+      input: { Calls: callsWithKeys, MeetingRecipients: meetingRecipients },
+    },
   });
 
-  const result = JSON.parse(response.data.meetingControls);
-  console.log('Lambda result:', result);
+  const result = response.data.meetingControls.Result;
 
   return result;
 };
 
-export default shareMeetings;
+export const shareModal = (props) => {
+  const [share, setShare] = useState(false);
+  const [meetingRecipients, setMeetingRecipients] = React.useState('');
+  const [submit, setSubmit] = useState(false);
+  const [shareResult, setShareResult] = useState(null);
+
+  const openShareSettings = () => {
+    setShare(true);
+  };
+
+  const closeShareSettings = () => {
+    setShare(false);
+    setMeetingRecipients('');
+    setShareResult(null);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmit(true);
+    console.log('Meeting Recipients: ', meetingRecipients);
+    const result = await shareMeetings(props, meetingRecipients);
+    setMeetingRecipients('');
+    setSubmit(false);
+    setShareResult(result);
+  };
+
+  return (
+    <SpaceBetween size="xxs" direction="horizontal">
+      <Button
+        iconName="share"
+        variant="normal"
+        loading={props.loading}
+        disabled={props.selectedItems.length === 0}
+        onClick={openShareSettings}
+      />
+      <Modal
+        onDismiss={closeShareSettings}
+        visible={share}
+        footer={
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmit(e);
+            }}
+          >
+            <Form
+              actions={
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Button formAction="none" onClick={closeShareSettings}>
+                    Close
+                  </Button>
+                  <Button
+                    variant="primary"
+                    disabled={submit || !meetingRecipients.trim()}
+                    onclick={(e) => {
+                      e.preventDefault();
+                      handleSubmit(e);
+                    }}
+                  >
+                    Submit
+                  </Button>
+                </SpaceBetween>
+              }
+            >
+              <FormField>
+                <Input value={meetingRecipients} onChange={(event) => setMeetingRecipients(event.detail.value)} />
+              </FormField>
+              <Alert type="info" visible={shareResult}>
+                {shareResult}
+              </Alert>
+            </Form>
+          </form>
+        }
+        header={<h3>Share Meeting</h3>}
+      >
+        You are sharing&#xA0;
+        {props.selectedItems.length}
+        {props.selectedItems.length === 1 ? ' meeting' : ' meetings'}
+        &#x2e; Enter a comma separated list of email addresses.
+      </Modal>
+    </SpaceBetween>
+  );
+};

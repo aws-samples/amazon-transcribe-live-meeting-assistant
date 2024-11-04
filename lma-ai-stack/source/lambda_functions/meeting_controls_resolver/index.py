@@ -7,9 +7,6 @@ import json
 import csv
 import logging
 import re
-from eventprocessor_utils import (
-    get_owner_from_jwt,
-)
 
 # grab environment variables
 LCA_CALL_EVENTS_TABLE = os.environ['LCA_CALL_EVENTS_TABLE']
@@ -32,7 +29,7 @@ def update_meeting_permissions(callid, listPK, listSK, recipients):
 
         if set(new_recipients).issubset(set(current_recipients)):
             print(f"Recipients already have access for {callid}")
-            return f"No update needed for CallId: {callid}"
+            return { 'Result': f"No update needed for CallId: {callid}" }
         
         combined_recipients = list(set(current_recipients + new_recipients))
 
@@ -44,14 +41,14 @@ def update_meeting_permissions(callid, listPK, listSK, recipients):
         updated_count += update_recipients(listPK, combined_recipients, listSK)
 
         print(f"Successfully updated {updated_count} items for CallId: {callid}")
-        return f"Updated {updated_count} items"
+        return
 
     except ClientError as err:
         logger.error("Error updating people can access %s: %s",
                      err.response['Error']['Code'], err.response['Error']['Message'])
         raise
     else:
-        return response['Attributes']
+        return
 
 def update_recipients(pk, recipients, sk):
     try:
@@ -126,34 +123,37 @@ def get_transcripts(callid):
         return response['Items']
 
 def lambda_handler(event, context):
-    print("Received event: " + json.dumps(event, indent=2))
-    request_owner = get_owner_from_jwt(event['accessToken'], True)
-    print("DECODED JWT", request_owner)
+    print("Received event: " + json.dumps(event))
 
-    data = json.loads(json.dumps(event))
-    calls = data['calls']
-    
+    request_owner = event["identity"]["username"]
+    isAdminUser = False
+    groups = event["identity"].get("groups")
+    if groups:
+        isAdminUser = "Admin" in groups       
+
+    calls = event["arguments"]["input"]["Calls"]
+    recipients = event["arguments"]["input"]["MeetingRecipients"]
+
+    if not recipients:
+        return { 'Result': "No recipients provided" }
+    if not all(re.match(r"[^@]+@[^@]+\.[^@]+", email) for email in recipients.split(', ')):
+        return { 'Result': "Invalid email address provided" }
+
     for call in calls:        
-        callid = call['callId']
-        listPK = call['listPK']
-        listSK = call['listSK']
+        callid = call['CallId']
+        listPK = call['ListPK']
+        listSK = call['ListSK']
 
         print("CallID: ", callid, listPK, listSK)
         transcripts = get_transcripts(callid)
         metadata = get_call_metadata(callid)
         print("Fetch Transcript response:", metadata)
-        if(metadata.get('Owner', '') != request_owner):
-            return "You don't have permission to share one or more of the requested calls"
-
-        recipients = event['meetingRecipients']
-        if not recipients:
-            return "No recipients provided"
-        if not all(re.match(r"[^@]+@[^@]+\.[^@]+", email) for email in recipients.split(', ')):
-            return "Invalid email address provided"
+        if(metadata.get('Owner', '') != request_owner and not isAdminUser):
+            return { 'Result': "You don't have permission to share one or more of the requested calls" }
 
         update_meeting_permissions(callid, listPK, listSK, recipients)
         
-    return "Meetings shared successfully"
+    return { 'Result': "Meetings shared successfully" }
 
 # Test case
 if __name__ == '__main__':
