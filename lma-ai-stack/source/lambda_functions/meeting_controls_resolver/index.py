@@ -19,26 +19,13 @@ def update_meeting_permissions(callid, listPK, listSK, recipients):
     pk = 'c#' + callid
     new_recipients = list(set(email.strip() for email in recipients.split(',') if email.strip()))
 
-    try:
-        response = ddbTable.get_item(
-            Key={'PK': pk, 'SK': pk},
-            ProjectionExpression='SharedWith'
-        )
-        
-        current_recipients = response.get('Item', {}).get('SharedWith', [])
-
-        if set(new_recipients).issubset(set(current_recipients)):
-            print(f"Recipients already have access for {callid}")
-            return { 'Result': f"No update needed for CallId: {callid}" }
-        
-        combined_recipients = list(set(current_recipients + new_recipients))
-
-        updated_count = update_recipients(pk, combined_recipients, None)
+    try:        
+        updated_count = update_recipients(pk, new_recipients, None)
         
         pk = 'trs#' + callid
-        updated_count += update_recipients(pk, combined_recipients, None)
+        updated_count += update_recipients(pk, new_recipients, None)
 
-        updated_count += update_recipients(listPK, combined_recipients, listSK)
+        updated_count += update_recipients(listPK, new_recipients, listSK)
 
         print(f"Successfully updated {updated_count} items for CallId: {callid}")
         return
