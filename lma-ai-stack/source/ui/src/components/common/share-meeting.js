@@ -62,10 +62,27 @@ export const shareModal = (props) => {
 
   const { getCallDetailsFromCallIds } = props;
 
+  const parseSharedWith = (sharedWithString) => {
+    return (sharedWithString || '')
+      .replace(/[[\]]/g, '')
+      .split(',')
+      .map((email) => email.trim())
+      .filter((email) => email);
+  };
+
   const openShareSettings = async () => {
     setShare(true);
-    const response = await getCallDetailsFromCallIds(props.selectedItems.map((c) => c.callId));
-    console.log('CALL SHARE MEETINGS RESPONSE:', response);
+    const callDetails = await getCallDetailsFromCallIds(props.selectedItems.map((c) => c.callId));
+    console.log('CALL SHARE MEETINGS RESPONSE:', callDetails);
+
+    const allRecipients = new Set();
+    callDetails.forEach((call) => {
+      const sharedWithArray = parseSharedWith(call.SharedWith);
+      sharedWithArray.forEach((email) => allRecipients.add(email));
+    });
+
+    const recipientList = Array.from(allRecipients).map((email) => email);
+    setMeetingRecipients(recipientList);
   };
 
   const closeShareSettings = () => {
