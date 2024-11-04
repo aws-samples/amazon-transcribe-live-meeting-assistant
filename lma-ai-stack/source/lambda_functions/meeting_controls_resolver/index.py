@@ -19,6 +19,8 @@ def update_meeting_permissions(callid, listPK, listSK, recipients):
     pk = 'c#' + callid
     new_recipients = list(set(email.strip() for email in recipients.split(',') if email.strip()))
 
+    if not recipients:
+        new_recipients = None
     try:        
         updated_count = update_recipients(pk, new_recipients, None)
         
@@ -121,9 +123,7 @@ def lambda_handler(event, context):
     calls = event["arguments"]["input"]["Calls"]
     recipients = event["arguments"]["input"]["MeetingRecipients"]
 
-    if not recipients:
-        return { 'Result': "No recipients provided" }
-    if not all(re.match(r"[^@]+@[^@]+\.[^@]+", email) for email in recipients.split(',')):
+    if recipients and not all(re.match(r"[^@]+@[^@]+\.[^@]+", email) for email in recipients.split(',')):
         return { 'Result': "Invalid email address provided" }
 
     for call in calls:        
