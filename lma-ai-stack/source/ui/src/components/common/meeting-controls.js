@@ -14,7 +14,8 @@ import {
   Box,
   ColumnLayout,
 } from '@awsui/components-react';
-import meetingControls from '../../graphql/queries/meetingControls';
+import shareMeetings from '../../graphql/queries/shareMeetings';
+import deleteMeetings from '../../graphql/queries/deleteMeetings';
 
 const getListKeys = (callId, createdAt) => {
   const SHARDS_IN_DAY = 6;
@@ -55,29 +56,29 @@ const callsWithKeys = (props) => {
   return callsKeys;
 };
 
-const shareMeetings = async (props, currentRecipients) => {
+const invokeShareMeetings = async (props, currentRecipients) => {
   const callsKeys = callsWithKeys(props);
   const response = await API.graphql({
-    query: meetingControls,
+    query: shareMeetings,
     variables: {
-      input: { Calls: callsKeys, MeetingRecipients: currentRecipients, Action: 'Share' },
+      input: { Calls: callsKeys, MeetingRecipients: currentRecipients },
     },
   });
 
-  const result = response.data.meetingControls.Result;
+  const result = response.data.shareMeetings.Result;
   return result;
 };
 
-const deleteMeetings = async (props) => {
+const invokeDeleteMeetings = async (props) => {
   const callsKeys = callsWithKeys(props);
   const response = await API.graphql({
-    query: meetingControls,
+    query: deleteMeetings,
     variables: {
-      input: { Calls: callsKeys, Action: 'Delete' },
+      input: { Calls: callsKeys },
     },
   });
 
-  const result = response.data.meetingControls.Result;
+  const result = response.data.deleteMeetings.Result;
   return result;
 };
 
@@ -155,7 +156,7 @@ export const shareModal = (props) => {
     // merge current and new recipients
     const allRecipients = [...new Set([...currentRecipients, ...newRecipients])];
     console.log('Meeting Recipients: ', allRecipients);
-    const result = await shareMeetings(props, allRecipients.join(','));
+    const result = await invokeShareMeetings(props, allRecipients.join(','));
     setCurrentRecipients([]);
     setNewRecipients([]);
     setSubmit(false);
@@ -308,7 +309,7 @@ export const deleteModal = (props) => {
   const handleDelete = async (e) => {
     e.preventDefault();
     setDeleteDisabled(true);
-    await deleteMeetings(props);
+    await invokeDeleteMeetings(props);
     closeDeleteSettings();
     console.log('IN HANDLE DELETE');
   };

@@ -93,19 +93,32 @@ type CreateCallOutput @aws_iam {
 	SharedWith: String
 }
 
-input MeetingControlsItem {
+input ShareMeetingsItem {
 	CallId: ID!
 	ListPK: ID!
 	ListSK: ID!
 }
 
-input MeetingControlsInput {
-	Calls: [MeetingControlsItem]
+input ShareMeetingsInput {
+	Calls: [ShareMeetingsItem]
 	MeetingRecipients: String
-	Action: String
 }
 
-type MeetingControlsOutput {
+type ShareMeetingsOutput {
+	Result: String
+}
+
+input DeleteMeetingsItem {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+}
+
+input DeleteMeetingsInput {
+	Calls: [DeleteMeetingsItem]
+}
+
+type DeleteMeetingsOutput {
 	Result: String
 }
 
@@ -128,7 +141,8 @@ type Mutation @aws_iam {
 	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
-    meetingControls(input: MeetingControlsInput!): MeetingControlsOutput @aws_cognito_user_pools
+    shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools
+	deleteMeetings(input: DeleteMeetingsInput!): DeleteMeetingsOutput @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools

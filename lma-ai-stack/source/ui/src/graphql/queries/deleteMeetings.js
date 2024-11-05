@@ -3,8 +3,8 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  mutation MeetingControlsMutation($input: MeetingControlsInput!) {
-    meetingControls(input: $input) {
+  mutation DeleteMeetingsMutation($input: DeleteMeetingsInput!) {
+    deleteMeetings(input: $input) {
       Result
     }
   }
