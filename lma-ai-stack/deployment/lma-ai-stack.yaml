@@ -1491,6 +1491,7 @@ Resources:
                   - dynamodb:Scan
                   - dynamodb:GetItem
                   - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
                 Resource: !GetAtt EventSourcingTable.Arn
 
   AppSyncMeetingControlsLambdaRole:

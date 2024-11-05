@@ -102,6 +102,7 @@ input MeetingControlsItem {
 input MeetingControlsInput {
 	Calls: [MeetingControlsItem]
 	MeetingRecipients: String
+	Action: String
 }
 
 type MeetingControlsOutput {

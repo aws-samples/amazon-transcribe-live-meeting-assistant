@@ -1,5 +1,5 @@
 import { API } from 'aws-amplify';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Button,
@@ -11,30 +11,31 @@ import {
   FormField,
   Input,
   Form,
+  Box,
+  ColumnLayout,
 } from '@awsui/components-react';
 import meetingControls from '../../graphql/queries/meetingControls';
 
-export const shareMeetings = async (props, currentRecipients) => {
+const getListKeys = (callId, createdAt) => {
+  const SHARDS_IN_DAY = 6;
+  const SHARD_DIVIDER = 24 / SHARDS_IN_DAY;
+
+  const now = new Date(createdAt);
+  const date = now.toISOString().substring(0, 10);
+  const hour = now.getUTCHours();
+
+  const hourShard = Math.floor(hour / SHARD_DIVIDER);
+  const shardPad = hourShard.toString().padStart(2, '0');
+
+  const listPK = `cls#${date}#s#${shardPad}`;
+  const listSK = `ts#${createdAt}#id#${callId}`;
+
+  return { listPK, listSK };
+};
+
+const callsWithKeys = (props) => {
   const { calls } = props;
-  const getListKeys = (callId, createdAt) => {
-    const SHARDS_IN_DAY = 6;
-    const SHARD_DIVIDER = 24 / SHARDS_IN_DAY;
-
-    const now = new Date(createdAt);
-    const date = now.toISOString().substring(0, 10);
-    const hour = now.getUTCHours();
-
-    const hourShard = Math.floor(hour / SHARD_DIVIDER);
-    const shardPad = hourShard.toString().padStart(2, '0');
-
-    const listPK = `cls#${date}#s#${shardPad}`;
-    const listSK = `ts#${createdAt}#id#${callId}`;
-
-    return { listPK, listSK };
-  };
-
-  // Get PK and SK from calls
-  const callsWithKeys = props.selectedItems.map(({ callId }) => {
+  const callsKeys = props.selectedItems.map(({ callId }) => {
     const call = calls.find((c) => c.CallId === callId);
 
     let listPK = call.ListPK;
@@ -51,16 +52,32 @@ export const shareMeetings = async (props, currentRecipients) => {
       CallId: call.CallId,
     };
   });
+  return callsKeys;
+};
 
+const shareMeetings = async (props, currentRecipients) => {
+  const callsKeys = callsWithKeys(props);
   const response = await API.graphql({
     query: meetingControls,
     variables: {
-      input: { Calls: callsWithKeys, MeetingRecipients: currentRecipients },
+      input: { Calls: callsKeys, MeetingRecipients: currentRecipients, Action: 'Share' },
     },
   });
 
   const result = response.data.meetingControls.Result;
+  return result;
+};
 
+const deleteMeetings = async (props) => {
+  const callsKeys = callsWithKeys(props);
+  const response = await API.graphql({
+    query: meetingControls,
+    variables: {
+      input: { Calls: callsKeys, Action: 'Delete' },
+    },
+  });
+
+  const result = response.data.meetingControls.Result;
   return result;
 };
 
@@ -79,8 +96,8 @@ export const shareModal = (props) => {
 
   const currentRecipientsDescription =
     props.selectedItems.length === 1
-      ? `The following recipients have access to "${props.selectedItems[0].callId}". Remove recipients who no longer need access.`
-      : `The following recipients have access to one or more of the selected meetings. If you share the meetings, all recipients in this list will have access to ${props.selectedItems.length} meetings. If you remove recipients, they will lose access to ${props.selectedItems.length} meetings.`;
+      ? `The following users have access to "${props.selectedItems[0].callId}". Remove users who no longer need access.`
+      : `The following users have access to one or more of the selected meetings. If you share the meetings, all users in this list will have access to ${props.selectedItems.length} meetings. If you remove users, they will lose access to ${props.selectedItems.length} meetings.`;
 
   const { getCallDetailsFromCallIds } = props;
 
@@ -234,16 +251,14 @@ export const shareModal = (props) => {
         <SpaceBetween size="s">
           <Container
             disableHeaderPaddings
-            header={<Header description={currentRecipientsDescription}>Existing Recipients</Header>}
+            header={<Header description={currentRecipientsDescription}>Existing Users</Header>}
           >
             {showCurrentRecipients()}
           </Container>
           <Container
             disableHeaderPaddings
             header={
-              <Header description="Enter a comma-separated list of email addresses and choose Add.">
-                New Recipients
-              </Header>
+              <Header description="Enter a comma-separated list of email addresses and choose Add.">Add Users</Header>
             }
           >
             <FormField>
@@ -263,6 +278,124 @@ export const shareModal = (props) => {
             {showNewRecipients()}
           </Container>
         </SpaceBetween>
+      </Modal>
+    </SpaceBetween>
+  );
+};
+
+export const deleteModal = (props) => {
+  const [visible, setVisible] = useState(false);
+  const [deleteDisabled, setDeleteDisabled] = useState(false);
+
+  const deleteConsentText = 'confirm';
+  const modalContent =
+    props.selectedItems.length === 1 ? `"${props.selectedItems[0].callId}"` : `${props.selectedItems.length} meetings`;
+
+  const [deleteInputText, setDeleteInputText] = useState('');
+  const inputMatchesConsentText = deleteInputText.toLowerCase() === deleteConsentText;
+  useEffect(() => {
+    setDeleteInputText('');
+  }, [visible]);
+
+  const openDeleteSettings = async () => {
+    setVisible(true);
+  };
+
+  const closeDeleteSettings = () => {
+    setVisible(false);
+  };
+
+  const handleDelete = async (e) => {
+    e.preventDefault();
+    setDeleteDisabled(true);
+    await deleteMeetings(props);
+    closeDeleteSettings();
+    console.log('IN HANDLE DELETE');
+  };
+
+  const handleDeleteSubmit = (event) => {
+    event.preventDefault();
+    console.log('IN HANDLE DELETE SUBMIT');
+    if (inputMatchesConsentText) {
+      handleDelete(event);
+    }
+  };
+
+  return (
+    <SpaceBetween size="xxs" direction="horizontal">
+      <Button
+        iconName="remove"
+        variant="normal"
+        loading={props.loading}
+        disabled={props.selectedItems.length === 0}
+        onClick={openDeleteSettings}
+      />
+      <Modal
+        visible={visible}
+        onDismiss={closeDeleteSettings}
+        header={<h3>Delete {modalContent}</h3>}
+        closeAriaLabel="Close dialog"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={closeDeleteSettings}>
+                Close
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleDelete}
+                disabled={!inputMatchesConsentText || deleteDisabled}
+                data-testid="submit"
+              >
+                Delete
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        {props.selectedItems.length > 0 && (
+          <SpaceBetween size="m">
+            {props.selectedItems.length > 1 ? (
+              <Box variant="span">
+                Permanently delete{' '}
+                <Box variant="span" fontWeight="bold">
+                  {props.selectedItems.length} meetings
+                </Box>
+                ? You can’t undo this action.
+              </Box>
+            ) : (
+              <Box variant="span">
+                Permanently delete meeting{' '}
+                <Box variant="span" fontWeight="bold">
+                  {props.selectedItems[0].callId}
+                </Box>
+                ? You can’t undo this action.
+              </Box>
+            )}
+
+            <Alert type="warning" statusIconAriaLabel="Warning">
+              Proceeding with this action will delete the
+              {props.selectedItems.length > 1
+                ? ' meetings with all their content. '
+                : ' meeting with all its content.'}{' '}
+            </Alert>
+
+            <Box>To avoid accidental deletions, we ask you to provide additional written consent.</Box>
+
+            <form onSubmit={handleDeleteSubmit}>
+              <FormField label={`To confirm this deletion, type "${deleteConsentText}".`}>
+                <ColumnLayout columns={2}>
+                  <Input
+                    placeholder={deleteConsentText}
+                    onChange={(event) => setDeleteInputText(event.detail.value)}
+                    value={deleteInputText}
+                    ariaRequired
+                  />
+                </ColumnLayout>
+              </FormField>
+            </form>
+          </SpaceBetween>
+        )}
       </Modal>
     </SpaceBetween>
   );

@@ -21,7 +21,7 @@ import { SentimentTrendIndicator } from '../sentiment-trend-icon/SentimentTrendI
 import { CategoryAlertPill } from './CategoryAlertPill';
 import { CategoryPills } from './CategoryPills';
 import { getTextOnlySummary } from '../common/summary';
-import { shareModal } from '../common/share-meeting';
+import { shareModal, deleteModal } from '../common/meeting-controls';
 
 export const KEY_COLUMN_ID = 'callId';
 
@@ -290,6 +290,7 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
             onClick={() => props.downloadToExcel()}
           />
           {shareModal(props)}
+          {deleteModal(props)}
         </SpaceBetween>
       }
       {...props}

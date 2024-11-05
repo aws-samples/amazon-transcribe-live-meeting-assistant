@@ -44,7 +44,7 @@ import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
 import { downloadTranscriptAsExcel, downloadTranscriptAsText, exportToTextFile } from '../common/download-func';
 import useCallsContext from '../../contexts/calls';
-import { shareModal } from '../common/share-meeting';
+import { shareModal, deleteModal } from '../common/meeting-controls';
 
 const logger = new Logger('CallPanel');
 
@@ -69,7 +69,15 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
   return (
     <Container
       header={
-        <Header variant="h4" info={<InfoLink onFollow={() => setToolsOpen(true)} />} actions={shareModal(props)}>
+        <Header
+          variant="h4"
+          info={<InfoLink onFollow={() => setToolsOpen(true)} />}
+          actions={
+            <SpaceBetween size="xxxs" direction="horizontal">
+              {shareModal(props)} {deleteModal(props)}
+            </SpaceBetween>
+          }
+        >
           Meeting Attributes
         </Header>
       }
