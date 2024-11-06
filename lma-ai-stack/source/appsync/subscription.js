@@ -18,8 +18,8 @@ export function response(ctx) {
   console.debug(`variables: ${variables}`);
   console.debug(`/*****/`);
 
-  if (!selectionSetList.includes('Owner')) {
-    console.error('You must included the "Owner" field in the selection set');
+  if (!selectionSetList.includes('Owner') || !selectionSetList.includes('SharedWith')) {
+    console.error('You must included the "Owner" & "SharedWith fields in the selection set');
     util.unauthorized();
   }
 

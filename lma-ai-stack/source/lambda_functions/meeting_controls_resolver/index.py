@@ -135,7 +135,7 @@ def get_call_metadata(callid):
     else:
         return metadata['Item']
 
-def share_meetings(calls, recipients):
+def share_meetings(calls, owner, recipients):
     if recipients and not all(re.match(r"[^@]+@[^@]+\.[^@]+", email) for email in recipients.split(',')):
         return { 'Result': "Invalid email address provided" }
 
@@ -146,7 +146,12 @@ def share_meetings(calls, recipients):
         print("CallID: ", callid, listPK, listSK)
         update_meeting_permissions(callid, listPK, listSK, recipients)
     
-    return { 'Result': "Meetings shared successfully" }
+    callIds = [call['CallId'] for call in calls]
+    return { 'Calls': callIds, 
+             'Result': "Meetings shared successfully",
+             'Owner': owner,
+             'SharedWith': recipients 
+        }
 
 def delete_meetings(calls):
     for call in calls:        
@@ -160,16 +165,17 @@ def delete_meetings(calls):
 
 def lambda_handler(event, context):
     print("Received event: " + json.dumps(event))
+    owner = event["identity"]["username"]
     if not verify_permissions(event):
         return { 'Result': "You don't have permission to share or delete one or more of the requested calls" }
 
     calls = event["arguments"]["input"]["Calls"]
-    action = event["arguments"]["input"]["Action"]
+    action = event["info"]["fieldName"]
 
-    if(action == "Share"):
+    if(action == "shareMeetings"):
         recipients = event["arguments"]["input"]["MeetingRecipients"]
-        return share_meetings(calls, recipients)
-    elif(action == "Delete"):
+        return share_meetings(calls, owner, recipients)
+    elif(action == "deleteMeetings"):
         return delete_meetings(calls)
     else:
         return { 'Result': "Invalid action" }

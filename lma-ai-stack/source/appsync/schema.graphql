@@ -17,6 +17,17 @@ input AddTranscriptSegmentInput {
 	SharedWith: String
 }
 
+input ShareTranscriptSegmentInput {
+	CallId: ID!
+	SK: ID!
+	SharedWith: String!
+}
+
+input DeleteTranscriptSegmentInput {
+	CallId: ID!
+	SK: ID!
+}
+
 type Call implements DynamoDbBase @aws_cognito_user_pools
 @aws_iam {
 	PK: ID!
@@ -105,7 +116,10 @@ input ShareMeetingsInput {
 }
 
 type ShareMeetingsOutput {
+	Calls: [ID!]
 	Result: String
+	Owner: String
+	SharedWith: String
 }
 
 input DeleteMeetingsItem {
@@ -141,6 +155,10 @@ type Mutation @aws_iam {
 	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
+	deleteCall(input: DeleteCallInput!): Call
+	shareCall(input: ShareCallInput!): Call
+	deleteTranscriptSegment(input: DeleteTranscriptSegmentInput!): TranscriptSegment
+	shareTranscriptSegment(input: ShareTranscriptSegmentInput!): TranscriptSegment
     shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools
 	deleteMeetings(input: DeleteMeetingsInput!): DeleteMeetingsOutput @aws_cognito_user_pools
 }
@@ -248,6 +266,8 @@ type Subscription {
 		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updatePcaUrl","updateAgent", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
+	onShareMeetings: ShareMeetingsOutput
+		@aws_subscribe(mutations: ["shareMeetings"])
 }
 
 type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
@@ -364,6 +384,22 @@ input UpdatePcaUrlInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+}
+
+input ShareCallInput {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+	SharedWith: String!
+	UpdatedAt: AWSDateTime
+	Owner: String
+}
+
+input DeleteCallInput {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+	Owner: String
 }
 
 schema {

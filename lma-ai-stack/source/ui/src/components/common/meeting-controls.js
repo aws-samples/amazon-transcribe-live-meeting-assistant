@@ -303,6 +303,7 @@ export const deleteModal = (props) => {
   };
 
   const closeDeleteSettings = () => {
+    setDeleteDisabled(false);
     setVisible(false);
   };
 
@@ -310,7 +311,6 @@ export const deleteModal = (props) => {
     e.preventDefault();
     setDeleteDisabled(true);
     await invokeDeleteMeetings(props);
-    closeDeleteSettings();
     console.log('IN HANDLE DELETE');
   };
 
