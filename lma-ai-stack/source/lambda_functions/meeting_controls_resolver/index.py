@@ -57,18 +57,23 @@ def delete_meetings(calls, owner):
     return { 'Result': "Meetings deleted successfully" }
 
 def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
-    input = {
-        "CallId": callid,
-        "ListPK": listPK,
-        "ListSK": listSK,
-        "Owner": owner,
-    }
     try:
         # First delete the transcript segments
         result = get_transcript_segments(appsync_session, schema, callid)
 
         for transcript_segment in result.get("getTranscriptSegments").get("TranscriptSegments"):
             delete_transcript_segment(appsync_session, schema, transcript_segment["PK"], transcript_segment["SK"])
+
+        result = get_call_details(appsync_session, schema, callid)
+        shared_with = result.get("getCall").get("SharedWith")
+
+        input = {
+            "CallId": callid,
+            "ListPK": listPK,
+            "ListSK": listSK,
+            "Owner": owner,
+            "SharedWith": shared_with,
+        }
 
         # Now delete the call records (PK that begins with c# and cls#)
         mutation = dsl_gql(
@@ -90,12 +95,35 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
     else:
         return
 
+def get_call_details(appsync_session, schema, callid):
+    try:
+        query = dsl_gql(
+            DSLQuery(
+                schema.Query.getCall.args(CallId=callid).select(
+                    schema.Call.PK,
+                    schema.Call.SK,
+                    schema.Call.CallId,
+                    schema.Call.CreatedAt,
+                    schema.Call.Owner,
+                    schema.Call.SharedWith
+                )
+            )
+        )
+
+        result = appsync_session.execute(query)
+        print("get call result", result)
+    except ClientError as err:
+        logger.error("Error getting call details %s: %s",
+                     err.response['Error']['Code'], err.response['Error']['Message'])
+        raise
+    else:
+        return result
+
 def delete_transcript_segment(appsync_session, schema, PK, SK):
     input = {
         "PK": PK,
         "SK": SK,
     }
-    print("Trs segment args", schema.input.DeleteTranscriptSegmentInput)
 
     try:
         mutation = dsl_gql(

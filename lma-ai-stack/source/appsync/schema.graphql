@@ -268,6 +268,8 @@ type Subscription {
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onShareMeetings: ShareMeetingsOutput
 		@aws_subscribe(mutations: ["shareMeetings"])
+	onDeleteCall: DeleteCallOutput
+		@aws_subscribe(mutations: ["deleteCall"])
 }
 
 type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
