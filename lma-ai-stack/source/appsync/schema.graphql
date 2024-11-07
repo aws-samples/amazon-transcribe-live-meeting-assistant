@@ -24,7 +24,7 @@ input ShareTranscriptSegmentInput {
 }
 
 input DeleteTranscriptSegmentInput {
-	CallId: ID!
+	PK: ID!
 	SK: ID!
 }
 
@@ -155,9 +155,9 @@ type Mutation @aws_iam {
 	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
-	deleteCall(input: DeleteCallInput!): Call
+	deleteCall(input: DeleteCallInput!): DeleteCallOutput
 	shareCall(input: ShareCallInput!): Call
-	deleteTranscriptSegment(input: DeleteTranscriptSegmentInput!): TranscriptSegment
+	deleteTranscriptSegment(input: DeleteTranscriptSegmentInput!): DeleteTranscriptSegmentOutput
 	shareTranscriptSegment(input: ShareTranscriptSegmentInput!): TranscriptSegment
     shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools
 	deleteMeetings(input: DeleteMeetingsInput!): DeleteMeetingsOutput @aws_cognito_user_pools
@@ -400,6 +400,17 @@ input DeleteCallInput {
 	ListPK: ID!
 	ListSK: ID!
 	Owner: String
+	SharedWith: String
+}
+
+type DeleteCallOutput @aws_iam {
+	CallId: ID!
+	Owner: String
+	SharedWith: String
+}
+
+type DeleteTranscriptSegmentOutput @aws_iam {
+	CallId: ID
 }
 
 schema {

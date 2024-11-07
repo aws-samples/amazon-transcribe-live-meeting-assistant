@@ -1,15 +1,22 @@
-import os
+from os import environ
 import io
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
 from botocore.exceptions import ClientError
 import json
-import csv
 import logging
 import re
+from gql import gql, Client
+from gql.dsl import DSLMutation, DSLSchema, DSLQuery, dsl_gql
+from graphql.language.printer import print_ast
+from appsync_utils import AppsyncRequestsGqlClient
+
+APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
+appsync_client = AppsyncRequestsGqlClient(
+    url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
 
 # grab environment variables
-LCA_CALL_EVENTS_TABLE = os.environ['LCA_CALL_EVENTS_TABLE']
+LCA_CALL_EVENTS_TABLE = environ['LCA_CALL_EVENTS_TABLE']
 
 logger = logging.getLogger(__name__)
 ddb = boto3.resource('dynamodb')
@@ -34,19 +41,112 @@ def verify_permissions(event):
 
     return True
 
-def delete_meeting(callid, listPK, listSK):
-    pk = 'c#' + callid
+def delete_meetings(calls, owner):
+    with appsync_client as appsync_session:
+        if not appsync_session.client.schema:
+            raise ValueError("invalid AppSync schema")
+        schema = DSLSchema(appsync_session.client.schema)
+
+        for call in calls:        
+            callid = call['CallId']
+            listPK = call['ListPK']
+            listSK = call['ListSK']
+            print("CallID: ", callid, listPK, listSK)
+            delete_meeting(appsync_session, schema, callid, listPK, listSK, owner)
+
+    return { 'Result': "Meetings deleted successfully" }
+
+def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
+    input = {
+        "CallId": callid,
+        "ListPK": listPK,
+        "ListSK": listSK,
+        "Owner": owner,
+    }
     try:
-        deleted_count = ddb_update_delete(pk, None, 'Delete', None)
-        pk = 'trs#' + callid
-        deleted_count += ddb_update_delete(pk, None, 'Delete', None)
-        deleted_count += ddb_update_delete(listPK, listSK, 'Delete', None)
+        # First delete the transcript segments
+        result = get_transcript_segments(appsync_session, schema, callid)
+
+        for transcript_segment in result.get("getTranscriptSegments").get("TranscriptSegments"):
+            delete_transcript_segment(appsync_session, schema, transcript_segment["PK"], transcript_segment["SK"])
+
+        # Now delete the call records (PK that begins with c# and cls#)
+        mutation = dsl_gql(
+            DSLMutation(
+                schema.Mutation.deleteCall.args(input=input).select(
+                    schema.DeleteCallOutput.CallId,
+                    schema.DeleteCallOutput.Owner,
+                    schema.DeleteCallOutput.SharedWith
+                )
+            )
+        )
+
+        result = appsync_session.execute(mutation)
+        print("delete query result", result)
     except ClientError as err:
         logger.error("Error deleting meetings %s: %s",
                      err.response['Error']['Code'], err.response['Error']['Message'])
         raise
     else:
         return
+
+def delete_transcript_segment(appsync_session, schema, PK, SK):
+    input = {
+        "PK": PK,
+        "SK": SK,
+    }
+    print("Trs segment args", schema.input.DeleteTranscriptSegmentInput)
+
+    try:
+        mutation = dsl_gql(
+            DSLMutation(
+                schema.Mutation.deleteTranscriptSegment.args(input=input).select(
+                    schema.DeleteTranscriptSegmentOutput.CallId,
+                )
+            )
+        )
+
+        result = appsync_session.execute(mutation)
+        print("delete transcript segment result", result)
+
+    except ClientError as err:
+        logger.error("Error deleting transcript segment %s: %s",
+                     err.response['Error']['Code'], err.response['Error']['Message'])
+        raise
+    else:
+        return
+
+def get_transcript_segments(appsync_session, schema, callid):
+    try:
+        query = dsl_gql(
+            DSLQuery(
+                schema.Query.getTranscriptSegments.args(callId=callid).select(
+                    schema.TranscriptSegmentList.TranscriptSegments.select(
+                        schema.TranscriptSegment.PK,
+                        schema.TranscriptSegment.SK,
+	                    schema.TranscriptSegment.CreatedAt,
+                        schema.TranscriptSegment.CallId,
+                        schema.TranscriptSegment.SegmentId,
+                        schema.TranscriptSegment.StartTime,
+                        schema.TranscriptSegment.EndTime,
+                        schema.TranscriptSegment.Transcript,
+                        schema.TranscriptSegment.IsPartial,
+                        schema.TranscriptSegment.Channel,
+                        schema.TranscriptSegment.Speaker,
+                    )
+                )
+            )
+        )
+
+        result = appsync_session.execute(query)
+        query_string = print_ast(query)
+        print("get transcript segments result", query_string, result)
+    except ClientError as err:
+        logger.error("Error deleting meetings %s: %s",
+                     err.response['Error']['Code'], err.response['Error']['Message'])
+        raise
+    else:
+        return result
 
 def update_meeting_permissions(callid, listPK, listSK, recipients):
     pk = 'c#' + callid
@@ -153,16 +253,6 @@ def share_meetings(calls, owner, recipients):
              'SharedWith': recipients 
         }
 
-def delete_meetings(calls):
-    for call in calls:        
-        callid = call['CallId']
-        listPK = call['ListPK']
-        listSK = call['ListSK']
-        print("CallID: ", callid, listPK, listSK)
-        delete_meeting(callid, listPK, listSK)
-
-    return { 'Result': "Meetings deleted successfully" }
-
 def lambda_handler(event, context):
     print("Received event: " + json.dumps(event))
     owner = event["identity"]["username"]
@@ -176,7 +266,7 @@ def lambda_handler(event, context):
         recipients = event["arguments"]["input"]["MeetingRecipients"]
         return share_meetings(calls, owner, recipients)
     elif(action == "deleteMeetings"):
-        return delete_meetings(calls)
+        return delete_meetings(calls, owner)
     else:
         return { 'Result': "Invalid action" }
 

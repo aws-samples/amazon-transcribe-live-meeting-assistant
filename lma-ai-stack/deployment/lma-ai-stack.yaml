@@ -1340,6 +1340,7 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
                 Resource: !GetAtt EventSourcingTable.Arn
 
   QueryKnowledgeBaseResolverFunction:
@@ -1445,6 +1446,8 @@ Resources:
           LCA_CALL_EVENTS_TABLE: !Ref EventSourcingTable
           REACT_APP_AWS_REGION: !Ref AWS::Region
           REACT_APP_USER_POOL_ID: !Ref UserPoolId
+          APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/MeetingControlsResolverFunction
@@ -1493,6 +1496,16 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
                 Resource: !GetAtt EventSourcingTable.Arn
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  # XXX specific mutation - addEnrichment
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/*"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/__schema"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/getCall"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
+
 
   AppSyncMeetingControlsLambdaRole:
     Type: AWS::IAM::Role
@@ -1774,6 +1787,17 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/addTranscriptSegment.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
+  DeleteTranscriptSegmentAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: deleteTranscriptSegment
+      RequestMappingTemplateS3Location: ../source/appsync/deleteTranscriptSegment.request.vtl
+      ResponseMappingTemplate: "$util.toJson($context.result)"
+
   ShareMeetingsAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -1799,6 +1823,41 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/deleteMeetings.js
+
+  DeleteCallAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: deleteCall
+      # This VTL uses a local sub so it needs to be kept here
+      RequestMappingTemplate: !Sub |-
+        #set( $PK = "c#${ctx.args.input.CallId}" )
+        {
+          "version": "2018-05-29",
+          "operation": "TransactWriteItems",
+          "transactItems": [
+            {
+              "table": "${EventSourcingTable}",
+              "operation": "DeleteItem",
+              "key": {
+                "PK": $util.dynamodb.toDynamoDBJson($PK),
+                "SK": $util.dynamodb.toDynamoDBJson($PK),
+              }
+            },
+            {
+              "table": "${EventSourcingTable}",
+              "operation": "DeleteItem",
+              "key" : {
+                "PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.ListPK),
+                "SK": $util.dynamodb.toDynamoDBJson($ctx.args.input.ListSK),
+              },
+            },
+          ],
+        }
+      ResponseMappingTemplateS3Location: ../source/appsync/deleteCall.response.vtl
 
   ListCallsDateHourAppSyncResolver:
     Type: AWS::AppSync::Resolver
