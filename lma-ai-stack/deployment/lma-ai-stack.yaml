@@ -1832,7 +1832,7 @@ Resources:
       FieldName: shareCall
       # This VTL uses a local sub so it needs to be kept here
       RequestMappingTemplate: !Sub |-
-        #set( $PK = "c#${ctx.args.input.CallId}" )
+        #set( $PK = "c#${!ctx.args.input.CallId}" )
         {
           "version": "2018-05-29",
           "operation": "TransactWriteItems",
@@ -1904,7 +1904,7 @@ Resources:
       FieldName: deleteCall
       # This VTL uses a local sub so it needs to be kept here
       RequestMappingTemplate: !Sub |-
-        #set( $PK = "c#${ctx.args.input.CallId}" )
+        #set( $PK = "c#${!ctx.args.input.CallId}" )
         {
           "version": "2018-05-29",
           "operation": "TransactWriteItems",
