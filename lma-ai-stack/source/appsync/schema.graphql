@@ -20,7 +20,7 @@ input AddTranscriptSegmentInput {
 input ShareTranscriptSegmentInput {
 	PK: ID!
 	SK: ID!
-	SharedWith: String!
+	SharedWith: [String!]
 }
 
 type ShareTranscriptSegmentOutput @aws_iam {
