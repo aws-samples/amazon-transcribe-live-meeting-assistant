@@ -1,5 +1,6 @@
 from os import environ
 import io
+import ast
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
 from botocore.exceptions import ClientError
@@ -8,7 +9,6 @@ import logging
 import re
 from gql import gql, Client
 from gql.dsl import DSLMutation, DSLSchema, DSLQuery, dsl_gql
-from graphql.language.printer import print_ast
 from appsync_utils import AppsyncRequestsGqlClient
 
 APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
@@ -40,7 +40,6 @@ def get_call_details(appsync_session, schema, callid):
         )
 
         result = appsync_session.execute(query)
-        print("get call result", result)
     except ClientError as err:
         logger.error("Error getting call details %s: %s",
                      err.response['Error']['Code'], err.response['Error']['Message'])
@@ -71,8 +70,6 @@ def get_transcript_segments(appsync_session, schema, callid):
         )
 
         result = appsync_session.execute(query)
-        query_string = print_ast(query)
-        print("get transcript segments result", query_string, result)
     except ClientError as err:
         logger.error("Error deleting meetings %s: %s",
                      err.response['Error']['Code'], err.response['Error']['Message'])
@@ -82,7 +79,6 @@ def get_transcript_segments(appsync_session, schema, callid):
 
 def get_call_metadata(callid):
     pk = 'c#'+callid
-    print(f"Call metadata PK: {pk}")
     try:
         metadata = ddbTable.get_item(
             Key={'PK': pk, 'SK': pk},
@@ -125,11 +121,10 @@ def share_meetings(calls, owner, recipients):
             raise ValueError("invalid AppSync schema")
         schema = DSLSchema(appsync_session.client.schema)
 
-        for call in calls:        
+        for call in calls:
             callid = call['CallId']
             listPK = call['ListPK']
             listSK = call['ListSK']
-            print("CallID: ", callid, listPK, listSK)
             share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, owner)
     
     callIds = [call['CallId'] for call in calls]
@@ -140,7 +135,6 @@ def share_meetings(calls, owner, recipients):
         }
 
 def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, owner):
-    pk = 'c#' + callid
     new_recipients = list(set(email.strip() for email in recipients.split(',') if email.strip()))
 
     if not recipients:
@@ -159,6 +153,18 @@ def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, o
             "SharedWith": new_recipients,
         }
 
+        result = get_call_details(appsync_session, schema, callid)
+        shared_with = result.get("getCall").get("SharedWith")
+
+        if shared_with:
+            shared_with = [recipient.strip() for recipient in shared_with[1:-1].split(',')]
+
+        if shared_with and new_recipients:
+            unshare_list = list(set(shared_with) - set(new_recipients))
+        elif shared_with:
+            unshare_list = shared_with
+        else:
+            unshare_list = []
         # Now share the call records (PK that begins with c# and cls#)
         mutation = dsl_gql(
             DSLMutation(
@@ -171,7 +177,23 @@ def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, o
         )
 
         result = appsync_session.execute(mutation)
-        print("share call query result", result)
+
+        # Send notification to recipients who no longer have access to the meeting
+        if unshare_list:
+            input = {
+                "CallId": callid,
+                "SharedWith": unshare_list
+            }
+            mutation = dsl_gql(
+                DSLMutation(
+                    schema.Mutation.unshareCall.args(input=input).select(
+                        schema.UnshareCallOutput.CallId,
+                        schema.UnshareCallOutput.SharedWith
+                    )
+                )
+            )
+
+            result = appsync_session.execute(mutation)
 
     except ClientError as err:
         logger.error("Error updating people can access %s: %s",
@@ -196,7 +218,6 @@ def update_transcript_segment(appsync_session, schema, PK, SK, new_recipients):
             )
         )
         result = appsync_session.execute(mutation)
-        print("update transcript segment result", result)
 
     except ClientError as err:
         logger.error("Error updating transcript segment %s: %s",
@@ -217,7 +238,6 @@ def delete_meetings(calls, owner):
             callid = call['CallId']
             listPK = call['ListPK']
             listSK = call['ListSK']
-            print("CallID: ", callid, listPK, listSK)
             delete_meeting(appsync_session, schema, callid, listPK, listSK, owner)
 
     return { 'Result': "Meetings deleted successfully" }
@@ -253,7 +273,6 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         )
 
         result = appsync_session.execute(mutation)
-        print("delete query result", result)
     except ClientError as err:
         logger.error("Error deleting meetings %s: %s",
                      err.response['Error']['Code'], err.response['Error']['Message'])
@@ -277,7 +296,6 @@ def delete_transcript_segment(appsync_session, schema, PK, SK):
         )
 
         result = appsync_session.execute(mutation)
-        print("delete transcript segment result", result)
 
     except ClientError as err:
         logger.error("Error deleting transcript segment %s: %s",
@@ -287,7 +305,6 @@ def delete_transcript_segment(appsync_session, schema, PK, SK):
         return
 
 def lambda_handler(event, context):
-    print("Received event: " + json.dumps(event))
     owner = event["identity"]["username"]
     if not verify_permissions(event):
         return { 'Result': "You don't have permission to share or delete one or more of the requested calls" }

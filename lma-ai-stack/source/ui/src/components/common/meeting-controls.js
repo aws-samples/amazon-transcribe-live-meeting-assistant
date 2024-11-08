@@ -114,7 +114,6 @@ export const shareModal = (props) => {
     setShare(true);
     setIsLoading(true);
     const callDetails = await getCallDetailsFromCallIds(props.selectedItems.map((c) => c.callId));
-    console.log('CALL SHARE MEETINGS RESPONSE:', callDetails);
 
     const recipients = new Set();
     callDetails.forEach((call) => {
@@ -155,7 +154,6 @@ export const shareModal = (props) => {
     setSubmit(true);
     // merge current and new recipients
     const allRecipients = [...new Set([...currentRecipients, ...newRecipients])];
-    console.log('Meeting Recipients: ', allRecipients);
     const result = await invokeShareMeetings(props, allRecipients.join(','));
     setCurrentRecipients([]);
     setNewRecipients([]);
@@ -311,12 +309,10 @@ export const deleteModal = (props) => {
     e.preventDefault();
     setDeleteDisabled(true);
     await invokeDeleteMeetings(props);
-    console.log('IN HANDLE DELETE');
   };
 
   const handleDeleteSubmit = (event) => {
     event.preventDefault();
-    console.log('IN HANDLE DELETE SUBMIT');
     if (inputMatchesConsentText) {
       handleDelete(event);
     }

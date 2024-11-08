@@ -15,6 +15,7 @@ import onAddTranscriptSegment from '../graphql/queries/onAddTranscriptSegment';
 import onUpdateCall from '../graphql/queries/onUpdateCall';
 import onShareMeetings from '../graphql/queries/onShareMeetings';
 import onDeleteCall from '../graphql/queries/onDeleteCall';
+import onUnshareCall from '../graphql/queries/onUnshareCall';
 import getTranscriptSegments from '../graphql/queries/getTranscriptSegments';
 
 import { CALL_LIST_SHARDS_PER_DAY } from '../components/call-list/calls-table-config';
@@ -124,6 +125,25 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
       next: async ({ provider, value }) => {
         logger.debug('call delete subscription update', { provider, value });
         const callId = value?.data?.onDeleteCall.CallId || '';
+        if (callId) {
+          setCalls((currentCalls) => currentCalls.filter((c) => c.CallId !== callId));
+        }
+      },
+      error: (error) => {
+        logger.error(error);
+        setErrorMessage('call delete subscription failed - please reload the page');
+      },
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    logger.debug('onUnshareCall subscription');
+    const subscription = API.graphql(graphqlOperation(onUnshareCall)).subscribe({
+      next: async ({ provider, value }) => {
+        logger.debug('call unshare subscription update', { provider, value });
+        const callId = value?.data?.onUnshareCall.CallId || '';
         if (callId) {
           setCalls((currentCalls) => currentCalls.filter((c) => c.CallId !== callId));
         }

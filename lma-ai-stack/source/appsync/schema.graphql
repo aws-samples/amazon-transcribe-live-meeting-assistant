@@ -161,6 +161,7 @@ type Mutation @aws_iam {
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
 	deleteCall(input: DeleteCallInput!): DeleteCallOutput
 	shareCall(input: ShareCallInput!): ShareCallOutput
+	unshareCall(input: UnshareCallInput!): UnshareCallOutput
 	deleteTranscriptSegment(input: DeleteTranscriptSegmentInput!): DeleteTranscriptSegmentOutput
 	shareTranscriptSegment(input: ShareTranscriptSegmentInput!): ShareTranscriptSegmentOutput
     shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools
@@ -274,6 +275,8 @@ type Subscription {
 		@aws_subscribe(mutations: ["shareMeetings"])
 	onDeleteCall: DeleteCallOutput
 		@aws_subscribe(mutations: ["deleteCall"])
+	onUnshareCall: UnshareCallOutput
+		@aws_subscribe(mutations: ["unshareCall"])
 }
 
 type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
@@ -422,6 +425,16 @@ type ShareCallOutput @aws_iam {
 
 type DeleteTranscriptSegmentOutput @aws_iam {
 	CallId: ID
+}
+
+input UnshareCallInput {
+	CallId: ID!
+	SharedWith: [String!]
+}
+
+type UnshareCallOutput @aws_iam {
+	CallId: ID!
+	SharedWith: [String!]
 }
 
 schema {
