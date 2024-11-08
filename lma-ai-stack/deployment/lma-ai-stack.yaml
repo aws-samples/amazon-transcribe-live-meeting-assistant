@@ -1805,7 +1805,7 @@ Resources:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
-      FieldName: ShareTranscriptSegment
+      FieldName: shareTranscriptSegment
       RequestMappingTemplateS3Location: ../source/appsync/shareTranscriptSegment.request.vtl
       ResponseMappingTemplate: "$util.toJson($context.arguments.input.PK)"
 
