@@ -69,6 +69,13 @@ Parameters:
     AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
     # yamllint enable rule:line-length
 
+  AudioFilePrefix:
+    Type: String
+    Default: lma-audio-recordings/
+    Description: >-
+      The Amazon S3 prefix where the audio files will be saved (must end
+      in "/")
+
   TranscriptFilePrefix:
     Type: String
     Default: lma-transcripts/
@@ -1447,6 +1454,9 @@ Resources:
           REACT_APP_AWS_REGION: !Ref AWS::Region
           REACT_APP_USER_POOL_ID: !Ref UserPoolId
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+          S3_BUCKET_NAME: !Ref S3BucketName
+          S3_RECORDINGS_PREFIX: !Ref AudioFilePrefix
+          S3_TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
 
       LoggingConfig:
         LogGroup:
@@ -1505,7 +1515,15 @@ Resources:
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/__schema"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/getCall"
                   - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
-
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:DeleteObject"
+                  - "s3:DeleteObjectVersion"
+                  - "s3:ListBucket"
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}"
+                  - !Sub "arn:aws:s3:::${S3BucketName}/*"
 
   AppSyncMeetingControlsLambdaRole:
     Type: AWS::IAM::Role

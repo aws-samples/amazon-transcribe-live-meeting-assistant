@@ -1,5 +1,7 @@
+import os
 from os import environ
 import io
+from urllib.parse import urlparse
 import ast
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
@@ -17,12 +19,44 @@ appsync_client = AppsyncRequestsGqlClient(
 
 # grab environment variables
 LCA_CALL_EVENTS_TABLE = environ['LCA_CALL_EVENTS_TABLE']
+S3_BUCKET_NAME = environ['S3_BUCKET_NAME']
+S3_RECORDINGS_PREFIX = environ['S3_RECORDINGS_PREFIX']
+S3_TRANSCRIPTS_PREFIX = environ['S3_TRANSCRIPTS_PREFIX']
 
 logger = logging.getLogger(__name__)
 ddb = boto3.resource('dynamodb')
 ddbTable = ddb.Table(LCA_CALL_EVENTS_TABLE)
+s3_client = boto3.client('s3')
 
 ### Common functions
+
+def delete_recordings_transcripts(callid):
+    response = s3_client.list_objects_v2(
+        Bucket=S3_BUCKET_NAME,
+        Prefix=S3_RECORDINGS_PREFIX + callid + '*'
+    )
+    if 'Contents' in response:
+        for object in response['Contents']:
+            print('Deleting ', object['Key'])
+            response = s3_client.delete_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=object['Key']
+            )
+
+    response = s3_client.list_objects_v2(
+        Bucket=S3_BUCKET_NAME,
+        Prefix=S3_TRANSCRIPTS_PREFIX + callid + '*'
+    )
+
+    if 'Contents' in response:
+        for object in response['Contents']:
+            print('Deleting ', object['Key'])
+            response = s3_client.delete_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=object['Key']
+            )
+
+    return
 
 def get_call_details(appsync_session, schema, callid):
     try:
@@ -34,7 +68,8 @@ def get_call_details(appsync_session, schema, callid):
                     schema.Call.CallId,
                     schema.Call.CreatedAt,
                     schema.Call.Owner,
-                    schema.Call.SharedWith
+                    schema.Call.SharedWith,
+                    schema.Call.RecordingUrl,
                 )
             )
         )
@@ -252,6 +287,8 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
 
         result = get_call_details(appsync_session, schema, callid)
         shared_with = result.get("getCall").get("SharedWith")
+
+        delete_recordings_transcripts(callid)
 
         input = {
             "CallId": callid,

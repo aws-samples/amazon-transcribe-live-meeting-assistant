@@ -1377,6 +1377,7 @@ Resources:
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
           - !Ref S3BucketName
+        AudioFilePrefix: !Ref AudioFilePrefix  
         TranscriptFilePrefix: !Ref TranscriptFilePrefix
         IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
