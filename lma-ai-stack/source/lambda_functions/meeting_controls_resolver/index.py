@@ -30,10 +30,22 @@ s3_client = boto3.client('s3')
 
 ### Common functions
 
+def posixify_filename(filename: str) -> str:
+    # Replace all invalid characters with underscores
+    regex = r'[^a-zA-Z0-9_.]'
+    posix_filename = re.sub(regex, '_', filename)
+    # Remove leading and trailing underscores
+    posix_filename = re.sub(r'^_+', '', posix_filename)
+    posix_filename = re.sub(r'_+$', '', posix_filename)
+    return posix_filename
+
 def delete_recordings_transcripts(callid):
+    filename = posixify_filename(f"{callid}")
+    prefix = f"{S3_RECORDINGS_PREFIX}{filename}"
+
     response = s3_client.list_objects_v2(
         Bucket=S3_BUCKET_NAME,
-        Prefix=S3_RECORDINGS_PREFIX + callid + '*'
+        Prefix=prefix
     )
     if 'Contents' in response:
         for object in response['Contents']:
@@ -43,9 +55,10 @@ def delete_recordings_transcripts(callid):
                 Key=object['Key']
             )
 
+    prefix = f"{S3_TRANSCRIPTS_PREFIX}{filename}"
     response = s3_client.list_objects_v2(
         Bucket=S3_BUCKET_NAME,
-        Prefix=S3_TRANSCRIPTS_PREFIX + callid + '*'
+        Prefix=prefix
     )
 
     if 'Contents' in response:
