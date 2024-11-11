@@ -1,12 +1,13 @@
 import { API } from 'aws-amplify';
 import React, { useEffect, useState } from 'react';
+import { useParams, useHistory } from 'react-router-dom';
 import {
   Alert,
   Button,
   Header,
   Modal,
+  TokenGroup,
   Container,
-  Multiselect,
   SpaceBetween,
   FormField,
   Input,
@@ -164,7 +165,7 @@ export const shareModal = (props) => {
 
   const showCurrentRecipients = () => {
     if (currentRecipients.length === 0) {
-      const placeholder = originalCount === 0 ? 'No recipients' : 'You have removed all current recipients';
+      const placeholder = originalCount === 0 ? 'None' : 'You have removed all current users';
       return (
         <FormField>
           <div>{placeholder}</div>
@@ -174,17 +175,15 @@ export const shareModal = (props) => {
 
     return (
       <FormField>
-        <Multiselect
-          selectedOptions={currentRecipients.map((r) => ({ label: r, value: r }))}
-          onChange={({ detail }) => {
-            const updatedRecipients = detail.selectedOptions.map((o) => o.value);
+        <TokenGroup
+          items={currentRecipients.map((r) => ({ label: r, value: r }))}
+          onDismiss={({ detail: { itemIndex } }) => {
+            const updatedRecipients = currentRecipients.filter((_, index) => index !== itemIndex);
             setCurrentRecipients(updatedRecipients);
             setChanged(currentRecipients.length !== 0);
             setShareResult(null);
           }}
-          options={currentRecipients.map((r) => ({ label: r, value: r }))}
-          removeSelectedOptions
-          placeholder={`Currently shared with ${originalCount} recipient(s)`}
+          alignment="horizontal"
         />
       </FormField>
     );
@@ -192,15 +191,14 @@ export const shareModal = (props) => {
 
   const showNewRecipients = () => {
     return (
-      <FormField>
-        <Multiselect
-          selectedOptions={newRecipients.map((r) => ({ label: r, value: r }))}
-          onChange={({ detail }) => setNewRecipients(detail.selectedOptions.map((o) => o.value))}
-          options={newRecipients.map((r) => ({ label: r, value: r }))}
-          removeSelectedOptions
-          placeholder="New recipients"
-        />
-      </FormField>
+      <TokenGroup
+        items={newRecipients.map((r) => ({ label: r, value: r }))}
+        onDismiss={({ detail: { itemIndex } }) => {
+          const updatedRecipients = newRecipients.filter((_, index) => index !== itemIndex);
+          setNewRecipients(updatedRecipients);
+        }}
+        alignment="horizontal"
+      />
     );
   };
 
@@ -217,7 +215,6 @@ export const shareModal = (props) => {
         onDismiss={closeShareSettings}
         visible={share}
         size="large"
-        disableContentPaddings
         footer={
           <Form
             actions={
@@ -248,32 +245,30 @@ export const shareModal = (props) => {
         header={<h3>Share {modalContent}</h3>}
       >
         <SpaceBetween size="s">
-          <Container
-            disableHeaderPaddings
-            header={<Header description={currentRecipientsDescription}>Existing Users</Header>}
-          >
+          <Container header={<Header description={currentRecipientsDescription}>Existing Users</Header>}>
             {showCurrentRecipients()}
           </Container>
           <Container
-            disableHeaderPaddings
             header={
               <Header description="Enter a comma-separated list of email addresses and choose Add.">Add Users</Header>
             }
           >
-            <FormField>
-              <SpaceBetween direction="horizontal" size="xs">
-                <Input
-                  value={addRecipients}
-                  onChange={(event) => {
-                    setChanged(true);
-                    setAddRecipients(event.detail.value);
-                    setShareResult(null);
-                  }}
-                  placeholder="Enter email addresses"
-                />
-                <Button onClick={handleAddRecipients}>Add</Button>
-              </SpaceBetween>
-            </FormField>
+            <form onSubmit={handleAddRecipients}>
+              <FormField>
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Input
+                    value={addRecipients}
+                    onChange={(event) => {
+                      setChanged(true);
+                      setAddRecipients(event.detail.value);
+                      setShareResult(null);
+                    }}
+                    placeholder="Enter email addresses"
+                  />
+                  <Button onClick={handleAddRecipients}>Add</Button>
+                </SpaceBetween>
+              </FormField>
+            </form>
             {showNewRecipients()}
           </Container>
         </SpaceBetween>
@@ -285,8 +280,13 @@ export const shareModal = (props) => {
 export const deleteModal = (props) => {
   const [visible, setVisible] = useState(false);
   const [deleteDisabled, setDeleteDisabled] = useState(false);
+  const [deleteResult, setDeleteResult] = useState(null);
+  const [deletedCallIds, setDeletedCallIds] = useState([]);
 
+  const history = useHistory();
+  const { callId } = useParams();
   const deleteConsentText = 'confirm';
+
   const modalContent =
     props.selectedItems.length === 1 ? `"${props.selectedItems[0].callId}"` : `${props.selectedItems.length} meetings`;
 
@@ -298,17 +298,27 @@ export const deleteModal = (props) => {
 
   const openDeleteSettings = async () => {
     setVisible(true);
+    setDeleteResult(null);
+    setDeletedCallIds([]);
   };
 
   const closeDeleteSettings = () => {
     setDeleteDisabled(false);
     setVisible(false);
+    setDeleteResult(null);
+    setDeletedCallIds([]);
+    if (callId) {
+      history.goBack();
+    }
   };
 
   const handleDelete = async (e) => {
+    console.log('callID', callId);
     e.preventDefault();
     setDeleteDisabled(true);
-    await invokeDeleteMeetings(props);
+    setDeletedCallIds(props.selectedItems.map((c) => c.callId));
+    const result = await invokeDeleteMeetings(props);
+    setDeleteResult(result);
   };
 
   const handleDeleteSubmit = (event) => {
@@ -327,30 +337,30 @@ export const deleteModal = (props) => {
         disabled={props.selectedItems.length === 0}
         onClick={openDeleteSettings}
       />
-      <Modal
-        visible={visible}
-        onDismiss={closeDeleteSettings}
-        header={<h3>Delete {modalContent}</h3>}
-        closeAriaLabel="Close dialog"
-        footer={
-          <Box float="right">
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="link" onClick={closeDeleteSettings}>
-                Close
-              </Button>
-              <Button
-                variant="primary"
-                onClick={handleDelete}
-                disabled={!inputMatchesConsentText || deleteDisabled}
-                data-testid="submit"
-              >
-                Delete
-              </Button>
-            </SpaceBetween>
-          </Box>
-        }
-      >
-        {props.selectedItems.length > 0 && (
+      {props.selectedItems.length > 0 ? (
+        <Modal
+          visible={visible}
+          onDismiss={closeDeleteSettings}
+          header={<h3>Delete {modalContent}</h3>}
+          closeAriaLabel="Close dialog"
+          footer={
+            <Box float="right">
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button variant="link" onClick={closeDeleteSettings}>
+                  Close
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleDelete}
+                  disabled={!inputMatchesConsentText || deleteDisabled}
+                  data-testid="submit"
+                >
+                  Delete
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+        >
           <SpaceBetween size="m">
             {props.selectedItems.length > 1 ? (
               <Box variant="span">
@@ -381,19 +391,54 @@ export const deleteModal = (props) => {
 
             <form onSubmit={handleDeleteSubmit}>
               <FormField label={`To confirm this deletion, type "${deleteConsentText}".`}>
-                <ColumnLayout columns={2}>
+                <ColumnLayout columns={1}>
                   <Input
                     placeholder={deleteConsentText}
                     onChange={(event) => setDeleteInputText(event.detail.value)}
                     value={deleteInputText}
                     ariaRequired
                   />
+                  <Alert type="success" visible={deleteResult}>
+                    {deleteResult}
+                  </Alert>
                 </ColumnLayout>
               </FormField>
             </form>
           </SpaceBetween>
-        )}
-      </Modal>
+        </Modal>
+      ) : (
+        <Modal
+          visible={visible}
+          onDismiss={closeDeleteSettings}
+          header={
+            <h3>
+              Delete {deletedCallIds.length === 1 ? `"${deletedCallIds[0]}"` : `${deletedCallIds.length} meetings`}
+            </h3>
+          }
+          closeAriaLabel="Close dialog"
+          footer={
+            <Box float="right">
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button variant="link" onClick={closeDeleteSettings}>
+                  Close
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleDelete}
+                  disabled={!inputMatchesConsentText || deleteDisabled}
+                  data-testid="submit"
+                >
+                  Delete
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+        >
+          <Alert type="success" visible={deleteResult}>
+            {deleteResult}
+          </Alert>
+        </Modal>
+      )}
     </SpaceBetween>
   );
 };
