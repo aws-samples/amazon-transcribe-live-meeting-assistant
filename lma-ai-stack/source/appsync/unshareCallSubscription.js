@@ -18,21 +18,16 @@ export function response(ctx) {
   console.debug(`variables: ${variables}`);
   console.debug(`/*****/`);
 
-  if (!selectionSetList.includes('Owner') || !selectionSetList.includes('SharedWith')) {
-    console.error('You must included the "Owner" & "SharedWith fields in the selection set');
+  if (!selectionSetList.includes('SharedWith')) {
+    console.error('You must included the "SharedWith field in the selection set');
     util.unauthorized();
   }
 
-  const { groups } = ctx.identity;
-  if((groups === undefined) || !ctx.identity.groups.includes("Admin")) {
-    console.debug(`Setting subscription filter with Owner or User that have been give access`);
-    const filter = {
-      or: [
-        { Owner: { eq: ctx.identity.username } },
-        { SharedWith: { contains: ctx.identity.username } }
-      ]
-    };
-    extensions.setSubscriptionFilter(util.transform.toSubscriptionFilter(filter));
-  }
+  console.debug(`Setting subscription filter with SharedWith`);
+  const filter = {
+      SharedWith: { contains: ctx.identity.username }
+  };
+  extensions.setSubscriptionFilter(util.transform.toSubscriptionFilter(filter));
+
   return null;
 }

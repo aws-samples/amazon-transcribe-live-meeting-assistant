@@ -26,7 +26,7 @@ const EMPTY_PANEL_CONTENT = {
   body: 'Select a meeting to see its details.',
 };
 
-const getPanelContentSingle = ({ items, setToolsOpen, callTranscriptPerCallId }) => {
+const getPanelContentSingle = ({ items, setToolsOpen, callTranscriptPerCallId, getCallDetailsFromCallIds }) => {
   if (!items.length) {
     return EMPTY_PANEL_CONTENT;
   }
@@ -35,17 +35,24 @@ const getPanelContentSingle = ({ items, setToolsOpen, callTranscriptPerCallId })
 
   return {
     header: 'Meeting Details',
-    body: <CallPanel item={item} setToolsOpen={setToolsOpen} callTranscriptPerCallId={callTranscriptPerCallId} />,
+    body: (
+      <CallPanel
+        item={item}
+        setToolsOpen={setToolsOpen}
+        callTranscriptPerCallId={callTranscriptPerCallId}
+        getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+      />
+    ),
   };
 };
 
-const getPanelContentMultiple = ({ items, setToolsOpen, callTranscriptPerCallId }) => {
+const getPanelContentMultiple = ({ items, setToolsOpen, callTranscriptPerCallId, getCallDetailsFromCallIds }) => {
   if (!items.length) {
     return EMPTY_PANEL_CONTENT;
   }
 
   if (items.length === 1) {
-    return getPanelContentSingle({ items, setToolsOpen, callTranscriptPerCallId });
+    return getPanelContentSingle({ items, setToolsOpen, callTranscriptPerCallId, getCallDetailsFromCallIds });
   }
 
   return {
@@ -68,7 +75,7 @@ const getPanelContentMultiple = ({ items, setToolsOpen, callTranscriptPerCallId 
 };
 
 // XXX to be implemented - not sure if needed
-const getPanelContentComparison = ({ items }) => {
+const getPanelContentComparison = ({ items, getCallDetailsFromCallIds }) => {
   if (!items.length) {
     return {
       header: '0 meetings selected',
@@ -77,7 +84,7 @@ const getPanelContentComparison = ({ items }) => {
   }
 
   if (items.length === 1) {
-    return getPanelContentSingle({ items });
+    return getPanelContentSingle({ items, getCallDetailsFromCallIds });
   }
   const keyHeaderMap = {
     callId: 'Meeting ID',
@@ -121,12 +128,12 @@ const getPanelContentComparison = ({ items }) => {
   };
 };
 
-export const getPanelContent = (items, type, setToolsOpen, callTranscriptPerCallId) => {
+export const getPanelContent = (items, type, setToolsOpen, callTranscriptPerCallId, getCallDetailsFromCallIds) => {
   if (type === 'single') {
-    return getPanelContentSingle({ items, setToolsOpen, callTranscriptPerCallId });
+    return getPanelContentSingle({ items, setToolsOpen, callTranscriptPerCallId, getCallDetailsFromCallIds });
   }
   if (type === 'multiple') {
-    return getPanelContentMultiple({ items, setToolsOpen, callTranscriptPerCallId });
+    return getPanelContentMultiple({ items, setToolsOpen, callTranscriptPerCallId, getCallDetailsFromCallIds });
   }
-  return getPanelContentComparison({ items });
+  return getPanelContentComparison({ items, getCallDetailsFromCallIds });
 };

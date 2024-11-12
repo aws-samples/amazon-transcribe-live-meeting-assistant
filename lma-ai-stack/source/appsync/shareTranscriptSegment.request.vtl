@@ -1,0 +1,14 @@
+{
+    "version" : "2018-05-29",
+    "operation" : "UpdateItem",
+    "key": {
+      "PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.PK),
+      "SK": $util.dynamodb.toDynamoDBJson($ctx.args.input.SK),
+    },
+    "update": {
+        "expression" : "SET SharedWith = :val", 
+        "expressionValues" : {
+            ":val" : $util.dynamodb.toDynamoDBJson($ctx.args.input.SharedWith)
+        }
+    }
+}

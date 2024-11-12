@@ -6,11 +6,6 @@ import {
   Badge,
   Box,
   Button,
-  Modal,
-  Form,
-  FormField,
-  Alert,
-  Input,
   ButtonDropdown,
   ColumnLayout,
   Container,
@@ -49,7 +44,7 @@ import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
 import { downloadTranscriptAsExcel, downloadTranscriptAsText, exportToTextFile } from '../common/download-func';
 import useCallsContext from '../../contexts/calls';
-import { shareMeetings } from '../common/share-meeting';
+import { shareModal, deleteModal } from '../common/meeting-controls';
 
 const logger = new Logger('CallPanel');
 
@@ -62,84 +57,102 @@ const MAXIMUM_RETRY_DELAY = 1000;
 const PAUSE_TO_MERGE_IN_SECONDS = 1;
 
 /* eslint-disable react/prop-types, react/destructuring-assignment */
-const CallAttributes = ({ item, setToolsOpen }) => (
-  <Container
-    header={
-      <Header variant="h4" info={<InfoLink onFollow={() => setToolsOpen(true)} />}>
-        Meeting Attributes
-      </Header>
-    }
-  >
-    <ColumnLayout columns={6} variant="text-grid">
-      <SpaceBetween size="xs">
-        <div>
-          <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>Meeting ID</strong>
-          </Box>
-          <div>{item.callId}</div>
-        </div>
-      </SpaceBetween>
+const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
+  const { calls } = useCallsContext();
+  const props = {
+    calls,
+    selectedItems: [item],
+    loading: false,
+    getCallDetailsFromCallIds,
+  };
 
-      <SpaceBetween size="xs">
-        <div>
-          <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>Initiation Timestamp</strong>
-          </Box>
-          <div>{item.initiationTimeStamp}</div>
-        </div>
-      </SpaceBetween>
-
-      <SpaceBetween size="xs">
-        <div>
-          <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>Last Update Timestamp</strong>
-          </Box>
-          <div>{item.updatedAt}</div>
-        </div>
-      </SpaceBetween>
-
-      <SpaceBetween size="xs">
-        <div>
-          <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>Duration</strong>
-          </Box>
-          <div>{item.conversationDurationTimeStamp}</div>
-        </div>
-      </SpaceBetween>
-
-      <SpaceBetween size="xs">
-        <div>
-          <Box margin={{ bottom: 'xxxs' }} color="text-label">
-            <strong>Status</strong>
-          </Box>
-          <StatusIndicator type={item.recordingStatusIcon}>{` ${item.recordingStatusLabel} `}</StatusIndicator>
-        </div>
-      </SpaceBetween>
-      {item?.pcaUrl?.length && (
+  return (
+    <Container
+      header={
+        <Header
+          variant="h4"
+          info={<InfoLink onFollow={() => setToolsOpen(true)} />}
+          actions={
+            <SpaceBetween size="xxxs" direction="horizontal">
+              {shareModal(props)} {deleteModal(props)}
+            </SpaceBetween>
+          }
+        >
+          Meeting Attributes
+        </Header>
+      }
+    >
+      <ColumnLayout columns={6} variant="text-grid">
         <SpaceBetween size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Post Meeting Analytics</strong>
+              <strong>Meeting ID</strong>
             </Box>
-            <Button variant="normal" href={item.pcaUrl} target="_blank" iconAlign="right" iconName="external">
-              Open in Post Call Analytics
-            </Button>
+            <div>{item.callId}</div>
           </div>
         </SpaceBetween>
-      )}
-      {item?.recordingUrl?.length && item?.recordingStatusLabel !== IN_PROGRESS_STATUS && (
+
         <SpaceBetween size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>Recording Audio</strong>
+              <strong>Initiation Timestamp</strong>
             </Box>
-            <RecordingPlayer recordingUrl={item.recordingUrl} />
+            <div>{item.initiationTimeStamp}</div>
           </div>
         </SpaceBetween>
-      )}
-    </ColumnLayout>
-  </Container>
-);
+
+        <SpaceBetween size="xs">
+          <div>
+            <Box margin={{ bottom: 'xxxs' }} color="text-label">
+              <strong>Last Update Timestamp</strong>
+            </Box>
+            <div>{item.updatedAt}</div>
+          </div>
+        </SpaceBetween>
+
+        <SpaceBetween size="xs">
+          <div>
+            <Box margin={{ bottom: 'xxxs' }} color="text-label">
+              <strong>Duration</strong>
+            </Box>
+            <div>{item.conversationDurationTimeStamp}</div>
+          </div>
+        </SpaceBetween>
+
+        <SpaceBetween size="xs">
+          <div>
+            <Box margin={{ bottom: 'xxxs' }} color="text-label">
+              <strong>Status</strong>
+            </Box>
+            <StatusIndicator type={item.recordingStatusIcon}>{` ${item.recordingStatusLabel} `}</StatusIndicator>
+          </div>
+        </SpaceBetween>
+        {item?.pcaUrl?.length && (
+          <SpaceBetween size="xs">
+            <div>
+              <Box margin={{ bottom: 'xxxs' }} color="text-label">
+                <strong>Post Meeting Analytics</strong>
+              </Box>
+              <Button variant="normal" href={item.pcaUrl} target="_blank" iconAlign="right" iconName="external">
+                Open in Post Call Analytics
+              </Button>
+            </div>
+          </SpaceBetween>
+        )}
+        {item?.recordingUrl?.length && item?.recordingStatusLabel !== IN_PROGRESS_STATUS && (
+          <SpaceBetween size="xs">
+            <div>
+              <Box margin={{ bottom: 'xxxs' }} color="text-label">
+                <strong>Recording Audio</strong>
+              </Box>
+              <RecordingPlayer recordingUrl={item.recordingUrl} />
+            </div>
+          </SpaceBetween>
+        )}
+      </ColumnLayout>
+    </Container>
+  );
+};
 
 // eslint-disable-next-line arrow-body-style
 const CallSummary = ({ item }) => {
@@ -149,44 +162,6 @@ const CallSummary = ({ item }) => {
     } else if (option.detail.id === 'email') {
       window.open(`mailto:?subject=${item.callId}&body=${getEmailFormattedSummary(item.callSummaryText)}`);
     }
-  };
-
-  const { currentSession, currentCredentials } = useAppContext();
-  const { settings } = useSettingsContext();
-  const { calls } = useCallsContext();
-
-  const [share, setShare] = useState(false);
-  const [meetingRecipients, setMeetingRecipients] = React.useState('');
-  const [submit, setSubmit] = useState(false);
-  const [shareResult, setShareResult] = useState(null);
-  const collectionProps = {
-    selectedItems: [item],
-  };
-
-  const openShareSettings = () => {
-    setShare(true);
-  };
-
-  const closeShareSettings = () => {
-    setShare(false);
-    setMeetingRecipients('');
-    setShareResult(null);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmit(true);
-    const result = await shareMeetings(
-      calls,
-      collectionProps,
-      meetingRecipients,
-      settings,
-      currentCredentials,
-      currentSession,
-    );
-    setMeetingRecipients('');
-    setShareResult(result);
-    setSubmit(false);
   };
 
   return (
@@ -217,52 +192,6 @@ const CallSummary = ({ item }) => {
                   <Icon name="download" variant="primary" />
                 </ButtonDropdown>
               )}
-              <Button iconName="share" variant="normal" onClick={openShareSettings} />
-              <Modal
-                onDismiss={closeShareSettings}
-                visible={share}
-                footer={
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handleSubmit(e);
-                    }}
-                  >
-                    <Form
-                      actions={
-                        <SpaceBetween direction="horizontal" size="xs">
-                          <Button formAction="none" onClick={closeShareSettings}>
-                            Close
-                          </Button>
-                          <Button
-                            variant="primary"
-                            disabled={submit || !meetingRecipients.trim()}
-                            onclick={(e) => {
-                              e.preventDefault();
-                              handleSubmit(e);
-                            }}
-                          >
-                            Submit
-                          </Button>
-                        </SpaceBetween>
-                      }
-                    >
-                      <FormField>
-                        <Input
-                          value={meetingRecipients}
-                          onChange={(event) => setMeetingRecipients(event.detail.value)}
-                        />
-                      </FormField>
-                      <Alert type="info" visible={shareResult}>
-                        {shareResult}
-                      </Alert>
-                    </Form>
-                  </form>
-                }
-                header={<h3>Share Meeting</h3>}
-              >
-                You are sharing&#xA0; 1 meeting &#x2e; Enter a comma separated list of email addresses.
-              </Modal>
             </SpaceBetween>
           }
         >
@@ -1064,7 +993,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
   </>
 );
 
-export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen }) => {
+export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCallDetailsFromCallIds }) => {
   const { currentCredentials } = useAppContext();
 
   const { settings } = useSettingsContext();
@@ -1106,7 +1035,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen }) => {
 
   return (
     <SpaceBetween size="s">
-      <CallAttributes item={item} setToolsOpen={setToolsOpen} />
+      <CallAttributes item={item} setToolsOpen={setToolsOpen} getCallDetailsFromCallIds={getCallDetailsFromCallIds} />
       <CallSummary item={item} />
       {(enableSentimentAnalysis || enableVoiceTone) && (
         <Grid
