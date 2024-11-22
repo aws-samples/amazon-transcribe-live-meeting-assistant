@@ -88,7 +88,7 @@ To share a meeting, choose one or more meetings that you own and then choose the
 
 ![Choose one or more meetings](./images/sharing-a-meeting-1.png)
 
-In the *Share Meeting* pop-up, provide a comma-separated list of email addresses for the recipients and choose Submit. 
+In the *Share Meeting* pop-up, provide a comma-separated list of email addresses for the recipients and choose Add. You can also remove access from one or more *Existing Users* if they no longer need access to this meeting. Once you have added and removed the recipients, click Submit.
 
 ![Enter Email Addresses of Recipients](./images/meeting-sharing-submit.png)
 
@@ -96,12 +96,13 @@ Wait for confirmation that the meetings have been successfully shared before clo
 
 ![Enter Email Addresses of Recipients](./images/meeting-sharing-success.png)
 
-If you need to share the meeting with additional recipients, you can do so immediately after the initial sharing or at a later time. LMA will preserve the original list of recipients and incrementally adds permissions for the new set of recipients during subsequent sharing of the same meeting.
+If you need to share the meeting with additional recipients or make additional changes to existing users list, you can do so immediately after the initial sharing or at a later time.
 
 ### Features (Sharing)
 - Users can now share both previous and *live meeting* with other recipients. When sharing a live meeting, there is a possibility that some lines of the transcript might be missing (not the whole thing). See [Limitations](#limitations) section for more details.
 - Meeting controls allow only the owner to share the meeting with recipients. That is, User 2 will not be able to share a meeting owned by User 1, even though they have access to view the meeting in the UI. Recipients of a shared meeting only have read-only access to the meeting.
 - Meetings can be shared with new users (i.e., users who haven't signed up for an LMA application). Restrictions apply. See [Limitations](#limitations) section for more information.
+- Sharing settings can be used to make modifications at any time to add or remove recipients.
 
 ### Limitations (Sharing)
 - When users share a live meeting with other recipients, there is a small possibility that some of the transcript segments may not be shared due to a race condition. This does not impact the recipient's ability to view other meeting details. This limitation will be addressed in a future release.
