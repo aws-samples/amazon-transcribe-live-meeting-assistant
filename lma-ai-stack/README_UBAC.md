@@ -13,7 +13,9 @@ you can either delete the Cognito User associated with the stack creation/update
 For information on managing users in your user pool see 
 [Managing users in your user pool](https://docs.aws.amazon.com/cognito/latest/developerguide/managing-users.html)
 
-In v0.2.5, LMA introduces a *Meeting Sharing* capability that allows users to share meetings they own with others. For more information on how this works, see [User-Based Access Control: Meeting Sharing Feature](./README_UBAC_MEETING_SHARING.md)
+In v0.2.5, LMA introduces a *Meeting Sharing* capability that allows users to share meetings they own with others. For more information on how this works, see [Sharing a Meeting](#Sharing-a-Meeting)
+
+In v0.2.7, LMA introduces a capability for users to delete meetings that they own. For more information on how this works, see [Deleting a Meeting](#Deleting-a-Meeting)
 
 ## New LMA stack deployment
 
@@ -50,11 +52,12 @@ your previous deployment, follow the instructions under
 
 As an administrator, you have access to all the previous meetings. There is no change in functionality for this user.
 
-## Features
+## Features of UBAC
 - Fine-grained access control that restricts each user to their own meetings.
-- Users can share meetings they own with others. For more information, see [User-Based Access Control: Meeting Sharing Feature](./README_UBAC_MEETING_SHARING.md)
+- Users can share meetings they own with others. For more information, see [Sharing a Meeting](#Sharing-a-Meeting)
+- Users can delete meetings they own. For more information, see [Deleting a Meeting](#Deleting-a-Meeting)
 
-## Limitations
+## Limitations of UBAC
 - This is a beta feature and may have bugs. Use it with caution. If you encounter any issues, please open a GitHub issue.
 - This feature upgrade (if upgrading from versions 0.1.9 or earlier) a breaking change. Existing users will not be able 
   to see their previously recorded meetings. A future release will enable authorized administrators to share meetings 
@@ -64,6 +67,71 @@ As an administrator, you have access to all the previous meetings. There is no c
 - Service limits apply. For example, Amazon Transcribe Streaming by default only allows you to stream up to 25 calls at
   a given time. You can request an increase to this through support. For Amazon Transcribe quotas and limits see
   [Amazon Transcribe endpoints and quotas](https://docs.aws.amazon.com/general/latest/gr/transcribe.html). Similar limits may apply to other services.
+
+## Sharing a Meeting
+Starting in version v0.2.5, LMA users can share meetings that they own with other users. On the Meeting List page of the LMA web UI, users can now see the meetings they own as well as meetings that have been shared with them.
+
+In the following illustration, we see meeting List seen by User 1 (kkdaws@amazon.com):
+1. The first meeting in the list is owned by a different user, but because it has been shared with User 1, it shows up in User1's meeting list. You can see the owner under Owner Email and the list of users the meeting has been shared with under Shared With.
+2. The second and third meetings in the list are owned by User 1, and shared with User 2 (kkdaws+1@amazon.com)
+
+![Share Meeting View User 1](./images/meeting-sharing-view-user-1.png)
+
+Here we see the meeting List seen by User 2 (kkdaws+1@amazon.com):
+1. The first meeting in the list is owned is the same as the first meeting in User1's list above - this is the meeting that is owned by User 2, and shared with User 1.
+2. The second and third meetings in the list also the same as those seen by User 1; they are owned by User 1, but show up in User2's list because User 1 shared them.
+
+![Share Meeting View User 2](./images/meeting-sharing-view-user-2.png)
+
+### Sharing one or more meetings with others
+To share a meeting, choose one or more meetings that you own and then choose the *share* icon on the meeting controls located on the upper right corner of the UI.
+
+![Choose one or more meetings](./images/sharing-a-meeting-1.png)
+
+In the *Share Meeting* pop-up, provide a comma-separated list of email addresses for the recipients and choose Submit. 
+
+![Enter Email Addresses of Recipients](./images/meeting-sharing-submit.png)
+
+Wait for confirmation that the meetings have been successfully shared before closing the pop-up. 
+
+![Enter Email Addresses of Recipients](./images/meeting-sharing-success.png)
+
+If you need to share the meeting with additional recipients, you can do so immediately after the initial sharing or at a later time. LMA will preserve the original list of recipients and incrementally adds permissions for the new set of recipients during subsequent sharing of the same meeting.
+
+### Features (Sharing)
+- Users can now share both previous and *live meeting* with other recipients. When sharing a live meeting, there is a possibility that some lines of the transcript might be missing (not the whole thing). See [Limitations](#limitations) section for more details.
+- Meeting controls allow only the owner to share the meeting with recipients. That is, User 2 will not be able to share a meeting owned by User 1, even though they have access to view the meeting in the UI. Recipients of a shared meeting only have read-only access to the meeting.
+- Meetings can be shared with new users (i.e., users who haven't signed up for an LMA application). Restrictions apply. See [Limitations](#limitations) section for more information.
+
+### Limitations (Sharing)
+- When users share a live meeting with other recipients, there is a small possibility that some of the transcript segments may not be shared due to a race condition. This does not impact the recipient's ability to view other meeting details. This limitation will be addressed in a future release.
+- Recipients do not receive email notifications when meetings are shared with them. Existing users who are recipients of a new meeting can see it in the LMA web UI. For new users, the meeting owner should share the LMA URL, and encourage them to create an account in order to see their meeting..
+- If a recipient who previously had access to the meeting but no longer does (because the owner removed them in the share settings), it is removed from their meetings list. However, the recipient will not be notified that the meeting is no longer shared with them.
+- The sharing functionality currently does not validate if the recipient's email is part of the *Authorized Account Email Domain* configured during LMA deployment. Even if the meeting share is successful, recipients will not be able to create an account if their email is not in the authorized domain.
+
+## Deleting a Meeting
+Starting in version 0.2.7, LMA users can delete meetings that they own. Deleting a meeting will also delete it from the users it was shared with.
+
+### Deleting one or more meetings
+To delete one or more meetings that you own, choose the *delete* icon on the meeting controls located on the upper right corner of the UI.
+
+![Delete meetings choice](./images/delete-a-meting-1.png)
+
+Type confirm in the text box to give consent to delete the selected meetings and click on Delete.
+
+![Delete meetings confirmation](./images/delete-meeting.confirmation.png)
+
+Wait for confirmation that the meetings have been successfully deleted before closing the pop-up.
+
+![Delete meetings success](./images/delete-meeting-success.png)
+
+### Features (Deleting)
+- Users can now delete previous and *live meetings*. 
+- Only the meeting owners can delete their meetings. That is, User 2 will not be able to delete a meeting owned by User 1, even though they have access to view the meeting in the UI. 
+
+### Limitations (Deleting)
+- If a deleted meeting has been previously shared with additional recipients, it is automatically removed from their meetings list. There is no notification mechanism that lets the recipient know that a meeting that was once shared with them was deleted.
+
 
 ## Developer testing / troubleshooting notes
 
