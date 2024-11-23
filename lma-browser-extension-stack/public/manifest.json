@@ -1,7 +1,7 @@
 {
   "name": "Amazon Live Meeting Assistant",
   "description": "Amazon Live Meeting Assistant, powered by Amazon Transcribe and Amazon Bedrock",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "manifest_version": 3,
   "action": {
     "default_title": "Click to open Amazon Live Meeting Assistant",
@@ -77,6 +77,17 @@
       "all_frames": true,
       "run_at": "document_idle"
     },
+	{
+		"matches": [
+			"https://meet.google.com/*"
+		],
+		"js": [
+			"content_scripts/mutation-summary.js",
+			"content_scripts/providers/meet.js"
+		],
+		"all_frames": true,
+		"run_at": "document_idle"
+	},
     {
       "matches": [
         "<all_urls>"
@@ -96,7 +107,8 @@
         "content_scripts/providers/zoom-injection.js",
         "content_scripts/providers/teams-injection.js",
         "content_scripts/providers/teams-live-injection.js",
-        "content_scripts/providers/webex-injection.js"
+        "content_scripts/providers/webex-injection.js",
+		"content_scripts/providers/meet-injection.js"
       ],
       "matches": [
         "<all_urls>"

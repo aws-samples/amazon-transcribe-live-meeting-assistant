@@ -17,6 +17,21 @@ input AddTranscriptSegmentInput {
 	SharedWith: String
 }
 
+input ShareTranscriptSegmentInput {
+	PK: ID!
+	SK: ID!
+	SharedWith: [String!]
+}
+
+type ShareTranscriptSegmentOutput @aws_iam {
+	PK: ID
+}
+
+input DeleteTranscriptSegmentInput {
+	PK: ID!
+	SK: ID!
+}
+
 type Call implements DynamoDbBase @aws_cognito_user_pools
 @aws_iam {
 	PK: ID!
@@ -93,6 +108,38 @@ type CreateCallOutput @aws_iam {
 	SharedWith: String
 }
 
+input ShareMeetingsItem {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+}
+
+input ShareMeetingsInput {
+	Calls: [ShareMeetingsItem]
+	MeetingRecipients: String
+}
+
+type ShareMeetingsOutput {
+	Calls: [ID!]
+	Result: String
+	Owner: String
+	SharedWith: String
+}
+
+input DeleteMeetingsItem {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+}
+
+input DeleteMeetingsInput {
+	Calls: [DeleteMeetingsItem]
+}
+
+type DeleteMeetingsOutput {
+	Result: String
+}
+
 interface DynamoDbBase {
 	PK: ID!
 	SK: ID!
@@ -112,6 +159,13 @@ type Mutation @aws_iam {
 	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
+	deleteCall(input: DeleteCallInput!): DeleteCallOutput
+	shareCall(input: ShareCallInput!): ShareCallOutput
+	unshareCall(input: UnshareCallInput!): UnshareCallOutput
+	deleteTranscriptSegment(input: DeleteTranscriptSegmentInput!): DeleteTranscriptSegmentOutput
+	shareTranscriptSegment(input: ShareTranscriptSegmentInput!): ShareTranscriptSegmentOutput
+    shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools
+	deleteMeetings(input: DeleteMeetingsInput!): DeleteMeetingsOutput @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -217,6 +271,12 @@ type Subscription {
 		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updatePcaUrl","updateAgent", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
+	onShareMeetings: ShareMeetingsOutput
+		@aws_subscribe(mutations: ["shareMeetings"])
+	onDeleteCall: DeleteCallOutput
+		@aws_subscribe(mutations: ["deleteCall"])
+	onUnshareCall: UnshareCallOutput
+		@aws_subscribe(mutations: ["unshareCall"])
 }
 
 type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
@@ -333,6 +393,48 @@ input UpdatePcaUrlInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+}
+
+input ShareCallInput {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+	SharedWith: [String]
+	Owner: String
+}
+
+input DeleteCallInput {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+	Owner: String
+	SharedWith: String
+}
+
+type DeleteCallOutput @aws_iam {
+	CallId: ID!
+	Owner: String
+	SharedWith: String
+}
+
+type ShareCallOutput @aws_iam {
+	CallId: ID!
+	Owner: String
+	SharedWith: String
+}
+
+type DeleteTranscriptSegmentOutput @aws_iam {
+	CallId: ID
+}
+
+input UnshareCallInput {
+	CallId: ID!
+	SharedWith: [String!]
+}
+
+type UnshareCallOutput @aws_iam {
+	CallId: ID!
+	SharedWith: [String!]
 }
 
 schema {

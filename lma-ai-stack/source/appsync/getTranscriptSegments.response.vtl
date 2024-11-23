@@ -2,7 +2,17 @@
   $util.error($ctx.error.message, $ctx.error.type)
 #end
 
-#if(!$context.identity.groups.contains("Admin"))
+## This resolver can be invoked by either a Lambda function with IAM authentication
+## or a User authenticated using Cognito. The Lambda function gets unrestricted access
+## to all the call records stored in the DynamoDB to perform the backend operations in the 
+## Meeting Controls Lambda function. 
+
+#set($isCognitoUser = true)
+#if($context.identity.userArn && $context.identity.userArn.contains(":assumed-role/"))
+  #set($isCognitoUser = false)
+#end
+
+#if(!$context.identity.groups.contains("Admin") && $isCognitoUser)
   #set($myResults = [])
   #foreach($item in $context.result.items)
     #if($item.Owner == $context.identity.username || $item.SharedWith.contains($context.identity.username))
