@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2024-11-23
+### Added
+- Added ability to remove 'sharedWith' users - PR #158
+- Added delete meetings functionality - PR #158
+- Integration for Google Meet in LMA browser extension - PR #159
+### Fixed 
+- Improvements to meetings sharing user experience - PR #158
+- Refactored UI to use common modules to avoid code duplication - PR #158
+
 ## [0.2.6] - 2024-11-01
 ### Fixed
 - Fixed a bug that allowed non-Admin users to see other user call details if they had (or could guess) the callId.
@@ -204,6 +213,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.2.7]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.7
 [0.2.6]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.6
 [0.2.5]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.5
 [0.2.4]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.4
