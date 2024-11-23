@@ -20,7 +20,7 @@ https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/assets/1
 
 ## Solution overview
 
-The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom, Teams, WebEx, and Chime currently), or audio only from any other browser-based meeting app, softphone or audio source. It uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, your choice of [Amazon Q Business](https://aws.amazon.com/q/business/) or [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, [Amazon Bedrock](https://aws.amazon.com/bedrock/) models for customizable transcription insights and summaries, and (opionally) [Amazon Bedrock Agents](https://aws.amazon.com/bedrock/agents/) to enable orchestration of actions with knowledge base queries.
+The Live Meeting Assistant (LMA) sample solution captures speaker audio and metadata from your browser-based meeting app (Zoom, Teams, WebEx, Meet, and Chime currently), or audio only from any other browser-based meeting app, softphone or audio source. It uses [Amazon Transcribe](https://aws.amazon.com/transcribe/) for speech to text, your choice of [Amazon Q Business](https://aws.amazon.com/q/business/) or [Knowledge Bases for Amazon Bedrock](https://aws.amazon.com/bedrock/knowledge-bases/) for contextual queries against your company's documents and knowledge sources, [Amazon Bedrock](https://aws.amazon.com/bedrock/) models for customizable transcription insights and summaries, and (opionally) [Amazon Bedrock Agents](https://aws.amazon.com/bedrock/agents/) to enable orchestration of actions with knowledge base queries.
 
 Everything you need is provided as open source in this [GitHub repo](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant). It’s straightforward to deploy in your AWS account. When you’re done, you’ll wonder how you ever managed without it!
 
@@ -43,7 +43,7 @@ The following are some of the things LMA can do:
 - **Gen AI queries across all your meetings** - LMA stores all your meeting transcripts and summaries in a separate Bedrock Knowledge base, and provides a chat interface where you can search for answers and references across all your meetings.
     <p align="left"><img style="border:2px solid #000000" src="./images/readme-meetings-query-tool.png" alt="readme-meetings-query-tool.png" width="500"/></p>
 
-- **Browser extension captures audio and meeting metadata from popular meeting apps** - The browser extension captures meeting metadata — the meeting title and names of active speakers — and audio from you (your microphone) and others (from the meeting browser tab). As of this writing, LMA supports Chrome for the browser extension, and Zoom, Teams, WebEx, and Chime for meeting apps (with others coming soon). _Standalone meeting apps don’t work with LMA — instead, launch your meetings in the browser._
+- **Browser extension captures audio and meeting metadata from popular meeting apps** - The browser extension captures meeting metadata — the meeting title and names of active speakers — and audio from you (your microphone) and others (from the meeting browser tab). As of this writing, LMA supports Chrome for the browser extension, and Zoom, Teams, WebEx, Meet, and Chime for meeting apps (with others coming soon). _Standalone meeting apps don’t work with LMA — instead, launch your meetings in the browser._
   <p align="left"><img src="./images/readme-browser-extension.png" alt="Browser Extension" width=200/></p>
 
 You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.
@@ -179,7 +179,7 @@ For the best meeting streaming experience, install the LMA browser plugin - curr
 
 LMA provides three streaming options:
 
-1. Use the **Chrome browser extension** to stream audio and speaker metadata from your meeting browser app. It currently works with Zoom, Teams, WebEx, and Chime, but we hope to add more meeting apps.
+1. Use the **Chrome browser extension** to stream audio and speaker metadata from your meeting browser app. It currently works with Zoom, Teams, WebEx, Meet, and Chime, but we hope to add more meeting apps.
 1. Use the **LMA Stream Audio tab** to stream audio from your microphone and any Chrome browser-based meeting app, softphone, or audio application.
    We show you how to use both options in the following sections.
 1. (New) Use the **LMA Virtual Participant (Preview)** feature to have LMA join the meeting as a separate virtual participant. \*_Please review the [Virtual Participant README](./lma-virtual-participant-stack/README.md) for more information and known issues._
