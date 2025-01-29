@@ -82,6 +82,7 @@ Complete the following steps to launch the CloudFormation stack:
    | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
    | US East (N. Virginia) | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
    | US West (Oregon)      | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-west-2.console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/create/review?templateURL=https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml&stackName=LMA) |
+   | AP Southeast (Sydney)      | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://ap-southeast-2.console.aws.amazon.com/cloudformation/home?region=ap-southeast-2#/stacks/create/review?templateURL=https://s3.ap-southeast-2.amazonaws.com/aws-bigdata-blog-replica-ap-southeast-2/artifacts/lma/lma-main.yaml&stackName=LMA) |
 
 1. For **Stack name**, use the default value, `LMA`.
 1. For **Admin Email Address**, use a valid email address—your temporary password is emailed to this address during the deployment. Refer to [New LMA stack deployment](./lma-ai-stack/README_UBAC.md#new-lma-stack-deployment) for recommendations on choosing an email address.
@@ -363,10 +364,11 @@ features, recommendations on choosing an email for the admin persona, and limita
 4. Choose **Replace current template**
 5. Use one of the **published template** below for your region, or use the **Template URL** output of the publish.sh script if you have build your own artifacts from the repository:
 
-| Region name           | Region code | Template URL                                                                         |
-| --------------------- | ----------- | ------------------------------------------------------------------------------------ |
-| US East (N. Virginia) | us-east-1   | https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml |
-| US West (Oregon)      | us-west-2   | https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml |
+| Region name           | Region code    | Template URL                                                                         |
+| --------------------- | -------------- | ------------------------------------------------------------------------------------ |
+| US East (N. Virginia) | us-east-1      | https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml |
+| US West (Oregon)      | us-west-2      | https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml |
+| AP Southeast (Sydney) | ap-southeast-2 | https://s3.ap-southeast-2.amazonaws.com/aws-bigdata-blog-replica-ap-southeast-2/artifacts/lma/lma-main.yaml |
 
 6. Choose **Next** and review the stack parameters.
 7. Choose **Next** two more times.
