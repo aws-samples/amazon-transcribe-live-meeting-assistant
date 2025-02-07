@@ -105,6 +105,38 @@ const checkForMeetingMetadata = function () {
         }
       } else {
         console.log('Button with data-tid="me-control-avatar-trigger" not found.');
+        // New logic to handle the case when avatarButton is not found
+        // Try to find name from participant info in new Teams UI
+        const participantInfo = document.querySelector('div[data-tid="participant-info"] .fui-StyledText span');
+        if (participantInfo) {
+          displayName = participantInfo.textContent;
+          console.log('Display Name from participant-info:', displayName);
+          metadata.userName = displayName;
+        } else {
+          // Fallback to original selector
+          const participantNameSpan = document.querySelector('div[role="group"][aria-labelledby^="control-message-"] span.fui-StyledText');
+          if (participantNameSpan) {
+            displayName = participantNameSpan.textContent;
+            console.log('Display Name from participant-info:', displayName);
+            metadata.userName = displayName;
+          } else {
+            // Try to get name from video element
+            const myselfVideo = document.querySelector('div[data-tid="myself-video"]');
+            if (myselfVideo && myselfVideo.hasAttribute('aria-label')) {
+              const ariaLabel = myselfVideo.getAttribute('aria-label');
+              const match = ariaLabel.match(/Myself video, ([^,]+)/);
+              if (match) {
+                displayName = match[1];
+                console.log('Display Name from myself-video:', displayName);
+                metadata.userName = displayName;
+              } else {
+                console.log('Could not extract name from aria-label');
+              }
+            } else {
+              console.log('No participant info elements found.');
+            }
+          }
+        }
       }
     }
     if (!metadata.meetingTopic || metadata.meetingTopic.trim() === '') {
@@ -133,141 +165,14 @@ const checkForMeetingMetadata = function () {
 }
 
 let activeSpeakerObserver;
-/* let audioStageObserver;
-
-const startAudioStageObserver = () => {
-  const audioStage = document.querySelector('div[data-tid="audio-stage"]');
-
-  if (audioStage) {
-    const config = { childList: true, subtree: true };
-    const callback = (mutationsList, observer) => {
-      mutationsList.forEach((mutation) => {
-        if (mutation.type === 'childList') {
-          console.log('Audio stage child elements changed');
-          mutation.addedNodes.forEach(node => {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-              // console.log('Added node:', node);
-            }
-          });
-          mutation.removedNodes.forEach(node => {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-              // console.log('Removed node:', node);
-            }
-          });
-          if (activeSpeakerObserver) {
-            activeSpeakerObserver.disconnect();
-            startObserver();
-          }
-        }
-      });
-    };
-
-    if (audioStageObserver) {
-      audioStageObserver.disconnect();
-    }
-    audioStageObserver = new MutationObserver(callback);
-    audioStageObserver.observe(audioStage, config);
-    console.log('Audio stage observer started');
-  } else {
-    console.log('Audio stage not found. Retrying in 2 seconds...');
-    setTimeout(startAudioStageObserver, 2000);
-  }
-};
-
-// Function to start the MutationObserver
-const startObserver = () => {
-  // Select the node that will be observed for mutations
-  const targetNodes = document.querySelectorAll('span[role="presentation"][id^="avatar-"]');
-
-  // Options for the observer (which mutations to observe)
-  const config = { attributes: true, attributeOldValue: true };
-
-  // Callback function to execute when mutations are observed
-  const callback = (mutationsList, observer) => {
-    mutationsList.forEach((mutation) => {
-      console.log(mutation);
-      if (mutation.type === 'attributes') {
-        console.log(`Attribute mutation detected: ${mutation.attributeName}`);
-        const oldValue = mutation.oldValue;
-        const newValue = mutation.target.getAttribute(mutation.attributeName);
-        // console.log(`Old value: ${oldValue}`);
-        // console.log(`New value: ${newValue}`);
-        if (oldValue.startsWith(inactiveRingClass) && newValue.startsWith(activeRingClass)) {
-          // console.log("Active Speaker participant-speaker-ring activated");
-          let parentElement = mutation.target.parentElement.parentElement.parentElement;
-          if (parentElement && parentElement.hasAttribute('aria-label')) {
-            const ariaLabel = parentElement.getAttribute('aria-label');
-            // console.log(`Found aria-label: ${ariaLabel}`);
-            if (ariaLabel.includes('muted')) {
-              // console.log('The ariaLabel contains the word "muted".');
-            } else {
-              const activeSpeaker = ariaLabel.split(',')[0];
-              console.log(`Active Speaker Change: ${activeSpeaker}`);
-              chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: activeSpeaker });
-            }
-          } else {
-            console.log('No aria-label found at expected parent level.');
-          }
-        }
-        else if (oldValue.startsWith(activeRingClass) && newValue.startsWith(inactiveRingClass)) {
-          let foundActiveSpeaker = false;
-          console.log("Active Speaker participant-speaker-ring stopped, findout who else is speaking");
-          const speakerList = document.querySelectorAll('div[data-cid="calling-participant-stream"]');
-          speakerList.forEach((speakerDiv, index) => {
-            //select the first div element with attribute of data-tid="participant-speaker"
-            const participantSpeaker = speakerDiv.querySelector('div[data-tid="participant-speaker"]');
-            if (participantSpeaker) {
-              // console.log(`Found participant speaker div for speaker ${index + 1}`);
-              const participantSpeakerRing = participantSpeaker.querySelector('div[data-tid="participant-speaker-ring"]');
-              if (participantSpeakerRing) {
-                const ringClass = participantSpeakerRing.getAttribute('class');
-                if (ringClass.startsWith(activeRingClass)) {
-                  const ariaLabel = speakerDiv.getAttribute('aria-label');
-                  if (ariaLabel.includes('muted')) {
-                    // console.log('The ariaLabel contains the word "muted".');
-                  } else {
-                    const activeSpeaker = ariaLabel.split(',')[0];
-                    console.log(`Active Speaker Change: ${activeSpeaker}`);
-                    chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: activeSpeaker });
-                    foundActiveSpeaker = true;
-                    return true;
-                  }
-                }
-              }
-            }
-          });
-          if (!foundActiveSpeaker) {
-            console.log(`No more active speakers.`);
-            chrome.runtime.sendMessage({ action: "ActiveSpeakerChange", active_speaker: "n/a" });
-          }
-        }
-      }
-    });
-  };
-
-  if (activeSpeakerObserver) {
-    activeSpeakerObserver.disconnect();
-  }
-  // Create an observer instance linked to the callback function
-  activeSpeakerObserver = new MutationObserver(callback);
-
-  // Start observing the target nodes for configured mutations
-  if (targetNodes.length > 0) {
-    targetNodes.forEach(node => {
-      activeSpeakerObserver.observe(node, config);
-    });
-    console.log('MutationObserver started for child nodes');
-  } else {
-    console.log('Target node not found. Retrying in 2 seconds...');
-    setTimeout(startObserver, 2000); // Retry after 2 seconds
-  }
-}; */
-
 
 // Function to start the MutationObserver
 const startObserver = () => {
   //data-cid="calling-participant-stream"
   let targetNodes = document.querySelector('div[aria-label="Shared content view"][role=main]');
+  if (!targetNodes) {
+    targetNodes = document.querySelector('div[data-testid="stage-segment-wrapper"][data-test-segment-type="central"]');
+  }
   if (targetNodes && targetNodes.hasAttribute('LMAAttached') && targetNodes.getAttribute('LMAAttached') === 'true') {
     return;
   }
