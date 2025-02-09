@@ -5,12 +5,18 @@ let meetingConfig = {};
 /************** Helper functions ***************/
 const getNameForVideoAvatar = function (element) {
   var speakerName = "n/a";
-  var avatarEl = element.querySelector('.video-avatar__avatar-name');
-  if (avatarEl)  speakerName = avatarEl.innerText;
-  else (avatarEl === undefined)
-  {
-    var avatarEl = element.querySelector('.video-avatar__avatar-img');
-    if (avatarEl) speakerName = avatarEl.alt;
+  var footerSpan = element.querySelector('.video-avatar__avatar-footer span[role="none"]');
+  if (footerSpan) {
+    speakerName = footerSpan.innerText;
+  } else {
+    // Fall back to avatar name checks
+    var avatarEl = element.querySelector('.video-avatar__avatar-name');
+    if (avatarEl) {
+      speakerName = avatarEl.innerText;
+    } else {
+      avatarEl = element.querySelector('.video-avatar__avatar-img');
+      if (avatarEl) speakerName = avatarEl.alt;
+    }
   }
   return speakerName;
 }
