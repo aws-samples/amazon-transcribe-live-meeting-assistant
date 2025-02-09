@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.9] - 2025-02-09
+### Fixed 
+- Zoom browser extension, active speaker not identified when video share or screen share is on bug fix #174
+
 ## [0.2.8] - 2025-02-07
 ### Fixed 
 - user identification has not working with chrome extension for teams - PR #170
@@ -218,6 +222,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.2.9]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.9
 [0.2.8]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.8
 [0.2.7]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.7
 [0.2.6]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.6
