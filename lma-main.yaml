@@ -314,6 +314,17 @@ Parameters:
       must pre-exist in your account,  match the Language Code selected above, and
       use the 'Narrow Band' base model.
 
+  ModelInitialization:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Specifies if Amazon Bedrock model access is validated and sample package uploaded to QnABot.
+      Setting this parameter to "false" is useful for automated deployments (e.g. AWS Workshop
+      Studio) where Amazon Bedrock model access permissions may not be set up yet.
+
   TranscriptLambdaHookFunctionArn:
     Default: ""
     Type: String
@@ -677,6 +688,10 @@ Metadata:
           default: Business Domain
         Parameters:
           - Domain
+      - Label:
+          default: Workshop options
+        Parameters:
+          - ModelInitialization
     ParameterLabels:
       CallAudioProcessor:
         default: Call Audio Processor
@@ -744,6 +759,8 @@ Metadata:
         default: Transcription Custom Vocabulary Name
       CustomLanguageModelName:
         default: Transcription Custom Language Model Name
+      ModelInitialization:
+        default: Amazon Bedrock Model Initialization
       TranscriptLambdaHookFunctionArn:
         default:
           Lambda Hook Function ARN for Custom Transcript Segment Processing
@@ -1015,6 +1032,7 @@ Resources:
               transcribePreferredLanguage = event['ResourceProperties'].get('TranscribePreferredLanguage', '')
               customVocabularyName = event['ResourceProperties'].get('CustomVocabularyName', '')
               customLanguageModelName = event['ResourceProperties'].get('CustomLanguageModelName', '')
+              modelInitialization = event['ResourceProperties'].get('ModelInitialization', '')
               if transcribeLanguageCode in ['identify-language', 'identify-multiple-languages']:
                 if customVocabularyName:
                   status = cfnresponse.FAILED
@@ -1043,12 +1061,13 @@ Resources:
               # Validate Bedrock model access
               failedModels = []
               requiredmodels = event['ResourceProperties'].get('BedrockModelIds', [])
-              for modelId in requiredmodels: 
-                if not is_model_available(modelId):
-                  failedModels.append(modelId)
-              if failedModels:
-                status = cfnresponse.FAILED
-                reason = f"Model(s) '{failedModels}' not available or not enabled. Check that Amazon Bedrock is available in your region, and that required models ('{requiredmodels}') are activated in your Amazon Bedrock account"
+              if modelInitialization == "true":
+                for modelId in requiredmodels: 
+                  if not is_model_available(modelId):
+                    failedModels.append(modelId)
+                if failedModels:
+                  status = cfnresponse.FAILED
+                  reason = f"Model(s) '{failedModels}' not available or not enabled. Check that Amazon Bedrock is available in your region, and that required models ('{requiredmodels}') are activated in your Amazon Bedrock account"
             else:
               print(f"Request type is {event['RequestType']} - skipping")
             cfnresponse.send(event, context, status, {}, reason=reason)
@@ -1080,6 +1099,7 @@ Resources:
       TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
       CustomVocabularyName: !Ref CustomVocabularyName
       CustomLanguageModelName: !Ref CustomLanguageModelName
+      ModelInitialization: !Ref ModelInitialization
       BedrockModelIds:
         - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
         - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB & QnABot
@@ -1556,6 +1576,7 @@ Resources:
           - ShouldUseTranscriptKnowledgeBase
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
           - ""
+        ModelInitialization: !Ref ModelInitialization
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         # Changes to Params below force AgentAssist Setup to update.
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
