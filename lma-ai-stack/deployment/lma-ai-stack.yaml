@@ -184,6 +184,9 @@ Parameters:
       - "anthropic.claude-3-sonnet-20240229-v1:0"
       - "anthropic.claude-3-5-sonnet-20240620-v1:0"
       - "anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.amazon.nova-micro-v1:0"
+      - "us.amazon.nova-lite-v1:0"
+      - "us.amazon.nova-pro-v1:0"
 
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
@@ -956,6 +959,12 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:GetInferenceProfile"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
         - PolicyName: !Sub ${AWS::StackName}-S3
           PolicyDocument:
             Version: 2012-10-17
