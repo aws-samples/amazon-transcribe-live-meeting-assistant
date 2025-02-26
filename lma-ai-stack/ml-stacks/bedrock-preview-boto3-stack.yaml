@@ -108,8 +108,8 @@ Resources:
             try: 
               if event['RequestType'] != 'Delete':
                 os.chdir('/tmp')
-                print(f"running pip install boto3==1.28.57")
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "boto3==1.28.57", "-t", "python" ])
+                print(f"running pip install boto3==1.36.19")
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "boto3==1.36.19", "-t", "python" ])
                 boto3_zip_name = make_zip_filename()
                 zipdir("python",boto3_zip_name)
                 print(f"uploading {boto3_zip_name} to s3 bucket {boto3_bucket}")
