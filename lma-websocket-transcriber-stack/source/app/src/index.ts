@@ -158,6 +158,19 @@ const registerHandlers = (
     ws: WebSocket,
     request: FastifyRequest
 ): void => {
+    // Setup ping interval to prevent timeout
+    const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.ping();
+            server.log.debug(`[PING]: [${clientIP}] - Sending ping to keep connection alive`);
+        }
+    }, 300000);
+
+    // Handle pong responses
+    ws.on('pong', () => {
+        server.log.debug(`[PONG]: [${clientIP}] - Received pong response`);
+    });
+
     ws.on('message', async (data, isBinary): Promise<void> => {
         try {
             if (isBinary) {
@@ -182,6 +195,7 @@ const registerHandlers = (
     });
 
     ws.on('close', (code: number) => {
+        clearInterval(pingInterval); // Clean up ping interval
         server.log.debug(
             `[ON WSCLOSE]: [${clientIP}] Received Websocket close message from the client. Closing the connection.`
         );
