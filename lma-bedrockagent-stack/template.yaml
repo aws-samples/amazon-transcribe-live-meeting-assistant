@@ -1,62 +1,100 @@
-AWSTemplateFormatVersion: "2010-09-09"
+AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: >
+Description: |
   Amazon Transcribe Live Meeting Assist - Bedrock Agent setup
 
 Parameters:
-  
+  SalesforceCredentials: 
+    Type: String
+    Description: Enter Salesforce secret ARN. Only needed if EnableSalesforceIntegration is set to true.
+    AllowedPattern: "^(arn:aws:secretsmanager:.*:secret:.*)?$"
+    ConstraintDescription: "Must be a valid Secrets Manager ARN or empty"
+
+  JiraCredentials:
+    Type: String
+    Description: Enter Jira secret ARN. Only needed if EnableJiraIntegration is set to true.
+    AllowedPattern: "^(arn:aws:secretsmanager:.*:secret:.*)?$"
+    ConstraintDescription: "Must be a valid Secrets Manager ARN or empty"
+
+  AsanaCredentials:
+    Type: String
+    Description: Enter Asana secret ARN. Only needed if EnableAsanaIntegration is set to true.
+    AllowedPattern: "^(arn:aws:secretsmanager:.*:secret:.*)?$"
+    ConstraintDescription: "Must be a valid Secrets Manager ARN or empty"
+
   BedrockModelID:
     Type: String
-    Default: "anthropic.claude-3-haiku-20240307-v1:0"
-    Description: >-
-      Selected LLM Model to use for agent
+    Default: anthropic.claude-3-haiku-20240307-v1:0
+    Description: Selected LLM Model to use for agent
 
   BedrockKnowledgeBaseId:
     Type: String
-    Default: ""
-    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
-    Description: >
+    Default: ''
+    AllowedPattern: ^(|[0-9a-zA-Z]{10})$
+    Description: |
       If populated, use existing KB. Otherwise create new KB
 
   KnowledgeBaseBucketName:
     Type: String
-    Default: ""
-    Description: >-
-      Enter the bucket name of an existing bucket with documents to ingest, or leave blank if you don't need an S3 data source.
+    Default: ''
+    Description: Enter the bucket name of an existing bucket with documents to
+      ingest, or leave blank if you don't need an S3 data source.
 
   InputDocumentUploadFolderPrefix:
     Type: String
-    Default: ""
-    Description: >-
-      Comma separated list of S3 prefixes with path to your source documents e.g. "my/documents/here/", "prefix1/, prefix2/"
+    Default: ''
+    Description: Comma separated list of S3 prefixes with path to your source
+      documents e.g. "my/documents/here/", "prefix1/, prefix2/"
 
   WebCrawlerURLs:
     Type: String
-    Default: ""
-    Description: >-
-      Comma separated list of public web sites to crawl, or leave blank if you don't need a Web data source.
+    Default: ''
+    Description: Comma separated list of public web sites to crawl, or leave blank
+      if you don't need a Web data source.
 
   WebCrawlerScope:
     Type: String
     AllowedValues:
-      - "DEFAULT"
-      - "HOST_ONLY"
-      - "SUBDOMAINS"
+      - DEFAULT
+      - HOST_ONLY
+      - SUBDOMAINS
     Default: DEFAULT
-    Description: >-
-      The scope of what is crawled for your URLs.
-      Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
-      Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
-      Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
+    Description: The scope of what is crawled for your URLs. Choose DEFAULT to limit
+      to web pages that have the same host and the same initial path as the
+      source URLs. Choose HOST_ONLY to limit to web pages that have the same
+      host as the source URLs. Choose SUBDOMAINS to to include sub domains in
+      addition to the host or primary domain.
 
   SNSEmailAddress:
     Type: String
-    Description: >-
-      Enter an email address to receive notifications from the SendMessage action group
+    Description: Enter an email address to receive notifications from the
+      SendMessage action group
 
 Conditions:
-  ShouldCreateBedrockKnowledgeBase:
-    !Equals [!Ref BedrockKnowledgeBaseId, ""]
+  ShouldCreateBedrockKnowledgeBase: !Equals
+    - !Ref BedrockKnowledgeBaseId
+    - ''
+  EnableSalesforceIntegration: !Not
+  - !Equals [!Ref SalesforceCredentials, '']
+  EnableJiraIntegration: !Not
+  - !Equals [!Ref JiraCredentials, '']
+  EnableAsanaIntegration: !Not
+  - !Equals [!Ref AsanaCredentials, '']
+
+Mappings:
+  ActionGroupsMap:
+    Salesforce:
+      Name: CreateSalesforceOpportunity
+      Description: Create an Opportunity in Salesforce
+      Lambda: CreateSalesforceOpportunityFunction
+    Jira:
+      Name: CreateJiraTicket
+      Description: Create a ticket in Jira
+      Lambda: CreateJiraTicketFunction
+    Asana:
+      Name: OpenAsanaTask
+      Description: Open a task in Asana
+      Lambda: OpenAsanaTaskFunction
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -92,7 +130,7 @@ Resources:
         pWebCrawlerURLs: !Ref WebCrawlerURLs
         pWebCrawlerScope: !Ref WebCrawlerScope
 
-  # Resourcs for SendMessage action group
+  # Resources for SendMessage action group
 
   SendMessageTopic:
     Type: AWS::SNS::Topic
@@ -105,7 +143,7 @@ Resources:
       TopicArn: !Ref SendMessageTopic
 
   SendMessageFunctionRole:
-    Type: 'AWS::IAM::Role'
+    Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -123,15 +161,15 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - 'sns:Publish'
-                  - 'sns:SetSMSAttributes'
-                  - 'sns:GetSMSAttributes'
+                  - sns:Publish
+                  - sns:SetSMSAttributes
+                  - sns:GetSMSAttributes
                 Resource: !Ref SendMessageTopic
 
   SendMessageFunction:
-    Type: 'AWS::Lambda::Function'
+    Type: AWS::Lambda::Function
     Properties:
-      Handler: 'index.lambda_handler'
+      Handler: index.lambda_handler
       Role: !GetAtt SendMessageFunctionRole.Arn
       Code:
         ZipFile: |
@@ -200,7 +238,82 @@ Resources:
       Environment:
         Variables:
           SNS_TOPIC_ARN: !Ref SendMessageTopic
-          DEFAULT_SUBJECT: "Message from Live Meeting Assistant (LMA)"
+          DEFAULT_SUBJECT: Message from Live Meeting Assistant (LMA)
+
+  CreateSalesforceOpportunityRole:
+    Type: AWS::IAM::Role
+    Condition: EnableSalesforceIntegration
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CreateSalesforceOpportunityFunction:
+    Type: AWS::Lambda::Function
+    Condition: EnableSalesforceIntegration
+    Properties:
+      Code: ../tools/salesforce-integration/src
+      Handler: lma_create_salesforce_opportunity.lambda_handler
+      Role: !GetAtt CreateSalesforceOpportunityRole.Arn
+      Runtime: python3.12
+      MemorySize: 128
+      Timeout: 120
+
+  CreateJiraTicketRole:
+    Type: AWS::IAM::Role
+    Condition: EnableJiraIntegration
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CreateJiraTicketFunction:
+    Type: AWS::Lambda::Function
+    Condition: EnableJiraIntegration
+    Properties:
+      Code: ../tools/jira-integration/src
+      Handler: lma_create_jira_ticket.lambda_handler
+      Role: !GetAtt CreateJiraTicketRole.Arn
+      Runtime: python3.12
+      MemorySize: 128
+      Timeout: 120
+
+  OpenAsanaTaskRole:
+    Type: AWS::IAM::Role
+    Condition: EnableAsanaIntegration
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  OpenAsanaTaskFunction:
+    Type: AWS::Lambda::Function
+    Condition: EnableAsanaIntegration
+    Properties:
+      Code: ../tools/asana-integration/src
+      Handler: lma_open_asana_task.lambda_handler
+      Role: !GetAtt OpenAsanaTaskRole.Arn
+      Runtime: python3.12
+      MemorySize: 128
+      Timeout: 120
 
   BedrockAgentRole:
     Type: AWS::IAM::Role
@@ -208,29 +321,29 @@ Resources:
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-            - bedrock.amazonaws.com
-          Action:
-          - sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service:
+                - bedrock.amazonaws.com
+            Action:
+              - sts:AssumeRole
       Policies:
-      - PolicyName: BedrockInvokeModel
-        PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - bedrock:InvokeModel
-            Resource:
-            - Fn::Sub: arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelID}
-          - Effect: Allow
-            Action:
-            - bedrock:Retrieve
-            Resource: !If
-            - ShouldCreateBedrockKnowledgeBase
-            - Fn::Sub: arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BEDROCKKB.Outputs.KnowledgeBaseID}
-            - Fn::Sub: arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseId}
+        - PolicyName: BedrockInvokeModel
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelID}
+              - Effect: Allow
+                Action:
+                  - bedrock:Retrieve
+                Resource: !If
+                  - ShouldCreateBedrockKnowledgeBase
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BEDROCKKB.Outputs.KnowledgeBaseID}
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseId}
 
   BedrockAgent:
     Type: AWS::Bedrock::Agent
@@ -239,14 +352,17 @@ Resources:
       Description: Bedrock Agent for Live Meeting Assistant stack
       AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
       AutoPrepare: true
-      Instruction: "You are an AI Meeting assistant who responds to instructions and questions from meeting participants using the provided tools, and the meeting transcript as context."
+      Instruction: You are an AI Meeting assistant who responds to instructions and
+        questions from meeting participants using the provided tools, and the
+        meeting transcript as context.
       FoundationModel: !Ref BedrockModelID
-      KnowledgeBases: 
-        - Description: Knowledge Base used for looking up answers or fact checking statements using trusted sources
+      KnowledgeBases:
+        - Description: Knowledge Base used for looking up answers or fact checking
+            statements using trusted sources
           KnowledgeBaseId: !If
-          - ShouldCreateBedrockKnowledgeBase
-          - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
-          - !Ref BedrockKnowledgeBaseId
+            - ShouldCreateBedrockKnowledgeBase
+            - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
+            - !Ref BedrockKnowledgeBaseId
       ActionGroups:
         - ActionGroupName: SendMessage
           Description: Send a message by SMS or Email
@@ -266,6 +382,96 @@ Resources:
                     Required: false
                     Description: The subject of the message to send
           SkipResourceInUseCheckOnDelete: true
+        - ActionGroupName: CreateSalesforceOpportunity
+          Description: Send a message by SMS or Email
+          ActionGroupExecutor:
+            Lambda: !GetAtt CreateSalesforceOpportunityFunction.Arn
+          FunctionSchema:
+            Functions:
+              - Name: CreateSalesforceOpportunity
+                Description: Create an Opportunity in Salesforce
+                Parameters:
+                  opportunity_name:
+                    Type: string
+                    Required: true
+                    Description: The opportunity name
+                  opportunity_stage:
+                    Type: string
+                    Required: true
+                    Description: The stage of the opportunity
+                  opportunity_close_date:
+                    Type: string
+                    Required: true
+                    Description: The close date of the opportunity
+          SkipResourceInUseCheckOnDelete: true
+
+      - !If
+        - IncludeSalesforce
+        - ActionGroupName: !FindInMap [ActionGroupsMap, Salesforce, Name]
+          Description: !FindInMap [ActionGroupsMap, Salesforce, Description]
+          ActionGroupExecutor:
+            Lambda: !GetAtt !FindInMap [ActionGroupsMap, Salesforce, Lambda].Arn
+          FunctionSchema:
+            Functions:
+              - Name: CreateSalesforceOpportunity
+                Description: Create an Opportunity in Salesforce
+                Parameters:
+                  opportunity_name:
+                    Type: string
+                    Required: true
+                    Description: The opportunity name
+                  opportunity_stage:
+                    Type: string
+                    Required: true
+                    Description: The stage of the opportunity
+                  opportunity_close_date:
+                    Type: strinring
+                    Required: true
+                    Description: The close date of the opportunity
+          SkipResourceInUseCheckOnDelete: true
+        - !Ref AWS::NoValue
+      - !If
+        - IncludeJira
+        - ActionGroupName: !FindInMap [ActionGroupsMap, Jira, Name]
+          Description: !FindInMap [ActionGroupsMap, Jira, Description]
+          ActionGroupExecutor:
+            Lambda: !GetAtt !FindInMap [ActionGroupsMap, Jira, Lambda].Arn
+          FunctionSchema:
+            Functions:
+              - Name: CreateJiraTicket
+                Description: Create a ticket in Jira
+                Parameters:
+                  ticket_summary:
+                    Type: string
+                    Required: true
+                    Description: The summary of the Jira ticket
+                  ticket_description:
+                    Type: string
+                    Required: true
+                    Description: The description of the Jira ticket
+          SkipResourceInUseCheckOnDOnDelete: true
+        - !Ref AWS::NoValue
+      - !If
+        - IncludeAsana
+        - ActionGroupName: !FindInMap [ActionGroupsMap, Asana, Name]
+          Description: !FindInMap [ActionGroupsMap, Asana, Description]
+          ActionGroupExecutor:
+            Lambda: !GetAtt !FindInMap [ActionGroupsMap, Asana, Lambda].Arn
+          FunctionSchema:
+            Functions:
+              - Name: OpenAsanaTask
+                Description: Open an Asana task
+                Parameters:
+                  description:
+                    Type: string
+                    Required: true
+                    Description: The description of the Asana task
+                  assigned_to:
+                    Type: string
+                    Required: true
+                    Description: Assignee of the Asana task
+          SkipResourceInUseCheckOnDelete: true
+        - !Ref AWS::NoValue
 
   SendMessageFunctionPermission:
     Type: AWS::Lambda::Permission
@@ -278,7 +484,7 @@ Resources:
   BedrockAgentAlias:
     Type: AWS::Bedrock::AgentAlias
     Properties:
-      Description: !Sub "Alias for Agent update: ${BedrockAgent.UpdatedAt}" 
+      Description: !Sub 'Alias for Agent update: ${BedrockAgent.UpdatedAt}'
       AgentId: !Ref BedrockAgent
       AgentAliasName: lma-agent
 
@@ -294,5 +500,5 @@ Outputs:
 
   SNSTopicForAgentMessages:
     Value: !GetAtt SendMessageTopic.TopicName
-    Description: Agent SendMessage SNS Topic ARN - Add subscriptions to this topic to receive messages from the agent
-
+    Description: Agent SendMessage SNS Topic ARN - Add subscriptions to this topic
+      to receive messages from the agent

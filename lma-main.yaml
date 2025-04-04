@@ -129,6 +129,30 @@ Parameters:
       Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
       Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
 
+  SalesforceSecretARN: 
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is BEDROCK_AGENT or BEDROCK_AGENT_WITH_KNOWLEDGE_BASE, optionally provide  
+      the ARN of the Secrets Manager secret containing the Salesforce OAuth credentials to enable 
+      Bedrock agent to perform actions based on context. If not specified, Salesforce will not be integrated.
+  
+  JiraSecretARN:
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is BEDROCK_AGENT or BEDROCK_AGENT_WITH_KNOWLEDGE_BASE, optionally provide  
+      the ARN of the Secrets Manager secret containing the JIRA OAuth credentials to enable 
+      Bedrock agent to perform actions based on context. If not specified, JIRA will not be integrated.
+
+  AsanaSecretARN: 
+    Type: String
+    Default: ""
+    Description: >-
+      If MeetingAssistService is BEDROCK_AGENT or BEDROCK_AGENT_WITH_KNOWLEDGE_BASE, optionally provide  
+      the ARN of the Secrets Manager secret containing the Asana OAuth credentials to enable 
+      Bedrock agent to perform actions based on context. If not specified, Asana will not be integrated.
+
   AmazonQAppId:
     Type: String
     Default: ""
@@ -574,6 +598,8 @@ Parameters:
       true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
     AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
 
+
+    
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -1431,6 +1457,9 @@ Resources:
       Parameters:
         BedrockModelID: !Ref MeetingAssistServiceBedrockModelID
         BedrockKnowledgeBaseId: !Ref BedrockKnowledgeBaseId
+        SalesforceCredentials: !Ref SalesforceSecretARN
+        JiraCredentials: !Ref JiraSecretARN
+        AsanaCredentials: !Ref AsanaSecretARN
         KnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
         InputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
         WebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
