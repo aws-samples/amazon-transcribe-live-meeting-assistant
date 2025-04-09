@@ -69,6 +69,9 @@ aws s3 cp asana_function.py.zip s3://${ARTIFACT_BUCKET}/${ARTIFACT_PREFIX}/lma-b
 # Clean up
 rm -rf "$TEMP_DIR"
 
+# Return to the original directory
+cd "$SCRIPT_DIR"
+
 echo "Lambda functions packaged and uploaded successfully!"
 
 # Create bucket if it doesn't already exist
