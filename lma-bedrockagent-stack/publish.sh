@@ -2,6 +2,40 @@
 
 # This script packages and uploads the Lambda functions for the Bedrock Agent stack
 
+# Stop the publish process on failures
+set -e
+
+# use current directory name as template name
+NAME=$(basename `pwd`)
+
+USAGE="$0 <cfn_bucket> <cfn_prefix> <region> [public]"
+
+BUCKET=$1
+[ -z "$BUCKET" ] && echo "Cfn bucket name is required parameter. Usage $USAGE" && exit 1
+
+PREFIX=$2
+[ -z "$PREFIX" ] && echo "Prefix is required parameter. Usage $USAGE" && exit 1
+
+# Remove trailing slash from prefix if needed
+[[ "${PREFIX}" == */ ]] && PREFIX="${PREFIX%?}"
+
+REGION=$3
+[ -z "$REGION" ] && echo "Region is a required parameter. Usage $USAGE" && exit 1
+export AWS_DEFAULT_REGION=$REGION
+
+ACL=$4
+if [ "$ACL" == "public" ]; then
+  echo "Published S3 artifacts will be acessible by public (read-only)"
+  PUBLIC=true
+else
+  echo "Published S3 artifacts will NOT be acessible by public."
+  PUBLIC=false
+fi
+
+# Export these variables for use in the Lambda packaging section
+export ARTIFACT_BUCKET=$BUCKET
+export ARTIFACT_PREFIX=$PREFIX
+
 # Get the directory of this script
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
@@ -37,47 +71,8 @@ rm -rf "$TEMP_DIR"
 
 echo "Lambda functions packaged and uploaded successfully!"
 
-##############################################################################################
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-##############################################################################################
-
-##############################################################################################
-# Create new Cfn artifacts bucket if not already existing, and publish template and artifacts
-# usage: ./publish.sh <cfn_bucket> <cfn_prefix> <region> [public]
-##############################################################################################
-# Stop the publish process on failures
-set -e
-
-# use current directory name as template name
-NAME=$(basename `pwd`)
-
-USAGE="$0 <cfn_bucket> <cfn_prefix> <region> [public]"
-
-BUCKET=$1
-[ -z "$BUCKET" ] && echo "Cfn bucket name is required parameter. Usage $USAGE" && exit 1
-
-PREFIX=$2
-[ -z "$PREFIX" ] && echo "Prefix is required parameter. Usage $USAGE" && exit 1
-
-# Remove trailing slash from prefix if needed
-[[ "${PREFIX}" == */ ]] && PREFIX="${PREFIX%?}"
-
-REGION=$3
-[ -z "$REGION" ] && echo "Region is a required parameter. Usage $USAGE" && exit 1
-export AWS_DEFAULT_REGION=$REGION
-
-ACL=$4
-if [ "$ACL" == "public" ]; then
-  echo "Published S3 artifacts will be acessible by public (read-only)"
-  PUBLIC=true
-else
-  echo "Published S3 artifacts will NOT be acessible by public."
-  PUBLIC=false
-fi
-
 # Create bucket if it doesn't already exist
-if [ -x $(aws s3api list-buckets --query 'Buckets[].Name' | grep "\"$BUCKET\"") ]; then
+if [ -z "$(aws s3api list-buckets --query 'Buckets[].Name' | grep "\"$BUCKET\"")" ]; then
   echo "Creating s3 bucket: $BUCKET"
   aws s3 mb s3://${BUCKET} || exit 1
   aws s3api put-bucket-versioning --bucket ${BUCKET} --versioning-configuration Status=Enabled || exit 1
@@ -128,4 +123,3 @@ fi
 
 echo Published $NAME - Template URL: $https_template
 exit 0
-
