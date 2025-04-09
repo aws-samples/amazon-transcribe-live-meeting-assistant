@@ -11,7 +11,33 @@ Here's a demo of a very simple agent that can use a knowledge base and send emai
 
 https://github.com/user-attachments/assets/0bb2b087-89ed-4114-ab9c-1ec5b376dbfc
 
+## Enhanced Action Groups for Business Applications
 
+LMA now supports additional action groups that allow your Bedrock Agent to interact with popular business applications:
+
+### Salesforce Integration
+Create opportunities directly in Salesforce during your meetings. When enabled, your agent can:
+- Create new sales opportunities with specified amounts and close dates
+- Associate opportunities with existing accounts
+- Set opportunity stages and descriptions
+
+Example: "OK Assistant, create a Salesforce opportunity for ABC Corp for $50,000 with a close date of next quarter"
+
+### Jira Integration
+Create issues and tasks in Jira during your meetings. When enabled, your agent can:
+- Create new issues with specified project keys
+- Set issue types, priorities, and assignees
+- Add detailed descriptions and labels
+
+Example: "OK Assistant, create a Jira bug in project DEMO with high priority titled 'Fix login screen error'"
+
+### Asana Integration
+Create tasks in Asana during your meetings. When enabled, your agent can:
+- Create new tasks with specified names and descriptions
+- Assign tasks to team members
+- Set due dates and add tasks to specific projects
+
+Example: "OK Assistant, create an Asana task for Sarah to update the marketing materials by next Friday"
 
 ## Current Limitations
 Be aware of some limitations when using agents in LMA:
@@ -41,15 +67,22 @@ and that's it..  Your LMA stack will be configured to use the QnABot Lambda Hook
 
 1. For **Meeting Assist Service**, choose `BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)`
 2. Optionally, for **BedrockKnowledgeBaseId**, provide the knowledge base *Id* of an existing Bedrock knowledge base for the new Bedrock Agent, or leave blank to have a new knowledge base created for you.
-3. Optionally, for **BedrockKnowledgeBaseWebCrawlerURLs**, or any of the other knowledge base data source parameters, modify the defaults to determine how your new knowledge base is initially populated.  
+3. Optionally, for **BedrockKnowledgeBaseWebCrawlerURLs**, or any of the other knowledge base data source parameters, modify the defaults to determine how your new knowledge base is initially populated.
+4. To enable business application integrations, set the following parameters:
+   - Set **EnableSalesforceIntegration** to `true` to add Salesforce opportunity creation capabilities
+   - Set **EnableJiraIntegration** to `true` to add Jira issue creation capabilities
+   - Set **EnableAsanaIntegration** to `true` to add Asana task creation capabilities
 
 and that's it..  Your LMA stack will create a simple Bedrock agent for you, and configure it the QnABot Lambda Hook `BedrockAgent-LambdaHook` to invoke this agent when the Meeting Assistant is invoked.
 
 The agent that is created for you has 
 - a Bedrock Knowledge for looking up information
 - an action group with a Lambda function that can send you messages via an SNS topic.
+- optional action groups for Salesforce, Jira, and Asana integrations (if enabled)
 
 **Verifying email for receiving SNS messages** - When the LMA stack creates the new Bedrock Agent, it also provisions an SNS topic, and automatically subscribes your email address (the AdminEmail you provided). You'll get an email at this address from `AWS Notifications <no-reply@sns.amazonaws.com>` with the subject `AWS Notification - Subscription Confirmation`. Open this email and click `Confirm subscription` so that you can play with the new message sending feature of LMA's meeting assistant agent!  You can add additional emails and/or phone numbers for text messages to the SNS Topic subscription in the Amazon SNS console; the SNS Topic is identified in the LMA Stack outputs as `SNSTopicForAgentMessages`.
+
+**Configuring business application credentials** - If you enabled any of the business application integrations (Salesforce, Jira, Asana), you'll need to update the corresponding AWS Secrets Manager secrets with your actual credentials. The secret names are provided in the stack outputs.
 
 Try it - ask "OK Assistant" for some information about life insurance, and then ask it to send the info to you in an email. See example below.
 
@@ -63,7 +96,7 @@ Also try the "ASK ASSISTANT" button to have the meeting assistant agent respond 
 
 <img src="../images/meetingassist-agent-query-action2.png" alt="meetingassist-agent-query-action2" width="900">
 
-Now try your own examples. Get it to fact check incorrect statements, email a summary of action items, and more.  Find out what works well, and what doesn't, and then see if you can make it work better!
+Now try your own examples. Get it to fact check incorrect statements, email a summary of action items, create a Salesforce opportunity based on the meeting discussion, create a Jira issue for a bug mentioned in the meeting, or assign tasks in Asana. Find out what works well, and what doesn't, and then see if you can make it work better!
 - Can you make it more accurate? Learn all about Bedrock Agents and how to customize prompts.
 - Can you add new action groups, for example, to book appointments, create tickets, retrieve balances, etc.
 

@@ -53,10 +53,43 @@ Parameters:
     Type: String
     Description: >-
       Enter an email address to receive notifications from the SendMessage action group
+      
+  EnableSalesforceIntegration:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: >-
+      Enable Salesforce integration for creating opportunities
+      
+  EnableJiraIntegration:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: >-
+      Enable Jira integration for creating issues
+      
+  EnableAsanaIntegration:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: >-
+      Enable Asana integration for creating tasks
 
 Conditions:
   ShouldCreateBedrockKnowledgeBase:
     !Equals [!Ref BedrockKnowledgeBaseId, ""]
+  EnableSalesforceIntegration:
+    !Equals [!Ref EnableSalesforceIntegration, "true"]
+  EnableJiraIntegration:
+    !Equals [!Ref EnableJiraIntegration, "true"]
+  EnableAsanaIntegration:
+    !Equals [!Ref EnableAsanaIntegration, "true"]
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -68,6 +101,12 @@ Metadata:
           - InputDocumentUploadFolderPrefix
           - WebCrawlerURLs
           - WebCrawlerScope
+      - Label:
+          default: Integration Options
+        Parameters:
+          - EnableSalesforceIntegration
+          - EnableJiraIntegration
+          - EnableAsanaIntegration
 
     ParameterLabels:
       KnowledgeBaseBucketName:
@@ -78,6 +117,12 @@ Metadata:
         default: Publicly accessible URLs for web crawling (optional)
       WebCrawlerScope:
         default: Web crawl sync scope
+      EnableSalesforceIntegration:
+        default: Enable Salesforce integration
+      EnableJiraIntegration:
+        default: Enable Jira integration
+      EnableAsanaIntegration:
+        default: Enable Asana integration
 
 Resources:
 
@@ -239,7 +284,31 @@ Resources:
       Description: Bedrock Agent for Live Meeting Assistant stack
       AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
       AutoPrepare: true
-      Instruction: "You are an AI Meeting assistant who responds to instructions and questions from meeting participants using the provided tools, and the meeting transcript as context."
+      Instruction: "You are an AI Meeting assistant who helps participants during meetings. You have access to the meeting transcript as context and can use various tools to provide assistance.
+
+Your capabilities include:
+1. Answering questions using your knowledge base - provide accurate information and cite sources when available
+2. Fact-checking statements made during the meeting using trusted sources
+3. Summarizing discussions and generating meeting insights
+4. Sending emails or messages with meeting information or summaries
+5. Creating Salesforce opportunities for deals discussed in the meeting
+6. Creating Jira issues for bugs, tasks, or features mentioned
+7. Creating Asana tasks for action items identified
+
+For business application actions (Salesforce, Jira, Asana):
+- Extract all necessary details from both the user request and meeting transcript
+- For Salesforce: Capture opportunity name, amount, close date, stage, and description
+- For Jira: Identify project key, issue type, summary, description, and priority
+- For Asana: Determine task name, notes, assignee, and due date
+- Provide clear confirmations when actions are completed
+
+When responding to questions or requests:
+- Be concise and focused in your answers
+- Cite sources when providing information from your knowledge base
+- Use the meeting transcript to provide context-aware responses
+- Maintain a helpful, professional tone
+
+Always prioritize accuracy and relevance in your responses."
       FoundationModel: !Ref BedrockModelID
       KnowledgeBases: 
         - Description: Knowledge Base used for looking up answers or fact checking statements using trusted sources
@@ -266,12 +335,154 @@ Resources:
                     Required: false
                     Description: The subject of the message to send
           SkipResourceInUseCheckOnDelete: true
+        - !If
+          - EnableSalesforceIntegration
+          - ActionGroupName: Salesforce
+            Description: Create opportunities in Salesforce
+            ActionGroupExecutor:
+              Lambda: !GetAtt SalesforceFunction.Arn
+            FunctionSchema:
+              Functions: 
+                - Name: CreateOpportunity
+                  Description: Create a new opportunity in Salesforce
+                  Parameters:
+                    name:
+                      Type: string
+                      Required: true
+                      Description: The name of the opportunity
+                    amount:
+                      Type: string
+                      Required: true
+                      Description: The amount of the opportunity
+                    close_date:
+                      Type: string
+                      Required: false
+                      Description: The close date of the opportunity (YYYY-MM-DD)
+                    stage:
+                      Type: string
+                      Required: false
+                      Description: The stage of the opportunity (e.g., Prospecting, Qualification)
+                    description:
+                      Type: string
+                      Required: false
+                      Description: A description of the opportunity
+                    account_id:
+                      Type: string
+                      Required: false
+                      Description: The Salesforce account ID to associate with this opportunity
+            SkipResourceInUseCheckOnDelete: true
+          - !Ref AWS::NoValue
+        - !If
+          - EnableJiraIntegration
+          - ActionGroupName: Jira
+            Description: Create issues in Jira
+            ActionGroupExecutor:
+              Lambda: !GetAtt JiraFunction.Arn
+            FunctionSchema:
+              Functions: 
+                - Name: CreateIssue
+                  Description: Create a new issue in Jira
+                  Parameters:
+                    project_key:
+                      Type: string
+                      Required: true
+                      Description: The project key in Jira
+                    issue_type:
+                      Type: string
+                      Required: false
+                      Description: The type of issue (e.g., Bug, Task, Story)
+                    summary:
+                      Type: string
+                      Required: true
+                      Description: The summary or title of the issue
+                    description:
+                      Type: string
+                      Required: false
+                      Description: A detailed description of the issue
+                    priority:
+                      Type: string
+                      Required: false
+                      Description: The priority of the issue (e.g., High, Medium, Low)
+                    assignee:
+                      Type: string
+                      Required: false
+                      Description: The username of the assignee
+                    labels:
+                      Type: string
+                      Required: false
+                      Description: Comma-separated list of labels
+            SkipResourceInUseCheckOnDelete: true
+          - !Ref AWS::NoValue
+        - !If
+          - EnableAsanaIntegration
+          - ActionGroupName: Asana
+            Description: Create tasks in Asana
+            ActionGroupExecutor:
+              Lambda: !GetAtt AsanaFunction.Arn
+            FunctionSchema:
+              Functions: 
+                - Name: CreateTask
+                  Description: Create a new task in Asana
+                  Parameters:
+                    name:
+                      Type: string
+                      Required: true
+                      Description: The name of the task
+                    notes:
+                      Type: string
+                      Required: false
+                      Description: Notes or description for the task
+                    project_gid:
+                      Type: string
+                      Required: false
+                      Description: The GID of the project to add the task to
+                    workspace_gid:
+                      Type: string
+                      Required: false
+                      Description: The GID of the workspace (if not using default)
+                    assignee:
+                      Type: string
+                      Required: false
+                      Description: The GID or email of the assignee
+                    due_on:
+                      Type: string
+                      Required: false
+                      Description: The due date (YYYY-MM-DD) or relative date (e.g., 'in 3 days')
+            SkipResourceInUseCheckOnDelete: true
+          - !Ref AWS::NoValue
 
   SendMessageFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref SendMessageFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !GetAtt BedrockAgent.AgentArn
+
+  SalesforceFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Condition: EnableSalesforceIntegration
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SalesforceFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !GetAtt BedrockAgent.AgentArn
+
+  JiraFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Condition: EnableJiraIntegration
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref JiraFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !GetAtt BedrockAgent.AgentArn
+
+  AsanaFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Condition: EnableAsanaIntegration
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AsanaFunction
       Principal: bedrock.amazonaws.com
       SourceArn: !GetAtt BedrockAgent.AgentArn
 
@@ -295,4 +506,160 @@ Outputs:
   SNSTopicForAgentMessages:
     Value: !GetAtt SendMessageTopic.TopicName
     Description: Agent SendMessage SNS Topic ARN - Add subscriptions to this topic to receive messages from the agent
+    
+  SalesforceSecretName:
+    Condition: EnableSalesforceIntegration
+    Value: !Ref SalesforceSecret
+    Description: Secret containing Salesforce credentials - update with your actual credentials
+    
+  JiraSecretName:
+    Condition: EnableJiraIntegration
+    Value: !Ref JiraSecret
+    Description: Secret containing Jira credentials - update with your actual credentials
+    
+  AsanaSecretName:
+    Condition: EnableAsanaIntegration
+    Value: !Ref AsanaSecret
+    Description: Secret containing Asana credentials - update with your actual credentials
 
+  # Salesforce Integration Resources
+  SalesforceSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: EnableSalesforceIntegration
+    Properties:
+      Name: !Sub "${AWS::StackName}-salesforce-credentials"
+      Description: "Salesforce API credentials for LMA Bedrock Agent"
+      SecretString: '{"instance_url":"https://your-instance.my.salesforce.com","client_id":"your_client_id","client_secret":"your_client_secret","username":"your_username","password":"your_password","security_token":"your_security_token"}'
+
+  SalesforceFunctionRole:
+    Type: 'AWS::IAM::Role'
+    Condition: EnableSalesforceIntegration
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                  - 'secretsmanager:UpdateSecretValue'
+                Resource: !Ref SalesforceSecret
+
+  SalesforceFunction:
+    Type: 'AWS::Lambda::Function'
+    Condition: EnableSalesforceIntegration
+    Properties:
+      Handler: 'salesforce_function.lambda_handler'
+      Role: !GetAtt SalesforceFunctionRole.Arn
+      Code:
+        S3Bucket: <ARTIFACT_BUCKET_TOKEN>
+        S3Key: <ARTIFACT_PREFIX_TOKEN>/lma-bedrockagent-stack/src/salesforce_function.py.zip
+      Runtime: python3.12
+      Timeout: 60
+      Environment:
+        Variables:
+          SALESFORCE_SECRET_NAME: !Ref SalesforceSecret
+
+  # Jira Integration Resources
+  JiraSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: EnableJiraIntegration
+    Properties:
+      Name: !Sub "${AWS::StackName}-jira-credentials"
+      Description: "Jira API credentials for LMA Bedrock Agent"
+      SecretString: '{"url":"https://your-domain.atlassian.net","email":"your_email@example.com","api_token":"your_api_token"}'
+
+  JiraFunctionRole:
+    Type: 'AWS::IAM::Role'
+    Condition: EnableJiraIntegration
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                Resource: !Ref JiraSecret
+
+  JiraFunction:
+    Type: 'AWS::Lambda::Function'
+    Condition: EnableJiraIntegration
+    Properties:
+      Handler: 'jira_function.lambda_handler'
+      Role: !GetAtt JiraFunctionRole.Arn
+      Code:
+        S3Bucket: <ARTIFACT_BUCKET_TOKEN>
+        S3Key: <ARTIFACT_PREFIX_TOKEN>/lma-bedrockagent-stack/src/jira_function.py.zip
+      Runtime: python3.12
+      Timeout: 60
+      Environment:
+        Variables:
+          JIRA_SECRET_NAME: !Ref JiraSecret
+
+  # Asana Integration Resources
+  AsanaSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: EnableAsanaIntegration
+    Properties:
+      Name: !Sub "${AWS::StackName}-asana-credentials"
+      Description: "Asana API credentials for LMA Bedrock Agent"
+      SecretString: '{"access_token":"your_access_token","workspace_gid":"your_workspace_gid"}'
+
+  AsanaFunctionRole:
+    Type: 'AWS::IAM::Role'
+    Condition: EnableAsanaIntegration
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                Resource: !Ref AsanaSecret
+
+  AsanaFunction:
+    Type: 'AWS::Lambda::Function'
+    Condition: EnableAsanaIntegration
+    Properties:
+      Handler: 'asana_function.lambda_handler'
+      Role: !GetAtt AsanaFunctionRole.Arn
+      Code:
+        S3Bucket: <ARTIFACT_BUCKET_TOKEN>
+        S3Key: <ARTIFACT_PREFIX_TOKEN>/lma-bedrockagent-stack/src/asana_function.py.zip
+      Runtime: python3.12
+      Timeout: 60
+      Environment:
+        Variables:
+          ASANA_SECRET_NAME: !Ref AsanaSecret

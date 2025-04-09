@@ -1,5 +1,42 @@
 #!/bin/bash
 
+# This script packages and uploads the Lambda functions for the Bedrock Agent stack
+
+# Get the directory of this script
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Create a temporary directory for packaging
+TEMP_DIR=$(mktemp -d)
+
+# Package the Lambda functions
+echo "Packaging Lambda functions..."
+
+# Package salesforce_function.py
+echo "Packaging salesforce_function.py..."
+cp "$SCRIPT_DIR/src/salesforce_function.py" "$TEMP_DIR/salesforce_function.py"
+cd "$TEMP_DIR"
+zip -r salesforce_function.py.zip salesforce_function.py
+aws s3 cp salesforce_function.py.zip s3://${ARTIFACT_BUCKET}/${ARTIFACT_PREFIX}/lma-bedrockagent-stack/src/salesforce_function.py.zip
+
+# Package jira_function.py
+echo "Packaging jira_function.py..."
+cp "$SCRIPT_DIR/src/jira_function.py" "$TEMP_DIR/jira_function.py"
+cd "$TEMP_DIR"
+zip -r jira_function.py.zip jira_function.py
+aws s3 cp jira_function.py.zip s3://${ARTIFACT_BUCKET}/${ARTIFACT_PREFIX}/lma-bedrockagent-stack/src/jira_function.py.zip
+
+# Package asana_function.py
+echo "Packaging asana_function.py..."
+cp "$SCRIPT_DIR/src/asana_function.py" "$TEMP_DIR/asana_function.py"
+cd "$TEMP_DIR"
+zip -r asana_function.py.zip asana_function.py
+aws s3 cp asana_function.py.zip s3://${ARTIFACT_BUCKET}/${ARTIFACT_PREFIX}/lma-bedrockagent-stack/src/asana_function.py.zip
+
+# Clean up
+rm -rf "$TEMP_DIR"
+
+echo "Lambda functions packaged and uploaded successfully!"
+
 ##############################################################################################
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
