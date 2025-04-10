@@ -326,10 +326,6 @@ Resources:
                       Type: string
                       Required: true
                       Description: The name of the opportunity
-                    amount:
-                      Type: string
-                      Required: true
-                      Description: The amount of the opportunity
                     close_date:
                       Type: string
                       Required: false
@@ -342,10 +338,6 @@ Resources:
                       Type: string
                       Required: false
                       Description: A description of the opportunity
-                    account_id:
-                      Type: string
-                      Required: false
-                      Description: The Salesforce account ID to associate with this opportunity
             SkipResourceInUseCheckOnDelete: true
           - !Ref AWS::NoValue
         - !If
@@ -375,18 +367,10 @@ Resources:
                       Type: string
                       Required: false
                       Description: A detailed description of the issue
-                    priority:
-                      Type: string
-                      Required: false
-                      Description: The priority of the issue (e.g., High, Medium, Low)
                     assignee:
                       Type: string
                       Required: false
                       Description: The username of the assignee
-                    labels:
-                      Type: string
-                      Required: false
-                      Description: Comma-separated list of labels
             SkipResourceInUseCheckOnDelete: true
           - !Ref AWS::NoValue
         - !If
@@ -404,10 +388,6 @@ Resources:
                       Type: string
                       Required: true
                       Description: The name of the task
-                    notes:
-                      Type: string
-                      Required: false
-                      Description: Notes or description for the task
                     project_gid:
                       Type: string
                       Required: false
