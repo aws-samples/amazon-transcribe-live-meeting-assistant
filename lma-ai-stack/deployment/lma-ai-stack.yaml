@@ -369,6 +369,10 @@ Parameters:
     Type: String
     Description: Cognito User Pool Client ID
 
+  CognitoDomain:
+    Type: String
+    Description: Cognito domain
+
   AppIdentityPoolId:
     Type: String
     Description: Cognito Identity Pool used by the UI
@@ -689,6 +693,8 @@ Resources:
               - "true"
           - Name: REACT_APP_ENABLE_LEX_AGENT_ASSIST
             Value: !Ref IsLexAgentAssistEnabled
+          - Name: REACT_APP_COGNITO_DOMAIN
+            Value: !Ref CognitoDomain
           - Name: REACT_APP_CLOUDFRONT_DOMAIN
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
       TimeoutInMinutes: 10

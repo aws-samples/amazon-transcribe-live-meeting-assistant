@@ -1399,6 +1399,7 @@ Resources:
         UserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
         CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
         AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
+        CognitoDomain: !GetAtt COGNITOSTACK.Outputs.CognitoDomain
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack

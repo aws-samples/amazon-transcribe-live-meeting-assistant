@@ -138,13 +138,14 @@ function UserProvider({ children }: any) {
     console.log("start auth flow");
 
     if (chrome.identity) {
-      const cognitoUrl = `${settings.cognitoDomain}/login?response_type=code&client_id=${settings.clientId}&redirect_uri=${settings.cognitoDomain}/&scope=email+openid+profile`;
+      const cognitoUrl = `${settings.cognitoDomain}/login?response_type=code&client_id=${settings.clientId}&redirect_uri=https://${chrome.runtime.id}.chromiumapp.org/&scope=email+openid+profile`;
       const redirectURL = await chrome.identity.launchWebAuthFlow({
         url: cognitoUrl,
         interactive: true
       });
       if (redirectURL) {
         const url = new URL(redirectURL);
+        console.log(redirectURL)
         const authorizationCode = url.searchParams.get("code");
         if (authorizationCode) exchangeCodeForToken(authorizationCode, 'authorization_code');
         else console.error("No authorization code in redirect url.");
@@ -152,7 +153,7 @@ function UserProvider({ children }: any) {
         console.error("Error with login.");
       }
     } else {
-      const cognitoUrl = `${settings.cognitoDomain}/login?response_type=code&client_id=${settings.clientId}&redirect_uri=http://localhost:3000/&scope=email+openid+profile`;
+      const cognitoUrl = `${settings.cognitoDomain}/login?response_type=code&client_id=${settings.clientId}&redirect_uri=https://${chrome.runtime.id}.chromiumapp.org/&scope=email+openid+profile`;
       window.location.href = cognitoUrl;
     }
   }, [exchangeCodeForToken]);

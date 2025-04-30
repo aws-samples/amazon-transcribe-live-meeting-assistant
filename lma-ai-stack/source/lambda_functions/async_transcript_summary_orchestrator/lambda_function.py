@@ -6,6 +6,7 @@ from os import getenv
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Any
 import json
+import requests
 import re
 import markdown
 import smtplib
@@ -50,13 +51,29 @@ KINESIS_CLIENT: KinesisClient = BOTO3_SESSION.client(
 TRANSCRIPT_SUMMARY_FUNCTION_ARN = getenv("TRANSCRIPT_SUMMARY_FUNCTION_ARN", "")
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 
+def get_user_email(access_token):
+    cognito_userinfo_endpoint = "https://lma-1731359078895707131.auth.us-east-1.amazoncognito.com/oauth2/userInfo"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = requests.get(cognito_userinfo_endpoint, headers=headers)
+    if response.status_code == 200:
+        user_info = response.json()
+        email = user_info.get("email")  # Extract the email attribute
+        return email
+    else:
+        print(response)
+        return 'error, cognito api failed'
 
 def get_call_summary(
     message: Dict[str, Any]
 ):
     print(message)
     decoded_jwt = jwt.decode(message["AccessToken"], options={"verify_signature": False})
-    user_email = decoded_jwt['username']
+    try:
+        user_email = get_user_email(message["AccessToken"])
+    except Exception as e:
+        print(e)
+        user_email = 'mherrera@kaipartners.com'
+        
     print(decoded_jwt)
     print(user_email)
     meeting_title = message["CallId"]

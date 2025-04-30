@@ -98,6 +98,8 @@ Outputs:
     Value: !Sub https://${LMAUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
   CognitoClientId:
     Value: !Ref UserPoolClient
+  CognitoDomain: 
+    Value: !Ref LMAUserPoolDomain
   CognitoAuthRoleArn:
     Value: !GetAtt CognitoAuthorizedRole.Arn
   UserPoolId:
@@ -163,7 +165,7 @@ Resources:
       Schema:
         - Name: email
           AttributeDataType: String
-          Mutable: false
+          Mutable: true
           Required: true
       UsernameConfiguration:
         CaseSensitive: false
@@ -391,19 +393,18 @@ Resources:
       InlineCode: |
         exports.handler = async (event, context) => {
           console.log(event);
-          const allowed_domains = (
-              process.env?.ALLOWED_SIGNUP_EMAIL_DOMAINS
-              .split(",").map(domain => {return domain.trim()})
-          );
+          const allowed_domains = ['kaipartners.com'];
           const { email } = event.request?.userAttributes;
           if (!email || !email.includes('@')) {
             throw Error('Username does not exists or invalid email address');
           }
-          const emailDomain = email?.split('@')[1];
+          const emailDomain = email?.split('@')[1].toLowerCase();;
           if (!emailDomain || !allowed_domains) {
             throw new Error('Server error - invalid configuration');
           }
           if (!allowed_domains.includes(emailDomain)) {
+            console.log(emailDomain)
+            console.log(allowed_domains)
             throw new Error('Invalid email address domain');
           }
           return event;
