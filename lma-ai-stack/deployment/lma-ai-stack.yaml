@@ -69,6 +69,13 @@ Parameters:
     AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
     # yamllint enable rule:line-length
 
+  AudioFilePrefix:
+    Type: String
+    Default: lma-audio-recordings/
+    Description: >-
+      The Amazon S3 prefix where the audio files will be saved (must end
+      in "/")
+
   TranscriptFilePrefix:
     Type: String
     Default: lma-transcripts/
@@ -176,6 +183,7 @@ Parameters:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
       - "anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "anthropic.claude-3-5-sonnet-20241022-v2:0"
 
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
@@ -213,6 +221,10 @@ Parameters:
       Lambda function after the call summary is processed.
       This function can implement custom logic that is relevant to post processing,
       for example, updating the call summary to a CRM system.
+
+  UpdateLMASettingsFunctionArn:
+    Type: String
+    Description: Update LMA Settings Lambda function ARN
 
   CloudFrontPriceClass:
     Type: String
@@ -307,7 +319,7 @@ Parameters:
 
   BootstrapVersion:
     Type: String
-    Default: 0.2.4
+    Default: 0.2.9
     Description: >
       Artifacts version (semver). Used to point to a specific release in the S3
       bootstrap bucket
@@ -1342,6 +1354,7 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
                 Resource: !GetAtt EventSourcingTable.Arn
 
   QueryKnowledgeBaseResolverFunction:
@@ -1424,6 +1437,123 @@ Resources:
                   - lambda:InvokeFunction
                 Resource: !GetAtt QueryKnowledgeBaseResolverFunction.Arn
 
+  ##########################################################################
+  # Meeting Controls Lambda - To share and delete meetings
+  ##########################################################################
+  MeetingControlsResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt MeetingControlsResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/meeting_controls_resolver
+      Layers:
+        - !Ref TranscriptEnrichmentPythonLayer
+      Description: Lambda function for meeting controls
+      MemorySize: 512
+      Timeout: 60
+      FunctionName: !Sub '${LMAStackName}-MeetingControlsLambda'
+      Environment:
+        Variables:
+          LCA_CALL_EVENTS_TABLE: !Ref EventSourcingTable
+          REACT_APP_AWS_REGION: !Ref AWS::Region
+          REACT_APP_USER_POOL_ID: !Ref UserPoolId
+          APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+          S3_BUCKET_NAME: !Ref S3BucketName
+          S3_RECORDINGS_PREFIX: !Ref AudioFilePrefix
+          S3_TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
+
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/MeetingControlsResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    DependsOn:
+      - MeetingControlsResolverFunctionLogGroup
+
+  MeetingControlsResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/MeetingControlsResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+
+  MeetingControlsResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: MeetingControlsResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-MeetingControls
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt EventSourcingTable.Arn
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  # XXX specific mutation - addEnrichment
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/*"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/__schema"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/fields/getCall"
+                  - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:DeleteObject"
+                  - "s3:DeleteObjectVersion"
+                  - "s3:ListBucket"
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}"
+                  - !Sub "arn:aws:s3:::${S3BucketName}/*"
+
+  AppSyncMeetingControlsLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt MeetingControlsResolverFunction.Arn
+
   AppSyncApiEncrypted:
     Type: AWS::AppSync::GraphQLApi
     Properties:
@@ -1471,6 +1601,17 @@ Resources:
       Description: NONE type data source to set up subscription filtering
       Type: NONE
 
+  MeetingsDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: Meetings
+      Description: Data source to share meetings
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncMeetingControlsLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MeetingControlsResolverFunction.Arn
+
   KnowledgeBaseDataSource:
     Type: AWS::AppSync::DataSource
     Properties:
@@ -1517,7 +1658,7 @@ Resources:
         #set( $shardsInDay = 6 )
         #set( $shardDivider = 24 / $shardsInDay )
         #set( $Integer = 0 )
-        #set( $now = $util.time.nowISO8601() )
+        #set( $now = $ctx.args.input.CreatedAt )
 
         #set( $date = $now.substring(0, 10) )
         #set( $hourString = $now.substring(11, 13) )
@@ -1530,8 +1671,6 @@ Resources:
 
         #set( $listPk = "cls#${!date}#s#${!shardPad}" )
         #set( $listSk = "ts#${!now}#id#${!ctx.args.input.CallId}" )
-
-        #set( $CreatedAt = $util.defaultIfNullOrBlank($ctx.args.input.CreatedAt, $util.time.nowISO8601()) )
 
         $util.qr($ctx.args.input.put("UpdatedAt", $now))
         $util.qr($ctx.args.input.put("Status", "STARTED"))
@@ -1673,6 +1812,148 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/addTranscriptSegment.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
+  DeleteTranscriptSegmentAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: deleteTranscriptSegment
+      RequestMappingTemplateS3Location: ../source/appsync/deleteTranscriptSegment.request.vtl
+      ResponseMappingTemplate: "$util.toJson($context.result)"
+
+  ShareTranscriptSegmentAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: shareTranscriptSegment
+      RequestMappingTemplateS3Location: ../source/appsync/shareTranscriptSegment.request.vtl
+      ResponseMappingTemplate: "$util.toJson($context.arguments.input.PK)"
+
+  ShareMeetingsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingsDataSource.Name
+      TypeName: Mutation
+      FieldName: shareMeetings
+      Runtime: 
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/shareMeetings.js
+
+  ShareCallAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: shareCall
+      # This VTL uses a local sub so it needs to be kept here
+      RequestMappingTemplate: !Sub |-
+        #set( $PK = "c#${!ctx.args.input.CallId}" )
+        {
+          "version": "2018-05-29",
+          "operation": "TransactWriteItems",
+          "transactItems": [
+            {
+              "table": "${EventSourcingTable}",
+              "operation": "UpdateItem",
+              "key": {
+                "PK": $util.dynamodb.toDynamoDBJson($PK),
+                "SK": $util.dynamodb.toDynamoDBJson($PK),
+              },
+              "update": {
+                "expression" : "SET SharedWith = :val", 
+                "expressionValues" : {
+                    ":val" : $util.dynamodb.toDynamoDBJson($ctx.args.input.SharedWith)
+                },
+              },
+            },
+            {
+              "table": "${EventSourcingTable}",
+              "operation": "UpdateItem",
+              "key" : {
+                "PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.ListPK),
+                "SK": $util.dynamodb.toDynamoDBJson($ctx.args.input.ListSK),
+              },
+              "update": {
+                "expression" : "SET SharedWith = :val", 
+                "expressionValues" : {
+                    ":val" : $util.dynamodb.toDynamoDBJson($ctx.args.input.SharedWith)
+                },
+              },
+            },
+          ],
+        }
+      ResponseMappingTemplateS3Location: ../source/appsync/shareCall.response.vtl
+
+  UnshareCallAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      TypeName: Mutation
+      FieldName: unshareCall
+      # This VTL uses a local sub so it needs to be kept here
+      RequestMappingTemplateS3Location: ../source/appsync/unshareCall.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/unshareCall.response.vtl
+
+  DeleteMeetingsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingsDataSource.Name
+      TypeName: Mutation
+      FieldName: deleteMeetings
+      Runtime: 
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/deleteMeetings.js
+
+  DeleteCallAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: deleteCall
+      # This VTL uses a local sub so it needs to be kept here
+      RequestMappingTemplate: !Sub |-
+        #set( $PK = "c#${!ctx.args.input.CallId}" )
+        {
+          "version": "2018-05-29",
+          "operation": "TransactWriteItems",
+          "transactItems": [
+            {
+              "table": "${EventSourcingTable}",
+              "operation": "DeleteItem",
+              "key": {
+                "PK": $util.dynamodb.toDynamoDBJson($PK),
+                "SK": $util.dynamodb.toDynamoDBJson($PK),
+              }
+            },
+            {
+              "table": "${EventSourcingTable}",
+              "operation": "DeleteItem",
+              "key" : {
+                "PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.ListPK),
+                "SK": $util.dynamodb.toDynamoDBJson($ctx.args.input.ListSK),
+              },
+            },
+          ],
+        }
+      ResponseMappingTemplateS3Location: ../source/appsync/deleteCall.response.vtl
+
   ListCallsDateHourAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -1750,6 +2031,45 @@ Resources:
       FieldName: onUpdateCall
       DataSourceName: !GetAtt SubscriptionDataSource.Name
       CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  OnShareMeetingsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onShareMeetings
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  OnDeleteCallAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onDeleteCall
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  OnUnshareCallAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onUnshareCall
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/unshareCallSubscription.js
       Runtime:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0

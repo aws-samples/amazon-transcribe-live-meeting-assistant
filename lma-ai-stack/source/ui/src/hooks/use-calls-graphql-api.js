@@ -13,6 +13,9 @@ import getCall from '../graphql/queries/getCall';
 import onCreateCall from '../graphql/queries/onCreateCall';
 import onAddTranscriptSegment from '../graphql/queries/onAddTranscriptSegment';
 import onUpdateCall from '../graphql/queries/onUpdateCall';
+import onShareMeetings from '../graphql/queries/onShareMeetings';
+import onDeleteCall from '../graphql/queries/onDeleteCall';
+import onUnshareCall from '../graphql/queries/onUnshareCall';
 import getTranscriptSegments from '../graphql/queries/getTranscriptSegments';
 
 import { CALL_LIST_SHARDS_PER_DAY } from '../components/call-list/calls-table-config';
@@ -30,7 +33,14 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
   const setCallsDeduped = (callValues) => {
     setCalls((currentCalls) => {
       const callValuesCallIds = callValues.map((c) => c.CallId);
-      return [...currentCalls.filter((c) => !callValuesCallIds.includes(c.CallId)), ...callValues];
+      return [
+        ...currentCalls.filter((c) => !callValuesCallIds.includes(c.CallId)),
+        ...callValues.map((call) => ({
+          ...call,
+          ListPK: call.ListPK || currentCalls.find((c) => c.CallId === call.CallId)?.ListPK,
+          ListSK: call.ListSK || currentCalls.find((c) => c.CallId === call.CallId)?.ListSK,
+        })),
+      ];
     });
   };
 
@@ -83,6 +93,64 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
       error: (error) => {
         logger.error(error);
         setErrorMessage('call update network request failed - please reload the page');
+      },
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    logger.debug('onShareMeetings subscription');
+    const subscription = API.graphql(graphqlOperation(onShareMeetings)).subscribe({
+      next: async ({ provider, value }) => {
+        logger.debug('share meetings subscription update', { provider, value });
+        const sharedCalls = value?.data?.onShareMeetings.Calls || '';
+        if (sharedCalls && sharedCalls.length > 0) {
+          const callValues = await getCallDetailsFromCallIds(sharedCalls);
+          setCallsDeduped(callValues);
+        }
+      },
+      error: (error) => {
+        logger.error(error);
+        setErrorMessage('share meetings subscription failed - please reload the page');
+      },
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    logger.debug('onDeleteCall subscription');
+    const subscription = API.graphql(graphqlOperation(onDeleteCall)).subscribe({
+      next: async ({ provider, value }) => {
+        logger.debug('call delete subscription update', { provider, value });
+        const callId = value?.data?.onDeleteCall.CallId || '';
+        if (callId) {
+          setCalls((currentCalls) => currentCalls.filter((c) => c.CallId !== callId));
+        }
+      },
+      error: (error) => {
+        logger.error(error);
+        setErrorMessage('call delete subscription failed - please reload the page');
+      },
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    logger.debug('onUnshareCall subscription');
+    const subscription = API.graphql(graphqlOperation(onUnshareCall)).subscribe({
+      next: async ({ provider, value }) => {
+        logger.debug('call unshare subscription update', { provider, value });
+        const callId = value?.data?.onUnshareCall.CallId || '';
+        if (callId) {
+          setCalls((currentCalls) => currentCalls.filter((c) => c.CallId !== callId));
+        }
+      },
+      error: (error) => {
+        logger.error(error);
+        setErrorMessage('call delete subscription failed - please reload the page');
       },
     });
 
@@ -207,7 +275,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
   const listCallIdsByDateShards = async ({ date, shards }) => {
     const listCallDateShardPromises = shards.map((i) => {
-      logger.debug('sendig list call date shard', date, i);
+      logger.debug('sending list call date shard', date, i);
       return API.graphql({ query: listCallDateShard, variables: { date, shard: i } });
     });
     const listCallDateShardResolutions = await Promise.allSettled(listCallDateShardPromises);
@@ -217,19 +285,17 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
       setErrorMessage('failed to list calls - please try again later');
       logger.error('list call promises rejected', listRejected);
     }
-
-    const callIds = listCallDateShardResolutions
+    const callData = listCallDateShardResolutions
       .filter((r) => r.status === 'fulfilled')
       .map((r) => r.value?.data?.listCallsDateShard?.Calls || [])
-      .map((items) => items.map((item) => item?.CallId))
       .reduce((pv, cv) => [...cv, ...pv], []);
 
-    return callIds;
+    return callData;
   };
 
   const listCallIdsByDateHours = async ({ date, hours }) => {
     const listCallDateHourPromises = hours.map((i) => {
-      logger.debug('sendig list call date hour', date, i);
+      logger.debug('sending list call date hour', date, i);
       return API.graphql({ query: listCallDateHour, variables: { date, hour: i } });
     });
     const listCallDateHourResolutions = await Promise.allSettled(listCallDateHourPromises);
@@ -240,13 +306,12 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
       logger.error('list call promises rejected', listRejected);
     }
 
-    const callIds = listCallDateHourResolutions
+    const callData = listCallDateHourResolutions
       .filter((r) => r.status === 'fulfilled')
       .map((r) => r.value?.data?.listCallsDateHour?.Calls || [])
-      .map((items) => items.map((item) => item?.CallId))
       .reduce((pv, cv) => [...cv, ...pv], []);
 
-    return callIds;
+    return callData;
   };
 
   // eslint-disable-next-line no-unused-vars
@@ -296,7 +361,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
       // parallelizes listCalls and getCallDetails
       // alternatively we could implement it by sending multiple graphql queries in 1 request
-      const callIdsDateShardPromises = Object.keys(dateShards).map(
+      const callDataDateShardPromises = Object.keys(dateShards).map(
         // pretttier-ignore
         async (d) => listCallIdsByDateShards({ date: d, shards: dateShards[d] }),
       );
@@ -318,14 +383,21 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
       const residualDateHours = { date: baseDateString, hours: residualHours };
       logger.debug('call list date hours', residualDateHours);
-      const callIdsDateHourPromise = listCallIdsByDateHours(residualDateHours);
 
-      const callIdsPromises = [...callIdsDateShardPromises, callIdsDateHourPromise];
-      const callDetailsPromises = callIdsPromises.map(async (callIdsPromise) => {
-        const callIds = await callIdsPromise;
-        logger.debug('callIds', callIds);
-        return getCallDetailsFromCallIds(callIds);
+      const callDataDateHourPromise = listCallIdsByDateHours(residualDateHours);
+
+      const callDataPromises = [...callDataDateShardPromises, callDataDateHourPromise];
+      const callDetailsPromises = callDataPromises.map(async (callDataPromise) => {
+        const callData = await callDataPromise;
+        const callIds = callData.map((item) => item.CallId);
+        const callDetails = await getCallDetailsFromCallIds(callIds);
+        // Merge call details with PK and SK
+        return callDetails.map((detail) => {
+          const matchingData = callData.find((item) => item.CallId === detail.CallId);
+          return { ...detail, ListPK: matchingData.PK, ListSK: matchingData.SK };
+        });
       });
+
       const callValuesPromises = callDetailsPromises.map(async (callValuesPromise) => {
         const callValues = await callValuesPromise;
         logger.debug('callValues', callValues);

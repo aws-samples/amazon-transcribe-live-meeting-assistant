@@ -20,6 +20,7 @@ const CallListSplitPanel = () => {
     sendGetTranscriptSegmentsRequest,
     selectedItems,
     setToolsOpen,
+    getCallDetailsFromCallIds,
   } = useCallsContext();
 
   const { header: panelHeader, body: panelBody } = getPanelContent(
@@ -27,6 +28,7 @@ const CallListSplitPanel = () => {
     'multiple',
     setToolsOpen,
     callTranscriptPerCallId,
+    getCallDetailsFromCallIds,
   );
 
   const sendTranscriptSegmentsRequests = async (item) => {

@@ -14,6 +14,22 @@ input AddTranscriptSegmentInput {
 	SentimentScore: SentimentScoreInput
 	SentimentWeighted: Float
 	Owner: String
+	SharedWith: String
+}
+
+input ShareTranscriptSegmentInput {
+	PK: ID!
+	SK: ID!
+	SharedWith: [String!]
+}
+
+type ShareTranscriptSegmentOutput @aws_iam {
+	PK: ID
+}
+
+input DeleteTranscriptSegmentInput {
+	PK: ID!
+	SK: ID!
 }
 
 type Call implements DynamoDbBase @aws_cognito_user_pools
@@ -35,8 +51,9 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	Metadatajson: String
 	CallCategories: [String]
 	IssuesDetected: String
-	CallSummaryText: String,
-	Owner: String,
+	CallSummaryText: String
+	Owner: String
+	SharedWith: String
 }
 
 type CallList @aws_cognito_user_pools
@@ -53,6 +70,8 @@ type CallListItem implements DynamoDbBase @aws_cognito_user_pools
 	UpdatedAt: AWSDateTime!
 	ExpiresAfter: AWSTimestamp
 	CallId: ID!
+	Owner: String
+	SharedWith: String
 }
 
 enum CallStatus {
@@ -80,11 +99,45 @@ input CreateCallInput {
 	Metadatajson: String
 	ExpiresAfter: AWSTimestamp
 	Owner: String
+	SharedWith: String
 }
 
 type CreateCallOutput @aws_iam {
 	CallId: ID!
 	Owner: String
+	SharedWith: String
+}
+
+input ShareMeetingsItem {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+}
+
+input ShareMeetingsInput {
+	Calls: [ShareMeetingsItem]
+	MeetingRecipients: String
+}
+
+type ShareMeetingsOutput {
+	Calls: [ID!]
+	Result: String
+	Owner: String
+	SharedWith: String
+}
+
+input DeleteMeetingsItem {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+}
+
+input DeleteMeetingsInput {
+	Calls: [DeleteMeetingsItem]
+}
+
+type DeleteMeetingsOutput {
+	Result: String
 }
 
 interface DynamoDbBase {
@@ -106,6 +159,13 @@ type Mutation @aws_iam {
 	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
+	deleteCall(input: DeleteCallInput!): DeleteCallOutput
+	shareCall(input: ShareCallInput!): ShareCallOutput
+	unshareCall(input: UnshareCallInput!): UnshareCallOutput
+	deleteTranscriptSegment(input: DeleteTranscriptSegmentInput!): DeleteTranscriptSegmentOutput
+	shareTranscriptSegment(input: ShareTranscriptSegmentInput!): ShareTranscriptSegmentOutput
+    shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools
+	deleteMeetings(input: DeleteMeetingsInput!): DeleteMeetingsOutput @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -211,6 +271,12 @@ type Subscription {
 		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updatePcaUrl","updateAgent", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
+	onShareMeetings: ShareMeetingsOutput
+		@aws_subscribe(mutations: ["shareMeetings"])
+	onDeleteCall: DeleteCallOutput
+		@aws_subscribe(mutations: ["deleteCall"])
+	onUnshareCall: UnshareCallOutput
+		@aws_subscribe(mutations: ["unshareCall"])
 }
 
 type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
@@ -232,6 +298,7 @@ type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
 	SentimentScore: SentimentScore
 	SentimentWeighted: Float
 	Owner: String
+	SharedWith: String
 }
 
 type TranscriptSegmentList @aws_cognito_user_pools
@@ -256,6 +323,7 @@ type TranscriptSegmentWithSentiment implements DynamoDbBase @aws_cognito_user_po
 	Sentiment: Sentiment
 	SentimentWeighted: Float
 	Owner: String
+	SharedWith: String
 }
 type TranscriptSegmentsWithSentimentList @aws_cognito_user_pools
 @aws_iam {
@@ -267,6 +335,7 @@ input UpdateAgentInput {
 	AgentId: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input AddCallCategoryInput {
@@ -274,6 +343,7 @@ input AddCallCategoryInput {
 	CallCategories: [String]
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input AddIssuesDetectedInput {
@@ -281,6 +351,7 @@ input AddIssuesDetectedInput {
 	IssuesDetected: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input AddCallSummaryTextInput {
@@ -288,6 +359,7 @@ input AddCallSummaryTextInput {
 	CallSummaryText: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input UpdateCallAggregationInput {
@@ -296,6 +368,7 @@ input UpdateCallAggregationInput {
 	TotalConversationDurationMillis: Float
 	Sentiment: SentimentAggregationInput
 	Owner: String
+	SharedWith: String
 }
 
 input UpdateCallStatusInput {
@@ -303,6 +376,7 @@ input UpdateCallStatusInput {
 	Status: CallStatus!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input UpdateRecordingUrlInput {
@@ -310,6 +384,7 @@ input UpdateRecordingUrlInput {
 	RecordingUrl: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
 }
 
 input UpdatePcaUrlInput {
@@ -317,6 +392,49 @@ input UpdatePcaUrlInput {
 	PcaUrl: String!
 	UpdatedAt: AWSDateTime
 	Owner: String
+	SharedWith: String
+}
+
+input ShareCallInput {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+	SharedWith: [String]
+	Owner: String
+}
+
+input DeleteCallInput {
+	CallId: ID!
+	ListPK: ID!
+	ListSK: ID!
+	Owner: String
+	SharedWith: String
+}
+
+type DeleteCallOutput @aws_iam {
+	CallId: ID!
+	Owner: String
+	SharedWith: String
+}
+
+type ShareCallOutput @aws_iam {
+	CallId: ID!
+	Owner: String
+	SharedWith: String
+}
+
+type DeleteTranscriptSegmentOutput @aws_iam {
+	CallId: ID
+}
+
+input UnshareCallInput {
+	CallId: ID!
+	SharedWith: [String!]
+}
+
+type UnshareCallOutput @aws_iam {
+	CallId: ID!
+	SharedWith: [String!]
 }
 
 schema {

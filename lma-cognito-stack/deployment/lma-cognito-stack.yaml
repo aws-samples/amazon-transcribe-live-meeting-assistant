@@ -335,7 +335,6 @@ Resources:
                   - states:StartExecution
                 Resource:
                   - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
-
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -384,13 +383,14 @@ Resources:
     Type: AWS::Serverless::Function
     Condition: ShouldAllowSignUpEmailDomain
     Properties:
-      Handler: index.handler
-      Runtime: nodejs18.x
-      Timeout: 3
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Timeout: 10
       Environment:
         Variables:
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
       InlineCode: |
+
         exports.handler = async (event, context) => {
           console.log(event);
           const allowed_domains = ['kaipartners.com'];
@@ -409,6 +409,7 @@ Resources:
           }
           return event;
         };
+
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/CognitoUserPoolEmailDomainVerifyFunction

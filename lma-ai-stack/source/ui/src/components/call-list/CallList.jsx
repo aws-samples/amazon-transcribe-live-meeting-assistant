@@ -41,6 +41,7 @@ const CallList = () => {
     setSelectedItems,
     setToolsOpen,
     periodsToLoad,
+    getCallDetailsFromCallIds,
   } = useCallsContext();
 
   const [preferences, setPreferences] = useLocalStorage('call-list-preferences', DEFAULT_PREFERENCES);
@@ -82,6 +83,7 @@ const CallList = () => {
       header={
         <CallsCommonHeader
           resourceName="Meetings"
+          calls={calls}
           selectedItems={collectionProps.selectedItems}
           totalItems={callList}
           updateTools={() => setToolsOpen(true)}
@@ -89,7 +91,9 @@ const CallList = () => {
           setIsLoading={setIsCallsListLoading}
           periodsToLoad={periodsToLoad}
           setPeriodsToLoad={setPeriodsToLoad}
+          getCallDetailsFromCallIds={getCallDetailsFromCallIds}
           downloadToExcel={() => exportToExcel(callList, 'Meeting-List')}
+          // eslint-disable-next-line max-len, prettier/prettier
         />
       }
       columnDefinitions={COLUMN_DEFINITIONS_MAIN}

@@ -4,4 +4,5 @@ gql[botocore,aiohttp,requests]~=3.5.0
 aws-lambda-powertools~=1.25.10
 phonenumbers~=8.12.51
 pyjwt
+
 markdown

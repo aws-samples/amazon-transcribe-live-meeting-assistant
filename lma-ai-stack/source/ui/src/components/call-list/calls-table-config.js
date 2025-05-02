@@ -21,6 +21,7 @@ import { SentimentTrendIndicator } from '../sentiment-trend-icon/SentimentTrendI
 import { CategoryAlertPill } from './CategoryAlertPill';
 import { CategoryPills } from './CategoryPills';
 import { getTextOnlySummary } from '../common/summary';
+import { shareModal, deleteModal } from '../common/meeting-controls';
 
 export const KEY_COLUMN_ID = 'callId';
 
@@ -41,7 +42,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
   },
   {
     id: 'agentId',
-    header: 'Name',
+    header: 'Owner Name',
     cell: (item) => item.agentId,
     sortingField: 'agentId',
   },
@@ -52,6 +53,18 @@ export const COLUMN_DEFINITIONS_MAIN = [
     sortingField: 'initiationTimeStamp',
     isDescending: false,
     width: 225,
+  },
+  {
+    id: 'owner',
+    header: 'Owner Email',
+    cell: (item) => item.owner,
+    sortingField: 'owner',
+  },
+  {
+    id: 'sharedWith',
+    header: 'Shared With',
+    cell: (item) => item.sharedWith,
+    sortingField: 'sharedWith',
   },
   {
     id: 'summary',
@@ -168,6 +181,8 @@ const VISIBLE_CONTENT_OPTIONS = [
     options: [
       { id: 'callId', label: 'Meeting ID', editable: false },
       { id: 'agentId', label: 'Name' },
+      { id: 'owner', label: 'Owner' },
+      { id: 'sharedWith', label: 'Shared With' },
       { id: 'initiationTimeStamp', label: 'Initiation Timestamp' },
       { id: 'recordingStatus', label: 'Status' },
       { id: 'summary', label: 'Summary' },
@@ -176,7 +191,15 @@ const VISIBLE_CONTENT_OPTIONS = [
   },
 ];
 
-const VISIBLE_CONTENT = ['agentId', 'initiationTimeStamp', 'recordingStatus', 'summary', 'conversationDuration'];
+const VISIBLE_CONTENT = [
+  'agentId',
+  'owner',
+  'sharedWith',
+  'initiationTimeStamp',
+  'recordingStatus',
+  'summary',
+  'conversationDuration',
+];
 
 export const DEFAULT_PREFERENCES = {
   pageSize: PAGE_SIZE_OPTIONS[0].value,
@@ -266,6 +289,8 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
             loading={props.loading}
             onClick={() => props.downloadToExcel()}
           />
+          {shareModal(props)}
+          {deleteModal(props)}
         </SpaceBetween>
       }
       {...props}

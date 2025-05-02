@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.9] - 2025-02-09
+### Fixed 
+- Zoom browser extension, active speaker not identified when video share or screen share is on bug fix #174
+
+## [0.2.8] - 2025-02-07
+### Fixed 
+- user identification has not working with chrome extension for teams - PR #170
+- Changed browser extension icons to a "person in a meeting room" - PR #167
+
+## [0.2.7] - 2024-11-23
+### Added
+- Added ability to remove 'sharedWith' users - PR #158
+- Added delete meetings functionality - PR #158
+- Integration for Google Meet in LMA browser extension - PR #159
+### Fixed 
+- Improvements to meetings sharing user experience - PR #158
+- Refactored UI to use common modules to avoid code duplication - PR #158
+
+## [0.2.6] - 2024-11-01
+### Fixed
+- Fixed a bug that allowed non-Admin users to see other user call details if they had (or could guess) the callId.
+- Fixed a bug that prevented calls from being shared for live calls.
+- Added share meeting button to call split panel and call details pages.
+
+## [0.2.5] - 2024-10-25
+
+### Added
+- User Based Access Control is enhanced to allow users to share their meetings with other users. PR #145
+- Add support for new Anthropic Claude 3.5 Sonnet v2 - PR #147
+
+### Fixed
+- Updated zoom code to address issue for leaving a meeting, continued effort on participant recognition - PR #148
+
+
 ## [0.2.4] - 2024-10-20
 
 ### Added
@@ -188,6 +222,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 
 [Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
+[0.2.9]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.9
+[0.2.8]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.8
+[0.2.7]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.7
+[0.2.6]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.6
+[0.2.5]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.5
 [0.2.4]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.4
 [0.2.3]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.3
 [0.2.2]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.2

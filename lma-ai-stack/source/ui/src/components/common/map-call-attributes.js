@@ -24,6 +24,10 @@ const mapCallsAttributes = (calls, settings) => {
       TotalConversationDurationMillis: totalConversationDurationMillis = 0,
       Sentiment: sentiment = {},
       PcaUrl: pcaUrl,
+      Owner: owner,
+      SharedWith: sharedWith,
+      ListPK: listPK,
+      ListSK: listSK,
     } = item;
     const recordingStatus = getRecordingStatus(item);
 
@@ -65,6 +69,10 @@ const mapCallsAttributes = (calls, settings) => {
       agentAverageSentiment,
       agentSentimentLabel,
       agentSentimentTrendLabel,
+      owner,
+      sharedWith,
+      listPK,
+      listSK,
     };
   });
 };
