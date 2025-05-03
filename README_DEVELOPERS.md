@@ -8,13 +8,7 @@ This Developer README describes how to build the project from the source code - 
 
 To deploy or to publish, you need to have the following packages installed on your computer:
 
-1. bash shell (Linux, MacOS, Windows-WSL)
-2. node v18 and npm 
-3. docker
-4. zip
-5. python3, pip3, virtualenv
-6. aws (AWS CLI)
-7. sam (AWS SAM)
+
 
 Copy the GitHub repo to your computer. Either:
 - use the git command: git clone https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant.git

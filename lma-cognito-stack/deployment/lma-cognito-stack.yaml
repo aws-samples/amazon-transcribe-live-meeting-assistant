@@ -383,8 +383,8 @@ Resources:
     Type: AWS::Serverless::Function
     Condition: ShouldAllowSignUpEmailDomain
     Properties:
-      Handler: index.lambda_handler
-      Runtime: python3.11
+      Handler: index.handler
+      Runtime: nodejs18.x
       Timeout: 10
       Environment:
         Variables:
@@ -393,18 +393,18 @@ Resources:
 
         exports.handler = async (event, context) => {
           console.log(event);
-          const allowed_domains = ['kaipartners.com'];
+          const allowed_domains = process.env.ALLOWED_SIGNUP_EMAIL_DOMAINS.split(',').map(domain => domain.trim());
           const { email } = event.request?.userAttributes;
           if (!email || !email.includes('@')) {
-            throw Error('Username does not exists or invalid email address');
+            throw Error('Username does not exist or invalid email address');
           }
-          const emailDomain = email?.split('@')[1].toLowerCase();;
+          const emailDomain = email?.split('@')[1].toLowerCase();
           if (!emailDomain || !allowed_domains) {
             throw new Error('Server error - invalid configuration');
           }
           if (!allowed_domains.includes(emailDomain)) {
-            console.log(emailDomain)
-            console.log(allowed_domains)
+            console.log(emailDomain);
+            console.log(allowed_domains);
             throw new Error('Invalid email address domain');
           }
           return event;
