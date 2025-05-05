@@ -1401,9 +1401,9 @@ Resources:
         AppSyncApiCacheInstanceType: !Ref AppSyncApiCacheInstanceType
         UserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
         CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
-
         CognitoDomain: !GetAtt COGNITOSTACK.Outputs.CognitoDomain
-
+        AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
+        UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
