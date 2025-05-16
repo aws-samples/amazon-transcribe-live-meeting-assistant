@@ -134,6 +134,14 @@ export const writeCallStartEvent = async (
         IdToken: callMetaData.idToken,
         RefreshToken: callMetaData.refreshToken,
     };
+    
+    // Log participants list if available
+    if (callMetaData.participants && callMetaData.participants.length > 0) {
+        server.log.info(
+            `[START]: ${callMetaData.callId} - Meeting has ${callMetaData.participants.length} participants: ${JSON.stringify(callMetaData.participants)}`
+        );
+    }
+    
     await writeCallEvent(callStartEvent, server);
 };
 

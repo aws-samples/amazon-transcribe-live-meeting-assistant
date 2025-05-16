@@ -89,6 +89,7 @@ export type CallMetaData = {
     samplingRate: number,
     callEvent: string,
     activeSpeaker: string,
+    participants?: string[], // Add participants array to store the full list
     channels: {
         [channelId: string]: ChannelSpeakerData;
     };

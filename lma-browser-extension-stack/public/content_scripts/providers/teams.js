@@ -1,7 +1,8 @@
 console.log("Inside LMA Teams script");
 
 let metadata = {
-  baseUrl: window.location.origin
+  baseUrl: window.location.origin,
+  participants: [] // Add participants array to store the full list
 }
 var displayName;
 
@@ -71,15 +72,66 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.action === "SendChatMessage") {
     console.log("received request to send a chat message");
     console.log("message:", request.message);
-    /* let chatInput = document.querySelector('p[data-placeholder="Type a message"]');
-    if (!chatInput) {
-      openChatPanel();
-    } 
-    sendChatMessage(request.message);
-    */
     startObserver();
   }
+  if (request.action === "FetchParticipants") {
+    fetchParticipantsList();
+    // Return participants list after a delay to ensure it's populated
+    setTimeout(() => {
+      sendResponse({participants: metadata.participants});
+    }, 2000);
+    return true; // Indicates we'll send a response asynchronously
+  }
 });
+
+const fetchParticipantsList = function() {
+  console.log("Fetching participants list");
+  
+  // Click the participants/people button to open the roster
+  const peopleButton = document.querySelector('button[data-tid="people-button"]');
+  if (peopleButton) {
+    peopleButton.click();
+    console.log("Clicked people button to open roster");
+    
+    // Give time for the roster to open and populate
+    setTimeout(() => {
+      // Look for the participants list container
+      const participantsContainer = document.querySelector('div[data-tid="roster-section-people-in-meeting"]');
+      if (participantsContainer) {
+        // Find all participant items
+        const participantItems = participantsContainer.querySelectorAll('div[data-tid="roster-participant"]');
+        
+        // Clear previous participants list
+        metadata.participants = [];
+        
+        // Extract participant names
+        participantItems.forEach(item => {
+          const nameElement = item.querySelector('span.fui-StyledText');
+          if (nameElement) {
+            const participantName = nameElement.textContent.trim();
+            if (participantName) {
+              metadata.participants.push(participantName);
+              console.log("Found participant:", participantName);
+            }
+          }
+        });
+        
+        console.log(`Found ${metadata.participants.length} participants`);
+        
+        // Close the roster panel to return to the meeting
+        const closeButton = document.querySelector('button[data-tid="roster-close-button"]');
+        if (closeButton) {
+          closeButton.click();
+          console.log("Closed roster panel");
+        }
+      } else {
+        console.log("Participants container not found");
+      }
+    }, 1000);
+  } else {
+    console.log("People button not found");
+  }
+};
 
 const checkForMeetingMetadata = function () {
   setTimeout(() => {
@@ -140,27 +192,24 @@ const checkForMeetingMetadata = function () {
       }
     }
     if (!metadata.meetingTopic || metadata.meetingTopic.trim() === '') {
-      /* const showMoreButton = document.getElementById('callingButtons-showMoreBtn');
-      if (showMoreButton) {
-        showMoreButton.click();
-      }
-      const meetingInfoButton = document.querySelector('[aria-label="Meeting info"]');
-      if (meetingInfoButton) {
-        meetingInfoButton.click();
-      } */
-      //const meetingTitle = document.querySelector('[data-tid="call-title"]');
       const meetingTitle = document.title;
       if (meetingTitle && displayName) {
         metadata.meetingTopic = meetingTitle;
-        //setInterval(checkAndClickRoster, 2000);
       }
     }
-    if (metadata.userName && metadata.userName.trim() !== '' && metadata.meetingTopic && metadata.meetingTopic.trim() !== '') {
-      chrome.runtime.sendMessage({
-        action: "UpdateMetadata",
-        metadata: metadata
-      });
-    }
+    
+    // Fetch participants list
+    fetchParticipantsList();
+    
+    // Send metadata update after a delay to ensure participants list is populated
+    setTimeout(() => {
+      if (metadata.userName && metadata.userName.trim() !== '' && metadata.meetingTopic && metadata.meetingTopic.trim() !== '') {
+        chrome.runtime.sendMessage({
+          action: "UpdateMetadata",
+          metadata: metadata
+        });
+      }
+    }, 2000);
   }, 2000);
 }
 

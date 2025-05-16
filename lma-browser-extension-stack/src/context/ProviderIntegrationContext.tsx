@@ -116,6 +116,21 @@ function IntegrationProvider({ children }: any) {
     if (tab && tab.id) {
       const response = await chrome.tabs.sendMessage(tab.id, { action: "FetchMetadata" });
       console.log("Received response from Metadata query!", response);
+      
+      // If this is Microsoft Teams, fetch the participants list
+      if (response && response.baseUrl && 
+          (response.baseUrl === "https://teams.microsoft.com" || response.baseUrl === "https://teams.live.com")) {
+        try {
+          const participantsResponse = await chrome.tabs.sendMessage(tab.id, { action: "FetchParticipants" });
+          if (participantsResponse && participantsResponse.participants) {
+            response.participants = participantsResponse.participants;
+            console.log("Received participants list:", response.participants);
+          }
+        } catch (error) {
+          console.error("Error fetching participants list:", error);
+        }
+      }
+      
       updateMetadata(response);
     }
     return {};
@@ -166,6 +181,12 @@ function IntegrationProvider({ children }: any) {
       samplingRate: 8000,
       activeSpeaker: 'n/a'
     }
+    
+    // Add participants list to call metadata if available
+    if (metadata.participants && metadata.participants.length > 0) {
+      callMetadata['participants'] = metadata.participants;
+      console.log("Adding participants list to call metadata:", metadata.participants);
+    }
 
     setCurrentCall(callMetadata);
 
@@ -180,7 +201,7 @@ function IntegrationProvider({ children }: any) {
     } catch (exception) {
       alert("If you recently installed or update LMA, please refresh the browser's page and try again.");
     }
-  }, [setShouldConnect, setCurrentCall]);
+  }, [setShouldConnect, setCurrentCall, metadata.participants]);
 
   const stopTranscription = useCallback(() => {
     if (isTranscribing) {

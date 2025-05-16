@@ -294,6 +294,13 @@ const onTextMessage = async (
       callMetaData.toNumber = callMetaData.toNumber || 'System Phone';
       callMetaData.activeSpeaker =
       callMetaData.activeSpeaker ?? callMetaData?.fromNumber ?? 'unknown';
+      
+      // Log participants list if available
+      if (callMetaData.participants && callMetaData.participants.length > 0) {
+          server.log.info(
+              `[START]: [${clientIP}][${callMetaData.callId}] - Meeting has ${callMetaData.participants.length} participants: ${JSON.stringify(callMetaData.participants)}`
+          );
+      }
 
       // if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
       //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);
