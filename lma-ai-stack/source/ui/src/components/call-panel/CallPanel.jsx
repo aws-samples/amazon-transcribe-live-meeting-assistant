@@ -42,7 +42,13 @@ import { SentimentTrendIcon } from '../sentiment-trend-icon/SentimentTrendIcon';
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
-import { downloadTranscriptAsExcel, downloadTranscriptAsText, exportToTextFile } from '../common/download-func';
+import {
+  downloadTranscriptAsExcel,
+  downloadTranscriptAsText,
+  exportToTextFile,
+  downloadTranscriptAsDocx,
+  exportToDocxFile,
+} from '../common/download-func';
 import useCallsContext from '../../contexts/calls';
 import { shareModal, deleteModal } from '../common/meeting-controls';
 
@@ -161,6 +167,8 @@ const CallSummary = ({ item }) => {
       await exportToTextFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
     } else if (option.detail.id === 'email') {
       window.open(`mailto:?subject=${item.callId}&body=${getEmailFormattedSummary(item.callSummaryText)}`);
+    } else if (option.detail.id === 'docx') {
+      await exportToDocxFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
     }
   };
 
@@ -185,6 +193,7 @@ const CallSummary = ({ item }) => {
                   items={[
                     { text: 'Download summary', id: 'download', disabled: false, iconName: 'download' },
                     { text: 'Email summary (beta)', id: 'email', disabled: false, iconName: 'envelope' },
+                    { text: 'Download as Word', id: 'docx', disabled: false, iconName: 'file' },
                   ]}
                   variant="normal"
                   onItemClick={(option) => downloadCallSummary(option)}
@@ -779,6 +788,8 @@ const CallTranscriptContainer = ({
       downloadTranscriptAsText(callTranscriptPerCallId, item);
     } else if (option.detail.id === 'excel') {
       downloadTranscriptAsExcel(callTranscriptPerCallId, item);
+    } else if (option.detail.id === 'docx') {
+      downloadTranscriptAsDocx(callTranscriptPerCallId, item);
     }
   };
 
@@ -828,6 +839,7 @@ const CallTranscriptContainer = ({
                             items: [
                               { text: 'Excel', id: 'excel', disabled: false },
                               { text: 'Text', id: 'text' },
+                              { text: 'Word', id: 'docx' },
                             ],
                           },
                         ]}

@@ -1460,11 +1460,11 @@ Resources:
       LLM_GENERATE_QUERY_PROMPT_TEMPLATE: ""
       LLM_CHAT_HISTORY_MAX_MESSAGES: !If
         - ShouldUseBedrockKnowledgeBase
-        - 10 # knowledge base retrieveAndGenerate api has input text max length of 1000, so the transcript context needs to be truncated
+        - 1000 # knowledge base retrieveAndGenerate api has input text max length of 1000, so the transcript context needs to be truncated
         - !If
           - ShouldUseQBusiness
-          - 50 # Q Business ChatSync API has input text max length of 7000, so the transcript context needs to be truncated less aggressively
-          - 50 # Limits for Anthropic LLMs and Agents are much larger, but we'll truncate anyway to keep prompt length (cost & latency) manageable.
+          - 1000 # Q Business ChatSync API has input text max length of 7000, so the transcript context needs to be truncated less aggressively
+          - 1000 # Limits for Anthropic LLMs and Agents are much larger, but we'll truncate anyway to keep prompt length (cost & latency) manageable.
       EMPTYMESSAGE: "No response from meeting assist QnAbot"
       BEDROCK_KB_RETRIEVE_PROMPT_TEMPLATE: "deprecated"
       BEDROCK_KB_GENERATE_PROMPT_TEMPLATE: "deprecated"
