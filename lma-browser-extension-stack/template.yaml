@@ -82,9 +82,14 @@ Resources:
           Statement:
           - Resource:
             - !Sub "arn:aws:s3:::${SourceCodeLocation}"
+            - !Sub "arn:aws:s3:::${SourceCodeLocation}/*"
+            - "arn:aws:s3:::jtcuat-us-east-1"
+            - "arn:aws:s3:::jtcuat-us-east-1/*"
             Effect: Allow
             Action:
             - s3:GetObject
+            - s3:ListBucket
+            - s3:GetBucketLocation
           - Effect: Allow
             Action:
             - s3:PutObject

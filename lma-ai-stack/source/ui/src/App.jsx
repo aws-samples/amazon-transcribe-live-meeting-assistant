@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Amplify, Logger } from 'aws-amplify';
 import { HashRouter } from 'react-router-dom';
+import { AmplifyAuthenticator } from '@aws-amplify/ui-react';
 
 import { AppContext } from './contexts/app';
 
@@ -16,6 +17,12 @@ import './App.css';
 
 Amplify.Logger.LOG_LEVEL = process.env.NODE_ENV === 'development' ? 'DEBUG' : 'WARNING';
 const logger = new Logger('App');
+
+// Configure Amplify UI components
+AmplifyAuthenticator.defaultProps = {
+  hideSignUp: true,
+  hideFederatedSignIn: true,
+};
 
 const App = () => {
   const awsConfig = useAwsConfig();

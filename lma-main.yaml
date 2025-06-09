@@ -23,7 +23,8 @@ Parameters:
     Type: String
     AllowedValues:
       - "Default"
-      - "Healthcare"
+      - "Construction"
+      - "Building Architecture"
     Description: Select the appropriate domain as necessary, or leave it at default
 
   MeetingAssistService:
@@ -40,7 +41,7 @@ Parameters:
 
   MeetingAssistServiceBedrockModelID:
     Type: String
-    Default: "anthropic.claude-3-haiku-20240307-v1:0"
+    Default: "anthropic.claude-3-5-sonnet-20240620-v1:0"
     AllowedValues:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
@@ -111,7 +112,7 @@ Parameters:
 
   BedrockKnowledgeBaseWebCrawlerURLs:
     Type: String
-    Default: https://en.wikipedia.org/wiki/Life_insurance, https://en.wikipedia.org/wiki/Mortgage_loan
+    Default: https://en.wikipedia.org/wiki/Construction, https://en.wikipedia.org/wiki/Architecture
     Description: >-
       If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
       or leave blank if you don't need a Web data source. If you provide one or more Web URLs a Web crawler data source will be created for you automatically.
@@ -352,7 +353,7 @@ Parameters:
       ARN below.
 
   BedrockModelId:
-    Default: "anthropic.claude-3-haiku-20240307-v1:0"
+    Default: "anthropic.claude-3-5-sonnet-20240620-v1:0"
     Type: String
     AllowedValues:
       - "anthropic.claude-3-haiku-20240307-v1:0"
@@ -398,6 +399,7 @@ Parameters:
 
   AdminEmail:
     Type: String
+    Default: "mherrera@kaipartners.com"
     Description: >-
       Email address of the admin user (e.g. jdoe+admin@example.com) that has access to all meetings 
       for administrative purposes. 
@@ -406,7 +408,7 @@ Parameters:
 
   AllowedSignUpEmailDomain:
     Type: String
-    Default: ""
+    Default: "kaipartners.com"
     Description: >-
       Email address domain (example.com) or comma separated list of email domains  (example1.com,
       example2.com) allowed to signin and signup using the web UI.

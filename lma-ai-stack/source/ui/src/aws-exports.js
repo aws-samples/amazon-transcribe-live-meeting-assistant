@@ -48,7 +48,9 @@ const awsmobile = {
     ],
     "aws_appsync_graphqlEndpoint": REACT_APP_APPSYNC_GRAPHQL_URL,
     "aws_appsync_region": REACT_APP_AWS_REGION,
-    "aws_appsync_authenticationType": "AMAZON_COGNITO_USER_POOLS"
+    "aws_appsync_authenticationType": "AMAZON_COGNITO_USER_POOLS",
+    "federatedSignIn": false,
+    "aws_cognito_social_providers": []
 }
 
 export default awsmobile;

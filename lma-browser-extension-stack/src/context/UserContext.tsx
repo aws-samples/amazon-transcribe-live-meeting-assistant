@@ -136,27 +136,30 @@ function UserProvider({ children }: any) {
 
   const login = useCallback(async () => {
     console.log("start auth flow");
-
-    if (chrome.identity) {
-      const cognitoUrl = `${settings.cognitoDomain}/login?response_type=code&client_id=${settings.clientId}&redirect_uri=https://${chrome.runtime.id}.chromiumapp.org/&scope=email+openid+profile`;
-      const redirectURL = await chrome.identity.launchWebAuthFlow({
-        url: cognitoUrl,
-        interactive: true
-      });
-      if (redirectURL) {
-        const url = new URL(redirectURL);
-        console.log(redirectURL)
-        const authorizationCode = url.searchParams.get("code");
-        if (authorizationCode) exchangeCodeForToken(authorizationCode, 'authorization_code');
-        else console.error("No authorization code in redirect url.");
+    try {
+      if (chrome.identity) {
+        const cognitoUrl = `${settings.cognitoDomain}/oauth2/authorize?response_type=code&client_id=${settings.clientId}&redirect_uri=https://${chrome.runtime.id}.chromiumapp.org/&scope=email+openid+profile`;
+        const redirectURL = await chrome.identity.launchWebAuthFlow({
+          url: cognitoUrl,
+          interactive: true
+        });
+        if (redirectURL) {
+          const url = new URL(redirectURL);
+          console.log(redirectURL)
+          const authorizationCode = url.searchParams.get("code");
+          if (authorizationCode) exchangeCodeForToken(authorizationCode, 'authorization_code');
+          else console.error("No authorization code in redirect url.");
+        } else {
+          console.error("Error with login.");
+        }
       } else {
-        console.error("Error with login.");
+        const cognitoUrl = `${settings.cognitoDomain}/oauth2/authorize?response_type=code&client_id=${settings.clientId}&redirect_uri=http://localhost:3000/&scope=email+openid+profile`;
+        window.location.href = cognitoUrl;
       }
-    } else {
-      const cognitoUrl = `${settings.cognitoDomain}/login?response_type=code&client_id=${settings.clientId}&redirect_uri=https://${chrome.runtime.id}.chromiumapp.org/&scope=email+openid+profile`;
-      window.location.href = cognitoUrl;
+    } catch (error) {
+      console.error('error logging in BROWSER EXTENSION', error);
     }
-  }, [exchangeCodeForToken]);
+  }, [exchangeCodeForToken, settings]);
 
   const logout = useCallback(() => {
     localStorage.removeItem('authTokens');

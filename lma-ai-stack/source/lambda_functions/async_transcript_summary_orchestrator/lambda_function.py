@@ -52,7 +52,7 @@ TRANSCRIPT_SUMMARY_FUNCTION_ARN = getenv("TRANSCRIPT_SUMMARY_FUNCTION_ARN", "")
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 
 def get_user_email(access_token):
-    cognito_userinfo_endpoint = "https://lma-1731359078895707131.auth.us-east-1.amazoncognito.com/oauth2/userInfo"
+    cognito_userinfo_endpoint = "https://jtc-uat-1746644220046210180.auth.us-east-1.amazoncognito.com/oauth2/userInfo"
     headers = {"Authorization": f"Bearer {access_token}"}
     response = requests.get(cognito_userinfo_endpoint, headers=headers)
     if response.status_code == 200:

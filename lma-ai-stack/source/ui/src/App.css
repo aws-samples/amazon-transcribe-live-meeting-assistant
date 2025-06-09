@@ -2,9 +2,9 @@
     SPDX-License-Identifier: Apache-2.0 */
 
 :root {
-    --amplify-primary-color: #ababab;
-    --amplify-primary-tint: #3f6060;
-    --amplify-primary-shade: #2dba89;
+    --amplify-primary-color: #0073bb;
+    --amplify-primary-tint: #005c99;
+    --amplify-primary-shade: #004d80;
     --amplify-background-color: #fafafa;
     --amplify-text-xxs: 0.75rem;
     --amplify-text-xs: 0.81rem;
@@ -14,4 +14,69 @@
     --amplify-text-lg: 1.5rem;
     --amplify-text-xl: 2rem;
     --amplify-text-xxl: 2.5rem;
+}
+
+/* Hide AWS Sign-in button - multiple selectors for better coverage */
+.sc-amplify-sign-in-button-h {
+    display: none !important;
+}
+
+div > div > amplify-oauth-button {
+    display: none !important;
+}
+
+/* More specific selector based on XPath */
+amplify-auth-container amplify-authenticator amplify-sign-in amplify-form-section form amplify-section section slot amplify-federated-buttons div div amplify-oauth-button {
+    display: none !important;
+}
+
+/* Hide AWS Sign-in button */
+.sign-in-button.oauth.sc-amplify-sign-in-button {
+    display: none !important;
+}
+
+/* Shadow DOM targeting */
+amplify-authenticator::part(federated-buttons) {
+    display: none !important;
+}
+
+amplify-sign-in::part(federated-buttons) {
+    display: none !important;
+}
+
+/* Target slotted content */
+::slotted(amplify-oauth-button) {
+    display: none !important;
+}
+
+/* Additional selectors for AWS sign-in button */
+[data-variation="primary"].amplify-button[data-provider="Amazon"] {
+    display: none !important;
+}
+
+.amplify-button[data-provider="Amazon"] {
+    display: none !important;
+}
+
+.amplify-federated-buttons {
+    display: none !important;
+}
+
+.amplify-federated-sign-in-button {
+    display: none !important;
+}
+
+/* Target the container of the federated buttons */
+.amplify-authenticator .amplify-federated-buttons {
+    display: none !important;
+}
+
+/* Target the AWS button specifically */
+.amplify-authenticator .amplify-button[data-provider="Amazon"] {
+    display: none !important;
+}
+
+/* Target the button container */
+.amplify-authenticator .amplify-federated-sign-in-button {
+    display: none !important;
 }

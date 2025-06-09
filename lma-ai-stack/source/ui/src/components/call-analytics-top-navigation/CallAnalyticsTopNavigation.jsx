@@ -70,26 +70,26 @@ const CallAnalyticsTopNavigation = () => {
                     </Button>
                   ),
                 },
-                {
-                  id: 'support-group',
-                  text: 'Resources',
-                  items: [
-                    {
-                      id: 'documentation',
-                      text: 'Blog Post',
-                      href: 'https://www.amazon.com/live-meeting-assistant',
-                      external: true,
-                      externalIconAriaLabel: ' (opens in new tab)',
-                    },
-                    {
-                      id: 'source',
-                      text: 'Source Code',
-                      href: 'https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant',
-                      external: true,
-                      externalIconAriaLabel: ' (opens in new tab)',
-                    },
-                  ],
-                },
+                // {
+                //   id: 'support-group',
+                //   text: 'Resources',
+                //   items: [
+                //     {
+                //       id: 'documentation',
+                //       text: 'Blog Post',
+                //       href: 'https://www.amazon.com/live-meeting-assistant',
+                //       external: true,
+                //       externalIconAriaLabel: ' (opens in new tab)',
+                //     },
+                //     {
+                //       id: 'source',
+                //       text: 'Source Code',
+                //       href: 'https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant',
+                //       external: true,
+                //       externalIconAriaLabel: ' (opens in new tab)',
+                //     },
+                //   ],
+                // },
               ],
             },
           ]}

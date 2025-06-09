@@ -85,7 +85,7 @@ Parameters:
   TranscriptFileBucketName:
     Type: String
     Default: ""
-    Description: >
+    Description: >-
       Existing bucket where transcript files will be stored.
     # yamllint disable rule:line-length
     AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
@@ -582,6 +582,7 @@ Resources:
                   - s3:GetBucketLocation
                   - s3:PutObject
                   - s3:ListBucket
+                  - s3:GetBucketLocation
               - Resource:
                   - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
                   - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*"

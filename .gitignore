@@ -1,7 +1,6 @@
 .DS_Store
 **/.DS_Store
 .idea
-
 **/opensearchpy_layer/python
 **/boto3_layer/python
 **/boto3_layer/boto3_lambda_layer.zip
@@ -10,3 +9,4 @@
 samconfig.toml
 .checksum
 .commit-hash
+node_modules/
