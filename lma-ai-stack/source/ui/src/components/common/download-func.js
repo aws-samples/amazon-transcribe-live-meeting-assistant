@@ -3,7 +3,8 @@ import * as XLSX from 'xlsx';
 import { DEFAULT_OTHER_SPEAKER_NAME } from './constants';
 
 // eslint-disable-next-line prettier/prettier
-export const onImportExcelAsync = (file) => new Promise((resolve, reject) => {
+export const onImportExcelAsync = (file) =>
+  new Promise((resolve, reject) => {
     // Obtener el objeto del archivo cargado
     const { files } = file.target;
     // Leer el archivo a través del objeto FileReader
@@ -56,6 +57,88 @@ export const exportToTextFile = async (text, nameFile) => {
   URL.revokeObjectURL(url);
 };
 
+// Function to export transcript as DOCX
+export const exportToDocxFile = async (text, nameFile) => {
+  try {
+    // Load the docx library dynamically
+    const docx = await import('docx');
+
+    // Parse the transcript text into structured data
+    const lines = text.split('\n');
+    const paragraphs = [];
+
+    // Add title
+    paragraphs.push(
+      new docx.Paragraph({
+        text: `Meeting Transcript: ${nameFile}`,
+        heading: docx.HeadingLevel.HEADING_1,
+        spacing: { after: 200 },
+      }),
+    );
+
+    // Process each line of the transcript
+    lines.forEach((line) => {
+      const match = line.match(/^(.*?)\s+\[(.*?)\]:\s+(.*)$/);
+      if (match) {
+        const [, speaker, timestamp, content] = match;
+
+        // Create a paragraph with different text runs for speaker, timestamp, and content
+        paragraphs.push(
+          new docx.Paragraph({
+            children: [
+              new docx.TextRun({
+                text: speaker,
+                bold: true,
+              }),
+              new docx.TextRun({
+                text: ` [${timestamp}]: `,
+                color: '666666',
+              }),
+              new docx.TextRun({
+                text: content,
+              }),
+            ],
+            spacing: { after: 120 },
+          }),
+        );
+      } else if (line.trim()) {
+        // For lines that don't match the pattern
+        paragraphs.push(
+          new docx.Paragraph({
+            text: line,
+            spacing: { after: 120 },
+          }),
+        );
+      }
+    });
+
+    // Create the document
+    const doc = new docx.Document({
+      sections: [
+        {
+          properties: {},
+          children: paragraphs,
+        },
+      ],
+    });
+
+    // Generate and download the document
+    docx.Packer.toBlob(doc).then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${nameFile}.docx`;
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+  } catch (error) {
+    console.error('Error exporting to DOCX:', error);
+
+    // Fallback method if the docx library fails to load or process
+    alert('Could not generate DOCX file. Please make sure you have an internet connection and try again.');
+  }
+};
+
 const getTimestampFromSeconds = (secs) => {
   if (!secs || Number.isNaN(secs)) {
     return '00:00.0';
@@ -100,7 +183,7 @@ const sortTranscriptByTime = (callTranscriptPerCallId, meeting) => {
         // eslint-disable-next-line prefer-const
         let [answer, sources] = parsedTranscript;
         // eslint-disable-next-line prefer-destructuring
-        sources = sources.split('</p></details>')[0];
+        sources = sources?.split('</p></details>')[0] || '';
 
         sources = sources.replace('<summary>Context</summary><p style="white-space: pre-line;"><br>', '(Sources)\n');
 
@@ -136,4 +219,14 @@ export const downloadTranscriptAsText = async (callTranscriptPerCallId, meeting)
   const text = currentTurnByTurnSegments.map((c) => `${c.speaker} [${c.startTimestamp}]: ${c.transcript}`).join('\n');
 
   await exportToTextFile(text, `Transcript-${callId}`);
+};
+
+export const downloadTranscriptAsDocx = async (callTranscriptPerCallId, meeting) => {
+  const { callId } = meeting;
+  const currentTurnByTurnSegments = sortTranscriptByTime(callTranscriptPerCallId, meeting);
+
+  // convert json to text lines of Speaker [start_timestamp]: transcript segment text
+  const text = currentTurnByTurnSegments.map((c) => `${c.speaker} [${c.startTimestamp}]: ${c.transcript}`).join('\n');
+
+  await exportToDocxFile(text, `Transcript-${callId}`);
 };
