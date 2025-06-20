@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.10] - 2025-06-20
+### Added
+- Add DOCX export functionality and increase LLM chat history limit. #183
+### Fixed 
+- When deploying LMA, the VirtualParticipantStack fails to create due to BuildCustomResourceFunction resource. #184
+
 ## [0.2.9] - 2025-02-09
 ### Fixed 
 - Zoom browser extension, active speaker not identified when video share or screen share is on bug fix #174
