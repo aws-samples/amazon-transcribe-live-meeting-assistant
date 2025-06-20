@@ -3,4 +3,3 @@ boto3
 pytest-playwright 
 requests
 sounddevice
-wave
