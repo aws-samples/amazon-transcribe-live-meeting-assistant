@@ -1,6 +1,6 @@
 {
   "name": "lma-ui",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "dependencies": {
     "@aws-amplify/ui-components": "^1.9.6",
