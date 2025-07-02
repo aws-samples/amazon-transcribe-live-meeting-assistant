@@ -314,7 +314,7 @@ Parameters:
       must pre-exist in your account,  match the Language Code selected above, and
       use the 'Narrow Band' base model.
 
-  ModelInitialization:
+  ModelValidation:
     Type: String
     Default: "true"
     AllowedValues:
@@ -691,7 +691,7 @@ Metadata:
       - Label:
           default: Workshop options
         Parameters:
-          - ModelInitialization
+          - ModelValidation
     ParameterLabels:
       CallAudioProcessor:
         default: Call Audio Processor
@@ -759,8 +759,8 @@ Metadata:
         default: Transcription Custom Vocabulary Name
       CustomLanguageModelName:
         default: Transcription Custom Language Model Name
-      ModelInitialization:
-        default: Amazon Bedrock Model Initialization
+      ModelValidation:
+        default: Amazon Bedrock Model Validation
       TranscriptLambdaHookFunctionArn:
         default:
           Lambda Hook Function ARN for Custom Transcript Segment Processing
@@ -1032,7 +1032,7 @@ Resources:
               transcribePreferredLanguage = event['ResourceProperties'].get('TranscribePreferredLanguage', '')
               customVocabularyName = event['ResourceProperties'].get('CustomVocabularyName', '')
               customLanguageModelName = event['ResourceProperties'].get('CustomLanguageModelName', '')
-              modelInitialization = event['ResourceProperties'].get('ModelInitialization', '')
+              modelValidation = event['ResourceProperties'].get('ModelValidation', '')
               if transcribeLanguageCode in ['identify-language', 'identify-multiple-languages']:
                 if customVocabularyName:
                   status = cfnresponse.FAILED
@@ -1061,7 +1061,7 @@ Resources:
               # Validate Bedrock model access
               failedModels = []
               requiredmodels = event['ResourceProperties'].get('BedrockModelIds', [])
-              if modelInitialization == "true":
+              if modelValidation == "true":
                 for modelId in requiredmodels: 
                   if not is_model_available(modelId):
                     failedModels.append(modelId)
@@ -1099,7 +1099,7 @@ Resources:
       TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
       CustomVocabularyName: !Ref CustomVocabularyName
       CustomLanguageModelName: !Ref CustomLanguageModelName
-      ModelInitialization: !Ref ModelInitialization
+      ModelValidation: !Ref ModelValidation
       BedrockModelIds:
         - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
         - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB & QnABot
@@ -1576,7 +1576,7 @@ Resources:
           - ShouldUseTranscriptKnowledgeBase
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
           - ""
-        ModelInitialization: !Ref ModelInitialization
+        ModelValidation: !Ref ModelValidation
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         # Changes to Params below force AgentAssist Setup to update.
         TranscribeLanguageCode: !Ref TranscribeLanguageCode

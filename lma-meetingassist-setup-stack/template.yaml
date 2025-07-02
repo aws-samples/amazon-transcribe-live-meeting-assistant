@@ -141,7 +141,7 @@ Parameters:
     Type: String
     Description: ARN of Transcript Summary function (if defined)
 
-  ModelInitialization:
+  ModelValidation:
     Type: String
     Default: "true"
     Description: >-
@@ -726,7 +726,7 @@ Resources:
       - ShouldConfigureTranscriptBedrockKB
       - !Ref TranscriptBedrockKnowledgeBaseId
       - !Ref AWS::NoValue
-      ModelInitialization: !Ref ModelInitialization
+      ModelValidation: !Ref ModelValidation
       # Changes to Params below force MeetingAssist Setup to execute.
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
       TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
