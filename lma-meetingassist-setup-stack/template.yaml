@@ -141,6 +141,12 @@ Parameters:
     Type: String
     Description: ARN of Transcript Summary function (if defined)
 
+  ModelValidation:
+    Type: String
+    Default: "true"
+    Description: >-
+      Specifies if Amazon Bedrock model access is validated and sample package uploaded to QnABot.
+
   # Changes to Params below force MeetingAssist Setup to update.
   TranscribeLanguageCode:
     Type: String
@@ -720,6 +726,7 @@ Resources:
       - ShouldConfigureTranscriptBedrockKB
       - !Ref TranscriptBedrockKnowledgeBaseId
       - !Ref AWS::NoValue
+      ModelValidation: !Ref ModelValidation
       # Changes to Params below force MeetingAssist Setup to execute.
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
       TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
