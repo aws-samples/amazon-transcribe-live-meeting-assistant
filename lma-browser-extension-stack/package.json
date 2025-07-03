@@ -1,6 +1,6 @@
 {
   "name": "lma-extension",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "private": true,
   "dependencies": {
     "@cloudscape-design/components": "^3.0.540",
