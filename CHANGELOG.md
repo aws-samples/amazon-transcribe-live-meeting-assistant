@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11] - 2025-07-03
+### Added
+- Adding model initialization parameter for when Amazon Bedrock model access might not be setup e.g. AWS workshops. Enables deployment of LMA without Amazon Bedrock model access. #185
+
+
+
 ## [0.2.10] - 2025-06-20
 ### Added
 - Add DOCX export functionality and increase LLM chat history limit. #183

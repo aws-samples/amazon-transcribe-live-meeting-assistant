@@ -121,7 +121,8 @@ def configureAiStack(props, oldprops):
 def setupQnABot(props, oldprops):
     configureQnabotSettings(props)
     if propsChanged(props, oldprops, ["QNABOTSTACK", "QnaMeetingAssistDemoJson", "QNASummarizeCallFunction", "QNAMeetingAssistLambdaHookFunction"]):
-        loadQnABotSamplePackage(props)
+        if (props["ModelValidation"] == 'true'):
+            loadQnABotSamplePackage(props)
         buildQnABotLexBot(props)
     else:
         print("QnaBot demo data unchanged - skipping QnABot sample data update.")
