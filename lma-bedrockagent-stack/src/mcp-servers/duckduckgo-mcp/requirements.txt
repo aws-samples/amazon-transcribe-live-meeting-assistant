@@ -1,19 +1,7 @@
-# Core dependencies
-strands-sdk==0.8.2
-aws-mcp-client==1.3.0
-boto3==1.34.62
-aws-lambda-powertools==2.12.0
-
-# Web/Async
-aiohttp==3.9.3
-httpx==0.27.0
-starlette==0.37.2
-uvicorn[standard]==0.29.0  # Only needed for local server execution
-
-# HTML Processing
-beautifulsoup4==4.12.3
-soupsieve==2.5  # bs4 dependency
-
-# Utilities
-python-dateutil==2.9.0.post0  # Date handling
-click==8.1.7  # CLI support
+beautifulsoup4>=4.13.3
+httpx>=0.28.1
+starlette
+mcp
+boto3
+fastmcp
+bedrock-agentcore-starter-toolkit
