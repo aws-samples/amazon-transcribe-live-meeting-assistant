@@ -2,3 +2,4 @@ mcp[cli]>=1.12.0
 strands-agents>=1.0.1
 strands-agents-builder>=0.1.7
 strands-agents-tools>=0.2.1
+bedrock-agentcore

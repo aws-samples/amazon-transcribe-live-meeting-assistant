@@ -36,6 +36,7 @@ Parameters:
       - "Q_BUSINESS (Use Existing)"
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
       - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)"
+      - "STRANDS_AGENT_WITH_MCP (Create)"
     Description: Choose the knowledge base / LLM service to use
 
   MeetingAssistServiceBedrockModelID:
@@ -901,6 +902,8 @@ Conditions:
       !Condition ShouldUseExistingBedrockAgent,
       !Condition ShouldCreateBedrockAgent,
     ]
+  ShouldCreateStrandsAgent:
+    !Equals [!Ref MeetingAssistService, "STRANDS_AGENT_WITH_MCP (Create)"]
   ShouldUseQBusiness:
     !Equals [!Ref MeetingAssistService, "Q_BUSINESS (Use Existing)"]
   ShouldUseLLMOnly:
@@ -908,6 +911,7 @@ Conditions:
       !Or [
         !Condition ShouldUseBedrockKnowledgeBase,
         !Condition ShouldUseBedrockAgent,
+        !Condition ShouldCreateStrandsAgent,
         !Condition ShouldUseQBusiness,
       ],
     ]
@@ -1550,6 +1554,10 @@ Resources:
             - ShouldCreateBedrockAgent
             - !GetAtt BEDROCKAGENT.Outputs.AgentAliasId
             - !Ref BedrockAgentAliasId
+          - ""
+        StrandsAgentArn: !If
+          - ShouldCreateStrandsAgent
+          - "PLACEHOLDER_FOR_STRANDS_AGENT_ARN"
           - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
         AmazonQAppId: !If
