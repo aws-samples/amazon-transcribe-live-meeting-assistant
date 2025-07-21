@@ -5,10 +5,10 @@ from mcp.client.streamable_http import streamablehttp_client
 def main():
     # Connect to the quiz MCP server
     print("\nConnecting to MCP Server...")
-    mcp_quiz_server = MCPClient(lambda: streamablehttp_client("http://localhost:8000/mcp"))
+    mcp_search_server = MCPClient(lambda: streamablehttp_client("http://localhost:8000/mcp"))
 
     try:
-        with mcp_quiz_server:
+        with mcp_search_server:
 
             # Create the subject expert agent with a system prompt
             subject_expert = Agent(
@@ -23,7 +23,7 @@ def main():
             )
 
             # List the tools available on the MCP server...
-            mcp_tools = mcp_quiz_server.list_tools_sync()
+            mcp_tools = mcp_search_server.list_tools_sync()
             print(f"Available tools: {[tool.tool_name for tool in mcp_tools]}")
 
             # ... and add them to the agent
