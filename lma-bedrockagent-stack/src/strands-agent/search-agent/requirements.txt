@@ -1,0 +1,5 @@
+strands-sdk>=0.8.2  # Core framework
+aws-mcp-client>=1.3.0  # Official MCP client library
+aiohttp>=3.9.0  # Async HTTP client for streamablehttp
+boto3>=1.34.0  # AWS SDK
+aws-lambda-powertools>=2.0.0  # Lambda utilities
