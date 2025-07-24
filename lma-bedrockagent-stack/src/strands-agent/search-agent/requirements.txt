@@ -1,5 +1,27 @@
-mcp[cli]>=1.12.0
-strands-agents>=1.0.1
-strands-agents-builder>=0.1.7
-strands-agents-tools>=0.2.1
-bedrock-agentcore
+# Core dependencies
+mcp>=1.12.1
+bedrock-agentcore>=0.1.1
+bedrock-agentcore-starter-toolkit>=0.1.2
+boto3>=1.39.12
+python-dotenv>=1.1.1
+
+# Build dependencies
+wheel>=0.41.0
+setuptools>=68.0.0
+cmake>=3.27.0
+ninja>=1.11.1
+
+# OpenTelemetry dependencies
+aws-opentelemetry-distro>=0.10.0
+aws_opentelemetry_distro_genai_beta>=0.1.2
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+opentelemetry-instrumentation>=0.41b0
+
+# Platform-specific dependencies
+--find-links https://download.pytorch.org/whl/torch_stable.html
+strands==0.1.0; platform_system != "Darwin"
+strands-macos==0.1.0; platform_system == "Darwin"
+
+# Health check dependencies
+requests>=2.31.0

@@ -26,12 +26,31 @@ def initialize_agent():
         return search_agent
     
     try:
-        # Get MCP server URL from environment variable or use default
-        mcp_server_url = os.getenv('MCP_SERVER_URL', 'http://localhost:8000/mcp')
+        # Get AgentCore runtime configuration
+        agent_runtime_arn = os.getenv('DUCKDUCKGO_MCP_ARN')
+        if not agent_runtime_arn:
+            raise ValueError("DUCKDUCKGO_MCP_ARN environment variable not set")
+            
+        # URL encode the ARN for use in the URL
+        encoded_arn = agent_runtime_arn.replace(':', '%3A').replace('/', '%2F')
+        mcp_server_url = f"https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/{encoded_arn}/invocations?qualifier=DEFAULT"
+        
         logger.info(f"Connecting to MCP Server at: {mcp_server_url}")
         
-        # Connect to the MCP server
-        mcp_search_server = MCPClient(lambda: streamablehttp_client(mcp_server_url))
+        # Configure headers with AWS authentication
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        # Connect to the MCP server with authentication
+        mcp_search_server = MCPClient(
+            lambda: streamablehttp_client(
+                mcp_server_url,
+                headers=headers,
+                timeout=120,
+                terminate_on_close=False
+            )
+        )
         
         with mcp_search_server:
             # Create the search agent with system prompt
@@ -164,6 +183,9 @@ async def invoke_streaming(payload):
 def main():
     """Local development and testing function"""
     try:
+        # For local testing, use local MCP server
+        os.environ['DUCKDUCKGO_MCP_ARN'] = os.getenv('DUCKDUCKGO_MCP_ARN', 'http://localhost:8000/mcp')
+        
         # Initialize agent for local testing
         agent = initialize_agent()
         
@@ -171,6 +193,7 @@ def main():
         print("=" * 55)
         print("\n📋 Try: 'What are the latest AWS services?' or 'Search for Python tutorials'")
         print("💡 This agent is now compatible with Bedrock AgentCore Runtime!")
+        print(f"\n💻 Using MCP Server: {os.getenv('DUCKDUCKGO_MCP_ARN')}")
         
         while True:
             user_input = input("\n🎯 Your request: ")
