@@ -1,0 +1,58 @@
+default_agent: duckduckgo_server
+agents:
+  server:
+    name: server
+    entrypoint: server.py
+    platform: linux/arm64
+    container_runtime: docker
+    aws:
+      execution_role: arn:aws:iam::423667995321:role/AgentCorePowerUserRole
+      execution_role_auto_create: true
+      account: '423667995321'
+      region: us-east-1
+      ecr_repository: 423667995321.dkr.ecr.us-east-1.amazonaws.com/bedrock_agentcore-server
+      ecr_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+      protocol_configuration:
+        server_protocol: MCP
+      observability:
+        enabled: true
+    bedrock_agentcore:
+      agent_id: server-gmUeZfCUcf
+      agent_arn: arn:aws:bedrock-agentcore:us-east-1:423667995321:runtime/server-gmUeZfCUcf
+      agent_session_id: null
+    codebuild:
+      project_name: null
+      execution_role: null
+      source_bucket: null
+    authorizer_configuration: null
+    oauth_configuration: null
+  duckduckgo_server:
+    name: duckduckgo_server
+    entrypoint: duckduckgo_server.py
+    platform: linux/arm64
+    container_runtime: docker
+    aws:
+      execution_role: arn:aws:iam::423667995321:role/AgentCorePowerUserRole
+      execution_role_auto_create: true
+      account: '423667995321'
+      region: us-east-1
+      ecr_repository: 423667995321.dkr.ecr.us-east-1.amazonaws.com/bedrock-agentcore-duckduckgo_server
+      ecr_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+      protocol_configuration:
+        server_protocol: MCP
+      observability:
+        enabled: true
+    bedrock_agentcore:
+      agent_id: duckduckgo_server-ioYbMl6401
+      agent_arn: arn:aws:bedrock-agentcore:us-east-1:423667995321:runtime/duckduckgo_server-ioYbMl6401
+      agent_session_id: null
+    codebuild:
+      project_name: null
+      execution_role: null
+      source_bucket: null
+    authorizer_configuration: null
+    oauth_configuration: null

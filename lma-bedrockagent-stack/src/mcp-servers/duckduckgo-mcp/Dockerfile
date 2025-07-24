@@ -1,27 +1,37 @@
-FROM python:3.13-alpine
-
-# Set working directory
+FROM public.ecr.aws/docker/library/python:3.12-slim
 WORKDIR /app
 
-# Install system dependencies
-RUN apk add --no-cache \
-    gcc \
-    musl-dev \
-    linux-headers
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+COPY requirements.txt requirements.txt
+# Install from requirements file
+RUN pip install -r requirements.txt
 
-# Expose port 8000 (MCP server default)
+
+
+
+RUN pip install aws-opentelemetry-distro>=0.10.0
+
+
+# Set AWS region environment variable
+
+ENV AWS_REGION=us-east-1
+ENV AWS_DEFAULT_REGION=us-east-1
+
+
+# Signal that this is running in Docker for host binding logic
+ENV DOCKER_CONTAINER=1
+
+# Create non-root user
+RUN useradd -m -u 1000 bedrock_agentcore
+USER bedrock_agentcore
+
+EXPOSE 8080
 EXPOSE 8000
 
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
+# Copy entire project (respecting .dockerignore)
+COPY . .
 
-# Run the MCP server
-CMD ["python", "server.py"]
+# Use the full module path
+
+CMD ["opentelemetry-instrument", "python", "-m", "duckduckgo_server"]
