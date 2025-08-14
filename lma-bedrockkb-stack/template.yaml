@@ -447,7 +447,7 @@ Resources:
         Fn::GetAtt:
           - OSSIndexCustomResourceFunctionRole
           - Arn
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       Timeout: 900
       Code: ./src/oss_custom_resource
       Environment:
