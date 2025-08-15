@@ -147,7 +147,7 @@ Resources:
           phases:
             install:
               runtime-versions:
-                nodejs: 18
+                nodejs: 22
             pre_build:
               commands:
                 - echo Source code from s3://${SOURCE_CODE_LOCATION}
