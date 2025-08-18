@@ -409,6 +409,13 @@ Parameters:
       Cognito.
     AllowedPattern: '^(|([\w-]+\.)+[\w-]{2,6}(, *([\w-]+\.)+[\w-]{2,6})*)$'
 
+  BedrockKnowledgeBaseID:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+    Description: >
+      Provide the *id* (not name) of an existing Bedrock Knowledge Base to be used for Agent Assist bot.
+
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -1381,7 +1388,7 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
-          KB_ID: !Sub "<Placeholder>"
+          KB_ID: !Ref BedrockKnowledgeBaseID
           KB_ACCOUNT_ID: !Ref AWS::AccountId
           KB_REGION: !Ref AWS::Region
           MODEL_ID: !Ref BedrockModelId

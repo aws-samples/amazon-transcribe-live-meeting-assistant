@@ -1456,6 +1456,10 @@ Resources:
         CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
         AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
+        BedrockKnowledgeBaseID: !If
+          - ShouldUseTranscriptKnowledgeBase
+          - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
+          - ""
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
