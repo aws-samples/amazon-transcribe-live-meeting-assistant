@@ -1,17 +1,28 @@
 import json
 import os
 import boto3
+from botocore.config import Config
 
 print("Boto3 version: ", boto3.__version__)
 
 KB_REGION = os.environ.get("KB_REGION") or os.environ["AWS_REGION"]
 KB_ID = os.environ.get("KB_ID")
+KB_ACCOUNT_ID = os.environ.get("KB_ACCOUNT_ID")
+
+# use inference profile for model id and arn as Nova models require the use of inference profiles
 MODEL_ID = os.environ.get("MODEL_ID")
-MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}::foundation-model/{MODEL_ID}"
+
+# if model id starts with Anthropic it is the legacy 3.0 models - use the model Id for the ARN
+# else it is an Inference Profile and use the profile's ARN
+if MODEL_ID.startswith("anthropic"):
+    MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}::foundation-model/{MODEL_ID}"
+else:
+    MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}:{KB_ACCOUNT_ID}:inference-profile/{MODEL_ID}"
 
 KB_CLIENT = boto3.client(
     service_name="bedrock-agent-runtime",
-    region_name=KB_REGION
+    region_name=KB_REGION,
+    config=Config(retries={'max_attempts': 50, 'mode': 'adaptive'})
 )
 
 def get_kb_response(query, userId, isAdminUser, sessionId):

@@ -1382,6 +1382,8 @@ Resources:
       Environment:
         Variables:
           KB_ID: !Sub "<Placeholder>"
+          KB_ACCOUNT_ID: !Ref AWS::AccountId
+          KB_REGION: !Ref AWS::Region
           MODEL_ID: !Ref BedrockModelId
       LoggingConfig:
         LogGroup:
@@ -1425,7 +1427,14 @@ Resources:
               - Effect: Allow
                 Action:
                   - "bedrock:InvokeModel"
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+                Resource: 
+                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:GetInferenceProfile"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
 
   AppSyncLambdaRole:
     Type: AWS::IAM::Role
