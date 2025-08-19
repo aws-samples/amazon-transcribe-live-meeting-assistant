@@ -4,10 +4,22 @@ WORKDIR /srv
 COPY . /srv
 
 ENV PIP_ROOT_USER_ACTION=ignore
+RUN apt-get update && apt-get install -y \
+    portaudio19-dev \
+    pulseaudio \
+    libnspr4 \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libatspi2.0-0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libxkbcommon0 \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip3 install --upgrade pip
 RUN pip3 install --default-timeout=20 -r requirements.txt
-RUN playwright install --with-deps chromium
-RUN apt-get update && apt-get install -y portaudio19-dev pulseaudio
+RUN playwright install chromium
 
 RUN chmod +x /srv/entrypoint.sh
 ENTRYPOINT ["/srv/entrypoint.sh"]
