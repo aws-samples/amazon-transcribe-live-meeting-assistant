@@ -183,11 +183,24 @@ Parameters:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
       - "anthropic.claude-3-5-sonnet-20240620-v1:0"
-      - "anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "amazon.nova-micro-v1:0"
+      - "amazon.nova-lite-v1:0"
+      - "amazon.nova-pro-v1:0"
+      - "us.amazon.nova-premier-v1:0"
+      - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+      - "us.anthropic.claude-sonnet-4-20250514-v1:0"
+      - "us.anthropic.claude-opus-4-20250514-v1:0"
+      - "us.anthropic.claude-opus-4-1-20250805-v1:0"
+      - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
 
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
-      of supported models.  Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
+      of supported models. Includes Nova models (cost-effective), Claude 3.5/3.7 (advanced), 
+      and Claude 4 (cutting-edge). Some models require inference profiles.
+      Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""
@@ -395,6 +408,13 @@ Parameters:
       using
       Cognito.
     AllowedPattern: '^(|([\w-]+\.)+[\w-]{2,6}(, *([\w-]+\.)+[\w-]{2,6})*)$'
+
+  BedrockKnowledgeBaseID:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+    Description: >
+      Provide the *id* (not name) of an existing Bedrock Knowledge Base to be used for Agent Assist bot.
 
 
 Metadata:
@@ -956,6 +976,12 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:GetInferenceProfile"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
         - PolicyName: !Sub ${AWS::StackName}-S3
           PolicyDocument:
             Version: 2012-10-17
@@ -1362,7 +1388,9 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
-          KB_ID: !Sub "<Placeholder>"
+          KB_ID: !Ref BedrockKnowledgeBaseID
+          KB_ACCOUNT_ID: !Ref AWS::AccountId
+          KB_REGION: !Ref AWS::Region
           MODEL_ID: !Ref BedrockModelId
       LoggingConfig:
         LogGroup:
@@ -1406,7 +1434,14 @@ Resources:
               - Effect: Allow
                 Action:
                   - "bedrock:InvokeModel"
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+                Resource: 
+                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:GetInferenceProfile"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
 
   AppSyncLambdaRole:
     Type: AWS::IAM::Role

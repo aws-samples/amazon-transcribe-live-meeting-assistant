@@ -45,9 +45,21 @@ Parameters:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
       - "anthropic.claude-3-5-sonnet-20240620-v1:0"
-      - "anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "amazon.nova-micro-v1:0"
+      - "amazon.nova-lite-v1:0"
+      - "amazon.nova-pro-v1:0"
+      - "us.amazon.nova-premier-v1:0"
+      - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+      - "us.anthropic.claude-sonnet-4-20250514-v1:0"
+      - "us.anthropic.claude-opus-4-20250514-v1:0"
+      - "us.anthropic.claude-opus-4-1-20250805-v1:0"
+      - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
     Description: >-
-      Select a Bedrock LLM model from the list."
+      Select a Bedrock LLM model from the list. Includes Nova models (cost-effective), 
+      Claude 3.5/3.7 (advanced), and Claude 4 (cutting-edge). Some models require inference profiles.
 
   BedrockGuardrailId:
     Type: String
@@ -369,10 +381,23 @@ Parameters:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
       - "anthropic.claude-3-5-sonnet-20240620-v1:0"
-      - "anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "amazon.nova-micro-v1:0"
+      - "amazon.nova-lite-v1:0"
+      - "amazon.nova-pro-v1:0"
+      - "us.amazon.nova-premier-v1:0"
+      - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+      - "us.anthropic.claude-sonnet-4-20250514-v1:0"
+      - "us.anthropic.claude-opus-4-20250514-v1:0"
+      - "us.anthropic.claude-opus-4-1-20250805-v1:0"
+      - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
-      of supported models.  Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
+      of supported models. Includes Nova models (cost-effective), Claude 3.5/3.7 (advanced), 
+      and Claude 4 (cutting-edge). Some models require inference profiles. 
+      Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""
@@ -987,7 +1012,14 @@ Resources:
               - Effect: Allow
                 Action:
                   - "bedrock:InvokeModel"
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
+                Resource: 
+                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:GetInferenceProfile"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
           PolicyName: BedrockPolicy
 
   ValidateParametersFunction:
@@ -1001,21 +1033,22 @@ Resources:
         import cfnresponse
         import json
         import boto3
+        from botocore.config import Config
         def is_model_available(modelId):
           try:
-              client = boto3.client('bedrock-runtime')
+              client = boto3.client('bedrock-runtime', config=Config(retries={'max_attempts': 50, 'mode': 'adaptive'}))
               prompt = "Why is the sky blue?"
               if 'embed' in modelId:
                   body = {"inputText": prompt}
+                  print(f"Testing model: {modelId} - {body}")
+                  client.invoke_model(body=json.dumps(body), modelId=modelId, accept='application/json', contentType='application/json')
               else:
-                  body = {
-                      "anthropic_version": "bedrock-2023-05-31",
-                      "messages": [{"role": "user", "content": [{'type': 'text', 'text': prompt}]}],
-                      "max_tokens": 128
+                  message = {
+                    "role": "user",
+                    "content": [{"text": prompt}]
                   }
-              print(f"Testing model: {modelId} - {body}")
-              client.invoke_model(body=json.dumps(
-                  body), modelId=modelId, accept='application/json', contentType='application/json')
+                  print(f"Testing model: {modelId} - {message}")
+                  client.converse(modelId=modelId, messages=[message])
               print(f"The model '{modelId}' is available and enabled.")
               return True
           except Exception as e:
@@ -1423,6 +1456,10 @@ Resources:
         CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
         AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
+        BedrockKnowledgeBaseID: !If
+          - ShouldUseTranscriptKnowledgeBase
+          - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
+          - ""
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
