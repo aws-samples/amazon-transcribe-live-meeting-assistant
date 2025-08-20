@@ -7,10 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+
+## [0.2.12] - 2025-08-20
+### Added
+- Support for newest Amazon Bedrock models including inference profiles
+- Auto-scroll behavior during meetings - now stops and switches to manual scroll when user scrolls up to read previous transcripts
+
+### Fixed
+- Favicon replaced with browser extension's icon for better branding
+- Virtual Participant Dockerfile - fixed Chromium font dependencies issue that was causing CloudFormation deployment failures
+- Updated Lambda runtime to Node.js 22 across multiple stacks
+
+
 ## [0.2.11] - 2025-07-03
 ### Added
 - Adding model initialization parameter for when Amazon Bedrock model access might not be setup e.g. AWS workshops. Enables deployment of LMA without Amazon Bedrock model access. #185
-
 
 
 ## [0.2.10] - 2025-06-20
