@@ -366,6 +366,13 @@ if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
 else # BSD like sed
   sed -i '' 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/source/package.json
 fi
+echo "update QnABot lambdaRuntime from nodejs18.x to nodejs22.x"
+# Detection of differences. sed varies betwen GNU sed and BSD sed
+if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
+  sed -i 's/"lambdaRuntime": *"nodejs18\.x"/"lambdaRuntime": "nodejs22.x"/' $dir/source/package.json
+else # BSD like sed
+  sed -i '' 's/"lambdaRuntime": *"nodejs18\.x"/"lambdaRuntime": "nodejs22.x"/' $dir/source/package.json
+fi
 echo "Creating config.json"
 cat > $dir/source/config.json <<_EOF
 {
