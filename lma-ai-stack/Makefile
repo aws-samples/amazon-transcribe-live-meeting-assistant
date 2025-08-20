@@ -281,6 +281,28 @@ $(PACKAGE_RELEASE_REPLACE_OUT_FILE): $(TEMPLATE_FILE) | $(OUT_DIR)
 		s@src-hash.zip@$(shell basename $(BUNDLE_RELEASE_FILE))@g ; \
 		" \
 		'$(<)' > '$(@)'
+	@echo '[INFO] performing token replacement in UI files for version: [$(RELEASE_VERSION)]'
+	@# Create temporary directory for token replacement
+	@mkdir -p $(OUT_DIR)/source-temp
+	@cp -r source $(OUT_DIR)/source-temp/
+	@cp VERSION $(OUT_DIR)/source-temp/
+	@# Replace VERSION tokens in temporary UI files
+	@if [ -f "$(OUT_DIR)/source-temp/source/ui/package.json" ]; then \
+		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" $(OUT_DIR)/source-temp/source/ui/package.json > $(OUT_DIR)/source-temp/source/ui/package.json.tmp && \
+		mv $(OUT_DIR)/source-temp/source/ui/package.json.tmp $(OUT_DIR)/source-temp/source/ui/package.json; \
+	fi
+	@if [ -f "$(OUT_DIR)/source-temp/source/ui/package-lock.json" ]; then \
+		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" $(OUT_DIR)/source-temp/source/ui/package-lock.json > $(OUT_DIR)/source-temp/source/ui/package-lock.json.tmp && \
+		mv $(OUT_DIR)/source-temp/source/ui/package-lock.json.tmp $(OUT_DIR)/source-temp/source/ui/package-lock.json; \
+	fi
+	@if [ -f "$(OUT_DIR)/source-temp/source/ui/src/components/common/constants.js" ]; then \
+		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" $(OUT_DIR)/source-temp/source/ui/src/components/common/constants.js > $(OUT_DIR)/source-temp/source/ui/src/components/common/constants.js.tmp && \
+		mv $(OUT_DIR)/source-temp/source/ui/src/components/common/constants.js.tmp $(OUT_DIR)/source-temp/source/ui/src/components/common/constants.js; \
+	fi
+	@if [ -f "$(OUT_DIR)/source-temp/VERSION" ]; then \
+		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" $(OUT_DIR)/source-temp/VERSION > $(OUT_DIR)/source-temp/VERSION.tmp && \
+		mv $(OUT_DIR)/source-temp/VERSION.tmp $(OUT_DIR)/source-temp/VERSION; \
+	fi
 
 PACKAGE_RELEASE_FILE_NAME := template-packaged-$(RELEASE_S3_BUCKET)-$(RELEASE_S3_PREFIX_SUB)-$(RELEASE_VERSION).yaml
 PACKAGE_RELEASE_OUT_FILE := $(OUT_DIR)/$(PACKAGE_RELEASE_FILE_NAME)
@@ -291,6 +313,30 @@ $(PACKAGE_RELEASE_OUT_FILE): $(PACKAGE_RELEASE_REPLACE_OUT_FILE) | $(OUT_DIR)
 
 	@echo '[INFO] configuring docker multiarchitecture for sam cross platform build'
 	docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
+	@echo '[INFO] temporarily replacing tokens in source files for SAM build'
+	@# Backup original files
+	@cp source/ui/package.json source/ui/package.json.backup 2>/dev/null || true
+	@cp source/ui/package-lock.json source/ui/package-lock.json.backup 2>/dev/null || true
+	@cp source/ui/src/components/common/constants.js source/ui/src/components/common/constants.js.backup 2>/dev/null || true
+	@cp VERSION VERSION.backup 2>/dev/null || true
+	@# Replace tokens temporarily
+	@if [ -f "source/ui/package.json" ]; then \
+		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" source/ui/package.json > source/ui/package.json.tmp && \
+		mv source/ui/package.json.tmp source/ui/package.json; \
+	fi
+	@if [ -f "source/ui/package-lock.json" ]; then \
+		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" source/ui/package-lock.json > source/ui/package-lock.json.tmp && \
+		mv source/ui/package-lock.json.tmp source/ui/package-lock.json; \
+	fi
+	@if [ -f "source/ui/src/components/common/constants.js" ]; then \
+		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" source/ui/src/components/common/constants.js > source/ui/src/components/common/constants.js.tmp && \
+		mv source/ui/src/components/common/constants.js.tmp source/ui/src/components/common/constants.js; \
+	fi
+	@if [ -f "VERSION" ]; then \
+		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" VERSION > VERSION.tmp && \
+		mv VERSION.tmp VERSION; \
+	fi
 
 	@echo '[INFO] sam building template file for release $(RELEASE_VERSION)'
 	sam build \
@@ -305,6 +351,13 @@ $(PACKAGE_RELEASE_OUT_FILE): $(PACKAGE_RELEASE_REPLACE_OUT_FILE) | $(OUT_DIR)
 		--s3-bucket '$(RELEASE_S3_BUCKET)' \
 		--s3-prefix '$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)' \
 		--output-template-file '$(@)' \
+
+	@echo '[INFO] restoring original source files with tokens'
+	@# Restore original files
+	@mv source/ui/package.json.backup source/ui/package.json 2>/dev/null || true
+	@mv source/ui/package-lock.json.backup source/ui/package-lock.json 2>/dev/null || true
+	@mv source/ui/src/components/common/constants.js.backup source/ui/src/components/common/constants.js 2>/dev/null || true
+	@mv VERSION.backup VERSION 2>/dev/null || true
 
 BUNDLE_RELEASE_FILE := $(OUT_DIR)/src-$(shell \
   git ls-files |\
