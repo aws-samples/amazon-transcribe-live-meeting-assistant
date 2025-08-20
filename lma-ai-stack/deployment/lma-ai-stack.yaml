@@ -573,7 +573,7 @@ Resources:
       ServiceToken: !Ref UpdateLMASettingsFunctionArn
       LCASettingsName: !Ref LMASettingsParameterName
       LCASettingsKeyValuePairs:
-        StackName: !Sub "${AWS::StackName}"
+        StackName: !Ref LMAStackName
         Version: !Ref BootstrapVersion
         BuildDateTime: "<BUILD_DATE_TIME>"
         # Add other existing settings that might be needed

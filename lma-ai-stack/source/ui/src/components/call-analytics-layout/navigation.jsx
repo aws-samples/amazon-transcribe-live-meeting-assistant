@@ -50,11 +50,9 @@ const generateNavigationItems = (settings) => {
     const developmentInfoItems = [];
 
     if (settings?.StackName) {
-      // Extract the main stack name (e.g., "LMA-6" from "LMA-6-AISTACK-1D23YP4RN3QZE")
-      const mainStackName = settings.StackName.split('-AISTACK')[0] || settings.StackName;
       developmentInfoItems.push({
         type: 'link',
-        text: `Stack Name: ${mainStackName}`,
+        text: `Stack Name: ${settings.StackName}`,
         href: '#',
       });
     }
