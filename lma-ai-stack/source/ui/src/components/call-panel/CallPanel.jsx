@@ -444,11 +444,13 @@ const CallInProgressTranscript = ({
   enableSentimentAnalysis,
 }) => {
   const bottomRef = useRef();
+  const containerRef = useRef();
   const [turnByTurnSegments, setTurnByTurnSegments] = useState([]);
   const [translateCache, setTranslateCache] = useState({});
   const [cacheSeen, setCacheSeen] = useState({});
   const [lastUpdated, setLastUpdated] = useState(Date.now());
   const [updateFlag, setUpdateFlag] = useState(false);
+  const [userHasScrolled, setUserHasScrolled] = useState(false);
 
   // channels: AGENT, AGENT_ASSIST, CALLER, CATEGORY_MATCH,
   // AGENT_VOICETONE, CALLER_VOICETONE
@@ -645,6 +647,18 @@ const CallInProgressTranscript = ({
     return currentTurnByTurnSegments;
   };
 
+  // Detect when user manually scrolls
+  const handleScroll = (e) => {
+    const container = e.target;
+    const threshold = 50; // pixels from bottom
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+    if (!isAtBottom && autoScroll) {
+      setUserHasScrolled(true);
+    } else if (isAtBottom) {
+      setUserHasScrolled(false);
+    }
+  };
+
   useEffect(() => {
     setTurnByTurnSegments(getTurnByTurnSegments);
   }, [callTranscriptPerCallId, item.recordingStatusLabel, targetLanguage, agentTranscript, translateOn, updateFlag]);
@@ -654,14 +668,25 @@ const CallInProgressTranscript = ({
     if (
       item.recordingStatusLabel === IN_PROGRESS_STATUS
       && autoScroll
+      && !userHasScrolled
       && bottomRef.current?.scrollIntoView
     ) {
       bottomRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, [turnByTurnSegments, autoScroll, item.recordingStatusLabel, targetLanguage, agentTranscript, translateOn]);
+  }, [
+    turnByTurnSegments,
+    autoScroll,
+    userHasScrolled,
+    item.recordingStatusLabel,
+    targetLanguage,
+    agentTranscript,
+    translateOn,
+  ]);
 
   return (
     <div
+      ref={containerRef}
+      onScroll={handleScroll}
       style={{
         overflowY: 'auto',
         maxHeight: collapseSentiment ? '34vh' : '68vh',
@@ -670,6 +695,36 @@ const CallInProgressTranscript = ({
         paddingRight: '10px',
       }}
     >
+      {/* Visual indicator when auto-scroll is paused */}
+      {userHasScrolled && autoScroll && (
+        <div
+          style={{
+            position: 'sticky',
+            top: 0,
+            background: '#ffeaa7',
+            padding: '5px 10px',
+            textAlign: 'center',
+            fontSize: '12px',
+            zIndex: 1000,
+            borderRadius: '4px',
+            margin: '0 0 10px 0',
+            border: '1px solid #fdcb6e',
+          }}
+        >
+          ⚠️ Auto-scroll paused - scroll to bottom to resume
+          <Button
+            onClick={() => {
+              setUserHasScrolled(false);
+              bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            variant="inline-link"
+            iconName="angle-down"
+            style={{ marginLeft: '10px', fontSize: '12px' }}
+          >
+            Resume
+          </Button>
+        </div>
+      )}
       <ColumnLayout borders="horizontal" columns={1}>
         {turnByTurnSegments}
       </ColumnLayout>
