@@ -686,7 +686,7 @@ Resources:
                 - echo Build started on `date`
                 - cd $CODEBUILD_SRC_DIR
                 - cd source/ui
-                - echo Building Web UI with replaced version tokens
+                - echo Building Web UI
                 - npm run build
                 - >
                   printf '{"RepositoryUri":"%s","ProjectName":"%s","ArtifactBucket":"%s"}'

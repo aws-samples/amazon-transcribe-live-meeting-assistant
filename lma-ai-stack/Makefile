@@ -282,28 +282,6 @@ $(PACKAGE_RELEASE_REPLACE_OUT_FILE): $(TEMPLATE_FILE) | $(OUT_DIR)
 		s@<BUILD_DATE_TIME>@$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")@g ; \
 		" \
 		'$(<)' > '$(@)'
-	@echo '[INFO] performing token replacement in UI files for version: [$(RELEASE_VERSION)]'
-	@# Create temporary directory for token replacement
-	@mkdir -p $(OUT_DIR)/source-temp
-	@cp -r source $(OUT_DIR)/source-temp/
-	@cp VERSION $(OUT_DIR)/source-temp/
-	@# Replace VERSION tokens in temporary UI files
-	@if [ -f "$(OUT_DIR)/source-temp/source/ui/package.json" ]; then \
-		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" $(OUT_DIR)/source-temp/source/ui/package.json > $(OUT_DIR)/source-temp/source/ui/package.json.tmp && \
-		mv $(OUT_DIR)/source-temp/source/ui/package.json.tmp $(OUT_DIR)/source-temp/source/ui/package.json; \
-	fi
-	@if [ -f "$(OUT_DIR)/source-temp/source/ui/package-lock.json" ]; then \
-		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" $(OUT_DIR)/source-temp/source/ui/package-lock.json > $(OUT_DIR)/source-temp/source/ui/package-lock.json.tmp && \
-		mv $(OUT_DIR)/source-temp/source/ui/package-lock.json.tmp $(OUT_DIR)/source-temp/source/ui/package-lock.json; \
-	fi
-	@if [ -f "$(OUT_DIR)/source-temp/source/ui/src/components/common/constants.js" ]; then \
-		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" $(OUT_DIR)/source-temp/source/ui/src/components/common/constants.js > $(OUT_DIR)/source-temp/source/ui/src/components/common/constants.js.tmp && \
-		mv $(OUT_DIR)/source-temp/source/ui/src/components/common/constants.js.tmp $(OUT_DIR)/source-temp/source/ui/src/components/common/constants.js; \
-	fi
-	@if [ -f "$(OUT_DIR)/source-temp/VERSION" ]; then \
-		sed -e "s/<VERSION_TOKEN>/$(RELEASE_VERSION)/g" $(OUT_DIR)/source-temp/VERSION > $(OUT_DIR)/source-temp/VERSION.tmp && \
-		mv $(OUT_DIR)/source-temp/VERSION.tmp $(OUT_DIR)/source-temp/VERSION; \
-	fi
 
 PACKAGE_RELEASE_FILE_NAME := template-packaged-$(RELEASE_S3_BUCKET)-$(RELEASE_S3_PREFIX_SUB)-$(RELEASE_VERSION).yaml
 PACKAGE_RELEASE_OUT_FILE := $(OUT_DIR)/$(PACKAGE_RELEASE_FILE_NAME)
