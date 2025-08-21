@@ -671,12 +671,22 @@ Resources:
                 - echo Installing Web UI dependencies
                 - cd source/ui
                 - npm install
+                - echo Performing token replacement for React build
+                - cd $CODEBUILD_SRC_DIR
+                - echo "Replacing VERSION_TOKEN with actual version in source files"
+                - sed -i "s/<VERSION_TOKEN>/${IMAGE_TAG}/g" source/ui/src/components/common/constants.js
+                - sed -i "s/<VERSION_TOKEN>/${IMAGE_TAG}/g" source/ui/package.json
+                - sed -i "s/<VERSION_TOKEN>/${IMAGE_TAG}/g" source/ui/package-lock.json 2>/dev/null || true
+                - sed -i "s/<VERSION_TOKEN>/${IMAGE_TAG}/g" VERSION
+                - echo "Verification - checking replaced values:"
+                - grep "LMA_VERSION" source/ui/src/components/common/constants.js || true
+                - grep "version" source/ui/package.json | head -1 || true
             build:
               commands:
                 - echo Build started on `date`
                 - cd $CODEBUILD_SRC_DIR
                 - cd source/ui
-                - echo Building Web UI
+                - echo Building Web UI with replaced version tokens
                 - npm run build
                 - >
                   printf '{"RepositoryUri":"%s","ProjectName":"%s","ArtifactBucket":"%s"}'

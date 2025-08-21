@@ -282,4 +282,4 @@ Resources:
 Outputs:
   ExtensionDownloadLocation:
     Description: LCA Chrome Browser Extension Download Location
-    Value: !Sub '${CloudfrontEndpoint}lma-chrome-extension.zip'
+    Value: !Sub '${CloudfrontEndpoint}lma-chrome-extension-v<VERSION_TOKEN>.zip'
