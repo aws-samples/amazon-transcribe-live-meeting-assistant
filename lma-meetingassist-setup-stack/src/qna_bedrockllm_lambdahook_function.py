@@ -2,18 +2,20 @@ import json
 import os
 import uuid
 import boto3
+from botocore.config import Config
 
 FETCH_TRANSCRIPT_FUNCTION_ARN = os.environ['FETCH_TRANSCRIPT_FUNCTION_ARN']
 
 BR_REGION = os.environ.get("BR_REGION") or os.environ["AWS_REGION"]
-MODEL_ID = os.environ.get("MODEL_ID")
-MODEL_ARN = f"arn:aws:bedrock:{BR_REGION}::foundation-model/{MODEL_ID}"
+# use inference profile for model id as Nova models require the use of inference profiles
+MODEL_ID = os.environ.get('MODEL_ID')
 DEFAULT_MAX_TOKENS = 256
 
 LAMBDA_CLIENT = boto3.client("lambda")
 BEDROCK_CLIENT = boto3.client(
     service_name="bedrock-runtime",
-    region_name=BR_REGION
+    region_name=BR_REGION,
+    config=Config(retries={'max_attempts': 50, 'mode': 'adaptive'})
 )
 
 
@@ -67,62 +69,25 @@ def get_br_response(transcript, query, settings):
     return resp
 
 
-def get_request_body(modelId, prompt):
-    provider = modelId.split(".")[0]
-    request_body = None
-    if provider == "anthropic":
-        # claude-3 models use new messages format
-        if modelId.startswith("anthropic.claude-3"):
-            request_body = {
-                "anthropic_version": "bedrock-2023-05-31",
-                "messages": [{"role": "user", "content": [{'type': 'text', 'text': prompt}]}],
-                "max_tokens": DEFAULT_MAX_TOKENS
-            }
-        else:
-            request_body = {
-                "prompt": prompt,
-                "max_tokens_to_sample": DEFAULT_MAX_TOKENS
-            }
-    else:
-        raise Exception("Unsupported provider: ", provider)
-    return request_body
-
-
-def get_generate_text(modelId, response):
-    provider = modelId.split(".")[0]
-    generated_text = None
-    response_body = json.loads(response.get("body").read())
-    print("Response body: ", json.dumps(response_body))
-    if provider == "anthropic":
-        # claude-3 models use new messages format
-        if modelId.startswith("anthropic.claude-3"):
-            generated_text = response_body.get("content")[0].get("text")
-        else:
-            generated_text = response_body.get("completion")
-    else:
-        raise Exception("Unsupported provider: ", provider)
-    return generated_text
+def get_generate_text(response):
+    return response["output"]["message"]["content"][0]["text"]
 
 
 def get_bedrock_response(prompt, settings):
     modelId = MODEL_ID
-    body = get_request_body(modelId, prompt)
-    args = dict(
-        body=json.dumps(body),
+    print("Bedrock request - ModelId", modelId)
+    message = {
+        "role": "user",
+        "content": [{"text": prompt}]
+    }
+    response = BEDROCK_CLIENT.converse(
         modelId=modelId,
-        accept='application/json',
-        contentType='application/json'
+        messages=[message],
+        inferenceConfig={
+            "maxTokens": DEFAULT_MAX_TOKENS
+        }
     )
-    # optional guardrails config
-    guardrailIdentifier = settings.get(
-        "ASSISTANT_BEDROCK_GUARDRAIL_ID", "")
-    if guardrailIdentifier:
-        args["guardrailIdentifier"] = guardrailIdentifier
-        args["guardrailVersion"] = str(settings.get(
-            "ASSISTANT_BEDROCK_GUARDRAIL_VERSION", "DRAFT"))
-    print("Bedrock request args - ", args)
-    response = BEDROCK_CLIENT.invoke_model(**args)
-    generated_text = get_generate_text(modelId, response)
+    generated_text = get_generate_text(response)
     print("Bedrock response: ", generated_text)
     return generated_text
 

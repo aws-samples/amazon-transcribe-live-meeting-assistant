@@ -279,6 +279,7 @@ $(PACKAGE_RELEASE_REPLACE_OUT_FILE): $(TEMPLATE_FILE) | $(OUT_DIR)
 		/^ {2,}BootstrapS3Prefix:/ , /^ {2,}Default:/ s@^(.*Default: {1,})(.*)@\1 $(RELEASE_S3_PREFIX)@ ; \
 		/^ {2,}BootstrapVersion:/ , /^ {2,}Default:/ s@^(.*Default: {1,})(.*)@\1 $(RELEASE_VERSION)@ ; \
 		s@src-hash.zip@$(shell basename $(BUNDLE_RELEASE_FILE))@g ; \
+		s@<BUILD_DATE_TIME>@$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")@g ; \
 		" \
 		'$(<)' > '$(@)'
 

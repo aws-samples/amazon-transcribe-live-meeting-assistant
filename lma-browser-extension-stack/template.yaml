@@ -147,7 +147,7 @@ Resources:
           phases:
             install:
               runtime-versions:
-                nodejs: 18
+                nodejs: 22
             pre_build:
               commands:
                 - echo Source code from s3://${SOURCE_CODE_LOCATION}
@@ -170,7 +170,7 @@ Resources:
                   }'
                   $WEBSOCKET_ENDPOINT $COGNITO_CLIENT_ID $COGNITO_LOGIN_URL $CLOUDFRONT_ENDPOINT "$RECORDING_DISCLAIMER" "$START_RECORDING_MESSAGE" "$STOP_RECORDING_MESSAGE" > ./build/lma_config.json
                 - echo Packaging extension for Chrome - other browsers to come later
-                - zipfile=lma-chrome-extension-v0.2.11.zip
+                - zipfile=lma-chrome-extension-v<VERSION_TOKEN>.zip
                 - (cd ./build && zip -r ../${zipfile} .)
                 - aws s3 cp ${zipfile} s3://${WEBAPP_BUCKET}/
                 - echo Artifact Location - s3://${WEBAPP_BUCKET}/${zipfile}
@@ -282,4 +282,4 @@ Resources:
 Outputs:
   ExtensionDownloadLocation:
     Description: LCA Chrome Browser Extension Download Location
-    Value: !Sub '${CloudfrontEndpoint}lma-chrome-extension.zip'
+    Value: !Sub '${CloudfrontEndpoint}lma-chrome-extension-v<VERSION_TOKEN>.zip'

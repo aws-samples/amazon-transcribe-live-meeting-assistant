@@ -183,11 +183,24 @@ Parameters:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
       - "anthropic.claude-3-5-sonnet-20240620-v1:0"
-      - "anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      - "amazon.nova-micro-v1:0"
+      - "amazon.nova-lite-v1:0"
+      - "amazon.nova-pro-v1:0"
+      - "us.amazon.nova-premier-v1:0"
+      - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+      - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+      - "us.anthropic.claude-sonnet-4-20250514-v1:0"
+      - "us.anthropic.claude-opus-4-20250514-v1:0"
+      - "us.anthropic.claude-opus-4-1-20250805-v1:0"
+      - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
 
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
-      of supported models.  Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
+      of supported models. Includes Nova models (cost-effective), Claude 3.5/3.7 (advanced), 
+      and Claude 4 (cutting-edge). Some models require inference profiles.
+      Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""
@@ -396,6 +409,13 @@ Parameters:
       Cognito.
     AllowedPattern: '^(|([\w-]+\.)+[\w-]{2,6}(, *([\w-]+\.)+[\w-]{2,6})*)$'
 
+  BedrockKnowledgeBaseID:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
+    Description: >
+      Provide the *id* (not name) of an existing Bedrock Knowledge Base to be used for Agent Assist bot.
+
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -547,6 +567,20 @@ Resources:
   # ParameterStore
   ##########################################################################
 
+  UpdateSettingsValues:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !Ref UpdateLMASettingsFunctionArn
+      LCASettingsName: !Ref LMASettingsParameterName
+      LCASettingsKeyValuePairs:
+        StackName: !Ref LMAStackName
+        Version: !Ref BootstrapVersion
+        BuildDateTime: "<BUILD_DATE_TIME>"
+        # Add other existing settings that might be needed
+        S3BucketName: !Ref S3BucketName
+        AudioFilePrefix: !Ref AudioFilePrefix
+        TranscriptFilePrefix: !Ref TranscriptFilePrefix
+
   ##########################################################################
   # CodeBuild
   ##########################################################################
@@ -637,6 +671,16 @@ Resources:
                 - echo Installing Web UI dependencies
                 - cd source/ui
                 - npm install
+                - echo Performing token replacement for React build
+                - cd $CODEBUILD_SRC_DIR
+                - echo "Replacing VERSION_TOKEN with actual version in source files"
+                - sed -i "s/<VERSION_TOKEN>/${IMAGE_TAG}/g" source/ui/src/components/common/constants.js
+                - sed -i "s/<VERSION_TOKEN>/${IMAGE_TAG}/g" source/ui/package.json
+                - sed -i "s/<VERSION_TOKEN>/${IMAGE_TAG}/g" source/ui/package-lock.json 2>/dev/null || true
+                - sed -i "s/<VERSION_TOKEN>/${IMAGE_TAG}/g" VERSION
+                - echo "Verification - checking replaced values:"
+                - grep "LMA_VERSION" source/ui/src/components/common/constants.js || true
+                - grep "version" source/ui/package.json | head -1 || true
             build:
               commands:
                 - echo Build started on `date`
@@ -956,6 +1000,12 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                   - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:GetInferenceProfile"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
         - PolicyName: !Sub ${AWS::StackName}-S3
           PolicyDocument:
             Version: 2012-10-17
@@ -1362,7 +1412,9 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
-          KB_ID: !Sub "<Placeholder>"
+          KB_ID: !Ref BedrockKnowledgeBaseID
+          KB_ACCOUNT_ID: !Ref AWS::AccountId
+          KB_REGION: !Ref AWS::Region
           MODEL_ID: !Ref BedrockModelId
       LoggingConfig:
         LogGroup:
@@ -1406,7 +1458,14 @@ Resources:
               - Effect: Allow
                 Action:
                   - "bedrock:InvokeModel"
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+                Resource: 
+                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:GetInferenceProfile"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
 
   AppSyncLambdaRole:
     Type: AWS::IAM::Role
@@ -2093,18 +2152,6 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/queryKnowledgeBase.js
 
-  QueryKnowledgeBaseResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt KnowledgeBaseDataSource.Name
-      TypeName: Query
-      FieldName: queryKnowledgeBase
-      Runtime: 
-        Name: APPSYNC_JS
-        RuntimeVersion: 1.0.0
-      CodeS3Location: ../source/appsync/queryKnowledgeBase.js
 
   ##########################################################################
   # Web Site
