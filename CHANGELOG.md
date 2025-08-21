@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Support for newest Amazon Bedrock models including inference profiles
 - Auto-scroll behavior during meetings - now stops and switches to manual scroll when user scrolls up to read previous transcripts
+- New 'Deployment Info' details added to the UI showing stack name, build date, and version.
 
 ### Changed
 - Migrated from complex update-version.sh script approach to simpler token-based versioning system, eliminating version mismatches and reducing maintenance overhead
