@@ -9,15 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
-## [0.2.12] - 2025-08-20
+## [0.2.12] - 2025-08-21
 ### Added
 - Support for newest Amazon Bedrock models including inference profiles
 - Auto-scroll behavior during meetings - now stops and switches to manual scroll when user scrolls up to read previous transcripts
 
-### Fixed
-- Favicon replaced with browser extension's icon for better branding
-- Virtual Participant Dockerfile - fixed Chromium font dependencies issue that was causing CloudFormation deployment failures
+### Changed
+- Migrated from complex update-version.sh script approach to simpler token-based versioning system, eliminating version mismatches and reducing maintenance overhead
 - Updated Lambda runtime to Node.js 22 across multiple stacks
+- Favicon replaced for better branding
+
+### Fixed
+- Virtual Participant Dockerfile - fixed Chromium font dependencies issue that was causing CloudFormation deployment failures
 
 
 ## [0.2.11] - 2025-07-03
@@ -245,25 +248,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release
 
-[Unreleased]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/compare/main...develop
-[0.2.9]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.9
-[0.2.8]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.8
-[0.2.7]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.7
-[0.2.6]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.6
-[0.2.5]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.5
-[0.2.4]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.4
-[0.2.3]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.3
-[0.2.2]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.2
-[0.2.1]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.1
-[0.2.0]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.2.0
-[0.1.10]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.10
-[0.1.9]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.9
-[0.1.8]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.8
-[0.1.7]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.7
-[0.1.6]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.6
-[0.1.5]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.5
-[0.1.4]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.4
-[0.1.3]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.3
-[0.1.2]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.2
-[0.1.1]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.1
-[0.1.0]: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/releases/tag/v0.1.0
