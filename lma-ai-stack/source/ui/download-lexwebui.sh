@@ -1,3 +1,9 @@
+#
+# 
+# Copyright Amazon.com, Inc. or its affiliates. This material is AWS Content under the AWS Enterprise Agreement 
+# or AWS Customer Agreement (as applicable) and is provided under the AWS Intellectual Property License.
+# 
+#
 curl https://raw.githubusercontent.com/aws-samples/aws-lex-web-ui/v0.19.9/dist/lex-web-ui-loader.css --output public/lex-web-ui-loader.css
 curl https://raw.githubusercontent.com/aws-samples/aws-lex-web-ui/v0.19.9/dist/lex-web-ui-loader.min.css --output public/lex-web-ui-loader.min.css
 curl https://raw.githubusercontent.com/aws-samples/aws-lex-web-ui/v0.19.9/dist/lex-web-ui-loader.min.js --output public/lex-web-ui-loader.min.js

@@ -1,3 +1,9 @@
+#
+# 
+# Copyright Amazon.com, Inc. or its affiliates. This material is AWS Content under the AWS Enterprise Agreement 
+# or AWS Customer Agreement (as applicable) and is provided under the AWS Intellectual Property License.
+# 
+#
 from details import meeting_platform, meeting_name_with_timestamp, should_record_call
 import asyncio
 from playwright.async_api import async_playwright

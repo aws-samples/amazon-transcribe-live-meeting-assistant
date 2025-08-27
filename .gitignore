@@ -10,3 +10,6 @@
 samconfig.toml
 .checksum
 .commit-hash
+
+# DSR
+.dsr/

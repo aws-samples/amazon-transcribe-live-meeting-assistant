@@ -1,3 +1,9 @@
+/*
+ * 
+ * Copyright Amazon.com, Inc. or its affiliates. This material is AWS Content under the AWS Enterprise Agreement 
+ * or AWS Customer Agreement (as applicable) and is provided under the AWS Intellectual Property License.
+ * 
+ */
 /* eslint-disable @typescript-eslint/no-empty-function */
 import React, { createContext, useContext, useState } from 'react';
 
