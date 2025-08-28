@@ -2,7 +2,6 @@ import asyncio
 import details
 import scribe
 from playwright.async_api import TimeoutError
-from takescreenshots import take_and_upload_screenshot
 
 
 async def wait_for_meeting_ui_ready(page, timeout=10000):
