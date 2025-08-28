@@ -1,8 +1,8 @@
 /*
- * 
- * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+ *
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: MIT-0
- * 
+ *
  */
 import { API } from 'aws-amplify';
 import React, { useEffect, useState } from 'react';
