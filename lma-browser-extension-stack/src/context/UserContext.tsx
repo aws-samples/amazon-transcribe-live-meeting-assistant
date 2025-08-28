@@ -1,3 +1,9 @@
+/*
+ * 
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+ * SPDX-License-Identifier: MIT-0
+ * 
+ */
 /* eslint-disable @typescript-eslint/no-empty-function */
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useSettings } from './SettingsContext';

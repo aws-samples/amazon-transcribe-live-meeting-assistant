@@ -1,3 +1,9 @@
+/*
+ * 
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+ * SPDX-License-Identifier: MIT-0
+ * 
+ */
 chrome.runtime.onMessage.addListener(async function (request, sender, sendResponse) {
   if (request.action === "StartTranscription") {
     console.log("Received recorder start streaming message", request);

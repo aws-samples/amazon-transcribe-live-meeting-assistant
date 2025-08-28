@@ -1,3 +1,9 @@
+/*
+ * 
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+ * SPDX-License-Identifier: MIT-0
+ * 
+ */
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import dotenv from 'dotenv';

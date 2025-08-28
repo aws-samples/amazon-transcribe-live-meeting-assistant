@@ -1,3 +1,9 @@
+#
+# 
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+# SPDX-License-Identifier: MIT-0
+# 
+#
 from details import meeting_platform, meeting_name_with_timestamp, should_record_call
 import asyncio
 from playwright.async_api import async_playwright

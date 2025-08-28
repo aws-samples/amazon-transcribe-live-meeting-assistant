@@ -1,3 +1,9 @@
+#
+# 
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+# SPDX-License-Identifier: MIT-0
+# 
+#
 # Invokes Anthropic generate text API using requests module
 # see https://console.anthropic.com/docs/api/reference for more details
 
