@@ -1,3 +1,9 @@
+/*
+ * 
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+ * SPDX-License-Identifier: MIT-0
+ * 
+ */
 // Based on sample from 
 // https://github.com/GoogleChromeLabs/web-audio-samples/blob/main/src/audio-worklet/migration/worklet-recorder/recording-processor.js
 

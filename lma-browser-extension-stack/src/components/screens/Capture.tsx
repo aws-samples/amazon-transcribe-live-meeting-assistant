@@ -1,3 +1,9 @@
+/*
+ * 
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+ * SPDX-License-Identifier: MIT-0
+ * 
+ */
 import React, { useCallback, useEffect } from 'react';
 import logo from './logo.svg';
 import './Capture.css'

@@ -1,3 +1,9 @@
+/*
+ * 
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+ * SPDX-License-Identifier: MIT-0
+ * 
+ */
 const iframe = document.createElement("iframe");
 iframe.setAttribute("hidden", "hidden");
 iframe.setAttribute("id", "permissionsIFrame");

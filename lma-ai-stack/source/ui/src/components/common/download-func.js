@@ -1,3 +1,9 @@
+/*
+ * 
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+ * SPDX-License-Identifier: MIT-0
+ * 
+ */
 /* eslint-disable indent */
 import * as XLSX from 'xlsx';
 import { DEFAULT_OTHER_SPEAKER_NAME } from './constants';

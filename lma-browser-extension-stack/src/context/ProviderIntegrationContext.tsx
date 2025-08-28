@@ -1,3 +1,9 @@
+/*
+ * 
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+ * SPDX-License-Identifier: MIT-0
+ * 
+ */
 /* eslint-disable @typescript-eslint/no-empty-function */
 import React, { createContext, startTransition, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import useWebSocket, { ReadyState } from 'react-use-websocket';
