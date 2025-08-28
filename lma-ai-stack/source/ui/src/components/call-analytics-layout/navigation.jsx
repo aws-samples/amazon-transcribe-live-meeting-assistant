@@ -45,12 +45,12 @@ const generateNavigationItems = (settings) => {
     },
   ];
 
-  // Add Development Info section if settings are available
+  // Add Deployment Info section if settings are available
   if (settings?.StackName || settings?.Version || settings?.BuildDateTime) {
-    const developmentInfoItems = [];
+    const deploymentInfoItems = [];
 
     if (settings?.StackName) {
-      developmentInfoItems.push({
+      deploymentInfoItems.push({
         type: 'link',
         text: `Stack Name: ${settings.StackName}`,
         href: '#',
@@ -64,7 +64,7 @@ const generateNavigationItems = (settings) => {
         // Convert ISO format to readable format: "2025-08-20T17:23:00Z" -> "2025-08-20 17:23:00"
         buildDateTime = settings.BuildDateTime.replace('T', ' ').replace('Z', '');
       }
-      developmentInfoItems.push({
+      deploymentInfoItems.push({
         type: 'link',
         text: `Build: ${buildDateTime}`,
         href: '#',
@@ -72,7 +72,7 @@ const generateNavigationItems = (settings) => {
     }
 
     if (settings?.Version) {
-      developmentInfoItems.push({
+      deploymentInfoItems.push({
         type: 'link',
         text: `Version: ${settings.Version}`,
         href: '#',
@@ -81,8 +81,8 @@ const generateNavigationItems = (settings) => {
 
     navigationItems.push({
       type: 'section',
-      text: 'Development Info',
-      items: developmentInfoItems,
+      text: 'Deployment Info',
+      items: deploymentInfoItems,
     });
   }
 
