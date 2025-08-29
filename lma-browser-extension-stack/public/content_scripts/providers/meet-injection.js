@@ -1,3 +1,9 @@
+/*
+ * 
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+ * SPDX-License-Identifier: MIT-0
+ * 
+ */
 const checkVariable = setInterval(() =>
 {
     const titleElement = document.querySelector('div[data-meeting-title]');

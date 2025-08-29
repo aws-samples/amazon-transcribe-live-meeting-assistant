@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## [0.2.13] - 2025-08-28
+### Added
+- Virtual Participant UI improvements including success modal and enhanced error handling
+
+### Changed
+- Updated license to MIT-0 for improved open source compatibility
+- ESLint and Prettier code formatting improvements for UI components
+
+### Fixed
+- Zoom Virtual Participant issue - improved element waiting logic and removed unnecessary delays
+- Deployment name handling fixes
+
+
 ## [0.2.12] - 2025-08-21
 ### Added
 - Support for newest Amazon Bedrock models including inference profiles
@@ -248,4 +261,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Initial release
-
