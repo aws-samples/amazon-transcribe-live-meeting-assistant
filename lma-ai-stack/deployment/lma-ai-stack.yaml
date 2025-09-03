@@ -37,6 +37,10 @@ Parameters:
     Type: String
     Description: LMA settings SSM Parameter store
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
   AudioRecordingExpirationInDays:
     Type: Number
     Description:
@@ -557,6 +561,7 @@ Resources:
         PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       TimeToLiveSpecification:
         AttributeName: ExpiresAfter
         Enabled: true

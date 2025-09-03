@@ -942,6 +942,85 @@ Conditions:
   ShouldUseTranscriptKnowledgeBase: !Condition ShouldCreateTranscriptKnowledgeBase
 
 Resources:
+  ##########################################################################
+  # Customer Managed KMS Key for encryption across all resources
+  ##########################################################################
+  CustomerManagedEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "Customer managed KMS key for ${AWS::StackName} encryption"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: kms:*
+            Resource: "*"
+          - Sid: Allow DynamoDB Service
+            Effect: Allow
+            Principal:
+              Service: dynamodb.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+          - Sid: Allow CloudWatch Logs Service
+            Effect: Allow
+            Principal:
+              Service: logs.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+          - Sid: Allow S3 Service
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+          - Sid: Allow SNS Service
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+          - Sid: Allow SQS Service
+            Effect: Allow
+            Principal:
+              Service: sqs.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+
+  CustomerManagedEncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${AWS::StackName}-encryption-key"
+      TargetKeyId: !Ref CustomerManagedEncryptionKey
+
   # Custom resource to enforce max length of StackName - prevent downstream failures
   StacknameCheckFunction:
     Type: AWS::Serverless::Function
@@ -1389,6 +1468,7 @@ Resources:
       Parameters:
         Domain: !Ref Domain
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
   COGNITOSTACK:
     Type: AWS::CloudFormation::Stack
@@ -1456,6 +1536,7 @@ Resources:
         CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
         AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         BedrockKnowledgeBaseID: !If
           - ShouldUseTranscriptKnowledgeBase
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
@@ -1615,6 +1696,7 @@ Resources:
           - ""
         ModelValidation: !Ref ModelValidation
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         # Changes to Params below force AgentAssist Setup to update.
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
@@ -1680,6 +1762,7 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         VPC: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.VPC

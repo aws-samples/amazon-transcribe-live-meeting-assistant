@@ -280,6 +280,10 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
   EnableAudioRecording:
     Type: String
     Default: "true"
@@ -709,6 +713,7 @@ Resources:
         PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       TimeToLiveSpecification:
         AttributeName: ExpiresAfter
         Enabled: true

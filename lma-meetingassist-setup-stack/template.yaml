@@ -170,6 +170,10 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
   AmazonQAppId:
     Type: String
     Description: Amazon Q Application ID
@@ -822,6 +826,7 @@ Resources:
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: True
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       TableName: !Sub "${LMAStackName}-QBusiness-CredentialsTable"
       TimeToLiveSpecification:
         AttributeName: ExpiresAt
