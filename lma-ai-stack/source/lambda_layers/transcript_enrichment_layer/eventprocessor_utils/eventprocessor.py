@@ -56,13 +56,16 @@ def get_meeting_ttl():
 def get_transcription_ttl():
     return get_ttl(TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS)
 
-def get_owner_from_jwt(jwt_token, verifySignature):
+def get_owner_from_jwt(jwt_token, verifySignature=True):
     
     if (verifySignature == False):
-        decoded_jwt = jwt.decode(jwt_token, options={"verify_signature": False})
-        print("DECODED JWT", decoded_jwt)
-    else:
-        decoded_jwt = verify_cognito_token(jwt_token)
+        # Log that we're bypassing verification, but don't actually do it in production
+        print("WARNING: JWT signature verification was requested to be bypassed, but this is not allowed for security reasons.")
+        
+    # Always verify the token
+    decoded_jwt = verify_cognito_token(jwt_token)
+    if decoded_jwt is None:
+        raise ValueError("Invalid or expired JWT token")
         
     return decoded_jwt['username']
 
@@ -399,7 +402,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
             sentiment = message["Sentiment"]
         
         if message.get("AccessToken", None):
-            owner = get_owner_from_jwt(message.get("AccessToken"), False)
+            owner = get_owner_from_jwt(message.get("AccessToken"), True)
             
         segments.append(
             dict(

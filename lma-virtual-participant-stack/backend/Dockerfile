@@ -1,4 +1,5 @@
 FROM public.ecr.aws/docker/library/python:3.12
+RUN useradd -m appuser
 USER root
 WORKDIR /srv
 COPY . /srv
@@ -22,4 +23,6 @@ RUN pip3 install --default-timeout=20 -r requirements.txt
 RUN playwright install chromium
 
 RUN chmod +x /srv/entrypoint.sh
+RUN chown -R appuser:appuser /srv
+USER appuser
 ENTRYPOINT ["/srv/entrypoint.sh"]
