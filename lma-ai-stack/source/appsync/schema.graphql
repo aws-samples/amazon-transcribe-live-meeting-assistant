@@ -167,8 +167,8 @@ type Mutation @aws_iam {
     shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools
 	deleteMeetings(input: DeleteMeetingsInput!): DeleteMeetingsOutput @aws_cognito_user_pools
 	# Virtual Participant Mutations
-	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools
-	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools
+	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -196,8 +196,8 @@ type Query @aws_cognito_user_pools
 	listCallsDateShard(date: AWSDate, shard: Int): CallList
     queryKnowledgeBase(input: String!, sessionId: String): String
 	# Virtual Participant Queries
-	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools
-	listVirtualParticipants: VirtualParticipantList @aws_cognito_user_pools
+	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	listVirtualParticipants: VirtualParticipantList @aws_cognito_user_pools @aws_iam
 }
 
 enum Sentiment {

@@ -2200,12 +2200,10 @@ Resources:
       TypeName: Subscription
       FieldName: onCreateVirtualParticipant
       DataSourceName: !GetAtt SubscriptionDataSource.Name
-      RequestMappingTemplate: |
-        {
-          "version": "2018-05-29",
-          "payload": {}
-        }
-      ResponseMappingTemplate: "$util.toJson($context.arguments)"
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
 
   OnUpdateVirtualParticipantAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -2215,12 +2213,10 @@ Resources:
       TypeName: Subscription
       FieldName: onUpdateVirtualParticipant
       DataSourceName: !GetAtt SubscriptionDataSource.Name
-      RequestMappingTemplate: |
-        {
-          "version": "2018-05-29",
-          "payload": {}
-        }
-      ResponseMappingTemplate: "$util.toJson($context.arguments)"
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
 
   ##########################################################################
   # Web Site
