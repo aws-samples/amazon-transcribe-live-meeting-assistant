@@ -6,6 +6,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { useHistory } from 'react-router-dom';
+import { API, graphqlOperation } from 'aws-amplify';
 
 import {
   Form,
@@ -24,6 +25,20 @@ import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
 import useSettingsContext from '../../contexts/settings';
 import { CALLS_PATH } from '../../routes/constants';
+
+// GraphQL mutation to create Virtual Participant
+const createVirtualParticipant = /* GraphQL */ `
+  mutation CreateVirtualParticipant($input: CreateVirtualParticipantInput!) {
+    createVirtualParticipant(input: $input) {
+      VirtualParticipantId
+      meetingName
+      meetingPlatform
+      meetingId
+      status
+      CreatedAt
+    }
+  }
+`;
 
 const MeetingForm = () => {
   const { user } = useAppContext();
@@ -134,20 +149,35 @@ const MeetingForm = () => {
     setError('');
 
     try {
-      // for later use when supporting scheduled meetings
-      const meetingDateTimeFormatted = '';
-
-      console.log('User:', JSON.stringify(user));
-
       const userName = user?.attributes?.email || 'Unknown';
 
-      // get stepfunctions client
+      // Step 1: Create Virtual Participant record first
+      console.log('Creating Virtual Participant record...');
+      const vpResult = await API.graphql(
+        graphqlOperation(createVirtualParticipant, {
+          input: {
+            VirtualParticipantId: `vp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            meetingName,
+            meetingPlatform: meetingPlatform.value.toUpperCase(),
+            meetingId: meetingId.replace(/ /g, ''),
+            meetingPassword: meetingPassword || '',
+            status: 'JOINING',
+            Owner: userName,
+            SharedWith: '',
+            ExpiresAfter: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days from now
+          },
+        }),
+      );
+
+      const virtualParticipantId = vpResult.data.createVirtualParticipant.VirtualParticipantId;
+      console.log('Created VP with ID:', virtualParticipantId);
+
+      // Step 2: Start Step Function with VP ID
       const sfnClient = new SFNClient({
         region: awsExports.aws_project_region,
         credentials: currentCredentials,
       });
 
-      // execute stepfunctions
       const sfnParams = {
         stateMachineArn: settings.LMAVirtualParticipantSchedulerStateMachine,
         input: JSON.stringify({
@@ -157,8 +187,9 @@ const MeetingForm = () => {
             meetingID: meetingId.replace(/ /g, ''),
             meetingPassword,
             meetingName,
-            meetingTime: meetingDateTimeFormatted,
+            meetingTime: '', // for later use when supporting scheduled meetings
             userName,
+            virtualParticipantId, // Now included!
             accessToken: user.signInUserSession.accessToken.jwtToken,
             idToken: user.signInUserSession.idToken.jwtToken,
             rereshToken: user.signInUserSession.refreshToken.token,
@@ -194,6 +225,7 @@ const MeetingForm = () => {
         name: meetingName,
         platform: meetingPlatform?.label || meetingPlatform,
         id: meetingId,
+        vpId: virtualParticipantId,
       });
 
       // Success - show modal and start countdown
@@ -206,7 +238,7 @@ const MeetingForm = () => {
       setMeetingName('');
       setMeetingPlatform('');
     } catch (err) {
-      console.error('Error fetching StepFunctions response:', err);
+      console.error('Error starting virtual participant:', err);
 
       // Try to parse the error message for more specific feedback
       const errorMessage = err.message || '';
@@ -216,6 +248,8 @@ const MeetingForm = () => {
         setError('You do not have permission to start a virtual participant. Please contact your administrator.');
       } else if (errorMessage.includes('InvalidParameterValue')) {
         setError('Invalid meeting information provided. Please check your inputs and try again.');
+      } else if (errorMessage.includes('GraphQL')) {
+        setError('Failed to create virtual participant record. Please try again.');
       } else {
         setError('Failed to start virtual participant. Please check your meeting details and try again.');
       }

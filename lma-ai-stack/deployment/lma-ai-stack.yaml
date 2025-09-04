@@ -534,6 +534,9 @@ Outputs:
       REACT_APP_AWS_REGION=${AWS::Region}
       REACT_APP_SETTINGS_PARAMETER=${LMASettingsParameterName}
       REACT_APP_ENABLE_LEX_AGENT_ASSIST=true
+  AppSyncGraphQLUrl:
+    Description: AppSync GraphQL endpoint URL
+    Value: !GetAtt AppSyncApiEncrypted.GraphQLUrl
 
 Resources:
   EventSourcingTable:
@@ -2152,6 +2155,72 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/queryKnowledgeBase.js
 
+  ##########################################################################
+  # Virtual Participant Resolvers
+  ##########################################################################
+
+  CreateVirtualParticipantAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: createVirtualParticipant
+      RequestMappingTemplateS3Location: ../source/appsync/createVirtualParticipant.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/createVirtualParticipant.response.vtl
+
+  UpdateVirtualParticipantAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: updateVirtualParticipant
+      RequestMappingTemplateS3Location: ../source/appsync/updateVirtualParticipant.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/updateVirtualParticipant.response.vtl
+
+  ListVirtualParticipantsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Query
+      FieldName: listVirtualParticipants
+      RequestMappingTemplateS3Location: ../source/appsync/listVirtualParticipants.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/listVirtualParticipants.response.vtl
+
+  OnCreateVirtualParticipantAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onCreateVirtualParticipant
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "payload": {}
+        }
+      ResponseMappingTemplate: "$util.toJson($context.arguments)"
+
+  OnUpdateVirtualParticipantAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onUpdateVirtualParticipant
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "payload": {}
+        }
+      ResponseMappingTemplate: "$util.toJson($context.arguments)"
 
   ##########################################################################
   # Web Site

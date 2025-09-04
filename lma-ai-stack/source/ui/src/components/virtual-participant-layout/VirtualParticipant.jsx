@@ -2,27 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
 
-import { Container, Header, ColumnLayout } from '@awsui/components-react';
+import { SpaceBetween, Container, Header, ColumnLayout } from '@awsui/components-react';
 import '@awsui/global-styles/index.css';
 
-// import useAppContext from '../../contexts/app';
-// import useSettingsContext from '../../contexts/settings';
-
 import MeetingForm from './MeetingForm';
+import VirtualParticipantList from './VirtualParticipantList';
 
 const VirtualParticipant = () => {
-  const test = '5';
-  // const { currentSession } = useAppContext();
-  // const { settings } = useSettingsContext();
-  // const JWT_TOKEN = currentSession.getAccessToken().getJwtToken();
-  console.log(test);
-
   return (
-    <Container header={<Header variant="h2">Virtual Participant (Preview)</Header>}>
-      <ColumnLayout columns={2}>
-        <MeetingForm />
-      </ColumnLayout>
-    </Container>
+    <SpaceBetween direction="vertical" size="l">
+      <Container header={<Header variant="h2">Start Virtual Participant</Header>}>
+        <ColumnLayout columns={1}>
+          <MeetingForm />
+        </ColumnLayout>
+      </Container>
+
+      <VirtualParticipantList />
+    </SpaceBetween>
   );
 };
 
