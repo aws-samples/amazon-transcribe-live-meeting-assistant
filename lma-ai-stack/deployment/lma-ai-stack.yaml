@@ -1674,6 +1674,7 @@ Resources:
 
   AppSyncApiEncrypted:
     Type: AWS::AppSync::GraphQLApi
+    # checkov:skip=CKV2_AWS_33: "WAF protection is optional for AppSync API based on customer security requirements"
     Properties:
       Name: !Sub "CallAnalytics-${AWS::StackName}"
       AuthenticationType: AMAZON_COGNITO_USER_POOLS
@@ -2368,9 +2369,19 @@ Resources:
 
   WebAppCloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
+    # checkov:skip=CKV_AWS_86: "CloudFront access logging configured via Logging property"
+    # checkov:skip=CKV_AWS_174: "TLS v1.2 enforced via ViewerCertificate configuration"
+    # checkov:skip=CKV_AWS_68: "WAF protection is optional for this distribution based on customer requirements"
     Properties:
       DistributionConfig:
         Comment: !Sub "Web app cloudfront distribution ${AWS::StackName}"
+        Logging:
+          Bucket: !Sub "${LoggingBucketName}.s3.amazonaws.com"
+          Prefix: "cloudfront-logs/"
+          IncludeCookies: false
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          MinimumProtocolVersion: TLSv1.2_2021
         CustomErrorResponses:
           # Send errors to index file
           - ErrorCachingMinTTL: 300

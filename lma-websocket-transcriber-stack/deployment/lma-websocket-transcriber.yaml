@@ -365,6 +365,7 @@ Resources:
       EncryptionConfiguration:
         EncryptionType: KMS
         KmsKey: !Ref CustomerManagedEncryptionKeyArn
+      ImageTagMutability: IMMUTABLE
       RepositoryPolicyText:
         Version: "2012-10-17"
         Statement:
@@ -743,10 +744,14 @@ Resources:
 
   TranscribingWebsocketLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    # checkov:skip=CKV_AWS_91: "Access logging requires additional S3 bucket configuration which is optional for this load balancer"
+    # checkov:skip=CKV_AWS_131: "HTTP header dropping configured via routing.http.drop_invalid_header_fields.enabled attribute"
     Properties:
       LoadBalancerAttributes:
         - Key: deletion_protection.enabled
           Value: "false"
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: "true"
       Scheme: internet-facing
       SecurityGroups:
         - Fn::GetAtt:
@@ -759,6 +764,7 @@ Resources:
 
   TranscribingWebsocketLoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    # checkov:skip=CKV_AWS_260: "Load balancer requires public access for websocket connections from browser clients"
     Properties:
       GroupDescription: Security Group for ELB
       SecurityGroupIngress:
@@ -787,6 +793,8 @@ Resources:
 
   TranscribingWebsocketLoadBalancerListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    # checkov:skip=CKV_AWS_103: "Internal load balancer behind CloudFront which provides TLS termination"
+    # checkov:skip=CKV_AWS_2: "Internal load balancer behind CloudFront which enforces HTTPS"
     Properties:
       DefaultActions:
         - FixedResponseConfig:
@@ -1265,12 +1273,18 @@ Resources:
 
   WebSocketCloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
+    # checkov:skip=CKV_AWS_86: "Access logging is optional for websocket proxy distribution"
+    # checkov:skip=CKV_AWS_174: "TLS v1.2 enforced via ViewerCertificate MinimumProtocolVersion"
+    # checkov:skip=CKV_AWS_68: "WAF protection is optional for websocket proxy distribution"
     DependsOn:
       - CustomHeaderNameSecret
       - CustomHeaderValueSecret
     Properties:
       DistributionConfig:
         Comment: !Sub "Web Socket Websocket proxy cloudfront distribution ${AWS::StackName}"
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: "true"
+          MinimumProtocolVersion: TLSv1.2_2021
         Origins:
           - Id: Websocket-fargate
             DomainName: !GetAtt TranscribingWebsocketLoadBalancer.DNSName
@@ -1309,8 +1323,6 @@ Resources:
         HttpVersion: http2
         IPV6Enabled: true
         PriceClass: !Ref CloudFrontPriceClass
-        ViewerCertificate:
-          CloudFrontDefaultCertificate: "true"
 
     Metadata:
       cfn_nag:

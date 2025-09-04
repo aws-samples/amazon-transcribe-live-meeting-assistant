@@ -54,6 +54,10 @@ Parameters:
     Description: >-
       Enter an email address to receive notifications from the SendMessage action group
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
 Conditions:
   ShouldCreateBedrockKnowledgeBase:
     !Equals [!Ref BedrockKnowledgeBaseId, ""]
@@ -96,6 +100,8 @@ Resources:
 
   SendMessageTopic:
     Type: AWS::SNS::Topic
+    Properties:
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   SendMessageTopicSubscription:
     Type: AWS::SNS::Subscription

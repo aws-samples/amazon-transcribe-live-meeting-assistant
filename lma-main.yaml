@@ -1658,6 +1658,7 @@ Resources:
         WebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
         WebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
         SNSEmailAddress: !Ref AdminEmail
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
   TRANSCRIPTBEDROCKKB:
     Type: AWS::CloudFormation::Stack

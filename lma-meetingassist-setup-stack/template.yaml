@@ -832,6 +832,7 @@ Resources:
     Properties:
       KeySpec: "SYMMETRIC_DEFAULT"
       KeyUsage: "ENCRYPT_DECRYPT"
+      EnableKeyRotation: true
       KeyPolicy:
         Version: "2012-10-17"
         Statement:

@@ -265,7 +265,12 @@ Resources:
     Type: AWS::ECR::Repository
     Properties:
       EmptyOnDelete: true
-      ImageTagMutability: MUTABLE
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: KMS
+        KmsKey: !Ref CustomerManagedEncryptionKeyArn
 
   BuildRole:
     Type: "AWS::IAM::Role"
@@ -606,6 +611,9 @@ Resources:
     Properties:
       CapacityProviders:
         - FARGATE
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
     DependsOn:
       - ECSRoleCustomResource
 
