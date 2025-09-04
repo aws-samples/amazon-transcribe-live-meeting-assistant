@@ -285,9 +285,9 @@ type Subscription {
 		@aws_subscribe(mutations: ["unshareCall"])
 	# Virtual Participant Subscriptions
 	onCreateVirtualParticipant: VirtualParticipant
-		@aws_subscribe(mutations: ["createVirtualParticipant"]) @aws_cognito_user_pools
+		@aws_subscribe(mutations: ["createVirtualParticipant"]) @aws_cognito_user_pools @aws_iam
 	onUpdateVirtualParticipant: VirtualParticipant
-		@aws_subscribe(mutations: ["updateVirtualParticipant"]) @aws_cognito_user_pools
+		@aws_subscribe(mutations: ["updateVirtualParticipant"]) @aws_cognito_user_pools @aws_iam
 }
 
 type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
