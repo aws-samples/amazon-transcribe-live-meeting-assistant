@@ -1065,6 +1065,7 @@ Resources:
     Properties:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
   IsStacknameLengthOK:
     Type: Custom::StacknameCheck
@@ -1207,6 +1208,7 @@ Resources:
     Properties:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
   ValidateParameters:
     Type: Custom::ValidateParameters
@@ -1330,6 +1332,7 @@ Resources:
     Properties:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
   UpdateLMASettingsValues:
     Type: AWS::CloudFormation::CustomResource
@@ -1441,6 +1444,7 @@ Resources:
     Properties:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
   QNABOT:
     Type: AWS::CloudFormation::Stack
@@ -1501,6 +1505,7 @@ Resources:
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         LMASettingsParameterName: !Ref LMASettingsParameter
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
   AISTACK:
     Type: AWS::CloudFormation::Stack
@@ -1739,6 +1744,7 @@ Resources:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-vpc-stack/template.yaml
       Parameters:
         LMAStackName: !Ref "AWS::StackName"
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
   WEBSOCKETTRANSCRIBERSTACK:
     Type: AWS::CloudFormation::Stack
@@ -1852,6 +1858,7 @@ Resources:
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         SourceCodeLocation: <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
 Outputs:
   ApplicationCloudfrontEndpoint:

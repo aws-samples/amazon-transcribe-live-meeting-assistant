@@ -106,6 +106,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/LLMPromptUploadFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   LLMStorePromptTemplates:
     Type: "AWS::CloudFormation::CustomResource"

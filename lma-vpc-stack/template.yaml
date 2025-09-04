@@ -12,6 +12,10 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
 Outputs:
   VPC:
     Description: VPC
@@ -61,6 +65,7 @@ Resources:
     Properties:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
     Metadata:
       cfn_nag:
         rules_to_suppress:

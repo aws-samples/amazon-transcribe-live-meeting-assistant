@@ -62,6 +62,10 @@ Parameters:
     Type: Number
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
 Resources:
 
   BrowserExtensionCodeBuildServiceRole:
@@ -215,6 +219,16 @@ Resources:
 
   CodeBuildTriggerFunction:
     Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     Properties:
       Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: python3.12
@@ -263,6 +277,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/CodeBuildTriggerFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
         
   CodeBuildRun:
     Type: Custom::CodeBuildRun

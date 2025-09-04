@@ -242,6 +242,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/GetLowercaseFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   LowercaseStackName:
     Type: Custom::GetLowercase
@@ -312,6 +313,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/QNASummarizeCallFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   Boto3Layer:
     Type: "AWS::Lambda::LayerVersion"
@@ -424,6 +426,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/QNABedrockKnowledgeBaseFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   QNABedrockAgentFunctionRole:
     Condition: ShouldConfigureBedrockAgent
@@ -527,6 +530,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/QNABedrockAgentFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   QNABedrockLLMFunctionRole:
     Condition: ShouldConfigureBedrockLLM
@@ -619,6 +623,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/QNABedrockLLMFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   SetupFunctionRole:
     Type: "AWS::IAM::Role"
@@ -742,6 +747,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/SetupFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   SetupFunctionResource:
     Type: AWS::CloudFormation::CustomResource

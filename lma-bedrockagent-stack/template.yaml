@@ -130,6 +130,17 @@ Resources:
 
   SendMessageFunction:
     Type: 'AWS::Lambda::Function'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
       Handler: 'index.lambda_handler'
       Role: !GetAtt SendMessageFunctionRole.Arn
@@ -234,6 +245,7 @@ Resources:
 
   BedrockAgent:
     Type: AWS::Bedrock::Agent
+    # checkov:skip=CKV_AWS_373: "Bedrock Agent encryption with CMK is not supported in this CloudFormation resource type"
     Properties:
       AgentName: !Sub "${AWS::StackName}"
       Description: Bedrock Agent for Live Meeting Assistant stack
@@ -295,4 +307,3 @@ Outputs:
   SNSTopicForAgentMessages:
     Value: !GetAtt SendMessageTopic.TopicName
     Description: Agent SendMessage SNS Topic ARN - Add subscriptions to this topic to receive messages from the agent
-

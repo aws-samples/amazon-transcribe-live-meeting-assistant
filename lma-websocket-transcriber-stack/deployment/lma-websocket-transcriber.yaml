@@ -362,6 +362,9 @@ Resources:
     Properties:
       ImageScanningConfiguration:
         ScanOnPush: "true"
+      EncryptionConfiguration:
+        EncryptionType: KMS
+        KmsKey: !Ref CustomerManagedEncryptionKeyArn
       RepositoryPolicyText:
         Version: "2012-10-17"
         Statement:
@@ -458,6 +461,9 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     DependsOn:
       - EcrImagesDeleteLambdaLogGroup
 
@@ -468,6 +474,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/EcrImagesDeleteLambda
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   EcrImagesDelete:
     Type: Custom::EcrImagesDelete
@@ -681,6 +688,9 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     DependsOn:
       - LambdaCodeBuildStartBuildLogGroup
 
@@ -691,6 +701,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/LambdaCodeBuildStartBuild
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   TranscriberCallEventTable:
     Type: AWS::DynamoDB::Table
@@ -1079,6 +1090,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/fargate/TranscriberWebsocket
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -1202,6 +1214,7 @@ Resources:
       Description:
         Generates a random value for custom header name and stores it in
         secrets manager
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
       GenerateSecretString:
         SecretStringTemplate: '{"header_name": "custom_header"}'
         GenerateStringKey: headersecret
@@ -1215,6 +1228,7 @@ Resources:
       Description:
         Generates a random value for custom header value and stores it
         in secrets manager
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
       GenerateSecretString:
         SecretStringTemplate: '{"header_value": "custom_header_value"}'
         GenerateStringKey: headersecret
@@ -1362,6 +1376,10 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - PCAIntegrationFunctionLogGroup
 
@@ -1372,6 +1390,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/PCAIntegrationFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   PCAIntegrationFunctionRole:
     Type: AWS::IAM::Role
