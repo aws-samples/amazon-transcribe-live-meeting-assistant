@@ -420,6 +420,10 @@ Parameters:
     Description: >
       Provide the *id* (not name) of an existing Bedrock Knowledge Base to be used for Agent Assist bot.
 
+  LoggingBucketName:
+    Type: String
+    Description: Name of the logging bucket for S3 access logs
+
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -756,6 +760,12 @@ Resources:
 
   LambdaCodeBuildStartBuildExecutionRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "CodeBuild integration requires broad CloudWatch Logs access for log group creation and management"
+    # checkov:skip=CKV_AWS_111: "CodeBuild integration requires broad CloudWatch Logs access for log group creation and management"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -838,6 +848,9 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     DependsOn:
       - LambdaCodeBuildStartBuildLogGroup
 
@@ -848,6 +861,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/LambdaCodeBuildStartBuild
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   DataStreamConsumer:
     Type: AWS::Kinesis::StreamConsumer
@@ -862,6 +876,9 @@ Resources:
       # yamllint disable rule:line-length
       TemplateURL: !Sub https://s3.${AWS::Region}.amazonaws.com/${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/bedrock-preview-boto3-stack.yaml
       # yamllint enable rule:line-length
+      Parameters:
+        CustomerManagedEncryptionKeyArn: !Ref CustomerManagedEncryptionKeyArn
+        LoggingBucketName: !Ref LoggingBucketName
 
   FetchTranscript:
     Type: AWS::Serverless::Function
@@ -886,6 +903,10 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - FetchTranscriptLogGroup
 
@@ -896,6 +917,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/FetchTranscript
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   LambdaFetchTranscriptExecutionRole:
     Type: AWS::IAM::Role
@@ -956,6 +978,10 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - BedrockSummaryLambdaLogGroup
 
@@ -966,6 +992,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/BedrockSummaryLambda
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   BedrockSummaryLambdaExecutionRole:
     Type: AWS::IAM::Role
@@ -1056,6 +1083,10 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - AsyncAgentAssistOrchestratorLogGroup
 
@@ -1066,6 +1097,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/AsyncAgentAssistOrchestrator
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   AsyncAgentAssistOrchestratorExecutionRole:
     Type: AWS::IAM::Role
@@ -1134,6 +1166,10 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - AsyncTranscriptSummaryOrchestratorLogGroup
 
@@ -1144,6 +1180,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/AsyncTranscriptSummaryOrchestrator
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   AsyncTranscriptSummaryOrchestratorExecutionRole:
     Type: AWS::IAM::Role
@@ -1189,6 +1226,8 @@ Resources:
   ##########################################################################
   CategorySNSTopic:
     Type: AWS::SNS::Topic
+    Properties:
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   ##########################################################################
   # Call Event Processor
@@ -1204,6 +1243,10 @@ Resources:
             reason: Customer can choose reserved concurrency based on their requirement.
           - id: W11
             reason: comprehend does not support resource-level permissions
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
       Architectures:
         - arm64
@@ -1342,6 +1385,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/CallEventProcessorFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   ##########################################################################
   # Transcript Enrichment Lambda Layers
@@ -1424,6 +1468,17 @@ Resources:
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/QueryKnowledgeBaseResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - QueryKnowledgeBaseResolverFunctionLogGroup
 
@@ -1434,6 +1489,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/QueryKnowledgeBaseResolverFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   QueryKnowledgeBaseResolverFunctionExecutionRole:
     Type: AWS::IAM::Role
@@ -1532,6 +1588,10 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - MeetingControlsResolverFunctionLogGroup
 
@@ -1542,6 +1602,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/MeetingControlsResolverFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   MeetingControlsResolverFunctionExecutionRole:
     Type: AWS::IAM::Role
@@ -2200,6 +2261,9 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     Type: AWS::Lambda::Function
     Properties:
       Handler: "index.lambda_handler"
@@ -2242,6 +2306,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/BucketDeleteLambda
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   RemoveWebAppBucketOnDelete:
     Type: Custom::RemoveWebAppBucketOnDelete
@@ -2251,6 +2316,7 @@ Resources:
 
   WebAppBucket:
     Type: AWS::S3::Bucket
+    # checkov:skip=CKV_AWS_18: "Access logging configured via LoggingConfiguration property"
     Properties:
       AccessControl: Private
       BucketEncryption:
@@ -2264,6 +2330,9 @@ Resources:
         RestrictPublicBuckets: true
       VersioningConfiguration:
         Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucketName
+        LogFilePrefix: "webapp-bucket-logs/"
       WebsiteConfiguration:
         IndexDocument: index.html
         ErrorDocument: index.html

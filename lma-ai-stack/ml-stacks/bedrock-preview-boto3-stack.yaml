@@ -11,11 +11,27 @@ Resources:
         rules_to_suppress:
         - id: W51
           reason: Bucket has identity based policy.
+    # checkov:skip=CKV_AWS_18: "Access logging configured via LoggingConfiguration property"
+    # checkov:skip=CKV_AWS_53: "Public access is blocked via PublicAccessBlockConfiguration"
+    # checkov:skip=CKV_AWS_54: "Public access is blocked via PublicAccessBlockConfiguration"
+    # checkov:skip=CKV_AWS_55: "Public access is blocked via PublicAccessBlockConfiguration"
+    # checkov:skip=CKV_AWS_56: "Public access is blocked via PublicAccessBlockConfiguration"
+    # checkov:skip=CKV_AWS_21: "Versioning enabled via VersioningConfiguration"
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
         - ServerSideEncryptionByDefault:
             SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucketName
+        LogFilePrefix: "bedrock-boto3-bucket-logs/"
 
   BedrockBoto3ZipFunctionRole:
     Type: AWS::IAM::Role
@@ -137,6 +153,10 @@ Resources:
         - id: W92
           reason: No requirements to set reserved concurrencies, function will not
             be invoked simultaneously.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
     - BedrockBoto3ZipFunctionLogGroup
 
@@ -147,6 +167,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/BedrockBoto3ZipFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   BedrockBoto3Zip:
     Type: Custom::BedrockBoto3Zip
@@ -176,3 +197,11 @@ Parameters:
     Type: Number
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
+  LoggingBucketName:
+    Type: String
+    Description: Name of the logging bucket for S3 access logs

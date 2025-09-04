@@ -83,6 +83,7 @@ Resources:
             reason: >-
               "Allow Resource * for CloudWatch Logs API since the resources are customer
               defined."
+    # checkov:skip=CKV_AWS_111: "VPC Flow Logs requires broad CloudWatch Logs access for log group creation and management"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"

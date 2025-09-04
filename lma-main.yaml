@@ -1348,6 +1348,69 @@ Resources:
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
+  ## LOGGING BUCKET FOR S3 ACCESS LOGS
+  LoggingBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: "This is the logging destination bucket - does not require its own access logging"
+    # checkov:skip=CKV_AWS_18: "This is the logging destination bucket - does not require its own access logging"
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLogs
+            Status: Enabled
+            ExpirationInDays: 180
+            Prefix: ""
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  LoggingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LoggingBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowS3ServerAccessLogs
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource: !Sub "${LoggingBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+          - Sid: EnforceSSLOnly
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: 
+              - !Sub "${LoggingBucket.Arn}/*"
+              - !Sub "${LoggingBucket.Arn}"
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+
   ## BUCKET TO STORE STEREO RECORDINGS AND TRANSCRIPTS FILES
   RecordingsBucket:
     Type: AWS::S3::Bucket
@@ -1370,6 +1433,9 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: "recordings-bucket-logs/"
       LifecycleConfiguration:
         Rules:
           - Id: AudioRetention
@@ -1554,6 +1620,7 @@ Resources:
         AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        LoggingBucketName: !Ref LoggingBucket
         BedrockKnowledgeBaseID: !If
           - ShouldUseTranscriptKnowledgeBase
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID

@@ -477,6 +477,7 @@ Resources:
         rules_to_suppress:
           - id: W57
             reason: Using cognito assume role with web identity and scoped permissions.
+    # checkov:skip=CKV_AWS_366: "Agent Assist Bot requires unauthenticated access for public bot functionality"
     Properties:
       IdentityPoolName: !Sub "${AWS::StackName}-AgentAssistBot-IdentityPool"
       AllowUnauthenticatedIdentities: true

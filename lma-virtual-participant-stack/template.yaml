@@ -220,6 +220,10 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
 Conditions:
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
@@ -238,6 +242,12 @@ Resources:
 
   LogsPolicy:
     Type: "AWS::IAM::ManagedPolicy"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W13
+            reason: "CloudWatch Logs requires broad access for log group and stream creation"
+    # checkov:skip=CKV_AWS_111: "CloudWatch Logs requires broad access for log group and stream creation"
     Properties:
       Path: /
       PolicyDocument:
@@ -337,6 +347,12 @@ Resources:
 
   BuildCustomResourceRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "CodeBuild integration requires broad access for build project management"
+    # checkov:skip=CKV_AWS_111: "CodeBuild integration requires broad access for build project management"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -364,6 +380,16 @@ Resources:
 
   BuildCustomResourceFunction:
     Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     Properties:
       Handler: index.handler
       Role: !GetAtt BuildCustomResourceRole.Arn
@@ -407,6 +433,12 @@ Resources:
 
   ECSRoleCustomResourceRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "ECS service-linked role creation requires broad IAM access"
+    # checkov:skip=CKV_AWS_109: "ECS service-linked role creation requires broad IAM permissions management access"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -436,6 +468,16 @@ Resources:
 
   ECSRoleCustomResourceFunction:
     Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     Properties:
       Handler: index.handler
       Role: !GetAtt ECSRoleCustomResourceRole.Arn
@@ -478,6 +520,12 @@ Resources:
 
   TaskRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Virtual participant requires broad Transcribe and Comprehend access for real-time processing"
+    # checkov:skip=CKV_AWS_111: "Virtual participant requires broad Transcribe and Comprehend access for real-time processing"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -651,6 +699,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/fargate/VirtualParticipant
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -666,6 +715,12 @@ Resources:
 
   ECSPolicy:
     Type: AWS::IAM::ManagedPolicy
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W13
+            reason: "ECS task scheduling requires broad access for task execution and role passing"
+    # checkov:skip=CKV_AWS_111: "ECS task scheduling requires broad access for task execution and role passing"
     Properties:
       PolicyDocument:
         Version: "2012-10-17"
@@ -717,9 +772,16 @@ Resources:
     Properties:
       RetentionInDays: 7
       LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}"
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   LMAVirtualParticipantSchedulerStateMachineRole:
     Type: "AWS::IAM::Role"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Step Functions state machine requires broad access for logging, tracing, and scheduling operations"
+    # checkov:skip=CKV_AWS_111: "Step Functions state machine requires broad access for logging, tracing, and scheduling operations"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"

@@ -852,6 +852,8 @@ Resources:
         - AttributeName: "jti"
           KeyType: "HASH"
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: True
         KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
@@ -863,6 +865,12 @@ Resources:
   LambdaFunctionRole:
     Type: AWS::IAM::Role
     Condition: ShouldCreateQPlugin
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "QBusiness integration requires broad S3 access for transcript retrieval from various buckets"
+    # checkov:skip=CKV_AWS_111: "QBusiness integration requires broad S3 access for transcript retrieval from various buckets"
     Properties:
       RoleName: !Sub "QNA-${LMAStackName}-QBusiness-LambdaHook-FunctionRole"
       AssumeRolePolicyDocument:
