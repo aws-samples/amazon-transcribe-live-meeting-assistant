@@ -2156,67 +2156,16 @@ Resources:
       CodeS3Location: ../source/appsync/queryKnowledgeBase.js
 
   ##########################################################################
-  # Virtual Participant Resolvers
+  # Virtual Participant - Amplify Data (Simple Approach)
   ##########################################################################
 
-  CreateVirtualParticipantAppSyncResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
+  VirtualParticipantAmplifyData:
+    Type: AWS::CloudFormation::Stack
     Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
-      TypeName: Mutation
-      FieldName: createVirtualParticipant
-      RequestMappingTemplateS3Location: ../source/appsync/createVirtualParticipant.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/createVirtualParticipant.response.vtl
-
-  UpdateVirtualParticipantAppSyncResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
-      TypeName: Mutation
-      FieldName: updateVirtualParticipant
-      RequestMappingTemplateS3Location: ../source/appsync/updateVirtualParticipant.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/updateVirtualParticipant.response.vtl
-
-  ListVirtualParticipantsAppSyncResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
-      TypeName: Query
-      FieldName: listVirtualParticipants
-      RequestMappingTemplateS3Location: ../source/appsync/listVirtualParticipants.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/listVirtualParticipants.response.vtl
-
-  OnCreateVirtualParticipantAppSyncResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      TypeName: Subscription
-      FieldName: onCreateVirtualParticipant
-      DataSourceName: !GetAtt SubscriptionDataSource.Name
-      CodeS3Location: ../source/appsync/subscription.js
-      Runtime:
-        Name: APPSYNC_JS
-        RuntimeVersion: 1.0.0
-
-  OnUpdateVirtualParticipantAppSyncResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      TypeName: Subscription
-      FieldName: onUpdateVirtualParticipant
-      DataSourceName: !GetAtt SubscriptionDataSource.Name
-      CodeS3Location: ../source/appsync/subscription.js
-      Runtime:
-        Name: APPSYNC_JS
-        RuntimeVersion: 1.0.0
+      TemplateURL: !Sub https://s3.${AWS::Region}.amazonaws.com/${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/virtual-participant-amplify-data.yaml
+      Parameters:
+        UserPoolId: !Ref UserPoolId
+        AppSyncApiId: !GetAtt AppSyncApiEncrypted.ApiId
 
   ##########################################################################
   # Web Site

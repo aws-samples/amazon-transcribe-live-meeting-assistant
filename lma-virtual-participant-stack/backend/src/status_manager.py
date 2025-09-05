@@ -48,20 +48,20 @@ class VirtualParticipantStatusManager:
             bool: True if update was successful, False otherwise
         """
         try:
-            # GraphQL mutation to update VP status
+            # Simple GraphQL mutation for new schema
             mutation = """
             mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
                 updateVirtualParticipant(input: $input) {
-                    VirtualParticipantId
+                    id
                     status
-                    UpdatedAt
+                    updatedAt
                 }
             }
             """
             
             variables = {
                 "input": {
-                    "VirtualParticipantId": self.participant_id,
+                    "id": self.participant_id,
                     "status": status
                 }
             }
@@ -97,6 +97,15 @@ class VirtualParticipantStatusManager:
             
             logger.info(f"GraphQL response status: {response.status_code}")
             logger.info(f"GraphQL response body: {response.text}")
+            logger.info(f"GraphQL response headers: {dict(response.headers)}")
+            
+            # Additional debugging for subscription issues
+            logger.info(f"=== STATUS UPDATE DEBUG ===")
+            logger.info(f"Participant ID: {self.participant_id}")
+            logger.info(f"Status being set: {status}")
+            logger.info(f"GraphQL endpoint: {self.graphql_endpoint}")
+            logger.info(f"Request payload: {json.dumps(payload, indent=2)}")
+            logger.info(f"=== END DEBUG ===")
             
             if response.status_code == 200:
                 response_data = response.json()
@@ -114,15 +123,22 @@ class VirtualParticipantStatusManager:
             return False
     
     def set_joining(self) -> bool:
-        """Set status to JOINING"""
+        """Set status to JOINING - VP is attempting to join meeting"""
         return self.update_status("JOINING")
     
+    def set_joined(self) -> bool:
+        """Set status to JOINED - VP successfully joined meeting"""
+        result = self.update_status("JOINED")
+        if not result:
+            raise Exception("Failed to update VP status to JOINED via GraphQL")
+        return result
+    
     def set_completed(self) -> bool:
-        """Set status to COMPLETED"""
+        """Set status to COMPLETED - Meeting ended successfully"""
         return self.update_status("COMPLETED")
     
     def set_failed(self, error_message: Optional[str] = None) -> bool:
-        """Set status to FAILED with optional error message"""
+        """Set status to FAILED - Wrong password, invalid meeting ID, or other error"""
         return self.update_status("FAILED", error_message)
 
 

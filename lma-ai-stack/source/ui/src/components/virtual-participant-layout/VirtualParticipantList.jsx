@@ -16,20 +16,22 @@ import {
   Container,
   Alert,
 } from '@awsui/components-react';
+import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
+import useAppContext from '../../contexts/app';
+import awsExports from '../../aws-exports';
+import useSettingsContext from '../../contexts/settings';
 
-// GraphQL operations
+// Simplified GraphQL operations for new schema
 const listVirtualParticipants = /* GraphQL */ `
   query ListVirtualParticipants {
     listVirtualParticipants {
-      VirtualParticipants {
-        VirtualParticipantId
-        meetingName
-        meetingPlatform
-        meetingId
-        status
-        CreatedAt
-        UpdatedAt
-      }
+      id
+      meetingName
+      meetingPlatform
+      meetingId
+      status
+      createdAt
+      updatedAt
     }
   }
 `;
@@ -37,33 +39,24 @@ const listVirtualParticipants = /* GraphQL */ `
 const createVirtualParticipant = /* GraphQL */ `
   mutation CreateVirtualParticipant($input: CreateVirtualParticipantInput!) {
     createVirtualParticipant(input: $input) {
-      VirtualParticipantId
+      id
       meetingName
       meetingPlatform
       meetingId
       status
-      CreatedAt
+      createdAt
     }
   }
 `;
 
-// Subscription temporarily disabled due to authorization issues
-// const onUpdateVirtualParticipant = /* GraphQL */ `
-//   subscription OnUpdateVirtualParticipant {
-//     onUpdateVirtualParticipant {
-//       VirtualParticipantId
-//       meetingName
-//       status
-//       UpdatedAt
-//     }
-//   }
-// `;
 
 const StatusBadge = ({ status }) => {
   const getStatusProps = (vpStatus) => {
     switch (vpStatus) {
       case 'JOINING':
-        return { color: 'blue', children: 'Joining' };
+        return { color: 'yellow', children: 'Joining' };
+      case 'JOINED':
+        return { color: 'blue', children: 'Joined' };
       case 'COMPLETED':
         return { color: 'green', children: 'Completed' };
       case 'FAILED':
@@ -85,6 +78,9 @@ StatusBadge.propTypes = {
 const renderStatusCell = (item) => <StatusBadge status={item.status} />;
 
 const VirtualParticipantList = () => {
+  const { user, currentCredentials } = useAppContext();
+  const { settings } = useSettingsContext();
+
   const [participants, setParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedItems, setSelectedItems] = useState([]);
@@ -96,6 +92,7 @@ const VirtualParticipantList = () => {
     meetingPassword: '',
   });
   const [notification, setNotification] = useState(null);
+  const [isCreating, setIsCreating] = useState(false);
 
   const loadParticipants = async () => {
     try {
@@ -103,8 +100,8 @@ const VirtualParticipantList = () => {
       console.log('Loading virtual participants...');
       const result = await API.graphql(graphqlOperation(listVirtualParticipants));
       console.log('GraphQL result:', JSON.stringify(result, null, 2));
-      console.log('VirtualParticipants array:', result.data?.listVirtualParticipants?.VirtualParticipants);
-      setParticipants(result.data.listVirtualParticipants.VirtualParticipants || []);
+      console.log('VirtualParticipants array:', result.data?.listVirtualParticipants);
+      setParticipants(result.data.listVirtualParticipants || []);
     } catch (error) {
       console.error('Error loading participants:', error);
       console.error('Full error:', JSON.stringify(error, null, 2));
@@ -122,39 +119,190 @@ const VirtualParticipantList = () => {
     loadParticipants();
   }, []);
 
-  // Subscribe to real-time updates - TEMPORARILY DISABLED due to authorization issues
-  // TODO: Re-enable after fixing subscription authorization
+  // Simple subscription for real-time updates
   useEffect(() => {
-    console.log('Real-time subscriptions temporarily disabled - using polling instead');
+    console.log('Setting up simple subscription for VP status updates');
 
-    // Poll for updates every 10 seconds as fallback
-    const pollInterval = setInterval(() => {
-      loadParticipants();
-    }, 10000);
+    const onUpdateVirtualParticipant = /* GraphQL */ `
+      subscription OnUpdateVirtualParticipant {
+        onUpdateVirtualParticipant {
+          id
+          status
+          updatedAt
+          meetingName
+        }
+      }
+    `;
 
-    return () => clearInterval(pollInterval);
+    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipant)).subscribe({
+      next: ({ value }) => {
+        const updatedParticipant = value?.data?.onUpdateVirtualParticipant;
+        console.log('Received VP update:', updatedParticipant);
+
+        if (!updatedParticipant || !updatedParticipant.id) {
+          console.warn('Received invalid VP update data:', updatedParticipant);
+          return;
+        }
+
+        // Update participant in the list
+        setParticipants((prev) =>
+          prev.map((p) => {
+            if (p.id === updatedParticipant.id) {
+              return {
+                ...p,
+                status: updatedParticipant.status,
+                updatedAt: updatedParticipant.updatedAt,
+              };
+            }
+            return p;
+          }),
+        );
+
+        // Show notification
+        if (updatedParticipant.meetingName && updatedParticipant.status) {
+          setNotification({
+            type: 'success',
+            content: `${updatedParticipant.meetingName} status updated to ${updatedParticipant.status}`,
+          });
+
+          // Clear notification after 5 seconds
+          setTimeout(() => setNotification(null), 5000);
+        }
+      },
+      error: (error) => {
+        console.error('Subscription error:', error);
+        setNotification({
+          type: 'error',
+          content: 'Real-time updates unavailable. Please refresh page to see latest status.',
+        });
+      },
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const handleCreateParticipant = async () => {
-    try {
-      const userName = 'test-user@example.com'; // TODO: Get from auth context
+  const parseStepFunctionError = (executionResult) => {
+    const output = executionResult.output ? JSON.parse(executionResult.output) : {};
+    const errorMessage = output.errorMessage || output.error || '';
 
-      await API.graphql(
+    // Check for specific error patterns
+    if (
+      errorMessage.toLowerCase().includes('meeting not found') ||
+      errorMessage.toLowerCase().includes('invalid meeting id')
+    ) {
+      return 'Meeting ID not found. Please check the meeting ID and try again.';
+    }
+
+    if (
+      errorMessage.toLowerCase().includes('incorrect password') ||
+      errorMessage.toLowerCase().includes('authentication failed')
+    ) {
+      return 'Incorrect meeting password. Please check the password and try again.';
+    }
+
+    if (
+      errorMessage.toLowerCase().includes('meeting not started') ||
+      errorMessage.toLowerCase().includes('meeting has not begun')
+    ) {
+      return 'Meeting has not started yet. Please wait for the host to start the meeting.';
+    }
+
+    if (
+      errorMessage.toLowerCase().includes('meeting ended') ||
+      errorMessage.toLowerCase().includes('meeting has ended')
+    ) {
+      return 'This meeting has already ended. Please check the meeting details.';
+    }
+
+    if (
+      errorMessage.toLowerCase().includes('permission denied') ||
+      errorMessage.toLowerCase().includes('not authorized')
+    ) {
+      return 'Permission denied. You may not have access to join this meeting.';
+    }
+
+    // Generic error
+    return errorMessage || 'Failed to join meeting. Please check your meeting details and try again.';
+  };
+
+  const handleCreateParticipant = async () => {
+    setIsCreating(true);
+
+    try {
+      const userName = user?.attributes?.email || 'test-user@example.com';
+
+      // Step 1: Create Virtual Participant record first (simplified)
+      console.log('Creating Virtual Participant record...');
+      const vpResult = await API.graphql(
         graphqlOperation(createVirtualParticipant, {
           input: {
-            VirtualParticipantId: `vp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             meetingName: createForm.meetingName,
             meetingPlatform: createForm.meetingPlatform,
-            meetingId: createForm.meetingId,
+            meetingId: createForm.meetingId.replace(/ /g, ''),
             meetingPassword: createForm.meetingPassword || '',
             status: 'JOINING',
-            Owner: userName,
-            SharedWith: '',
-            ExpiresAfter: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days from now
           },
         }),
       );
 
+      const virtualParticipantId = vpResult.data.createVirtualParticipant.id;
+      console.log('Created VP with ID:', virtualParticipantId);
+
+      // Step 2: Start Step Function with VP ID
+      const sfnClient = new SFNClient({
+        region: awsExports.aws_project_region,
+        credentials: currentCredentials,
+      });
+
+      const sfnParams = {
+        stateMachineArn: settings.LMAVirtualParticipantSchedulerStateMachine,
+        input: JSON.stringify({
+          apiInfo: { httpMethod: 'POST' },
+          data: {
+            meetingPlatform: createForm.meetingPlatform === 'ZOOM' ? 'Zoom' : createForm.meetingPlatform,
+            meetingID: createForm.meetingId.replace(/ /g, ''),
+            meetingPassword: createForm.meetingPassword,
+            meetingName: createForm.meetingName,
+            meetingTime: '', // for later use when supporting scheduled meetings
+            userName,
+            virtualParticipantId, // Now included!
+            accessToken: user.signInUserSession.accessToken.jwtToken,
+            idToken: user.signInUserSession.idToken.jwtToken,
+            rereshToken: user.signInUserSession.refreshToken.token,
+          },
+        }),
+      };
+
+      console.log('StepFunctions params:', JSON.stringify(sfnParams));
+
+      const data = await sfnClient.send(new StartSyncExecutionCommand(sfnParams));
+      console.log('StepFunctions response:', JSON.stringify(data));
+
+      // Check execution status
+      if (data.status === 'FAILED') {
+        const errorMessage = parseStepFunctionError(data);
+        setNotification({
+          type: 'error',
+          content: errorMessage,
+        });
+        return;
+      }
+
+      if (data.status === 'SUCCEEDED') {
+        // Parse output to check for join success
+        const output = data.output ? JSON.parse(data.output) : {};
+
+        if (output.success === false || output.error) {
+          const errorMessage = parseStepFunctionError(data);
+          setNotification({
+            type: 'error',
+            content: errorMessage,
+          });
+          return;
+        }
+      }
+
+      // Success - close modal and refresh list
       setShowCreateModal(false);
       setCreateForm({
         meetingName: '',
@@ -168,14 +316,41 @@ const VirtualParticipantList = () => {
 
       setNotification({
         type: 'success',
-        content: 'Virtual participant created successfully',
+        content: `Virtual participant "${createForm.meetingName}" started successfully and is joining the meeting.`,
       });
-    } catch (error) {
-      console.error('Error creating participant:', error);
-      setNotification({
-        type: 'error',
-        content: 'Failed to create virtual participant',
-      });
+    } catch (err) {
+      console.error('Error starting virtual participant:', err);
+
+      // Try to parse the error message for more specific feedback
+      const errorMessage = err.message || '';
+      if (errorMessage.includes('StateMachineDoesNotExist')) {
+        setNotification({
+          type: 'error',
+          content: 'Virtual Participant service is not configured. Please contact your administrator.',
+        });
+      } else if (errorMessage.includes('AccessDenied')) {
+        setNotification({
+          type: 'error',
+          content: 'You do not have permission to start a virtual participant. Please contact your administrator.',
+        });
+      } else if (errorMessage.includes('InvalidParameterValue')) {
+        setNotification({
+          type: 'error',
+          content: 'Invalid meeting information provided. Please check your inputs and try again.',
+        });
+      } else if (errorMessage.includes('GraphQL')) {
+        setNotification({
+          type: 'error',
+          content: 'Failed to create virtual participant record. Please try again.',
+        });
+      } else {
+        setNotification({
+          type: 'error',
+          content: 'Failed to start virtual participant. Please check your meeting details and try again.',
+        });
+      }
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -205,10 +380,10 @@ const VirtualParticipantList = () => {
       sortingField: 'status',
     },
     {
-      id: 'CreatedAt',
+      id: 'createdAt',
       header: 'Created',
-      cell: (item) => new Date(item.CreatedAt).toLocaleString(),
-      sortingField: 'CreatedAt',
+      cell: (item) => new Date(item.createdAt).toLocaleString(),
+      sortingField: 'createdAt',
     },
   ];
 
@@ -274,9 +449,11 @@ const VirtualParticipantList = () => {
               <Button
                 variant="primary"
                 onClick={handleCreateParticipant}
-                disabled={!createForm.meetingName || !createForm.meetingId}
+                disabled={!createForm.meetingName || !createForm.meetingId || isCreating}
+                loading={isCreating}
+                loadingText="Starting Virtual Participant..."
               >
-                Create
+                {isCreating ? 'Starting...' : 'Join Now'}
               </Button>
             </SpaceBetween>
           </Box>
