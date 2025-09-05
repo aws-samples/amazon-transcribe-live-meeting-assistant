@@ -1,0 +1,2 @@
+# Script only processes files that already exist in the build directory
+lma-ai-stack/deployment/manifest-generator/app.js

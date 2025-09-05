@@ -310,9 +310,13 @@ const onTextMessage = async (
 
       await writeCallStartEvent(callMetaData, server);
       const tempRecordingFilename = getTempRecordingFileName(callMetaData);
-      const sanitizedFilename = path.basename(tempRecordingFilename);
+      // Sanitize filename to prevent path traversal attacks
+      const sanitizedFilename = path.basename(tempRecordingFilename).replace(/[^a-zA-Z0-9._-]/g, '_');
+      if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
+          throw new Error('Invalid recording filename provided');
+      }
       const writeRecordingStream = fs.createWriteStream(
-          path.join(LOCAL_TEMP_DIR, sanitizedFilename)
+          path.resolve(LOCAL_TEMP_DIR, sanitizedFilename)
       );
       const recordingFileSize = 0;
 
@@ -457,13 +461,20 @@ const endCall = async (
                     );
                     const tempRecordingFilename = getTempRecordingFileName(callMetaData);
                     const wavRecordingFilename = getWavRecordingFileName(callMetaData);
-                    const sanitizedTempFilename = path.basename(tempRecordingFilename);
-                    const sanitizedWavFilename = path.basename(wavRecordingFilename);
+                    // Sanitize filenames to prevent path traversal attacks
+                    const sanitizedTempFilename = path.basename(tempRecordingFilename).replace(/[^a-zA-Z0-9._-]/g, '_');
+                    const sanitizedWavFilename = path.basename(wavRecordingFilename).replace(/[^a-zA-Z0-9._-]/g, '_');
+                    
+                    if (!sanitizedTempFilename || sanitizedTempFilename === '.' || sanitizedTempFilename === '..' ||
+                        !sanitizedWavFilename || sanitizedWavFilename === '.' || sanitizedWavFilename === '..') {
+                        throw new Error('Invalid filename provided for recording conversion');
+                    }
+                    
                     const readStream = fs.createReadStream(
-                        path.join(LOCAL_TEMP_DIR, sanitizedTempFilename)
+                        path.resolve(LOCAL_TEMP_DIR, sanitizedTempFilename)
                     );
                     const writeStream = fs.createWriteStream(
-                        path.join(LOCAL_TEMP_DIR, sanitizedWavFilename)
+                        path.resolve(LOCAL_TEMP_DIR, sanitizedWavFilename)
                     );
                     writeStream.write(header);
                     for await (const chunk of readStream) {
@@ -475,11 +486,11 @@ const endCall = async (
                     await writeToS3(callMetaData, sanitizedWavFilename);
                     await deleteTempFile(
                         callMetaData,
-                        path.join(LOCAL_TEMP_DIR, sanitizedTempFilename)
+                        path.resolve(LOCAL_TEMP_DIR, sanitizedTempFilename)
                     );
                     await deleteTempFile(
                         callMetaData,
-                        path.join(LOCAL_TEMP_DIR, sanitizedWavFilename)
+                        path.resolve(LOCAL_TEMP_DIR, sanitizedWavFilename)
                     );
 
                     const recordingUrl = `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${RECORDING_FILE_PREFIX}${wavRecordingFilename}`;
@@ -534,8 +545,12 @@ const endCall = async (
 };
 
 const writeToS3 = async (callMetaData: CallMetaData, tempFileName: string) => {
-    const sanitizedFileName = path.basename(tempFileName);
-    const sourceFile = path.join(LOCAL_TEMP_DIR, sanitizedFileName);
+    // Sanitize filename to prevent path traversal attacks
+    const sanitizedFileName = path.basename(tempFileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+    if (!sanitizedFileName || sanitizedFileName === '.' || sanitizedFileName === '..') {
+        throw new Error('Invalid filename provided');
+    }
+    const sourceFile = path.resolve(LOCAL_TEMP_DIR, sanitizedFileName);
     let data;
     const fileStream = fs.createReadStream(sourceFile);
     const uploadParams = {
