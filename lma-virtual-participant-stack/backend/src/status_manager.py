@@ -86,14 +86,24 @@ class VirtualParticipantStatusManager:
             self._sign_request(request)
             
             # Send the request
+            logger.info(f"Sending GraphQL request to: {self.graphql_endpoint}")
+            logger.info(f"Request payload: {json.dumps(payload, indent=2)}")
+            
             response = requests.post(
                 request.url,
                 data=request.body,
                 headers=dict(request.headers)
             )
             
+            logger.info(f"GraphQL response status: {response.status_code}")
+            logger.info(f"GraphQL response body: {response.text}")
+            
             if response.status_code == 200:
-                logger.info(f"Updated VP {self.participant_id} status to {status}")
+                response_data = response.json()
+                if 'errors' in response_data:
+                    logger.error(f"GraphQL errors: {response_data['errors']}")
+                    return False
+                logger.info(f"Successfully updated VP {self.participant_id} status to {status}")
                 return True
             else:
                 logger.error(f"Failed to update VP status: HTTP {response.status_code} - {response.text}")

@@ -47,16 +47,17 @@ const createVirtualParticipant = /* GraphQL */ `
   }
 `;
 
-const onUpdateVirtualParticipant = /* GraphQL */ `
-  subscription OnUpdateVirtualParticipant {
-    onUpdateVirtualParticipant {
-      VirtualParticipantId
-      meetingName
-      status
-      UpdatedAt
-    }
-  }
-`;
+// Subscription temporarily disabled due to authorization issues
+// const onUpdateVirtualParticipant = /* GraphQL */ `
+//   subscription OnUpdateVirtualParticipant {
+//     onUpdateVirtualParticipant {
+//       VirtualParticipantId
+//       meetingName
+//       status
+//       UpdatedAt
+//     }
+//   }
+// `;
 
 const StatusBadge = ({ status }) => {
   const getStatusProps = (vpStatus) => {
@@ -99,10 +100,14 @@ const VirtualParticipantList = () => {
   const loadParticipants = async () => {
     try {
       setLoading(true);
+      console.log('Loading virtual participants...');
       const result = await API.graphql(graphqlOperation(listVirtualParticipants));
+      console.log('GraphQL result:', JSON.stringify(result, null, 2));
+      console.log('VirtualParticipants array:', result.data?.listVirtualParticipants?.VirtualParticipants);
       setParticipants(result.data.listVirtualParticipants.VirtualParticipants || []);
     } catch (error) {
       console.error('Error loading participants:', error);
+      console.error('Full error:', JSON.stringify(error, null, 2));
       setNotification({
         type: 'error',
         content: 'Failed to load virtual participants',
@@ -117,47 +122,35 @@ const VirtualParticipantList = () => {
     loadParticipants();
   }, []);
 
-  // Subscribe to real-time updates
+  // Subscribe to real-time updates - TEMPORARILY DISABLED due to authorization issues
+  // TODO: Re-enable after fixing subscription authorization
   useEffect(() => {
-    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipant)).subscribe({
-      next: ({ value }) => {
-        const updatedParticipant = value.data.onUpdateVirtualParticipant;
+    console.log('Real-time subscriptions temporarily disabled - using polling instead');
 
-        // Update participant in the list
-        setParticipants((prev) =>
-          prev.map((p) =>
-            p.VirtualParticipantId === updatedParticipant.VirtualParticipantId ? { ...p, ...updatedParticipant } : p,
-          ),
-        );
+    // Poll for updates every 10 seconds as fallback
+    const pollInterval = setInterval(() => {
+      loadParticipants();
+    }, 10000);
 
-        // Show notification
-        setNotification({
-          type: 'success',
-          content: `${updatedParticipant.meetingName} status updated to ${updatedParticipant.status}`,
-        });
-
-        // Clear notification after 5 seconds
-        setTimeout(() => setNotification(null), 5000);
-      },
-      error: (error) => {
-        console.error('Subscription error:', error);
-        setNotification({
-          type: 'error',
-          content: 'Error receiving real-time updates',
-        });
-      },
-    });
-
-    return () => subscription.unsubscribe();
+    return () => clearInterval(pollInterval);
   }, []);
 
   const handleCreateParticipant = async () => {
     try {
+      const userName = 'test-user@example.com'; // TODO: Get from auth context
+
       await API.graphql(
         graphqlOperation(createVirtualParticipant, {
           input: {
-            ...createForm,
+            VirtualParticipantId: `vp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            meetingName: createForm.meetingName,
+            meetingPlatform: createForm.meetingPlatform,
+            meetingId: createForm.meetingId,
+            meetingPassword: createForm.meetingPassword || '',
             status: 'JOINING',
+            Owner: userName,
+            SharedWith: '',
+            ExpiresAfter: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days from now
           },
         }),
       );

@@ -3,13 +3,11 @@
   "version": "2018-05-29",
   "operation": "Scan",
   "filter": {
-    "expression": "#owner = :owner AND begins_with(#pk, :vpPrefix)",
+    "expression": "begins_with(#pk, :vpPrefix)",
     "expressionNames": {
-      "#owner": "Owner",
       "#pk": "PK"
     },
     "expressionValues": {
-      ":owner": $util.dynamodb.toDynamoDBJson($ctx.identity.claims.email),
       ":vpPrefix": $util.dynamodb.toDynamoDBJson("vp#")
     }
   }

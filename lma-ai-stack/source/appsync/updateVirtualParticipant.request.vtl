@@ -10,14 +10,14 @@
   "#updatedAt": "UpdatedAt"
 })
 #set($expressionAttributeValues = {
-  ":updatedAt": $util.dynamodb.toDynamoDBJson($now)
+  ":updatedAt": $util.dynamodb.toDynamoDB($now)
 })
 
 ## Add fields that are being updated
 #if($ctx.args.input.status)
   #set($updateExpression = "${updateExpression}, #status = :status")
   #set($void = $expressionAttributeNames.put("#status", "status"))
-  #set($void = $expressionAttributeValues.put(":status", $util.dynamodb.toDynamoDBJson($ctx.args.input.status)))
+  #set($void = $expressionAttributeValues.put(":status", $util.dynamodb.toDynamoDB($ctx.args.input.status)))
 #end
 
 #if($ctx.args.input.meetingName)
