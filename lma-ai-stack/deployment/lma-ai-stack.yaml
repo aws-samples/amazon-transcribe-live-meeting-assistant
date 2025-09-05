@@ -2221,13 +2221,15 @@ Resources:
       FieldName: createVirtualParticipant
       DataSourceName: !GetAtt VirtualParticipantDataSource.Name
       RequestMappingTemplate: |
+        #set($id = $util.autoId())
         {
           "version": "2018-05-29",
           "operation": "PutItem",
           "key": {
-            "id": $util.dynamodb.toDynamoDBJson($util.autoId())
+            "id": $util.dynamodb.toDynamoDBJson($id)
           },
           "attributeValues": {
+            "id": $util.dynamodb.toDynamoDBJson($id),
             "meetingName": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingName),
             "meetingPlatform": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingPlatform),
             "meetingId": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingId),

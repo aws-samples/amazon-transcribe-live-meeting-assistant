@@ -49,7 +49,6 @@ const createVirtualParticipant = /* GraphQL */ `
   }
 `;
 
-
 const StatusBadge = ({ status }) => {
   const getStatusProps = (vpStatus) => {
     switch (vpStatus) {

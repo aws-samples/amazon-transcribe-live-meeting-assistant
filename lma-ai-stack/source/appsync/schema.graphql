@@ -199,17 +199,17 @@ type Query @aws_cognito_user_pools
 	listVirtualParticipants: [VirtualParticipant]
 }
 
-# Simple Virtual Participant Types
+# Simple Virtual Participant Types - All fields nullable except ID to avoid subscription issues
 type VirtualParticipant {
 	id: ID!
-	meetingName: String!
-	meetingPlatform: String!
-	meetingId: String!
+	meetingName: String
+	meetingPlatform: String
+	meetingId: String
 	meetingPassword: String
-	status: String!
-	owner: String!
-	createdAt: AWSDateTime!
-	updatedAt: AWSDateTime!
+	status: String
+	owner: String
+	createdAt: AWSDateTime
+	updatedAt: AWSDateTime
 }
 
 input CreateVirtualParticipantInput {
