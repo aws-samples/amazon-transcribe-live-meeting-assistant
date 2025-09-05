@@ -2288,8 +2288,8 @@ Resources:
       ResponseMappingTemplate: |
         $util.toJson($ctx.result.items)
 
-  # Simple subscription resolver
-  OnUpdateVirtualParticipantResolver:
+  # Simple subscription resolver (renamed to avoid conflicts)
+  SimpleOnUpdateVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
