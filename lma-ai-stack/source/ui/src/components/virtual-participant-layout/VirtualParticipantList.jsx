@@ -53,15 +53,15 @@ const StatusBadge = ({ status }) => {
   const getStatusProps = (vpStatus) => {
     switch (vpStatus) {
       case 'JOINING':
-        return { color: 'yellow', children: 'Joining' };
+        return { color: 'blue', children: 'Joining' };
       case 'JOINED':
-        return { color: 'blue', children: 'Joined' };
+        return { color: 'green', children: 'Joined' };
       case 'COMPLETED':
         return { color: 'green', children: 'Completed' };
       case 'FAILED':
         return { color: 'red', children: 'Failed' };
       default:
-        return { color: 'grey', children: vpStatus };
+        return { color: 'grey', children: vpStatus || 'Unknown' };
     }
   };
 
