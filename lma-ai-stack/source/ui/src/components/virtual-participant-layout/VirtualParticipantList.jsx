@@ -118,67 +118,18 @@ const VirtualParticipantList = () => {
     loadParticipants();
   }, []);
 
-  // Simple subscription for real-time updates
+  // Simple polling for reliable updates (no complex subscription issues)
   useEffect(() => {
-    console.log('Setting up simple subscription for VP status updates');
-
-    const onUpdateVirtualParticipant = /* GraphQL */ `
-      subscription OnUpdateVirtualParticipant {
-        onUpdateVirtualParticipant {
-          id
-          status
-          updatedAt
-          meetingName
-        }
+    const pollInterval = setInterval(() => {
+      // Only poll if we have participants and not currently loading
+      if (participants.length > 0 && !loading && !isCreating) {
+        console.log('Polling for VP status updates...');
+        loadParticipants();
       }
-    `;
+    }, 3000); // Poll every 3 seconds
 
-    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipant)).subscribe({
-      next: ({ value }) => {
-        const updatedParticipant = value?.data?.onUpdateVirtualParticipant;
-        console.log('Received VP update:', updatedParticipant);
-
-        if (!updatedParticipant || !updatedParticipant.id) {
-          console.warn('Received invalid VP update data:', updatedParticipant);
-          return;
-        }
-
-        // Update participant in the list
-        setParticipants((prev) =>
-          prev.map((p) => {
-            if (p.id === updatedParticipant.id) {
-              return {
-                ...p,
-                status: updatedParticipant.status,
-                updatedAt: updatedParticipant.updatedAt,
-              };
-            }
-            return p;
-          }),
-        );
-
-        // Show notification
-        if (updatedParticipant.meetingName && updatedParticipant.status) {
-          setNotification({
-            type: 'success',
-            content: `${updatedParticipant.meetingName} status updated to ${updatedParticipant.status}`,
-          });
-
-          // Clear notification after 5 seconds
-          setTimeout(() => setNotification(null), 5000);
-        }
-      },
-      error: (error) => {
-        console.error('Subscription error:', error);
-        setNotification({
-          type: 'error',
-          content: 'Real-time updates unavailable. Please refresh page to see latest status.',
-        });
-      },
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+    return () => clearInterval(pollInterval);
+  }, [participants.length, loading, isCreating]);
 
   const parseStepFunctionError = (executionResult) => {
     const output = executionResult.output ? JSON.parse(executionResult.output) : {};

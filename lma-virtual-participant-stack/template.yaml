@@ -548,6 +548,15 @@ Resources:
                 Action:
                   - "appsync:GraphQL"
                 Resource: "*"
+        - PolicyName: VirtualParticipantTablePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:GetItem"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VirtualParticipant*"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role

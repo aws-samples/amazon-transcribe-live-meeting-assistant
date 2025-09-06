@@ -2241,6 +2241,9 @@ Resources:
           }
         }
       ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
         $util.toJson($ctx.result)
 
   UpdateVirtualParticipantResolver:
@@ -2268,11 +2271,18 @@ Resources:
               ":status": $util.dynamodb.toDynamoDBJson($ctx.args.input.status),
               ":updatedAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601())
             }
-          },
-          "returnValues": "ALL_NEW"
+          }
         }
       ResponseMappingTemplate: |
-        $util.toJson($ctx.result.Attributes)
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        ## Since we don't have returnValues, construct response manually
+        {
+          "id": "$ctx.args.input.id",
+          "status": "$ctx.args.input.status",
+          "updatedAt": "$util.time.nowISO8601()"
+        }
 
   ListVirtualParticipantsResolver:
     Type: AWS::AppSync::Resolver
@@ -2290,7 +2300,7 @@ Resources:
       ResponseMappingTemplate: |
         $util.toJson($ctx.result.items)
 
-  # Simple subscription resolver (renamed to avoid conflicts)
+  # Simple subscription resolver using JavaScript (like other working subscriptions)
   SimpleOnUpdateVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -2299,13 +2309,10 @@ Resources:
       TypeName: Subscription
       FieldName: onUpdateVirtualParticipant
       DataSourceName: !GetAtt SubscriptionDataSource.Name
-      RequestMappingTemplate: |
-        {
-          "version": "2018-05-29",
-          "payload": {}
-        }
-      ResponseMappingTemplate: |
-        $util.toJson($context.result)
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
 
   ##########################################################################
   # Web Site
