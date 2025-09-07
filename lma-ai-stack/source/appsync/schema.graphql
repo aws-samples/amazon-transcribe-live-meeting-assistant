@@ -166,9 +166,16 @@ type Mutation @aws_iam {
 	shareTranscriptSegment(input: ShareTranscriptSegmentInput!): ShareTranscriptSegmentOutput
     shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools
 	deleteMeetings(input: DeleteMeetingsInput!): DeleteMeetingsOutput @aws_cognito_user_pools
-	# Simple Virtual Participant Mutations
 	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+}
+
+type VirtualParticipant @model @auth(rules: [{ allow: owner }]) {
+  meetingName: String!
+  meetingPlatform: String!
+  meetingId: String!
+  meetingPassword: String
+  status: String!
 }
 
 type OverallSentiment @aws_cognito_user_pools

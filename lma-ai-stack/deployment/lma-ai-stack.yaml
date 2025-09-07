@@ -2156,10 +2156,8 @@ Resources:
       CodeS3Location: ../source/appsync/queryKnowledgeBase.js
 
   ##########################################################################
-  # Virtual Participant - Simple Approach (Inline)
+  # Virtual Participant
   ##########################################################################
-
-  # Simple DynamoDB table for Virtual Participants
   VirtualParticipantTable:
     Type: AWS::DynamoDB::Table
     Properties:
