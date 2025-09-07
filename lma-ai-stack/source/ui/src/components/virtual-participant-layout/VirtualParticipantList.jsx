@@ -22,8 +22,7 @@ import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
 import useSettingsContext from '../../contexts/settings';
 
-// Simplified GraphQL operations for new schema
-const listVirtualParticipants = /* GraphQL */ `
+const listVirtualParticipants = `
   query ListVirtualParticipants {
     listVirtualParticipants {
       id

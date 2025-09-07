@@ -48,7 +48,6 @@ class VirtualParticipantStatusManager:
             bool: True if update was successful, False otherwise
         """
         try:
-            # Simple GraphQL mutation for new schema
             mutation = """
             mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
                 updateVirtualParticipant(input: $input) {

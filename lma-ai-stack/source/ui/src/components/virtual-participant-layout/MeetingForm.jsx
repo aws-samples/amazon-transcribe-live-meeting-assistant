@@ -189,7 +189,7 @@ const MeetingForm = () => {
             meetingName,
             meetingTime: '', // for later use when supporting scheduled meetings
             userName,
-            virtualParticipantId, // Now included!
+            virtualParticipantId,
             accessToken: user.signInUserSession.accessToken.jwtToken,
             idToken: user.signInUserSession.idToken.jwtToken,
             rereshToken: user.signInUserSession.refreshToken.token,

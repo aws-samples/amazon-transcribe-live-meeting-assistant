@@ -2209,7 +2209,6 @@ Resources:
                   - dynamodb:DeleteItem
                 Resource: !GetAtt VirtualParticipantTable.Arn
 
-  # Simple resolvers using direct DynamoDB operations
   CreateVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -2301,7 +2300,6 @@ Resources:
       ResponseMappingTemplate: |
         $util.toJson($ctx.result.items)
 
-  # Simple subscription resolver using JavaScript (like other working subscriptions)
   SimpleOnUpdateVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
