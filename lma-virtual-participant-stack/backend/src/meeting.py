@@ -13,10 +13,19 @@ import kds
 import recording
 from status_manager import VirtualParticipantStatusManager
 
-if meeting_platform == "Chime":
-    from chime import meeting
-elif meeting_platform == "Zoom":
-    from zoom import meeting
+try:
+    platform_lower = meeting_platform.lower().strip()
+    
+    if platform_lower in ["chime", "amazon chime"]:
+        from chime import meeting
+    elif platform_lower in ["zoom"]:
+        from zoom import meeting
+    else:
+        raise Exception(f"Unsupported meeting platform: '{meeting_platform}'")
+except ImportError as e:
+    raise Exception(f"Failed to import meeting function for platform '{meeting_platform}': {e}")
+except Exception as e:
+    raise
 
 
 async def app():
@@ -27,7 +36,6 @@ async def app():
         try:
             status_manager = VirtualParticipantStatusManager(vp_id)
             status_manager.set_joining()
-            print(f"VP {vp_id} status set to JOINING")
         except Exception as e:
             print(f"Failed to initialize status manager: {e}")
     
@@ -53,54 +61,36 @@ async def app():
 
             # Try to join meeting - update status based on success/failure
             try:
-                # Pass status manager to meeting function so it can update status at right time
-                if meeting_platform == "Zoom":
-                    await meeting(page, status_manager, vp_id)
-                else:
-                    await meeting(page)
-                
-                # If we get here without exception, meeting completed successfully
-                # Note: The meeting() function runs until the meeting ends
+                await meeting(page, status_manager, vp_id)
                 
             except Exception as meeting_error:
-                # Meeting join failed - check for specific error types
                 error_msg = str(meeting_error).lower()
                 
                 if any(keyword in error_msg for keyword in ['password', 'passcode', 'authentication']):
                     if status_manager:
                         status_manager.set_failed("Wrong meeting password")
-                        print(f"VP {vp_id} status set to FAILED - Wrong password")
                 elif any(keyword in error_msg for keyword in ['meeting not found', 'invalid meeting', 'meeting id']):
                     if status_manager:
                         status_manager.set_failed("Invalid meeting ID")
-                        print(f"VP {vp_id} status set to FAILED - Invalid meeting ID")
                 elif any(keyword in error_msg for keyword in ['meeting ended', 'meeting has ended']):
                     if status_manager:
                         status_manager.set_failed("Meeting already ended")
-                        print(f"VP {vp_id} status set to FAILED - Meeting ended")
                 elif any(keyword in error_msg for keyword in ['permission denied', 'not authorized']):
                     if status_manager:
                         status_manager.set_failed("Permission denied")
-                        print(f"VP {vp_id} status set to FAILED - Permission denied")
                 else:
                     if status_manager:
                         status_manager.set_failed(f"Meeting join failed: {meeting_error}")
-                        print(f"VP {vp_id} status set to FAILED - {meeting_error}")
                 raise
             
             await browser.close()
         
-        # Meeting completed successfully
         if status_manager:
             status_manager.set_completed()
-            print(f"VP {vp_id} status set to COMPLETED")
             
     except Exception as e:
-        print(f"Overall error: {e}")
-        # Only set failed if we haven't already set a more specific error
         if status_manager and str(e) not in ['Meeting join failed', 'Wrong password', 'Invalid meeting ID']:
             status_manager.set_failed(str(e))
-            print(f"VP {vp_id} status set to FAILED - {e}")
         raise
 
 

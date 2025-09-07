@@ -208,6 +208,8 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	meetingPassword: String
 	status: String
 	owner: String
+	Owner: String
+	SharedWith: String
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
 }

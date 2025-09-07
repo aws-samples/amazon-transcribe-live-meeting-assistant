@@ -15,6 +15,7 @@ import {
   Select,
   Container,
   Alert,
+  Flashbar,
 } from '@awsui/components-react';
 import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
 import useAppContext from '../../contexts/app';
@@ -92,18 +93,14 @@ const VirtualParticipantList = () => {
   });
   const [notification, setNotification] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [popupNotifications, setPopupNotifications] = useState([]);
 
   const loadParticipants = async () => {
     try {
       setLoading(true);
-      console.log('Loading virtual participants...');
       const result = await API.graphql(graphqlOperation(listVirtualParticipants));
-      console.log('GraphQL result:', JSON.stringify(result, null, 2));
-      console.log('VirtualParticipants array:', result.data?.listVirtualParticipants);
       setParticipants(result.data.listVirtualParticipants || []);
     } catch (error) {
-      console.error('Error loading participants:', error);
-      console.error('Full error:', JSON.stringify(error, null, 2));
       setNotification({
         type: 'error',
         content: 'Failed to load virtual participants',
@@ -118,17 +115,97 @@ const VirtualParticipantList = () => {
     loadParticipants();
   }, []);
 
-  // Simple polling for reliable updates (no complex subscription issues)
   useEffect(() => {
-    const pollInterval = setInterval(() => {
-      // Only poll if we have participants and not currently loading
-      if (participants.length > 0 && !loading && !isCreating) {
-        console.log('Polling for VP status updates...');
-        loadParticipants();
+    const onUpdateVirtualParticipant = /* GraphQL */ `
+      subscription OnUpdateVirtualParticipant {
+        onUpdateVirtualParticipant {
+          id
+          status
+          updatedAt
+          meetingName
+          owner
+          Owner
+          SharedWith
+        }
       }
-    }, 3000); // Poll every 3 seconds
+    `;
 
-    return () => clearInterval(pollInterval);
+    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipant)).subscribe({
+      next: ({ value }) => {
+        const updatedParticipant = value?.data?.onUpdateVirtualParticipant;
+
+        if (!updatedParticipant || !updatedParticipant.id) {
+          return;
+        }
+
+        setParticipants((prev) =>
+          prev.map((p) => {
+            if (p.id === updatedParticipant.id) {
+              return {
+                ...p,
+                status: updatedParticipant.status,
+                updatedAt: updatedParticipant.updatedAt,
+              };
+            }
+            return p;
+          }),
+        );
+
+        const existingParticipant = participants.find((p) => p.id === updatedParticipant.id);
+        const meetingName = updatedParticipant.meetingName || existingParticipant?.meetingName || 'Unknown Meeting';
+
+        if (updatedParticipant.status) {
+          const notificationId = `vp-${updatedParticipant.id}-${Date.now()}`;
+          let notificationType = 'info';
+          let message = '';
+
+          switch (updatedParticipant.status) {
+            case 'JOINED':
+              notificationType = 'success';
+              message = `Virtual Participant joined "${meetingName}"`;
+              break;
+            case 'COMPLETED':
+              notificationType = 'success';
+              message = `Virtual Participant completed "${meetingName}"`;
+              break;
+            case 'FAILED':
+              notificationType = 'error';
+              message = `Virtual Participant failed to join "${meetingName}"`;
+              break;
+            default:
+              message = `Virtual Participant status updated to ${updatedParticipant.status} for "${meetingName}"`;
+          }
+
+          const popupNotification = {
+            type: notificationType,
+            content: message,
+            dismissible: true,
+            dismissLabel: 'Dismiss',
+            id: notificationId,
+            onDismiss: () => {
+              setPopupNotifications((current) => current.filter((n) => n.id !== notificationId));
+            },
+          };
+
+          setPopupNotifications((current) => [...current, popupNotification]);
+
+          setTimeout(() => {
+            setPopupNotifications((current) => current.filter((n) => n.id !== notificationId));
+          }, 8000);
+        }
+      },
+      error: () => {
+        const pollInterval = setInterval(() => {
+          if (participants.length > 0 && !loading && !isCreating) {
+            loadParticipants();
+          }
+        }, 5000);
+
+        return () => clearInterval(pollInterval);
+      },
+    });
+
+    return () => subscription.unsubscribe();
   }, [participants.length, loading, isCreating]);
 
   const parseStepFunctionError = (executionResult) => {
@@ -181,8 +258,6 @@ const VirtualParticipantList = () => {
     try {
       const userName = user?.attributes?.email || 'test-user@example.com';
 
-      // Step 1: Create Virtual Participant record first (simplified)
-      console.log('Creating Virtual Participant record...');
       const vpResult = await API.graphql(
         graphqlOperation(createVirtualParticipant, {
           input: {
@@ -196,9 +271,7 @@ const VirtualParticipantList = () => {
       );
 
       const virtualParticipantId = vpResult.data.createVirtualParticipant.id;
-      console.log('Created VP with ID:', virtualParticipantId);
 
-      // Step 2: Start Step Function with VP ID
       const sfnClient = new SFNClient({
         region: awsExports.aws_project_region,
         credentials: currentCredentials,
@@ -213,9 +286,9 @@ const VirtualParticipantList = () => {
             meetingID: createForm.meetingId.replace(/ /g, ''),
             meetingPassword: createForm.meetingPassword,
             meetingName: createForm.meetingName,
-            meetingTime: '', // for later use when supporting scheduled meetings
+            meetingTime: '',
             userName,
-            virtualParticipantId, // Now included!
+            virtualParticipantId,
             accessToken: user.signInUserSession.accessToken.jwtToken,
             idToken: user.signInUserSession.idToken.jwtToken,
             rereshToken: user.signInUserSession.refreshToken.token,
@@ -223,12 +296,8 @@ const VirtualParticipantList = () => {
         }),
       };
 
-      console.log('StepFunctions params:', JSON.stringify(sfnParams));
-
       const data = await sfnClient.send(new StartSyncExecutionCommand(sfnParams));
-      console.log('StepFunctions response:', JSON.stringify(data));
 
-      // Check execution status
       if (data.status === 'FAILED') {
         const errorMessage = parseStepFunctionError(data);
         setNotification({
@@ -239,7 +308,6 @@ const VirtualParticipantList = () => {
       }
 
       if (data.status === 'SUCCEEDED') {
-        // Parse output to check for join success
         const output = data.output ? JSON.parse(data.output) : {};
 
         if (output.success === false || output.error) {
@@ -252,7 +320,6 @@ const VirtualParticipantList = () => {
         }
       }
 
-      // Success - close modal and refresh list
       setShowCreateModal(false);
       setCreateForm({
         meetingName: '',
@@ -261,7 +328,6 @@ const VirtualParticipantList = () => {
         meetingPassword: '',
       });
 
-      // Refresh the list
       loadParticipants();
 
       setNotification({
@@ -269,9 +335,6 @@ const VirtualParticipantList = () => {
         content: `Virtual participant "${createForm.meetingName}" started successfully and is joining the meeting.`,
       });
     } catch (err) {
-      console.error('Error starting virtual participant:', err);
-
-      // Try to parse the error message for more specific feedback
       const errorMessage = err.message || '';
       if (errorMessage.includes('StateMachineDoesNotExist')) {
         setNotification({
@@ -347,6 +410,9 @@ const VirtualParticipantList = () => {
 
   return (
     <SpaceBetween direction="vertical" size="l">
+      {/* Popup notifications using Flashbar */}
+      {popupNotifications.length > 0 && <Flashbar items={popupNotifications} />}
+
       {notification && (
         <Alert type={notification.type} dismissible onDismiss={() => setNotification(null)}>
           {notification.content}

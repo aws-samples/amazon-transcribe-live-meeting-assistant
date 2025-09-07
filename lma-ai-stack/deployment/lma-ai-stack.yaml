@@ -2236,6 +2236,8 @@ Resources:
             "meetingPassword": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingPassword),
             "status": $util.dynamodb.toDynamoDBJson($ctx.args.input.status),
             "owner": $util.dynamodb.toDynamoDBJson($ctx.identity.username),
+            "Owner": $util.dynamodb.toDynamoDBJson($ctx.identity.username),
+            "SharedWith": $util.dynamodb.toDynamoDBJson(""),
             "createdAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601()),
             "updatedAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601())
           }
@@ -2277,11 +2279,12 @@ Resources:
         #if($ctx.error)
           $util.error($ctx.error.message, $ctx.error.type)
         #end
-        ## Since we don't have returnValues, construct response manually
         {
           "id": "$ctx.args.input.id",
           "status": "$ctx.args.input.status",
-          "updatedAt": "$util.time.nowISO8601()"
+          "updatedAt": "$util.time.nowISO8601()",
+          "Owner": "$ctx.identity.username",
+          "SharedWith": ""
         }
 
   ListVirtualParticipantsResolver:

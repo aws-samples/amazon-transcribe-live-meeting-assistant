@@ -66,17 +66,14 @@ class VirtualParticipantStatusManager:
                 }
             }
             
-            # Log error message if failed
             if status == "FAILED" and error_message:
                 logger.error(f"VP {self.participant_id} failed: {error_message}")
             
-            # Prepare the GraphQL request
             payload = {
                 "query": mutation,
                 "variables": variables
             }
             
-            # Create and sign the request
             request = AWSRequest(
                 method='POST',
                 url=self.graphql_endpoint,
@@ -85,37 +82,20 @@ class VirtualParticipantStatusManager:
             )
             self._sign_request(request)
             
-            # Send the request
-            logger.info(f"Sending GraphQL request to: {self.graphql_endpoint}")
-            logger.info(f"Request payload: {json.dumps(payload, indent=2)}")
-            
             response = requests.post(
                 request.url,
                 data=request.body,
                 headers=dict(request.headers)
             )
             
-            logger.info(f"GraphQL response status: {response.status_code}")
-            logger.info(f"GraphQL response body: {response.text}")
-            logger.info(f"GraphQL response headers: {dict(response.headers)}")
-            
-            # Additional debugging for subscription issues
-            logger.info(f"=== STATUS UPDATE DEBUG ===")
-            logger.info(f"Participant ID: {self.participant_id}")
-            logger.info(f"Status being set: {status}")
-            logger.info(f"GraphQL endpoint: {self.graphql_endpoint}")
-            logger.info(f"Request payload: {json.dumps(payload, indent=2)}")
-            logger.info(f"=== END DEBUG ===")
-            
             if response.status_code == 200:
                 response_data = response.json()
                 if 'errors' in response_data:
                     logger.error(f"GraphQL errors: {response_data['errors']}")
                     return False
-                logger.info(f"Successfully updated VP {self.participant_id} status to {status}")
                 return True
             else:
-                logger.error(f"Failed to update VP status: HTTP {response.status_code} - {response.text}")
+                logger.error(f"Failed to update VP status: HTTP {response.status_code}")
                 return False
             
         except Exception as e:
