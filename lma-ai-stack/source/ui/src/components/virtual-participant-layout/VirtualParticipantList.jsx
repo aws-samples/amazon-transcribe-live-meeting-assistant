@@ -400,11 +400,11 @@ const VirtualParticipantList = () => {
   ];
 
   const platformOptions = [
-    { label: 'Zoom', value: 'ZOOM' },
-    { label: 'Chime', value: 'CHIME' },
-    { label: 'Teams', value: 'TEAMS' },
-    { label: 'WebEx', value: 'WEBEX' },
-    { label: 'Google Meet', value: 'GOOGLE_MEET' },
+    { label: 'Zoom', value: 'ZOOM', disabled: false },
+    { label: 'Chime', value: 'CHIME', disabled: false },
+    { label: 'Teams', value: 'TEAMS', disabled: true },
+    { label: 'WebEx', value: 'WEBEX', disabled: true },
+    { label: 'Google Meet', value: 'GOOGLE_MEET', disabled: true },
   ];
 
   return (
