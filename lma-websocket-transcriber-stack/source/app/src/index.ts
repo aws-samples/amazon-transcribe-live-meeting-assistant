@@ -324,18 +324,18 @@ const onTextMessage = async (
       const audioInputStream = new BlockStream({ size: highWaterMarkSize });
       const socketCallMap: SocketCallData = {
           callMetadata: {
-            callId: callMetaData.callId,
-            callEvent: callMetaData.callEvent,
-            fromNumber: callMetaData.fromNumber,
-            toNumber: callMetaData.toNumber,
-            activeSpeaker: callMetaData.activeSpeaker,
-            agentId: callMetaData.agentId,
-            accessToken: callMetaData.accessToken,
-            idToken: callMetaData.idToken,
-            refreshToken: callMetaData.refreshToken,
-            shouldRecordCall: callMetaData.shouldRecordCall,
-            samplingRate: callMetaData.samplingRate,
-            channels: callMetaData.channels
+              callId: callMetaData.callId,
+              callEvent: callMetaData.callEvent,
+              fromNumber: callMetaData.fromNumber,
+              toNumber: callMetaData.toNumber,
+              activeSpeaker: callMetaData.activeSpeaker,
+              agentId: callMetaData.agentId,
+              accessToken: callMetaData.accessToken,
+              idToken: callMetaData.idToken,
+              refreshToken: callMetaData.refreshToken,
+              shouldRecordCall: callMetaData.shouldRecordCall,
+              samplingRate: callMetaData.samplingRate,
+              channels: callMetaData.channels
           },
           audioInputStream: audioInputStream,
           writeRecordingStream: writeRecordingStream,
