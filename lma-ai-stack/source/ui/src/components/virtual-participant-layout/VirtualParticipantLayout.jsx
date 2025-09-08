@@ -14,7 +14,7 @@ import Breadcrumbs from './breadcrumbs';
 import ToolsPanel from './tools-panel';
 
 import useAppContext from '../../contexts/app';
-import VirtualParticipant from './VirtualParticipant';
+import VirtualParticipantList from './VirtualParticipantList';
 
 const logger = new Logger('VirtualParticipantLayout');
 
@@ -41,7 +41,7 @@ const VirtualParticipantLayout = () => {
       content={
         <Switch>
           <Route path={path}>
-            <VirtualParticipant />
+            <VirtualParticipantList />
           </Route>
         </Switch>
       }
