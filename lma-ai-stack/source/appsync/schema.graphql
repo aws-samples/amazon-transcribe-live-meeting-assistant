@@ -170,14 +170,6 @@ type Mutation @aws_iam {
 	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 }
 
-type VirtualParticipant @model @auth(rules: [{ allow: owner }]) {
-  meetingName: String!
-  meetingPlatform: String!
-  meetingId: String!
-  meetingPassword: String
-  status: String!
-}
-
 type OverallSentiment @aws_cognito_user_pools
 @aws_iam {
 	AGENT: Float
