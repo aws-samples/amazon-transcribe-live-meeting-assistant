@@ -214,6 +214,8 @@ Resources:
       Handler: index.lambda_handler
       Role: !GetAtt GetDomainLambdaRole.Arn
       Timeout: 30
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: |
           import cfnresponse

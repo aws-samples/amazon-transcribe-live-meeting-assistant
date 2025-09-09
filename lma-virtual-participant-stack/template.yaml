@@ -410,6 +410,8 @@ Resources:
       Role: !GetAtt BuildCustomResourceRole.Arn
       Timeout: 900
       Runtime: python3.12
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: !Sub |
           import boto3
@@ -499,6 +501,8 @@ Resources:
       Role: !GetAtt ECSRoleCustomResourceRole.Arn
       Timeout: 300
       Runtime: python3.12
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: !Sub |
           import boto3

@@ -246,6 +246,8 @@ Resources:
       MemorySize: 128
       Handler: index.handler
       Description: This AWS Lambda Function kicks off a code build job.
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: |
           import boto3

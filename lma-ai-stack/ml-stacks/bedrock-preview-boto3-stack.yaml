@@ -66,6 +66,8 @@ Resources:
       Role: !GetAtt 'BedrockBoto3ZipFunctionRole.Arn'
       Timeout: 60
       MemorySize: 512
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           BOTO3_BUCKET: !Ref BedrockBoto3Bucket

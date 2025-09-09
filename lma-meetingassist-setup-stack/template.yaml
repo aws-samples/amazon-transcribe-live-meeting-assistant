@@ -305,6 +305,8 @@ Resources:
       Handler: qna_summarize_call_function.handler
       Runtime: python3.12
       Timeout: 900
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           TRANSCRIPT_SUMMARY_FUNCTION_ARN: !Ref TranscriptSummaryFunctionArn
@@ -414,6 +416,8 @@ Resources:
       Layers:
         - !Ref Boto3Layer
       Timeout: 900
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
@@ -520,6 +524,8 @@ Resources:
       Layers:
         - !Ref Boto3Layer
       Timeout: 900
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
@@ -616,6 +622,8 @@ Resources:
       Layers:
         - !Ref Boto3Layer
       Timeout: 900
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
@@ -746,6 +754,8 @@ Resources:
       Handler: setup_function.handler
       Runtime: python3.12
       Timeout: 900
+      TracingConfig:
+        Mode: Active
       Code: ./src
       LoggingConfig:
         LogGroup:
@@ -1003,6 +1013,8 @@ Resources:
         - !Ref Boto3Layer
       Timeout: 60
       MemorySize: 128
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           AWS_DATA_PATH: /opt/model

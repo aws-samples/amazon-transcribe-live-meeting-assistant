@@ -440,6 +440,8 @@ Resources:
       Layers:
         - Ref: OpenSearchPyLayer
         - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPythonV2:68
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           POWERTOOLS_SERVICE_NAME: InfraSetupLambda
@@ -502,6 +504,8 @@ Resources:
       Runtime: nodejs22.x
       Timeout: 900
       Code: ./src/oss_custom_resource
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           USER_ON_EVENT_FUNCTION_ARN:
@@ -753,6 +757,8 @@ Resources:
       Timeout: 600
       MemorySize: 128
       Code: ./src/start_ingestion_job_custom_resource
+      TracingConfig:
+        Mode: Active
 
   StartWebIngestionJob:
     Type: AWS::CloudFormation::CustomResource
