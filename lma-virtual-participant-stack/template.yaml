@@ -224,6 +224,14 @@ Parameters:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
 
+  PermissionsBoundaryArn:
+    Type: String
+    Default: AWS::NoValue
+    Description: >-
+      (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
+      If provided, this policy will limit the maximum permissions that can be granted to IAM roles
+      in this stack, providing an additional layer of security.
+
 Conditions:
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
@@ -286,6 +294,7 @@ Resources:
               - "sts:AssumeRole"
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
       Policies:
         - PolicyName: "ECRPolicy"
           PolicyDocument:
@@ -371,6 +380,7 @@ Resources:
       Path: "/"
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
       Policies:
         - PolicyName: BuildPolicy
           PolicyDocument:
@@ -457,6 +467,7 @@ Resources:
       Path: "/"
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
       Policies:
         - PolicyName: IAMPolicy
           PolicyDocument:
@@ -541,6 +552,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
       Policies:
         - PolicyName: LMAPolicy
           PolicyDocument:
@@ -605,6 +617,7 @@ Resources:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceEventsRole
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
         - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
 
   Cluster:
     Type: "AWS::ECS::Cluster"
@@ -760,6 +773,7 @@ Resources:
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
         - !GetAtt ECSPolicy.PolicyArn
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
       Policies:
         - PolicyName: TagPolicy
           PolicyDocument:
@@ -801,6 +815,7 @@ Resources:
       Path: "/"
       ManagedPolicyArns:
         - !GetAtt ECSPolicy.PolicyArn
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
       Policies:
         - PolicyName: ExpandedLogsPolicy
           PolicyDocument:
