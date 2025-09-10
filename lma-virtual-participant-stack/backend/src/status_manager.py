@@ -101,6 +101,14 @@ class VirtualParticipantStatusManager:
             logger.error(f"Unexpected error updating VP status: {e}")
             return False
     
+    def set_initializing(self) -> bool:
+        """Set status to INITIALIZING - VP is starting up"""
+        return self.update_status("INITIALIZING")
+    
+    def set_connecting(self) -> bool:
+        """Set status to CONNECTING - VP is connecting to meeting platform"""
+        return self.update_status("CONNECTING")
+    
     def set_joining(self) -> bool:
         """Set status to JOINING - VP is attempting to join meeting"""
         return self.update_status("JOINING")
@@ -111,6 +119,10 @@ class VirtualParticipantStatusManager:
         if not result:
             raise Exception("Failed to update VP status to JOINED via GraphQL")
         return result
+    
+    def set_active(self) -> bool:
+        """Set status to ACTIVE - VP is actively recording meeting"""
+        return self.update_status("ACTIVE")
     
     def set_completed(self) -> bool:
         """Set status to COMPLETED - Meeting ended successfully"""

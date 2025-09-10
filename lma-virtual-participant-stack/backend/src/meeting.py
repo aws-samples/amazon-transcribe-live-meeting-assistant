@@ -35,11 +35,18 @@ async def app():
     if vp_id:
         try:
             status_manager = VirtualParticipantStatusManager(vp_id)
-            status_manager.set_joining()
+            # Start with INITIALIZING status
+            status_manager.set_initializing()
+            print(f"VP {vp_id} status: INITIALIZING")
         except Exception as e:
             print(f"Failed to initialize status manager: {e}")
     
     try:
+        # Set CONNECTING status when starting browser
+        if status_manager:
+            status_manager.set_connecting()
+            print(f"VP {vp_id} status: CONNECTING")
+        
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=True,
@@ -58,6 +65,11 @@ async def app():
             page = await browser.new_page()
             page.set_default_timeout(20000)
             page.on("pageerror", lambda exc: print(f"Uncaught page exception: {exc}"))
+
+            # Set JOINING status before attempting to join meeting
+            if status_manager:
+                status_manager.set_joining()
+                print(f"VP {vp_id} status: JOINING")
 
             # Try to join meeting - update status based on success/failure
             try:

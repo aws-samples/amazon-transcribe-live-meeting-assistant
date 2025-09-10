@@ -90,6 +90,17 @@ Resources:
                 Action:
                   - appsync:GraphQL
                 Resource: !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/*"
+              - Effect: Allow
+                Action:
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                  - ecs:StopTask
+                  - ecs:DescribeTaskDefinition
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeClusters
+                Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/*"
 
   ##########################################################################
   # Enhanced AppSync Data Sources and Resolvers

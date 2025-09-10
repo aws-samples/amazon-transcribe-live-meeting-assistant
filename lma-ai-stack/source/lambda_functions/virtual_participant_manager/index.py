@@ -13,6 +13,7 @@ from enum import Enum
 
 from error_analyzer import ErrorAnalyzer
 from performance_monitor import PerformanceMonitor
+from ecs_manager import ECSTaskManager
 
 # Configure logging
 logger = logging.getLogger()
@@ -87,6 +88,7 @@ class VirtualParticipantManager:
         self.table = dynamodb.Table(table_name)
         self.error_analyzer = ErrorAnalyzer()
         self.performance_monitor = PerformanceMonitor()
+        self.ecs_manager = ECSTaskManager()
         
     def get_current_timestamp(self) -> str:
         """Get current timestamp in ISO format"""
@@ -238,27 +240,46 @@ class VirtualParticipantManager:
             raise
     
     def end_virtual_participant(self, vp_id: str, end_reason: str, ended_by: str = None) -> Dict[str, Any]:
-        """End a Virtual Participant with performance analysis"""
+        """End a Virtual Participant with actual ECS container termination"""
         
         current_time = self.get_current_timestamp()
         
-        # First update status with history
+        logger.info(f"Starting termination process for VP {vp_id}")
+        
+        # Step 1: Attempt to stop the actual ECS container
+        ecs_termination_success = self.ecs_manager.stop_vp_task(vp_id, end_reason)
+        
+        if ecs_termination_success:
+            logger.info(f"Successfully terminated ECS container for VP {vp_id}")
+            termination_message = f"Virtual Participant terminated: {end_reason} (Container stopped)"
+        else:
+            logger.warning(f"Could not find/stop ECS container for VP {vp_id} - updating status only")
+            termination_message = f"Virtual Participant status updated: {end_reason} (Container may still be running)"
+        
+        # Step 2: Update database status with termination details
         updated_vp = self.update_virtual_participant_status(
             vp_id, 
             VPStatus.ENDED.value, 
-            f"Virtual Participant ended: {end_reason}",
-            metadata=json.dumps({'endedBy': ended_by, 'endReason': end_reason})
+            termination_message,
+            metadata=json.dumps({
+                'endedBy': ended_by, 
+                'endReason': end_reason,
+                'ecsTerminated': ecs_termination_success,
+                'terminationTimestamp': current_time
+            })
         )
         
-        # Then update end-specific fields
+        # Step 3: Update end-specific fields
         update_expression = """
             SET endedAt = :ended_at,
-                endReason = :end_reason
+                endReason = :end_reason,
+                ecsTerminated = :ecs_terminated
         """
         
         expression_attribute_values = {
             ':ended_at': current_time,
-            ':end_reason': end_reason
+            ':end_reason': end_reason,
+            ':ecs_terminated': ecs_termination_success
         }
         
         if ended_by:
@@ -277,8 +298,14 @@ class VirtualParticipantManager:
             final_vp = response['Attributes']
             performance_analysis = self.performance_monitor.analyze_performance(final_vp)
             
-            logger.info(f"Ended VP {vp_id}: {end_reason}")
-            logger.info(f"Final performance analysis: {performance_analysis}")
+            # Get ECS task status for verification
+            task_status = self.ecs_manager.get_task_status(vp_id)
+            
+            logger.info(f"VP {vp_id} termination complete:")
+            logger.info(f"  - Database Status: ENDED")
+            logger.info(f"  - ECS Container: {'TERMINATED' if ecs_termination_success else 'UNKNOWN'}")
+            logger.info(f"  - Task Status: {task_status}")
+            logger.info(f"  - Performance Analysis: {performance_analysis}")
             
             return final_vp
             
