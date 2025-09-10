@@ -1,0 +1,304 @@
+# Virtual Participant Enhancements CloudFormation Template
+# This template adds the enhanced VP features to the existing LMA stack
+
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: Virtual Participant Enhancements for LMA
+
+Parameters:
+  LMAStackName:
+    Type: String
+    Description: Name of the main LMA stack
+  
+  AppSyncApiId:
+    Type: String
+    Description: AppSync API ID from main LMA stack
+  
+  VirtualParticipantTableName:
+    Type: String
+    Description: Virtual Participant DynamoDB table name
+  
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs
+
+Resources:
+  ##########################################################################
+  # Enhanced Virtual Participant Manager Lambda Function
+  ##########################################################################
+  
+  VirtualParticipantManagerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-VirtualParticipantManager"
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/virtual_participant_manager
+      Description: Enhanced Virtual Participant Manager with status tracking and analytics
+      MemorySize: 512
+      Timeout: 300
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref VirtualParticipantTableName
+          LOG_LEVEL: INFO
+      Role: !GetAtt VirtualParticipantManagerRole.Arn
+      LoggingConfig:
+        LogGroup: !Sub "/${LMAStackName}/lambda/VirtualParticipantManager"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement
+
+  VirtualParticipantManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${LMAStackName}/lambda/VirtualParticipantManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+
+  VirtualParticipantManagerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: VirtualParticipantManagerPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource: !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/*"
+
+  ##########################################################################
+  # Enhanced AppSync Data Sources and Resolvers
+  ##########################################################################
+
+  VirtualParticipantLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      Name: VirtualParticipantEnhancedLambda
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt VirtualParticipantLambdaDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt VirtualParticipantManagerFunction.Arn
+
+  VirtualParticipantLambdaDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt VirtualParticipantManagerFunction.Arn
+
+  # Enhanced resolvers for the new GraphQL operations (no conflicts with existing ones)
+  GetVirtualParticipantEnhancedResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      TypeName: Query
+      FieldName: getVirtualParticipantEnhanced
+      DataSourceName: !GetAtt VirtualParticipantLambdaDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              operation: 'getVirtualParticipantEnhanced',
+              arguments: ctx.arguments,
+              identity: ctx.identity,
+              source: ctx.source,
+              request: ctx.request,
+            },
+          };
+        }
+        
+        export function response(ctx) {
+          const { error, result } = ctx;
+          
+          if (error) {
+            util.error(error.message, error.type);
+          }
+          
+          if (result.statusCode !== 200) {
+            util.error(result.body.error || 'Failed to get Virtual Participant', 'InternalError');
+          }
+          
+          return result.body;
+        }
+
+  UpdateVirtualParticipantStatusResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      TypeName: Mutation
+      FieldName: updateVirtualParticipantStatus
+      DataSourceName: !GetAtt VirtualParticipantLambdaDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              operation: 'updateVirtualParticipantStatus',
+              arguments: ctx.arguments,
+              identity: ctx.identity,
+              source: ctx.source,
+              request: ctx.request,
+            },
+          };
+        }
+        
+        export function response(ctx) {
+          const { error, result } = ctx;
+          
+          if (error) {
+            util.error(error.message, error.type);
+          }
+          
+          if (result.statusCode !== 200) {
+            util.error(result.body.error || 'Failed to update Virtual Participant status', 'InternalError');
+          }
+          
+          return result.body;
+        }
+
+  EndVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      TypeName: Mutation
+      FieldName: endVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantLambdaDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              operation: 'endVirtualParticipant',
+              arguments: ctx.arguments,
+              identity: ctx.identity,
+              source: ctx.source,
+              request: ctx.request,
+            },
+          };
+        }
+        
+        export function response(ctx) {
+          const { error, result } = ctx;
+          
+          if (error) {
+            util.error(error.message, error.type);
+          }
+          
+          if (result.statusCode !== 200) {
+            util.error(result.body.error || 'Failed to end Virtual Participant', 'InternalError');
+          }
+          
+          return result.body;
+        }
+
+  GetVirtualParticipantMetricsResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      TypeName: Query
+      FieldName: getVirtualParticipantMetrics
+      DataSourceName: !GetAtt VirtualParticipantLambdaDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          return {
+            operation: 'Invoke',
+            payload: {
+              operation: 'getVirtualParticipantMetrics',
+              arguments: ctx.arguments,
+              identity: ctx.identity,
+              source: ctx.source,
+              request: ctx.request,
+            },
+          };
+        }
+        
+        export function response(ctx) {
+          const { error, result } = ctx;
+          
+          if (error) {
+            util.error(error.message, error.type);
+          }
+          
+          if (result.statusCode !== 200) {
+            util.error(result.body.error || 'Failed to get Virtual Participant metrics', 'InternalError');
+          }
+          
+          return result.body;
+        }
+
+  # Note: onUpdateVirtualParticipant resolver already exists in main LMA stack
+  # We don't need to create a new subscription resolver - the existing one will work
+  # with our enhanced data structure since DynamoDB is schemaless
+
+Outputs:
+  VirtualParticipantManagerFunctionArn:
+    Description: ARN of the Virtual Participant Manager Lambda function
+    Value: !GetAtt VirtualParticipantManagerFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-VirtualParticipantManagerArn"
+
+  VirtualParticipantLambdaDataSourceName:
+    Description: Name of the Virtual Participant Enhanced Lambda data source
+    Value: !GetAtt VirtualParticipantLambdaDataSource.Name
+    Export:
+      Name: !Sub "${AWS::StackName}-VirtualParticipantEnhancedLambdaDataSource"

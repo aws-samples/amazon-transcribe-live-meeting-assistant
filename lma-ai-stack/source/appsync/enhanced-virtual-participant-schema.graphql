@@ -1,0 +1,193 @@
+# Enhanced Virtual Participant Schema for Phase 2
+# This extends the existing schema with detailed status tracking, metrics, and error handling
+
+# Enhanced VirtualParticipant type with detailed tracking
+type VirtualParticipantEnhanced @aws_cognito_user_pools @aws_iam {
+	id: ID!
+	meetingName: String
+	meetingPlatform: String
+	meetingId: String
+	meetingPassword: String
+	status: VirtualParticipantStatus
+	owner: String
+	Owner: String
+	SharedWith: String
+	createdAt: AWSDateTime
+	updatedAt: AWSDateTime
+	
+	# Enhanced fields for Phase 2
+	statusHistory: [VirtualParticipantStatusHistoryEntry]
+	connectionDetails: VirtualParticipantConnectionDetails
+	errorDetails: VirtualParticipantErrorDetails
+	metrics: VirtualParticipantMetrics
+	relatedCallId: ID
+	endedAt: AWSDateTime
+	endedBy: String
+	endReason: String
+}
+
+# Enhanced status enum with more granular states
+enum VirtualParticipantStatus {
+	INITIALIZING
+	CONNECTING
+	JOINING
+	JOINED
+	ACTIVE
+	COMPLETED
+	FAILED
+	ENDED
+}
+
+# Status history tracking
+type VirtualParticipantStatusHistoryEntry @aws_cognito_user_pools @aws_iam {
+	status: VirtualParticipantStatus!
+	timestamp: AWSDateTime!
+	message: String
+	errorDetails: String
+	duration: Int  # Duration in this status (milliseconds)
+	metadata: String  # JSON string for additional context
+}
+
+input VirtualParticipantStatusHistoryEntryInput {
+	status: VirtualParticipantStatus!
+	timestamp: AWSDateTime!
+	message: String
+	errorDetails: String
+	duration: Int
+	metadata: String
+}
+
+# Connection details and metrics
+type VirtualParticipantConnectionDetails @aws_cognito_user_pools @aws_iam {
+	joinAttempts: Int
+	successfulJoins: Int
+	lastJoinAttempt: AWSDateTime
+	connectionDuration: Int  # Total time connected (milliseconds)
+	disconnectionReason: String
+	networkLatency: Float
+	audioQuality: Float
+	connectionStability: Float
+}
+
+input VirtualParticipantConnectionDetailsInput {
+	joinAttempts: Int
+	successfulJoins: Int
+	lastJoinAttempt: AWSDateTime
+	connectionDuration: Int
+	disconnectionReason: String
+	networkLatency: Float
+	audioQuality: Float
+	connectionStability: Float
+}
+
+# Error details for troubleshooting
+type VirtualParticipantErrorDetails @aws_cognito_user_pools @aws_iam {
+	errorCode: String
+	errorMessage: String
+	errorCategory: VirtualParticipantErrorCategory
+	troubleshootingSteps: [String]
+	lastErrorAt: AWSDateTime
+	errorCount: Int
+}
+
+input VirtualParticipantErrorDetailsInput {
+	errorCode: String
+	errorMessage: String
+	errorCategory: VirtualParticipantErrorCategory
+	troubleshootingSteps: [String]
+	lastErrorAt: AWSDateTime
+	errorCount: Int
+}
+
+enum VirtualParticipantErrorCategory {
+	AUTHENTICATION_ERROR
+	NETWORK_ERROR
+	MEETING_NOT_FOUND
+	MEETING_ENDED
+	PERMISSION_DENIED
+	INVALID_CREDENTIALS
+	PLATFORM_ERROR
+	TIMEOUT_ERROR
+	UNKNOWN_ERROR
+}
+
+# Performance metrics
+type VirtualParticipantMetrics @aws_cognito_user_pools @aws_iam {
+	totalDuration: Int  # Total time from creation to completion (milliseconds)
+	timeToJoin: Int     # Time from creation to successful join (milliseconds)
+	uptime: Float       # Percentage of time successfully connected
+	averageLatency: Float
+	transcriptSegments: Int
+	audioMinutes: Float
+	lastActivity: AWSDateTime
+}
+
+input VirtualParticipantMetricsInput {
+	totalDuration: Int
+	timeToJoin: Int
+	uptime: Float
+	averageLatency: Float
+	transcriptSegments: Int
+	audioMinutes: Float
+	lastActivity: AWSDateTime
+}
+
+# Enhanced input types
+input CreateVirtualParticipantEnhancedInput {
+	meetingName: String!
+	meetingPlatform: String!
+	meetingId: String!
+	meetingPassword: String
+	status: VirtualParticipantStatus!
+	metadata: String  # JSON string for additional context
+}
+
+input UpdateVirtualParticipantStatusInput {
+	id: ID!
+	status: VirtualParticipantStatus!
+	message: String
+	errorDetails: VirtualParticipantErrorDetailsInput
+	connectionDetails: VirtualParticipantConnectionDetailsInput
+	metrics: VirtualParticipantMetricsInput
+	metadata: String
+}
+
+input EndVirtualParticipantInput {
+	id: ID!
+	endReason: String!
+	endedBy: String
+}
+
+# Enhanced mutations
+extend type Mutation {
+	createVirtualParticipantEnhanced(input: CreateVirtualParticipantEnhancedInput!): VirtualParticipantEnhanced @aws_cognito_user_pools @aws_iam
+	updateVirtualParticipantStatus(input: UpdateVirtualParticipantStatusInput!): VirtualParticipantEnhanced @aws_cognito_user_pools @aws_iam
+	addVirtualParticipantStatusHistory(input: AddVirtualParticipantStatusHistoryInput!): VirtualParticipantEnhanced @aws_cognito_user_pools @aws_iam
+	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipantEnhanced @aws_cognito_user_pools @aws_iam
+}
+
+input AddVirtualParticipantStatusHistoryInput {
+	id: ID!
+	statusEntry: VirtualParticipantStatusHistoryEntryInput!
+}
+
+# Enhanced queries
+extend type Query {
+	getVirtualParticipantEnhanced(id: ID!): VirtualParticipantEnhanced @aws_cognito_user_pools @aws_iam
+	listVirtualParticipantsEnhanced(status: VirtualParticipantStatus, limit: Int, nextToken: String): VirtualParticipantEnhancedList @aws_cognito_user_pools @aws_iam
+	getVirtualParticipantMetrics(id: ID!): VirtualParticipantMetrics @aws_cognito_user_pools @aws_iam
+	getVirtualParticipantStatusHistory(id: ID!): [VirtualParticipantStatusHistoryEntry] @aws_cognito_user_pools @aws_iam
+}
+
+type VirtualParticipantEnhancedList @aws_cognito_user_pools @aws_iam {
+	items: [VirtualParticipantEnhanced]
+	nextToken: String
+}
+
+# Enhanced subscriptions
+extend type Subscription {
+	onUpdateVirtualParticipantEnhanced(id: ID): VirtualParticipantEnhanced
+		@aws_subscribe(mutations: ["updateVirtualParticipantStatus", "addVirtualParticipantStatusHistory", "endVirtualParticipant"])
+	onVirtualParticipantStatusChange(id: ID): VirtualParticipantStatusHistoryEntry
+		@aws_subscribe(mutations: ["addVirtualParticipantStatusHistory"])
+}

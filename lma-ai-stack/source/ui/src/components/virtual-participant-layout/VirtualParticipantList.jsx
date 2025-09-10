@@ -16,6 +16,7 @@ import {
   Container,
   Alert,
   Flashbar,
+  Link,
 } from '@awsui/components-react';
 import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
 import useAppContext from '../../contexts/app';
@@ -75,6 +76,9 @@ StatusBadge.propTypes = {
 
 // Render function for status cell - defined outside component to avoid re-creation
 const renderStatusCell = (item) => <StatusBadge status={item.status} />;
+
+// Render function for meeting name cell - defined outside component to avoid re-creation
+const renderMeetingNameCell = (item) => <Link href={`#/virtual-participant/${item.id}`}>{item.meetingName}</Link>;
 
 const VirtualParticipantList = () => {
   const { user, currentCredentials } = useAppContext();
@@ -370,7 +374,7 @@ const VirtualParticipantList = () => {
     {
       id: 'meetingName',
       header: 'Meeting Name',
-      cell: (item) => item.meetingName,
+      cell: renderMeetingNameCell,
       sortingField: 'meetingName',
     },
     {
