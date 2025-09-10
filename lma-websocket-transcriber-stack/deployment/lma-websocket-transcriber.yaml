@@ -295,6 +295,14 @@ Parameters:
       meeting will not be recorded.
       If set to true, the meeting will be recorded.
 
+  PermissionsBoundaryArn:
+    Type: String
+    Default: AWS::NoValue
+    Description: >-
+      (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
+      If provided, this policy will limit the maximum permissions that can be granted to IAM roles
+      in this stack, providing an additional layer of security.
+
 Metadata:
   "AWS::CloudFormation::Interface":
     ParameterGroups:
@@ -391,6 +399,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
       Policies:
         - PolicyName: deleteEcrImages
           PolicyDocument:
@@ -413,6 +422,8 @@ Resources:
       MemorySize: 128
       Timeout: 60
       Role: !GetAtt EcrImagesDeleteLambdaRole.Arn
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: |
           import boto3
@@ -494,6 +505,7 @@ Resources:
             Effect: Allow
             Principal:
               Service: codebuild.amazonaws.com
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
       Policies:
         - PolicyName: ecs-service
           PolicyDocument:
@@ -888,6 +900,7 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
         Version: "2012-10-17"
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
 
   TranscriberWebsocketTaskDefTaskRoleDefaultPolicy:
     Type: AWS::IAM::Policy
@@ -1117,6 +1130,7 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
         Version: "2012-10-17"
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
 
   TranscriberWebsocketTaskDefExecutionRoleDefaultPolicy:
     Type: AWS::IAM::Policy

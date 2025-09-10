@@ -22,6 +22,14 @@ Parameters:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
 
+  PermissionsBoundaryArn:
+    Type: String
+    Default: AWS::NoValue
+    Description: >-
+      (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
+      If provided, this policy will limit the maximum permissions that can be granted to IAM roles
+      in this stack, providing an additional layer of security.
+
 Resources:
   LLMPromptTemplateTable:
     Type: "AWS::DynamoDB::Table"
@@ -51,6 +59,7 @@ Resources:
               - "sts:AssumeRole"
       ManagedPolicyArns:
         - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
       Policies:
         - PolicyName: allow-s3-notification-config
           PolicyDocument:
@@ -90,6 +99,8 @@ Resources:
       Runtime: python3.12
       MemorySize: 128
       Timeout: 60
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           DOMAIN: !Ref Domain

@@ -1300,6 +1300,8 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 900
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: |
           import boto3
@@ -1561,6 +1563,7 @@ Resources:
         Domain: !Ref Domain
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
   COGNITOSTACK:
     Type: AWS::CloudFormation::Stack
@@ -1631,6 +1634,7 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         BedrockKnowledgeBaseID: !If
           - ShouldUseTranscriptKnowledgeBase
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
@@ -1670,6 +1674,7 @@ Resources:
         WebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
         SNSEmailAddress: !Ref AdminEmail
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
   TRANSCRIPTBEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -1860,6 +1865,7 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         VPC: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.VPC

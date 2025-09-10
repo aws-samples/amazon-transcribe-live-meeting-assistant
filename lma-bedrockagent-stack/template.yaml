@@ -58,6 +58,14 @@ Parameters:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
 
+  PermissionsBoundaryArn:
+    Type: String
+    Default: AWS::NoValue
+    Description: >-
+      (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
+      If provided, this policy will limit the maximum permissions that can be granted to IAM roles
+      in this stack, providing an additional layer of security.
+
 Conditions:
   ShouldCreateBedrockKnowledgeBase:
     !Equals [!Ref BedrockKnowledgeBaseId, ""]
@@ -122,6 +130,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !Ref PermissionsBoundaryArn
       Policies:
         - PolicyName: LambdaExecutionPolicy
           PolicyDocument:
@@ -150,6 +159,14 @@ Resources:
     Properties:
       Handler: 'index.lambda_handler'
       Role: !GetAtt SendMessageFunctionRole.Arn
+      Runtime: python3.12
+      Timeout: 60
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref SendMessageTopic
+          DEFAULT_SUBJECT: "Message from Live Meeting Assistant (LMA)"
       Code:
         ZipFile: |
           import json
@@ -211,13 +228,6 @@ Resources:
               function_response = {'response': action_response, 'messageVersion': event['messageVersion']}
               print("Response: {}".format(function_response))
               return function_response
-
-      Runtime: python3.12
-      Timeout: 60
-      Environment:
-        Variables:
-          SNS_TOPIC_ARN: !Ref SendMessageTopic
-          DEFAULT_SUBJECT: "Message from Live Meeting Assistant (LMA)"
 
   BedrockAgentRole:
     Type: AWS::IAM::Role
