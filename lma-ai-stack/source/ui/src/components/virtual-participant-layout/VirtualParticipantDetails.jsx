@@ -15,13 +15,50 @@ import {
   Spinner,
   Flashbar,
 } from '@awsui/components-react';
-import {
-  getVirtualParticipant,
-  onUpdateVirtualParticipantDetailed,
-  endVirtualParticipant,
-} from '../../graphql/queries/virtualParticipantQueries';
 import StatusTimeline from './StatusTimeline';
 import PerformanceMetrics from './PerformanceMetrics';
+
+// Use simple GraphQL queries that match the actual deployed schema
+const getVirtualParticipant = `
+  query GetVirtualParticipant($id: ID!) {
+    getVirtualParticipant(id: $id) {
+      id
+      meetingName
+      meetingPlatform
+      meetingId
+      status
+      createdAt
+      updatedAt
+      owner
+      Owner
+      SharedWith
+    }
+  }
+`;
+
+const onUpdateVirtualParticipantDetailed = `
+  subscription OnUpdateVirtualParticipant {
+    onUpdateVirtualParticipant {
+      id
+      status
+      updatedAt
+      meetingName
+      owner
+      Owner
+      SharedWith
+    }
+  }
+`;
+
+const endVirtualParticipant = `
+  mutation EndVirtualParticipant($input: EndVirtualParticipantInput!) {
+    endVirtualParticipant(input: $input) {
+      id
+      status
+      updatedAt
+    }
+  }
+`;
 
 const logger = new Logger('VirtualParticipantDetails');
 
@@ -348,13 +385,13 @@ const VirtualParticipantDetails = () => {
     if (vpId) {
       loadVpDetails();
     }
-  }, [vpId, loadVpDetails]);
+  }, [vpId]);
 
-  // Set up real-time updates subscription
+  // Set up real-time updates subscription (no parameters needed)
   useEffect(() => {
     if (!vpId) return undefined;
 
-    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipantDetailed, { id: vpId })).subscribe({
+    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipantDetailed)).subscribe({
       next: ({ value }) => {
         const updated = value?.data?.onUpdateVirtualParticipant;
         if (updated && updated.id === vpId) {
@@ -380,6 +417,7 @@ const VirtualParticipantDetails = () => {
       },
       error: (err) => {
         logger.error('Subscription error:', err);
+        // Don't retry on subscription errors to avoid infinite loops
       },
     });
 
@@ -477,23 +515,44 @@ const VirtualParticipantDetails = () => {
       {/* Current Status */}
       <StatusDetails status={vpDetails.status} updatedAt={vpDetails.updatedAt} />
 
-      {/* Status Timeline */}
-      <StatusTimeline
-        history={vpDetails.statusHistory}
-        currentStatus={vpDetails.status}
-        currentTimestamp={vpDetails.updatedAt}
-      />
+      {/* Status Timeline - Only show if enhanced data available */}
+      {vpDetails.statusHistory && (
+        <StatusTimeline
+          history={vpDetails.statusHistory}
+          currentStatus={vpDetails.status}
+          currentTimestamp={vpDetails.updatedAt}
+        />
+      )}
 
       {/* Connection Details */}
       <Container header={<Header variant="h3">Connection Details</Header>}>
         <ConnectionDetails vpDetails={vpDetails} />
       </Container>
 
-      {/* Performance Metrics */}
+      {/* Performance Metrics - Only show if enhanced data available */}
       {(vpDetails.metrics || vpDetails.connectionDetails) && <PerformanceMetrics vpDetails={vpDetails} />}
 
-      {/* Error Troubleshooting */}
+      {/* Error Troubleshooting - Only show for failed status */}
       <ErrorTroubleshooting status={vpDetails.status} errorDetails={vpDetails.errorDetails} />
+
+      {/* Basic Status Timeline for basic schema */}
+      {!vpDetails.statusHistory && (
+        <Container header={<Header variant="h3">Status Information</Header>}>
+          <Alert type="info">
+            <SpaceBetween direction="vertical" size="s">
+              <div>
+                <strong>Current Status:</strong> {vpDetails.status}
+              </div>
+              <div>
+                <strong>Last Updated:</strong> {new Date(vpDetails.updatedAt).toLocaleString()}
+              </div>
+              <div>
+                <strong>Created:</strong> {new Date(vpDetails.createdAt).toLocaleString()}
+              </div>
+            </SpaceBetween>
+          </Alert>
+        </Container>
+      )}
 
       {/* Action Buttons */}
       <ActionButtons vpDetails={vpDetails} onRefresh={handleRefresh} onEnd={handleEnd} />
