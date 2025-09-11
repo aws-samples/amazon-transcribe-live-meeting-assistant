@@ -17,6 +17,13 @@ class ECSTaskManager:
     
     def __init__(self):
         self.ecs_client = boto3.client('ecs')
+        
+        # Debug logging for environment variables
+        logger.info(f"ECS_CLUSTER_NAME from env: {os.environ.get('ECS_CLUSTER_NAME', 'NOT_SET')}")
+        logger.info(f"CLUSTER_NAME from env: {os.environ.get('CLUSTER_NAME', 'NOT_SET')}")
+        logger.info(f"AWS_LAMBDA_FUNCTION_NAME: {os.environ.get('AWS_LAMBDA_FUNCTION_NAME', 'NOT_SET')}")
+        logger.info(f"TABLE_NAME: {os.environ.get('TABLE_NAME', 'NOT_SET')}")
+        
         # Try to get cluster name from environment, fallback to dynamic discovery
         self.cluster_name = (
             os.environ.get('ECS_CLUSTER_NAME') or 
@@ -25,27 +32,80 @@ class ECSTaskManager:
         )
         logger.info(f"ECSTaskManager initialized with cluster: {self.cluster_name}")
     
-    def find_vp_cluster(self) -> str:
-        """Find the Virtual Participant cluster dynamically"""
+    def get_stack_name_from_lambda(self) -> str:
+        """Extract base stack name from Lambda function name or environment"""
         try:
+            # Try to get from Lambda context first
+            lambda_function_name = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', '')
+            logger.info(f"Lambda function name: {lambda_function_name}")
+            
+            if lambda_function_name:
+                # Pattern: {base-stack-name}-AISTACK-{id}-VirtualParticipantManager
+                # Example: end-button-AISTACK-58LCOGDXUZTI-VirtualParticipantManager
+                # We want just the base part: end-button
+                
+                if '-VirtualParticipantManager' in lambda_function_name:
+                    # Remove the suffix first
+                    without_suffix = lambda_function_name.replace('-VirtualParticipantManager', '')
+                    logger.info(f"Without suffix: {without_suffix}")
+                    
+                    # Look for AISTACK pattern and extract base stack name
+                    if '-AISTACK-' in without_suffix:
+                        base_stack_name = without_suffix.split('-AISTACK-')[0]
+                        logger.info(f"Extracted base stack name from Lambda function: {base_stack_name}")
+                        return base_stack_name
+                    else:
+                        # If no AISTACK pattern, use the whole thing
+                        logger.info(f"No AISTACK pattern, using full name: {without_suffix}")
+                        return without_suffix
+            
+            # Fallback: try to get from DynamoDB table name
+            table_name = os.environ.get('TABLE_NAME', '')
+            logger.info(f"Table name: {table_name}")
+            
+            if table_name and '-VirtualParticipant' in table_name:
+                # Pattern: {base-stack-name}-AISTACK-{id}-VirtualParticipant
+                without_suffix = table_name.replace('-VirtualParticipant', '')
+                
+                if '-AISTACK-' in without_suffix:
+                    base_stack_name = without_suffix.split('-AISTACK-')[0]
+                    logger.info(f"Extracted base stack name from table name: {base_stack_name}")
+                    return base_stack_name
+                else:
+                    logger.info(f"Extracted stack name from table name: {without_suffix}")
+                    return without_suffix
+            
+            logger.warning("Could not extract stack name from Lambda or table name")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error extracting stack name: {e}")
+            return None
+    
+    def find_vp_cluster(self) -> str:
+        """Find the Virtual Participant cluster dynamically using stack name pattern"""
+        try:
+            # Get stack name from Lambda function name
+            stack_name = self.get_stack_name_from_lambda()
+            logger.info(f"Using stack name for cluster search: {stack_name}")
+            
             # List all clusters
             response = self.ecs_client.list_clusters()
             clusters = response.get('clusterArns', [])
             
             logger.info(f"Found {len(clusters)} ECS clusters")
             
-            # Look for cluster with VirtualParticipant in the name
-            for cluster_arn in clusters:
-                cluster_name = cluster_arn.split('/')[-1]  # Extract name from ARN
-                logger.info(f"Checking cluster: {cluster_name}")
-                
-                # More comprehensive search patterns
-                if any(keyword in cluster_name.upper() for keyword in [
-                    'VIRTUALPARTICIPANT', 'VP', 'VIRTUAL-PARTICIPANT', 
-                    'VIRTUAL_PARTICIPANT', 'MEETING', 'LMA'
-                ]):
-                    logger.info(f"Found potential VP cluster: {cluster_name}")
-                    return cluster_name
+            # Pattern: {stack-name}-VIRTUALPARTICIPANTSTACK-{id}-Cluster-{someid}
+            if stack_name:
+                for cluster_arn in clusters:
+                    cluster_name = cluster_arn.split('/')[-1]  # Extract name from ARN
+                    logger.info(f"Checking cluster: {cluster_name}")
+                    
+                    # Check if cluster matches the expected pattern
+                    if (cluster_name.startswith(stack_name) and 
+                        'VIRTUALPARTICIPANTSTACK' in cluster_name.upper()):
+                        logger.info(f"Found matching VP cluster: {cluster_name}")
+                        return cluster_name
             
             # If no specific VP cluster found, try the first cluster
             if clusters:
