@@ -2276,12 +2276,6 @@ Resources:
             $util.qr( $expValues.put(":CallId", $util.dynamodb.toDynamoDB($ctx.args.input.CallId)) )
         #end
         
-        ## Add taskArn if provided **
-        #if( !$util.isNullOrBlank($ctx.args.input.taskArn) )
-            $util.qr( $expSet.put("#taskArn", ":taskArn") )
-            $util.qr( $expNames.put("#taskArn", "taskArn") )
-            $util.qr( $expValues.put(":taskArn", $util.dynamodb.toDynamoDB($ctx.args.input.taskArn)) )
-        #end
         
         ## Build the SET expression **
         #set( $expression = "SET" )

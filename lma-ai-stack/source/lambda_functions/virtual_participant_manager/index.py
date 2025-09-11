@@ -1,6 +1,6 @@
 """
 Virtual Participant Manager Lambda Function
-Handles enhanced status tracking, metrics, and error reporting for Virtual Participants
+Handles VP termination with registry-based task ARN lookup
 """
 
 import os
@@ -8,12 +8,8 @@ import json
 import boto3
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, asdict
-from enum import Enum
+from typing import Dict, Any, Optional
 
-from error_analyzer import ErrorAnalyzer
-from performance_monitor import PerformanceMonitor
 from ecs_manager import ECSTaskManager
 
 # Configure logging
@@ -22,84 +18,15 @@ logger.setLevel(logging.INFO)
 
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
-appsync = boto3.client('appsync')
-
-class VPStatus(Enum):
-    INITIALIZING = "INITIALIZING"
-    CONNECTING = "CONNECTING"
-    JOINING = "JOINING"
-    JOINED = "JOINED"
-    ACTIVE = "ACTIVE"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
-    ENDED = "ENDED"
-
-class ErrorCategory(Enum):
-    AUTHENTICATION_ERROR = "AUTHENTICATION_ERROR"
-    NETWORK_ERROR = "NETWORK_ERROR"
-    MEETING_NOT_FOUND = "MEETING_NOT_FOUND"
-    MEETING_ENDED = "MEETING_ENDED"
-    PERMISSION_DENIED = "PERMISSION_DENIED"
-    INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
-    PLATFORM_ERROR = "PLATFORM_ERROR"
-    TIMEOUT_ERROR = "TIMEOUT_ERROR"
-    UNKNOWN_ERROR = "UNKNOWN_ERROR"
-
-@dataclass
-class StatusHistoryEntry:
-    status: str
-    timestamp: str
-    message: Optional[str] = None
-    error_details: Optional[str] = None
-    duration: Optional[int] = None
-    metadata: Optional[str] = None
-
-@dataclass
-class ConnectionDetails:
-    join_attempts: int = 0
-    successful_joins: int = 0
-    last_join_attempt: Optional[str] = None
-    connection_duration: int = 0
-    disconnection_reason: Optional[str] = None
-    network_latency: Optional[float] = None
-    audio_quality: Optional[float] = None
-    connection_stability: Optional[float] = None
-
-@dataclass
-class ErrorDetails:
-    error_code: Optional[str] = None
-    error_message: Optional[str] = None
-    error_category: Optional[str] = None
-    troubleshooting_steps: Optional[List[str]] = None
-    last_error_at: Optional[str] = None
-    error_count: int = 0
-
-@dataclass
-class Metrics:
-    total_duration: int = 0
-    time_to_join: Optional[int] = None
-    uptime: float = 0.0
-    average_latency: Optional[float] = None
-    transcript_segments: int = 0
-    audio_minutes: float = 0.0
-    last_activity: Optional[str] = None
 
 class VirtualParticipantManager:
     def __init__(self, table_name: str):
         self.table = dynamodb.Table(table_name)
-        self.error_analyzer = ErrorAnalyzer()
-        self.performance_monitor = PerformanceMonitor()
         self.ecs_manager = ECSTaskManager()
         
     def get_current_timestamp(self) -> str:
         """Get current timestamp in ISO format"""
         return datetime.now(timezone.utc).isoformat()
-    
-    def calculate_duration(self, start_time: str, end_time: str = None) -> int:
-        """Calculate duration between two timestamps in milliseconds"""
-        start = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-        end = datetime.fromisoformat((end_time or self.get_current_timestamp()).replace('Z', '+00:00'))
-        return int((end - start).total_seconds() * 1000)
     
     def get_virtual_participant(self, vp_id: str) -> Optional[Dict[str, Any]]:
         """Get Virtual Participant by ID"""
@@ -110,294 +37,80 @@ class VirtualParticipantManager:
             logger.error(f"Error getting VP {vp_id}: {str(e)}")
             return None
     
-    def update_virtual_participant_status(self, vp_id: str, status: str, 
-                                        message: str = None, 
-                                        error_details: Dict = None,
-                                        connection_details: Dict = None,
-                                        metrics: Dict = None,
-                                        metadata: str = None) -> Dict[str, Any]:
-        """Update Virtual Participant status with enhanced tracking"""
-        
-        current_time = self.get_current_timestamp()
-        vp = self.get_virtual_participant(vp_id)
-        
-        if not vp:
-            raise ValueError(f"Virtual Participant {vp_id} not found")
-        
-        # Calculate duration in previous status
-        previous_status_duration = None
-        if vp.get('updatedAt'):
-            previous_status_duration = self.calculate_duration(vp['updatedAt'], current_time)
-        
-        # Create status history entry
-        status_entry = StatusHistoryEntry(
-            status=status,
-            timestamp=current_time,
-            message=message,
-            error_details=json.dumps(error_details) if error_details else None,
-            duration=previous_status_duration,
-            metadata=metadata
-        )
-        
-        # Get existing status history
-        status_history = vp.get('statusHistory', [])
-        status_history.append(asdict(status_entry))
-        
-        # Update connection details
-        existing_connection = vp.get('connectionDetails', {})
-        if connection_details:
-            existing_connection.update(connection_details)
-        
-        # Update error details if status is FAILED
-        existing_error_details = vp.get('errorDetails', {})
-        if status == VPStatus.FAILED.value and error_details:
-            # Use error analyzer for intelligent error categorization
-            error_report = self.error_analyzer.create_error_report(
-                error_message=error_details.get('errorMessage', ''),
-                error_code=error_details.get('errorCode'),
-                platform=vp.get('meetingPlatform', '').lower(),
-                context={'vpId': vp_id, 'meetingId': vp.get('meetingId')}
-            )
-            
-            existing_error_details.update({
-                'errorCode': error_details.get('errorCode'),
-                'errorMessage': error_details.get('errorMessage'),
-                'errorCategory': error_report['errorCategory'],
-                'troubleshootingSteps': error_report['troubleshootingSteps'],
-                'severity': error_report['severity'],
-                'isRetryable': error_report['isRetryable'],
-                'lastErrorAt': current_time,
-                'errorCount': existing_error_details.get('errorCount', 0) + 1
-            })
-        
-        # Update metrics
-        existing_metrics = vp.get('metrics', {})
-        if metrics:
-            existing_metrics.update(metrics)
-        
-        # Calculate total duration if completed/ended
-        if status in [VPStatus.COMPLETED.value, VPStatus.ENDED.value, VPStatus.FAILED.value]:
-            total_duration = self.calculate_duration(vp['createdAt'], current_time)
-            existing_metrics['totalDuration'] = total_duration
-            
-            # Calculate time to join if we have JOINED status in history
-            for entry in status_history:
-                if entry['status'] == VPStatus.JOINED.value:
-                    time_to_join = self.calculate_duration(vp['createdAt'], entry['timestamp'])
-                    existing_metrics['timeToJoin'] = time_to_join
-                    break
-        
-        existing_metrics['lastActivity'] = current_time
-        
-        # Update the item in DynamoDB
-        update_expression = """
-            SET #status = :status,
-                updatedAt = :updated_at,
-                statusHistory = :status_history,
-                connectionDetails = :connection_details,
-                errorDetails = :error_details,
-                #metrics = :metrics
-        """
-        
-        expression_attribute_names = {
-            '#status': 'status',
-            '#metrics': 'metrics'
-        }
-        
-        expression_attribute_values = {
-            ':status': status,
-            ':updated_at': current_time,
-            ':status_history': status_history,
-            ':connection_details': existing_connection,
-            ':error_details': existing_error_details,
-            ':metrics': existing_metrics
-        }
-        
-        # Add endedAt if status is terminal
-        if status in [VPStatus.COMPLETED.value, VPStatus.ENDED.value, VPStatus.FAILED.value]:
-            update_expression += ", endedAt = :ended_at"
-            expression_attribute_values[':ended_at'] = current_time
-        
-        try:
-            response = self.table.update_item(
-                Key={'id': vp_id},
-                UpdateExpression=update_expression,
-                ExpressionAttributeNames=expression_attribute_names,
-                ExpressionAttributeValues=expression_attribute_values,
-                ReturnValues='ALL_NEW'
-            )
-            
-            updated_vp = response['Attributes']
-            
-            # Generate performance analysis if VP is completed
-            if status in [VPStatus.COMPLETED.value, VPStatus.ENDED.value]:
-                performance_analysis = self.performance_monitor.analyze_performance(updated_vp)
-                logger.info(f"Performance analysis for VP {vp_id}: {performance_analysis}")
-            
-            logger.info(f"Updated VP {vp_id} status to {status}")
-            return updated_vp
-            
-        except Exception as e:
-            logger.error(f"Error updating VP {vp_id}: {str(e)}")
-            raise
-    
     def end_virtual_participant(self, vp_id: str, end_reason: str, ended_by: str = None) -> Dict[str, Any]:
-        """End a Virtual Participant with proper meeting termination and ECS container cleanup"""
+        """End a Virtual Participant with ECS container termination and Kinesis END event"""
         
         current_time = self.get_current_timestamp()
         
-        logger.info(f"=== STARTING COMPREHENSIVE TERMINATION PROCESS FOR VP {vp_id} ===")
-        logger.info(f"End reason: {end_reason}")
-        logger.info(f"Ended by: {ended_by}")
+        logger.info(f"Ending Virtual Participant {vp_id}")
         
-        # Step 1: Get VP details to access CallId for proper meeting termination
-        logger.info(f"Step 1: Getting VP details for {vp_id}")
+        # Get VP details
         vp = self.get_virtual_participant(vp_id)
         if not vp:
-            logger.error(f"Virtual Participant {vp_id} not found in database")
             raise ValueError(f"Virtual Participant {vp_id} not found")
         
-        logger.info(f"VP details: {json.dumps(vp, indent=2, default=str)}")
         call_id = vp.get('CallId')
-        task_arn = vp.get('taskArn')
-        logger.info(f"CallId associated with VP: {call_id}")
-        logger.info(f"TaskArn stored in VP record: {task_arn}")
         
-        if task_arn:
-            logger.info(f"✓ VP {vp_id} has stored task ARN - will use direct termination")
-        else:
-            logger.warning(f"✗ VP {vp_id} has NO stored task ARN - will use search method")
-        
-        # Step 2: Send END event to Kinesis (like send_end_meeting() in kds.py)
-        logger.info(f"Step 2: Sending END event to Kinesis")
+        # Send END event to Kinesis
         kinesis_end_success = False
         if call_id:
             try:
                 kinesis_end_success = self.send_end_meeting_event(call_id, vp)
-                logger.info(f"✓ Successfully sent END event to Kinesis for CallId {call_id}")
+                logger.info(f"Sent END event to Kinesis for CallId {call_id}")
             except Exception as e:
-                logger.error(f"✗ Failed to send END event to Kinesis: {e}")
-                import traceback
-                logger.error(f"Kinesis error traceback: {traceback.format_exc()}")
-        else:
-            logger.warning(f"No CallId found for VP {vp_id}, skipping Kinesis END event")
+                logger.error(f"Failed to send END event to Kinesis: {e}")
         
-        # Step 3: Attempt to stop the actual ECS container using VPTaskRegistry
-        logger.info(f"Step 3: Attempting to stop ECS container")
-        
-        # Try to get task details from VPTaskRegistry first
+        # Stop ECS container using registry
         task_details = self.get_task_details_from_registry(vp_id)
         
         if task_details:
             task_arn = task_details.get('taskArn')
             cluster_arn = task_details.get('clusterArn')
-            logger.info(f"✓ Found task details in registry - taskArn: {task_arn}")
-            logger.info(f"✓ Found cluster details in registry - clusterArn: {cluster_arn}")
+            logger.info(f"Found task details in registry for VP {vp_id}")
             
-            # Use registry ARNs for direct termination (most efficient)
+            # Direct termination using stored ARNs
             ecs_termination_success = self.ecs_manager.stop_vp_task_by_arn(task_arn, cluster_arn, vp_id, end_reason)
             
-            # Clean up registry entry after termination
-            try:
+            # Clean up registry entry
+            if ecs_termination_success:
                 self.cleanup_registry_entry(vp_id)
-                logger.info(f"✓ Cleaned up registry entry for VP {vp_id}")
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to cleanup registry entry: {cleanup_error}")
         else:
-            # Fallback to legacy search method if no registry entry
-            logger.warning(f"✗ No task details found in registry for VP {vp_id}, falling back to legacy search")
-            ecs_termination_success = self.ecs_manager.stop_vp_task(vp_id, end_reason)
+            logger.warning(f"No task details found in registry for VP {vp_id}")
+            ecs_termination_success = False
         
-        if ecs_termination_success:
-            logger.info(f"✓ Successfully terminated ECS container for VP {vp_id}")
-            container_status = "Container stopped"
-        else:
-            logger.warning(f"✗ Could not find/stop ECS container for VP {vp_id}")
-            container_status = "Container may still be running"
-        
-        # Step 4: Update database status with comprehensive termination details
-        termination_message = f"Virtual Participant terminated: {end_reason}"
-        if kinesis_end_success:
-            termination_message += " (Meeting ended properly)"
-        if ecs_termination_success:
-            termination_message += f" ({container_status})"
-        
-        updated_vp = self.update_virtual_participant_status(
-            vp_id, 
-            VPStatus.ENDED.value, 
-            termination_message,
-            metadata=json.dumps({
-                'endedBy': ended_by, 
-                'endReason': end_reason,
-                'ecsTerminated': ecs_termination_success,
-                'kinesisEndSent': kinesis_end_success,
-                'terminationTimestamp': current_time,
-                'callId': call_id
-            })
-        )
-        
-        # Step 5: Update end-specific fields
-        update_expression = """
-            SET endedAt = :ended_at,
-                endReason = :end_reason,
-                ecsTerminated = :ecs_terminated,
-                kinesisEndSent = :kinesis_end_sent
-        """
-        
-        expression_attribute_values = {
-            ':ended_at': current_time,
-            ':end_reason': end_reason,
-            ':ecs_terminated': ecs_termination_success,
-            ':kinesis_end_sent': kinesis_end_success
-        }
-        
-        if ended_by:
-            update_expression += ", endedBy = :ended_by"
-            expression_attribute_values[':ended_by'] = ended_by
-        
+        # Update VP status to ENDED
         try:
             response = self.table.update_item(
                 Key={'id': vp_id},
-                UpdateExpression=update_expression,
-                ExpressionAttributeValues=expression_attribute_values,
+                UpdateExpression="SET #status = :status, updatedAt = :updated_at, endedAt = :ended_at, endReason = :end_reason, ecsTerminated = :ecs_terminated, kinesisEndSent = :kinesis_end_sent",
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={
+                    ':status': 'ENDED',
+                    ':updated_at': current_time,
+                    ':ended_at': current_time,
+                    ':end_reason': end_reason,
+                    ':ecs_terminated': ecs_termination_success,
+                    ':kinesis_end_sent': kinesis_end_success
+                },
                 ReturnValues='ALL_NEW'
             )
             
-            # Generate final performance analysis
-            final_vp = response['Attributes']
-            performance_analysis = self.performance_monitor.analyze_performance(final_vp)
-            
-            # Get ECS task status for verification
-            task_status = self.ecs_manager.get_task_status(vp_id)
-            
-            logger.info(f"VP {vp_id} comprehensive termination complete:")
-            logger.info(f"  - Database Status: ENDED")
-            logger.info(f"  - Meeting END Event: {'SENT' if kinesis_end_success else 'FAILED'}")
-            logger.info(f"  - ECS Container: {'TERMINATED' if ecs_termination_success else 'UNKNOWN'}")
-            logger.info(f"  - Task Status: {task_status}")
-            logger.info(f"  - Performance Analysis: {performance_analysis}")
-            
-            return final_vp
+            logger.info(f"VP {vp_id} terminated successfully")
+            return response['Attributes']
             
         except Exception as e:
-            logger.error(f"Error ending VP {vp_id}: {str(e)}")
+            logger.error(f"Error updating VP {vp_id} status: {str(e)}")
             raise
     
     def send_end_meeting_event(self, call_id: str, vp: Dict[str, Any]) -> bool:
-        """Send END event to Kinesis to properly close the meeting transcript"""
+        """Send END event to Kinesis to close the meeting transcript"""
         try:
-            # Get Kinesis stream name from environment
             kinesis_stream_name = os.environ.get('KINESIS_STREAM_NAME')
-            logger.info(f"Kinesis stream name from environment: {kinesis_stream_name}")
-            
             if not kinesis_stream_name:
-                logger.error("KINESIS_STREAM_NAME not set, cannot send END event")
                 return False
             
-            # Initialize Kinesis client
             kinesis = boto3.client('kinesis')
             
-            # Create END event (similar to send_end_meeting() in kds.py)
             end_call_event = {
                 'EventType': 'END',
                 'CallId': call_id,
@@ -405,114 +118,52 @@ class VirtualParticipantManager:
                 'SystemPhoneNumber': 'LMA System',
                 'CreatedAt': self.get_current_timestamp(),
                 'AgentId': vp.get('owner', 'Unknown'),
-                # Note: Access tokens not available in Lambda context
                 'AccessToken': '',
                 'IdToken': '',
                 'RefreshToken': '',
             }
             
-            logger.info(f"Sending END meeting event to Kinesis:")
-            logger.info(f"  Stream: {kinesis_stream_name}")
-            logger.info(f"  CallId: {call_id}")
-            logger.info(f"  Event: {json.dumps(end_call_event, indent=2)}")
-            
-            # Write the END event to Kinesis Data Stream
-            response = kinesis.put_record(
+            kinesis.put_record(
                 StreamName=kinesis_stream_name,
                 PartitionKey=call_id,
                 Data=json.dumps(end_call_event).encode('utf-8')
             )
             
-            logger.info(f"Kinesis put_record response: {json.dumps(response, indent=2, default=str)}")
-            logger.info(f"Successfully sent END meeting event to Kinesis")
             return True
             
         except Exception as e:
-            logger.error(f"Error sending END meeting event to Kinesis: {e}")
-            import traceback
-            logger.error(f"Kinesis error traceback: {traceback.format_exc()}")
+            logger.error(f"Error sending END event to Kinesis: {e}")
             return False
-    
-    def get_performance_analysis(self, vp_id: str) -> Dict[str, Any]:
-        """Get performance analysis for a Virtual Participant"""
-        
-        vp = self.get_virtual_participant(vp_id)
-        if not vp:
-            raise ValueError(f"Virtual Participant {vp_id} not found")
-        
-        return self.performance_monitor.analyze_performance(vp)
-    
-    def link_to_meeting_transcript(self, vp_id: str, call_id: str) -> Dict[str, Any]:
-        """Link Virtual Participant to a meeting transcript"""
-        
-        current_time = self.get_current_timestamp()
-        
-        try:
-            response = self.table.update_item(
-                Key={'id': vp_id},
-                UpdateExpression="SET CallId = :call_id, updatedAt = :updated_at",
-                ExpressionAttributeValues={
-                    ':call_id': call_id,
-                    ':updated_at': current_time
-                },
-                ReturnValues='ALL_NEW'
-            )
-            
-            logger.info(f"Linked VP {vp_id} to meeting {call_id}")
-            return response['Attributes']
-            
-        except Exception as e:
-            logger.error(f"Error linking VP {vp_id} to meeting {call_id}: {str(e)}")
-            raise
     
     def get_task_details_from_registry(self, vp_id: str) -> Optional[Dict[str, Any]]:
         """Get task details from VPTaskRegistry table"""
         try:
-            # Try to find registry table name pattern
-            registry_table_names = [
-                f"end-button-VIRTUALPARTICIPANTSTACK-*-VPTaskRegistry",
-                f"*-VPTaskRegistry"
-            ]
+            # Find VPTaskRegistry table
+            dynamodb_client = boto3.client('dynamodb')
+            tables = dynamodb_client.list_tables()['TableNames']
             
-            for pattern in registry_table_names:
-                try:
-                    # List tables to find the registry table
-                    dynamodb_client = boto3.client('dynamodb')
-                    tables = dynamodb_client.list_tables()['TableNames']
-                    
-                    registry_table = None
-                    for table_name in tables:
-                        if 'VPTaskRegistry' in table_name:
-                            registry_table = table_name
-                            break
-                    
-                    if registry_table:
-                        logger.info(f"Found VPTaskRegistry table: {registry_table}")
-                        registry_table_resource = dynamodb.Table(registry_table)
-                        
-                        response = registry_table_resource.get_item(Key={'vpId': vp_id})
-                        if 'Item' in response:
-                            logger.info(f"Found task details in registry for VP {vp_id}")
-                            return response['Item']
-                        else:
-                            logger.info(f"No registry entry found for VP {vp_id}")
-                            return None
-                    
-                except Exception as table_error:
-                    logger.warning(f"Error accessing registry table: {table_error}")
-                    continue
+            registry_table = None
+            for table_name in tables:
+                if 'VPTaskRegistry' in table_name:
+                    registry_table = table_name
+                    break
             
-            logger.warning(f"Could not find VPTaskRegistry table")
-            return None
+            if not registry_table:
+                logger.warning("VPTaskRegistry table not found")
+                return None
+            
+            registry_table_resource = dynamodb.Table(registry_table)
+            response = registry_table_resource.get_item(Key={'vpId': vp_id})
+            
+            return response.get('Item')
             
         except Exception as e:
-            logger.error(f"Error getting task details from registry for VP {vp_id}: {str(e)}")
+            logger.error(f"Error getting task details from registry: {e}")
             return None
     
     def cleanup_registry_entry(self, vp_id: str) -> bool:
         """Clean up registry entry after task termination"""
         try:
-            # Find and delete from registry table
             dynamodb_client = boto3.client('dynamodb')
             tables = dynamodb_client.list_tables()['TableNames']
             
@@ -525,106 +176,48 @@ class VirtualParticipantManager:
             if registry_table:
                 registry_table_resource = dynamodb.Table(registry_table)
                 registry_table_resource.delete_item(Key={'vpId': vp_id})
-                logger.info(f"Deleted registry entry for VP {vp_id}")
+                logger.info(f"Cleaned up registry entry for VP {vp_id}")
                 return True
-            else:
-                logger.warning("Could not find VPTaskRegistry table for cleanup")
-                return False
+            
+            return False
                 
         except Exception as e:
-            logger.error(f"Error cleaning up registry entry for VP {vp_id}: {str(e)}")
+            logger.error(f"Error cleaning up registry entry: {e}")
             return False
 
 def lambda_handler(event, context):
-    """
-    Lambda handler for Virtual Participant management operations
-    """
+    """Lambda handler for Virtual Participant management operations"""
     
-    logger.info("=== LAMBDA FUNCTION CALLED ===")
-    logger.info(f"Received event: {json.dumps(event, indent=2)}")
-    logger.info(f"Context: {context}")
-    logger.info(f"Environment variables:")
-    logger.info(f"  - TABLE_NAME: {os.environ.get('TABLE_NAME', 'NOT_SET')}")
-    logger.info(f"  - KINESIS_STREAM_NAME: {os.environ.get('KINESIS_STREAM_NAME', 'NOT_SET')}")
-    logger.info(f"  - LOG_LEVEL: {os.environ.get('LOG_LEVEL', 'NOT_SET')}")
+    logger.info("Processing VP management request")
     
-    # Get table name from environment
     table_name = os.environ.get('TABLE_NAME', 'VirtualParticipants')
-    logger.info(f"Using table name: {table_name}")
-    
     vp_manager = VirtualParticipantManager(table_name)
     
     try:
-        # Parse the event
         operation = event.get('operation')
         arguments = event.get('arguments', {})
         
-        logger.info(f"Operation: {operation}")
-        logger.info(f"Arguments: {json.dumps(arguments, indent=2)}")
-        
-        if operation == 'updateVirtualParticipantStatus':
-            logger.info("Processing updateVirtualParticipantStatus operation")
+        if operation == 'endVirtualParticipant':
             input_data = arguments.get('input', {})
-            result = vp_manager.update_virtual_participant_status(
-                vp_id=input_data['id'],
-                status=input_data['status'],
-                message=input_data.get('message'),
-                error_details=input_data.get('errorDetails'),
-                connection_details=input_data.get('connectionDetails'),
-                metrics=input_data.get('metrics'),
-                metadata=input_data.get('metadata')
-            )
-            
-        elif operation == 'endVirtualParticipant':
-            logger.info("=== PROCESSING END VIRTUAL PARTICIPANT ===")
-            input_data = arguments.get('input', {})
-            logger.info(f"Input data: {json.dumps(input_data, indent=2)}")
-            logger.info(f"VP Manager initialized for registry-based termination")
             
             result = vp_manager.end_virtual_participant(
                 vp_id=input_data['id'],
                 end_reason=input_data['endReason'],
                 ended_by=input_data.get('endedBy')
             )
-            logger.info(f"End VP result: {json.dumps(result, indent=2, default=str)}")
-            logger.info("=== END VIRTUAL PARTICIPANT PROCESSING COMPLETE ===")
             
-        elif operation == 'getVirtualParticipantEnhanced':
-            logger.info("Processing getVirtualParticipantEnhanced operation")
-            vp_id = arguments.get('id')
-            result = vp_manager.get_virtual_participant(vp_id)
-            if not result:
-                raise ValueError(f"Virtual Participant {vp_id} not found")
-        
-        elif operation == 'getVirtualParticipantMetrics':
-            logger.info("Processing getVirtualParticipantMetrics operation")
-            vp_id = arguments.get('id')
-            result = vp_manager.get_performance_analysis(vp_id)
+            logger.info("VP termination completed successfully")
             
-        elif operation == 'linkToMeetingTranscript':
-            logger.info("Processing linkToMeetingTranscript operation")
-            input_data = arguments.get('input', {})
-            result = vp_manager.link_to_meeting_transcript(
-                vp_id=input_data['vpId'],
-                call_id=input_data['callId']
-            )
-                
         else:
-            logger.error(f"Unknown operation: {operation}")
             raise ValueError(f"Unknown operation: {operation}")
         
-        logger.info("=== LAMBDA FUNCTION SUCCESS ===")
         return {
             'statusCode': 200,
             'body': result
         }
         
     except Exception as e:
-        logger.error("=== LAMBDA FUNCTION ERROR ===")
         logger.error(f"Error processing request: {str(e)}")
-        logger.error(f"Error type: {type(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
         
         return {
             'statusCode': 500,

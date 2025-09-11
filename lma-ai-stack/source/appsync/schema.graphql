@@ -212,8 +212,6 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
 	CallId: ID
-	taskArn: String
-	clusterArn: String
 }
 
 input CreateVirtualParticipantInput {
@@ -228,7 +226,6 @@ input UpdateVirtualParticipantInput {
 	id: ID!
 	status: String!
 	CallId: ID
-	taskArn: String
 }
 
 input EndVirtualParticipantInput {
