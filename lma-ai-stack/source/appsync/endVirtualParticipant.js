@@ -8,6 +8,11 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const { input } = ctx.arguments;
   
+  // Add debugging to see if this resolver is being called
+  console.log('=== APPSYNC JS RESOLVER CALLED ===');
+  console.log('Input:', JSON.stringify(input));
+  console.log('Identity:', JSON.stringify(ctx.identity));
+  
   // Invoke Lambda function for enhanced VP management
   return {
     operation: 'Invoke',

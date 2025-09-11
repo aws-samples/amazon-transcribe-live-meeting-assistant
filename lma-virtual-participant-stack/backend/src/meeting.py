@@ -9,6 +9,7 @@ import asyncio
 from playwright.async_api import async_playwright
 import sys
 import os
+import signal
 import kds
 import recording
 from status_manager import VirtualParticipantStatusManager
@@ -28,9 +29,28 @@ except Exception as e:
     raise
 
 
+# Global variables for graceful shutdown
+shutdown_requested = False
+status_manager = None
+vp_id = None
+
+def signal_handler(signum, frame):
+    """Handle termination signals gracefully"""
+    global shutdown_requested, status_manager, vp_id
+    print(f"Received signal {signum}, initiating graceful shutdown...")
+    shutdown_requested = True
+    
+    # Update status to ENDED when externally terminated
+    if status_manager and vp_id:
+        try:
+            status_manager.set_completed()  # Use COMPLETED instead of ENDED for external termination
+            print(f"VP {vp_id} status updated to COMPLETED due to external termination")
+        except Exception as e:
+            print(f"Failed to update status during shutdown: {e}")
+
 async def app():
     # Initialize status manager if VP_ID is provided
-    status_manager = None
+    global status_manager, vp_id
     vp_id = os.environ.get('VIRTUAL_PARTICIPANT_ID')
     if vp_id:
         try:
@@ -40,6 +60,10 @@ async def app():
             print(f"VP {vp_id} status: INITIALIZING")
         except Exception as e:
             print(f"Failed to initialize status manager: {e}")
+    
+    # Set up signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
     
     try:
         # Set CONNECTING status when starting browser

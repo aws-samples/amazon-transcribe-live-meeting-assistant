@@ -3,6 +3,7 @@ Virtual Participant Manager Lambda Function
 Handles enhanced status tracking, metrics, and error reporting for Virtual Participants
 """
 
+import os
 import json
 import boto3
 import logging
@@ -195,11 +196,12 @@ class VirtualParticipantManager:
                 statusHistory = :status_history,
                 connectionDetails = :connection_details,
                 errorDetails = :error_details,
-                metrics = :metrics
+                #metrics = :metrics
         """
         
         expression_attribute_names = {
-            '#status': 'status'
+            '#status': 'status',
+            '#metrics': 'metrics'
         }
         
         expression_attribute_values = {
@@ -240,23 +242,57 @@ class VirtualParticipantManager:
             raise
     
     def end_virtual_participant(self, vp_id: str, end_reason: str, ended_by: str = None) -> Dict[str, Any]:
-        """End a Virtual Participant with actual ECS container termination"""
+        """End a Virtual Participant with proper meeting termination and ECS container cleanup"""
         
         current_time = self.get_current_timestamp()
         
-        logger.info(f"Starting termination process for VP {vp_id}")
+        logger.info(f"=== STARTING COMPREHENSIVE TERMINATION PROCESS FOR VP {vp_id} ===")
+        logger.info(f"End reason: {end_reason}")
+        logger.info(f"Ended by: {ended_by}")
         
-        # Step 1: Attempt to stop the actual ECS container
+        # Step 1: Get VP details to access CallId for proper meeting termination
+        logger.info(f"Step 1: Getting VP details for {vp_id}")
+        vp = self.get_virtual_participant(vp_id)
+        if not vp:
+            logger.error(f"Virtual Participant {vp_id} not found in database")
+            raise ValueError(f"Virtual Participant {vp_id} not found")
+        
+        logger.info(f"VP details: {json.dumps(vp, indent=2, default=str)}")
+        call_id = vp.get('CallId')
+        logger.info(f"CallId associated with VP: {call_id}")
+        
+        # Step 2: Send END event to Kinesis (like send_end_meeting() in kds.py)
+        logger.info(f"Step 2: Sending END event to Kinesis")
+        kinesis_end_success = False
+        if call_id:
+            try:
+                kinesis_end_success = self.send_end_meeting_event(call_id, vp)
+                logger.info(f"✓ Successfully sent END event to Kinesis for CallId {call_id}")
+            except Exception as e:
+                logger.error(f"✗ Failed to send END event to Kinesis: {e}")
+                import traceback
+                logger.error(f"Kinesis error traceback: {traceback.format_exc()}")
+        else:
+            logger.warning(f"No CallId found for VP {vp_id}, skipping Kinesis END event")
+        
+        # Step 3: Attempt to stop the actual ECS container
+        logger.info(f"Step 3: Attempting to stop ECS container")
         ecs_termination_success = self.ecs_manager.stop_vp_task(vp_id, end_reason)
         
         if ecs_termination_success:
-            logger.info(f"Successfully terminated ECS container for VP {vp_id}")
-            termination_message = f"Virtual Participant terminated: {end_reason} (Container stopped)"
+            logger.info(f"✓ Successfully terminated ECS container for VP {vp_id}")
+            container_status = "Container stopped"
         else:
-            logger.warning(f"Could not find/stop ECS container for VP {vp_id} - updating status only")
-            termination_message = f"Virtual Participant status updated: {end_reason} (Container may still be running)"
+            logger.warning(f"✗ Could not find/stop ECS container for VP {vp_id}")
+            container_status = "Container may still be running"
         
-        # Step 2: Update database status with termination details
+        # Step 4: Update database status with comprehensive termination details
+        termination_message = f"Virtual Participant terminated: {end_reason}"
+        if kinesis_end_success:
+            termination_message += " (Meeting ended properly)"
+        if ecs_termination_success:
+            termination_message += f" ({container_status})"
+        
         updated_vp = self.update_virtual_participant_status(
             vp_id, 
             VPStatus.ENDED.value, 
@@ -265,21 +301,25 @@ class VirtualParticipantManager:
                 'endedBy': ended_by, 
                 'endReason': end_reason,
                 'ecsTerminated': ecs_termination_success,
-                'terminationTimestamp': current_time
+                'kinesisEndSent': kinesis_end_success,
+                'terminationTimestamp': current_time,
+                'callId': call_id
             })
         )
         
-        # Step 3: Update end-specific fields
+        # Step 5: Update end-specific fields
         update_expression = """
             SET endedAt = :ended_at,
                 endReason = :end_reason,
-                ecsTerminated = :ecs_terminated
+                ecsTerminated = :ecs_terminated,
+                kinesisEndSent = :kinesis_end_sent
         """
         
         expression_attribute_values = {
             ':ended_at': current_time,
             ':end_reason': end_reason,
-            ':ecs_terminated': ecs_termination_success
+            ':ecs_terminated': ecs_termination_success,
+            ':kinesis_end_sent': kinesis_end_success
         }
         
         if ended_by:
@@ -301,8 +341,9 @@ class VirtualParticipantManager:
             # Get ECS task status for verification
             task_status = self.ecs_manager.get_task_status(vp_id)
             
-            logger.info(f"VP {vp_id} termination complete:")
+            logger.info(f"VP {vp_id} comprehensive termination complete:")
             logger.info(f"  - Database Status: ENDED")
+            logger.info(f"  - Meeting END Event: {'SENT' if kinesis_end_success else 'FAILED'}")
             logger.info(f"  - ECS Container: {'TERMINATED' if ecs_termination_success else 'UNKNOWN'}")
             logger.info(f"  - Task Status: {task_status}")
             logger.info(f"  - Performance Analysis: {performance_analysis}")
@@ -312,6 +353,56 @@ class VirtualParticipantManager:
         except Exception as e:
             logger.error(f"Error ending VP {vp_id}: {str(e)}")
             raise
+    
+    def send_end_meeting_event(self, call_id: str, vp: Dict[str, Any]) -> bool:
+        """Send END event to Kinesis to properly close the meeting transcript"""
+        try:
+            # Get Kinesis stream name from environment
+            kinesis_stream_name = os.environ.get('KINESIS_STREAM_NAME')
+            logger.info(f"Kinesis stream name from environment: {kinesis_stream_name}")
+            
+            if not kinesis_stream_name:
+                logger.error("KINESIS_STREAM_NAME not set, cannot send END event")
+                return False
+            
+            # Initialize Kinesis client
+            kinesis = boto3.client('kinesis')
+            
+            # Create END event (similar to send_end_meeting() in kds.py)
+            end_call_event = {
+                'EventType': 'END',
+                'CallId': call_id,
+                'CustomerPhoneNumber': 'Virtual Participant',
+                'SystemPhoneNumber': 'LMA System',
+                'CreatedAt': self.get_current_timestamp(),
+                'AgentId': vp.get('owner', 'Unknown'),
+                # Note: Access tokens not available in Lambda context
+                'AccessToken': '',
+                'IdToken': '',
+                'RefreshToken': '',
+            }
+            
+            logger.info(f"Sending END meeting event to Kinesis:")
+            logger.info(f"  Stream: {kinesis_stream_name}")
+            logger.info(f"  CallId: {call_id}")
+            logger.info(f"  Event: {json.dumps(end_call_event, indent=2)}")
+            
+            # Write the END event to Kinesis Data Stream
+            response = kinesis.put_record(
+                StreamName=kinesis_stream_name,
+                PartitionKey=call_id,
+                Data=json.dumps(end_call_event).encode('utf-8')
+            )
+            
+            logger.info(f"Kinesis put_record response: {json.dumps(response, indent=2, default=str)}")
+            logger.info(f"Successfully sent END meeting event to Kinesis")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error sending END meeting event to Kinesis: {e}")
+            import traceback
+            logger.error(f"Kinesis error traceback: {traceback.format_exc()}")
+            return False
     
     def get_performance_analysis(self, vp_id: str) -> Dict[str, Any]:
         """Get performance analysis for a Virtual Participant"""
@@ -350,10 +441,18 @@ def lambda_handler(event, context):
     Lambda handler for Virtual Participant management operations
     """
     
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info("=== LAMBDA FUNCTION CALLED ===")
+    logger.info(f"Received event: {json.dumps(event, indent=2)}")
+    logger.info(f"Context: {context}")
+    logger.info(f"Environment variables:")
+    logger.info(f"  - TABLE_NAME: {os.environ.get('TABLE_NAME', 'NOT_SET')}")
+    logger.info(f"  - KINESIS_STREAM_NAME: {os.environ.get('KINESIS_STREAM_NAME', 'NOT_SET')}")
+    logger.info(f"  - LOG_LEVEL: {os.environ.get('LOG_LEVEL', 'NOT_SET')}")
     
     # Get table name from environment
-    table_name = context.get('TABLE_NAME', 'VirtualParticipants')
+    table_name = os.environ.get('TABLE_NAME', 'VirtualParticipants')
+    logger.info(f"Using table name: {table_name}")
+    
     vp_manager = VirtualParticipantManager(table_name)
     
     try:
@@ -361,7 +460,11 @@ def lambda_handler(event, context):
         operation = event.get('operation')
         arguments = event.get('arguments', {})
         
+        logger.info(f"Operation: {operation}")
+        logger.info(f"Arguments: {json.dumps(arguments, indent=2)}")
+        
         if operation == 'updateVirtualParticipantStatus':
+            logger.info("Processing updateVirtualParticipantStatus operation")
             input_data = arguments.get('input', {})
             result = vp_manager.update_virtual_participant_status(
                 vp_id=input_data['id'],
@@ -374,24 +477,33 @@ def lambda_handler(event, context):
             )
             
         elif operation == 'endVirtualParticipant':
+            logger.info("=== PROCESSING END VIRTUAL PARTICIPANT ===")
             input_data = arguments.get('input', {})
+            logger.info(f"Input data: {json.dumps(input_data, indent=2)}")
+            logger.info(f"VP Manager ECS cluster: {vp_manager.ecs_manager.cluster_name}")
+            
             result = vp_manager.end_virtual_participant(
                 vp_id=input_data['id'],
                 end_reason=input_data['endReason'],
                 ended_by=input_data.get('endedBy')
             )
+            logger.info(f"End VP result: {json.dumps(result, indent=2, default=str)}")
+            logger.info("=== END VIRTUAL PARTICIPANT PROCESSING COMPLETE ===")
             
         elif operation == 'getVirtualParticipantEnhanced':
+            logger.info("Processing getVirtualParticipantEnhanced operation")
             vp_id = arguments.get('id')
             result = vp_manager.get_virtual_participant(vp_id)
             if not result:
                 raise ValueError(f"Virtual Participant {vp_id} not found")
         
         elif operation == 'getVirtualParticipantMetrics':
+            logger.info("Processing getVirtualParticipantMetrics operation")
             vp_id = arguments.get('id')
             result = vp_manager.get_performance_analysis(vp_id)
             
         elif operation == 'linkToMeetingTranscript':
+            logger.info("Processing linkToMeetingTranscript operation")
             input_data = arguments.get('input', {})
             result = vp_manager.link_to_meeting_transcript(
                 vp_id=input_data['vpId'],
@@ -399,15 +511,22 @@ def lambda_handler(event, context):
             )
                 
         else:
+            logger.error(f"Unknown operation: {operation}")
             raise ValueError(f"Unknown operation: {operation}")
         
+        logger.info("=== LAMBDA FUNCTION SUCCESS ===")
         return {
             'statusCode': 200,
             'body': result
         }
         
     except Exception as e:
+        logger.error("=== LAMBDA FUNCTION ERROR ===")
         logger.error(f"Error processing request: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
         return {
             'statusCode': 500,
             'body': {

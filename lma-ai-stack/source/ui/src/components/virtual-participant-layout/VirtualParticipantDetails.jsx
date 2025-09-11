@@ -47,6 +47,7 @@ const onUpdateVirtualParticipantDetailed = `
       owner
       Owner
       SharedWith
+      CallId
     }
   }
 `;
@@ -134,12 +135,17 @@ StatusBadge.propTypes = {
 
 const StatusDetails = ({ status, updatedAt }) => {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.FAILED;
+  const isInProgress = ['INITIALIZING', 'CONNECTING', 'JOINING'].includes(status);
 
   return (
     <Container>
       <SpaceBetween direction="vertical" size="s">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Icon name={config.icon} variant={config.type === 'error' ? 'error' : 'normal'} />
+          {isInProgress ? (
+            <Spinner size="normal" />
+          ) : (
+            <Icon name={config.icon} variant={config.type === 'error' ? 'error' : 'normal'} />
+          )}
           <Box fontSize="heading-m" fontWeight="bold">
             {config.message}
           </Box>
@@ -402,19 +408,28 @@ const VirtualParticipantDetails = () => {
             ...prev,
             status: updated.status,
             updatedAt: updated.updatedAt,
+            CallId: updated.CallId || prev.CallId, // Update CallId if available
           }));
 
           // Show notification for status changes
           const config = STATUS_CONFIG[updated.status];
           if (config) {
+            const notificationId = `status-${Date.now()}`;
             const notification = {
               type: config.type === 'error' ? 'error' : 'success',
               content: config.message,
               dismissible: true,
-              id: `status-${Date.now()}`,
-              onDismiss: () => setNotifications((prev) => prev.filter((n) => n.id !== `status-${Date.now()}`)),
+              id: notificationId,
+              onDismiss: () => setNotifications((prev) => prev.filter((n) => n.id !== notificationId)),
             };
             setNotifications((prev) => [...prev, notification]);
+
+            // Auto-dismiss success notifications after 5 seconds
+            if (config.type !== 'error') {
+              setTimeout(() => {
+                setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+              }, 5000);
+            }
           }
         }
       },
@@ -433,7 +448,10 @@ const VirtualParticipantDetails = () => {
 
   const handleEnd = async () => {
     try {
-      await API.graphql(
+      console.log('=== FRONTEND: CALLING END VP MUTATION ===');
+      console.log('VP ID:', vpId);
+      console.log('Mutation:', endVirtualParticipant);
+      const result = await API.graphql(
         graphqlOperation(endVirtualParticipant, {
           input: {
             id: vpId,
@@ -442,6 +460,8 @@ const VirtualParticipantDetails = () => {
           },
         }),
       );
+      console.log('=== FRONTEND: END VP MUTATION RESULT ===');
+      console.log('Result:', JSON.stringify(result, null, 2));
 
       const notification = {
         type: 'success',

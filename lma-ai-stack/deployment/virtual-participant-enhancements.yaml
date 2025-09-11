@@ -19,6 +19,10 @@ Parameters:
     Type: String
     Description: Virtual Participant DynamoDB table name
   
+  CallDataStreamName:
+    Type: String
+    Description: Name of the Kinesis Data Stream for call events
+  
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
@@ -42,6 +46,7 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref VirtualParticipantTableName
+          KINESIS_STREAM_NAME: !Ref CallDataStreamName
           LOG_LEVEL: INFO
       Role: !GetAtt VirtualParticipantManagerRole.Arn
       LoggingConfig:
@@ -101,6 +106,12 @@ Resources:
                 Action:
                   - ecs:DescribeClusters
                 Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/*"
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                  - kinesis:PutRecords
+                  - kinesis:DescribeStream
+                Resource: !Sub "arn:aws:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
 
   ##########################################################################
   # Enhanced AppSync Data Sources and Resolvers
@@ -217,45 +228,8 @@ Resources:
           return result.body;
         }
 
-  EndVirtualParticipantResolver:
-    Type: AWS::AppSync::Resolver
-    Properties:
-      ApiId: !Ref AppSyncApiId
-      TypeName: Mutation
-      FieldName: endVirtualParticipant
-      DataSourceName: !GetAtt VirtualParticipantLambdaDataSource.Name
-      Runtime:
-        Name: APPSYNC_JS
-        RuntimeVersion: 1.0.0
-      Code: |
-        import { util } from '@aws-appsync/utils';
-        
-        export function request(ctx) {
-          return {
-            operation: 'Invoke',
-            payload: {
-              operation: 'endVirtualParticipant',
-              arguments: ctx.arguments,
-              identity: ctx.identity,
-              source: ctx.source,
-              request: ctx.request,
-            },
-          };
-        }
-        
-        export function response(ctx) {
-          const { error, result } = ctx;
-          
-          if (error) {
-            util.error(error.message, error.type);
-          }
-          
-          if (result.statusCode !== 200) {
-            util.error(result.body.error || 'Failed to end Virtual Participant', 'InternalError');
-          }
-          
-          return result.body;
-        }
+  # EndVirtualParticipantResolver removed - handled by main LMA stack
+  # to avoid resolver conflicts and ensure single source of truth
 
   GetVirtualParticipantMetricsResolver:
     Type: AWS::AppSync::Resolver

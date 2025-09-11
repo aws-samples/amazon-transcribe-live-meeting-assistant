@@ -498,7 +498,7 @@ Outputs:
     Value: !GetAtt EventSourcingTable.Arn
   CallEventProcessorFunctionRoleName:
     Description: The Name of the IAM role used by CallEventProcessorFunction
-    Value: !Ref CallEventProcessorFunctionRole
+    Value: !Sub "${CallEventProcessorFunction}Role"
   SNSTopic:
     Description: The SNS topic name that LMA publishes category events to
     Value: !GetAtt CategorySNSTopic.TopicName
@@ -2340,6 +2340,92 @@ Resources:
           $util.error($ctx.error.message, $ctx.error.type)
         #end
         $util.toJson($ctx.result)
+
+  # Virtual Participant Manager Lambda Function
+  VirtualParticipantManagerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-VirtualParticipantManager"
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/virtual_participant_manager
+      Description: Enhanced Virtual Participant Manager with ECS termination and Kinesis events
+      MemorySize: 512
+      Timeout: 300
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref VirtualParticipantTable
+          KINESIS_STREAM_NAME: !Ref CallDataStream
+          ECS_CLUSTER_NAME: !Sub "${LMAStackName}-VirtualParticipant-Cluster"
+          CLUSTER_NAME: !Sub "${LMAStackName}-VirtualParticipant-Cluster"
+          LOG_LEVEL: DEBUG
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref VirtualParticipantTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kinesis:PutRecord
+                - kinesis:PutRecords
+                - kinesis:DescribeStream
+              Resource: !Ref CallDataStreamArn
+            - Effect: Allow
+              Action:
+                - ecs:ListTasks
+                - ecs:DescribeTasks
+                - ecs:StopTask
+                - ecs:DescribeTaskDefinition
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - ecs:DescribeClusters
+              Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/*"
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement
+
+  VirtualParticipantManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+
+  # Lambda data source for VP Manager
+  VirtualParticipantLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: VirtualParticipantLambda
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt VirtualParticipantLambdaDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt VirtualParticipantManagerFunction.Arn
+
+  VirtualParticipantLambdaDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt VirtualParticipantManagerFunction.Arn
 
   EndVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
