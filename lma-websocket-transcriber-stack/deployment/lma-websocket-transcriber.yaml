@@ -297,7 +297,7 @@ Parameters:
 
   PermissionsBoundaryArn:
     Type: String
-    Default: AWS::NoValue
+    Default: ""
     Description: >-
       (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
@@ -335,6 +335,7 @@ Metadata:
         default: Transcription Custom Language Model Name
 
 Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
     - !Or
@@ -399,7 +400,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      PermissionsBoundary: !Ref PermissionsBoundaryArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: deleteEcrImages
           PolicyDocument:
@@ -505,7 +509,10 @@ Resources:
             Effect: Allow
             Principal:
               Service: codebuild.amazonaws.com
-      PermissionsBoundary: !Ref PermissionsBoundaryArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: ecs-service
           PolicyDocument:
@@ -900,7 +907,10 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
         Version: "2012-10-17"
-      PermissionsBoundary: !Ref PermissionsBoundaryArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
 
   TranscriberWebsocketTaskDefTaskRoleDefaultPolicy:
     Type: AWS::IAM::Policy
@@ -1130,7 +1140,10 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
         Version: "2012-10-17"
-      PermissionsBoundary: !Ref PermissionsBoundaryArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
 
   TranscriberWebsocketTaskDefExecutionRoleDefaultPolicy:
     Type: AWS::IAM::Policy

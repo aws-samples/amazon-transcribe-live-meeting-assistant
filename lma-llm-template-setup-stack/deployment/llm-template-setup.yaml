@@ -24,11 +24,14 @@ Parameters:
 
   PermissionsBoundaryArn:
     Type: String
-    Default: AWS::NoValue
+    Default: ""
     Description: >-
       (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
 Resources:
   LLMPromptTemplateTable:
@@ -59,7 +62,10 @@ Resources:
               - "sts:AssumeRole"
       ManagedPolicyArns:
         - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-      PermissionsBoundary: !Ref PermissionsBoundaryArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: allow-s3-notification-config
           PolicyDocument:

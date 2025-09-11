@@ -95,7 +95,7 @@ Parameters:
 
   PermissionsBoundaryArn:
     Type: String
-    Default: AWS::NoValue
+    Default: ""
     Description: >-
       (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
@@ -104,6 +104,7 @@ Parameters:
 Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
 Outputs:
   CognitoLoginUrl:
@@ -193,7 +194,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      PermissionsBoundary: !Ref PermissionsBoundaryArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
 
   GetDomainLambda:
     Type: "AWS::Lambda::Function"
