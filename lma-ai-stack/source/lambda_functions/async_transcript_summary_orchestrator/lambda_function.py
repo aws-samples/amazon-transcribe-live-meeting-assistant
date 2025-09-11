@@ -3,7 +3,6 @@
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
 
-
 from os import getenv
 from typing import TYPE_CHECKING, Dict, List, Any
 import json

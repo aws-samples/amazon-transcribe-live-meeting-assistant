@@ -3,7 +3,6 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-
 export const createWavHeader = (sampleRate: number, length: number) => {
     const buffer = Buffer.alloc(44);
   

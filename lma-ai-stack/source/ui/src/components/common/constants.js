@@ -3,7 +3,6 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-
 // eslint-disable import/prefer-default-export
 
 export const LMA_VERSION = 'v<VERSION_TOKEN>';

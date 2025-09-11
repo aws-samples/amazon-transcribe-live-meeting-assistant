@@ -3,7 +3,6 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-
 export const posixifyFilename = function (filename: string) {
     // Replace all invalid characters with underscores.
     const regex = /[^a-zA-Z0-9_.]/g;
