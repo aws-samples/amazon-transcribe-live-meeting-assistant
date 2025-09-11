@@ -106,7 +106,7 @@ Parameters:
 
   PermissionsBoundaryArn:
     Type: String
-    Default: AWS::NoValue
+    Default: ""
     Description: >-
       (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
@@ -209,6 +209,7 @@ Conditions:
     Fn::Or:
       - Condition: IsChunkingStrategyFixed
       - Condition: IsChunkingStrategyDefault
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
 Resources:
   # Custom resource to transform input to lowercase.
@@ -354,7 +355,10 @@ Resources:
                 - lambda.amazonaws.com
             Action:
               - sts:AssumeRole
-      PermissionsBoundary: !Ref PermissionsBoundaryArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: OSSLambdaRoleDefaultPolicy # Reference: https://docs.aws.amazon.com/service-authorization/latest/reference/list_awsx-ray.html
           PolicyDocument:
@@ -461,7 +465,10 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - arn:aws:iam::aws:policy/AmazonTextractFullAccess
-      PermissionsBoundary: !Ref PermissionsBoundaryArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: OSSIndexCustomResourceFunctionRoleDefaultPolicy
           PolicyDocument:
@@ -726,7 +733,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      PermissionsBoundary: !Ref PermissionsBoundaryArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyDocument:
             Version: 2012-10-17
