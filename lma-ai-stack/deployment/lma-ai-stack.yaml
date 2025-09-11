@@ -878,16 +878,6 @@ Resources:
       StreamARN: !Ref CallDataStreamArn
       ConsumerName: DataStreamConsumer
 
-  BedrockPreviewBoto3Stack:
-    Type: AWS::CloudFormation::Stack
-    Condition: ShouldEnableBedrockSummarizer
-    Properties:
-      # yamllint disable rule:line-length
-      TemplateURL: !Sub https://s3.${AWS::Region}.amazonaws.com/${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/bedrock-preview-boto3-stack.yaml
-      # yamllint enable rule:line-length
-      Parameters:
-        CustomerManagedEncryptionKeyArn: !Ref CustomerManagedEncryptionKeyArn
-        LoggingBucketName: !Ref LoggingBucketName
 
   FetchTranscript:
     Type: AWS::Serverless::Function
@@ -972,8 +962,6 @@ Resources:
       MemorySize: 512
       Handler: index.handler
       CodeUri: ../source/lambda_functions/bedrock_summary_lambda
-      Layers:
-        - !GetAtt BedrockPreviewBoto3Stack.Outputs.BedrockBoto3Layer
       Description:
         This AWS Lambda Function runs a transcript summary inference on
         the call transcript using Bedrock API
