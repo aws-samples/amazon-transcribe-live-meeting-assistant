@@ -34,6 +34,79 @@ shutdown_requested = False
 status_manager = None
 vp_id = None
 
+def store_task_arn_in_registry(vp_id: str):
+    """Store task ARN in VPTaskRegistry for efficient termination"""
+    try:
+        import urllib.request
+        import boto3
+        import json
+        from datetime import datetime, timezone
+        
+        print(f"Storing task ARN for VP {vp_id} in registry...")
+        
+        # Get task ARN from ECS metadata endpoint
+        metadata_uri = os.environ.get('ECS_CONTAINER_METADATA_URI_V4')
+        if not metadata_uri:
+            print("ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS")
+            return
+        
+        # Get task metadata
+        task_metadata_url = f"{metadata_uri}/task"
+        print(f"Fetching task metadata from: {task_metadata_url}")
+        
+        with urllib.request.urlopen(task_metadata_url, timeout=10) as response:
+            metadata = json.loads(response.read().decode())
+            task_arn = metadata.get('TaskARN')
+            cluster_arn = metadata.get('Cluster')
+            
+            print(f"Retrieved task ARN: {task_arn}")
+            print(f"Retrieved cluster ARN: {cluster_arn}")
+            
+            if not task_arn or not cluster_arn:
+                print("Could not get task ARN or cluster ARN from metadata")
+                return
+        
+        # Store in VPTaskRegistry table
+        dynamodb = boto3.resource('dynamodb')
+        
+        # Find VPTaskRegistry table
+        dynamodb_client = boto3.client('dynamodb')
+        tables = dynamodb_client.list_tables()['TableNames']
+        
+        registry_table_name = None
+        for table_name in tables:
+            if 'VPTaskRegistry' in table_name:
+                registry_table_name = table_name
+                break
+        
+        if not registry_table_name:
+            print("VPTaskRegistry table not found")
+            return
+        
+        print(f"Found VPTaskRegistry table: {registry_table_name}")
+        registry_table = dynamodb.Table(registry_table_name)
+        
+        # Calculate expiry time (24 hours from now)
+        expiry_time = int((datetime.now(timezone.utc).timestamp() + 86400))
+        
+        # Store task details
+        registry_table.put_item(
+            Item={
+                'vpId': vp_id,
+                'taskArn': task_arn,
+                'clusterArn': cluster_arn,
+                'createdAt': datetime.now(timezone.utc).isoformat(),
+                'taskStatus': 'RUNNING',
+                'expiresAt': expiry_time
+            }
+        )
+        
+        print(f"✓ Successfully stored task ARN in registry for VP {vp_id}")
+        
+    except Exception as e:
+        print(f"Error storing task ARN in registry: {e}")
+        # This is non-critical - don't fail the container startup
+
 def signal_handler(signum, frame):
     """Handle termination signals gracefully"""
     global shutdown_requested, status_manager, vp_id
@@ -70,6 +143,13 @@ async def app():
             # Start with INITIALIZING status
             status_manager.set_initializing()
             print(f"VP {vp_id} status: INITIALIZING")
+            
+            # Store task ARN for efficient termination (separate from join flow)
+            try:
+                store_task_arn_in_registry(vp_id)
+            except Exception as arn_error:
+                print(f"Failed to store task ARN (non-critical): {arn_error}")
+                
         except Exception as e:
             print(f"Failed to initialize status manager: {e}")
     

@@ -259,7 +259,14 @@ class VirtualParticipantManager:
         
         logger.info(f"VP details: {json.dumps(vp, indent=2, default=str)}")
         call_id = vp.get('CallId')
+        task_arn = vp.get('taskArn')
         logger.info(f"CallId associated with VP: {call_id}")
+        logger.info(f"TaskArn stored in VP record: {task_arn}")
+        
+        if task_arn:
+            logger.info(f"✓ VP {vp_id} has stored task ARN - will use direct termination")
+        else:
+            logger.warning(f"✗ VP {vp_id} has NO stored task ARN - will use search method")
         
         # Step 2: Send END event to Kinesis (like send_end_meeting() in kds.py)
         logger.info(f"Step 2: Sending END event to Kinesis")
@@ -275,9 +282,31 @@ class VirtualParticipantManager:
         else:
             logger.warning(f"No CallId found for VP {vp_id}, skipping Kinesis END event")
         
-        # Step 3: Attempt to stop the actual ECS container
+        # Step 3: Attempt to stop the actual ECS container using VPTaskRegistry
         logger.info(f"Step 3: Attempting to stop ECS container")
-        ecs_termination_success = self.ecs_manager.stop_vp_task(vp_id, end_reason)
+        
+        # Try to get task details from VPTaskRegistry first
+        task_details = self.get_task_details_from_registry(vp_id)
+        
+        if task_details:
+            task_arn = task_details.get('taskArn')
+            cluster_arn = task_details.get('clusterArn')
+            logger.info(f"✓ Found task details in registry - taskArn: {task_arn}")
+            logger.info(f"✓ Found cluster details in registry - clusterArn: {cluster_arn}")
+            
+            # Use registry ARNs for direct termination (most efficient)
+            ecs_termination_success = self.ecs_manager.stop_vp_task_by_arn(task_arn, cluster_arn, vp_id, end_reason)
+            
+            # Clean up registry entry after termination
+            try:
+                self.cleanup_registry_entry(vp_id)
+                logger.info(f"✓ Cleaned up registry entry for VP {vp_id}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup registry entry: {cleanup_error}")
+        else:
+            # Fallback to legacy search method if no registry entry
+            logger.warning(f"✗ No task details found in registry for VP {vp_id}, falling back to legacy search")
+            ecs_termination_success = self.ecs_manager.stop_vp_task(vp_id, end_reason)
         
         if ecs_termination_success:
             logger.info(f"✓ Successfully terminated ECS container for VP {vp_id}")
@@ -435,6 +464,76 @@ class VirtualParticipantManager:
         except Exception as e:
             logger.error(f"Error linking VP {vp_id} to meeting {call_id}: {str(e)}")
             raise
+    
+    def get_task_details_from_registry(self, vp_id: str) -> Optional[Dict[str, Any]]:
+        """Get task details from VPTaskRegistry table"""
+        try:
+            # Try to find registry table name pattern
+            registry_table_names = [
+                f"end-button-VIRTUALPARTICIPANTSTACK-*-VPTaskRegistry",
+                f"*-VPTaskRegistry"
+            ]
+            
+            for pattern in registry_table_names:
+                try:
+                    # List tables to find the registry table
+                    dynamodb_client = boto3.client('dynamodb')
+                    tables = dynamodb_client.list_tables()['TableNames']
+                    
+                    registry_table = None
+                    for table_name in tables:
+                        if 'VPTaskRegistry' in table_name:
+                            registry_table = table_name
+                            break
+                    
+                    if registry_table:
+                        logger.info(f"Found VPTaskRegistry table: {registry_table}")
+                        registry_table_resource = dynamodb.Table(registry_table)
+                        
+                        response = registry_table_resource.get_item(Key={'vpId': vp_id})
+                        if 'Item' in response:
+                            logger.info(f"Found task details in registry for VP {vp_id}")
+                            return response['Item']
+                        else:
+                            logger.info(f"No registry entry found for VP {vp_id}")
+                            return None
+                    
+                except Exception as table_error:
+                    logger.warning(f"Error accessing registry table: {table_error}")
+                    continue
+            
+            logger.warning(f"Could not find VPTaskRegistry table")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting task details from registry for VP {vp_id}: {str(e)}")
+            return None
+    
+    def cleanup_registry_entry(self, vp_id: str) -> bool:
+        """Clean up registry entry after task termination"""
+        try:
+            # Find and delete from registry table
+            dynamodb_client = boto3.client('dynamodb')
+            tables = dynamodb_client.list_tables()['TableNames']
+            
+            registry_table = None
+            for table_name in tables:
+                if 'VPTaskRegistry' in table_name:
+                    registry_table = table_name
+                    break
+            
+            if registry_table:
+                registry_table_resource = dynamodb.Table(registry_table)
+                registry_table_resource.delete_item(Key={'vpId': vp_id})
+                logger.info(f"Deleted registry entry for VP {vp_id}")
+                return True
+            else:
+                logger.warning("Could not find VPTaskRegistry table for cleanup")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up registry entry for VP {vp_id}: {str(e)}")
+            return False
 
 def lambda_handler(event, context):
     """
@@ -480,7 +579,7 @@ def lambda_handler(event, context):
             logger.info("=== PROCESSING END VIRTUAL PARTICIPANT ===")
             input_data = arguments.get('input', {})
             logger.info(f"Input data: {json.dumps(input_data, indent=2)}")
-            logger.info(f"VP Manager ECS cluster: {vp_manager.ecs_manager.cluster_name}")
+            logger.info(f"VP Manager initialized for registry-based termination")
             
             result = vp_manager.end_virtual_participant(
                 vp_id=input_data['id'],

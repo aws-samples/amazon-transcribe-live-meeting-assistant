@@ -2276,6 +2276,13 @@ Resources:
             $util.qr( $expValues.put(":CallId", $util.dynamodb.toDynamoDB($ctx.args.input.CallId)) )
         #end
         
+        ## Add taskArn if provided **
+        #if( !$util.isNullOrBlank($ctx.args.input.taskArn) )
+            $util.qr( $expSet.put("#taskArn", ":taskArn") )
+            $util.qr( $expNames.put("#taskArn", "taskArn") )
+            $util.qr( $expValues.put(":taskArn", $util.dynamodb.toDynamoDB($ctx.args.input.taskArn)) )
+        #end
+        
         ## Build the SET expression **
         #set( $expression = "SET" )
         #foreach( $entry in $expSet.entrySet() )
@@ -2356,8 +2363,6 @@ Resources:
         Variables:
           TABLE_NAME: !Ref VirtualParticipantTable
           KINESIS_STREAM_NAME: !Ref CallDataStream
-          ECS_CLUSTER_NAME: !Sub "${LMAStackName}-VirtualParticipant-Cluster"
-          CLUSTER_NAME: !Sub "${LMAStackName}-VirtualParticipant-Cluster"
           LOG_LEVEL: DEBUG
       Policies:
         - DynamoDBCrudPolicy:
@@ -2371,6 +2376,7 @@ Resources:
               Resource: !Ref CallDataStreamArn
             - Effect: Allow
               Action:
+                - ecs:ListClusters
                 - ecs:ListTasks
                 - ecs:DescribeTasks
                 - ecs:StopTask
@@ -2380,6 +2386,16 @@ Resources:
               Action:
                 - ecs:DescribeClusters
               Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/*"
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:DeleteItem
+              Resource: 
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VPTaskRegistry*"
+            - Effect: Allow
+              Action:
+                - dynamodb:ListTables
+              Resource: "*"
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
     Metadata:

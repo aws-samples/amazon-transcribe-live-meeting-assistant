@@ -17,20 +17,7 @@ class ECSTaskManager:
     
     def __init__(self):
         self.ecs_client = boto3.client('ecs')
-        
-        # Debug logging for environment variables
-        logger.info(f"ECS_CLUSTER_NAME from env: {os.environ.get('ECS_CLUSTER_NAME', 'NOT_SET')}")
-        logger.info(f"CLUSTER_NAME from env: {os.environ.get('CLUSTER_NAME', 'NOT_SET')}")
-        logger.info(f"AWS_LAMBDA_FUNCTION_NAME: {os.environ.get('AWS_LAMBDA_FUNCTION_NAME', 'NOT_SET')}")
-        logger.info(f"TABLE_NAME: {os.environ.get('TABLE_NAME', 'NOT_SET')}")
-        
-        # Try to get cluster name from environment, fallback to dynamic discovery
-        self.cluster_name = (
-            os.environ.get('ECS_CLUSTER_NAME') or 
-            os.environ.get('CLUSTER_NAME') or
-            self.find_vp_cluster()
-        )
-        logger.info(f"ECSTaskManager initialized with cluster: {self.cluster_name}")
+        logger.info("ECSTaskManager initialized - using stored ARNs for direct termination")
     
     def get_stack_name_from_lambda(self) -> str:
         """Extract base stack name from Lambda function name or environment"""
@@ -122,7 +109,7 @@ class ECSTaskManager:
         
     def find_vp_task(self, vp_id: str) -> Optional[str]:
         """
-        Find the running ECS task for a Virtual Participant
+        Find the running ECS task for a Virtual Participant (legacy method - use stored ARN instead)
         
         Args:
             vp_id: Virtual Participant ID
@@ -130,6 +117,8 @@ class ECSTaskManager:
         Returns:
             Task ARN if found, None otherwise
         """
+        logger.warning(f"Using legacy task search method for VP {vp_id} - consider using stored task ARN instead")
+        
         try:
             logger.info(f"Searching for ECS task with VP ID: {vp_id} in cluster: {self.cluster_name}")
             
@@ -144,65 +133,74 @@ class ECSTaskManager:
                 return None
             
             logger.info(f"Found {len(response['taskArns'])} running tasks in cluster")
+            logger.warning(f"Legacy search through {len(response['taskArns'])} tasks - this is inefficient")
             
-            # Describe tasks to get details
+            # For legacy support, just return the first VP-related task
+            # This is not reliable for multiple VPs but serves as fallback
             task_details = self.ecs_client.describe_tasks(
                 cluster=self.cluster_name,
-                tasks=response['taskArns']
+                tasks=response['taskArns'][:5]  # Limit to first 5 tasks to avoid timeout
             )
             
-            # Find task with matching VP ID in environment variables or tags
             for task in task_details.get('tasks', []):
                 task_arn = task['taskArn']
                 task_definition = task.get('taskDefinitionArn', '')
                 
-                logger.info(f"Checking task: {task_arn}")
-                logger.info(f"Task definition: {task_definition}")
-                
                 # Check if task definition contains VP-related keywords
-                if any(keyword in task_definition.upper() for keyword in ['VIRTUALPARTICIPANT', 'VP', 'VIRTUAL-PARTICIPANT']):
-                    logger.info(f"Found VP-related task definition: {task_definition}")
-                
-                # Get task definition details to check environment variables
-                try:
-                    task_def_response = self.ecs_client.describe_task_definition(
-                        taskDefinition=task_definition
-                    )
-                    
-                    containers = task_def_response.get('taskDefinition', {}).get('containerDefinitions', [])
-                    
-                    for container in containers:
-                        env_vars = container.get('environment', [])
-                        logger.info(f"Container {container.get('name', 'unknown')} has {len(env_vars)} environment variables")
-                        
-                        # Look for various VP ID environment variables
-                        for env_var in env_vars:
-                            env_name = env_var.get('name', '')
-                            env_value = env_var.get('value', '')
-                            
-                            # Check multiple possible environment variable names
-                            if env_name in ['VIRTUAL_PARTICIPANT_ID', 'VP_ID', 'PARTICIPANT_ID'] and env_value == vp_id:
-                                logger.info(f"Found ECS task for VP {vp_id}: {task_arn} (matched via {env_name})")
-                                return task_arn
-                            
-                            # Log all environment variables for debugging
-                            if 'VP' in env_name.upper() or 'PARTICIPANT' in env_name.upper():
-                                logger.info(f"  Found VP-related env var: {env_name}={env_value}")
-                                
-                except Exception as task_def_error:
-                    logger.warning(f"Could not describe task definition {task_definition}: {task_def_error}")
-                    continue
+                if any(keyword in task_definition.upper() for keyword in ['VIRTUALPARTICIPANT']):
+                    logger.warning(f"Using first VP-related task as fallback: {task_arn}")
+                    return task_arn
             
-            logger.warning(f"No ECS task found for VP {vp_id} after checking all running tasks")
+            logger.warning(f"No ECS task found for VP {vp_id} using legacy search")
             return None
             
         except Exception as e:
             logger.error(f"Error finding ECS task for VP {vp_id}: {str(e)}")
             return None
     
+    def stop_vp_task_by_arn(self, task_arn: str, cluster_arn: str, vp_id: str, reason: str = "User requested termination") -> bool:
+        """
+        Stop the ECS task using stored task ARN and cluster ARN (most efficient approach)
+        
+        Args:
+            task_arn: ECS Task ARN stored in VP record
+            cluster_arn: ECS Cluster ARN stored in VP record
+            vp_id: Virtual Participant ID (for logging)
+            reason: Reason for stopping the task
+            
+        Returns:
+            True if task was stopped successfully, False otherwise
+        """
+        try:
+            logger.info(f"=== DIRECT ECS TASK TERMINATION FOR VP {vp_id} ===")
+            logger.info(f"Task ARN: {task_arn}")
+            logger.info(f"Cluster ARN: {cluster_arn}")
+            logger.info(f"Reason: {reason}")
+            
+            if not task_arn or not cluster_arn:
+                logger.warning(f"Missing stored ARNs for VP {vp_id} - taskArn: {bool(task_arn)}, clusterArn: {bool(cluster_arn)}")
+                return False
+            
+            # Stop the task directly using stored ARNs (no discovery needed)
+            response = self.ecs_client.stop_task(
+                cluster=cluster_arn,  # Use stored cluster ARN
+                task=task_arn,        # Use stored task ARN
+                reason=reason
+            )
+            
+            stopped_task = response.get('task', {})
+            logger.info(f"✓ Successfully stopped ECS task for VP {vp_id}")
+            logger.info(f"Task final status: {stopped_task.get('lastStatus')}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error stopping ECS task for VP {vp_id}: {str(e)}")
+            return False
+
     def stop_vp_task(self, vp_id: str, reason: str = "User requested termination") -> bool:
         """
-        Stop the ECS task for a Virtual Participant
+        Stop the ECS task for a Virtual Participant (legacy method - searches for task)
         
         Args:
             vp_id: Virtual Participant ID
@@ -212,7 +210,7 @@ class ECSTaskManager:
             True if task was stopped successfully, False otherwise
         """
         try:
-            logger.info(f"=== ATTEMPTING TO STOP ECS TASK FOR VP {vp_id} ===")
+            logger.info(f"=== ATTEMPTING TO STOP ECS TASK FOR VP {vp_id} (LEGACY SEARCH METHOD) ===")
             logger.info(f"Cluster name: {self.cluster_name}")
             logger.info(f"Reason: {reason}")
             

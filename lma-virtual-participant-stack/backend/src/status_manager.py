@@ -119,6 +119,8 @@ class VirtualParticipantStatusManager:
             # Include CallId if it exists
             if current_call_id:
                 variables["input"]["CallId"] = current_call_id
+                logger.info(f"Including CallId in update: {current_call_id}")
+            
             
             if status == "FAILED" and error_message:
                 logger.error(f"VP {self.participant_id} failed: {error_message}")
