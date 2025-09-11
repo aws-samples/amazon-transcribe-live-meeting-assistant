@@ -2434,41 +2434,12 @@ Resources:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       TypeName: Mutation
       FieldName: endVirtualParticipant
-      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
-      RequestMappingTemplate: |
-        {
-          "version": "2018-05-29",
-          "operation": "UpdateItem",
-          "key": {
-            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
-          },
-          "update": {
-            "expression": "SET #status = :status, #updatedAt = :updatedAt, #endedAt = :endedAt, #endReason = :endReason, #endedBy = :endedBy",
-            "expressionNames": {
-              "#status": "status",
-              "#updatedAt": "updatedAt",
-              "#endedAt": "endedAt",
-              "#endReason": "endReason",
-              "#endedBy": "endedBy"
-            },
-            "expressionValues": {
-              ":status": $util.dynamodb.toDynamoDBJson("ENDED"),
-              ":updatedAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601()),
-              ":endedAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601()),
-              ":endReason": $util.dynamodb.toDynamoDBJson($ctx.args.input.endReason),
-              ":endedBy": $util.dynamodb.toDynamoDBJson($ctx.args.input.endedBy)
-            }
-          }
-        }
-      ResponseMappingTemplate: |
-        #if($ctx.error)
-          $util.error($ctx.error.message, $ctx.error.type)
-        #end
-        $util.toJson($ctx.result)
+      DataSourceName: !GetAtt VirtualParticipantLambdaDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/endVirtualParticipant.js
 
-  # Note: SimpleOnUpdateVirtualParticipantResolver removed to prevent conflicts
-  # The existing onUpdateVirtualParticipant subscription from the main schema
-  # already handles Virtual Participant updates properly
 
   ##########################################################################
   # Web Site

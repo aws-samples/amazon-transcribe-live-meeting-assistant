@@ -40,6 +40,14 @@ def signal_handler(signum, frame):
     print(f"Received signal {signum}, initiating graceful shutdown...")
     shutdown_requested = True
     
+    # Send END event to Kinesis when externally terminated
+    try:
+        print("Sending END meeting event due to external termination...")
+        kds.send_end_meeting()
+        print("END meeting event sent successfully")
+    except Exception as e:
+        print(f"Failed to send END meeting event: {e}")
+    
     # Update status to ENDED when externally terminated
     if status_manager and vp_id:
         try:
@@ -47,6 +55,10 @@ def signal_handler(signum, frame):
             print(f"VP {vp_id} status updated to COMPLETED due to external termination")
         except Exception as e:
             print(f"Failed to update status during shutdown: {e}")
+    
+    # Exit gracefully
+    print("Graceful shutdown complete. Exiting...")
+    sys.exit(0)
 
 async def app():
     # Initialize status manager if VP_ID is provided
