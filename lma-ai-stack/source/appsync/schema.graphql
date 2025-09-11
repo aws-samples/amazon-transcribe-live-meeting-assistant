@@ -211,6 +211,7 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	SharedWith: String
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
+	CallId: ID
 }
 
 input CreateVirtualParticipantInput {
@@ -224,6 +225,7 @@ input CreateVirtualParticipantInput {
 input UpdateVirtualParticipantInput {
 	id: ID!
 	status: String!
+	CallId: ID
 }
 
 input EndVirtualParticipantInput {

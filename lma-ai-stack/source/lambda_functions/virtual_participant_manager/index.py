@@ -330,7 +330,7 @@ class VirtualParticipantManager:
         try:
             response = self.table.update_item(
                 Key={'id': vp_id},
-                UpdateExpression="SET relatedCallId = :call_id, updatedAt = :updated_at",
+                UpdateExpression="SET CallId = :call_id, updatedAt = :updated_at",
                 ExpressionAttributeValues={
                     ':call_id': call_id,
                     ':updated_at': current_time

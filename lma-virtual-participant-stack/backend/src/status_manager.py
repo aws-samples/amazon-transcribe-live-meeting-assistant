@@ -48,11 +48,62 @@ class VirtualParticipantStatusManager:
             bool: True if update was successful, False otherwise
         """
         try:
+            # First, get the current VP to preserve existing CallId
+            get_query = """
+            query GetVirtualParticipant($id: ID!) {
+                getVirtualParticipant(id: $id) {
+                    id
+                    status
+                    CallId
+                }
+            }
+            """
+            
+            get_payload = {
+                "query": get_query,
+                "variables": {"id": self.participant_id}
+            }
+            
+            # Create and sign the GET request
+            get_request = AWSRequest(
+                method='POST',
+                url=self.graphql_endpoint,
+                data=json.dumps(get_payload),
+                headers={'Content-Type': 'application/json'}
+            )
+            self._sign_request(get_request)
+            
+            # Get current VP data
+            get_response = requests.post(
+                get_request.url,
+                data=get_request.body,
+                headers=dict(get_request.headers)
+            )
+            
+            if get_response.status_code != 200:
+                logger.error(f"Failed to get VP data: HTTP {get_response.status_code}")
+                return False
+            
+            get_data = get_response.json()
+            if 'errors' in get_data:
+                logger.error(f"GraphQL errors getting VP: {get_data['errors']}")
+                return False
+            
+            current_vp = get_data['data']['getVirtualParticipant']
+            if not current_vp:
+                logger.error(f"VP {self.participant_id} not found")
+                return False
+            
+            current_call_id = current_vp.get('CallId')
+            logger.info(f"Preserving CallId: {current_call_id} while updating status to {status}")
+            
+            # Now update with new status while preserving CallId
             mutation = """
             mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
                 updateVirtualParticipant(input: $input) {
                     id
                     status
+                    CallId
                     updatedAt
                 }
             }
@@ -64,6 +115,10 @@ class VirtualParticipantStatusManager:
                     "status": status
                 }
             }
+            
+            # Include CallId if it exists
+            if current_call_id:
+                variables["input"]["CallId"] = current_call_id
             
             if status == "FAILED" and error_message:
                 logger.error(f"VP {self.participant_id} failed: {error_message}")
@@ -92,6 +147,7 @@ class VirtualParticipantStatusManager:
                 if 'errors' in response_data:
                     logger.error(f"GraphQL errors: {response_data['errors']}")
                     return False
+                logger.info(f"Successfully updated VP {self.participant_id} status to {status} with preserved CallId: {current_call_id}")
                 return True
             else:
                 logger.error(f"Failed to update VP status: HTTP {response.status_code}")

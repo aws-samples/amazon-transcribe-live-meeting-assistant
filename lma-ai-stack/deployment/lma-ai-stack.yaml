@@ -2254,6 +2254,37 @@ Resources:
       FieldName: updateVirtualParticipant
       DataSourceName: !GetAtt VirtualParticipantDataSource.Name
       RequestMappingTemplate: |
+        #set( $UpdatedAt = $util.time.nowISO8601() )
+        ## Set up tracking for dynamic updates **
+        #set( $expNames = {} )
+        #set( $expValues = {} )
+        #set( $expSet = {} )
+        
+        ## Always update status and updatedAt **
+        $util.qr( $expSet.put("#status", ":status") )
+        $util.qr( $expNames.put("#status", "status") )
+        $util.qr( $expValues.put(":status", $util.dynamodb.toDynamoDB($ctx.args.input.status)) )
+        
+        $util.qr( $expSet.put("#updatedAt", ":updatedAt") )
+        $util.qr( $expNames.put("#updatedAt", "updatedAt") )
+        $util.qr( $expValues.put(":updatedAt", $util.dynamodb.toDynamoDB($UpdatedAt)) )
+        
+        ## Add CallId if provided **
+        #if( !$util.isNullOrBlank($ctx.args.input.CallId) )
+            $util.qr( $expSet.put("#CallId", ":CallId") )
+            $util.qr( $expNames.put("#CallId", "CallId") )
+            $util.qr( $expValues.put(":CallId", $util.dynamodb.toDynamoDB($ctx.args.input.CallId)) )
+        #end
+        
+        ## Build the SET expression **
+        #set( $expression = "SET" )
+        #foreach( $entry in $expSet.entrySet() )
+            #set( $expression = "${expression} ${entry.key} = ${entry.value}" )
+            #if ( $foreach.hasNext )
+                #set( $expression = "${expression}," )
+            #end
+        #end
+        
         {
           "version": "2018-05-29",
           "operation": "UpdateItem",
@@ -2261,28 +2292,16 @@ Resources:
             "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
           },
           "update": {
-            "expression": "SET #status = :status, #updatedAt = :updatedAt",
-            "expressionNames": {
-              "#status": "status",
-              "#updatedAt": "updatedAt"
-            },
-            "expressionValues": {
-              ":status": $util.dynamodb.toDynamoDBJson($ctx.args.input.status),
-              ":updatedAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601())
-            }
+            "expression": "$expression",
+            "expressionNames": $utils.toJson($expNames),
+            "expressionValues": $utils.toJson($expValues)
           }
         }
       ResponseMappingTemplate: |
         #if($ctx.error)
           $util.error($ctx.error.message, $ctx.error.type)
         #end
-        {
-          "id": "$ctx.args.input.id",
-          "status": "$ctx.args.input.status",
-          "updatedAt": "$util.time.nowISO8601()",
-          "Owner": "$ctx.identity.username",
-          "SharedWith": ""
-        }
+        $util.toJson($ctx.result)
 
   ListVirtualParticipantsResolver:
     Type: AWS::AppSync::Resolver

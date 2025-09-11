@@ -32,6 +32,7 @@ const getVirtualParticipant = `
       owner
       Owner
       SharedWith
+      CallId
     }
   }
 `;
@@ -56,20 +57,6 @@ const endVirtualParticipant = `
       id
       status
       updatedAt
-    }
-  }
-`;
-
-// Query to search for Call records by meeting name pattern
-const searchCallsByName = `
-  query ListCalls($startDateTime: AWSDateTime, $endDateTime: AWSDateTime) {
-    listCalls(startDateTime: $startDateTime, endDateTime: $endDateTime) {
-      Calls {
-        CallId
-        CreatedAt
-        UpdatedAt
-        Owner
-      }
     }
   }
 `;
@@ -344,8 +331,8 @@ const ActionButtons = ({ vpDetails, onRefresh, onEnd }) => {
           </Button>
         )}
 
-        {vpDetails.relatedCallId && (
-          <Button iconName="external" href={`#/calls/${vpDetails.relatedCallId}`}>
+        {vpDetails.CallId && (
+          <Button iconName="external" href={`#/calls/${vpDetails.CallId}`}>
             View Meeting Transcript
           </Button>
         )}
@@ -361,7 +348,7 @@ const ActionButtons = ({ vpDetails, onRefresh, onEnd }) => {
 ActionButtons.propTypes = {
   vpDetails: PropTypes.shape({
     status: PropTypes.string.isRequired,
-    relatedCallId: PropTypes.string,
+    CallId: PropTypes.string,
   }).isRequired,
   onRefresh: PropTypes.func.isRequired,
   onEnd: PropTypes.func.isRequired,
@@ -374,49 +361,6 @@ const VirtualParticipantDetails = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [notifications, setNotifications] = useState([]);
-  const [relatedCallId, setRelatedCallId] = useState(null);
-  const [searchingCall, setSearchingCall] = useState(false);
-
-  // Search for related Call record by meeting name pattern (simple approach)
-  const searchForRelatedCall = async (meetingName) => {
-    if (!meetingName) return null;
-
-    try {
-      setSearchingCall(true);
-
-      // Search recent calls (last 24 hours)
-      const endTime = new Date();
-      const startTime = new Date(endTime.getTime() - 24 * 60 * 60 * 1000);
-
-      const result = await API.graphql(
-        graphqlOperation(searchCallsByName, {
-          startDateTime: startTime.toISOString(),
-          endDateTime: endTime.toISOString(),
-        }),
-      );
-
-      const calls = result.data.listCalls.Calls || [];
-
-      // Find Call that starts with the meeting name (most recent first)
-      const matchingCalls = calls
-        .filter((call) => call.CallId && call.CallId.startsWith(meetingName))
-        .sort((a, b) => new Date(b.CreatedAt) - new Date(a.CreatedAt));
-
-      if (matchingCalls.length > 0) {
-        const latestCall = matchingCalls[0];
-        console.log('Found related Call:', latestCall.CallId);
-        setRelatedCallId(latestCall.CallId);
-        return latestCall.CallId;
-      }
-      console.log('No related Call found for:', meetingName);
-      return null;
-    } catch (err) {
-      logger.error('Error searching for related Call:', err);
-      return null;
-    } finally {
-      setSearchingCall(false);
-    }
-  };
 
   const loadVpDetails = async () => {
     try {
@@ -445,18 +389,6 @@ const VirtualParticipantDetails = () => {
       loadVpDetails();
     }
   }, [vpId]);
-
-  // Search for related Call when VP status indicates transcription has started (run once per status change)
-  useEffect(() => {
-    if (
-      vpDetails &&
-      ['JOINED', 'ACTIVE', 'COMPLETED', 'ENDED'].includes(vpDetails.status) &&
-      !relatedCallId &&
-      !searchingCall
-    ) {
-      searchForRelatedCall(vpDetails.meetingName);
-    }
-  }, [vpDetails?.status]);
 
   // Set up real-time updates subscription (no parameters needed)
   useEffect(() => {
@@ -565,13 +497,6 @@ const VirtualParticipantDetails = () => {
     );
   }
 
-  // Determine button text and state
-  const getCallDetailsButtonText = () => {
-    if (searchingCall) return 'Finding Meeting...';
-    if (relatedCallId) return 'View Call Details';
-    return 'Call Details (Not Available)';
-  };
-
   return (
     <SpaceBetween direction="vertical" size="l">
       {notifications.length > 0 && <Flashbar items={notifications} />}
@@ -587,11 +512,10 @@ const VirtualParticipantDetails = () => {
               </Button>
               <Button
                 iconName="external"
-                href={relatedCallId ? `#/calls/${relatedCallId}` : undefined}
-                disabled={!relatedCallId}
-                loading={searchingCall}
+                href={vpDetails.CallId ? `#/calls/${vpDetails.CallId}` : undefined}
+                disabled={!vpDetails.CallId}
               >
-                {getCallDetailsButtonText()}
+                {vpDetails.CallId ? 'View Call Details' : 'Call Details (Not Available)'}
               </Button>
             </SpaceBetween>
           }
