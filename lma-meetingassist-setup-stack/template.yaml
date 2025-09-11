@@ -896,6 +896,7 @@ Resources:
         PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: True
+        SSEType: KMS
         KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       TableName: !Sub "${LMAStackName}-QBusiness-CredentialsTable"
       TimeToLiveSpecification:
