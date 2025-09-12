@@ -539,7 +539,6 @@ const VirtualParticipantDetails = () => {
         <ConnectionDetails vpDetails={vpDetails} />
       </Container>
 
-
       {/* Error Troubleshooting - Only show for failed status */}
       <ErrorTroubleshooting status={vpDetails.status} errorDetails={vpDetails.errorDetails} />
 
