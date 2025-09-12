@@ -1569,8 +1569,6 @@ Resources:
       Parameters:
         Domain: !Ref Domain
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
-        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
-        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
   COGNITOSTACK:
     Type: AWS::CloudFormation::Stack

@@ -18,21 +18,6 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
-  CustomerManagedEncryptionKeyArn:
-    Type: String
-    Description: ARN of the customer managed KMS key for encryption
-
-  PermissionsBoundaryArn:
-    Type: String
-    Default: ""
-    Description: >-
-      (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
-      If provided, this policy will limit the maximum permissions that can be granted to IAM roles
-      in this stack, providing an additional layer of security.
-
-Conditions:
-  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
-
 Resources:
   LLMPromptTemplateTable:
     Type: "AWS::DynamoDB::Table"
@@ -46,8 +31,6 @@ Resources:
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
@@ -63,10 +46,6 @@ Resources:
               - "sts:AssumeRole"
       ManagedPolicyArns:
         - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
       Policies:
         - PolicyName: allow-s3-notification-config
           PolicyDocument:
@@ -88,17 +67,6 @@ Resources:
 
   LLMPromptUploadFunction:
     Type: "AWS::Lambda::Function"
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
       Code: ../source/lambda_functions
       Handler: llm_prompt_upload.lambda_handler
@@ -106,8 +74,6 @@ Resources:
       Runtime: python3.12
       MemorySize: 128
       Timeout: 60
-      TracingConfig:
-        Mode: Active
       Environment:
         Variables:
           DOMAIN: !Ref Domain
@@ -124,7 +90,6 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/LLMPromptUploadFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   LLMStorePromptTemplates:
     Type: "AWS::CloudFormation::CustomResource"
