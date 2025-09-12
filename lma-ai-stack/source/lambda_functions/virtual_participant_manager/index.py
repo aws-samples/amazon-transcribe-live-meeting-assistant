@@ -138,21 +138,12 @@ class VirtualParticipantManager:
     def get_task_details_from_registry(self, vp_id: str) -> Optional[Dict[str, Any]]:
         """Get task details from VPTaskRegistry table"""
         try:
-            # Find VPTaskRegistry table
-            dynamodb_client = boto3.client('dynamodb')
-            tables = dynamodb_client.list_tables()['TableNames']
-            
-            registry_table = None
-            for table_name in tables:
-                if 'VPTaskRegistry' in table_name:
-                    registry_table = table_name
-                    break
-            
-            if not registry_table:
-                logger.warning("VPTaskRegistry table not found")
+            registry_table_name = os.environ.get('VP_TASK_REGISTRY_TABLE_NAME')
+            if not registry_table_name:
+                logger.warning("VP_TASK_REGISTRY_TABLE_NAME environment variable not set")
                 return None
             
-            registry_table_resource = dynamodb.Table(registry_table)
+            registry_table_resource = dynamodb.Table(registry_table_name)
             response = registry_table_resource.get_item(Key={'vpId': vp_id})
             
             return response.get('Item')
@@ -164,22 +155,15 @@ class VirtualParticipantManager:
     def cleanup_registry_entry(self, vp_id: str) -> bool:
         """Clean up registry entry after task termination"""
         try:
-            dynamodb_client = boto3.client('dynamodb')
-            tables = dynamodb_client.list_tables()['TableNames']
+            registry_table_name = os.environ.get('VP_TASK_REGISTRY_TABLE_NAME')
+            if not registry_table_name:
+                logger.warning("VP_TASK_REGISTRY_TABLE_NAME environment variable not set")
+                return False
             
-            registry_table = None
-            for table_name in tables:
-                if 'VPTaskRegistry' in table_name:
-                    registry_table = table_name
-                    break
-            
-            if registry_table:
-                registry_table_resource = dynamodb.Table(registry_table)
-                registry_table_resource.delete_item(Key={'vpId': vp_id})
-                logger.info(f"Cleaned up registry entry for VP {vp_id}")
-                return True
-            
-            return False
+            registry_table_resource = dynamodb.Table(registry_table_name)
+            registry_table_resource.delete_item(Key={'vpId': vp_id})
+            logger.info(f"Cleaned up registry entry for VP {vp_id}")
+            return True
                 
         except Exception as e:
             logger.error(f"Error cleaning up registry entry: {e}")

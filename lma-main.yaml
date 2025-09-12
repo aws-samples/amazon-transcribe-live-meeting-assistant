@@ -1921,6 +1921,7 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         GraphQLEndpoint: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
+        VPTaskRegistryTableName: !GetAtt AISTACK.Outputs.VPTaskRegistryTableName
         VPC: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.VPC

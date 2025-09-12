@@ -65,24 +65,14 @@ def store_task_arn_in_registry(vp_id: str):
                 print("Could not get task ARN or cluster ARN from metadata")
                 return
         
-        # Store in VPTaskRegistry table
-        dynamodb = boto3.resource('dynamodb')
-        
-        # Find VPTaskRegistry table
-        dynamodb_client = boto3.client('dynamodb')
-        tables = dynamodb_client.list_tables()['TableNames']
-        
-        registry_table_name = None
-        for table_name in tables:
-            if 'VPTaskRegistry' in table_name:
-                registry_table_name = table_name
-                break
-        
+        # Store in VPTaskRegistry table using environment variable
+        registry_table_name = os.environ.get('VP_TASK_REGISTRY_TABLE_NAME')
         if not registry_table_name:
-            print("VPTaskRegistry table not found")
+            print("VP_TASK_REGISTRY_TABLE_NAME environment variable not set")
             return
         
-        print(f"Found VPTaskRegistry table: {registry_table_name}")
+        print(f"Using VPTaskRegistry table: {registry_table_name}")
+        dynamodb = boto3.resource('dynamodb')
         registry_table = dynamodb.Table(registry_table_name)
         
         # Calculate expiry time (24 hours from now)
