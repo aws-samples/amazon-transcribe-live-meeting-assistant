@@ -1,0 +1,139 @@
+/* Status Timeline Styles */
+.status-timeline {
+  padding: 16px 0;
+}
+
+.timeline-entry {
+  display: flex;
+  margin-bottom: 24px;
+  position: relative;
+}
+
+.timeline-entry-last {
+  margin-bottom: 0;
+}
+
+.timeline-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-right: 16px;
+  min-width: 40px;
+}
+
+.timeline-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid;
+  background-color: var(--awsui-color-background-container-content);
+  z-index: 1;
+}
+
+.timeline-icon-in-progress {
+  border-color: var(--awsui-color-border-status-info);
+  background-color: var(--awsui-color-background-status-info);
+}
+
+.timeline-icon-success {
+  border-color: var(--awsui-color-border-status-success);
+  background-color: var(--awsui-color-background-status-success);
+}
+
+.timeline-icon-error {
+  border-color: var(--awsui-color-border-status-error);
+  background-color: var(--awsui-color-background-status-error);
+}
+
+.timeline-icon-stopped {
+  border-color: var(--awsui-color-border-control-default);
+  background-color: var(--awsui-color-background-control-disabled);
+}
+
+.timeline-line {
+  width: 2px;
+  flex: 1;
+  background-color: var(--awsui-color-border-divider-default);
+  margin-top: 8px;
+  min-height: 24px;
+}
+
+.timeline-content {
+  flex: 1;
+  padding-top: 4px;
+}
+
+.timeline-header {
+  margin-bottom: 8px;
+}
+
+.timeline-message {
+  margin-bottom: 4px;
+}
+
+.timeline-description {
+  margin-bottom: 8px;
+}
+
+.timeline-error {
+  margin-top: 8px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .timeline-connector {
+    margin-right: 12px;
+    min-width: 32px;
+  }
+  
+  .timeline-icon {
+    width: 32px;
+    height: 32px;
+  }
+  
+  .timeline-entry {
+    margin-bottom: 20px;
+  }
+}
+
+/* Animation for loading states */
+.timeline-icon-in-progress .awsui-icon {
+  animation: timeline-pulse 2s infinite;
+}
+
+@keyframes timeline-pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .timeline-icon {
+    background-color: var(--awsui-color-background-container-content);
+  }
+  
+  .timeline-line {
+    background-color: var(--awsui-color-border-divider-default);
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .timeline-icon {
+    border-width: 3px;
+  }
+  
+  .timeline-line {
+    width: 3px;
+  }
+}

@@ -557,6 +557,23 @@ Resources:
                   - "dynamodb:UpdateItem"
                   - "dynamodb:GetItem"
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VirtualParticipant*"
+        - PolicyName: VPTaskRegistryPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:ListTables"
+                Resource: 
+                  - !GetAtt VPTaskRegistry.Arn
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VPTaskRegistry*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:ListTables"
+                Resource: "*"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -582,6 +599,22 @@ Resources:
         - FARGATE
     DependsOn:
       - ECSRoleCustomResource
+
+  # VP Task Registry Table - stores task ARNs for efficient termination
+  VPTaskRegistry:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-VPTaskRegistry"
+      AttributeDefinitions:
+        - AttributeName: vpId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: vpId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
 
   TaskDefinition:
     Type: "AWS::ECS::TaskDefinition"
@@ -808,6 +841,15 @@ Resources:
                 Condition:
                   StringLike:
                     iam:PassedToService: scheduler.amazonaws.com
+        - PolicyName: DynamoDBPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VirtualParticipant*"
 
   LMAVirtualParticipantSchedulerStateMachine:
     Type: "AWS::StepFunctions::StateMachine"

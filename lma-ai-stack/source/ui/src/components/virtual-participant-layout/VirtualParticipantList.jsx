@@ -16,6 +16,7 @@ import {
   Container,
   Alert,
   Flashbar,
+  Link,
 } from '@awsui/components-react';
 import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
 import useAppContext from '../../contexts/app';
@@ -52,10 +53,16 @@ const createVirtualParticipant = /* GraphQL */ `
 const StatusBadge = ({ status }) => {
   const getStatusProps = (vpStatus) => {
     switch (vpStatus) {
+      case 'INITIALIZING':
+        return { color: 'blue', children: 'Initializing' };
+      case 'CONNECTING':
+        return { color: 'blue', children: 'Connecting' };
       case 'JOINING':
         return { color: 'blue', children: 'Joining' };
       case 'JOINED':
         return { color: 'green', children: 'Joined' };
+      case 'ACTIVE':
+        return { color: 'green', children: 'Active' };
       case 'COMPLETED':
         return { color: 'green', children: 'Completed' };
       case 'FAILED':
@@ -76,13 +83,15 @@ StatusBadge.propTypes = {
 // Render function for status cell - defined outside component to avoid re-creation
 const renderStatusCell = (item) => <StatusBadge status={item.status} />;
 
+// Render function for meeting name cell - defined outside component to avoid re-creation
+const renderMeetingNameCell = (item) => <Link href={`#/virtual-participant/${item.id}`}>{item.meetingName}</Link>;
+
 const VirtualParticipantList = () => {
   const { user, currentCredentials } = useAppContext();
   const { settings } = useSettingsContext();
 
   const [participants, setParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedItems, setSelectedItems] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({
     meetingName: '',
@@ -93,6 +102,7 @@ const VirtualParticipantList = () => {
   const [notification, setNotification] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
   const [popupNotifications, setPopupNotifications] = useState([]);
+  const [sortingColumn, setSortingColumn] = useState({ sortingField: 'createdAt', sortingDescending: true });
 
   const loadParticipants = async () => {
     try {
@@ -137,8 +147,82 @@ const VirtualParticipantList = () => {
           return;
         }
 
-        setParticipants((prev) =>
-          prev.map((p) => {
+        setParticipants((prev) => {
+          const existingParticipant = prev.find((p) => p.id === updatedParticipant.id);
+          const meetingName = updatedParticipant.meetingName || existingParticipant?.meetingName || 'Unknown Meeting';
+          // Only show notification if status actually changed
+          if (
+            existingParticipant &&
+            existingParticipant.status !== updatedParticipant.status &&
+            updatedParticipant.status
+          ) {
+            let notificationType = 'info';
+            let message = '';
+
+            switch (updatedParticipant.status) {
+              case 'INITIALIZING':
+                notificationType = 'info';
+                message = `Virtual Participant initializing for "${meetingName}"`;
+                break;
+              case 'CONNECTING':
+                notificationType = 'info';
+                message = `Virtual Participant connecting to "${meetingName}"`;
+                break;
+              case 'JOINING':
+                notificationType = 'info';
+                message = `Virtual Participant joining "${meetingName}"`;
+                break;
+              case 'JOINED':
+                notificationType = 'success';
+                message = `Virtual Participant joined "${meetingName}"`;
+                break;
+              case 'ACTIVE':
+                notificationType = 'success';
+                message = `Virtual Participant is active in "${meetingName}"`;
+                break;
+              case 'COMPLETED':
+                notificationType = 'success';
+                message = `Virtual Participant completed "${meetingName}"`;
+                break;
+              case 'FAILED':
+                notificationType = 'error';
+                message = `Virtual Participant failed to join "${meetingName}"`;
+                break;
+              default:
+                message = `Virtual Participant status updated to ${updatedParticipant.status} for "${meetingName}"`;
+            }
+
+            // Check if a similar notification already exists to prevent duplicates
+            setPopupNotifications((current) => {
+              const existingNotification = current.find((n) => n.content === message && n.type === notificationType);
+
+              // If similar notification already exists, don't add a new one
+              if (existingNotification) {
+                return current;
+              }
+
+              const notificationId = `vp-${updatedParticipant.id}-${updatedParticipant.status}-${Date.now()}`;
+              const popupNotification = {
+                type: notificationType,
+                content: message,
+                dismissible: true,
+                dismissLabel: 'Dismiss',
+                id: notificationId,
+                onDismiss: () => {
+                  setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
+                },
+              };
+
+              // Auto-dismiss after 8 seconds
+              setTimeout(() => {
+                setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
+              }, 8000);
+
+              return [...current, popupNotification];
+            });
+          }
+
+          return prev.map((p) => {
             if (p.id === updatedParticipant.id) {
               return {
                 ...p,
@@ -147,57 +231,12 @@ const VirtualParticipantList = () => {
               };
             }
             return p;
-          }),
-        );
-
-        const existingParticipant = participants.find((p) => p.id === updatedParticipant.id);
-        const meetingName = updatedParticipant.meetingName || existingParticipant?.meetingName || 'Unknown Meeting';
-
-        if (updatedParticipant.status) {
-          const notificationId = `vp-${updatedParticipant.id}-${Date.now()}`;
-          let notificationType = 'info';
-          let message = '';
-
-          switch (updatedParticipant.status) {
-            case 'JOINED':
-              notificationType = 'success';
-              message = `Virtual Participant joined "${meetingName}"`;
-              break;
-            case 'COMPLETED':
-              notificationType = 'success';
-              message = `Virtual Participant completed "${meetingName}"`;
-              break;
-            case 'FAILED':
-              notificationType = 'error';
-              message = `Virtual Participant failed to join "${meetingName}"`;
-              break;
-            default:
-              message = `Virtual Participant status updated to ${updatedParticipant.status} for "${meetingName}"`;
-          }
-
-          const popupNotification = {
-            type: notificationType,
-            content: message,
-            dismissible: true,
-            dismissLabel: 'Dismiss',
-            id: notificationId,
-            onDismiss: () => {
-              setPopupNotifications((current) => current.filter((n) => n.id !== notificationId));
-            },
-          };
-
-          setPopupNotifications((current) => [...current, popupNotification]);
-
-          setTimeout(() => {
-            setPopupNotifications((current) => current.filter((n) => n.id !== notificationId));
-          }, 8000);
-        }
+          });
+        });
       },
       error: () => {
         const pollInterval = setInterval(() => {
-          if (participants.length > 0 && !loading && !isCreating) {
-            loadParticipants();
-          }
+          loadParticipants();
         }, 5000);
 
         return () => clearInterval(pollInterval);
@@ -205,7 +244,56 @@ const VirtualParticipantList = () => {
     });
 
     return () => subscription.unsubscribe();
-  }, [participants.length, loading, isCreating]);
+  }, []); // Remove dependencies to prevent subscription recreation
+
+  // Sorting function
+  const sortParticipants = (items, sortingConfig) => {
+    if (!sortingConfig.sortingField) return items;
+
+    return [...items].sort((a, b) => {
+      const aValue = a[sortingConfig.sortingField];
+      const bValue = b[sortingConfig.sortingField];
+
+      let comparison = 0;
+
+      // Handle different data types
+      if (sortingConfig.sortingField === 'createdAt') {
+        comparison = new Date(aValue) - new Date(bValue);
+      } else if (typeof aValue === 'string' && typeof bValue === 'string') {
+        comparison = aValue.toLowerCase().localeCompare(bValue.toLowerCase());
+      } else if (aValue < bValue) {
+        comparison = -1;
+      } else if (aValue > bValue) {
+        comparison = 1;
+      } else {
+        comparison = 0;
+      }
+
+      return sortingConfig.sortingDescending ? -comparison : comparison;
+    });
+  };
+
+  // Handle sorting change
+  const handleSortingChange = ({ detail }) => {
+    const newSortingField = detail.sortingColumn?.sortingField || detail.sortingField;
+
+    // If clicking the same column, toggle the direction
+    if (sortingColumn.sortingField === newSortingField) {
+      setSortingColumn({
+        sortingField: newSortingField,
+        sortingDescending: !sortingColumn.sortingDescending,
+      });
+    } else {
+      // If clicking a different column, start with ascending (false)
+      setSortingColumn({
+        sortingField: newSortingField,
+        sortingDescending: false,
+      });
+    }
+  };
+
+  // Get sorted participants
+  const sortedParticipants = sortParticipants(participants, sortingColumn);
 
   const parseStepFunctionError = (executionResult) => {
     const output = executionResult.output ? JSON.parse(executionResult.output) : {};
@@ -264,7 +352,7 @@ const VirtualParticipantList = () => {
             meetingPlatform: createForm.meetingPlatform,
             meetingId: createForm.meetingId.replace(/ /g, ''),
             meetingPassword: createForm.meetingPassword || '',
-            status: 'JOINING',
+            status: 'INITIALIZING',
           },
         }),
       );
@@ -370,7 +458,7 @@ const VirtualParticipantList = () => {
     {
       id: 'meetingName',
       header: 'Meeting Name',
-      cell: (item) => item.meetingName,
+      cell: renderMeetingNameCell,
       sortingField: 'meetingName',
     },
     {
@@ -421,11 +509,10 @@ const VirtualParticipantList = () => {
       <Container>
         <Table
           columnDefinitions={columnDefinitions}
-          items={participants}
+          items={sortedParticipants}
           loading={loading}
-          selectedItems={selectedItems}
-          onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
-          selectionType="multi"
+          sortingColumn={sortingColumn}
+          onSortingChange={handleSortingChange}
           header={
             <Header
               counter={`(${participants.length})`}
