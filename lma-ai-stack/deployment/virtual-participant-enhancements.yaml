@@ -23,6 +23,11 @@ Parameters:
     Type: String
     Description: Name of the Kinesis Data Stream for call events
   
+  VPTaskRegistryTableName:
+    Type: String
+    Description: Name of the VPTaskRegistry DynamoDB table from virtual participant stack
+    Default: ""
+  
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
@@ -47,6 +52,7 @@ Resources:
         Variables:
           TABLE_NAME: !Ref VirtualParticipantTableName
           KINESIS_STREAM_NAME: !Ref CallDataStreamName
+          VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistryTableName
           LOG_LEVEL: INFO
       Role: !GetAtt VirtualParticipantManagerRole.Arn
       LoggingConfig:
@@ -112,6 +118,11 @@ Resources:
                   - kinesis:PutRecords
                   - kinesis:DescribeStream
                 Resource: !Sub "arn:aws:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:DeleteItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
 
   ##########################################################################
   # Enhanced AppSync Data Sources and Resolvers

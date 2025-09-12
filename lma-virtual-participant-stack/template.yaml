@@ -59,6 +59,10 @@ Parameters:
     Type: String
     Description: AppSync GraphQL endpoint URL for Virtual Participant status updates
 
+  VPTaskRegistryTableName:
+    Type: String
+    Description: Name of the VPTaskRegistry DynamoDB table from AI stack
+
   # container source code
   SourceCodeLocation:
     Type: String
@@ -566,14 +570,8 @@ Resources:
                   - "dynamodb:PutItem"
                   - "dynamodb:GetItem"
                   - "dynamodb:UpdateItem"
-                  - "dynamodb:ListTables"
                 Resource: 
-                  - !GetAtt VPTaskRegistry.Arn
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VPTaskRegistry*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:ListTables"
-                Resource: "*"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -600,21 +598,7 @@ Resources:
     DependsOn:
       - ECSRoleCustomResource
 
-  # VP Task Registry Table - stores task ARNs for efficient termination
-  VPTaskRegistry:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: !Sub "${AWS::StackName}-VPTaskRegistry"
-      AttributeDefinitions:
-        - AttributeName: vpId
-          AttributeType: S
-      KeySchema:
-        - AttributeName: vpId
-          KeyType: HASH
-      BillingMode: PAY_PER_REQUEST
-      TimeToLiveSpecification:
-        AttributeName: expiresAt
-        Enabled: true
+
 
   TaskDefinition:
     Type: "AWS::ECS::TaskDefinition"
@@ -676,6 +660,8 @@ Resources:
               Value: !Ref ExitMessage
             - Name: GRAPHQL_ENDPOINT
               Value: !Ref GraphQLEndpoint
+            - Name: VP_TASK_REGISTRY_TABLE_NAME
+              Value: !Ref VPTaskRegistryTableName
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           LogConfiguration:

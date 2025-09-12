@@ -534,6 +534,9 @@ Outputs:
       REACT_APP_AWS_REGION=${AWS::Region}
       REACT_APP_SETTINGS_PARAMETER=${LMASettingsParameterName}
       REACT_APP_ENABLE_LEX_AGENT_ASSIST=true
+  VPTaskRegistryTableName:
+    Description: Name of the VPTaskRegistry DynamoDB table
+    Value: !Ref VPTaskRegistry
   AppSyncGraphQLUrl:
     Description: AppSync GraphQL endpoint URL
     Value: !GetAtt AppSyncApiEncrypted.GraphQLUrl
@@ -1519,6 +1522,9 @@ Resources:
           S3_BUCKET_NAME: !Ref S3BucketName
           S3_RECORDINGS_PREFIX: !Ref AudioFilePrefix
           S3_TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
+          VP_TABLE_NAME: !Ref VirtualParticipantTable
+          VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
+          KINESIS_STREAM_NAME: !Ref CallDataStream
 
       LoggingConfig:
         LogGroup:
@@ -1586,6 +1592,24 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::${S3BucketName}"
                   - !Sub "arn:aws:s3:::${S3BucketName}/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:GetItem
+                  - dynamodb:DeleteItem
+                Resource: 
+                  - !GetAtt VirtualParticipantTable.Arn
+                  - !GetAtt VPTaskRegistry.Arn
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                  - kinesis:PutRecords
+                Resource: !Ref CallDataStreamArn
+              - Effect: Allow
+                Action:
+                  - ecs:StopTask
+                  - ecs:DescribeTasks
+                Resource: "*"
 
   AppSyncMeetingControlsLambdaRole:
     Type: AWS::IAM::Role
@@ -2357,6 +2381,7 @@ Resources:
         Variables:
           TABLE_NAME: !Ref VirtualParticipantTable
           KINESIS_STREAM_NAME: !Ref CallDataStream
+          VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
           LOG_LEVEL: DEBUG
       Policies:
         - DynamoDBCrudPolicy:
@@ -2385,7 +2410,7 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:DeleteItem
               Resource: 
-                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VPTaskRegistry*"
+                - !GetAtt VPTaskRegistry.Arn
             - Effect: Allow
               Action:
                 - dynamodb:ListTables
@@ -2405,6 +2430,22 @@ Resources:
     Properties:
       LogGroupName: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
       RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+
+  # VP Task Registry Table - stores task ARNs for efficient termination
+  VPTaskRegistry:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-VPTaskRegistry"
+      AttributeDefinitions:
+        - AttributeName: vpId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: vpId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
 
   # Lambda data source for VP Manager
   VirtualParticipantLambdaDataSource:
