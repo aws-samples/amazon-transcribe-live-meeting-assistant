@@ -55,6 +55,10 @@ Parameters:
     Type: String
     Description: Update LMA Settings Lambda function ARN
 
+  GraphQLEndpoint:
+    Type: String
+    Description: AppSync GraphQL endpoint URL for Virtual Participant status updates
+
   # container source code
   SourceCodeLocation:
     Type: String
@@ -597,10 +601,11 @@ Resources:
               - Effect: Allow
                 Action:
                   - kinesis:PutRecord
+                  - kinesis:PutRecords
+                  - kinesis:DescribeStream
                 Resource:
-                  - !Sub
-                    - "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${streamName}"
-                    - streamName: !Ref CallDataStreamName
+                  - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
+                  - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/*"
         - PolicyName: TranscribePolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -616,6 +621,40 @@ Resources:
               - Effect: Allow
                 Action:
                   - "comprehend:DetectPiiEntities"
+                Resource: "*"
+        - PolicyName: AppSyncPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "appsync:GraphQL"
+                Resource: "*"
+        - PolicyName: VirtualParticipantTablePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:GetItem"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VirtualParticipant*"
+        - PolicyName: VPTaskRegistryPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:ListTables"
+                Resource: 
+                  - !GetAtt VPTaskRegistry.Arn
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VPTaskRegistry*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:ListTables"
                 Resource: "*"
 
   TaskExecutionRole:
@@ -649,6 +688,22 @@ Resources:
           Value: enabled
     DependsOn:
       - ECSRoleCustomResource
+
+  # VP Task Registry Table - stores task ARNs for efficient termination
+  VPTaskRegistry:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-VPTaskRegistry"
+      AttributeDefinitions:
+        - AttributeName: vpId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: vpId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
 
   TaskDefinition:
     Type: "AWS::ECS::TaskDefinition"
@@ -708,6 +763,8 @@ Resources:
               Value: !Ref StopRecordingMessage
             - Name: EXIT_MESSAGE
               Value: !Ref ExitMessage
+            - Name: GRAPHQL_ENDPOINT
+              Value: !Ref GraphQLEndpoint
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           LogConfiguration:
@@ -895,6 +952,15 @@ Resources:
                 Condition:
                   StringLike:
                     iam:PassedToService: scheduler.amazonaws.com
+        - PolicyName: DynamoDBPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VirtualParticipant*"
 
   LMAVirtualParticipantSchedulerStateMachine:
     Type: "AWS::StepFunctions::StateMachine"
@@ -1007,6 +1073,10 @@ Resources:
                           {
                             "Name": "USER_REFRESH_TOKEN",
                             "Value.$": "$.data.rereshToken"
+                          },
+                          {
+                            "Name": "VIRTUAL_PARTICIPANT_ID",
+                            "Value.$": "$.data.virtualParticipantId"
                           }
                         ]
                       }

@@ -2,6 +2,7 @@
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
 
+import os
 import asyncio
 import details
 import kds
@@ -46,6 +47,18 @@ async def write_audio(transcribe_stream, recording_stream):
 
 async def transcribe():
     print("Transcribe starting")
+    
+    # Update VP status to ACTIVE when transcription begins
+    vp_id = os.environ.get('VIRTUAL_PARTICIPANT_ID')
+    if vp_id:
+        try:
+            from status_manager import VirtualParticipantStatusManager
+            status_manager = VirtualParticipantStatusManager(vp_id)
+            status_manager.set_active()
+            print(f"VP {vp_id} status: ACTIVE (transcription started)")
+        except Exception as e:
+            print(f"Failed to update VP status to ACTIVE: {e}")
+    
     kds.send_start_meeting()
 
     if details.transcribe_language_code in ["identify-language", "identify-multiple-languages"]:

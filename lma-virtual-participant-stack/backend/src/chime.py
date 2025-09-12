@@ -12,7 +12,7 @@ from datetime import datetime
 import time
 
 
-async def meeting(page):
+async def meeting(page, status_manager=None, vp_id=None):
 
     print("Getting meeting link.")
     await page.goto(f"https://app.chime.aws/meetings/{details.meeting_id}")
@@ -22,7 +22,7 @@ async def meeting(page):
         name_text_element = await page.wait_for_selector('#name')
     except TimeoutError:
         print("LMA Virtual Participant was unable to join the meeting.")
-        return
+        raise Exception("Meeting not found or invalid meeting ID")
     else:
         await name_text_element.type(details.lma_identity)
         await name_text_element.press('Tab')
@@ -46,9 +46,14 @@ async def meeting(page):
         )
     except TimeoutError:
         print("LMA Virtual Participant was not admitted into the meeting.")
-        return
+        raise Exception("Wrong meeting password or permission denied")
     else:
         await chat_panel_element.click()
+        
+        # Update status to JOINED - VP successfully joined the meeting
+        if status_manager and vp_id:
+            status_manager.set_joined()
+            print(f"VP {vp_id} status set to JOINED - Successfully joined Chime meeting")
 
     async def send_messages(messages):
         message_element = await page.wait_for_selector(

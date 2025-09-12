@@ -515,7 +515,7 @@ Outputs:
     Value: !GetAtt EventSourcingTable.Arn
   CallEventProcessorFunctionRoleName:
     Description: The Name of the IAM role used by CallEventProcessorFunction
-    Value: !Ref CallEventProcessorFunctionRole
+    Value: !Sub "${CallEventProcessorFunction}Role"
   SNSTopic:
     Description: The SNS topic name that LMA publishes category events to
     Value: !GetAtt CategorySNSTopic.TopicName
@@ -551,6 +551,9 @@ Outputs:
       REACT_APP_AWS_REGION=${AWS::Region}
       REACT_APP_SETTINGS_PARAMETER=${LMASettingsParameterName}
       REACT_APP_ENABLE_LEX_AGENT_ASSIST=true
+  AppSyncGraphQLUrl:
+    Description: AppSync GraphQL endpoint URL
+    Value: !GetAtt AppSyncApiEncrypted.GraphQLUrl
 
 Resources:
   EventSourcingTable:
@@ -2220,6 +2223,301 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/queryKnowledgeBase.js
+
+  ##########################################################################
+  # Virtual Participant
+  ##########################################################################
+  VirtualParticipantTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-VirtualParticipant"
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  # Data source for Virtual Participant table
+  VirtualParticipantDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: VirtualParticipantTable
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt VirtualParticipantDataSourceRole.Arn
+      DynamoDBConfig:
+        TableName: !Ref VirtualParticipantTable
+        AwsRegion: !Ref AWS::Region
+
+  VirtualParticipantDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt VirtualParticipantTable.Arn
+
+  CreateVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: createVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      RequestMappingTemplate: |
+        #set($id = $util.autoId())
+        {
+          "version": "2018-05-29",
+          "operation": "PutItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($id)
+          },
+          "attributeValues": {
+            "id": $util.dynamodb.toDynamoDBJson($id),
+            "meetingName": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingName),
+            "meetingPlatform": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingPlatform),
+            "meetingId": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingId),
+            "meetingPassword": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingPassword),
+            "status": $util.dynamodb.toDynamoDBJson($ctx.args.input.status),
+            "owner": $util.dynamodb.toDynamoDBJson($ctx.identity.username),
+            "Owner": $util.dynamodb.toDynamoDBJson($ctx.identity.username),
+            "SharedWith": $util.dynamodb.toDynamoDBJson(""),
+            "createdAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601()),
+            "updatedAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601())
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  UpdateVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      RequestMappingTemplate: |
+        #set( $UpdatedAt = $util.time.nowISO8601() )
+        ## Set up tracking for dynamic updates **
+        #set( $expNames = {} )
+        #set( $expValues = {} )
+        #set( $expSet = {} )
+        
+        ## Always update status and updatedAt **
+        $util.qr( $expSet.put("#status", ":status") )
+        $util.qr( $expNames.put("#status", "status") )
+        $util.qr( $expValues.put(":status", $util.dynamodb.toDynamoDB($ctx.args.input.status)) )
+        
+        $util.qr( $expSet.put("#updatedAt", ":updatedAt") )
+        $util.qr( $expNames.put("#updatedAt", "updatedAt") )
+        $util.qr( $expValues.put(":updatedAt", $util.dynamodb.toDynamoDB($UpdatedAt)) )
+        
+        ## Add CallId if provided **
+        #if( !$util.isNullOrBlank($ctx.args.input.CallId) )
+            $util.qr( $expSet.put("#CallId", ":CallId") )
+            $util.qr( $expNames.put("#CallId", "CallId") )
+            $util.qr( $expValues.put(":CallId", $util.dynamodb.toDynamoDB($ctx.args.input.CallId)) )
+        #end
+        
+        
+        ## Build the SET expression **
+        #set( $expression = "SET" )
+        #foreach( $entry in $expSet.entrySet() )
+            #set( $expression = "${expression} ${entry.key} = ${entry.value}" )
+            #if ( $foreach.hasNext )
+                #set( $expression = "${expression}," )
+            #end
+        #end
+        
+        {
+          "version": "2018-05-29",
+          "operation": "UpdateItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+          },
+          "update": {
+            "expression": "$expression",
+            "expressionNames": $utils.toJson($expNames),
+            "expressionValues": $utils.toJson($expValues)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ListVirtualParticipantsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: listVirtualParticipants
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Scan"
+        }
+      ResponseMappingTemplate: |
+        $util.toJson($ctx.result.items)
+
+  GetVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "GetItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.id)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  # Virtual Participant Manager Lambda Function
+  VirtualParticipantManagerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-VirtualParticipantManager"
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/virtual_participant_manager
+      Description: Enhanced Virtual Participant Manager with ECS termination and Kinesis events
+      MemorySize: 512
+      Timeout: 300
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref VirtualParticipantTable
+          KINESIS_STREAM_NAME: !Ref CallDataStream
+          LOG_LEVEL: DEBUG
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref VirtualParticipantTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kinesis:PutRecord
+                - kinesis:PutRecords
+                - kinesis:DescribeStream
+              Resource: !Ref CallDataStreamArn
+            - Effect: Allow
+              Action:
+                - ecs:ListClusters
+                - ecs:ListTasks
+                - ecs:DescribeTasks
+                - ecs:StopTask
+                - ecs:DescribeTaskDefinition
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - ecs:DescribeClusters
+              Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/*"
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:DeleteItem
+              Resource: 
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VPTaskRegistry*"
+            - Effect: Allow
+              Action:
+                - dynamodb:ListTables
+              Resource: "*"
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement
+
+  VirtualParticipantManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+
+  # Lambda data source for VP Manager
+  VirtualParticipantLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: VirtualParticipantLambda
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt VirtualParticipantLambdaDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt VirtualParticipantManagerFunction.Arn
+
+  VirtualParticipantLambdaDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt VirtualParticipantManagerFunction.Arn
+
+  EndVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: endVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantLambdaDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/endVirtualParticipant.js
 
 
   ##########################################################################

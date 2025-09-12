@@ -1920,6 +1920,7 @@ Resources:
         LMASettingsParameterName: !Ref LMASettingsParameter
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        GraphQLEndpoint: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
         VPC: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.VPC

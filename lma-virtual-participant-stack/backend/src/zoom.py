@@ -48,7 +48,7 @@ async def wait_for_element_with_fallbacks(page, selectors, timeout=5000):
     return None
 
 
-async def meeting(page):
+async def meeting(page, status_manager=None, vp_id=None):
 
     print("Getting meeting link.")
     await page.goto(f"https://zoom.us/wc/{details.meeting_id}/join")
@@ -58,7 +58,7 @@ async def meeting(page):
         password_text_element = await page.wait_for_selector("#input-for-pwd")
     except TimeoutError:
         print("LMA Virtual Participant was unable to join the meeting.")
-        return
+        raise Exception("Meeting not found or invalid meeting ID")
     else:
         await password_text_element.type(details.meeting_password)
 
@@ -69,7 +69,7 @@ async def meeting(page):
         await name_text_element.press("Enter")
     except TimeoutError:
         print("LMA Virtual Participant was not admitted into the meeting.")
-        return
+        raise Exception("Wrong meeting password or permission denied")
     # Wait for meeting interface to load by checking for key UI elements
     print("Waiting for meeting interface to load...")
     try:
@@ -83,6 +83,12 @@ async def meeting(page):
             timeout=15000
         )
         print("Meeting interface loaded successfully")
+        
+        # Update status to JOINED - VP successfully joined the meeting
+        if status_manager and vp_id:
+            status_manager.set_joined()
+            print(f"VP {vp_id} status set to JOINED - Successfully joined meeting")
+            
     except TimeoutError:
         print("Meeting interface took longer than expected to load, continuing...")
 
@@ -202,16 +208,16 @@ async def meeting(page):
     
     chat_button_element = await wait_for_element_with_fallbacks(page, chat_selectors, 10000)
     if not chat_button_element:
-        print("Could not find chat button - continuing without chat")
-        return
+        print("Could not find chat button - meeting interface may have failed to load properly")
+        raise Exception("Meeting interface failed to load - could not find chat button")
     
     try:
         await chat_button_element.hover()
         await chat_button_element.click()
         print("Chat panel opened successfully")
     except Exception as e:
-        print(f"Error clicking chat button: {e} - continuing without chat")
-        return
+        print(f"Error clicking chat button: {e}")
+        raise Exception(f"Failed to open chat panel: {e}")
 
     async def send_messages(messages):
         # Try multiple selectors for message input
