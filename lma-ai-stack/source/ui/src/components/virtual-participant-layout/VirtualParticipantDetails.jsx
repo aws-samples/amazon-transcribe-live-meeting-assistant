@@ -18,7 +18,6 @@ import {
 import StatusTimeline from './StatusTimeline';
 import PerformanceMetrics from './PerformanceMetrics';
 
-// Use simple GraphQL queries that match the actual deployed schema
 const getVirtualParticipant = `
   query GetVirtualParticipant($id: ID!) {
     getVirtualParticipant(id: $id) {
@@ -396,7 +395,7 @@ const VirtualParticipantDetails = () => {
     }
   }, [vpId]);
 
-  // Set up real-time updates subscription (no parameters needed)
+  // Set up real-time updates subscription - NO NOTIFICATIONS (handled by VirtualParticipantList)
   useEffect(() => {
     if (!vpId) return undefined;
 
@@ -404,33 +403,13 @@ const VirtualParticipantDetails = () => {
       next: ({ value }) => {
         const updated = value?.data?.onUpdateVirtualParticipant;
         if (updated && updated.id === vpId) {
+          // Only update local state, no notifications (VirtualParticipantList handles notifications)
           setVpDetails((prev) => ({
             ...prev,
             status: updated.status,
             updatedAt: updated.updatedAt,
             CallId: updated.CallId || prev.CallId, // Update CallId if available
           }));
-
-          // Show notification for status changes
-          const config = STATUS_CONFIG[updated.status];
-          if (config) {
-            const notificationId = `status-${Date.now()}`;
-            const notification = {
-              type: config.type === 'error' ? 'error' : 'success',
-              content: config.message,
-              dismissible: true,
-              id: notificationId,
-              onDismiss: () => setNotifications((prev) => prev.filter((n) => n.id !== notificationId)),
-            };
-            setNotifications((prev) => [...prev, notification]);
-
-            // Auto-dismiss success notifications after 5 seconds
-            if (config.type !== 'error') {
-              setTimeout(() => {
-                setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
-              }, 5000);
-            }
-          }
         }
       },
       error: (err) => {
