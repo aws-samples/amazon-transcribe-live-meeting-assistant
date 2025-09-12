@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useHistory } from 'react-router-dom';
+import { useParams, useHistory, Link as RouterLink } from 'react-router-dom';
 import { API, graphqlOperation, Logger } from 'aws-amplify';
 import PropTypes from 'prop-types';
 import {
@@ -336,14 +336,14 @@ const ActionButtons = ({ vpDetails, onRefresh, onEnd }) => {
         )}
 
         {vpDetails.CallId && (
-          <Button iconName="external" href={`#/calls/${vpDetails.CallId}`}>
-            View Meeting Transcript
-          </Button>
+          <RouterLink to={`/calls/${vpDetails.CallId}`} style={{ textDecoration: 'none' }}>
+            <Button iconName="external">View Meeting Transcript</Button>
+          </RouterLink>
         )}
 
-        <Button iconName="external" href="#/calls">
-          View All Meetings
-        </Button>
+        <RouterLink to="/calls" style={{ textDecoration: 'none' }}>
+          <Button iconName="external">View All Meetings</Button>
+        </RouterLink>
       </SpaceBetween>
     </Container>
   );
@@ -508,13 +508,15 @@ const VirtualParticipantDetails = () => {
               <Button iconName="arrow-left" onClick={() => history.goBack()}>
                 Back to List
               </Button>
-              <Button
-                iconName="external"
-                href={vpDetails.CallId ? `#/calls/${vpDetails.CallId}` : undefined}
-                disabled={!vpDetails.CallId}
-              >
-                {vpDetails.CallId ? 'View Call Details' : 'Call Details (Not Available)'}
-              </Button>
+              {vpDetails.CallId ? (
+                <RouterLink to={`/calls/${vpDetails.CallId}`} style={{ textDecoration: 'none' }}>
+                  <Button iconName="external">View Call Details</Button>
+                </RouterLink>
+              ) : (
+                <Button iconName="external" disabled>
+                  Call Details (Not Available)
+                </Button>
+              )}
             </SpaceBetween>
           }
         >

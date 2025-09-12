@@ -18,6 +18,7 @@ import re
 from gql import gql, Client
 from gql.dsl import DSLMutation, DSLSchema, DSLQuery, dsl_gql
 from appsync_utils import AppsyncRequestsGqlClient
+from datetime import datetime, timezone
 
 APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
 appsync_client = AppsyncRequestsGqlClient(
@@ -28,11 +29,16 @@ LCA_CALL_EVENTS_TABLE = environ['LCA_CALL_EVENTS_TABLE']
 S3_BUCKET_NAME = environ['S3_BUCKET_NAME']
 S3_RECORDINGS_PREFIX = environ['S3_RECORDINGS_PREFIX']
 S3_TRANSCRIPTS_PREFIX = environ['S3_TRANSCRIPTS_PREFIX']
+VP_TABLE_NAME = environ.get('VP_TABLE_NAME')
+VP_TASK_REGISTRY_TABLE_NAME = environ.get('VP_TASK_REGISTRY_TABLE_NAME')
+KINESIS_STREAM_NAME = environ.get('KINESIS_STREAM_NAME')
 
 logger = logging.getLogger(__name__)
 ddb = boto3.resource('dynamodb')
 ddbTable = ddb.Table(LCA_CALL_EVENTS_TABLE)
 s3_client = boto3.client('s3')
+kinesis_client = boto3.client('kinesis')
+ecs_client = boto3.client('ecs')
 
 ### Common functions
 
@@ -298,7 +304,10 @@ def delete_meetings(calls, owner):
 
 def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
     try:
-        # First delete the transcript segments
+        # First check and cleanup any associated Virtual Participants
+        cleanup_virtual_participants(callid)
+        
+        # Delete the transcript segments
         result = get_transcript_segments(appsync_session, schema, callid)
 
         for transcript_segment in result.get("getTranscriptSegments").get("TranscriptSegments"):
@@ -335,6 +344,117 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         raise
     else:
         return
+
+def cleanup_virtual_participants(callid):
+    """Clean up Virtual Participants associated with the meeting being deleted"""
+    if not VP_TABLE_NAME:
+        logger.info("VP_TABLE_NAME not configured, skipping VP cleanup")
+        return
+    
+    try:
+        vp_table = ddb.Table(VP_TABLE_NAME)
+        
+        # Scan for VPs with matching CallId
+        response = vp_table.scan(
+            FilterExpression=Attr('CallId').eq(callid)
+        )
+        
+        vps_to_cleanup = response.get('Items', [])
+        
+        for vp in vps_to_cleanup:
+            vp_id = vp.get('id')
+            if not vp_id:
+                continue
+                
+            logger.info(f"Cleaning up VP {vp_id} for meeting {callid}")
+            
+            # Send END event to Kinesis
+            send_vp_end_event(callid, vp)
+            
+            # Stop ECS task if running
+            stop_vp_ecs_task(vp_id)
+            
+            # Delete VP record
+            vp_table.delete_item(Key={'id': vp_id})
+            
+            # Delete registry entry
+            delete_vp_registry_entry(vp_id)
+            
+        if vps_to_cleanup:
+            logger.info(f"Cleaned up {len(vps_to_cleanup)} VPs for meeting {callid}")
+            
+    except Exception as e:
+        logger.error(f"Error cleaning up VPs for meeting {callid}: {e}")
+
+def send_vp_end_event(callid, vp):
+    """Send END event to Kinesis for VP cleanup"""
+    if not KINESIS_STREAM_NAME:
+        return
+        
+    try:
+        end_event = {
+            'EventType': 'END',
+            'CallId': callid,
+            'CustomerPhoneNumber': 'Virtual Participant',
+            'SystemPhoneNumber': 'LMA System',
+            'CreatedAt': datetime.now(timezone.utc).isoformat(),
+            'AgentId': vp.get('owner', 'Unknown'),
+            'AccessToken': '',
+            'IdToken': '',
+            'RefreshToken': '',
+        }
+        
+        kinesis_client.put_record(
+            StreamName=KINESIS_STREAM_NAME,
+            PartitionKey=callid,
+            Data=json.dumps(end_event).encode('utf-8')
+        )
+        
+        logger.info(f"Sent END event to Kinesis for VP in meeting {callid}")
+        
+    except Exception as e:
+        logger.error(f"Error sending VP END event: {e}")
+
+def stop_vp_ecs_task(vp_id):
+    """Stop ECS task for VP using registry lookup"""
+    if not VP_TASK_REGISTRY_TABLE_NAME:
+        return
+        
+    try:
+        registry_table = ddb.Table(VP_TASK_REGISTRY_TABLE_NAME)
+        response = registry_table.get_item(Key={'vpId': vp_id})
+        
+        task_details = response.get('Item')
+        if not task_details:
+            logger.info(f"No task registry entry found for VP {vp_id}")
+            return
+            
+        task_arn = task_details.get('taskArn')
+        cluster_arn = task_details.get('clusterArn')
+        
+        if task_arn and cluster_arn:
+            ecs_client.stop_task(
+                cluster=cluster_arn,
+                task=task_arn,
+                reason=f'Meeting deleted - VP {vp_id} cleanup'
+            )
+            logger.info(f"Stopped ECS task for VP {vp_id}")
+            
+    except Exception as e:
+        logger.error(f"Error stopping ECS task for VP {vp_id}: {e}")
+
+def delete_vp_registry_entry(vp_id):
+    """Delete VP registry entry"""
+    if not VP_TASK_REGISTRY_TABLE_NAME:
+        return
+        
+    try:
+        registry_table = ddb.Table(VP_TASK_REGISTRY_TABLE_NAME)
+        registry_table.delete_item(Key={'vpId': vp_id})
+        logger.info(f"Deleted registry entry for VP {vp_id}")
+        
+    except Exception as e:
+        logger.error(f"Error deleting registry entry for VP {vp_id}: {e}")
 
 def delete_transcript_segment(appsync_session, schema, PK, SK):
     input = {

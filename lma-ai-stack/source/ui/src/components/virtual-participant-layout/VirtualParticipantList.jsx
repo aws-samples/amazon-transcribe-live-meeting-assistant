@@ -16,8 +16,8 @@ import {
   Container,
   Alert,
   Flashbar,
-  Link,
 } from '@awsui/components-react';
+import { Link as RouterLink } from 'react-router-dom';
 import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
 import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
@@ -84,7 +84,11 @@ StatusBadge.propTypes = {
 const renderStatusCell = (item) => <StatusBadge status={item.status} />;
 
 // Render function for meeting name cell - defined outside component to avoid re-creation
-const renderMeetingNameCell = (item) => <Link href={`#/virtual-participant/${item.id}`}>{item.meetingName}</Link>;
+const renderMeetingNameCell = (item) => (
+  <RouterLink to={`/virtual-participant/${item.id}`} style={{ textDecoration: 'none', color: '#0972d3' }}>
+    {item.meetingName}
+  </RouterLink>
+);
 
 const VirtualParticipantList = () => {
   const { user, currentCredentials } = useAppContext();
