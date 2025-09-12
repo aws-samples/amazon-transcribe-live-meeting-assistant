@@ -16,7 +16,6 @@ import {
   Flashbar,
 } from '@awsui/components-react';
 import StatusTimeline from './StatusTimeline';
-import PerformanceMetrics from './PerformanceMetrics';
 
 const getVirtualParticipant = `
   query GetVirtualParticipant($id: ID!) {
@@ -540,8 +539,6 @@ const VirtualParticipantDetails = () => {
         <ConnectionDetails vpDetails={vpDetails} />
       </Container>
 
-      {/* Performance Metrics - Only show if enhanced data available */}
-      {(vpDetails.metrics || vpDetails.connectionDetails) && <PerformanceMetrics vpDetails={vpDetails} />}
 
       {/* Error Troubleshooting - Only show for failed status */}
       <ErrorTroubleshooting status={vpDetails.status} errorDetails={vpDetails.errorDetails} />

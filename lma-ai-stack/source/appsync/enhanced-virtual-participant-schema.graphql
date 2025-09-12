@@ -14,8 +14,6 @@ type VirtualParticipantEnhanced @aws_cognito_user_pools @aws_iam {
 	SharedWith: String
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
-	
-	# Enhanced fields for Phase 2
 	statusHistory: [VirtualParticipantStatusHistoryEntry]
 	connectionDetails: VirtualParticipantConnectionDetails
 	errorDetails: VirtualParticipantErrorDetails
@@ -26,7 +24,7 @@ type VirtualParticipantEnhanced @aws_cognito_user_pools @aws_iam {
 	endReason: String
 }
 
-# Enhanced status enum with more granular states
+# status enum with more granular states
 enum VirtualParticipantStatus {
 	INITIALIZING
 	CONNECTING
