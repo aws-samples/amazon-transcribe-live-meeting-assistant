@@ -98,7 +98,7 @@ Resources:
       LLMPromptTemplateTableName: !Ref LLMPromptTemplateTable
       Domain: !Ref Domain
       # hash below is updated by publish.sh script- used to force tempate updates when source has changed.
-      source_hash: f880a08c782a2f31
+      source_hash: 482f939cde5c9b26
 
 Outputs:
   LLMPromptTemplateTableName:

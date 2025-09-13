@@ -31,12 +31,13 @@ Parameters:
     Type: String
     AllowedValues:
       - "BEDROCK_LLM"
+      - "STRANDS_BEDROCK"
       - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
       - "BEDROCK_AGENT (Use Existing)"
       - "Q_BUSINESS (Use Existing)"
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
       - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)"
-    Description: Choose the knowledge base / LLM service to use
+    Description: Choose the knowledge base / LLM service to use. STRANDS_BEDROCK provides a lightweight alternative to QnABot.
 
   MeetingAssistServiceBedrockModelID:
     Type: String
@@ -936,14 +937,19 @@ Conditions:
     ]
   ShouldUseQBusiness:
     !Equals [!Ref MeetingAssistService, "Q_BUSINESS (Use Existing)"]
+  ShouldUseStrandsBedrock:
+    !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
   ShouldUseLLMOnly:
     !Not [
       !Or [
         !Condition ShouldUseBedrockKnowledgeBase,
         !Condition ShouldUseBedrockAgent,
         !Condition ShouldUseQBusiness,
+        !Condition ShouldUseStrandsBedrock,
       ],
     ]
+  ShouldDeployQnABot:
+    !Not [!Condition ShouldUseStrandsBedrock]
   ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
   ShouldCreateTranscriptKnowledgeBase:
     !Equals [!Ref TranscriptKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)"]
@@ -1533,6 +1539,7 @@ Resources:
 
   QNABOT:
     Type: AWS::CloudFormation::Stack
+    Condition: ShouldDeployQnABot
     DependsOn:
       - IsStacknameLengthOK
       - ValidateParameters
@@ -1751,7 +1758,10 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AISTACK: !Ref AISTACK
-        QNABOTSTACK: !Ref QNABOT
+        QNABOTSTACK: !If
+          - ShouldDeployQnABot
+          - !Ref QNABOT
+          - ""
         COGNITOSTACK: !Ref COGNITOSTACK
         MeetingAssistService: !Ref MeetingAssistService
         BedrockKnowledgeBaseId: !If
@@ -1782,14 +1792,22 @@ Resources:
           - ""
         IDCApplicationARN: !Ref IDCApplicationARN
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
-        LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
-        LexMeetingAssistLocaleId:
-          !FindInMap [
-            TranscribeToLexLocaleId,
-            !Ref TranscribeLanguageCode,
-            Value,
-          ]
+        LexMeetingAssistBotId: !If
+          - ShouldDeployQnABot
+          - !GetAtt QNABOT.Outputs.LexV2BotId
+          - ""
+        LexMeetingAssistAliasId: !If
+          - ShouldDeployQnABot
+          - !GetAtt QNABOT.Outputs.LexV2BotAliasId
+          - ""
+        LexMeetingAssistLocaleId: !If
+          - ShouldDeployQnABot
+          - !FindInMap [
+              TranscribeToLexLocaleId,
+              !Ref TranscribeLanguageCode,
+              Value,
+            ]
+          - ""
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         CloudFrontDistributionId: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         QnaMeetingAssistDemoJson: !If
@@ -1968,7 +1986,10 @@ Outputs:
 
   QnaBotContentDesigner:
     Description: Agent Assist Content Designer URL (QnABot on AWS)
-    Value: !GetAtt QNABOT.Outputs.ContentDesignerURL
+    Value: !If
+      - ShouldDeployQnABot
+      - !GetAtt QNABOT.Outputs.ContentDesignerURL
+      - "QnABot not deployed - STRANDS_BEDROCK selected"
 
   RecordingsS3Bucket:
     Description: Bucket which contains all the call recordings

@@ -195,6 +195,7 @@ Conditions:
   ShouldConfigureBedrockKB: !Not [!Equals [!Ref BedrockKnowledgeBaseId, ""]]
   ShouldConfigureBedrockAgent: !Not [!Equals [!Ref BedrockAgentId, ""]]
   ShouldCreateQPlugin: !Not [!Equals [!Ref AmazonQAppId, ""]]
+  ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
   ShouldConfigureBedrockLLM:
     !And [
       !Condition ShouldConfigureQnabot,
@@ -658,6 +659,109 @@ Resources:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
+  # Strands Lambda Layer for Strands SDK
+  StrandsLayer:
+    Type: "AWS::Lambda::LayerVersion"
+    Condition: ShouldUseStrandsBedrock
+    Properties:
+      LayerName: !Sub "${LMAStackName}-strands-layer"
+      Description: "Strands Agents SDK for meeting assistance"
+      Content: ./strands_layer
+      CompatibleRuntimes:
+        - python3.12
+
+  StrandsMeetingAssistFunctionRole:
+    Condition: ShouldUseStrandsBedrock
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                Resource: 
+                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:GetInferenceProfile"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:ApplyGuardrail"
+                Resource: "*"
+          PolicyName: BedrockPolicy
+        - PolicyName: InlinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: lambda:InvokeFunction
+                Effect: Allow
+                Resource: !Ref FetchTranscriptFunctionArn
+
+  StrandsMeetingAssistFunction:
+    Condition: ShouldUseStrandsBedrock
+    Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for meeting assist function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      FunctionName: !Sub "STRANDS-${LMAStackName}-MeetingAssist"
+      Role: !GetAtt StrandsMeetingAssistFunctionRole.Arn
+      Handler: strands_meeting_assist_function.handler
+      Runtime: python3.12
+      Layers:
+        - !Ref Boto3Layer
+        - !Ref StrandsLayer
+      Timeout: 300
+      MemorySize: 512
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
+          MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
+      Code: ./src
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/StrandsMeetingAssistFunction
+    DependsOn:
+      - StrandsMeetingAssistFunctionLogGroup
+
+  StrandsMeetingAssistFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldUseStrandsBedrock
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/StrandsMeetingAssistFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   SetupFunctionRole:
     Type: "AWS::IAM::Role"
     Properties:
@@ -806,15 +910,18 @@ Resources:
       QnaMeetingAssistDemoJson: !Ref QnaMeetingAssistDemoJson
       QNASummarizeCallFunction: !Ref QNASummarizeCallFunction
       QNAMeetingAssistLambdaHookFunction: !If
-        - ShouldCreateQPlugin
-        - !Ref QBusinessLambdaHookFunction
+        - ShouldUseStrandsBedrock
+        - !Ref StrandsMeetingAssistFunction
         - !If
-          - ShouldConfigureBedrockKB
-          - !Ref QNABedrockKnowledgeBaseFunction
+          - ShouldCreateQPlugin
+          - !Ref QBusinessLambdaHookFunction
           - !If
-            - ShouldConfigureBedrockAgent
-            - !Ref QNABedrockAgentFunction
-            - !Ref QNABedrockLLMFunction
+            - ShouldConfigureBedrockKB
+            - !Ref QNABedrockKnowledgeBaseFunction
+            - !If
+              - ShouldConfigureBedrockAgent
+              - !Ref QNABedrockAgentFunction
+              - !Ref QNABedrockLLMFunction
       QnaBotSettings: !Ref QnaBotSettings
       TranscriptBedrockKnowledgeBaseId: !If
       - ShouldConfigureTranscriptBedrockKB
@@ -1052,3 +1159,7 @@ Resources:
 Outputs:
   QBusinessLambdaHookFunctionRoleArn:
     Value: !If [ShouldCreateQPlugin, !GetAtt "LambdaFunctionRole.Arn", "NA"]
+  
+  StrandsMeetingAssistFunctionArn:
+    Description: ARN of the Strands Meeting Assist Lambda function
+    Value: !If [ShouldUseStrandsBedrock, !GetAtt StrandsMeetingAssistFunction.Arn, "NA"]
