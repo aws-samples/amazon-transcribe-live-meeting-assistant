@@ -20,9 +20,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install --upgrade pip
 RUN pip3 install --default-timeout=20 -r requirements.txt
-RUN playwright install chromium
 
 RUN chmod +x /srv/entrypoint.sh
 RUN chown -R appuser:appuser /srv
 USER appuser
+RUN playwright install chromium
 ENTRYPOINT ["/srv/entrypoint.sh"]
