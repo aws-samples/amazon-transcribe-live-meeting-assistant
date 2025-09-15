@@ -400,7 +400,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
             sentiment = message["Sentiment"]
         
         if message.get("AccessToken", None):
-            owner = get_owner_from_jwt(message.get("AccessToken"), True)
+            owner = get_owner_from_jwt(message.get("AccessToken"), False)
             
         segments.append(
             dict(
