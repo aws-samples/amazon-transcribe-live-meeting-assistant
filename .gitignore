@@ -13,3 +13,4 @@ samconfig.toml
 
 # DSR
 .dsr/
+!.dsr/issues.json
