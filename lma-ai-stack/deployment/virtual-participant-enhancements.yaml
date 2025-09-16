@@ -1,3 +1,7 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
 # Virtual Participant Enhancements CloudFormation Template
 # This template adds the enhanced VP features to the existing LMA stack
 
