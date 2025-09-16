@@ -494,7 +494,7 @@ Resources:
             reason: Using cognito assume role with web identity and scoped permissions.
     Properties:
       IdentityPoolName: !Sub "${AWS::StackName}-AgentAssistBot-IdentityPool"
-      AllowUnauthenticatedIdentities: false
+      AllowUnauthenticatedIdentities: true
       CognitoIdentityProviders:
         - ClientId: !Ref UserPoolClient
           ProviderName: !GetAtt UserPool.ProviderName
@@ -505,6 +505,7 @@ Resources:
       IdentityPoolId: !Ref AgentAssistBotIdentityPool
       Roles:
         authenticated: !GetAtt AgentAssistBotAuthRole.Arn
+        unauthenticated: !GetAtt AgentAssistBotUnauthRole.Arn
 
   AgentAssistBotUnauthRole:
     Type: AWS::IAM::Role
