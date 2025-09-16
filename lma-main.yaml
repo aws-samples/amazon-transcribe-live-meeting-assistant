@@ -718,6 +718,10 @@ Metadata:
           - PrivateSubnet1
           - PrivateSubnet2
       - Label:
+          default: Security Configuration
+        Parameters:
+          - PermissionsBoundaryArn
+      - Label:
           default: Business Domain
         Parameters:
           - Domain
@@ -838,6 +842,8 @@ Metadata:
         default: Existing Private Subnet 1
       PrivateSubnet2:
         default: Existing Private Subnet 2
+      PermissionsBoundaryArn:
+        default: Permissions Boundary ARN
 
 Mappings:
   TranscribeToLexLocaleId:
