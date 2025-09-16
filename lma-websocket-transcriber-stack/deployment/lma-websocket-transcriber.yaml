@@ -379,37 +379,6 @@ Resources:
         EncryptionType: KMS
         KmsKey: !Ref CustomerManagedEncryptionKeyArn
       ImageTagMutability: MUTABLE
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [
-              {
-                "rulePriority": 1,
-                "description": "Delete untagged images older than 7 days",
-                "selection": {
-                  "tagStatus": "untagged",
-                  "countType": "sinceImagePushed",
-                  "countUnit": "days",
-                  "countNumber": 7
-                },
-                "action": {
-                  "type": "expire"
-                }
-              },
-              {
-                "rulePriority": 2,
-                "description": "Keep only the latest 10 tagged images",
-                "selection": {
-                  "tagStatus": "tagged",
-                  "countType": "imageCountMoreThan",
-                  "countNumber": 10
-                },
-                "action": {
-                  "type": "expire"
-                }
-              }
-            ]
-          }
       RepositoryPolicyText:
         Version: "2012-10-17"
         Statement:
