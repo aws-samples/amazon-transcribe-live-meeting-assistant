@@ -1043,7 +1043,7 @@
     "fix": "Configure CloudTrail to capture DynamoDB data plane events.",
     "priority": "HIGH",
     "check_id": "DDB-002",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1065,7 +1065,7 @@
     "fix": "Configure CloudTrail to capture DynamoDB data plane events.",
     "priority": "HIGH",
     "check_id": "DDB-002",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1255,7 +1255,7 @@
     "fix": "Enable image scanning by setting ImageScanningConfiguration.ScanOnPush to true.",
     "priority": "HIGH",
     "check_id": "EKS-024",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1409,7 +1409,7 @@
     "fix": "Store sensitive parameters in AWS Secrets Manager or SSM Parameter Store as SecureString and reference them using secrets in the task definition.",
     "priority": "HIGH",
     "check_id": "ECS-002",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1453,7 +1453,7 @@
     "fix": "Add a WebACLId property to the DistributionConfig to associate a WAF Web ACL with this distribution",
     "priority": "HIGH",
     "check_id": "CFR-002",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1510,7 +1510,7 @@
     "fix": "Configure a lifecycle policy to clean up old and unused images.",
     "priority": "HIGH",
     "check_id": "EKS-024",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
