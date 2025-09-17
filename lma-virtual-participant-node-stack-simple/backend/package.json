@@ -1,0 +1,29 @@
+{
+  "name": "lma-virtual-participant-app",
+  "version": "1.0.0",
+  "description": "LMA Virtual Participant Application",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node --esm src/index.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.726.1",
+    "@aws-sdk/client-kinesis": "^3.726.1",
+    "@aws-sdk/client-transcribe-streaming": "^3.726.1",
+    "@aws-sdk/client-comprehend": "^3.726.1",
+    "@aws-sdk/client-s3": "^3.726.1",
+    "@aws-sdk/util-dynamodb": "^3.726.1",
+    "aws-sigv4-fetch": "^4.3.0",
+    "puppeteer": "^24.17.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.6",
+    "@types/uuid": "^9.0.8",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}
