@@ -47,7 +47,7 @@
     "check_id": "python.django.security.injection.ssrf.ssrf-injection-requests.ssrf-injection-requests",
     "priority": "HIGH",
     "references": "https://owasp.org/www-community/attacks/Server_Side_Request_Forgery",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "Semgrep",
@@ -77,7 +77,7 @@
     "check_id": "python.django.security.injection.ssrf.ssrf-injection-requests.ssrf-injection-requests",
     "priority": "HIGH",
     "references": "https://owasp.org/www-community/attacks/Server_Side_Request_Forgery",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "Bandit",
