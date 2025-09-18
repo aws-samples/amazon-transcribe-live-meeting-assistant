@@ -22,6 +22,10 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
 Resources:
   LLMPromptTemplateTable:
     Type: "AWS::DynamoDB::Table"
@@ -96,6 +100,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/LLMPromptUploadFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   LLMStorePromptTemplates:
     Type: "AWS::CloudFormation::CustomResource"

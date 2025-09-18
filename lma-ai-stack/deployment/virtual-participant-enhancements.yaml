@@ -37,6 +37,10 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
 Resources:
   ##########################################################################
   # Enhanced Virtual Participant Manager Lambda Function
@@ -74,6 +78,7 @@ Resources:
     Properties:
       LogGroupName: !Sub "/${LMAStackName}/lambda/VirtualParticipantManager"
       RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   VirtualParticipantManagerRole:
     Type: AWS::IAM::Role
