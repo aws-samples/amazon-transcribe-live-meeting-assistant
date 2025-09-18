@@ -2037,6 +2037,7 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         VPC: !If
           - ShouldCreateVPC
