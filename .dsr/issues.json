@@ -1202,7 +1202,7 @@
     "fix": "Define specific policies for the task role that grant only the permissions required for the task to function.",
     "priority": "HIGH",
     "check_id": "ECS-006",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1425,28 +1425,6 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed"
-  },
-  {
-    "source": "security-matrix",
-    "path": "lma-virtual-participant-stack/template.yaml",
-    "resourceType": "AWS::IAM::Role",
-    "resourceName": "TaskRole",
-    "issue": "ECS task may have overly permissive IAM roles",
-    "fix": "Avoid using wildcard '*' for resources without conditions. Add conditions like tags, principals, IP addresses, or ARNs to limit the scope.",
-    "priority": "HIGH",
-    "check_id": "ECS-005",
-    "status": "Open"
-  },
-  {
-    "source": "security-matrix",
-    "path": "lma-virtual-participant-stack/template.yaml",
-    "resourceType": "AWS::IAM::Role",
-    "resourceName": "TaskRole",
-    "issue": "ECS task IAM role may not follow least-privilege principle",
-    "fix": "Avoid using wildcard actions like '*' or 'service:*'. Specify only the exact actions required by the task.",
-    "priority": "HIGH",
-    "check_id": "ECS-006",
-    "status": "Open"
   },
   {
     "source": "security-matrix",
@@ -1876,6 +1854,28 @@
     "fix": "Specify a target S3 bucket in the Logging configuration using the Bucket property.",
     "priority": "medium",
     "check_id": "CFR-003",
+    "status": "suppressed"
+  },
+  {
+    "source": "security-matrix",
+    "path": "lma-virtual-participant-stack/template.yaml",
+    "resourceType": "AWS::IAM::Role",
+    "resourceName": "TaskRole",
+    "issue": "ECS task may have overly permissive IAM roles",
+    "fix": "Avoid using wildcard '*' for resources without conditions. Add conditions like tags, principals, IP addresses, or ARNs to limit the scope.",
+    "priority": "HIGH",
+    "check_id": "ECS-005",
+    "status": "suppressed"
+  },
+  {
+    "source": "security-matrix",
+    "path": "lma-virtual-participant-stack/template.yaml",
+    "resourceType": "AWS::IAM::Role",
+    "resourceName": "TaskRole",
+    "issue": "ECS task IAM role may not follow least-privilege principle",
+    "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the task.",
+    "priority": "HIGH",
+    "check_id": "ECS-006",
     "status": "suppressed"
   }
 ]

@@ -613,14 +613,20 @@ Resources:
                   - kinesis:DescribeStream
                 Resource:
                   - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
-                  - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/*"
         - PolicyName: TranscribePolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
-                  - "transcribe:*"
+                  - transcribe:DeleteTranscriptionJob
+                  - transcribe:GetTranscriptionJob
+                  - transcribe:GetVocabulary
+                  - transcribe:ListTranscriptionJobs
+                  - transcribe:ListVocabularies
+                  - transcribe:StartStreamTranscription
+                  - transcribe:StartTranscriptionJob
+                  - transcribe:StartCallAnalyticsStreamTranscription
                 Resource: "*"
         - PolicyName: DetectPIIPolicy
           PolicyDocument:
@@ -637,7 +643,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - "appsync:GraphQL"
-                Resource: "*"
+                Resource: !Sub "${GraphQLEndpoint}/*"
         - PolicyName: VirtualParticipantTablePolicy
           PolicyDocument:
             Version: 2012-10-17
