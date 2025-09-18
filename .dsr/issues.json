@@ -615,7 +615,7 @@
     "fix": "Use explicit string values instead of CloudFormation intrinsic functions for security-critical properties.",
     "priority": "HIGH",
     "check_id": "S3-001",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
