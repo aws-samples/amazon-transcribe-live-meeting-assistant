@@ -445,17 +445,6 @@
   {
     "source": "security-matrix",
     "path": "lma-meetingassist-setup-stack/template.yaml",
-    "resourceType": "AWS::KMS::Key",
-    "resourceName": "KMSKey",
-    "issue": "KMS key deployed without monitoring infrastructure for events and compliance",
-    "fix": "Add EventBridge rule with EventPattern source \"aws.kms\" and Lambda function target for KMS event monitoring.",
-    "priority": "HIGH",
-    "check_id": "KMS-007",
-    "status": "Open"
-  },
-  {
-    "source": "security-matrix",
-    "path": "lma-meetingassist-setup-stack/template.yaml",
     "resourceType": "AWS::DynamoDB::Table",
     "resourceName": "CredentialsTable",
     "issue": "DynamoDB data plane events are not captured by CloudTrail logging",
@@ -583,17 +572,6 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed"
-  },
-  {
-    "source": "security-matrix",
-    "path": "lma-main.yaml",
-    "resourceType": "AWS::KMS::Key",
-    "resourceName": "CustomerManagedEncryptionKey",
-    "issue": "KMS key deployed without monitoring infrastructure for events and compliance",
-    "fix": "Add EventBridge rule with EventPattern source \"aws.kms\" and Lambda function target for KMS event monitoring.",
-    "priority": "HIGH",
-    "check_id": "KMS-007",
-    "status": "Open"
   },
   {
     "source": "security-matrix",

@@ -1072,6 +1072,129 @@ Resources:
       AliasName: !Sub "alias/${AWS::StackName}-encryption-key"
       TargetKeyId: !Ref CustomerManagedEncryptionKey
 
+  # EventBridge rule for KMS key monitoring
+  KMSKeyMonitoringEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-KMS-Key-Monitoring"
+      Description: "EventBridge rule to monitor KMS key events for compliance and security"
+      EventPattern:
+        source:
+          - "aws.kms"
+        detail:
+          eventSource:
+            - "kms.amazonaws.com"
+          eventName:
+            - "DisableKey"
+            - "ScheduleKeyDeletion"
+            - "CancelKeyDeletion"
+            - "CreateKey"
+            - "PutKeyPolicy"
+            - "EnableKey"
+            - "DisableKeyRotation"
+            - "EnableKeyRotation"
+          resources:
+            - !GetAtt CustomerManagedEncryptionKey.Arn
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt KMSKeyMonitoringFunction.Arn
+          Id: "KMSKeyMonitoringTarget"
+
+  # Lambda function for KMS key monitoring
+  KMSKeyMonitoringFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for monitoring function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 128
+      Description: "Lambda function to process KMS key events for monitoring and compliance"
+      InlineCode: |
+        import json
+        import boto3
+        import logging
+
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        def handler(event, context):
+            """
+            Process KMS key events for monitoring and compliance.
+            This function logs KMS key events and can be extended to send alerts.
+            """
+            try:
+                logger.info(f"Received KMS event: {json.dumps(event)}")
+                
+                # Extract event details
+                detail = event.get('detail', {})
+                event_name = detail.get('eventName', 'Unknown')
+                event_source = detail.get('eventSource', 'Unknown')
+                source_ip = detail.get('sourceIPAddress', 'Unknown')
+                user_identity = detail.get('userIdentity', {})
+                
+                # Log key information
+                logger.info(f"KMS Event: {event_name}")
+                logger.info(f"Source: {event_source}")
+                logger.info(f"Source IP: {source_ip}")
+                logger.info(f"User Identity: {json.dumps(user_identity)}")
+                
+                # Add custom logic here for specific event handling
+                if event_name in ['DisableKey', 'ScheduleKeyDeletion']:
+                    logger.warning(f"CRITICAL KMS EVENT: {event_name} - Key security may be compromised")
+                elif event_name == 'PutKeyPolicy':
+                    logger.info(f"KMS key policy updated - review for compliance")
+                
+                return {
+                    'statusCode': 200,
+                    'body': json.dumps({
+                        'message': f'Successfully processed KMS event: {event_name}',
+                        'eventProcessed': True
+                    })
+                }
+                
+            except Exception as e:
+                logger.error(f"Error processing KMS event: {str(e)}")
+                return {
+                    'statusCode': 500,
+                    'body': json.dumps({
+                        'message': f'Error processing KMS event: {str(e)}',
+                        'eventProcessed': False
+                    })
+                }
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/KMSKeyMonitoringFunction
+    DependsOn:
+      - KMSKeyMonitoringFunctionLogGroup
+
+  KMSKeyMonitoringFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/KMSKeyMonitoringFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  # Permission for EventBridge to invoke the Lambda function
+  KMSKeyMonitoringFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref KMSKeyMonitoringFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt KMSKeyMonitoringEventRule.Arn
+
   # Custom resource to enforce max length of StackName - prevent downstream failures
   StacknameCheckFunction:
     Type: AWS::Serverless::Function
