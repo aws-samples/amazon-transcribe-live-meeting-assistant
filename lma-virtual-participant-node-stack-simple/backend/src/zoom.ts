@@ -14,19 +14,6 @@ export default class Zoom {
         }
     }
 
-    private async waitForMeetingUIReady(page: Page, timeout = 10000): Promise<void> {
-        /**Wait for Zoom meeting UI to be ready by checking for multiple indicators*/
-        try {
-            await page.waitForSelector(
-                '.zm-video-container, .meeting-client-view, .participants-counter',
-                { timeout }
-            );
-        } catch (error) {
-            console.log('Zoom meeting UI failed to load properly');
-            throw error;
-        }
-    }
-
     public async initialize(page: Page): Promise<void> {
         console.log('Getting Zoom meeting link.');
         await page.goto(`https://zoom.us/wc/${details.invite.meetingId}/join`);

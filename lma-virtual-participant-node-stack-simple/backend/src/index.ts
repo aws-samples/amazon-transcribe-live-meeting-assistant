@@ -63,18 +63,14 @@ const main = async (): Promise<void> => {
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // Use system Chromium in Docker
         ignoreDefaultArgs: ['--mute-audio'],
         args: [
-            '--window-size=2560,1440',
-            '--use-fake-ui-for-media-stream',
-            '--use-fake-device-for-media-stream',
-            '--disable-notifications',
-            '--disable-extensions',
-            '--disable-crash-reporter',
-            '--disable-dev-shm-usage',
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-gpu',
-            '--disable-web-security',
-            '--disable-features=VizDisplayCompositor',
+                "--window-size=1920,1080",
+                "--use-fake-ui-for-media-stream",
+                "--use-fake-device-for-media-stream",
+                "--disable-notifications",
+                "--disable-extensions",
+                "--disable-crash-reporter",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
         ],
     });
 
@@ -101,13 +97,13 @@ const main = async (): Promise<void> => {
         console.log(`Initializing ${details.invite.meetingPlatform} handler...`);
         
         switch (details.invite.meetingPlatform) {
-            case 'Chime':
+            case 'CHIME':
                 meeting = new Chime();
                 break;
             case 'Zoom':
                 meeting = new Zoom();
                 break;
-            case 'Webex':
+            case 'WEBEX':
                 meeting = new Webex();
                 break;
             default:

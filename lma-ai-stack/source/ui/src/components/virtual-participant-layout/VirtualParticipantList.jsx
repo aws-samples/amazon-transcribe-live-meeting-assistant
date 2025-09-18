@@ -373,7 +373,7 @@ const VirtualParticipantList = () => {
         input: JSON.stringify({
           apiInfo: { httpMethod: 'POST' },
           data: {
-            meetingPlatform: createForm.meetingPlatform === 'ZOOM' ? 'Zoom' : createForm.meetingPlatform,
+            meetingPlatform: createForm.meetingPlatform,
             meetingID: createForm.meetingId.replace(/ /g, ''),
             meetingPassword: createForm.meetingPassword,
             meetingName: createForm.meetingName,

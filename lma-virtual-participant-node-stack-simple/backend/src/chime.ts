@@ -13,7 +13,7 @@ export default class Chime {
         for (const message of messages) {
             await messageElement?.type(message);
             await messageElement?.press('Enter');
-            await new Promise(resolve => setTimeout(resolve, 100)); // Small delay between messages
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
     }
 
@@ -24,18 +24,17 @@ export default class Chime {
         console.log('Entering name.');
         try {
             const nameTextElement = await page.waitForSelector('#name');
-            if (nameTextElement) {
-                await nameTextElement.type(details.scribeIdentity);
-                await nameTextElement.press('Tab');
-                await page.keyboard.press('Enter');
-            }
+            await nameTextElement?.type(details.scribeIdentity);
+            await page.type("#name", details.scribeIdentity, { delay: 100 });
+            await nameTextElement?.press('Tab');
+            await page.keyboard.press('Enter');
         } catch (error) {
             console.log('LMA Virtual Participant was unable to join the meeting.');
             throw new Error('Meeting not found or invalid meeting ID');
         }
 
         console.log('Clicking mute button.');
-        const muteCheckboxElement = await page.waitForSelector('text="Join muted"');
+        const muteCheckboxElement = await page.waitForSelector('text/Join muted');
         await muteCheckboxElement?.click();
 
         console.log('Clicking join button.');
@@ -230,9 +229,10 @@ export default class Chime {
 
         console.log('Waiting for meeting end.');
         try {
-            await page.waitForSelector('button[id="endMeeting"]', {
+            await page.waitForSelector('#endMeeting', {
                 hidden: true,
                 timeout: details.meetingTimeout,
+                // timeout: 500,
             });
             console.log('Meeting ended.');
         } catch (error) {

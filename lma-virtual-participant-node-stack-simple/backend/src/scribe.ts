@@ -156,7 +156,6 @@ export class TranscriptionService {
                     }
                 }
 
-                // Process transcription results in parallel (matching Python asyncio.gather)
                 const recordingStream = createWriteStream(details.tmpRecordingFilename);
                 
                 await Promise.all([
