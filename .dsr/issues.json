@@ -578,17 +578,6 @@
     "path": "lma-llm-template-setup-stack/deployment/llm-template-setup.yaml",
     "resourceType": "AWS::Lambda::Function",
     "resourceName": "LLMPromptUploadFunction",
-    "issue": "No X-Ray tracing configured for Lambda function",
-    "fix": "Add TracingConfig property to the Lambda function configuration.",
-    "priority": "HIGH",
-    "check_id": "LAMBDA-004",
-    "status": "Open"
-  },
-  {
-    "source": "security-matrix",
-    "path": "lma-llm-template-setup-stack/deployment/llm-template-setup.yaml",
-    "resourceType": "AWS::Lambda::Function",
-    "resourceName": "LLMPromptUploadFunction",
     "issue": "Lambda function lacks CloudWatch alarms for monitoring",
     "fix": "Create CloudWatch alarms for the following Lambda metrics: Errors,Throttles,Duration,Invocations,ConcurrentExecutions,DeadLetterErrors. Configure alarm actions (e.g., SNS notifications) to assign an owner who will monitor and respond to incidents.",
     "priority": "HIGH",
@@ -927,16 +916,6 @@
     "priority": "HIGH",
     "check_id": "IAM-004",
     "status": "suppressed"
-  },
-  {
-    "source": "security-matrix",
-    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
-    "resourceType": "AWS::AppSync::GraphQLApi",
-    "resourceName": "AppSyncApiEncrypted",
-    "issue": "AppSync GraphQL API is missing appropriate authorization method (missing or incomplete documentation).\n\nYou've chosen AMAZON_COGNITO_USER_POOLS authorization. Please document the following considerations:\n\nDescription: Cognito User Pools provide comprehensive user management and authentication but add complexity and may be excessive for simpler applications.\n\nPros:\n- Built-in user management and authentication flows\n- Supports social identity providers (Google, Facebook, etc.)\n- Handles token issuance and validation\n- Includes features like MFA and adaptive authentication\n\nCons:\n- Adds complexity to the application architecture\n- May be overkill for simple applications\n- Requires Cognito setup and configuration\n- Additional cost considerations\n\nAction: Document these pros and cons in the resource metadata using either the AuthorizationDocumentation field or Comments field.",
-    "priority": "HIGH",
-    "check_id": "ASC-002",
-    "status": "Open"
   },
   {
     "source": "security-matrix",
@@ -1841,5 +1820,93 @@
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "DynamoDB Table",
     "resourceName": "VPTaskRegistry"
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 2286,
+    "issue": "Ensure DynamoDB Tables are encrypted using a KMS Customer Managed CMK",
+    "check_id": "CKV_AWS_119",
+    "priority": "INFO",
+    "fix": "Configure AWS::DynamoDB::Table with customer-managed KMS encryption by setting 'SSESpecification' with 'SSEEnabled: true' and 'KMSMasterKeyId' referencing an AWS::KMS::Key resource instead of using default AWS-owned keys for enhanced control.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "DynamoDB Table",
+    "resourceName": "VirtualParticipantTable"
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 2473,
+    "issue": "Ensure that AWS Lambda function is configured inside a VPC",
+    "check_id": "CKV_AWS_117",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function to run within VPC by setting 'VpcConfig' with 'SubnetIds' and 'SecurityGroupIds' properties. This provides network isolation and enables access to VPC-only resources like RDS instances.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction"
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 2473,
+    "issue": "Ensure that AWS Lambda function is configured for a Dead Letter Queue(DLQ)",
+    "check_id": "CKV_AWS_116",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function with Dead Letter Queue by setting 'DeadLetterConfig' with 'TargetArn' referencing an AWS::SQS::Queue or AWS::SNS::Topic resource. This captures failed function invocations for debugging and reprocessing.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction"
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 2473,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction"
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 2473,
+    "issue": "Ensure that AWS Lambda function is configured for function-level concurrent execution limit",
+    "check_id": "CKV_AWS_115",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function with concurrent execution limit by setting 'ReservedConcurrencyLimit' property to an appropriate value. This prevents the function from consuming all available concurrent executions in your account.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction"
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 2539,
+    "issue": "Ensure DynamoDB Tables are encrypted using a KMS Customer Managed CMK",
+    "check_id": "CKV_AWS_119",
+    "priority": "INFO",
+    "fix": "Configure AWS::DynamoDB::Table with customer-managed KMS encryption by setting 'SSESpecification' with 'SSEEnabled: true' and 'KMSMasterKeyId' referencing an AWS::KMS::Key resource instead of using default AWS-owned keys for enhanced control.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "DynamoDB Table",
+    "resourceName": "VPTaskRegistry"
+  },
+  {
+    "source": "security-matrix",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "resourceType": "AWS::AppSync::GraphQLApi",
+    "resourceName": "AppSyncApiEncrypted",
+    "issue": "AppSync GraphQL API is missing appropriate authorization method (missing or incomplete documentation).\n\nYou've chosen AMAZON_COGNITO_USER_POOLS authorization. Please document the following considerations:\n\nDescription: Cognito User Pools provide comprehensive user management and authentication but add complexity and may be excessive for simpler applications.\n\nPros:\n- Built-in user management and authentication flows\n- Supports social identity providers (Google, Facebook, etc.)\n- Handles token issuance and validation\n- Includes features like MFA and adaptive authentication\n\nCons:\n- Adds complexity to the application architecture\n- May be overkill for simple applications\n- Requires Cognito setup and configuration\n- Additional cost considerations\n\nAction: Document these pros and cons in the resource metadata using either the AuthorizationDocumentation field or Comments field.",
+    "priority": "HIGH",
+    "check_id": "ASC-002",
+    "status": "suppressed"
   }
 ]
