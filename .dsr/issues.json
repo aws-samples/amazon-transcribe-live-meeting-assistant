@@ -1010,17 +1010,6 @@
     "stack": "lma-ai-stack/deployment/lma-ai-stack.yaml",
     "resourceType": "AWS::CloudFront::Distribution",
     "resourceName": "WebAppCloudFrontDistribution",
-    "issue": "CloudFront distribution does not have access logging enabled with proper retention (logging bucket not specified)",
-    "fix": "Specify a target S3 bucket in the Logging configuration using the Bucket property.",
-    "priority": "medium",
-    "check_id": "CFR-003",
-    "status": "Open"
-  },
-  {
-    "source": "security-matrix",
-    "stack": "lma-ai-stack/deployment/lma-ai-stack.yaml",
-    "resourceType": "AWS::CloudFront::Distribution",
-    "resourceName": "WebAppCloudFrontDistribution",
     "issue": "CloudFront S3 origin lacks Origin Access Control (Origin[0] with domain [object Object] uses legacy Origin Access Identity)",
     "fix": "Consider upgrading to Origin Access Control by adding OriginAccessControlId to the origin configuration.",
     "priority": "medium",
@@ -1313,17 +1302,6 @@
     "priority": "HIGH",
     "check_id": "CFR-002",
     "status": "suppressed"
-  },
-  {
-    "source": "security-matrix",
-    "stack": "lma-websocket-transcriber-stack/deployment/lma-websocket-transcriber.yaml",
-    "resourceType": "AWS::CloudFront::Distribution",
-    "resourceName": "WebSocketCloudFrontDistribution",
-    "issue": "CloudFront distribution does not have access logging enabled with proper retention (logging not enabled)",
-    "fix": "Enable CloudFront access logging by adding a Logging configuration with a target S3 bucket and a log prefix.",
-    "priority": "high",
-    "check_id": "CFR-003",
-    "status": "Open"
   },
   {
     "source": "security-matrix",
@@ -1885,6 +1863,41 @@
     "issue": "AppSync GraphQL API is missing appropriate authorization method (missing or incomplete documentation).\n\nYou've chosen AMAZON_COGNITO_USER_POOLS authorization. Please document the following considerations:\n\nDescription: Cognito User Pools provide comprehensive user management and authentication but add complexity and may be excessive for simpler applications.\n\nPros:\n- Built-in user management and authentication flows\n- Supports social identity providers (Google, Facebook, etc.)\n- Handles token issuance and validation\n- Includes features like MFA and adaptive authentication\n\nCons:\n- Adds complexity to the application architecture\n- May be overkill for simple applications\n- Requires Cognito setup and configuration\n- Additional cost considerations\n\nAction: Document these pros and cons in the resource metadata using either the AuthorizationDocumentation field or Comments field.",
     "priority": "HIGH",
     "check_id": "ASC-002",
+    "status": "suppressed"
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-websocket-transcriber-stack/deployment/lma-websocket-transcriber.yaml",
+    "line": 377,
+    "issue": "Ensure ECR Image Tags are immutable",
+    "check_id": "CKV_AWS_51",
+    "priority": "LOW",
+    "fix": "Configure AWS::ECR::Repository with immutable tags by setting 'ImageTagMutability: IMMUTABLE'. This prevents image tag overwriting, ensuring container image integrity and preventing accidental deployment of modified images.",
+    "status": "Open",
+    "stack": "lma-websocket-transcriber-stack-deployment-lma-websocket-transcriber",
+    "resourceType": "ECR Repository",
+    "resourceName": "TranscriberECRRepository"
+  },
+  {
+    "source": "security-matrix",
+    "stack": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "resourceType": "AWS::CloudFront::Distribution",
+    "resourceName": "WebAppCloudFrontDistribution",
+    "issue": "CloudFront distribution does not have access logging enabled with proper retention (logging bucket not specified)",
+    "fix": "Specify a target S3 bucket in the Logging configuration using the Bucket property.",
+    "priority": "medium",
+    "check_id": "CFR-003",
+    "status": "suppressed"
+  },
+  {
+    "source": "security-matrix",
+    "stack": "lma-websocket-transcriber-stack/deployment/lma-websocket-transcriber.yaml",
+    "resourceType": "AWS::CloudFront::Distribution",
+    "resourceName": "WebSocketCloudFrontDistribution",
+    "issue": "CloudFront distribution does not have access logging enabled with proper retention (logging bucket not specified)",
+    "fix": "Specify a target S3 bucket in the Logging configuration using the Bucket property.",
+    "priority": "medium",
+    "check_id": "CFR-003",
     "status": "suppressed"
   }
 ]

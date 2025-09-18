@@ -1845,6 +1845,7 @@ Resources:
         WebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
         SNSEmailAddress: !Ref AdminEmail
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
   TRANSCRIPTBEDROCKKB:
