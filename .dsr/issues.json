@@ -1092,7 +1092,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1125,7 +1125,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1213,7 +1213,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1224,7 +1224,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1246,7 +1246,7 @@
     "fix": "Manually verify that the TaskRole permissions align with the container's actual requirements. Follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1268,7 +1268,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1301,7 +1301,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "Checkov",
@@ -1336,7 +1336,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1369,7 +1369,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1402,7 +1402,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1457,7 +1457,7 @@
     "fix": "Avoid using wildcard actions like '*' or 'service:*'. Specify only the exact actions required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1468,7 +1468,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1490,7 +1490,7 @@
     "fix": "Manually verify that the TaskRole permissions align with the container's actual requirements. Follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1512,7 +1512,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",
@@ -1523,7 +1523,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open"
+    "status": "suppressed"
   },
   {
     "source": "security-matrix",

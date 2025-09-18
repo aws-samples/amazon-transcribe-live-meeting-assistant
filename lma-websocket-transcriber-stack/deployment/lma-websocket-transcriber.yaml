@@ -1039,6 +1039,9 @@ Resources:
                 - transcribe.streaming.amazonaws.com
             Action:
               - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub ${AWS::AccountId}
       Path: /
       Policies:
         - PolicyName: tca-post-call-policy
@@ -1049,14 +1052,20 @@ Resources:
                 Action:
                   - s3:GetObject
                   - s3:ListBucket
-                  - s3:PutObject
-                  - s3:DeleteObject
                 Resource:
                   - !Sub
                     - "arn:aws:s3:::${bucket}"
                     - bucket: !Ref S3BucketName
                   - !Sub
-                    - "arn:aws:s3:::${bucket}/*"
+                    - "arn:aws:s3:::${bucket}/${CallAnalyticsPrefix}*"
+                    - bucket: !Ref S3BucketName
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub
+                    - "arn:aws:s3:::${bucket}/${CallAnalyticsPrefix}*"
                     - bucket: !Ref S3BucketName
 
     Metadata:
