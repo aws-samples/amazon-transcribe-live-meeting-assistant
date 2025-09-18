@@ -78,6 +78,8 @@ Resources:
       Runtime: python3.12
       MemorySize: 128
       Timeout: 60
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           DOMAIN: !Ref Domain

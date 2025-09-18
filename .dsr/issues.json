@@ -447,17 +447,6 @@
     "path": "lma-meetingassist-setup-stack/template.yaml",
     "resourceType": "AWS::KMS::Key",
     "resourceName": "KMSKey",
-    "issue": "KMS key policy violates least privilege or separation of duties",
-    "fix": "Replace wildcard actions [kms:*] with specific actions like \"kms:Encrypt\" or \"kms:Decrypt\" based on use case requirements.",
-    "priority": "HIGH",
-    "check_id": "KMS-002",
-    "status": "Open"
-  },
-  {
-    "source": "security-matrix",
-    "path": "lma-meetingassist-setup-stack/template.yaml",
-    "resourceType": "AWS::KMS::Key",
-    "resourceName": "KMSKey",
     "issue": "KMS key deployed without monitoring infrastructure for events and compliance",
     "fix": "Add EventBridge rule with EventPattern source \"aws.kms\" and Lambda function target for KMS event monitoring.",
     "priority": "HIGH",
@@ -618,28 +607,6 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed"
-  },
-  {
-    "source": "security-matrix",
-    "path": "lma-main.yaml",
-    "resourceType": "AWS::KMS::Key",
-    "resourceName": "CustomerManagedEncryptionKey",
-    "issue": "Resource policy allows cross-account access without proper confused deputy prevention using aws:SourceArn and aws:SourceAccount condition keys",
-    "fix": "Add aws:SourceArn and/or aws:SourceAccount condition keys to cross-account policy statements.",
-    "priority": "HIGH",
-    "check_id": "IAM-005",
-    "status": "Open"
-  },
-  {
-    "source": "security-matrix",
-    "path": "lma-main.yaml",
-    "resourceType": "AWS::KMS::Key",
-    "resourceName": "CustomerManagedEncryptionKey",
-    "issue": "KMS key policy violates least privilege or separation of duties",
-    "fix": "Replace wildcard actions [kms:*] with specific actions like \"kms:Encrypt\" or \"kms:Decrypt\" based on use case requirements.",
-    "priority": "HIGH",
-    "check_id": "KMS-002",
-    "status": "Open"
   },
   {
     "source": "security-matrix",
@@ -1709,5 +1676,40 @@
     "priority": "HIGH",
     "check_id": "ECS-010",
     "status": "Open"
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-llm-template-setup-stack/deployment/llm-template-setup.yaml",
+    "line": 92,
+    "issue": "Ensure that CloudWatch Log Group is encrypted by KMS",
+    "check_id": "CKV_AWS_158",
+    "priority": "LOW",
+    "fix": "Configure AWS::Logs::LogGroup with customer-managed KMS encryption by setting 'KmsKeyId' property to reference an AWS::KMS::Key resource. This provides full control over log encryption and access management.",
+    "status": "Open",
+    "stack": "lma-llm-template-setup-stack-deployment-llm-template-setup",
+    "resourceType": "Logs LogGroup",
+    "resourceName": "LLMPromptUploadFunctionLogGroup"
+  },
+  {
+    "source": "security-matrix",
+    "path": "lma-meetingassist-setup-stack/template.yaml",
+    "resourceType": "AWS::KMS::Key",
+    "resourceName": "KMSKey",
+    "issue": "KMS key policy violates least privilege or separation of duties",
+    "fix": "Separate encrypt actions [kms:Encrypt, kms:ReEncryptFrom, kms:ReEncryptTo, kms:GenerateDataKey, kms:GenerateDataKeyWithoutPlaintext] from decrypt actions [kms:CreateGrant, kms:DescribeKey, kms:Decrypt] into different statements with different principals for separation of duties.",
+    "priority": "HIGH",
+    "check_id": "KMS-002",
+    "status": "suppressed"
+  },
+  {
+    "source": "security-matrix",
+    "path": "lma-main.yaml",
+    "resourceType": "AWS::KMS::Key",
+    "resourceName": "CustomerManagedEncryptionKey",
+    "issue": "KMS key policy violates least privilege or separation of duties",
+    "fix": "Separate encrypt actions [kms:Encrypt, kms:ReEncryptFrom, kms:ReEncryptTo, kms:GenerateDataKey, kms:GenerateDataKeyWithoutPlaintext] from decrypt actions [kms:CreateGrant, kms:DescribeKey, kms:Decrypt] into different statements with different principals for separation of duties.",
+    "priority": "HIGH",
+    "check_id": "KMS-002",
+    "status": "suppressed"
   }
 ]

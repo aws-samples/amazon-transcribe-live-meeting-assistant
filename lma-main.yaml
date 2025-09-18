@@ -963,7 +963,37 @@ Resources:
             Effect: Allow
             Principal:
               AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
-            Action: kms:*
+            Action:
+              - "kms:CreateAlias"
+              - "kms:CreateGrant"
+              - "kms:CreateKey"
+              - "kms:DescribeKey"
+              - "kms:EnableKey"
+              - "kms:EnableKeyRotation"
+              - "kms:ListAliases"
+              - "kms:ListGrants"
+              - "kms:ListKeys"
+              - "kms:ListKeyPolicies"
+              - "kms:ListResourceTags"
+              - "kms:PutKeyPolicy"
+              - "kms:UpdateAlias"
+              - "kms:UpdateKeyDescription"
+              - "kms:RevokeGrant"
+              - "kms:DisableKey"
+              - "kms:DisableKeyRotation"
+              - "kms:GetKeyPolicy"
+              - "kms:GetKeyRotationStatus"
+              - "kms:DeleteAlias"
+              - "kms:TagResource"
+              - "kms:UntagResource"
+              - "kms:ScheduleKeyDeletion"
+              - "kms:CancelKeyDeletion"
+              - "kms:Encrypt"
+              - "kms:Decrypt"
+              - "kms:ReEncryptFrom"
+              - "kms:ReEncryptTo"
+              - "kms:GenerateDataKey"
+              - "kms:GenerateDataKeyWithoutPlaintext"
             Resource: "*"
           - Sid: Allow DynamoDB Service
             Effect: Allow
@@ -976,6 +1006,9 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
           - Sid: Allow CloudWatch Logs Service
             Effect: Allow
             Principal:
@@ -987,6 +1020,9 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
           - Sid: Allow S3 Service
             Effect: Allow
             Principal:
@@ -998,6 +1034,9 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
           - Sid: Allow SNS Service
             Effect: Allow
             Principal:
@@ -1009,6 +1048,9 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
           - Sid: Allow SQS Service
             Effect: Allow
             Principal:
@@ -1020,6 +1062,9 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
 
   CustomerManagedEncryptionKeyAlias:
     Type: AWS::KMS::Alias
