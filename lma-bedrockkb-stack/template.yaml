@@ -468,7 +468,6 @@ Resources:
         Version: "2012-10-17"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - arn:aws:iam::aws:policy/AmazonTextractFullAccess
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
@@ -491,6 +490,15 @@ Resources:
                             - OSSSetupLambdaFunction
                             - Arn
                         - :*
+        - PolicyName: XRayTracingPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTelemetryRecords
+                  - xray:PutTraceSegments
+                Resource: "*"
 
   OSSIndexCustomResourceFunction:
     Type: AWS::Lambda::Function

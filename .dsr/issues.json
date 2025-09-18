@@ -269,17 +269,6 @@
   {
     "source": "security-matrix",
     "path": "lma-bedrockkb-stack/template.yaml",
-    "resourceType": "AWS::IAM::Role",
-    "resourceName": "OSSIndexCustomResourceFunctionRole",
-    "issue": "Lambda function IAM role violates principle of least privilege",
-    "fix": "Replace overly permissive managed policy 'arn:aws:iam::aws:policy/AmazonTextractFullAccess' with a custom policy that grants only the specific permissions required by the Lambda function.",
-    "priority": "HIGH",
-    "check_id": "LAMBDA-005",
-    "status": "Open"
-  },
-  {
-    "source": "security-matrix",
-    "path": "lma-bedrockkb-stack/template.yaml",
     "resourceType": "AWS::Lambda::Function",
     "resourceName": "OSSIndexCustomResourceFunction",
     "issue": "Compute resource has IAM role without permissions boundary, allowing unrestricted IAM resource creation",
@@ -287,17 +276,6 @@
     "priority": "HIGH",
     "check_id": "IAM-004",
     "status": "suppressed"
-  },
-  {
-    "source": "security-matrix",
-    "path": "lma-bedrockkb-stack/template.yaml",
-    "resourceType": "AWS::IAM::Role",
-    "resourceName": "OSSIndexCustomResourceFunctionRole",
-    "issue": "Lambda function IAM role violates principle of least privilege",
-    "fix": "Replace overly permissive managed policy 'arn:aws:iam::aws:policy/AmazonTextractFullAccess' with a custom policy that grants only the specific permissions required by the Lambda function.",
-    "priority": "HIGH",
-    "check_id": "LAMBDA-005",
-    "status": "Open"
   },
   {
     "source": "security-matrix",
