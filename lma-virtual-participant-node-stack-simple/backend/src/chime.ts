@@ -236,6 +236,7 @@ export default class Chime {
             });
             console.log('Meeting ended.');
         } catch (error) {
+            console.log(error);
             console.log('Meeting timed out.');
         } finally {
             details.start = false;

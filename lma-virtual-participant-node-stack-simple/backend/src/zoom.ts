@@ -174,25 +174,16 @@ export default class Zoom {
         }
 
         console.log('Waiting for meeting end.');
-        try {
-            // Wait for either leave meeting button or meeting ended message
-            await Promise.race([
-                page.waitForSelector(
-                    'button.leave-meeting-options__btn',
-                    { timeout: 0 }
-                ),
-                page.waitForSelector(
-                    'text="This meeting has been ended by host"',
-                    { timeout: 0 }
-                ),
-                page.waitForSelector(
-                    'button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue',
-                    { timeout: details.meetingTimeout }
-                )
-            ]);
-            console.log('Meeting ended.');
-        } catch (error) {
-            console.log('Meeting timed out.');
+         try {
+            await page.waitForSelector(
+                "button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue",
+                {
+                    timeout: details.meetingTimeout,
+                }
+            );
+            console.log("Meeting ended.");
+        } catch {
+            console.log("Meeting timed out.");
         } finally {
             details.start = false;
             await details.updateInvite('Completed');

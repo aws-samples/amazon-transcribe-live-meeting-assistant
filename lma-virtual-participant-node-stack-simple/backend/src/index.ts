@@ -100,7 +100,7 @@ const main = async (): Promise<void> => {
             case 'CHIME':
                 meeting = new Chime();
                 break;
-            case 'Zoom':
+            case 'ZOOM':
                 meeting = new Zoom();
                 break;
             case 'WEBEX':
