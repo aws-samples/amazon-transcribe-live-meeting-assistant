@@ -174,13 +174,10 @@ export default class Zoom {
         }
 
         console.log('Waiting for meeting end.');
-         try {
-            await page.waitForSelector(
-                "button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue",
-                {
-                    timeout: details.meetingTimeout,
-                }
-            );
+        try {
+            await page.waitForSelector('.zm-modal-body-title', {
+                timeout: details.meetingTimeout,
+            });
             console.log("Meeting ended.");
         } catch {
             console.log("Meeting timed out.");
