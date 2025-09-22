@@ -229,15 +229,33 @@ export default class Chime {
 
         console.log('Waiting for meeting end.');
         try {
-            await page.waitForSelector('#endMeeting', {
-                hidden: true,
-                timeout: details.meetingTimeout,
-                // timeout: 500,
+            await new Promise((resolve, reject) => {
+                const checkInterval = setInterval(async () => {
+                    try {
+                        // Check if page navigated away
+                        const currentUrl = await page.url();
+                        if (currentUrl === 'about:blank' || !currentUrl.includes('chime.aws')) {
+                            console.log('Meeting ended: Page navigated away');
+                            clearInterval(checkInterval);
+                            resolve(undefined);
+                            return;
+                        }
+                        
+                    } catch (error) {
+                        clearInterval(checkInterval);
+                        reject(error);
+                    }
+                }, 5000); // Check every 5 seconds
+                
+                // Set up timeout
+                setTimeout(() => {
+                    clearInterval(checkInterval);
+                    reject(new Error('Meeting timeout'));
+                }, details.meetingTimeout);
             });
-            console.log('Meeting ended.');
+            console.log("Meeting ended.");
         } catch (error) {
-            console.log(error);
-            console.log('Meeting timed out.');
+            console.log("Meeting timed out.");
         } finally {
             details.start = false;
             await details.updateInvite('Completed');
