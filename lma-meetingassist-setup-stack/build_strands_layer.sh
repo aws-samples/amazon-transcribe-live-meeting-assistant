@@ -6,6 +6,9 @@ set -e
 
 echo "Building Strands Lambda Layer..."
 
+# Get the current working directory
+ORIGINAL_DIR=$(pwd)
+
 # Create temporary directory
 TEMP_DIR=$(mktemp -d)
 echo "Using temporary directory: $TEMP_DIR"
@@ -25,8 +28,8 @@ echo "Creating layer zip file..."
 cd $TEMP_DIR
 zip -r strands-layer.zip python/
 
-# Move zip file to strands_layer directory
-mv strands-layer.zip ../strands_layer/
+# Move zip file to strands_layer directory (using absolute path)
+mv strands-layer.zip $ORIGINAL_DIR/strands_layer/
 
 echo "Strands layer built successfully: strands_layer/strands-layer.zip"
 
