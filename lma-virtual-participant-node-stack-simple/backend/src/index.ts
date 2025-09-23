@@ -62,6 +62,8 @@ const main = async (): Promise<void> => {
         headless: true, // Run headless in production
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // Use system Chromium in Docker
         ignoreDefaultArgs: ['--mute-audio'],
+        protocolTimeout: details.meetingTimeout, // Set protocol timeout to 4 hours to match meeting timeout
+        timeout: details.meetingTimeout,
         args: [
                 "--window-size=1920,1080",
                 "--use-fake-ui-for-media-stream",
@@ -75,7 +77,7 @@ const main = async (): Promise<void> => {
     });
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 2560, height: 1440 });
+    await page.setViewport({ width: 1024, height: 768 });
     page.setDefaultTimeout(20000);
 
     // Set user agent to avoid detection

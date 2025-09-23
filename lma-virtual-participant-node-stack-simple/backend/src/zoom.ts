@@ -172,15 +172,26 @@ export default class Zoom {
             await this.sendMessages(page, details.startMessages);
             transcriptionService.startTranscription();
         }
-
         console.log('Waiting for meeting end.');
-        try {
-            await page.waitForSelector('.zm-modal-body-title', {
-                timeout: details.meetingTimeout,
-            });
-            console.log("Meeting ended.");
-        } catch {
-            console.log("Meeting timed out.");
+       try {
+            // Wait for either leave meeting button or meeting ended message
+            const result = await Promise.race([
+                // Only wait for URL change to about:blank (most reliable indicator)
+                page.waitForFunction(
+                    () => window.location.href === 'about:blank',
+                    { timeout: 0 }
+                ).then(() => 'URL_CHANGE_BLANK'),
+                // Keep the 4-hour timeout as fallback
+                page.waitForSelector(
+                    'button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue',
+                    { timeout: details.meetingTimeout }
+                ).then(() => 'LEGACY_BUTTON_TIMEOUT')
+            ]);
+            // console.log(`DEBUG: Meeting ended via: ${result}`);
+            console.log('Meeting ended.');
+        } catch (error) {
+            // console.log(`DEBUG: Meeting timeout error: ${error instanceof Error ? error.message : String(error)}`);
+            console.log('Meeting timed out.');
         } finally {
             details.start = false;
             await details.updateInvite('Completed');
