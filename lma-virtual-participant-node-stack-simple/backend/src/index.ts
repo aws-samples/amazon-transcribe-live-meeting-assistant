@@ -1,4 +1,4 @@
-import puppeteer from 'puppeteer-extra';
+import puppeteer from 'puppeteer';
 import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import Chime from './chime.js';
@@ -89,7 +89,6 @@ const main = async (): Promise<void> => {
         });
     } else {
         console.log('DEBUG: Using standard puppeteer for non-Teams meeting');
-        puppeteer.use(StealthPlugin());
         browser = await puppeteer.launch({
             headless: false,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,

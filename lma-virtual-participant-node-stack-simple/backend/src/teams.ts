@@ -21,7 +21,7 @@ export default class Teams {
         try {
             console.log("Getting meeting link.");
             await page.goto(
-                `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?launchAgent=marketing_join&laentry=hero&p=${details.invite.meetingPassword}&anon=true`
+                `https://teams.live.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?launchAgent=marketing_join&laentry=hero&p=${details.invite.meetingPassword}&anon=true`
             );
         } catch {
             console.log("Your scribe was unable to join the meeting.");
@@ -139,14 +139,41 @@ export default class Teams {
         });
         await speakerViewElement?.click();
 
+        // Set up simple attendee change monitoring
+        await page.exposeFunction('attendeeChange', async (hasOthers: boolean) => {
+            console.log(`DEBUG: Teams has other participants: ${hasOthers}`);
+            if (!hasOthers) {
+                console.log('LMA Virtual Participant got lonely and left.');
+                details.start = false;
+                await page.goto('about:blank');
+            }
+        });
+
         console.log("Listening for attendee changes.");
-        page.waitForSelector('[data-tid="toolbar-item-badge"]', {
-            hidden: true,
-            timeout: details.meetingTimeout,
-        }).then(() => {
-            console.log("Your scribe got lonely and left.");
-            details.start = false;
-            page.browser().close();
+        await page.evaluate(() => {
+            const checkAttendeeCount = () => {
+                const badgeElement = document.querySelector('span[data-tid="toolbar-item-badge"]');
+                const hasOthers = badgeElement && parseInt(badgeElement.textContent || '0') > 1;
+                console.log(`DEBUG: Badge element found: ${!!badgeElement}, count: ${badgeElement?.textContent || 'N/A'}, hasOthers: ${hasOthers}`);
+                (window as any).attendeeChange(hasOthers);
+            };
+
+            // Check initial state
+            checkAttendeeCount();
+
+            // Monitor for badge appearance/disappearance
+            const rosterButton = document.querySelector('#roster-button, button[data-inp="roster-button"]');
+            if (rosterButton) {
+                const config = { childList: true, subtree: true, characterData: true };
+                const callback = () => {
+                    checkAttendeeCount();
+                };
+                const observer = new MutationObserver(callback);
+                observer.observe(rosterButton, config);
+                console.log('DEBUG: Teams attendee monitoring set up on roster button');
+            } else {
+                console.log('DEBUG: Teams roster button not found - attendee monitoring disabled');
+            }
         });
 
         await page.exposeFunction("speakerChange", transcriptionService.speakerChange);
@@ -221,15 +248,31 @@ export default class Teams {
 
         console.log("Waiting for meeting end.");
         try {
-            await page.waitForSelector("#hangup-button", {
-                hidden: true,
-                timeout: details.meetingTimeout,
-            });
+            // Wait for multiple Teams meeting end indicators
+            const result = await Promise.race([
+                // Wait for hangup button to be hidden (original logic)
+                page.waitForSelector("#hangup-button", {
+                    hidden: true,
+                    timeout: details.meetingTimeout,
+                }).then(() => 'HANGUP_BUTTON_HIDDEN'),
+                // Wait for rejoin button to appear (when meeting ends)
+                page.waitForSelector('button[data-tid="anon-meeting-end-screen-rejoin-button"]', {
+                    timeout: details.meetingTimeout,
+                }).then(() => 'REJOIN_BUTTON_APPEARED'),
+                // Monitor for URL change to about:blank
+                page.waitForFunction(
+                    () => window.location.href === 'about:blank',
+                    { timeout: details.meetingTimeout }
+                ).then(() => 'URL_CHANGE_BLANK')
+            ]);
+            console.log(`DEBUG: Teams meeting ended via: ${result}`);
             console.log("Meeting ended.");
-        } catch {
+        } catch (error) {
+            console.log(`DEBUG: Teams meeting timeout error: ${error instanceof Error ? error.message : String(error)}`);
             console.log("Meeting timed out.");
         } finally {
             details.start = false;
+            await details.updateInvite('Completed');
         }
     }
 }
