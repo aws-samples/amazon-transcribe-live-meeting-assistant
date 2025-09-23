@@ -1,6 +1,9 @@
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-extra';
+import puppeteerExtra from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
+import Teams from './teams.js';
 import Webex from './webex.js';
 import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
@@ -58,12 +61,23 @@ const main = async (): Promise<void> => {
 
     // Launch Puppeteer browser
     console.log('Launching browser...');
-    const browser = await puppeteer.launch({
-        headless: true, // Run headless in production
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // Use system Chromium in Docker
-        ignoreDefaultArgs: ['--mute-audio'],
-        args: [
-                "--window-size=1920,1080",
+    console.log(`DEBUG: Setting protocolTimeout to ${details.meetingTimeout}ms (${details.meetingTimeout / 1000 / 60} minutes)`);
+    
+    const isTeamsMeeting = details.invite.meetingPlatform === 'Teams' || details.invite.meetingPlatform === 'TEAMS';
+    let browser;
+    
+    if (isTeamsMeeting) {
+        console.log('DEBUG: Using puppeteer-extra with stealth plugin for Teams meeting');
+        // Configure puppeteer-extra with stealth plugin for Teams
+        puppeteerExtra.use(StealthPlugin());
+        browser = await puppeteerExtra.launch({
+            headless: false,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            ignoreDefaultArgs: ['--mute-audio'],
+            protocolTimeout: details.meetingTimeout,
+            timeout: details.meetingTimeout,
+            args: [
+                "--window-size=1024,768",
                 "--use-fake-ui-for-media-stream",
                 "--use-fake-device-for-media-stream",
                 "--disable-notifications",
@@ -71,11 +85,32 @@ const main = async (): Promise<void> => {
                 "--disable-crash-reporter",
                 "--disable-dev-shm-usage",
                 "--no-sandbox",
-        ],
-    });
+            ],
+        });
+    } else {
+        console.log('DEBUG: Using standard puppeteer for non-Teams meeting');
+        puppeteer.use(StealthPlugin());
+        browser = await puppeteer.launch({
+            headless: false,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            ignoreDefaultArgs: ['--mute-audio'],
+            protocolTimeout: details.meetingTimeout,
+            timeout: details.meetingTimeout,
+            args: [
+                "--window-size=1024,768",
+                "--use-fake-ui-for-media-stream",
+                "--use-fake-device-for-media-stream",
+                "--disable-notifications",
+                "--disable-extensions",
+                "--disable-crash-reporter",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+            ],
+        });
+    }
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 2560, height: 1440 });
+    await page.setViewport({ width: 1024, height: 768 });
     page.setDefaultTimeout(20000);
 
     // Set user agent to avoid detection
@@ -83,7 +118,7 @@ const main = async (): Promise<void> => {
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
 
-    let meeting: Chime | Zoom | Webex;
+    let meeting: Chime | Zoom | Teams | Webex;
     let success = false;
 
     try {
@@ -95,6 +130,7 @@ const main = async (): Promise<void> => {
 
         // Initialize the appropriate meeting platform handler
         console.log(`Initializing ${details.invite.meetingPlatform} handler...`);
+        console.log(`DEBUG: Meeting platform value: "${details.invite.meetingPlatform}" (type: ${typeof details.invite.meetingPlatform})`);
         
         switch (details.invite.meetingPlatform) {
             case 'CHIME':
@@ -102,6 +138,10 @@ const main = async (): Promise<void> => {
                 break;
             case 'ZOOM':
                 meeting = new Zoom();
+                break;
+            case 'TEAMS':
+            case 'Teams':
+                meeting = new Teams();
                 break;
             case 'WEBEX':
                 meeting = new Webex();
