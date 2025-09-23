@@ -224,7 +224,7 @@ echo "Computing hash of extension folder contents"
 HASH=$(calculate_hash ".")
 zipfile=src-${HASH}.zip
 echo "Zipping source to ${tmpdir}/${zipfile}"
-zip -r ${tmpdir}/$zipfile . -x "node_modules/*" -x "build/*"
+zip -r ${tmpdir}/$zipfile . -x "node_modules/*" -x "build/*" -x "dist/*"
 echo "Upload source and template to S3"
 VIRTUAL_PARTICIPANT_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${dir}/${zipfile}
 aws s3 cp ${tmpdir}/${zipfile} s3://${VIRTUAL_PARTICIPANT_SRC_S3_LOCATION}

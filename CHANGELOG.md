@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+
+### Changed
+- Changed Virtual Participant from python to node sdk. 
+
+### Fixed
+
+## [0.2.14] - 2025-09-12
+### Added
+- Virtual Participant user enhancements including status tracking, notifications for tracking virtual participant, and option to end virtual participant
+
+### Fixed
+- Meeting deletion now properly removes Virtual Participant traces
 
 ## [0.2.14] - 2025-09-12
 ### Added
