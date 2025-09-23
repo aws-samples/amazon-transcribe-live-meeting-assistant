@@ -25,11 +25,6 @@ export class TranscriptionService {
     }
 
     private async *audioStream() {
-        // For local testing without Transcribe permissions, don't start FFmpeg
-        if (!process.env.ECS_CONTAINER_METADATA_URI_V4) {
-            console.log('Local testing mode - skipping audio capture');
-            return;
-        }
 
         this.process = spawn('ffmpeg', [
             '-f',
@@ -85,7 +80,7 @@ export class TranscriptionService {
         console.log('Starting transcription service');
         this.isTranscribing = true;
 
-        // Send start meeting event to Kinesis (LMA integration)
+        // Send start meeting event to Kinesis
         try {
             await sendStartMeeting();
         } catch (error: any) {
@@ -94,14 +89,6 @@ export class TranscriptionService {
             } else {
                 console.error('Failed to send start meeting event:', error);
             }
-        }
-
-        // For local testing without AWS permissions, skip actual transcription
-        if (!process.env.ECS_CONTAINER_METADATA_URI_V4) {
-            console.log('Local testing mode - skipping AWS Transcribe (no permissions)');
-            console.log('Meeting join and chat functionality will still work');
-            this.isTranscribing = false;
-            return;
         }
 
         const maxRetries = 5;
@@ -142,7 +129,7 @@ export class TranscriptionService {
                     sessionId = response.SessionId;
                     console.log(`New transcription session ID: ${sessionId}`);
                     
-                    // Update status to ACTIVE when transcription starts (matching Python scribe.py)
+                    // Update status to ACTIVE when transcription starts
                     const vpId = process.env.VIRTUAL_PARTICIPANT_ID;
                     if (vpId) {
                         try {
@@ -167,24 +154,17 @@ export class TranscriptionService {
                 break;
 
             } catch (error: any) {
-                if (error.name === 'AccessDeniedException' && error.message.includes('transcribe:StartStreamTranscription')) {
-                    console.log('Error: Transcribe permission denied during local testing');
-                    console.log('Note: This is expected when running locally without proper IAM permissions');
-                    break; // Don't retry permission errors
+                console.error(`Transcription error (attempt ${attempt + 1}/${maxRetries}):`, error.message);
+                
+                if (attempt < maxRetries - 1) {
+                    console.log(`Retrying in ${retryDelay / 1000} seconds...`);
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
                 } else {
-                    console.error(`Transcription error (attempt ${attempt + 1}/${maxRetries}):`, error.message);
-                    
-                    if (attempt < maxRetries - 1) {
-                        console.log(`Retrying in ${retryDelay / 1000} seconds...`);
-                        await new Promise(resolve => setTimeout(resolve, retryDelay));
-                    } else {
-                        console.error('Max retries reached. Transcription stopped.');
-                        break;
-                    }
+                    console.error('Max retries reached. Transcription stopped.');
+                    break;
                 }
             }
         }
-
         this.isTranscribing = false;
         console.log('Transcription service stopped');
     }
@@ -246,7 +226,7 @@ export class TranscriptionService {
             this.process = null;
         }
 
-        // Send end meeting event to Kinesis (LMA integration)
+        // Send end meeting event to Kinesis
         try {
             await sendEndMeeting();
         } catch (error: any) {
@@ -259,7 +239,7 @@ export class TranscriptionService {
     }
 
     async speakerChange(speaker: string): Promise<void> {
-        // Update global current speaker (matching Python)
+        // Update global current speaker
         currentSpeaker = speaker;
         
         const timestamp = Date.now();
@@ -281,7 +261,7 @@ export class TranscriptionService {
         };
     }
 
-    // Method to handle transcription restart (for LMA commands)
+    // Method to handle transcription restart
     async restartTranscription(): Promise<void> {
         if (this.isTranscribing) {
             await this.stopTranscription();
@@ -296,8 +276,6 @@ export class TranscriptionService {
         try {
             // Create audio input queue (matching Python asyncio.Queue)
             const audioQueue: Buffer[] = [];
-            let isProcessing = true;
-
             // Start FFmpeg process for audio capture
             this.process = spawn('ffmpeg', [
                 '-f', 'pulse',
@@ -314,9 +292,8 @@ export class TranscriptionService {
             this.process.stdout?.on('data', async (chunk: Buffer) => {
                 if (details.start && this.isTranscribing) {
                     try {
-                        // Send to Transcribe (matching Python send_audio_event)
+                        // Send to Transcrib
                         await transcribeResponse.input_stream?.send_audio_event?.({ audio_chunk: chunk });
-                        // Write to recording stream (matching Python)
                         recordingStream.write(chunk);
                     } catch (error) {
                         console.log('Audio processing error:', error);
@@ -338,17 +315,16 @@ export class TranscriptionService {
         }
     }
 
-    // Handle transcript events (matching Python MyEventHandler)
+    // Handle transcript events
     private async handleTranscriptEvents(transcribeResponse: any): Promise<void> {
         try {
-            // Process transcript results (matching Python MyEventHandler.handle_events)
+            // Process transcript results
             for await (const event of transcribeResponse.TranscriptResultStream ?? []) {
                 if (!this.isTranscribing) {
                     break;
                 }
-
                 for (const result of event.TranscriptEvent?.Transcript?.Results ?? []) {
-                    // Send all results to Kinesis (matching Python behavior)
+                    // Send all results to Kinesis
                     try {
                         await sendAddTranscriptSegment(currentSpeaker, result);
                     } catch (error) {

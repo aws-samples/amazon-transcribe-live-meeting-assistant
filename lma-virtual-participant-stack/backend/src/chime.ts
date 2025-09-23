@@ -1,7 +1,6 @@
 import { Page } from 'puppeteer';
 import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
-import { sendAddTranscriptSegment } from './kinesis-stream.js';
 
 export default class Chime {
     private prevSender: string = '';
@@ -57,8 +56,6 @@ export default class Chime {
 
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Update status to JOINED
-        await details.updateInvite('Joined');
         console.log('Successfully joined Chime meeting');
 
         console.log('Sending introduction messages.');
@@ -165,7 +162,6 @@ export default class Chime {
                     sender !== 'Amazon Chime' &&
                     !sender?.includes(details.scribeName)
                 ) {
-                    // Process meeting messages (LMA feature)
                     const timestamp = new Date().toLocaleTimeString('en-US', {
                         hour12: false,
                         hour: '2-digit',
@@ -258,7 +254,6 @@ export default class Chime {
             console.log("Meeting timed out.");
         } finally {
             details.start = false;
-            await details.updateInvite('Completed');
         }
     }
 }

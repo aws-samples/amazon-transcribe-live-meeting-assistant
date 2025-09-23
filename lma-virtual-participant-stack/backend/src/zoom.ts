@@ -65,8 +65,6 @@ export default class Zoom {
         await chatButtonElement?.hover();
         await chatButtonElement?.click();
 
-        await details.updateInvite('Joined');
-
         console.log('Sending introduction messages.');
         await this.sendMessages(page, details.introMessages);
 
@@ -194,7 +192,6 @@ export default class Zoom {
             console.log('Meeting timed out.');
         } finally {
             details.start = false;
-            await details.updateInvite('Completed');
         }
     }
 }

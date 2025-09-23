@@ -2,7 +2,6 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { createWriteStream, createReadStream, unlinkSync, existsSync } from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import { details, detailsManager } from './details.js';
-import { sendEndMeeting } from './kinesis-stream.js';
 
 export class RecordingService {
   private s3Client: S3Client;

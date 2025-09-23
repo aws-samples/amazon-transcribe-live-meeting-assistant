@@ -217,14 +217,14 @@ else
 echo "SKIPPING $dir (unchanged)"
 fi
 
-dir=lma-virtual-participant-node-stack-simple
-echo "PACKAGING $dir (Node.js Virtual Participant)"
+dir=lma-virtual-participant-stack
+echo "PACKAGING $dir"
 pushd $dir
-echo "Computing hash of Node.js Virtual Participant contents"
+echo "Computing hash of extension folder contents"
 HASH=$(calculate_hash ".")
 zipfile=src-${HASH}.zip
 echo "Zipping source to ${tmpdir}/${zipfile}"
-zip -r ${tmpdir}/$zipfile . -x "node_modules/*" -x "build/*" -x "dist/*" -x ".aws/*"
+zip -r ${tmpdir}/$zipfile . -x "node_modules/*" -x "build/*" -x "dist/*" -x
 echo "Upload source and template to S3"
 VIRTUAL_PARTICIPANT_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${dir}/${zipfile}
 aws s3 cp ${tmpdir}/${zipfile} s3://${VIRTUAL_PARTICIPANT_SRC_S3_LOCATION}

@@ -1,6 +1,6 @@
 # Virtual Participant (Preview)
 
-This stack deploys an ECS Fargate Task and Step Function state machine architecture that will join meeting via 'Virtual Participant', or VP for short. The VP is launched via a Fargate Task that runs via [Playwright](https://playwright.dev/python/), a headless Chrome browser. The audio and meeting metadata are ingested and sent to the LMA Kinesis Data Stream for further processing.
+This stack deploys an ECS Fargate Task and Step Function state machine architecture that will join meeting via 'Virtual Participant', or VP for short. The VP is launched via a Fargate Task that runs via Puppeteer, a headless Chrome browser. The audio and meeting metadata are ingested and sent to the LMA Kinesis Data Stream for further processing.
 
 This feature is currently a work in progress - not feature complete. It currently works for Chime and Zoom calls only, and while it can join and stream a call, it has known issues, listed below.
 

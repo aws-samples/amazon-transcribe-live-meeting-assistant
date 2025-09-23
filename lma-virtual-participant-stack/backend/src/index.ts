@@ -34,7 +34,7 @@ const main = async (): Promise<void> => {
             try {
                 await statusManager.storeTaskArnInRegistry();
             } catch (arnError) {
-                console.log(`Failed to store task ARN (non-critical): ${arnError}`);
+                console.log(`Failed to store task ARN : ${arnError}`);
             }
         } catch (error) {
             console.error(`Failed to initialize status manager: ${error}`);
@@ -121,13 +121,10 @@ const main = async (): Promise<void> => {
         console.log('Meeting joined successfully');
         success = true;
 
-        // The meeting handlers will manage the meeting lifecycle
-        // including transcription, message monitoring, and cleanup
 
     } catch (error: any) {
         console.error('Meeting failed:', error.message);
         
-        // Set appropriate failure status based on error type
         if (statusManager) {
             const errorMsg = error.message.toLowerCase();
             if (errorMsg.includes('password') || errorMsg.includes('passcode')) {
@@ -143,16 +140,6 @@ const main = async (): Promise<void> => {
             }
         }
         
-        // Try to capture screenshot for debugging
-        try {
-            const screenshot = await page.screenshot({ 
-                path: '/tmp/error-screenshot.png',
-                fullPage: true 
-            });
-            console.log('Error screenshot saved to /tmp/error-screenshot.png');
-        } catch (screenshotError) {
-            console.error('Failed to capture error screenshot:', screenshotError);
-        }
     } finally {
         // Cleanup
         console.log('Cleaning up...');
@@ -184,13 +171,6 @@ const main = async (): Promise<void> => {
             await browser.close();
         } catch (error) {
             console.error('Error closing browser:', error);
-        }
-
-        try {
-            // Clean up invite record
-            await details.deleteInvite();
-        } catch (error) {
-            console.error('Error deleting invite:', error);
         }
 
         // Final status update
