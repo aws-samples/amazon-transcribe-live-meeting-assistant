@@ -185,15 +185,19 @@ export default class Teams {
         console.log("Listening for speaker changes.");
         await page.evaluate(() => {
             const targetNode = document.querySelector('[data-tid="SpeakerStage-wrapper"]');
-            const config = { characterData: true, subtree: true };
-            const callback = (mutationList: MutationRecord[]) => {
-                for (const mutation of mutationList) {
-                    const newSpeaker = mutation.target.textContent;
-                    if (newSpeaker) {
-                        (window as any).speakerChange(newSpeaker);
-                    }
-                }
+            const config = { 
+                childList: true,      // Watch for added/removed child elements
+                subtree: true,        // Watch all descendants
+                characterData: true,  // Watch for text content changes
+                attributes: true,     // Watch for attribute changes
+                attributeFilter: ['data-tid', 'class'] // Only watch specific attributes
             };
+            const callback = (mutationList: MutationRecord[]) => {
+                const currentSpeaker = targetNode?.textContent;
+                if (currentSpeaker) {
+                    (window as any).speakerChange(currentSpeaker);
+                }
+            }; 
             const observer = new MutationObserver(callback);
             if (targetNode) observer.observe(targetNode, config);
 
