@@ -13,7 +13,7 @@ RUN apt-get update && \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-RUN npm install && \
+RUN npm ci && \
     npm run build
     
 RUN chmod +x /srv/entrypoint.sh

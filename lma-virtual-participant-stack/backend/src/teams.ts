@@ -3,6 +3,7 @@
 import { Page } from "puppeteer";
 import { details } from "./details.js";
 import { transcriptionService } from "./scribe.js";
+import { createStatusManager } from "./status-manager.js";
 
 // const bedrockClient = new BedrockRuntimeClient();
 
@@ -123,7 +124,11 @@ export default class Teams {
             return;
         }
 
-        details.updateInvite("Joined");
+        // Update status to JOINED
+        if (details.invite.virtualParticipantId) {
+            const statusManager = createStatusManager(details.invite.virtualParticipantId);
+            await statusManager.setJoined();
+        }
         console.log("Sending introduction messages.");
         await this.sendMessages(page, details.introMessages);
 
@@ -246,6 +251,13 @@ export default class Teams {
             if (targetNode) observer.observe(targetNode, config);
         });
 
+        // Start transcription if enabled (LMA behavior)
+        if (details.start) {
+            console.log(details.startMessages[0]);
+            await this.sendMessages(page, details.startMessages);
+            transcriptionService.startTranscription();
+        }
+
         console.log("Waiting for meeting end.");
         try {
             // Wait for multiple Teams meeting end indicators
@@ -272,7 +284,11 @@ export default class Teams {
             console.log("Meeting timed out.");
         } finally {
             details.start = false;
-            await details.updateInvite('Completed');
+            // Update status to COMPLETED
+            if (details.invite.virtualParticipantId) {
+                const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                await statusManager.setCompleted();
+            }
         }
     }
 }
