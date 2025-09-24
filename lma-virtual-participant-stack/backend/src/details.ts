@@ -66,9 +66,6 @@ export interface MeetingDetails {
   enableAudioRecording: boolean;
   tmpRecordingFilename: string;
   
-  // Status Management
-  updateInvite: (status: string) => Promise<void>;
-  deleteInvite: () => Promise<void>;
 }
 
 class DetailsManager {
@@ -166,45 +163,11 @@ class DetailsManager {
       // Recording Configuration
       enableAudioRecording: process.env.ENABLE_AUDIO_RECORDING !== 'false',
       tmpRecordingFilename: `/tmp/${meetingName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.wav`,
-
-      // Status Management Functions
-      updateInvite: this.updateInviteStatus.bind(this),
-      deleteInvite: this.deleteInviteRecord.bind(this),
     };
   }
 
   get details(): MeetingDetails {
     return this._details;
-  }
-
-  private async updateInviteStatus(status: string): Promise<void> {
-    try {
-      // Update status in DynamoDB VP Task Registry (LMA integration)
-      if (this._details.vpTaskRegistryTableName && this._details.invite.virtualParticipantId) {
-        console.log(`Updating VP status to: ${status} for ID: ${this._details.invite.virtualParticipantId}`);
-        // TODO: Implement DynamoDB update
-      }
-
-      // Update status via GraphQL (if endpoint available)
-      if (this._details.graphqlEndpoint) {
-        console.log(`Updating meeting status via GraphQL: ${status}`);
-        // TODO: Implement GraphQL mutation
-      }
-    } catch (error) {
-      console.error('Failed to update invite status:', error);
-    }
-  }
-
-  private async deleteInviteRecord(): Promise<void> {
-    try {
-      // Clean up VP Task Registry record
-      if (this._details.vpTaskRegistryTableName && this._details.invite.virtualParticipantId) {
-        console.log(`Deleting VP record for ID: ${this._details.invite.virtualParticipantId}`);
-        // TODO: Implement DynamoDB delete
-      }
-    } catch (error) {
-      console.error('Failed to delete invite record:', error);
-    }
   }
 
   // Utility method to get meeting name with timestamp (for file naming)

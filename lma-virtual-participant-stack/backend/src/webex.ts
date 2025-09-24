@@ -100,7 +100,7 @@ export default class Webex {
         await new Promise(resolve => setTimeout(resolve, 1000));
 
         // Update status to JOINED
-        await details.updateInvite('Joined');
+        // await details.updateInvite('Joined');
         console.log('Successfully joined Webex meeting');
 
         console.log('Sending introduction messages.');
@@ -237,7 +237,7 @@ export default class Webex {
             console.log('Meeting timed out.');
         } finally {
             details.start = false;
-            await details.updateInvite('Completed');
+            // await details.updateInvite('Completed');
         }
     }
 }
