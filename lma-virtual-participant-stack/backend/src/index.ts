@@ -211,6 +211,7 @@ const main = async (): Promise<void> => {
         }
         
         console.log('Ending Task. Bye.');
+        process.exit(1);
     }
 };
 
