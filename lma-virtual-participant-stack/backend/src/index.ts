@@ -12,8 +12,8 @@ import { recordingService } from './recording.js';
 import { sendEndMeeting } from './kinesis-stream.js';
 
 // Window dimensions configuration
-const WINDOW_WIDTH = 1024;
-const WINDOW_HEIGHT = 768;
+const WINDOW_WIDTH = 1920;
+const WINDOW_HEIGHT = 1080;
 
 // Shared Puppeteer configuration
 const getPuppeteerConfig = () => ({
