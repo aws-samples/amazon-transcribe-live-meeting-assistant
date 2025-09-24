@@ -69,6 +69,7 @@ Parameters:
     Description: >-
       Lex Bot Locale ID used for Meeting Assist.
     AllowedValues:
+      - ""
       - ca_ES
       - de_AT
       - de_DE

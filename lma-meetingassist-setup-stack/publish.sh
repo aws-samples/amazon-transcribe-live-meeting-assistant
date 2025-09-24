@@ -61,6 +61,10 @@ echo "Packaging boto3_layer"
 pushd boto3_layer
 pip3 install --requirement ./requirements.txt --target=./python
 popd
+echo "Packaging strands_layer"
+pushd strands_layer
+pip3 install --requirement ./requirements.txt --target=./python
+popd
 aws cloudformation package \
 --template-file ${template} \
 --output-template-file ${tmpdir}/${template} \

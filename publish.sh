@@ -270,10 +270,6 @@ dir=lma-meetingassist-setup-stack
 if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir
-# Always build Strands layer to ensure it's up to date
-echo "Building Strands Lambda layer..."
-chmod +x ./build_strands_layer.sh
-./build_strands_layer.sh
 chmod +x ./publish.sh
 ./publish.sh $BUCKET $PREFIX_AND_VERSION $REGION || exit 1
 popd
