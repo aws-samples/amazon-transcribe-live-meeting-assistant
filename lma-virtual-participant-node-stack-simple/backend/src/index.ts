@@ -11,6 +11,29 @@ import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { sendEndMeeting } from './kinesis-stream.js';
 
+// Window dimensions configuration
+const WINDOW_WIDTH = 1024;
+const WINDOW_HEIGHT = 768;
+
+// Shared Puppeteer configuration
+const getPuppeteerConfig = () => ({
+    headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    ignoreDefaultArgs: ['--mute-audio'],
+    protocolTimeout: details.meetingTimeout,
+    timeout: details.meetingTimeout,
+    args: [
+        `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT}`,
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream",
+        "--disable-notifications",
+        "--disable-extensions",
+        "--disable-crash-reporter",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+    ],
+});
+
 // Global variables for graceful shutdown
 let shutdownRequested = false;
 let statusManager: VirtualParticipantStatusManager | null = null;
@@ -70,46 +93,14 @@ const main = async (): Promise<void> => {
         console.log('DEBUG: Using puppeteer-extra with stealth plugin for Teams meeting');
         // Configure puppeteer-extra with stealth plugin for Teams
         puppeteerExtra.use(StealthPlugin());
-        browser = await puppeteerExtra.launch({
-            headless: false,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            ignoreDefaultArgs: ['--mute-audio'],
-            protocolTimeout: details.meetingTimeout,
-            timeout: details.meetingTimeout,
-            args: [
-                "--window-size=1024,768",
-                "--use-fake-ui-for-media-stream",
-                "--use-fake-device-for-media-stream",
-                "--disable-notifications",
-                "--disable-extensions",
-                "--disable-crash-reporter",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-            ],
-        });
+        browser = await puppeteerExtra.launch(getPuppeteerConfig());
     } else {
         console.log('DEBUG: Using standard puppeteer for non-Teams meeting');
-        browser = await puppeteer.launch({
-            headless: false,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            ignoreDefaultArgs: ['--mute-audio'],
-            protocolTimeout: details.meetingTimeout,
-            timeout: details.meetingTimeout,
-            args: [
-                "--window-size=1024,768",
-                "--use-fake-ui-for-media-stream",
-                "--use-fake-device-for-media-stream",
-                "--disable-notifications",
-                "--disable-extensions",
-                "--disable-crash-reporter",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-            ],
-        });
+        browser = await puppeteer.launch(getPuppeteerConfig());
     }
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 1024, height: 768 });
+    await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
     page.setDefaultTimeout(20000);
 
     // Set user agent to avoid detection
