@@ -181,27 +181,114 @@ export default class Teams {
             }
         });
 
-        await page.exposeFunction("speakerChange", transcriptionService.speakerChange);
+        await page.exposeFunction("speakerChange", async (speaker: string) => {
+            console.log(`DEBUG: Speaker detected: "${speaker}"`);
+            await transcriptionService.speakerChange(speaker);
+        });
+        
         console.log("Listening for speaker changes.");
         await page.evaluate(() => {
-            const targetNode = document.querySelector('[data-tid="SpeakerStage-wrapper"]');
-            const config = { 
-                childList: true,      // Watch for added/removed child elements
-                subtree: true,        // Watch all descendants
-                characterData: true,  // Watch for text content changes
-                attributes: true,     // Watch for attribute changes
-                attributeFilter: ['data-tid', 'class'] // Only watch specific attributes
+            console.log('DEBUG: Setting up speaker detection for both normal and screen sharing modes...');
+            
+            const findCurrentSpeaker = () => {
+                // Method 1: Look for active speaking indicator (voice-level-stream-outline with vdi-frame-occlusion class)
+                const speakingIndicator = document.querySelector('[data-tid="voice-level-stream-outline"].vdi-frame-occlusion');
+                if (speakingIndicator) {
+                    console.log('DEBUG: Found active speaking indicator, looking for associated participant...');
+                    
+                    // Find the participant container that contains this speaking indicator
+                    const participantContainer = speakingIndicator.closest('[data-tid]:not([data-tid*="wrapper"]):not([data-tid*="button"]):not([data-tid*="avatar"]):not([data-tid*="outline"])');
+                    if (participantContainer) {
+                        const name = participantContainer.getAttribute('data-tid');
+                        if (name && name.length > 0 && !name.includes('LMA')) {
+                            console.log(`DEBUG: Active speaking indicator mode - speaker: "${name}"`);
+                            return name;
+                        }
+                    }
+                    
+                    // Alternative: look for the participant element that's a sibling or parent
+                    const participantElement = speakingIndicator.parentElement?.querySelector('[data-tid]:not([data-tid*="wrapper"]):not([data-tid*="button"]):not([data-tid*="avatar"]):not([data-tid*="outline"])');
+                    if (participantElement) {
+                        const name = participantElement.getAttribute('data-tid');
+                        if (name && name.length > 0 && !name.includes('LMA')) {
+                            console.log(`DEBUG: Active speaking indicator (sibling) mode - speaker: "${name}"`);
+                            return name;
+                        }
+                    }
+                }
+                
+                // Method 2: Check for screen sharing scenario
+                const screenShareElement = document.querySelector('[data-stream-type="ScreenSharing"]');
+                if (screenShareElement) {
+                    console.log('DEBUG: Screen sharing detected, looking for speaker in video participants...');
+                    
+                    // When screen sharing, look for video participants (not the screen sharer)
+                    const videoParticipants = document.querySelectorAll('[data-stream-type="Video"][data-tid]:not([data-tid*="LMA"])');
+                    console.log(`DEBUG: Found ${videoParticipants.length} video participants during screen share`);
+                    
+                    for (const participant of videoParticipants) {
+                        const name = participant.getAttribute('data-tid');
+                        if (name && name.length > 0) {
+                            console.log(`DEBUG: Screen sharing mode - speaker: "${name}"`);
+                            return name;
+                        }
+                    }
+                }
+                
+                // Method 3: Normal mode - check SpeakerStage-wrapper
+                const speakerStage = document.querySelector('[data-tid="SpeakerStage-wrapper"]');
+                if (speakerStage) {
+                    const speakerElement = speakerStage.querySelector('[data-tid]:not([data-tid*="wrapper"]):not([data-tid*="button"]):not([data-tid*="avatar"])');
+                    if (speakerElement) {
+                        const name = speakerElement.getAttribute('data-tid');
+                        if (name && name.length > 0) {
+                            console.log(`DEBUG: Normal mode - speaker: "${name}"`);
+                            return name;
+                        }
+                    }
+                }
+                
+                // Method 4: Fallback - look for any prominent participant
+                const allParticipants = document.querySelectorAll('[data-tid]:not([data-tid*="wrapper"]):not([data-tid*="button"]):not([data-tid*="avatar"]):not([data-tid*="LMA"])');
+                console.log(`DEBUG: Fallback - found ${allParticipants.length} total participants`);
+                
+                for (const participant of allParticipants) {
+                    const name = participant.getAttribute('data-tid');
+                    if (name && name.length > 0 && name.length < 100) {
+                        console.log(`DEBUG: Fallback mode - speaker: "${name}"`);
+                        return name;
+                    }
+                }
+                
+                console.log('DEBUG: No speaker found in any mode');
+                return '';
             };
+            
+            const targetNode = document.querySelector('[data-tid="modern-stage-wrapper"]');
+            const config = { 
+                childList: true,
+                subtree: true,
+                characterData: true,
+                attributes: true,
+                attributeFilter: ['data-tid', 'class', 'data-stream-type']
+            };
+            
             const callback = (mutationList: MutationRecord[]) => {
-                const currentSpeaker = targetNode?.textContent;
+                console.log(`DEBUG: Stage mutation detected, checking for speaker...`);
+                const currentSpeaker = findCurrentSpeaker();
                 if (currentSpeaker) {
                     (window as any).speakerChange(currentSpeaker);
                 }
-            }; 
+            };
+            
             const observer = new MutationObserver(callback);
-            if (targetNode) observer.observe(targetNode, config);
+            if (targetNode) {
+                observer.observe(targetNode, config);
+                console.log('DEBUG: MutationObserver set up on modern-stage-wrapper');
+            }
 
-            const initialSpeaker = targetNode?.textContent;
+            // Set initial speaker
+            const initialSpeaker = findCurrentSpeaker();
             if (initialSpeaker) {
                 (window as any).speakerChange(initialSpeaker);
             }
