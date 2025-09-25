@@ -98,21 +98,55 @@ export default class Zoom {
 
         console.log('Listening for speaker changes.');
         await page.evaluate(() => {
-            const targetNode = document.querySelector(
-                '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
-            );
-            const config = { childList: true, subtree: true };
-            const callback = (mutationList: MutationRecord[]) => {
-                for (const mutation of mutationList) {
-                    const newSpeaker = mutation.target.textContent;
-                    if (newSpeaker) (window as any).speakerChange(newSpeaker);
-                }
-            };
-            const observer = new MutationObserver(callback);
-            if (targetNode) observer.observe(targetNode, config);
+            let observer: MutationObserver | null = null;
 
-            const initialSpeaker = targetNode?.textContent;
-            if (initialSpeaker) (window as any).speakerChange(initialSpeaker);
+            function setupObserver() {
+                if (observer) {
+                    observer.disconnect();
+                    observer = null;
+                }
+                var targetNode = document.querySelector('.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer');
+
+                if (!targetNode) {
+                    console.log('Speaker element not found, switching to side-by-side view');                
+                    const viewButton = document.querySelector('#full-screen-dropdown button') as HTMLElement;
+                    viewButton?.click();
+                    setTimeout(() => {
+                        const sideBySideOption = document.querySelector('a[aria-label="Side-by-side: Speaker"]') as HTMLElement;
+                        sideBySideOption?.click();
+                        setTimeout(setupObserver, 1000);
+                    }, 500);
+                    return;
+                }
+
+                const config = { childList: true, subtree: true };
+                const callback = (mutationList: MutationRecord[]) => {
+                    for (const mutation of mutationList) {
+                        const newSpeaker = mutation.target.textContent;
+                        console.log('New speaker detected:', newSpeaker);
+                        if (newSpeaker) (window as any).speakerChange(newSpeaker);
+                    }
+                };
+
+                observer = new MutationObserver(callback);
+                observer.observe(targetNode, config);
+
+                const initialSpeaker = targetNode?.textContent;
+                if (initialSpeaker) (window as any).speakerChange(initialSpeaker);
+            }
+
+            // Initial setup
+            setupObserver();
+            // Periodically check if the target node still exists
+            setInterval(() => {
+                const currentNode = document.querySelector(
+                    '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
+                );
+                if (!currentNode && observer) {
+                    console.log('Target node lost, attempting to re-setup observer');
+                    setupObserver();
+                }
+            }, 2000);
         });
 
         // Set up message monitoring with LMA features
