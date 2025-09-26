@@ -1,12 +1,38 @@
 import puppeteer from 'puppeteer';
+import puppeteerExtra from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
+import Teams from './teams.js';
 import Webex from './webex.js';
 import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { sendEndMeeting } from './kinesis-stream.js';
+
+// Window dimensions configuration
+const WINDOW_WIDTH = 1920;
+const WINDOW_HEIGHT = 1080;
+
+// Shared Puppeteer configuration
+const getPuppeteerConfig = () => ({
+    headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    ignoreDefaultArgs: ['--mute-audio'],
+    protocolTimeout: details.meetingTimeout,
+    timeout: details.meetingTimeout,
+    args: [
+        `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT}`,
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream",
+        "--disable-notifications",
+        "--disable-extensions",
+        "--disable-crash-reporter",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+    ],
+});
 
 // Global variables for graceful shutdown
 let shutdownRequested = false;
@@ -58,26 +84,21 @@ const main = async (): Promise<void> => {
 
     // Launch Puppeteer browser
     console.log('Launching browser...');
-    const browser = await puppeteer.launch({
-        headless: true, // Run headless in production
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // Use system Chromium in Docker
-        ignoreDefaultArgs: ['--mute-audio'],
-        protocolTimeout: details.meetingTimeout, // Set protocol timeout to 4 hours to match meeting timeout
-        timeout: details.meetingTimeout,
-        args: [
-                "--window-size=1920,1080",
-                "--use-fake-ui-for-media-stream",
-                "--use-fake-device-for-media-stream",
-                "--disable-notifications",
-                "--disable-extensions",
-                "--disable-crash-reporter",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-        ],
-    });
+    const isTeamsMeeting = details.invite.meetingPlatform === 'Teams' || details.invite.meetingPlatform === 'TEAMS';
+    let browser;
+    
+    if (isTeamsMeeting) {
+        console.log('DEBUG: Using puppeteer-extra with stealth plugin for Teams meeting');
+        // Configure puppeteer-extra with stealth plugin for Teams
+        puppeteerExtra.use(StealthPlugin());
+        browser = await puppeteerExtra.launch(getPuppeteerConfig());
+    } else {
+        console.log('DEBUG: Using standard puppeteer for non-Teams meeting');
+        browser = await puppeteer.launch(getPuppeteerConfig());
+    }
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 1024, height: 768 });
+    await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
     page.setDefaultTimeout(20000);
 
     // Set user agent to avoid detection
@@ -85,7 +106,7 @@ const main = async (): Promise<void> => {
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
 
-    let meeting: Chime | Zoom | Webex;
+    let meeting: Chime | Zoom | Teams | Webex;
     let success = false;
 
     try {
@@ -97,6 +118,7 @@ const main = async (): Promise<void> => {
 
         // Initialize the appropriate meeting platform handler
         console.log(`Initializing ${details.invite.meetingPlatform} handler...`);
+        console.log(`DEBUG: Meeting platform value: "${details.invite.meetingPlatform}" (type: ${typeof details.invite.meetingPlatform})`);
         
         switch (details.invite.meetingPlatform) {
             case 'CHIME':
@@ -104,6 +126,10 @@ const main = async (): Promise<void> => {
                 break;
             case 'ZOOM':
                 meeting = new Zoom();
+                break;
+            case 'TEAMS':
+            case 'Teams':
+                meeting = new Teams();
                 break;
             case 'WEBEX':
                 meeting = new Webex();
@@ -186,6 +212,7 @@ const main = async (): Promise<void> => {
         }
         
         console.log('Ending Task. Bye.');
+        process.exit(1);
     }
 };
 
