@@ -1,25 +1,20 @@
-FROM public.ecr.aws/docker/library/python:3.12
+
+FROM public.ecr.aws/docker/library/node:20-slim
 USER root
 WORKDIR /srv
 COPY . /srv
 
-ENV PIP_ROOT_USER_ACTION=ignore
-RUN apt-get update && apt-get install -y \
-    portaudio19-dev \
-    pulseaudio \
-    libnspr4 \
-    libnss3 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libatspi2.0-0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libxkbcommon0 \
-    && rm -rf /var/lib/apt/lists/*
-RUN pip3 install --upgrade pip
-RUN pip3 install --default-timeout=20 -r requirements.txt
-RUN playwright install chromium
+RUN apt-get update && \
+    apt-get install -y \
+    chromium \
+    ffmpeg \
+    pulseaudio
 
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+RUN npm ci && \
+    npm run build
+    
 RUN chmod +x /srv/entrypoint.sh
 ENTRYPOINT ["/srv/entrypoint.sh"]

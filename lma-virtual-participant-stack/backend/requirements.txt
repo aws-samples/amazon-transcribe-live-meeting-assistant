@@ -1,6 +1,0 @@
-amazon-transcribe 
-boto3
-pytest-playwright 
-requests
-sounddevice
-playwright==1.54.0

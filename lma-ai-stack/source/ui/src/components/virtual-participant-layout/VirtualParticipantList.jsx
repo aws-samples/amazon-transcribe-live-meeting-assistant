@@ -373,7 +373,7 @@ const VirtualParticipantList = () => {
         input: JSON.stringify({
           apiInfo: { httpMethod: 'POST' },
           data: {
-            meetingPlatform: createForm.meetingPlatform === 'ZOOM' ? 'Zoom' : createForm.meetingPlatform,
+            meetingPlatform: createForm.meetingPlatform,
             meetingID: createForm.meetingId.replace(/ /g, ''),
             meetingPassword: createForm.meetingPassword,
             meetingName: createForm.meetingName,
@@ -494,7 +494,7 @@ const VirtualParticipantList = () => {
   const platformOptions = [
     { label: 'Zoom', value: 'ZOOM', disabled: false },
     { label: 'Chime', value: 'CHIME', disabled: false },
-    { label: 'Teams', value: 'TEAMS', disabled: true },
+    { label: 'Teams', value: 'TEAMS', disabled: false },
     { label: 'WebEx', value: 'WEBEX', disabled: true },
     { label: 'Google Meet', value: 'GOOGLE_MEET', disabled: true },
   ];
