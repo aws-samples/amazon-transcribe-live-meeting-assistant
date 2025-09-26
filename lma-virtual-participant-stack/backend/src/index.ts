@@ -205,6 +205,7 @@ const main = async (): Promise<void> => {
                 await statusManager.setCompleted();
             }
             console.log('LMA Virtual Participant completed successfully');
+            process.exit(0);
         } else {
             console.log('LMA Virtual Participant failed');
             process.exit(1);
