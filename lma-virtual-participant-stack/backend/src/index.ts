@@ -31,6 +31,10 @@ const getPuppeteerConfig = () => ({
         "--disable-crash-reporter",
         "--disable-dev-shm-usage",
         "--no-sandbox",
+        "--enable-logging",
+        "--v=1",
+        "--enable-logging=stderr",
+        "--log-level=0",
     ],
 });
 
