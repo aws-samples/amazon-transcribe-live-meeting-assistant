@@ -500,7 +500,7 @@ exports.esCognitoAccess = function () {
                         'cognito-idp:ListUsers',
                     ],
                     Resource: [
-                        { 'Fn::GetAtt': ['UserPool', 'Arn'] },
+                        { 'Fn::Sub': 'arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*' },
                     ],
                 },
                 {
