@@ -1,4 +1,4 @@
-import { Page } from 'puppeteer';
+import { Page,ConsoleMessage } from 'puppeteer';
 import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
 
@@ -15,6 +15,35 @@ export default class Zoom {
     }
 
     public async initialize(page: Page): Promise<void> {
+
+    page.on('console', (message: ConsoleMessage) => {
+        const type = message.type();
+        const text = message.text();
+
+        switch (type) {
+            case 'log':
+                console.log(`Browser Log: ${text}`);
+                break; 
+            case 'error':
+                console.error(`Browser Error: ${text}`);
+                break;
+            case 'info':
+                console.info(`Browser Info: ${text}`);
+                break;
+            default:
+                console.log(`Browser ${type}: ${text}`);
+        }
+    });
+
+    // Add error handlers
+    page.on('pageerror', (error: Error) => {
+        console.error('Page Error:', error);
+    });
+
+    page.on('error', (error: Error) => {
+        console.error('Browser Error:', error);
+    });
+
         console.log('Getting Zoom meeting link.');
         await page.goto(`https://zoom.us/wc/${details.invite.meetingId}/join`);
 
@@ -99,51 +128,114 @@ export default class Zoom {
         console.log('Listening for speaker changes.');
         await page.evaluate(() => {
             let observer: MutationObserver | null = null;
+            let viewSwitchAttempted = false;
 
-            function setupObserver() {
+            async function switchToSideBySideView() {
+                if (viewSwitchAttempted) {
+                    console.log('View switch already attempted, skipping');
+                    return false;
+                }
+                console.log('Switching to side-by-side view');
+                viewSwitchAttempted = true;
+                
+                // Wait longer for Zoom UI to be fully loaded
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                console.log('Looking for view button...');
+                const viewButton = document.querySelector('#full-screen-dropdown button') as HTMLElement;
+                if (!viewButton) {
+                    console.log('View button not found with selector: #full-screen-dropdown button');
+                    return false;
+                }
+                
+                console.log('Found view button, clicking...');
+                viewButton.click();
+                console.log('Clicked view button, waiting for options to appear');
+                
+                // Wait longer for dropdown to appear
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                console.log('Looking for side-by-side option...');
+                const sideBySideOption = document.querySelector('a[aria-label="Side-by-side: Speaker"]') as HTMLElement;
+                if (!sideBySideOption) {
+                    console.log('Side-by-side option not found with selector: a[aria-label="Side-by-side: Speaker"]');
+                    return false;
+                }
+                
+                console.log('Found side-by-side option, clicking...');
+                sideBySideOption.click();
+                console.log('Clicked side-by-side option');
+                // Wait for view to change, then setup observer
+                setTimeout(setupObserver, 3000);
+                return true;
+            }
+
+            async function setupObserver() {
+                // Disconnect existing observer if any
                 if (observer) {
                     observer.disconnect();
                     observer = null;
                 }
-                var targetNode = document.querySelector('.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer');
 
-                if (!targetNode) {
-                    console.log('Speaker element not found, switching to side-by-side view');                
-                    const viewButton = document.querySelector('#full-screen-dropdown button') as HTMLElement;
-                    viewButton?.click();
-                    setTimeout(() => {
-                        const sideBySideOption = document.querySelector('a[aria-label="Side-by-side: Speaker"]') as HTMLElement;
-                        sideBySideOption?.click();
-                        setTimeout(setupObserver, 1000);
-                    }, 500);
+                // Find a stable parent element that's always present
+                const parentNode = document.querySelector('.meeting-app');
+                if (!parentNode) {
+                    console.log('Parent container not found');
                     return;
                 }
 
-                const config = { childList: true, subtree: true };
+                // Check if speaker element exists
+                const speakerElement = document.querySelector(
+                    '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
+                );
+
+                if (!speakerElement) {
+                    console.log('Speaker element not found');
+                    if (!viewSwitchAttempted) {
+                        switchToSideBySideView();
+                    }
+                    return;
+                }
+
+                const config = { 
+                    childList: true, 
+                    subtree: true 
+                };
+
                 const callback = (mutationList: MutationRecord[]) => {
-                    for (const mutation of mutationList) {
-                        const newSpeaker = mutation.target.textContent;
-                        console.log('New speaker detected:', newSpeaker);
-                        if (newSpeaker) (window as any).speakerChange(newSpeaker);
+                    const currentSpeakerElement = document.querySelector(
+                        '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
+                    );
+
+                    if (currentSpeakerElement) {
+                        const speakerName = currentSpeakerElement.textContent;
+                        if (speakerName) {
+                            console.log('Speaker detected:', speakerName);
+                            (window as any).speakerChange(speakerName);
+                        }
+                    } else if (!viewSwitchAttempted) {
+                        console.log('Speaker element lost, attempting to switch view');
+                        switchToSideBySideView();
                     }
                 };
 
                 observer = new MutationObserver(callback);
-                observer.observe(targetNode, config);
+                observer.observe(parentNode, config);
 
-                const initialSpeaker = targetNode?.textContent;
-                if (initialSpeaker) (window as any).speakerChange(initialSpeaker);
+                // Handle initial state
+                if (speakerElement.textContent) {
+                    (window as any).speakerChange(speakerElement.textContent);
+                }
             }
-
-            // Initial setup
-            setupObserver();
-            // Periodically check if the target node still exists
-            setInterval(() => {
-                const currentNode = document.querySelector(
+            setTimeout(() => {
+                const initialSpeakerElement = document.querySelector(
                     '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
                 );
-                if (!currentNode && observer) {
-                    console.log('Target node lost, attempting to re-setup observer');
+
+                if (!initialSpeakerElement) {
+                    console.log('Initial speaker element not found, attempting to switch view');
+                    switchToSideBySideView();
+                } else {
                     setupObserver();
                 }
             }, 2000);
