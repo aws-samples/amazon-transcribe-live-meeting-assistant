@@ -344,7 +344,7 @@ Resources:
             phases:
               pre_build:
                 commands:
-                  - pip3 install awscli --upgrade --user
+                  - echo Logging in to Amazon ECR...
                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
               build:
                 commands:
@@ -652,7 +652,7 @@ Resources:
                   - "dynamodb:PutItem"
                   - "dynamodb:GetItem"
                   - "dynamodb:UpdateItem"
-                Resource: 
+                Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
 
   TaskExecutionRole:
@@ -712,6 +712,8 @@ Resources:
               Value: "8080"
             - Name: KINESIS_STREAM_NAME
               Value: !Ref CallDataStreamName
+            - Name: CALL_DATA_STREAM_NAME
+              Value: !Ref CallDataStreamName
             - Name: SAVE_PARTIAL_TRANSCRIPTS
               Value: "true"
             - Name: SHOW_SPEAKER_LABEL
@@ -723,7 +725,14 @@ Resources:
                 - ShouldEnableContentRedaction
                 - "true"
                 - "false"
+            - Name: ENABLE_CONTENT_REDACTION
+              Value: !If
+                - ShouldEnableContentRedaction
+                - "true"
+                - "false"
             - Name: CONTENT_REDACTION_TYPE
+              Value: !Ref TranscribeContentRedactionType
+            - Name: TRANSCRIBE_CONTENT_REDACTION_TYPE
               Value: !Ref TranscribeContentRedactionType
             - Name: TRANSCRIBE_PII_ENTITY_TYPES
               Value: !Ref TranscribePiiEntityTypes
@@ -751,6 +760,8 @@ Resources:
               Value: !Ref GraphQLEndpoint
             - Name: VP_TASK_REGISTRY_TABLE_NAME
               Value: !Ref VPTaskRegistryTableName
+            - Name: ENABLE_AUDIO_RECORDING
+              Value: !Ref EnableAudioRecording
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           LogConfiguration:
@@ -1214,4 +1225,31 @@ Resources:
 
 Outputs:
   StepFunctions:
+    Description: Step Functions State Machine ARN
     Value: !Ref LMAVirtualParticipantSchedulerStateMachine
+    Export:
+      Name: !Sub "${AWS::StackName}-StateMachineArn"
+
+  ClusterArn:
+    Description: ECS Cluster ARN
+    Value: !GetAtt Cluster.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterArn"
+
+  TaskDefinitionArn:
+    Description: Task Definition ARN
+    Value: !Ref TaskDefinition
+    Export:
+      Name: !Sub "${AWS::StackName}-TaskDefinitionArn"
+
+  ECRRepositoryUri:
+    Description: ECR Repository URI
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}"
+    Export:
+      Name: !Sub "${AWS::StackName}-ECRRepositoryUri"
+
+  SecurityGroupId:
+    Description: Security Group ID
+    Value: !Ref SecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-SecurityGroupId"

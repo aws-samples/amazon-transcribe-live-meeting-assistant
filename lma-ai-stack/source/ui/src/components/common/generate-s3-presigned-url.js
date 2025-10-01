@@ -14,10 +14,14 @@ let newUrl = '';
 const generateS3PresignedUrl = async (url, credentials) => {
   // prettier-ignore
 
-  const bucketName = url.split('/')[2].split('.')[0];
-  const key = `${url.split('/')[3]}/${url.split('/')[4]}`;
-  const region = url.split('/')[2].split('.')[2];
+  // Parse the URL properly to handle URL-encoded characters
+  const urlObj = new URL(url);
+  const bucketName = urlObj.hostname.split('.')[0];
+  const region = urlObj.hostname.split('.')[2];
+  // Remove leading slash and decode URL-encoded characters
+  const key = decodeURIComponent(urlObj.pathname.substring(1));
 
+  // For presigning, we need to use the decoded key, not the encoded one
   newUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
 
   if (url.includes('detailType')) {

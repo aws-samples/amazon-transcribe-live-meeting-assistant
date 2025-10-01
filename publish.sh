@@ -222,7 +222,7 @@ echo "Computing hash of extension folder contents"
 HASH=$(calculate_hash ".")
 zipfile=src-${HASH}.zip
 echo "Zipping source to ${tmpdir}/${zipfile}"
-zip -r ${tmpdir}/$zipfile . -x "node_modules/*" -x "build/*"
+zip -r ${tmpdir}/$zipfile . -x "node_modules/*" -x "build/*" -x "dist/*"
 echo "Upload source and template to S3"
 VIRTUAL_PARTICIPANT_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${dir}/${zipfile}
 aws s3 cp ${tmpdir}/${zipfile} s3://${VIRTUAL_PARTICIPANT_SRC_S3_LOCATION}
@@ -374,6 +374,8 @@ echo "Applying patch files to remove unused KMS keys from QnABot and customize d
 cp -v ./patches/qnabot/templates_examples_examples_index.js $dir/source/templates/examples/examples/index.js
 cp -v ./patches/qnabot/templates_examples_extensions_index.js $dir/source/templates/examples/extensions/index.js
 cp -v ./patches/qnabot/website_js_lib_store_api_actions_settings.js $dir/source/website/js/lib/store/api/actions/settings.js
+echo "Applying patch to fix Cognito permissions for OpenSearch domain"
+cp -v ./patches/qnabot/templates_util.js $dir/source/templates/util.js
 echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lma'"
 # Detection of differences. sed varies betwen GNU sed and BSD sed
 if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
