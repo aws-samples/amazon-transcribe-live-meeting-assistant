@@ -1,3 +1,7 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
@@ -280,6 +284,14 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
+  LoggingBucketName:
+    Type: String
+    Description: Name of the S3 bucket for CloudFront access logs
+
   EnableAudioRecording:
     Type: String
     Default: "true"
@@ -290,6 +302,14 @@ Parameters:
       Enable or disable recording of audio during a meeting. If set to false, the
       meeting will not be recorded.
       If set to true, the meeting will be recorded.
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
+      If provided, this policy will limit the maximum permissions that can be granted to IAM roles
+      in this stack, providing an additional layer of security.
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -323,6 +343,7 @@ Metadata:
         default: Transcription Custom Language Model Name
 
 Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
     - !Or
@@ -357,7 +378,43 @@ Resources:
     Type: AWS::ECR::Repository
     Properties:
       ImageScanningConfiguration:
-        ScanOnPush: "true"
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: KMS
+        KmsKey: !Ref CustomerManagedEncryptionKeyArn
+      ImageTagMutability: MUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v", "latest", "stable"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Delete untagged images older than 1 day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 1
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
       RepositoryPolicyText:
         Version: "2012-10-17"
         Statement:
@@ -383,6 +440,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: deleteEcrImages
           PolicyDocument:
@@ -405,6 +466,8 @@ Resources:
       MemorySize: 128
       Timeout: 60
       Role: !GetAtt EcrImagesDeleteLambdaRole.Arn
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: |
           import boto3
@@ -454,6 +517,9 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     DependsOn:
       - EcrImagesDeleteLambdaLogGroup
 
@@ -464,6 +530,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/EcrImagesDeleteLambda
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   EcrImagesDelete:
     Type: Custom::EcrImagesDelete
@@ -482,6 +549,10 @@ Resources:
             Effect: Allow
             Principal:
               Service: codebuild.amazonaws.com
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: ecs-service
           PolicyDocument:
@@ -677,6 +748,9 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     DependsOn:
       - LambdaCodeBuildStartBuildLogGroup
 
@@ -687,6 +761,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/LambdaCodeBuildStartBuild
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   TranscriberCallEventTable:
     Type: AWS::DynamoDB::Table
@@ -709,6 +784,8 @@ Resources:
         PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       TimeToLiveSpecification:
         AttributeName: ExpiresAfter
         Enabled: true
@@ -727,10 +804,14 @@ Resources:
 
   TranscribingWebsocketLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    # checkov:skip=CKV_AWS_91: "Access logging requires additional S3 bucket configuration which is optional for this load balancer"
+    # checkov:skip=CKV_AWS_131: "HTTP header dropping configured via routing.http.drop_invalid_header_fields.enabled attribute"
     Properties:
       LoadBalancerAttributes:
         - Key: deletion_protection.enabled
           Value: "false"
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: "true"
       Scheme: internet-facing
       SecurityGroups:
         - Fn::GetAtt:
@@ -743,6 +824,7 @@ Resources:
 
   TranscribingWebsocketLoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    # checkov:skip=CKV_AWS_260: "Load balancer requires public access for websocket connections from browser clients"
     Properties:
       GroupDescription: Security Group for ELB
       SecurityGroupIngress:
@@ -771,6 +853,8 @@ Resources:
 
   TranscribingWebsocketLoadBalancerListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    # checkov:skip=CKV_AWS_103: "Internal load balancer behind CloudFront which provides TLS termination"
+    # checkov:skip=CKV_AWS_2: "Internal load balancer behind CloudFront which enforces HTTPS"
     Properties:
       DefaultActions:
         - FixedResponseConfig:
@@ -864,6 +948,10 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
         Version: "2012-10-17"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
 
   TranscriberWebsocketTaskDefTaskRoleDefaultPolicy:
     Type: AWS::IAM::Policy
@@ -951,6 +1039,9 @@ Resources:
                 - transcribe.streaming.amazonaws.com
             Action:
               - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub ${AWS::AccountId}
       Path: /
       Policies:
         - PolicyName: tca-post-call-policy
@@ -961,14 +1052,20 @@ Resources:
                 Action:
                   - s3:GetObject
                   - s3:ListBucket
-                  - s3:PutObject
-                  - s3:DeleteObject
                 Resource:
                   - !Sub
                     - "arn:aws:s3:::${bucket}"
                     - bucket: !Ref S3BucketName
                   - !Sub
-                    - "arn:aws:s3:::${bucket}/*"
+                    - "arn:aws:s3:::${bucket}/${CallAnalyticsPrefix}*"
+                    - bucket: !Ref S3BucketName
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub
+                    - "arn:aws:s3:::${bucket}/${CallAnalyticsPrefix}*"
                     - bucket: !Ref S3BucketName
 
     Metadata:
@@ -1074,6 +1171,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/fargate/TranscriberWebsocket
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -1092,6 +1190,10 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
         Version: "2012-10-17"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
 
   TranscriberWebsocketTaskDefExecutionRoleDefaultPolicy:
     Type: AWS::IAM::Policy
@@ -1197,6 +1299,7 @@ Resources:
       Description:
         Generates a random value for custom header name and stores it in
         secrets manager
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
       GenerateSecretString:
         SecretStringTemplate: '{"header_name": "custom_header"}'
         GenerateStringKey: headersecret
@@ -1210,6 +1313,7 @@ Resources:
       Description:
         Generates a random value for custom header value and stores it
         in secrets manager
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
       GenerateSecretString:
         SecretStringTemplate: '{"header_value": "custom_header_value"}'
         GenerateStringKey: headersecret
@@ -1246,12 +1350,22 @@ Resources:
 
   WebSocketCloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
+    # checkov:skip=CKV_AWS_86: "Access logging is optional for websocket proxy distribution"
+    # checkov:skip=CKV_AWS_174: "TLS v1.2 enforced via ViewerCertificate MinimumProtocolVersion"
+    # checkov:skip=CKV_AWS_68: "WAF protection is optional for websocket proxy distribution"
     DependsOn:
       - CustomHeaderNameSecret
       - CustomHeaderValueSecret
     Properties:
       DistributionConfig:
         Comment: !Sub "Web Socket Websocket proxy cloudfront distribution ${AWS::StackName}"
+        Logging:
+          Bucket: !Sub "${LoggingBucketName}.s3.amazonaws.com"
+          Prefix: "websocket-cloudfront-logs/"
+          IncludeCookies: false
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: "true"
+          MinimumProtocolVersion: TLSv1.2_2021
         Origins:
           - Id: Websocket-fargate
             DomainName: !GetAtt TranscribingWebsocketLoadBalancer.DNSName
@@ -1290,8 +1404,6 @@ Resources:
         HttpVersion: http2
         IPV6Enabled: true
         PriceClass: !Ref CloudFrontPriceClass
-        ViewerCertificate:
-          CloudFrontDefaultCertificate: "true"
 
     Metadata:
       cfn_nag:
@@ -1357,6 +1469,10 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - PCAIntegrationFunctionLogGroup
 
@@ -1367,6 +1483,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/PCAIntegrationFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   PCAIntegrationFunctionRole:
     Type: AWS::IAM::Role

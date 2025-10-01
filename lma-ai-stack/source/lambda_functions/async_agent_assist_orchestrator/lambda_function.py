@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.12
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 
 from os import getenv
 from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Optional

@@ -1,3 +1,7 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
 """
 ECS Task Manager for Virtual Participants
 Handles direct termination of ECS containers using stored ARNs

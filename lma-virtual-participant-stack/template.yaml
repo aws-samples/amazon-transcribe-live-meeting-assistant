@@ -1,3 +1,7 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Amazon Transcribe Live Meeting Assistant - Virtual Participant
 
@@ -228,7 +232,20 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
+      If provided, this policy will limit the maximum permissions that can be granted to IAM roles
+      in this stack, providing an additional layer of security.
+
 Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
@@ -246,6 +263,12 @@ Resources:
 
   LogsPolicy:
     Type: "AWS::IAM::ManagedPolicy"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W13
+            reason: "CloudWatch Logs requires broad access for log group and stream creation"
+    # checkov:skip=CKV_AWS_111: "CloudWatch Logs requires broad access for log group and stream creation"
     Properties:
       Path: /
       PolicyDocument:
@@ -264,6 +287,11 @@ Resources:
     Properties:
       EmptyOnDelete: true
       ImageTagMutability: MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: KMS
+        KmsKey: !Ref CustomerManagedEncryptionKeyArn
 
   BuildRole:
     Type: "AWS::IAM::Role"
@@ -279,6 +307,10 @@ Resources:
               - "sts:AssumeRole"
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: "ECRPolicy"
           PolicyDocument:
@@ -345,6 +377,12 @@ Resources:
 
   BuildCustomResourceRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "CodeBuild integration requires broad access for build project management"
+    # checkov:skip=CKV_AWS_111: "CodeBuild integration requires broad access for build project management"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -358,6 +396,10 @@ Resources:
       Path: "/"
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: BuildPolicy
           PolicyDocument:
@@ -372,11 +414,23 @@ Resources:
 
   BuildCustomResourceFunction:
     Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     Properties:
       Handler: index.handler
       Role: !GetAtt BuildCustomResourceRole.Arn
       Timeout: 900
       Runtime: python3.12
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: !Sub |
           import boto3
@@ -415,6 +469,12 @@ Resources:
 
   ECSRoleCustomResourceRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "ECS service-linked role creation requires broad IAM access"
+    # checkov:skip=CKV_AWS_109: "ECS service-linked role creation requires broad IAM permissions management access"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -428,6 +488,10 @@ Resources:
       Path: "/"
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: IAMPolicy
           PolicyDocument:
@@ -444,11 +508,23 @@ Resources:
 
   ECSRoleCustomResourceFunction:
     Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     Properties:
       Handler: index.handler
       Role: !GetAtt ECSRoleCustomResourceRole.Arn
       Timeout: 300
       Runtime: python3.12
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: !Sub |
           import boto3
@@ -486,6 +562,12 @@ Resources:
 
   TaskRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Virtual participant requires broad Transcribe and Comprehend access for real-time processing"
+    # checkov:skip=CKV_AWS_111: "Virtual participant requires broad Transcribe and Comprehend access for real-time processing"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -496,6 +578,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: LMAPolicy
           PolicyDocument:
@@ -527,14 +613,20 @@ Resources:
                   - kinesis:DescribeStream
                 Resource:
                   - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
-                  - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/*"
         - PolicyName: TranscribePolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
-                  - "transcribe:*"
+                  - transcribe:DeleteTranscriptionJob
+                  - transcribe:GetTranscriptionJob
+                  - transcribe:GetVocabulary
+                  - transcribe:ListTranscriptionJobs
+                  - transcribe:ListVocabularies
+                  - transcribe:StartStreamTranscription
+                  - transcribe:StartTranscriptionJob
+                  - transcribe:StartCallAnalyticsStreamTranscription
                 Resource: "*"
         - PolicyName: DetectPIIPolicy
           PolicyDocument:
@@ -589,12 +681,19 @@ Resources:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceEventsRole
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
         - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
 
   Cluster:
     Type: "AWS::ECS::Cluster"
     Properties:
       CapacityProviders:
         - FARGATE
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
     DependsOn:
       - ECSRoleCustomResource
 
@@ -705,6 +804,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/fargate/VirtualParticipant
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -720,6 +820,12 @@ Resources:
 
   ECSPolicy:
     Type: AWS::IAM::ManagedPolicy
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W13
+            reason: "ECS task scheduling requires broad access for task execution and role passing"
+    # checkov:skip=CKV_AWS_111: "ECS task scheduling requires broad access for task execution and role passing"
     Properties:
       PolicyDocument:
         Version: "2012-10-17"
@@ -751,6 +857,10 @@ Resources:
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
         - !GetAtt ECSPolicy.PolicyArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: TagPolicy
           PolicyDocument:
@@ -771,9 +881,16 @@ Resources:
     Properties:
       RetentionInDays: 7
       LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}"
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   LMAVirtualParticipantSchedulerStateMachineRole:
     Type: "AWS::IAM::Role"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Step Functions state machine requires broad access for logging, tracing, and scheduling operations"
+    # checkov:skip=CKV_AWS_111: "Step Functions state machine requires broad access for logging, tracing, and scheduling operations"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -785,6 +902,10 @@ Resources:
       Path: "/"
       ManagedPolicyArns:
         - !GetAtt ECSPolicy.PolicyArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: ExpandedLogsPolicy
           PolicyDocument:

@@ -1,5 +1,3 @@
-#  Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#  SPDX-License-Identifier: Apache-2.0
 
 VERSION_FILE ?= ../VERSION
 AWS_REGION ?= us-east-1
@@ -7,12 +5,7 @@ RELEASE_S3_BUCKET := $(RELEASE_S3_BUCKET_BASE)-$(AWS_REGION)
 RELEASE_S3_PREFIX ?= release
 RELEASE_VERSION ?= $(shell cat $(VERSION_FILE))
 
-BEDROCK_BOTO3_STACK_TEMPLATE := bedrock-preview-boto3-stack.yaml
-RELEASE_TEMPLATE_BEDROCK_BOTO3_S3_URL := s3://$(RELEASE_S3_BUCKET)/$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)/$(BEDROCK_BOTO3_STACK_TEMPLATE)
+release:
+	echo '[INFO] No ml-stacks templates to upload'
 
-bedrock-boto3-stack: $(BEDROCK_BOTO3_STACK_TEMPLATE)
-	echo '[INFO] uploading $(BEDROCK_BOTO3_STACK_TEMPLATE) to $(RELEASE_TEMPLATE_BEDROCK_BOTO3_S3_URL)'
-	aws s3 cp '$(BEDROCK_BOTO3_STACK_TEMPLATE)' '$(RELEASE_TEMPLATE_BEDROCK_BOTO3_S3_URL)'
-
-release: bedrock-boto3-stack
 .PHONY: release

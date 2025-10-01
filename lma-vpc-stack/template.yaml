@@ -1,3 +1,7 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Amazon Transcribe Live Meeting Assist - Websocket Server
 
@@ -11,6 +15,10 @@ Parameters:
     Type: Number
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
 
 Outputs:
   VPC:
@@ -61,6 +69,7 @@ Resources:
     Properties:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -78,6 +87,7 @@ Resources:
             reason: >-
               "Allow Resource * for CloudWatch Logs API since the resources are customer
               defined."
+    # checkov:skip=CKV_AWS_111: "VPC Flow Logs requires broad CloudWatch Logs access for log group creation and management"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"

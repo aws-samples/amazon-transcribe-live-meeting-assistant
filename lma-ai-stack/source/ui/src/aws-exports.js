@@ -1,6 +1,9 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
 /* eslint-disable */
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
 // The values in this file are generated in CodeBuild
 // You can also create a .env.local file during development
 // https://create-react-app.dev/docs/adding-custom-environment-variables/

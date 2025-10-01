@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
 import React from 'react';
 import PropTypes from 'prop-types';
 import { Container, Header, SpaceBetween, Box, Icon, Alert, Badge } from '@awsui/components-react';

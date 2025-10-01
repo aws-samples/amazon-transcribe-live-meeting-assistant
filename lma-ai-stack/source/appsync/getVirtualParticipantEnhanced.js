@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
 /**
  * AppSync JavaScript Resolver for getVirtualParticipantEnhanced
  * Retrieves a single Virtual Participant with enhanced details

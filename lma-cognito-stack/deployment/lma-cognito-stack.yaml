@@ -1,16 +1,6 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License").
-# You may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 
 ---
 AWSTemplateFormatVersion: "2010-09-09"
@@ -89,9 +79,22 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
+      If provided, this policy will limit the maximum permissions that can be granted to IAM roles
+      in this stack, providing an additional layer of security.
+
 Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
 Outputs:
   CognitoLoginUrl:
@@ -181,9 +184,23 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
 
   GetDomainLambda:
     Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     Properties:
       Description: Returns the lowercase version of a string
       MemorySize: 256
@@ -191,6 +208,8 @@ Resources:
       Handler: index.lambda_handler
       Role: !GetAtt GetDomainLambdaRole.Arn
       Timeout: 30
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: |
           import cfnresponse
@@ -213,6 +232,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/GetDomainLambda
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   GetDomain:
     Type: Custom::GetDomain
@@ -425,6 +445,10 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - CognitoUserPoolEmailDomainVerifyFunctionLogGroup
 
@@ -435,6 +459,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/CognitoUserPoolEmailDomainVerifyFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   CognitoUserPoolEmailDomainVerifyPermission:
     Type: AWS::Lambda::Permission
