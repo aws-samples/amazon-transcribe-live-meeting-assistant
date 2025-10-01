@@ -1,3 +1,7 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
@@ -284,6 +288,10 @@ Parameters:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
 
+  LoggingBucketName:
+    Type: String
+    Description: Name of the S3 bucket for CloudFront access logs
+
   EnableAudioRecording:
     Type: String
     Default: "true"
@@ -370,11 +378,43 @@ Resources:
     Type: AWS::ECR::Repository
     Properties:
       ImageScanningConfiguration:
-        ScanOnPush: "true"
+        ScanOnPush: true
       EncryptionConfiguration:
         EncryptionType: KMS
         KmsKey: !Ref CustomerManagedEncryptionKeyArn
       ImageTagMutability: MUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v", "latest", "stable"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Delete untagged images older than 1 day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 1
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
       RepositoryPolicyText:
         Version: "2012-10-17"
         Statement:
@@ -999,6 +1039,9 @@ Resources:
                 - transcribe.streaming.amazonaws.com
             Action:
               - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub ${AWS::AccountId}
       Path: /
       Policies:
         - PolicyName: tca-post-call-policy
@@ -1009,14 +1052,20 @@ Resources:
                 Action:
                   - s3:GetObject
                   - s3:ListBucket
-                  - s3:PutObject
-                  - s3:DeleteObject
                 Resource:
                   - !Sub
                     - "arn:aws:s3:::${bucket}"
                     - bucket: !Ref S3BucketName
                   - !Sub
-                    - "arn:aws:s3:::${bucket}/*"
+                    - "arn:aws:s3:::${bucket}/${CallAnalyticsPrefix}*"
+                    - bucket: !Ref S3BucketName
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub
+                    - "arn:aws:s3:::${bucket}/${CallAnalyticsPrefix}*"
                     - bucket: !Ref S3BucketName
 
     Metadata:
@@ -1310,6 +1359,10 @@ Resources:
     Properties:
       DistributionConfig:
         Comment: !Sub "Web Socket Websocket proxy cloudfront distribution ${AWS::StackName}"
+        Logging:
+          Bucket: !Sub "${LoggingBucketName}.s3.amazonaws.com"
+          Prefix: "websocket-cloudfront-logs/"
+          IncludeCookies: false
         ViewerCertificate:
           CloudFrontDefaultCertificate: "true"
           MinimumProtocolVersion: TLSv1.2_2021

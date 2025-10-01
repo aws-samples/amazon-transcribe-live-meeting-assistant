@@ -1,16 +1,7 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License").
-# You may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
 ---
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
@@ -719,6 +710,10 @@ Metadata:
           - PrivateSubnet1
           - PrivateSubnet2
       - Label:
+          default: Security Configuration
+        Parameters:
+          - PermissionsBoundaryArn
+      - Label:
           default: Business Domain
         Parameters:
           - Domain
@@ -839,6 +834,8 @@ Metadata:
         default: Existing Private Subnet 1
       PrivateSubnet2:
         default: Existing Private Subnet 2
+      PermissionsBoundaryArn:
+        default: Permissions Boundary ARN
 
 Mappings:
   TranscribeToLexLocaleId:
@@ -972,7 +969,37 @@ Resources:
             Effect: Allow
             Principal:
               AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
-            Action: kms:*
+            Action:
+              - "kms:CreateAlias"
+              - "kms:CreateGrant"
+              - "kms:CreateKey"
+              - "kms:DescribeKey"
+              - "kms:EnableKey"
+              - "kms:EnableKeyRotation"
+              - "kms:ListAliases"
+              - "kms:ListGrants"
+              - "kms:ListKeys"
+              - "kms:ListKeyPolicies"
+              - "kms:ListResourceTags"
+              - "kms:PutKeyPolicy"
+              - "kms:UpdateAlias"
+              - "kms:UpdateKeyDescription"
+              - "kms:RevokeGrant"
+              - "kms:DisableKey"
+              - "kms:DisableKeyRotation"
+              - "kms:GetKeyPolicy"
+              - "kms:GetKeyRotationStatus"
+              - "kms:DeleteAlias"
+              - "kms:TagResource"
+              - "kms:UntagResource"
+              - "kms:ScheduleKeyDeletion"
+              - "kms:CancelKeyDeletion"
+              - "kms:Encrypt"
+              - "kms:Decrypt"
+              - "kms:ReEncryptFrom"
+              - "kms:ReEncryptTo"
+              - "kms:GenerateDataKey"
+              - "kms:GenerateDataKeyWithoutPlaintext"
             Resource: "*"
           - Sid: Allow DynamoDB Service
             Effect: Allow
@@ -985,6 +1012,9 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
           - Sid: Allow CloudWatch Logs Service
             Effect: Allow
             Principal:
@@ -996,6 +1026,9 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
           - Sid: Allow S3 Service
             Effect: Allow
             Principal:
@@ -1007,6 +1040,9 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
           - Sid: Allow SNS Service
             Effect: Allow
             Principal:
@@ -1018,6 +1054,9 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
           - Sid: Allow SQS Service
             Effect: Allow
             Principal:
@@ -1029,12 +1068,138 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
 
   CustomerManagedEncryptionKeyAlias:
     Type: AWS::KMS::Alias
     Properties:
       AliasName: !Sub "alias/${AWS::StackName}-encryption-key"
       TargetKeyId: !Ref CustomerManagedEncryptionKey
+
+  # EventBridge rule for KMS key monitoring
+  KMSKeyMonitoringEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-KMS-Key-Monitoring"
+      Description: "EventBridge rule to monitor KMS key events for compliance and security"
+      EventPattern:
+        source:
+          - "aws.kms"
+        detail:
+          eventSource:
+            - "kms.amazonaws.com"
+          eventName:
+            - "DisableKey"
+            - "ScheduleKeyDeletion"
+            - "CancelKeyDeletion"
+            - "CreateKey"
+            - "PutKeyPolicy"
+            - "EnableKey"
+            - "DisableKeyRotation"
+            - "EnableKeyRotation"
+          resources:
+            - !GetAtt CustomerManagedEncryptionKey.Arn
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt KMSKeyMonitoringFunction.Arn
+          Id: "KMSKeyMonitoringTarget"
+
+  # Lambda function for KMS key monitoring
+  KMSKeyMonitoringFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for monitoring function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 128
+      Description: "Lambda function to process KMS key events for monitoring and compliance"
+      InlineCode: |
+        import json
+        import boto3
+        import logging
+
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        def handler(event, context):
+            """
+            Process KMS key events for monitoring and compliance.
+            This function logs KMS key events and can be extended to send alerts.
+            """
+            try:
+                logger.info(f"Received KMS event: {json.dumps(event)}")
+                
+                # Extract event details
+                detail = event.get('detail', {})
+                event_name = detail.get('eventName', 'Unknown')
+                event_source = detail.get('eventSource', 'Unknown')
+                source_ip = detail.get('sourceIPAddress', 'Unknown')
+                user_identity = detail.get('userIdentity', {})
+                
+                # Log key information
+                logger.info(f"KMS Event: {event_name}")
+                logger.info(f"Source: {event_source}")
+                logger.info(f"Source IP: {source_ip}")
+                logger.info(f"User Identity: {json.dumps(user_identity)}")
+                
+                # Add custom logic here for specific event handling
+                if event_name in ['DisableKey', 'ScheduleKeyDeletion']:
+                    logger.warning(f"CRITICAL KMS EVENT: {event_name} - Key security may be compromised")
+                elif event_name == 'PutKeyPolicy':
+                    logger.info(f"KMS key policy updated - review for compliance")
+                
+                return {
+                    'statusCode': 200,
+                    'body': json.dumps({
+                        'message': f'Successfully processed KMS event: {event_name}',
+                        'eventProcessed': True
+                    })
+                }
+                
+            except Exception as e:
+                logger.error(f"Error processing KMS event: {str(e)}")
+                return {
+                    'statusCode': 500,
+                    'body': json.dumps({
+                        'message': f'Error processing KMS event: {str(e)}',
+                        'eventProcessed': False
+                    })
+                }
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/KMSKeyMonitoringFunction
+    DependsOn:
+      - KMSKeyMonitoringFunctionLogGroup
+
+  KMSKeyMonitoringFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/KMSKeyMonitoringFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  # Permission for EventBridge to invoke the Lambda function
+  KMSKeyMonitoringFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref KMSKeyMonitoringFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt KMSKeyMonitoringEventRule.Arn
 
   # Custom resource to enforce max length of StackName - prevent downstream failures
   StacknameCheckFunction:
@@ -1576,6 +1741,7 @@ Resources:
       Parameters:
         Domain: !Ref Domain
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
   COGNITOSTACK:
     Type: AWS::CloudFormation::Stack
@@ -1686,6 +1852,7 @@ Resources:
         WebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
         SNSEmailAddress: !Ref AdminEmail
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
   TRANSCRIPTBEDROCKKB:
@@ -1888,6 +2055,7 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         VPC: !If
           - ShouldCreateVPC

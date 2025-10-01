@@ -1,3 +1,7 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Amazon Transcribe Live Meeting Assistant - Virtual Participant
 
@@ -609,14 +613,20 @@ Resources:
                   - kinesis:DescribeStream
                 Resource:
                   - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
-                  - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/*"
         - PolicyName: TranscribePolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
-                  - "transcribe:*"
+                  - transcribe:DeleteTranscriptionJob
+                  - transcribe:GetTranscriptionJob
+                  - transcribe:GetVocabulary
+                  - transcribe:ListTranscriptionJobs
+                  - transcribe:ListVocabularies
+                  - transcribe:StartStreamTranscription
+                  - transcribe:StartTranscriptionJob
+                  - transcribe:StartCallAnalyticsStreamTranscription
                 Resource: "*"
         - PolicyName: DetectPIIPolicy
           PolicyDocument:
