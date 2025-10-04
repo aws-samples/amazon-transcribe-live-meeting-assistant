@@ -1789,7 +1789,18 @@ Resources:
         IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
-        IsLexAgentAssistEnabled: true
+        IsLexAgentAssistEnabled: !If
+          - ShouldUseStrandsBedrock
+          - false
+          - true
+        IsLambdaAgentAssistEnabled: !If
+          - ShouldUseStrandsBedrock
+          - true
+          - false
+        AgentAssistExistingLambdaFunctionArn: !If
+          - ShouldUseStrandsBedrock
+          - "arn:aws:lambda:*:*:function:placeholder"
+          - ""
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
@@ -1967,14 +1978,11 @@ Resources:
           - ShouldDeployQnABot
           - !GetAtt QNABOT.Outputs.LexV2BotAliasId
           - ""
-        LexMeetingAssistLocaleId: !If
-          - ShouldDeployQnABot
-          - !FindInMap [
-              TranscribeToLexLocaleId,
-              !Ref TranscribeLanguageCode,
-              Value,
-            ]
-          - ""
+        LexMeetingAssistLocaleId: !FindInMap [
+            TranscribeToLexLocaleId,
+            !Ref TranscribeLanguageCode,
+            Value,
+          ]
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         CloudFrontDistributionId: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         QnaMeetingAssistDemoJson: !If

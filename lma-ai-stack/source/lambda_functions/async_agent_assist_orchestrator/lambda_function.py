@@ -248,11 +248,14 @@ def publish_lambda_agent_assist_transcript_segment(
     transcript: str = message.get("OriginalTranscript", message["Transcript"])
     created_at = datetime.utcnow().astimezone().isoformat()
 
+    # Determine response channel based on input channel
+    response_channel = "CHAT_ASSISTANT" if channel == "CHAT_ASSISTANT" else "AGENT_ASSISTANT"
+    
     lambda_agent_assist_input = dict(
         content=transcript,
         transcript_segment_args=dict(
             CallId=call_id,
-            Channel="AGENT_ASSISTANT",
+            Channel=response_channel,
             CreatedAt=created_at,
             EndTime=end_time,
             ExpiresAfter=get_transcription_ttl(),
@@ -268,6 +271,9 @@ def publish_lambda_agent_assist_transcript_segment(
     )
 
     write_agent_assist_to_kds(transcript_segment)
+    
+    # Return the transcript segment for synchronous callers
+    return transcript_segment
 
 
 def get_lambda_agent_assist_transcript(
@@ -615,7 +621,8 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
 
         write_agent_assist_to_kds(transcript_segment)
 
-    return
+    # Return the last transcript segment for synchronous callers
+    return transcript_segment if transcript_segment else None
 
 
 @LOGGER.inject_lambda_context
@@ -631,7 +638,10 @@ def handler(event, context: LambdaContext):
         publish_lex_agent_assist_transcript_segment(data)
     elif IS_LAMBDA_AGENT_ASSIST_ENABLED:
         LOGGER.info("Invoking Lambda agent assist")
-        publish_lambda_agent_assist_transcript_segment(data)
+        transcript_segment = publish_lambda_agent_assist_transcript_segment(data)
+        # Return the response for synchronous callers (like chat interface)
+        if transcript_segment and transcript_segment.get("Transcript"):
+            return {"message": transcript_segment.get("Transcript")}
     else:
         LOGGER.warning("Agent assist is not enabled but orchestrator invoked")
-    return
+    return {}

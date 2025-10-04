@@ -15,9 +15,12 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 RUN npm ci && \
     npm run build
+
+RUN npx playwright install chromium
+
+RUN groupadd -r appuser && useradd -r -g appuser appuser
     
 RUN chmod +x /srv/entrypoint.sh
 RUN chown -R appuser:appuser /srv
 USER appuser
-RUN playwright install chromium
 ENTRYPOINT ["/srv/entrypoint.sh"]

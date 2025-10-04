@@ -1,0 +1,352 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,minimal-ui">
+    <title>STRANDS Meeting Assistant</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            overflow: hidden;
+        }
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            word-wrap: break-word;
+        }
+        .message.user {
+            background-color: #007bff;
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        .message.assistant {
+            background-color: #e9ecef;
+            color: #333;
+            align-self: flex-start;
+        }
+        .message.error {
+            background-color: #dc3545;
+            color: white;
+            align-self: flex-start;
+        }
+        .input-container {
+            padding: 20px;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            gap: 10px;
+        }
+        .input-field {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #ced4da;
+            border-radius: 20px;
+            outline: none;
+            font-size: 14px;
+        }
+        .send-button {
+            padding: 12px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .send-button:hover {
+            background-color: #0056b3;
+        }
+        .send-button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #6c757d;
+            font-style: italic;
+        }
+        .loading::after {
+            content: '';
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-messages" id="chatMessages">
+            <div class="message assistant">
+                Hello! I'm your STRANDS meeting assistant. I can help answer questions about the meeting or provide information. How can I assist you?
+            </div>
+        </div>
+        <div class="input-container">
+            <input type="text" class="input-field" id="messageInput" placeholder="Type your question here..." />
+            <button class="send-button" id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script>
+        // Prevent React router from intercepting this page
+        if (window.history && window.history.pushState) {
+            window.addEventListener('popstate', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        }
+
+        // Get callId from URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const callId = urlParams.get("callId");
+        console.log(`DEBUG: STRANDS Chat UI - CallId: ${callId}`);
+
+        const chatMessages = document.getElementById('chatMessages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+
+        function addMessage(text, type = 'assistant') {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = text;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function addLoadingMessage() {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant loading';
+            messageDiv.textContent = 'Thinking...';
+            messageDiv.id = 'loadingMessage';
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return messageDiv;
+        }
+
+        function removeLoadingMessage() {
+            const loadingMsg = document.getElementById('loadingMessage');
+            if (loadingMsg) {
+                loadingMsg.remove();
+            }
+        }
+
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            console.log(`DEBUG: STRANDS - Sending message: ${message}`);
+            
+            // Add user message to chat
+            addMessage(message, 'user');
+            messageInput.value = '';
+            sendButton.disabled = true;
+
+            // Add loading indicator
+            const loadingMsg = addLoadingMessage();
+
+            try {
+                // Use the new sendChatMessage GraphQL mutation
+                const response = await callSendChatMessageAPI(message, callId);
+                
+                removeLoadingMessage();
+                
+                if (response && response.data && response.data.sendChatMessage) {
+                    console.log(`DEBUG: STRANDS - Successfully sent chat message:`, response.data.sendChatMessage);
+                    
+                    // Display the actual STRANDS response if available
+                    if (response.data.sendChatMessage.Response) {
+                        addMessage(response.data.sendChatMessage.Response, 'assistant');
+                    } else {
+                        addMessage('Message sent to STRANDS assistant. Waiting for response...', 'assistant');
+                    }
+                } else {
+                    console.error('DEBUG: STRANDS - Unexpected response format:', response);
+                    addMessage('Message sent but response format was unexpected. Check console for details.', 'error');
+                }
+                
+            } catch (error) {
+                console.error('DEBUG: STRANDS - Error sending message:', error);
+                removeLoadingMessage();
+                addMessage(`Sorry, I encountered an error: ${error.message}. Please try again.`, 'error');
+            }
+
+            sendButton.disabled = false;
+        }
+
+        async function callSendChatMessageAPI(message, callId) {
+            // Use postMessage to request the parent window to make the GraphQL call
+            return new Promise((resolve, reject) => {
+                const messageId = `strands-chat-${Date.now()}`;
+                
+                const messageHandler = (event) => {
+                    if (event.data && event.data.type === 'STRANDS_CHAT_RESPONSE' && event.data.messageId === messageId) {
+                        window.removeEventListener('message', messageHandler);
+                        if (event.data.success) {
+                            console.log('DEBUG: STRANDS - Chat message call successful:', event.data.result);
+                            resolve(event.data.result);
+                        } else {
+                            console.error('DEBUG: STRANDS - Chat message call failed:', event.data.error);
+                            reject(new Error(event.data.error || 'Chat message call failed'));
+                        }
+                    }
+                };
+                
+                window.addEventListener('message', messageHandler);
+                
+                // Request GraphQL call from parent
+                if (window.parent && window.parent !== window) {
+                    console.log('DEBUG: STRANDS - Requesting sendChatMessage call from parent window');
+                    window.parent.postMessage({
+                        type: 'STRANDS_CHAT_REQUEST',
+                        messageId: messageId,
+                        callId: callId,
+                        message: message
+                    }, '*');
+                    
+                    // Timeout after 10 seconds
+                    setTimeout(() => {
+                        window.removeEventListener('message', messageHandler);
+                        reject(new Error('Timeout waiting for chat message response from parent window'));
+                    }, 10000);
+                } else {
+                    reject(new Error('No parent window available for chat message call'));
+                }
+            });
+        }
+
+        async function callGraphQLAPI(message, callId) {
+            // Use postMessage to request the parent window to make the GraphQL call
+            return new Promise((resolve, reject) => {
+                const messageId = `strands-graphql-${Date.now()}`;
+                
+                const messageHandler = (event) => {
+                    if (event.data && event.data.type === 'STRANDS_GRAPHQL_RESPONSE' && event.data.messageId === messageId) {
+                        window.removeEventListener('message', messageHandler);
+                        if (event.data.success) {
+                            console.log('DEBUG: STRANDS - GraphQL call successful:', event.data.result);
+                            resolve(event.data.result);
+                        } else {
+                            console.error('DEBUG: STRANDS - GraphQL call failed:', event.data.error);
+                            reject(new Error(event.data.error || 'GraphQL call failed'));
+                        }
+                    }
+                };
+                
+                window.addEventListener('message', messageHandler);
+                
+                // Request GraphQL call from parent
+                if (window.parent && window.parent !== window) {
+                    console.log('DEBUG: STRANDS - Requesting GraphQL call from parent window');
+                    window.parent.postMessage({
+                        type: 'STRANDS_GRAPHQL_REQUEST',
+                        messageId: messageId,
+                        mutation: 'addTranscriptSegment',
+                        variables: {
+                            CallId: callId,
+                            Status: "TRANSCRIBING",
+                            SegmentId: `strands-${Date.now()}`,
+                            StartTime: Date.now() / 1000,
+                            EndTime: (Date.now() / 1000) + 1,
+                            Transcript: message,
+                            IsPartial: false,
+                            Channel: "AGENT",
+                            Speaker: "User",
+                            CreatedAt: new Date().toISOString(),
+                            ExpiresAfter: Math.floor(Date.now() / 1000) + (90 * 24 * 60 * 60)
+                        }
+                    }, '*');
+                    
+                    // Timeout after 10 seconds
+                    setTimeout(() => {
+                        window.removeEventListener('message', messageHandler);
+                        reject(new Error('Timeout waiting for GraphQL response from parent window'));
+                    }, 10000);
+                } else {
+                    reject(new Error('No parent window available for GraphQL call'));
+                }
+            });
+        }
+
+        // Clean up subscription on page unload
+        window.addEventListener('beforeunload', function() {
+            if (window.strandsSubscription) {
+                console.log('DEBUG: STRANDS - Cleaning up subscription');
+                window.strandsSubscription.unsubscribe();
+            }
+        });
+
+        // Subscribe to AGENT_ASSISTANT responses specifically for this chat interface
+        function subscribeToResponses() {
+            // Use postMessage to request parent window to set up subscription for us
+            window.parent.postMessage({
+                type: 'STRANDS_SETUP_SUBSCRIPTION',
+                callId: callId
+            }, '*');
+            
+            // Listen for subscription messages from parent
+            const subscriptionHandler = (event) => {
+                console.log('DEBUG: subscriptionHandler', event);
+                if (event.data && event.data.type === 'STRANDS_SUBSCRIPTION_MESSAGE') {
+                    const segment = event.data.segment;
+                    if (segment && segment.Channel === "CHAT_ASSISTANT" && segment.CallId === callId) {
+                        console.log(`DEBUG: STRANDS - Received chat response:`, segment);
+                        addMessage(segment.Transcript, 'assistant');
+                    }
+                }
+            };
+            
+            window.addEventListener('message', subscriptionHandler);
+            
+            // Store handler for cleanup
+            window.strandsSubscriptionHandler = subscriptionHandler;
+            
+            console.log(`DEBUG: STRANDS - Setting up dedicated chat subscription for CallId: ${callId}`);
+        }
+
+        // Event listeners
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Focus input field
+        messageInput.focus();
+
+        // Set up subscription for responses
+        subscribeToResponses();
+
+        console.log('DEBUG: STRANDS Meeting Assistant Chat UI loaded successfully');
+    </script>
+</body>
+</html>

@@ -25,7 +25,7 @@ import {
 import rehypeRaw from 'rehype-raw';
 import ReactMarkdown from 'react-markdown';
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
-import { Logger } from 'aws-amplify';
+import { API, Logger, graphqlOperation } from 'aws-amplify';
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
 import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
 import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
@@ -634,6 +634,7 @@ const CallInProgressTranscript = ({
             || s.agentTranscript || s.channel !== 'AGENT')
           && (s.channel !== 'AGENT_VOICETONE')
           && (s.channel !== 'CALLER_VOICETONE')
+          && (s.channel !== 'CHAT_ASSISTANT')
           && <TranscriptSegment
             key={`${s.segmentId}-${s.createdAt}`}
             segment={s}
@@ -735,7 +736,15 @@ const CallInProgressTranscript = ({
 };
 
 const getAgentAssistPanel = (item, collapseSentiment) => {
-  if (process.env.REACT_APP_ENABLE_LEX_AGENT_ASSIST === 'true') {
+  if (process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true') {
+    // Use STRANDS UI for Lambda mode, Lex UI for Lex mode
+    const iframeSrc =
+      process.env.REACT_APP_AGENT_ASSIST_MODE === 'LAMBDA'
+        ? `/strands-chat.html?callId=${item.callId}`
+        : `/index-lexwebui.html?callId=${item.callId}`;
+
+    console.log(`DEBUG: Agent Assist Mode: ${process.env.REACT_APP_AGENT_ASSIST_MODE}, Using iframe: ${iframeSrc}`);
+
     return (
       <Container
         disableContentPaddings
@@ -756,7 +765,7 @@ const getAgentAssistPanel = (item, collapseSentiment) => {
           <iframe
             style={{ border: '0px', height: collapseSentiment ? '34vh' : '68vh', margin: '0' }}
             title="Meeting Assist"
-            src={`/index-lexwebui.html?callId=${item.callId}`}
+            src={iframeSrc}
             width="100%"
           />
         </Box>
@@ -856,13 +865,13 @@ const CallTranscriptContainer = ({
         {
           colspan: {
             default: 12,
-            xs: process.env.REACT_APP_ENABLE_LEX_AGENT_ASSIST === 'true' ? 8 : 12,
+            xs: process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true' ? 8 : 12,
           },
         },
         {
           colspan: {
             default: 12,
-            xs: process.env.REACT_APP_ENABLE_LEX_AGENT_ASSIST === 'true' ? 4 : 0,
+            xs: process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true' ? 4 : 0,
           },
         },
       ]}
@@ -1101,6 +1110,131 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
       retryStrategy: customRetryStrategy,
     });
   }, [currentCredentials]);
+
+  // Add message handler for STRANDS iframe requests (chat and subscription)
+  useEffect(() => {
+    let chatSubscription = null;
+
+    const handleMessage = async (event) => {
+      // Handle chat message requests
+      if (event.data && event.data.type === 'STRANDS_CHAT_REQUEST') {
+        console.log('DEBUG: CallPanel - Received chat message from STRANDS iframe:', event.data.message);
+
+        try {
+          const mutation = `
+            mutation SendChatMessage($input: SendChatMessageInput!) {
+              sendChatMessage(input: $input) {
+                MessageId
+                Status
+                CallId
+                Response
+              }
+            }
+          `;
+
+          const variables = {
+            input: {
+              CallId: event.data.callId,
+              Message: event.data.message,
+            },
+          };
+
+          console.log('DEBUG: CallPanel - Making sendChatMessage GraphQL call:', variables);
+
+          const result = await API.graphql(graphqlOperation(mutation, variables));
+
+          // Send success response back to iframe
+          event.source.postMessage(
+            {
+              type: 'STRANDS_CHAT_RESPONSE',
+              messageId: event.data.messageId,
+              success: true,
+              result,
+            },
+            '*',
+          );
+
+          console.log('DEBUG: CallPanel - sendChatMessage call successful, sent response to iframe');
+        } catch (error) {
+          console.error('DEBUG: CallPanel - sendChatMessage call failed:', error);
+
+          // Send error response back to iframe
+          event.source.postMessage(
+            {
+              type: 'STRANDS_CHAT_RESPONSE',
+              messageId: event.data.messageId,
+              success: false,
+              error: error.message || 'sendChatMessage call failed',
+            },
+            '*',
+          );
+        }
+      }
+
+      // Handle subscription setup requests
+      else if (event.data && event.data.type === 'STRANDS_SETUP_SUBSCRIPTION') {
+        console.log('DEBUG: CallPanel - Setting up dedicated chat subscription for:', event.data.callId);
+
+        try {
+          const subscription = `
+            subscription OnAddTranscriptSegment($callId: ID) {
+              onAddTranscriptSegment(CallId: $callId) {
+                CallId
+                SegmentId
+                Transcript
+                Channel
+                Speaker
+                StartTime
+                EndTime
+                CreatedAt
+              }
+            }
+          `;
+
+          // Clean up existing subscription if any
+          if (chatSubscription) {
+            chatSubscription.unsubscribe();
+          }
+
+          // Set up subscription for this call - filter by CHAT_ASSISTANT channel in the handler
+          chatSubscription = API.graphql(
+            graphqlOperation(subscription, {
+              callId: event.data.callId,
+            }),
+          ).subscribe({
+            next: ({ value }) => {
+              const segment = value?.data?.onAddTranscriptSegment;
+              if (segment && segment.Channel === 'CHAT_ASSISTANT' && segment.CallId === event.data.callId) {
+                console.log(`DEBUG: CallPanel - Received CHAT_ASSISTANT response for chat:`, segment);
+
+                // Send the response to the chat iframe
+                event.source.postMessage(
+                  {
+                    type: 'STRANDS_SUBSCRIPTION_MESSAGE',
+                    segment,
+                  },
+                  '*',
+                );
+              }
+            },
+            error: (error) => {
+              console.error('DEBUG: CallPanel - Chat subscription error:', error);
+            },
+          });
+
+          console.log('DEBUG: CallPanel - Chat subscription set up successfully');
+        } catch (error) {
+          console.error('DEBUG: CallPanel - Failed to set up chat subscription:', error);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, []);
 
   return (
     <SpaceBetween size="s">

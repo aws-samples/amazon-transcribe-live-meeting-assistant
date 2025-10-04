@@ -1,0 +1,5 @@
+{
+  "transcript": "Bob Strahan: Good morning everyone, let's start our weekly sync.\nAlice Johnson: Thanks Bob. I wanted to discuss the Q3 roadmap.\nBob Strahan: Great topic. What are your thoughts?\nAlice Johnson: I think we should prioritize the new analytics dashboard.\nCharlie Davis: I agree with Alice. Our customers have been asking for better reporting.\nBob Strahan: Excellent points. Let's make that our top priority.\nAlice Johnson: I can lead that initiative.\nBob Strahan: Perfect. Charlie, can you support Alice on this?\nCharlie Davis: Absolutely, I'll help with the backend integration.\nBob Strahan: Great. Let's target end of Q3 for the first release.",
+  "userInput": "What are the main action items from this meeting?",
+  "callId": "test-call-123"
+}

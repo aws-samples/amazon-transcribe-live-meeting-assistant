@@ -32,16 +32,16 @@ def handler(event, context):
     try:
         logger.info(f"Strands Meeting Assist - Processing event: {json.dumps(event)}")
         
-        # Extract parameters from event
+        # Extract parameters from event - handle both 'text' and 'userInput' for compatibility
         transcript = event.get('transcript', '')
-        user_input = event.get('userInput', '')
-        call_id = event.get('callId', '')
+        user_input = event.get('userInput', '') or event.get('text', '')
+        call_id = event.get('callId', '') or event.get('call_id', '')
         
         if not user_input:
             return {
                 'statusCode': 400,
                 'body': json.dumps({
-                    'error': 'userInput is required'
+                    'error': 'userInput or text is required'
                 })
             }
         
@@ -77,16 +77,21 @@ User Request: {user_input}
             # Get response from Strands agent
             response = agent(context_message)
             
-            logger.info(f"Strands agent response: {response}")
+            # Convert AgentResult to string if needed
+            if hasattr(response, 'text'):
+                response_text = response.text
+            elif hasattr(response, '__str__'):
+                response_text = str(response)
+            else:
+                response_text = response
+            
+            logger.info(f"Strands agent response: {response_text}")
             
             # Format response for LMA
             return {
-                'statusCode': 200,
-                'body': json.dumps({
-                    'response': response,
-                    'callId': call_id,
-                    'source': 'strands_bedrock'
-                })
+                'message': response_text,
+                'callId': call_id,
+                'source': 'strands_bedrock'
             }
             
         except ImportError as e:
@@ -162,12 +167,9 @@ Please provide a helpful response based on the meeting context. Keep it concise 
         logger.info(f"Fallback Bedrock response: {response_text}")
         
         return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'response': response_text,
-                'callId': call_id,
-                'source': 'bedrock_fallback'
-            })
+            'message': response_text,
+            'callId': call_id,
+            'source': 'bedrock_fallback'
         }
         
     except Exception as e:

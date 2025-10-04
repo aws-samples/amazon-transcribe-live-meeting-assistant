@@ -53,27 +53,29 @@ Parameters:
     Type: String
     Default: "anthropic.claude-3-sonnet-20240229-v1:0"
 
-  # Required
+  # Required when using QnABot, ignored for STRANDS_BEDROCK
   LexMeetingAssistBotId:
     Type: String
+    Default: ""
     Description: >-
-      Lex Bot Id used for Meeting Assist.
+      Lex Bot Id used for Meeting Assist. Only required when MeetingAssistService uses QnABot (not STRANDS_BEDROCK).
     AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
 
-  # Required
+  # Required when using QnABot, ignored for STRANDS_BEDROCK
   LexMeetingAssistAliasId:
     Type: String
+    Default: ""
     Description: >-
-      Lex Bot Alias ID used for Meeting Assist.
+      Lex Bot Alias ID used for Meeting Assist. Only required when MeetingAssistService uses QnABot (not STRANDS_BEDROCK).
     AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
 
-  # Required
+  # Required when using QnABot, ignored for STRANDS_BEDROCK
   LexMeetingAssistLocaleId:
     Type: String
+    Default: "en_US"
     Description: >-
-      Lex Bot Locale ID used for Meeting Assist.
+      Lex Bot Locale ID used for Meeting Assist. Only required when MeetingAssistService uses QnABot (not STRANDS_BEDROCK).
     AllowedValues:
-      - ""
       - ca_ES
       - de_AT
       - de_DE
