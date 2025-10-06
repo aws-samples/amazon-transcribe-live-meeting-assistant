@@ -11,12 +11,116 @@ Provides a lightweight alternative to QnABot using AWS Strands SDK
 import json
 import os
 import boto3
+from boto3.dynamodb.conditions import Key, Attr
 from typing import Dict, Any
 import logging
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Initialize AWS clients
+dynamodb = boto3.resource('dynamodb')
+bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
+
+def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
+    """
+    Fetch the meeting transcript from DynamoDB
+    """
+    try:
+        table = dynamodb.Table(dynamodb_table_name)
+        pk = f'trs#{call_id}'
+        
+        # Query for transcript segments
+        response = table.query(
+            KeyConditionExpression=Key('PK').eq(pk),
+            FilterExpression=(
+                (Attr('Channel').eq('AGENT') | Attr('Channel').eq('CALLER') | Attr('Channel').eq('AGENT_ASSISTANT')) 
+                & Attr('IsPartial').eq(False)
+            )
+        )
+        
+        # Sort by EndTime and format transcript
+        items = sorted(response.get('Items', []), key=lambda x: x.get('EndTime', 0))
+        
+        transcript_parts = []
+        for item in items:
+            speaker = item.get('Speaker', 'Unknown')
+            transcript = item.get('Transcript', '')
+            channel = item.get('Channel', '')
+            
+            # Format based on channel
+            if channel == 'AGENT_ASSISTANT':
+                transcript_parts.append(f"MeetingAssistant: {transcript}")
+            else:
+                transcript_parts.append(f"{speaker}: {transcript}")
+        
+        full_transcript = '\n'.join(transcript_parts)
+        logger.info(f"Fetched transcript for {call_id}: {len(full_transcript)} characters")
+        
+        return full_transcript
+        
+    except Exception as e:
+        logger.error(f"Error fetching transcript: {str(e)}")
+        return ""
+
+def query_knowledge_base(user_input: str, call_id: str) -> str:
+    """
+    Query Bedrock Knowledge Base for relevant context
+    """
+    try:
+        kb_id = os.environ.get('KB_ID')
+        if not kb_id:
+            return ""
+        
+        model_id = os.environ.get('MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
+        kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
+        kb_account_id = os.environ.get('KB_ACCOUNT_ID')
+        
+        # Determine model ARN based on model type
+        if model_id.startswith("anthropic"):
+            model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
+        else:
+            model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
+        
+        # Query knowledge base
+        kb_input = {
+            "input": {
+                'text': user_input
+            },
+            "retrieveAndGenerateConfiguration": {
+                'knowledgeBaseConfiguration': {
+                    'knowledgeBaseId': kb_id,
+                    'modelArn': model_arn,
+                    "retrievalConfiguration": {
+                        "vectorSearchConfiguration": {
+                            "filter": {
+                                "equals": {
+                                    "key": "CallId",
+                                    "value": call_id
+                                }
+                            }
+                        }
+                    }
+                },
+                'type': 'KNOWLEDGE_BASE'
+            }
+        }
+        
+        logger.info(f"Querying KB with input: {kb_input}")
+        
+        response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
+        
+        # Extract response text
+        kb_response = response.get("output", {}).get("text", "")
+        
+        logger.info(f"KB response: {kb_response}")
+        
+        return kb_response
+        
+    except Exception as e:
+        logger.error(f"Error querying knowledge base: {str(e)}")
+        return ""
 
 def handler(event, context):
     """
@@ -33,9 +137,9 @@ def handler(event, context):
         logger.info(f"Strands Meeting Assist - Processing event: {json.dumps(event)}")
         
         # Extract parameters from event - handle both 'text' and 'userInput' for compatibility
-        transcript = event.get('transcript', '')
         user_input = event.get('userInput', '') or event.get('text', '')
         call_id = event.get('callId', '') or event.get('call_id', '')
+        dynamodb_table_name = event.get('dynamodb_table_name', '')
         
         if not user_input:
             return {
@@ -44,6 +148,12 @@ def handler(event, context):
                     'error': 'userInput or text is required'
                 })
             }
+        
+        # Fetch meeting transcript from DynamoDB
+        transcript = fetch_meeting_transcript(call_id, dynamodb_table_name) if dynamodb_table_name else event.get('transcript', '')
+        
+        # Query knowledge base if configured
+        kb_context = query_knowledge_base(user_input, call_id)
         
         # Initialize Strands Agent
         try:
@@ -68,9 +178,10 @@ def handler(event, context):
             
             # Prepare context for the agent
             context_message = f"""
-Meeting Context:
+Meeting Transcript:
 {transcript if transcript else "No meeting transcript available yet."}
 
+{f"Knowledge Base Context:\n{kb_context}\n" if kb_context else ""}
 User Request: {user_input}
 """
             

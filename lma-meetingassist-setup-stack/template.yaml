@@ -31,6 +31,17 @@ Parameters:
     Type: String
     Description: Choose which knowledge base / LLM service to use
 
+  EnableStrandsAgent:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable STRANDS agent as an additional agent within QnABot. 
+      When true, STRANDS will be available alongside the selected MeetingAssistService backend.
+      Only applicable when QnABot is deployed (QNABOTSTACK is provided).
+
   BedrockKnowledgeBaseId:
     Type: String
     Default: ""
@@ -203,6 +214,15 @@ Conditions:
   ShouldConfigureBedrockAgent: !Not [!Equals [!Ref BedrockAgentId, ""]]
   ShouldCreateQPlugin: !Not [!Equals [!Ref AmazonQAppId, ""]]
   ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
+  ShouldEnableStrandsAgent: !Equals [!Ref EnableStrandsAgent, "true"]
+  ShouldDeployStrandsFunction: !Or
+    - !Condition ShouldUseStrandsBedrock
+    - !And
+      - !Condition ShouldConfigureQnabot
+      - !Condition ShouldEnableStrandsAgent
+  ShouldDeployStrandsHook: !And
+    - !Condition ShouldConfigureQnabot
+    - !Condition ShouldEnableStrandsAgent
   ShouldConfigureBedrockLLM:
     !And [
       !Condition ShouldConfigureQnabot,
@@ -649,6 +669,9 @@ Resources:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
           MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
+          KB_ID: !Ref BedrockKnowledgeBaseId
+          KB_REGION: !Ref AWS::Region
+          KB_ACCOUNT_ID: !Ref AWS::AccountId
       Code: ./src
       LoggingConfig:
         LogGroup:
@@ -669,7 +692,7 @@ Resources:
   # Strands Lambda Layer for Strands SDK
   StrandsLayer:
     Type: "AWS::Lambda::LayerVersion"
-    Condition: ShouldUseStrandsBedrock
+    Condition: ShouldDeployStrandsFunction
     Properties:
       LayerName: !Sub "${LMAStackName}-strands-layer"
       Description: "Strands Agents SDK for meeting assistance"
@@ -678,7 +701,7 @@ Resources:
         - python3.12
 
   StrandsMeetingAssistFunctionRole:
-    Condition: ShouldUseStrandsBedrock
+    Condition: ShouldDeployStrandsFunction
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -714,6 +737,25 @@ Resources:
                   - "bedrock:ApplyGuardrail"
                 Resource: "*"
           PolicyName: BedrockPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:Retrieve"
+                  - "bedrock:RetrieveAndGenerate"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+          PolicyName: BedrockKBPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:Query"
+                  - "dynamodb:GetItem"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
+          PolicyName: DynamoDBPolicy
         - PolicyName: InlinePolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -723,7 +765,7 @@ Resources:
                 Resource: !Ref FetchTranscriptFunctionArn
 
   StrandsMeetingAssistFunction:
-    Condition: ShouldUseStrandsBedrock
+    Condition: ShouldDeployStrandsFunction
     Type: "AWS::Lambda::Function"
     Metadata:
       cfn_nag:
@@ -761,10 +803,88 @@ Resources:
 
   StrandsMeetingAssistFunctionLogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: ShouldUseStrandsBedrock
+    Condition: ShouldDeployStrandsFunction
     Properties:
       LogGroupName:
         Fn::Sub: /${AWS::StackName}/lambda/StrandsMeetingAssistFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # QnABot Lambda Hook for STRANDS Backend
+  QNAStrandsLambdaHookFunctionRole:
+    Condition: ShouldDeployStrandsHook
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !If
+                    - ShouldDeployStrandsFunction
+                    - !GetAtt StrandsMeetingAssistFunction.Arn
+                    - !Ref AWS::NoValue
+          PolicyName: StrandsInvokePolicy
+
+  QNAStrandsLambdaHookFunction:
+    Condition: ShouldDeployStrandsHook
+    Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for QnABot integration function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values"
+    Properties:
+      FunctionName: !Sub "QNA-${LMAStackName}-STRANDS-LambdaHook"
+      Role: !GetAtt QNAStrandsLambdaHookFunctionRole.Arn
+      Handler: qna_strands_lambdahook_function.handler
+      Runtime: python3.12
+      Timeout: 300
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          STRANDS_LAMBDA_ARN: !If
+            - ShouldDeployStrandsFunction
+            - !GetAtt StrandsMeetingAssistFunction.Arn
+            - ""
+          DYNAMODB_TABLE_NAME: ""
+      Code: ./src
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/QNAStrandsLambdaHookFunction
+    DependsOn:
+      - QNAStrandsLambdaHookFunctionLogGroup
+
+  QNAStrandsLambdaHookFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldDeployStrandsHook
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/QNAStrandsLambdaHookFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
@@ -809,6 +929,7 @@ Resources:
                 Effect: Allow
                 Resource:
                   - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}*"
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${LMAStackName}*"
               - Action:
                   - iam:ListRolePolicies
                   - iam:PutRolePolicy
@@ -862,6 +983,7 @@ Resources:
                   Effect: Allow
                   Resource:
                     - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}*"
+                    - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${LMAStackName}*"
                 - !Ref AWS::NoValue
   SetupFunction:
     Type: "AWS::Lambda::Function"
@@ -918,18 +1040,24 @@ Resources:
       QnaMeetingAssistDemoJson: !Ref QnaMeetingAssistDemoJson
       QNASummarizeCallFunction: !Ref QNASummarizeCallFunction
       QNAMeetingAssistLambdaHookFunction: !If
-        - ShouldUseStrandsBedrock
-        - !Ref StrandsMeetingAssistFunction
+        - ShouldConfigureQnabot
         - !If
-          - ShouldCreateQPlugin
-          - !Ref QBusinessLambdaHookFunction
+          - ShouldUseStrandsBedrock
+          - !Ref QNAStrandsLambdaHookFunction
           - !If
-            - ShouldConfigureBedrockKB
-            - !Ref QNABedrockKnowledgeBaseFunction
+            - ShouldCreateQPlugin
+            - !Ref QBusinessLambdaHookFunction
             - !If
-              - ShouldConfigureBedrockAgent
-              - !Ref QNABedrockAgentFunction
-              - !Ref QNABedrockLLMFunction
+              - ShouldConfigureBedrockKB
+              - !Ref QNABedrockKnowledgeBaseFunction
+              - !If
+                - ShouldConfigureBedrockAgent
+                - !Ref QNABedrockAgentFunction
+                - !Ref QNABedrockLLMFunction
+        - !If
+          - ShouldUseStrandsBedrock
+          - !Ref StrandsMeetingAssistFunction
+          - !Ref AWS::NoValue
       QnaBotSettings: !Ref QnaBotSettings
       TranscriptBedrockKnowledgeBaseId: !If
       - ShouldConfigureTranscriptBedrockKB
