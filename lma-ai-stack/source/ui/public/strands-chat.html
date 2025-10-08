@@ -232,11 +232,11 @@
                         message: message
                     }, '*');
                     
-                    // Timeout after 10 seconds
+                    // Timeout after 30 seconds (STRANDS processing can take time)
                     setTimeout(() => {
                         window.removeEventListener('message', messageHandler);
                         reject(new Error('Timeout waiting for chat message response from parent window'));
-                    }, 10000);
+                    }, 30000);
                 } else {
                     reject(new Error('No parent window available for chat message call'));
                 }
@@ -285,11 +285,11 @@
                         }
                     }, '*');
                     
-                    // Timeout after 10 seconds
+                    // Timeout after 30 seconds (STRANDS processing can take time)
                     setTimeout(() => {
                         window.removeEventListener('message', messageHandler);
                         reject(new Error('Timeout waiting for GraphQL response from parent window'));
-                    }, 10000);
+                    }, 30000);
                 } else {
                     reject(new Error('No parent window available for GraphQL call'));
                 }

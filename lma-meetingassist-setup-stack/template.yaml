@@ -756,6 +756,16 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
           PolicyName: DynamoDBPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                  - "kms:DescribeKey"
+                Resource:
+                  - !Ref CustomerManagedEncryptionKeyArn
+          PolicyName: KMSDecryptPolicy
         - PolicyName: InlinePolicy
           PolicyDocument:
             Version: "2012-10-17"
