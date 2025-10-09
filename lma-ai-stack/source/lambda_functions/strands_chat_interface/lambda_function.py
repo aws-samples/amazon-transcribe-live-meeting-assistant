@@ -72,6 +72,7 @@ def lambda_handler(event, context):
             "CallId": call_id,
             "Channel": "CHAT_ASSISTANT",  # Use dedicated chat channel
             "SegmentId": message_id,
+            "MessageId": message_id,  # Pass MessageId for token streaming
             "StartTime": datetime.now().timestamp(),
             "EndTime": datetime.now().timestamp() + 1,
             "Transcript": message,
@@ -81,33 +82,28 @@ def lambda_handler(event, context):
             "CreatedAt": datetime.utcnow().isoformat() + "Z",
             "ExpiresAfter": int(datetime.now().timestamp()) + (90 * 24 * 60 * 60),  # 90 days
             "Owner": username,
-            # Note: We don't include tokens here since this is a direct Lambda invocation
         }
         
         logger.info(f"STRANDS Chat Interface - Invoking AsyncAgentAssistOrchestrator: {orchestrator_arn}")
         logger.info(f"STRANDS Chat Interface - Payload: {json.dumps(orchestrator_payload)}")
         
-        # Invoke AsyncAgentAssistOrchestrator synchronously to get the response
+        # Invoke AsyncAgentAssistOrchestrator asynchronously
+        # The response will be streamed via addChatToken mutations
         response = lambda_client.invoke(
             FunctionName=orchestrator_arn,
-            InvocationType='RequestResponse',  # Synchronous invocation to wait for response
+            InvocationType='Event',  # Asynchronous invocation - don't wait for response
             Payload=json.dumps(orchestrator_payload)
         )
         
-        logger.info(f"STRANDS Chat Interface - AsyncAgentAssistOrchestrator invoked successfully")
+        logger.info(f"STRANDS Chat Interface - AsyncAgentAssistOrchestrator invoked successfully (async)")
         
-        # Parse the response to get the STRANDS message
-        response_payload = json.loads(response['Payload'].read())
-        strands_response = response_payload.get('message', 'Response received but no message found')
-        
-        logger.info(f"STRANDS Chat Interface - STRANDS response: {strands_response}")
-        
-        # Return success response with actual STRANDS response for GraphQL
+        # Return immediately with MessageId so UI can subscribe to token stream
+        # The actual response will come via onAddChatToken subscription
         return {
             "MessageId": message_id,
-            "Status": "COMPLETED",
+            "Status": "PROCESSING",
             "CallId": call_id,
-            "Response": strands_response
+            "Response": None  # Response will be streamed via tokens
         }
         
     except Exception as e:

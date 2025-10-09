@@ -23,6 +23,60 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
 
+# Get AppSync endpoint from environment
+APPSYNC_GRAPHQL_URL = os.environ.get('APPSYNC_GRAPHQL_URL', '')
+ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
+
+def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool, sequence: int):
+    """
+    Send a chat token to AppSync for real-time streaming
+    """
+    try:
+        if not APPSYNC_GRAPHQL_URL:
+            logger.warning("APPSYNC_GRAPHQL_URL not configured, skipping token streaming")
+            return
+        
+        from asst_gql_client import AppsyncRequestsGqlClient
+        from datetime import datetime
+        from gql import gql
+        
+        # Initialize AppSync client
+        appsync_client = AppsyncRequestsGqlClient(
+            url=APPSYNC_GRAPHQL_URL,
+            fetch_schema_from_transport=False
+        )
+        
+        # GraphQL mutation - parse it into an AST
+        mutation = gql("""
+        mutation AddChatToken($input: AddChatTokenInput!) {
+            addChatToken(input: $input) {
+                CallId
+                MessageId
+                Token
+                IsComplete
+                Sequence
+                Timestamp
+            }
+        }
+        """)
+        
+        variables = {
+            'input': {
+                'CallId': call_id,
+                'MessageId': message_id,
+                'Token': token,
+                'IsComplete': is_complete,
+                'Sequence': sequence
+            }
+        }
+        
+        # Execute mutation
+        result = appsync_client.execute(mutation, variable_values=variables)
+        logger.debug(f"Sent token {sequence} to AppSync: {token[:50]}...")
+        
+    except Exception as e:
+        logger.error(f"Error sending token to AppSync: {str(e)}")
+
 def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
     """
     Fetch the meeting transcript from DynamoDB
@@ -163,11 +217,17 @@ def handler(event, context):
             # Get model configuration from environment variables
             model_id = os.environ.get('MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
             
-            # Configure Bedrock model
+            # Get message ID for streaming - use MessageId if provided, otherwise fall back to SegmentId
+            transcript_segment_args = event.get('transcript_segment_args', {})
+            message_id = transcript_segment_args.get('MessageId') or transcript_segment_args.get('SegmentId', f"msg-{call_id}")
+            
+            logger.info(f"Using MessageId for streaming: {message_id}")
+            
+            # Configure Bedrock model with streaming if enabled
             bedrock_model = BedrockModel(
                 model_id=model_id,
                 temperature=0.3,
-                streaming=False
+                streaming=ENABLE_STREAMING
             )
             
             # Create agent with meeting assistant prompt
@@ -185,16 +245,60 @@ Meeting Transcript:
 User Request: {user_input}
 """
             
-            # Get response from Strands agent
-            response = agent(context_message)
-            
-            # Convert AgentResult to string if needed
-            if hasattr(response, 'text'):
-                response_text = response.text
-            elif hasattr(response, '__str__'):
-                response_text = str(response)
+            # Handle streaming vs non-streaming
+            if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL:
+                logger.info("Streaming mode enabled - sending tokens to AppSync")
+                
+                # Import asyncio for async streaming
+                import asyncio
+                
+                async def stream_response():
+                    sequence = 0
+                    full_response = []
+                    
+                    # Use stream_async to get async iterator
+                    async for event in agent.stream_async(context_message):
+                        # Check if this is a data event with text content
+                        if isinstance(event, dict) and 'data' in event:
+                            token_text = event['data']
+                            full_response.append(token_text)
+                            
+                            # Send token to AppSync
+                            send_chat_token_to_appsync(
+                                call_id=call_id,
+                                message_id=message_id,
+                                token=token_text,
+                                is_complete=False,
+                                sequence=sequence
+                            )
+                            sequence += 1
+                    
+                    # Send completion token
+                    send_chat_token_to_appsync(
+                        call_id=call_id,
+                        message_id=message_id,
+                        token='',
+                        is_complete=True,
+                        sequence=sequence
+                    )
+                    
+                    logger.info(f"Streaming complete. Total tokens: {sequence}")
+                    return ''.join(full_response)
+                
+                # Run the async streaming function
+                response_text = asyncio.run(stream_response())
+                
             else:
-                response_text = response
+                # Non-streaming mode (current behavior)
+                response = agent(context_message)
+                
+                # Convert AgentResult to string if needed
+                if hasattr(response, 'text'):
+                    response_text = response.text
+                elif hasattr(response, '__str__'):
+                    response_text = str(response)
+                else:
+                    response_text = response
             
             logger.info(f"Strands agent response: {response_text}")
             

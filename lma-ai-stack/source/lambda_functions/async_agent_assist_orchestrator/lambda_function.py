@@ -251,19 +251,28 @@ def publish_lambda_agent_assist_transcript_segment(
     # Determine response channel based on input channel
     response_channel = "CHAT_ASSISTANT" if channel == "CHAT_ASSISTANT" else "AGENT_ASSISTANT"
     
+    # Extract MessageId if provided (for chat streaming)
+    message_id = message.get("MessageId")
+    
+    transcript_segment_args = dict(
+        CallId=call_id,
+        Channel=response_channel,
+        CreatedAt=created_at,
+        EndTime=end_time,
+        ExpiresAfter=get_transcription_ttl(),
+        IsPartial=is_partial,
+        SegmentId=str(uuid.uuid4()),
+        StartTime=start_time,
+        Status="TRANSCRIBING",
+    )
+    
+    # Add MessageId if provided (for token streaming)
+    if message_id:
+        transcript_segment_args["MessageId"] = message_id
+    
     lambda_agent_assist_input = dict(
         content=transcript,
-        transcript_segment_args=dict(
-            CallId=call_id,
-            Channel=response_channel,
-            CreatedAt=created_at,
-            EndTime=end_time,
-            ExpiresAfter=get_transcription_ttl(),
-            IsPartial=is_partial,
-            SegmentId=str(uuid.uuid4()),
-            StartTime=start_time,
-            Status="TRANSCRIBING",
-        ),
+        transcript_segment_args=transcript_segment_args,
     )
 
     transcript_segment = get_lambda_agent_assist_transcript(

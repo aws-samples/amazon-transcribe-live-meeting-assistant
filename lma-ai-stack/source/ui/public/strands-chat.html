@@ -182,11 +182,14 @@
                 if (response && response.data && response.data.sendChatMessage) {
                     console.log(`DEBUG: STRANDS - Successfully sent chat message:`, response.data.sendChatMessage);
                     
-                    // Display the actual STRANDS response if available
+                    const messageId = response.data.sendChatMessage.MessageId;
+                    
+                    // Subscribe to token stream for this message
+                    subscribeToTokenStream(messageId);
+                    
+                    // Display the actual STRANDS response if available (fallback for non-streaming)
                     if (response.data.sendChatMessage.Response) {
                         addMessage(response.data.sendChatMessage.Response, 'assistant');
-                    } else {
-                        addMessage('Message sent to STRANDS assistant. Waiting for response...', 'assistant');
                     }
                 } else {
                     console.error('DEBUG: STRANDS - Unexpected response format:', response);
@@ -303,6 +306,54 @@
                 window.strandsSubscription.unsubscribe();
             }
         });
+
+        // Subscribe to token stream for real-time streaming
+        function subscribeToTokenStream(messageId) {
+            console.log(`DEBUG: STRANDS - Setting up token stream subscription for MessageId: ${messageId}`);
+            
+            // Create a message element for streaming response
+            const streamingMessageDiv = document.createElement('div');
+            streamingMessageDiv.className = 'message assistant';
+            streamingMessageDiv.id = `streaming-message-${messageId}`;
+            streamingMessageDiv.textContent = '';
+            chatMessages.appendChild(streamingMessageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            // Request parent window to set up token subscription
+            window.parent.postMessage({
+                type: 'STRANDS_SETUP_TOKEN_SUBSCRIPTION',
+                callId: callId,
+                messageId: messageId
+            }, '*');
+            
+            // Listen for token messages from parent
+            const tokenHandler = (event) => {
+                if (event.data && event.data.type === 'STRANDS_TOKEN_MESSAGE') {
+                    const token = event.data.token;
+                    console.log(`DEBUG: STRANDS - Received token:`, token);
+                    
+                    if (token.MessageId === messageId) {
+                        if (token.IsComplete) {
+                            console.log(`DEBUG: STRANDS - Streaming complete for message ${messageId}`);
+                            // Remove loading message if present
+                            removeLoadingMessage();
+                            // Clean up token handler
+                            window.removeEventListener('message', tokenHandler);
+                        } else {
+                            console.log(`DEBUG: STRANDS - Token ${token.Sequence}: "${token.Token}"`);
+                            // Append token to streaming message
+                            streamingMessageDiv.textContent += token.Token;
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        }
+                    }
+                }
+            };
+            
+            window.addEventListener('message', tokenHandler);
+            
+            // Store handler for cleanup
+            window.strandsTokenHandler = tokenHandler;
+        }
 
         // Subscribe to AGENT_ASSISTANT responses specifically for this chat interface
         function subscribeToResponses() {

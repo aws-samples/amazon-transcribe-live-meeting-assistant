@@ -171,6 +171,7 @@ type Mutation @aws_iam {
 	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools
+	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -315,6 +316,8 @@ type Subscription {
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onSendChatMessage(CallId: ID): SendChatMessageOutput
 		@aws_subscribe(mutations: ["sendChatMessage"])
+	onAddChatToken(CallId: ID!, MessageId: ID!): ChatToken
+		@aws_subscribe(mutations: ["addChatToken"])
 	onShareMeetings: ShareMeetingsOutput
 		@aws_subscribe(mutations: ["shareMeetings"])
 	onDeleteCall: DeleteCallOutput
@@ -493,6 +496,23 @@ type SendChatMessageOutput @aws_cognito_user_pools @aws_iam {
 	Status: String!
 	CallId: ID!
 	Response: String
+}
+
+input AddChatTokenInput {
+	CallId: ID!
+	MessageId: ID!
+	Token: String!
+	IsComplete: Boolean!
+	Sequence: Int!
+}
+
+type ChatToken @aws_cognito_user_pools @aws_iam {
+	CallId: ID!
+	MessageId: ID!
+	Token: String!
+	IsComplete: Boolean!
+	Sequence: Int!
+	Timestamp: AWSDateTime!
 }
 
 

@@ -1143,31 +1143,41 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
           const result = await API.graphql(graphqlOperation(mutation, variables));
 
-          // Send success response back to iframe
-          event.source.postMessage(
-            {
-              type: 'STRANDS_CHAT_RESPONSE',
-              messageId: event.data.messageId,
-              success: true,
-              result,
-            },
-            '*',
-          );
+          console.log('DEBUG: CallPanel - sendChatMessage result:', result);
 
-          console.log('DEBUG: CallPanel - sendChatMessage call successful, sent response to iframe');
+          // Send success response back to iframe
+          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+          if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage(
+              {
+                type: 'STRANDS_CHAT_RESPONSE',
+                messageId: event.data.messageId,
+                success: true,
+                result,
+              },
+              '*',
+            );
+            console.log('DEBUG: CallPanel - Sent success response to iframe');
+          } else {
+            console.error('DEBUG: CallPanel - Could not find iframe to send response');
+          }
         } catch (error) {
           console.error('DEBUG: CallPanel - sendChatMessage call failed:', error);
 
           // Send error response back to iframe
-          event.source.postMessage(
-            {
-              type: 'STRANDS_CHAT_RESPONSE',
-              messageId: event.data.messageId,
-              success: false,
-              error: error.message || 'sendChatMessage call failed',
-            },
-            '*',
-          );
+          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+          if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage(
+              {
+                type: 'STRANDS_CHAT_RESPONSE',
+                messageId: event.data.messageId,
+                success: false,
+                error: error.message || error.errors?.[0]?.message || 'sendChatMessage call failed',
+              },
+              '*',
+            );
+            console.log('DEBUG: CallPanel - Sent error response to iframe');
+          }
         }
       }
 
@@ -1225,6 +1235,61 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           console.log('DEBUG: CallPanel - Chat subscription set up successfully');
         } catch (error) {
           console.error('DEBUG: CallPanel - Failed to set up chat subscription:', error);
+        }
+      }
+
+      // Handle token stream subscription setup
+      else if (event.data && event.data.type === 'STRANDS_SETUP_TOKEN_SUBSCRIPTION') {
+        console.log(
+          'DEBUG: CallPanel - Setting up token stream subscription for:',
+          event.data.callId,
+          event.data.messageId,
+        );
+
+        try {
+          const subscription = `
+            subscription OnAddChatToken($callId: ID!, $messageId: ID!) {
+              onAddChatToken(CallId: $callId, MessageId: $messageId) {
+                CallId
+                MessageId
+                Token
+                IsComplete
+                Sequence
+                Timestamp
+              }
+            }
+          `;
+
+          // Set up token subscription
+          const tokenSubscription = API.graphql(
+            graphqlOperation(subscription, {
+              callId: event.data.callId,
+              messageId: event.data.messageId,
+            }),
+          ).subscribe({
+            next: ({ value }) => {
+              const token = value?.data?.onAddChatToken;
+              if (token) {
+                console.log(`DEBUG: CallPanel - Received token ${token.Sequence}:`, token.Token);
+
+                // Send token to the chat iframe
+                event.source.postMessage(
+                  {
+                    type: 'STRANDS_TOKEN_MESSAGE',
+                    token,
+                  },
+                  '*',
+                );
+              }
+            },
+            error: (error) => {
+              console.error('DEBUG: CallPanel - Token subscription error:', error);
+            },
+          });
+
+          console.log('DEBUG: CallPanel - Token subscription set up successfully', tokenSubscription);
+        } catch (error) {
+          console.error('DEBUG: CallPanel - Failed to set up token subscription:', error);
         }
       }
     };
