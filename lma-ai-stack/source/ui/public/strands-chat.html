@@ -117,8 +117,18 @@
     </div>
 
     <script>
+        // Prevent React router from intercepting this page
+        if (window.history && window.history.pushState) {
+            window.addEventListener('popstate', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        }
+
+        // Get callId from URL params
         const urlParams = new URLSearchParams(window.location.search);
         const callId = urlParams.get("callId");
+        console.log(`DEBUG: STRANDS Chat UI - CallId: ${callId}`);
 
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
@@ -152,68 +162,156 @@
         async function sendMessage() {
             const message = messageInput.value.trim();
             if (!message) return;
+
+            console.log(`DEBUG: STRANDS - Sending message: ${message}`);
             
+            // Add user message to chat
             addMessage(message, 'user');
             messageInput.value = '';
             sendButton.disabled = true;
-            addLoadingMessage();
+
+            // Add loading indicator
+            const loadingMsg = addLoadingMessage();
 
             try {
+                // Use the new sendChatMessage GraphQL mutation
                 const response = await callSendChatMessageAPI(message, callId);
                 
-                if (response?.data?.sendChatMessage) {
+                removeLoadingMessage();
+                
+                if (response && response.data && response.data.sendChatMessage) {
+                    console.log(`DEBUG: STRANDS - Successfully sent chat message:`, response.data.sendChatMessage);
+                    
                     const messageId = response.data.sendChatMessage.MessageId;
+                    
+                    // Subscribe to token stream for this message
                     subscribeToTokenStream(messageId);
                     
-                    // Fallback for non-streaming responses
+                    // Display the actual STRANDS response if available (fallback for non-streaming)
                     if (response.data.sendChatMessage.Response) {
-                        removeLoadingMessage();
                         addMessage(response.data.sendChatMessage.Response, 'assistant');
                     }
                 } else {
-                    removeLoadingMessage();
-                    addMessage('Unexpected response format', 'error');
+                    console.error('DEBUG: STRANDS - Unexpected response format:', response);
+                    addMessage('Message sent but response format was unexpected. Check console for details.', 'error');
                 }
+                
             } catch (error) {
+                console.error('DEBUG: STRANDS - Error sending message:', error);
                 removeLoadingMessage();
-                addMessage(`Error: ${error.message}`, 'error');
+                addMessage(`Sorry, I encountered an error: ${error.message}. Please try again.`, 'error');
             }
 
             sendButton.disabled = false;
         }
 
         async function callSendChatMessageAPI(message, callId) {
+            // Use postMessage to request the parent window to make the GraphQL call
             return new Promise((resolve, reject) => {
                 const messageId = `strands-chat-${Date.now()}`;
                 
                 const messageHandler = (event) => {
-                    if (event.data?.type === 'STRANDS_CHAT_RESPONSE' && event.data.messageId === messageId) {
+                    if (event.data && event.data.type === 'STRANDS_CHAT_RESPONSE' && event.data.messageId === messageId) {
                         window.removeEventListener('message', messageHandler);
-                        event.data.success ? resolve(event.data.result) : reject(new Error(event.data.error));
+                        if (event.data.success) {
+                            console.log('DEBUG: STRANDS - Chat message call successful:', event.data.result);
+                            resolve(event.data.result);
+                        } else {
+                            console.error('DEBUG: STRANDS - Chat message call failed:', event.data.error);
+                            reject(new Error(event.data.error || 'Chat message call failed'));
+                        }
                     }
                 };
                 
                 window.addEventListener('message', messageHandler);
                 
+                // Request GraphQL call from parent
                 if (window.parent && window.parent !== window) {
+                    console.log('DEBUG: STRANDS - Requesting sendChatMessage call from parent window');
                     window.parent.postMessage({
                         type: 'STRANDS_CHAT_REQUEST',
-                        messageId,
-                        callId,
-                        message
+                        messageId: messageId,
+                        callId: callId,
+                        message: message
                     }, '*');
                     
+                    // Timeout after 30 seconds (STRANDS processing can take time)
                     setTimeout(() => {
                         window.removeEventListener('message', messageHandler);
-                        reject(new Error('Request timeout'));
+                        reject(new Error('Timeout waiting for chat message response from parent window'));
                     }, 30000);
                 } else {
-                    reject(new Error('No parent window available'));
+                    reject(new Error('No parent window available for chat message call'));
                 }
             });
         }
 
+        async function callGraphQLAPI(message, callId) {
+            // Use postMessage to request the parent window to make the GraphQL call
+            return new Promise((resolve, reject) => {
+                const messageId = `strands-graphql-${Date.now()}`;
+                
+                const messageHandler = (event) => {
+                    if (event.data && event.data.type === 'STRANDS_GRAPHQL_RESPONSE' && event.data.messageId === messageId) {
+                        window.removeEventListener('message', messageHandler);
+                        if (event.data.success) {
+                            console.log('DEBUG: STRANDS - GraphQL call successful:', event.data.result);
+                            resolve(event.data.result);
+                        } else {
+                            console.error('DEBUG: STRANDS - GraphQL call failed:', event.data.error);
+                            reject(new Error(event.data.error || 'GraphQL call failed'));
+                        }
+                    }
+                };
+                
+                window.addEventListener('message', messageHandler);
+                
+                // Request GraphQL call from parent
+                if (window.parent && window.parent !== window) {
+                    console.log('DEBUG: STRANDS - Requesting GraphQL call from parent window');
+                    window.parent.postMessage({
+                        type: 'STRANDS_GRAPHQL_REQUEST',
+                        messageId: messageId,
+                        mutation: 'addTranscriptSegment',
+                        variables: {
+                            CallId: callId,
+                            Status: "TRANSCRIBING",
+                            SegmentId: `strands-${Date.now()}`,
+                            StartTime: Date.now() / 1000,
+                            EndTime: (Date.now() / 1000) + 1,
+                            Transcript: message,
+                            IsPartial: false,
+                            Channel: "AGENT",
+                            Speaker: "User",
+                            CreatedAt: new Date().toISOString(),
+                            ExpiresAfter: Math.floor(Date.now() / 1000) + (90 * 24 * 60 * 60)
+                        }
+                    }, '*');
+                    
+                    // Timeout after 30 seconds (STRANDS processing can take time)
+                    setTimeout(() => {
+                        window.removeEventListener('message', messageHandler);
+                        reject(new Error('Timeout waiting for GraphQL response from parent window'));
+                    }, 30000);
+                } else {
+                    reject(new Error('No parent window available for GraphQL call'));
+                }
+            });
+        }
+
+        // Clean up subscription on page unload
+        window.addEventListener('beforeunload', function() {
+            if (window.strandsSubscription) {
+                console.log('DEBUG: STRANDS - Cleaning up subscription');
+                window.strandsSubscription.unsubscribe();
+            }
+        });
+
+        // Subscribe to token stream for real-time streaming
         function subscribeToTokenStream(messageId) {
+            console.log(`DEBUG: STRANDS - Setting up token stream subscription for MessageId: ${messageId}`);
+            
+            // Create a message element for streaming response
             const streamingMessageDiv = document.createElement('div');
             streamingMessageDiv.className = 'message assistant';
             streamingMessageDiv.id = `streaming-message-${messageId}`;
@@ -221,21 +319,29 @@
             chatMessages.appendChild(streamingMessageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
             
+            // Request parent window to set up token subscription
             window.parent.postMessage({
                 type: 'STRANDS_SETUP_TOKEN_SUBSCRIPTION',
-                callId,
-                messageId
+                callId: callId,
+                messageId: messageId
             }, '*');
             
+            // Listen for token messages from parent
             const tokenHandler = (event) => {
-                if (event.data?.type === 'STRANDS_TOKEN_MESSAGE') {
+                if (event.data && event.data.type === 'STRANDS_TOKEN_MESSAGE') {
                     const token = event.data.token;
+                    console.log(`DEBUG: STRANDS - Received token:`, token);
                     
                     if (token.MessageId === messageId) {
                         if (token.IsComplete) {
+                            console.log(`DEBUG: STRANDS - Streaming complete for message ${messageId}`);
+                            // Remove loading message if present
                             removeLoadingMessage();
+                            // Clean up token handler
                             window.removeEventListener('message', tokenHandler);
                         } else {
+                            console.log(`DEBUG: STRANDS - Token ${token.Sequence}: "${token.Token}"`);
+                            // Append token to streaming message
                             streamingMessageDiv.textContent += token.Token;
                             chatMessages.scrollTop = chatMessages.scrollHeight;
                         }
@@ -244,13 +350,54 @@
             };
             
             window.addEventListener('message', tokenHandler);
+            
+            // Store handler for cleanup
+            window.strandsTokenHandler = tokenHandler;
         }
 
+        // Subscribe to AGENT_ASSISTANT responses specifically for this chat interface
+        function subscribeToResponses() {
+            // Use postMessage to request parent window to set up subscription for us
+            window.parent.postMessage({
+                type: 'STRANDS_SETUP_SUBSCRIPTION',
+                callId: callId
+            }, '*');
+            
+            // Listen for subscription messages from parent
+            const subscriptionHandler = (event) => {
+                console.log('DEBUG: subscriptionHandler', event);
+                if (event.data && event.data.type === 'STRANDS_SUBSCRIPTION_MESSAGE') {
+                    const segment = event.data.segment;
+                    if (segment && segment.Channel === "CHAT_ASSISTANT" && segment.CallId === callId) {
+                        console.log(`DEBUG: STRANDS - Received chat response:`, segment);
+                        addMessage(segment.Transcript, 'assistant');
+                    }
+                }
+            };
+            
+            window.addEventListener('message', subscriptionHandler);
+            
+            // Store handler for cleanup
+            window.strandsSubscriptionHandler = subscriptionHandler;
+            
+            console.log(`DEBUG: STRANDS - Setting up dedicated chat subscription for CallId: ${callId}`);
+        }
+
+        // Event listeners
         sendButton.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
         });
+
+        // Focus input field
         messageInput.focus();
+
+        // Set up subscription for responses
+        subscribeToResponses();
+
+        console.log('DEBUG: STRANDS Meeting Assistant Chat UI loaded successfully');
     </script>
 </body>
 </html>

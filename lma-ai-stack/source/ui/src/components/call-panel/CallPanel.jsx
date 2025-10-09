@@ -1111,11 +1111,15 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     });
   }, [currentCredentials]);
 
-  // Add message handler for STRANDS iframe requests
+  // Add message handler for STRANDS iframe requests (chat and subscription)
   useEffect(() => {
+    let chatSubscription = null;
+
     const handleMessage = async (event) => {
       // Handle chat message requests
       if (event.data && event.data.type === 'STRANDS_CHAT_REQUEST') {
+        console.log('DEBUG: CallPanel - Received chat message from STRANDS iframe:', event.data.message);
+
         try {
           const mutation = `
             mutation SendChatMessage($input: SendChatMessageInput!) {
@@ -1135,7 +1139,11 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
             },
           };
 
+          console.log('DEBUG: CallPanel - Making sendChatMessage GraphQL call:', variables);
+
           const result = await API.graphql(graphqlOperation(mutation, variables));
+
+          console.log('DEBUG: CallPanel - sendChatMessage result:', result);
 
           // Send success response back to iframe
           const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
@@ -1149,9 +1157,12 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
               },
               '*',
             );
+            console.log('DEBUG: CallPanel - Sent success response to iframe');
+          } else {
+            console.error('DEBUG: CallPanel - Could not find iframe to send response');
           }
         } catch (error) {
-          logger.error('sendChatMessage call failed', error);
+          console.error('DEBUG: CallPanel - sendChatMessage call failed:', error);
 
           // Send error response back to iframe
           const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
@@ -1165,12 +1176,76 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
               },
               '*',
             );
+            console.log('DEBUG: CallPanel - Sent error response to iframe');
           }
+        }
+      }
+
+      // Handle subscription setup requests
+      else if (event.data && event.data.type === 'STRANDS_SETUP_SUBSCRIPTION') {
+        console.log('DEBUG: CallPanel - Setting up dedicated chat subscription for:', event.data.callId);
+
+        try {
+          const subscription = `
+            subscription OnAddTranscriptSegment($callId: ID) {
+              onAddTranscriptSegment(CallId: $callId) {
+                CallId
+                SegmentId
+                Transcript
+                Channel
+                Speaker
+                StartTime
+                EndTime
+                CreatedAt
+              }
+            }
+          `;
+
+          // Clean up existing subscription if any
+          if (chatSubscription) {
+            chatSubscription.unsubscribe();
+          }
+
+          // Set up subscription for this call - filter by CHAT_ASSISTANT channel in the handler
+          chatSubscription = API.graphql(
+            graphqlOperation(subscription, {
+              callId: event.data.callId,
+            }),
+          ).subscribe({
+            next: ({ value }) => {
+              const segment = value?.data?.onAddTranscriptSegment;
+              if (segment && segment.Channel === 'CHAT_ASSISTANT' && segment.CallId === event.data.callId) {
+                console.log(`DEBUG: CallPanel - Received CHAT_ASSISTANT response for chat:`, segment);
+
+                // Send the response to the chat iframe
+                event.source.postMessage(
+                  {
+                    type: 'STRANDS_SUBSCRIPTION_MESSAGE',
+                    segment,
+                  },
+                  '*',
+                );
+              }
+            },
+            error: (error) => {
+              console.error('DEBUG: CallPanel - Chat subscription error:', error);
+            },
+          });
+
+          console.log('DEBUG: CallPanel - Chat subscription set up successfully');
+        } catch (error) {
+          console.error('DEBUG: CallPanel - Failed to set up chat subscription:', error);
         }
       }
 
       // Handle token stream subscription setup
       else if (event.data && event.data.type === 'STRANDS_SETUP_TOKEN_SUBSCRIPTION') {
+        console.log(
+          'DEBUG: CallPanel - Setting up token stream subscription for:',
+          event.data.callId,
+          event.data.messageId,
+        );
+
         try {
           const subscription = `
             subscription OnAddChatToken($callId: ID!, $messageId: ID!) {
@@ -1186,7 +1261,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           `;
 
           // Set up token subscription
-          API.graphql(
+          const tokenSubscription = API.graphql(
             graphqlOperation(subscription, {
               callId: event.data.callId,
               messageId: event.data.messageId,
@@ -1195,6 +1270,8 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
             next: ({ value }) => {
               const token = value?.data?.onAddChatToken;
               if (token) {
+                console.log(`DEBUG: CallPanel - Received token ${token.Sequence}:`, token.Token);
+
                 // Send token to the chat iframe
                 event.source.postMessage(
                   {
@@ -1206,11 +1283,13 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
               }
             },
             error: (error) => {
-              logger.error('Token subscription error', error);
+              console.error('DEBUG: CallPanel - Token subscription error:', error);
             },
           });
+
+          console.log('DEBUG: CallPanel - Token subscription set up successfully', tokenSubscription);
         } catch (error) {
-          logger.error('Failed to set up token subscription', error);
+          console.error('DEBUG: CallPanel - Failed to set up token subscription:', error);
         }
       }
     };
