@@ -30,17 +30,6 @@ Parameters:
       - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)"
     Description: Choose the knowledge base / LLM service to use. STRANDS_BEDROCK provides a lightweight alternative to QnABot.
 
-  EnableStrandsAgent:
-    Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: >-
-      Enable STRANDS agent as an additional agent within QnABot. 
-      When true, STRANDS will be available alongside the selected MeetingAssistService backend.
-      Only applicable when QnABot is deployed.
-
   MeetingAssistServiceBedrockModelID:
     Type: String
     Default: "anthropic.claude-3-haiku-20240307-v1:0"
@@ -644,7 +633,6 @@ Metadata:
       - Label:
           default: Meeting Assist Bedrock Knowledge Base
         Parameters:
-          - EnableStrandsAgent
           - BedrockKnowledgeBaseId
           - BedrockKnowledgeBaseS3BucketName
           - BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
@@ -752,8 +740,6 @@ Metadata:
         default: Authorized Account Email Domain(s)
       MeetingAssistService:
         default: Meeting Assist Service
-      EnableStrandsAgent:
-        default: Enable STRANDS Agent in QnABot
       MeetingAssistServiceBedrockModelID:
         default: Meeting Assist Service Bedrock Model ID
       AssistantWakePhraseRegEx:
@@ -1956,7 +1942,6 @@ Resources:
           - ""
         COGNITOSTACK: !Ref COGNITOSTACK
         MeetingAssistService: !Ref MeetingAssistService
-        EnableStrandsAgent: !Ref EnableStrandsAgent
         BedrockKnowledgeBaseId: !If
           - ShouldUseBedrockKnowledgeBase
           - !If
