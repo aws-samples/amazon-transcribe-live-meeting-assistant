@@ -1813,7 +1813,7 @@ Resources:
           - false
         AgentAssistExistingLambdaFunctionArn: !If
           - ShouldUseStrandsBedrock
-          - "arn:aws:lambda:*:*:function:placeholder"
+          - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
           - ""
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
