@@ -500,7 +500,7 @@ const VirtualParticipantList = () => {
     { label: 'Zoom', value: 'ZOOM', disabled: false },
     { label: 'Chime', value: 'CHIME', disabled: false },
     { label: 'Teams', value: 'TEAMS', disabled: false },
-    { label: 'WebEx', value: 'WEBEX', disabled: true },
+    { label: 'WebEx', value: 'WEBEX', disabled: false },
     { label: 'Google Meet', value: 'GOOGLE_MEET', disabled: true },
   ];
 

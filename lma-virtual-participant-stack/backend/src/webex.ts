@@ -1,106 +1,116 @@
 import { Page, Frame } from 'puppeteer';
 import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
+import { createStatusManager } from "./status-manager.js";
 
 export default class Webex {
-    private readonly iframe = 'iframe[name="thinIframe"]';
-
+    private readonly iframe = '#unified-webclient-iframe';
     private async sendMessages(
         frame: Frame,
         messages: string[]
     ): Promise<void> {
-        const messageElement = await frame.waitForSelector(
-            'textarea[placeholder="Type your message here"]'
-        );
+        const messageElement = await frame.waitForSelector('.ql-editor[contenteditable="true"]');
         for (const message of messages) {
             await messageElement?.type(message);
             await messageElement?.press('Enter');
         }
+        console.log('Sent messages:', messages);
     }
 
     public async initialize(page: Page): Promise<void> {
         console.log('Getting Webex meeting link.');
         await page.goto('https://signin.webex.com/join');
-
         console.log('Entering meeting ID.');
-        const meetingTextElement = await page.waitForSelector(
-            '#join-meeting-form'
-        );
+        const meetingTextElement = await page.waitForSelector('#join-meeting-form');
         await meetingTextElement?.type(details.invite.meetingId);
         await meetingTextElement?.press('Enter');
-
-        console.log('Launching app.');
-        try {
-            await page.waitForSelector('.meet_message_H1');
-            await page.goto(`${page.url()}?launchApp=true`);
-        } catch (error) {
-            console.log('LMA Virtual Participant was unable to join the meeting.');
-            throw new Error('Meeting not found or invalid meeting ID');
+        const joinFromBrowserButton = await page.waitForSelector('#broadcom-center-right', { timeout: 10000 });
+        if (joinFromBrowserButton) {
+            console.log('Found "Join from this browser" button, clicking it.');
+            await joinFromBrowserButton.click();
         }
-
-        const frameElement = await page.waitForSelector(this.iframe);
+        console.log('Launching app.');
+        const frameElement = await page.waitForSelector(this.iframe, { timeout: 15000 });
         const frame = await frameElement?.contentFrame();
         if (!frame) {
             throw new Error('Failed to access Webex meeting frame');
         }
+        await page.evaluate(() => {
+            const checkAndClosePopup = () => {
+                const dialog = document.querySelector('.el-dialog__wrapper');
+                if (dialog && dialog.textContent?.includes('Problem joining from browser?')) {
+                    const closeButton = dialog.querySelector('.el-dialog__close');
+                    if (closeButton) {
+                        console.log('Auto-closing "Problem joining from browser?" popup');
+                        (closeButton as HTMLElement).click();
+                        return true;
+                    }
+                }
+                return false;
+            };
 
-        console.log('Entering name.');
-        const nameTextElement = await frame.waitForSelector(
-            'input[aria-labelledby="nameLabel"]'
-        );
-        await nameTextElement?.type(details.scribeIdentity);
+            // Check immediately
+            if (!checkAndClosePopup()) {
+                const observer = new MutationObserver(() => {
+                    if (checkAndClosePopup()) {
+                        observer.disconnect();
+                    }
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+            }
+        });
+        console.log('Entering name in the new interface.');
+        console.log(frame.evaluate(()=> document.querySelector('input[data-test="Name (required)"]')));
+        const nameInputElement = await frame.waitForSelector('input[data-test="Name (required)"]',{ timeout: 10000 });
+        await nameInputElement?.type(details.scribeIdentity);
 
-        console.log('Entering email.');
-        const emailTextElement = await frame.waitForSelector(
-            'input[aria-labelledby="emailLabel"]'
-        );
-        // Use a generic bot email for Webex
-        await emailTextElement?.type('lma-bot@example.com');
-        await emailTextElement?.press('Enter');
-
-        console.log('Clicking cookie button.');
+        // Wait for the meeting interface to load
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        // need to change frame for this.
+        console.log('Handling cookie banner.');
         try {
-            const cookieButtonElement = await page.waitForSelector(
-                '.cookie-manage-close-handler',
-                { timeout: 2000 }
+            const rejectButton = await page.waitForSelector(
+                '.cookie-banner-body .a32ueaoVYHwRrsRMl0ci mdc-button:first-child',
+                { timeout: 3000 }
             );
-            await cookieButtonElement?.click();
-        } catch {
-            // Cookie button may not appear
+            await rejectButton?.click();
+            console.log('Successfully clicked Reject cookie button');
+        } catch (error) {
+            console.log('Cookie banner not found:', error);
         }
-
         console.log('Clicking mute button.');
-        const muteButtonElement = await frame.waitForSelector('text="Mute"');
+        const muteButtonElement = await frame.waitForSelector('mdc-button[data-test="microphone-button"]');
         await muteButtonElement?.click();
 
         console.log('Clicking video button.');
         const videoButtonElement = await frame.waitForSelector(
-            'text="Stop video"'
+            'mdc-button[data-test="camera-button"]'
         );
         await videoButtonElement?.click();
 
         console.log('Clicking join button.');
-        const joinButtonElement = await frame.waitForSelector(
-            'text="Join meeting"'
-        );
+        const joinButtonElement = await frame.waitForSelector('mdc-button[data-test="join-button"]');
         await joinButtonElement?.click();
 
-        console.log('Opening chat panel.');
+        console.log("Opening chat panel.");
         try {
-            const chatPanelElement = await frame.waitForSelector(
-                'text="Chat"',
-                { timeout: details.waitingTimeout }
-            );
-            await chatPanelElement?.click();
-        } catch (error) {
-            console.log('LMA Virtual Participant was not admitted into the meeting.');
-            throw new Error('Wrong meeting password or permission denied');
+            await frame.waitForSelector('mdc-button[data-test="in-meeting-chat-toggle-button"]', {
+                timeout: details.waitingTimeout,
+            });
+            await frame.click('mdc-button[data-test="in-meeting-chat-toggle-button"]');
+            console.log("Chat panel button clicked successfully");
+        } catch(error: any) {
+            console.log("Chat panel button error:", error.message);
+            console.log("Your scribe was not admitted into the meeting.");
+            return;
         }
 
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Update status to JOINED
-        // await details.updateInvite('Joined');
+        if (details.invite.virtualParticipantId) {
+            const statusManager = createStatusManager(details.invite.virtualParticipantId);
+            await statusManager.setJoined();
+        }
         console.log('Successfully joined Webex meeting');
 
         console.log('Sending introduction messages.');
@@ -110,45 +120,106 @@ export default class Webex {
         await page.exposeFunction('speakerChange', async (speaker: string) => {
             await transcriptionService.speakerChange(speaker);
         });
+        console.log("Listening for speaker changes.");
+        await frame.evaluate(() => {
+              const doc = document;
 
-        console.log('Listening for speaker changes.');
-        await page.evaluate(
-            ({ iframe }) => {
-                const iFrame = document.querySelector(
-                    iframe
-                ) as HTMLIFrameElement;
-                const iFrameDocument = iFrame?.contentDocument;
-                const targetNode = iFrameDocument?.querySelector(
-                    'div[class*="layout-layout-content-left"]'
+              // --- Helpers ------------------------------------------------------------
+              // Accept both Document and Element for flexibility
+              const NAME_SELECTORS = [
+                '[data-test="participant-name"]',
+                '[class*="full-name"]',
+                'mdc-text[type="body-large-regular"]',
+                'mdc-text',
+                '[class*="name"]',
+                '[data-test*="name"]',
+              ];
+
+              function getActiveSpeakerElement(root: Document | Element): Element | null {
+                // querySelector exists on both Document and Element
+                return root.querySelector?.('.active-speaker-halo') ?? null;
+              }
+
+              function getParticipantItem(node: Element | null): Element | null {
+                if (!node) return null;
+                return (
+                  node.closest?.(
+                    'li,[role="listitem"],.participants-list-item,.participants-video-tile,.participants-video-panel-wrapper'
+                  ) ?? null
                 );
+              }
 
-                const config = { attributes: true, subtree: true };
+              function extractNameFromItem(item: Element | null): string | null {
+                  if (!item) return null;
 
-                const callback = (mutationList: MutationRecord[]) => {
-                    for (const mutation of mutationList) {
-                        if (mutation.attributeName === 'class') {
-                            const childNode = mutation.target as HTMLElement;
-                            const pattern = /.*videoitem-in-speaking.*/;
-                            if (childNode.classList.value.match(pattern)) {
-                                const nameElement = childNode.querySelector(
-                                    '[class^="videoitem-full-name-content"]'
-                                );
-                                if (nameElement) {
-                                    (window as any).speakerChange(
-                                        nameElement.textContent
-                                    );
-                                }
-                            }
-                        }
+                  for (const sel of NAME_SELECTORS) {
+                      const el = item.querySelector?.(sel) as Element | null;
+                      const text = el?.textContent?.trim();
+                      if (text) return text;
+                  }
+                  const aria = item.getAttribute?.('aria-label')?.trim();
+                  if (aria) return aria;
+                  const text = item.textContent?.trim();
+                  return text || null;
+              }
+              function getActiveSpeakerName(): string | null {
+                const halo = getActiveSpeakerElement(doc);
+                if (!halo) return null;
+                const item = getParticipantItem(halo);
+                return extractNameFromItem(item);
+              }
+              let lastAnnounced = "";
+              function announceIfChanged() {
+                const name = getActiveSpeakerName();
+                if (name && name !== lastAnnounced) {
+                  lastAnnounced = name;
+                  console.log(`Speaker changed to: ${name}`);
+                  (window as any).speakerChange?.(name);
+                }
+              }
+              // Initial scan
+              announceIfChanged();
+              const observer = new MutationObserver((mutations) => {
+                for (const m of mutations) {
+                  if (m.type === 'childList') {
+                    // Added/removed/moved halo?
+                    for (const n of [...m.addedNodes, ...m.removedNodes]) {
+                      if (
+                        n instanceof Element &&
+                        (n.matches?.('.active-speaker-halo') || n.querySelector?.('.active-speaker-halo'))
+                      ) {
+                        announceIfChanged();
+                        return;
+                      }
                     }
-                };
+                  } else if (m.type === 'attributes') {
+                    const t = m.target as Element;
+                    if (
+                      t.matches?.('.active-speaker-halo') ||
+                      t.classList?.contains?.('active-speaker-halo') ||
+                      t.querySelector?.('.active-speaker-halo')
+                    ) {
+                      announceIfChanged();
+                      return;
+                    }
+                  }
+                }
+              });
 
-                const observer = new MutationObserver(callback);
-                if (targetNode) observer.observe(targetNode, config);
-            },
-            { iframe: this.iframe }
-        );
+              observer.observe(doc.body, {
+                subtree: true,
+                childList: true,
+                attributes: true,
+                attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'],
+              });
 
+              const interval = setInterval(announceIfChanged, 500);
+
+              (window as any).__webexActiveSpeakerStop = () => {
+                observer.disconnect();
+                clearInterval(interval);
+              };
+            });
         // Set up message monitoring with LMA features
         await page.exposeFunction('messageChange', async (message: string) => {
             if (message.includes(details.endCommand)) {
@@ -186,13 +257,8 @@ export default class Webex {
         });
 
         console.log('Listening for message changes.');
-        await page.evaluate(
-            ({ iframe }) => {
-                const iFrame = document.querySelector(
-                    iframe
-                ) as HTMLIFrameElement;
-                const iFrameDocument = iFrame?.contentDocument;
-                const targetNode = iFrameDocument?.querySelector(
+        await frame.evaluate(() => {
+                const targetNode = document.querySelector(
                     'div[class^="style-chat-box"]'
                 );
 
@@ -216,11 +282,9 @@ export default class Webex {
 
                 const observer = new MutationObserver(callback);
                 if (targetNode) observer.observe(targetNode, config);
-            },
-            { iframe: this.iframe }
-        );
+            });
 
-        // Start transcription if enabled (LMA behavior)
+        // Start transcription if enabled
         if (details.start) {
             console.log(details.startMessages[0]);
             await this.sendMessages(frame, details.startMessages);
@@ -229,15 +293,61 @@ export default class Webex {
 
         console.log('Waiting for meeting end.');
         try {
-            await frame.waitForSelector('.style-end-message-2PkYs', {
-                timeout: details.meetingTimeout,
+            // Set up meeting end detection by monitoring iframe text content
+            let meetingEnded = false;
+            await page.exposeFunction('meetingEndDetected', async (reason: string) => {
+                if (!meetingEnded) {
+                    meetingEnded = true;
+                    console.log(`Meeting ended detected: ${reason}`);
+                    details.start = false;
+                }
             });
+
+            // Monitor the iframe for meeting end text
+            await frame.evaluate(() => {
+                    const observer = new MutationObserver(() => {
+                        const bodyText = document.body?.textContent?.toLowerCase() || '';
+
+                        if (bodyText.includes('meeting has ended') ||
+                            bodyText.includes('this meeting has ended') ||
+                            bodyText.includes('meeting ended') ||
+                            bodyText.includes('you have left the meeting') ||
+                            bodyText.includes('meeting disconnected')) {
+                            (window as any).meetingEndDetected('Meeting end text detected');
+                            observer.disconnect();
+                        }
+                    });
+
+                    observer.observe(document.body, {
+                        childList: true,
+                        subtree: true,
+                        characterData: true
+                    });
+
+                    // Check immediately in case meeting already ended
+                    const bodyText = document.body?.textContent?.toLowerCase() || '';
+                    if (bodyText.includes('meeting has ended') ||
+                        bodyText.includes('this meeting has ended') ||
+                        bodyText.includes('meeting ended')) {
+                        (window as any).meetingEndDetected('Meeting end text detected immediately');
+                        observer.disconnect();
+                    }
+                });
+
+            // Wait for meeting end or timeout
+            const startTime = Date.now();
+            while (!meetingEnded && (Date.now() - startTime) < details.meetingTimeout) {
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Check every second
+            }
+
+            if (!meetingEnded) {
+                console.log('Meeting timed out.');
+            }
             console.log('Meeting ended.');
         } catch (error) {
-            console.log('Meeting timed out.');
+            console.log('Meeting ended with error:', error);
         } finally {
             details.start = false;
-            // await details.updateInvite('Completed');
         }
     }
 }
