@@ -17,3 +17,10 @@ samconfig.toml
 .dsr/
 !.dsr/issues.json
 !.dsr/settings.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
