@@ -358,8 +358,13 @@ else
 echo "SKIPPING $dir (unchanged)"
 fi
 
+# START QnABot Build Section - Advanced users can comment out this entire section to disable QnABot at build time
 dir=submodule-aws-qnabot
 echo "UPDATING $dir"
+# NOTE FOR ADVANCED USERS: To disable QnABot at build time for custom deployments,
+# you can comment out this entire QnABot build section (from START to END markers). 
+# However, most users should use the CloudFormation parameter 'MeetingAssistService=STRANDS_BEDROCK' 
+# instead, which allows runtime selection without modifying the build process.
 git submodule init
 echo "Removing any QnAbot changes from previous builds"
 pushd $dir && git checkout . && popd
@@ -416,6 +421,7 @@ update_submodule_hash $dir
 else
 echo "SKIPPING $dir (unchanged)"
 fi
+# END QnABot Build Section
 
 echo "PACKAGING Main Stack Cfn artifacts"
 MAIN_TEMPLATE=lma-main.yaml

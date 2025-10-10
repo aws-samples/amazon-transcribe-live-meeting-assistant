@@ -233,6 +233,42 @@ def get_status(bucket, statusFile):
     return obj_status_details["status"]
 
 
+def configureStrandsMode(props):
+    """Configure AsyncAgentAssistOrchestrator for STRANDS mode"""
+    print("Configuring STRANDS mode - updating AsyncAgentAssistOrchestrator with STRANDS Lambda ARN")
+    
+    # Use the QNAMeetingAssistLambdaHookFunction parameter which contains the STRANDS function name
+    if "QNAMeetingAssistLambdaHookFunction" in props:
+        strands_function_name = props["QNAMeetingAssistLambdaHookFunction"]
+        print(f"Using STRANDS Lambda function name from parameter: {strands_function_name}")
+        
+        # Get the full ARN for the function
+        try:
+            response = lam.get_function(FunctionName=strands_function_name)
+            strands_function_arn = response['Configuration']['FunctionArn']
+            print(f"Found STRANDS Lambda ARN: {strands_function_arn}")
+            
+            # Update AsyncAgentAssistOrchestrator with the STRANDS Lambda ARN
+            asyncAgentAssistOrchestratorFunction = getStackResource(
+                props["AISTACK"], "AsyncAgentAssistOrchestrator")
+            response = lam.get_function_configuration(
+                FunctionName=asyncAgentAssistOrchestratorFunction)
+            envVars = response["Environment"]["Variables"]
+            envVars["LAMBDA_AGENT_ASSIST_FUNCTION_ARN"] = strands_function_arn
+            
+            response = lam.update_function_configuration(
+                FunctionName=asyncAgentAssistOrchestratorFunction,
+                Environment={"Variables": envVars}
+            )
+            print("Updated AsyncAgentAssistOrchestrator with STRANDS Lambda ARN")
+            
+        except Exception as e:
+            print(f"Error getting STRANDS Lambda ARN: {e}")
+            raise e
+    else:
+        raise ValueError("QNAMeetingAssistLambdaHookFunction parameter not found")
+
+
 def handler(event, context):
     global aws_account_id
     global aws_partition
@@ -247,7 +283,13 @@ def handler(event, context):
         props = event["ResourceProperties"]
         oldprops = event.get("OldResourceProperties", {})
         try:
-            configureAiStack(props, oldprops)
+            # Skip Lex configuration for STRANDS_BEDROCK mode
+            if props["MeetingAssistService"] != "STRANDS_BEDROCK":
+                configureAiStack(props, oldprops)
+            else:
+                print("STRANDS_BEDROCK mode detected - skipping Lex configuration")
+                # Configure STRANDS mode instead
+                configureStrandsMode(props)
             if props["QNABOTSTACK"]:
                 setupQnABot(props, oldprops)
         except Exception as e:
