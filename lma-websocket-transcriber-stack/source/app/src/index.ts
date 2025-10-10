@@ -1,6 +1,8 @@
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
-
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
 import fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import { FastifyRequest } from 'fastify';
@@ -307,16 +309,33 @@ const onTextMessage = async (
 
       await writeCallStartEvent(callMetaData, server);
       const tempRecordingFilename = getTempRecordingFileName(callMetaData);
+      // Sanitize filename to prevent path traversal attacks
+      const sanitizedFilename = path.basename(tempRecordingFilename).replace(/[^a-zA-Z0-9._-]/g, '_');
+      if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
+          throw new Error('Invalid recording filename provided');
+      }
       const writeRecordingStream = fs.createWriteStream(
-          path.join(LOCAL_TEMP_DIR, tempRecordingFilename)
+          path.resolve(LOCAL_TEMP_DIR, sanitizedFilename)
       );
       const recordingFileSize = 0;
 
       const highWaterMarkSize = (callMetaData.samplingRate / 10) * 2 * 2;
       const audioInputStream = new BlockStream({ size: highWaterMarkSize });
       const socketCallMap: SocketCallData = {
-      // copy (not reference) callMetaData into socketCallMap
-          callMetadata: Object.assign({}, callMetaData),
+          callMetadata: {
+              callId: callMetaData.callId,
+              callEvent: callMetaData.callEvent,
+              fromNumber: callMetaData.fromNumber,
+              toNumber: callMetaData.toNumber,
+              activeSpeaker: callMetaData.activeSpeaker,
+              agentId: callMetaData.agentId,
+              accessToken: callMetaData.accessToken,
+              idToken: callMetaData.idToken,
+              refreshToken: callMetaData.refreshToken,
+              shouldRecordCall: callMetaData.shouldRecordCall,
+              samplingRate: callMetaData.samplingRate,
+              channels: callMetaData.channels
+          },
           audioInputStream: audioInputStream,
           writeRecordingStream: writeRecordingStream,
           recordingFileSize: recordingFileSize,
@@ -441,11 +460,20 @@ const endCall = async (
                     );
                     const tempRecordingFilename = getTempRecordingFileName(callMetaData);
                     const wavRecordingFilename = getWavRecordingFileName(callMetaData);
+                    // Sanitize filenames to prevent path traversal attacks
+                    const sanitizedTempFilename = path.basename(tempRecordingFilename).replace(/[^a-zA-Z0-9._-]/g, '_');
+                    const sanitizedWavFilename = path.basename(wavRecordingFilename).replace(/[^a-zA-Z0-9._-]/g, '_');
+                    
+                    if (!sanitizedTempFilename || sanitizedTempFilename === '.' || sanitizedTempFilename === '..' ||
+                        !sanitizedWavFilename || sanitizedWavFilename === '.' || sanitizedWavFilename === '..') {
+                        throw new Error('Invalid filename provided for recording conversion');
+                    }
+                    
                     const readStream = fs.createReadStream(
-                        path.join(LOCAL_TEMP_DIR, tempRecordingFilename)
+                        path.resolve(LOCAL_TEMP_DIR, sanitizedTempFilename)
                     );
                     const writeStream = fs.createWriteStream(
-                        path.join(LOCAL_TEMP_DIR, wavRecordingFilename)
+                        path.resolve(LOCAL_TEMP_DIR, sanitizedWavFilename)
                     );
                     writeStream.write(header);
                     for await (const chunk of readStream) {
@@ -453,22 +481,18 @@ const endCall = async (
                     }
                     writeStream.end();
 
-                    await writeToS3(callMetaData, tempRecordingFilename);
-                    await writeToS3(callMetaData, wavRecordingFilename);
+                    await writeToS3(callMetaData, sanitizedTempFilename);
+                    await writeToS3(callMetaData, sanitizedWavFilename);
                     await deleteTempFile(
                         callMetaData,
-                        path.join(LOCAL_TEMP_DIR, tempRecordingFilename)
+                        path.resolve(LOCAL_TEMP_DIR, sanitizedTempFilename)
                     );
                     await deleteTempFile(
                         callMetaData,
-                        path.join(LOCAL_TEMP_DIR, wavRecordingFilename)
+                        path.resolve(LOCAL_TEMP_DIR, sanitizedWavFilename)
                     );
 
-                    const url = new URL(
-                        RECORDING_FILE_PREFIX + wavRecordingFilename,
-                        `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com`
-                    );
-                    const recordingUrl = url.href;
+                    const recordingUrl = `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${RECORDING_FILE_PREFIX}${wavRecordingFilename}`;
 
                     await writeCallRecordingEvent(callMetaData, recordingUrl, server);
                 } else {
@@ -520,8 +544,12 @@ const endCall = async (
 };
 
 const writeToS3 = async (callMetaData: CallMetaData, tempFileName: string) => {
-    const sourceFile = path.join(LOCAL_TEMP_DIR, tempFileName);
-
+    // Sanitize filename to prevent path traversal attacks
+    const sanitizedFileName = path.basename(tempFileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+    if (!sanitizedFileName || sanitizedFileName === '.' || sanitizedFileName === '..') {
+        throw new Error('Invalid filename provided');
+    }
+    const sourceFile = path.resolve(LOCAL_TEMP_DIR, sanitizedFileName);
     let data;
     const fileStream = fs.createReadStream(sourceFile);
     const uploadParams = {
@@ -562,6 +590,13 @@ const deleteTempFile = async (
     callMetaData: CallMetaData,
     sourceFile: string
 ) => {
+    // Ensure we're not deleting files outside of our designated directory
+    if (!sourceFile.startsWith(LOCAL_TEMP_DIR)) {
+        server.log.error(
+            `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Attempted to delete file outside of temp directory: ${sourceFile}`
+        );
+        return;
+    }
     try {
         await fs.promises.unlink(sourceFile);
         server.log.debug(
@@ -584,7 +619,7 @@ server.listen(
         port: parseInt(process.env?.['SERVERPORT'] ?? '8080'),
         host: process.env?.['SERVERHOST'] ?? '127.0.0.1',
     },
-    (err) => {
+    (err: Error | null) => {
         if (err) {
             server.log.error(
                 `[WS SERVER STARTUP]: Error starting websocket server: ${normalizeErrorForLogging(

@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.2.17] - 2025-10-10
+### Added
+- Webex Virtual Participant support (joins Teams, Zoom, Chime, and Meet)
+- Claude Sonnet 4.5 support for meeting summaries and meeting assistant
+- AWS Strands agent as a lightweight alternative to QnABot for meeting assistance with new STRANDS_BEDROCK option
+
+### Changed
+- Enhanced security posture with comprehensive infrastructure and code improvements
+- Added optional IAM permissions boundary support (similar to IDP project)
+- Created centralized CustomerManagedEncryptionKey resource for consistent encryption across all services
+
 ## [0.2.16] - 2025-10-01
 ### Fixed
 - Github #196 issue - Fixed QnABot deployment permissions issue.

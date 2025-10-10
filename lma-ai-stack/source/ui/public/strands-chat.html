@@ -1,0 +1,256 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,minimal-ui">
+    <title>STRANDS Meeting Assistant</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            overflow: hidden;
+        }
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            word-wrap: break-word;
+        }
+        .message.user {
+            background-color: #007bff;
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        .message.assistant {
+            background-color: #e9ecef;
+            color: #333;
+            align-self: flex-start;
+        }
+        .message.error {
+            background-color: #dc3545;
+            color: white;
+            align-self: flex-start;
+        }
+        .input-container {
+            padding: 20px;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            gap: 10px;
+        }
+        .input-field {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #ced4da;
+            border-radius: 20px;
+            outline: none;
+            font-size: 14px;
+        }
+        .send-button {
+            padding: 12px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .send-button:hover {
+            background-color: #0056b3;
+        }
+        .send-button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #6c757d;
+            font-style: italic;
+        }
+        .loading::after {
+            content: '';
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-messages" id="chatMessages">
+            <div class="message assistant">
+                Hello! I'm your STRANDS meeting assistant. I can help answer questions about the meeting or provide information. How can I assist you?
+            </div>
+        </div>
+        <div class="input-container">
+            <input type="text" class="input-field" id="messageInput" placeholder="Type your question here..." />
+            <button class="send-button" id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const callId = urlParams.get("callId");
+
+        const chatMessages = document.getElementById('chatMessages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+
+        function addMessage(text, type = 'assistant') {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = text;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function addLoadingMessage() {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant loading';
+            messageDiv.textContent = 'Thinking...';
+            messageDiv.id = 'loadingMessage';
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return messageDiv;
+        }
+
+        function removeLoadingMessage() {
+            const loadingMsg = document.getElementById('loadingMessage');
+            if (loadingMsg) {
+                loadingMsg.remove();
+            }
+        }
+
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+            
+            addMessage(message, 'user');
+            messageInput.value = '';
+            sendButton.disabled = true;
+            addLoadingMessage();
+
+            try {
+                const response = await callSendChatMessageAPI(message, callId);
+                
+                if (response?.data?.sendChatMessage) {
+                    const messageId = response.data.sendChatMessage.MessageId;
+                    subscribeToTokenStream(messageId);
+                    
+                    // Fallback for non-streaming responses
+                    if (response.data.sendChatMessage.Response) {
+                        removeLoadingMessage();
+                        addMessage(response.data.sendChatMessage.Response, 'assistant');
+                    }
+                } else {
+                    removeLoadingMessage();
+                    addMessage('Unexpected response format', 'error');
+                }
+            } catch (error) {
+                removeLoadingMessage();
+                addMessage(`Error: ${error.message}`, 'error');
+            }
+
+            sendButton.disabled = false;
+        }
+
+        async function callSendChatMessageAPI(message, callId) {
+            return new Promise((resolve, reject) => {
+                const messageId = `strands-chat-${Date.now()}`;
+                
+                const messageHandler = (event) => {
+                    if (event.data?.type === 'STRANDS_CHAT_RESPONSE' && event.data.messageId === messageId) {
+                        window.removeEventListener('message', messageHandler);
+                        event.data.success ? resolve(event.data.result) : reject(new Error(event.data.error));
+                    }
+                };
+                
+                window.addEventListener('message', messageHandler);
+                
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'STRANDS_CHAT_REQUEST',
+                        messageId,
+                        callId,
+                        message
+                    }, '*');
+                    
+                    setTimeout(() => {
+                        window.removeEventListener('message', messageHandler);
+                        reject(new Error('Request timeout'));
+                    }, 30000);
+                } else {
+                    reject(new Error('No parent window available'));
+                }
+            });
+        }
+
+        function subscribeToTokenStream(messageId) {
+            const streamingMessageDiv = document.createElement('div');
+            streamingMessageDiv.className = 'message assistant';
+            streamingMessageDiv.id = `streaming-message-${messageId}`;
+            streamingMessageDiv.textContent = '';
+            chatMessages.appendChild(streamingMessageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            window.parent.postMessage({
+                type: 'STRANDS_SETUP_TOKEN_SUBSCRIPTION',
+                callId,
+                messageId
+            }, '*');
+            
+            const tokenHandler = (event) => {
+                if (event.data?.type === 'STRANDS_TOKEN_MESSAGE') {
+                    const token = event.data.token;
+                    
+                    if (token.MessageId === messageId) {
+                        if (token.IsComplete) {
+                            removeLoadingMessage();
+                            window.removeEventListener('message', tokenHandler);
+                        } else {
+                            streamingMessageDiv.textContent += token.Token;
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        }
+                    }
+                }
+            };
+            
+            window.addEventListener('message', tokenHandler);
+        }
+
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+        messageInput.focus();
+    </script>
+</body>
+</html>

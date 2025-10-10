@@ -1,6 +1,8 @@
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
-
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Badge,
@@ -23,7 +25,7 @@ import {
 import rehypeRaw from 'rehype-raw';
 import ReactMarkdown from 'react-markdown';
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
-import { Logger } from 'aws-amplify';
+import { API, Logger, graphqlOperation } from 'aws-amplify';
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
 import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
 import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
@@ -632,6 +634,7 @@ const CallInProgressTranscript = ({
             || s.agentTranscript || s.channel !== 'AGENT')
           && (s.channel !== 'AGENT_VOICETONE')
           && (s.channel !== 'CALLER_VOICETONE')
+          && (s.channel !== 'CHAT_ASSISTANT')
           && <TranscriptSegment
             key={`${s.segmentId}-${s.createdAt}`}
             segment={s}
@@ -733,7 +736,15 @@ const CallInProgressTranscript = ({
 };
 
 const getAgentAssistPanel = (item, collapseSentiment) => {
-  if (process.env.REACT_APP_ENABLE_LEX_AGENT_ASSIST === 'true') {
+  if (process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true') {
+    // Use STRANDS UI for Lambda mode, Lex UI for Lex mode
+    const iframeSrc =
+      process.env.REACT_APP_AGENT_ASSIST_MODE === 'LAMBDA'
+        ? `/strands-chat.html?callId=${item.callId}`
+        : `/index-lexwebui.html?callId=${item.callId}`;
+
+    console.log(`DEBUG: Agent Assist Mode: ${process.env.REACT_APP_AGENT_ASSIST_MODE}, Using iframe: ${iframeSrc}`);
+
     return (
       <Container
         disableContentPaddings
@@ -754,7 +765,7 @@ const getAgentAssistPanel = (item, collapseSentiment) => {
           <iframe
             style={{ border: '0px', height: collapseSentiment ? '34vh' : '68vh', margin: '0' }}
             title="Meeting Assist"
-            src={`/index-lexwebui.html?callId=${item.callId}`}
+            src={iframeSrc}
             width="100%"
           />
         </Box>
@@ -854,13 +865,13 @@ const CallTranscriptContainer = ({
         {
           colspan: {
             default: 12,
-            xs: process.env.REACT_APP_ENABLE_LEX_AGENT_ASSIST === 'true' ? 8 : 12,
+            xs: process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true' ? 8 : 12,
           },
         },
         {
           colspan: {
             default: 12,
-            xs: process.env.REACT_APP_ENABLE_LEX_AGENT_ASSIST === 'true' ? 4 : 0,
+            xs: process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true' ? 4 : 0,
           },
         },
       ]}
@@ -1099,6 +1110,117 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
       retryStrategy: customRetryStrategy,
     });
   }, [currentCredentials]);
+
+  // Add message handler for STRANDS iframe requests
+  useEffect(() => {
+    const handleMessage = async (event) => {
+      // Handle chat message requests
+      if (event.data && event.data.type === 'STRANDS_CHAT_REQUEST') {
+        try {
+          const mutation = `
+            mutation SendChatMessage($input: SendChatMessageInput!) {
+              sendChatMessage(input: $input) {
+                MessageId
+                Status
+                CallId
+                Response
+              }
+            }
+          `;
+
+          const variables = {
+            input: {
+              CallId: event.data.callId,
+              Message: event.data.message,
+            },
+          };
+
+          const result = await API.graphql(graphqlOperation(mutation, variables));
+
+          // Send success response back to iframe
+          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+          if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage(
+              {
+                type: 'STRANDS_CHAT_RESPONSE',
+                messageId: event.data.messageId,
+                success: true,
+                result,
+              },
+              '*',
+            );
+          }
+        } catch (error) {
+          logger.error('sendChatMessage call failed', error);
+
+          // Send error response back to iframe
+          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+          if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage(
+              {
+                type: 'STRANDS_CHAT_RESPONSE',
+                messageId: event.data.messageId,
+                success: false,
+                error: error.message || error.errors?.[0]?.message || 'sendChatMessage call failed',
+              },
+              '*',
+            );
+          }
+        }
+      }
+
+      // Handle token stream subscription setup
+      else if (event.data && event.data.type === 'STRANDS_SETUP_TOKEN_SUBSCRIPTION') {
+        try {
+          const subscription = `
+            subscription OnAddChatToken($callId: ID!, $messageId: ID!) {
+              onAddChatToken(CallId: $callId, MessageId: $messageId) {
+                CallId
+                MessageId
+                Token
+                IsComplete
+                Sequence
+                Timestamp
+              }
+            }
+          `;
+
+          // Set up token subscription
+          API.graphql(
+            graphqlOperation(subscription, {
+              callId: event.data.callId,
+              messageId: event.data.messageId,
+            }),
+          ).subscribe({
+            next: ({ value }) => {
+              const token = value?.data?.onAddChatToken;
+              if (token) {
+                // Send token to the chat iframe
+                event.source.postMessage(
+                  {
+                    type: 'STRANDS_TOKEN_MESSAGE',
+                    token,
+                  },
+                  '*',
+                );
+              }
+            },
+            error: (error) => {
+              logger.error('Token subscription error', error);
+            },
+          });
+        } catch (error) {
+          logger.error('Failed to set up token subscription', error);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, []);
 
   return (
     <SpaceBetween size="s">

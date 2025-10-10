@@ -1,3 +1,7 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
@@ -49,25 +53,28 @@ Parameters:
     Type: String
     Default: "anthropic.claude-3-sonnet-20240229-v1:0"
 
-  # Required
+  # Required when using QnABot, ignored for STRANDS_BEDROCK
   LexMeetingAssistBotId:
     Type: String
+    Default: ""
     Description: >-
-      Lex Bot Id used for Meeting Assist.
+      Lex Bot Id used for Meeting Assist. Only required when MeetingAssistService uses QnABot (not STRANDS_BEDROCK).
     AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
 
-  # Required
+  # Required when using QnABot, ignored for STRANDS_BEDROCK
   LexMeetingAssistAliasId:
     Type: String
+    Default: ""
     Description: >-
-      Lex Bot Alias ID used for Meeting Assist.
+      Lex Bot Alias ID used for Meeting Assist. Only required when MeetingAssistService uses QnABot (not STRANDS_BEDROCK).
     AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
 
-  # Required
+  # Required when using QnABot, ignored for STRANDS_BEDROCK
   LexMeetingAssistLocaleId:
     Type: String
+    Default: "en_US"
     Description: >-
-      Lex Bot Locale ID used for Meeting Assist.
+      Lex Bot Locale ID used for Meeting Assist. Only required when MeetingAssistService uses QnABot (not STRANDS_BEDROCK).
     AllowedValues:
       - ca_ES
       - de_AT
@@ -133,6 +140,10 @@ Parameters:
     Type: String
     Description: The domain name of the LMA CloudFront distribution
 
+  AppSyncGraphQLUrl:
+    Type: String
+    Description: The AppSync GraphQL API URL
+
   FetchTranscriptFunctionArn:
     Type: String
     Description: ARN of Fetch Transcript function
@@ -170,6 +181,10 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
   AmazonQAppId:
     Type: String
     Description: Amazon Q Application ID
@@ -178,11 +193,21 @@ Parameters:
     Type: String
     Description: ARN of the Identity Center customer managed application created for QBusiness
 
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
+      If provided, this policy will limit the maximum permissions that can be granted to IAM roles
+      in this stack, providing an additional layer of security.
+
 Conditions:
   ShouldConfigureQnabot: !Not [!Equals [!Ref QNABOTSTACK, ""]]
   ShouldConfigureBedrockKB: !Not [!Equals [!Ref BedrockKnowledgeBaseId, ""]]
   ShouldConfigureBedrockAgent: !Not [!Equals [!Ref BedrockAgentId, ""]]
   ShouldCreateQPlugin: !Not [!Equals [!Ref AmazonQAppId, ""]]
+  ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
+  ShouldDeployStrandsFunction: !Condition ShouldUseStrandsBedrock
   ShouldConfigureBedrockLLM:
     !And [
       !Condition ShouldConfigureQnabot,
@@ -199,11 +224,22 @@ Conditions:
           - Ref: BedrockKnowledgeBaseS3BucketName
   ShouldConfigureTranscriptBedrockKB:
     !Not [!Equals [!Ref TranscriptBedrockKnowledgeBaseId, ""]]
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
 Resources:
   # Custom resource to transform input to lowercase.
   GetLowercaseFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       Handler: index.handler
       Runtime: python3.12
@@ -218,13 +254,6 @@ Resources:
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/GetLowercaseFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
       - GetLowercaseFunctionLogGroup
 
@@ -235,6 +264,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/GetLowercaseFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   LowercaseStackName:
     Type: Custom::GetLowercase
@@ -254,6 +284,10 @@ Resources:
         Version: 2012-10-17
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - Fn::If:
             - HasSummaryLambdaFunction
@@ -268,20 +302,6 @@ Resources:
 
   QNASummarizeCallFunction:
     Type: "AWS::Lambda::Function"
-    Properties:
-      # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
-      FunctionName: !Sub "QNA-SummarizeCall-${LMAStackName}"
-      Role: !GetAtt LambdaHookSummarizeCallRole.Arn
-      Handler: qna_summarize_call_function.handler
-      Runtime: python3.12
-      Timeout: 900
-      Environment:
-        Variables:
-          TRANSCRIPT_SUMMARY_FUNCTION_ARN: !Ref TranscriptSummaryFunctionArn
-      Code: ./src
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/QNASummarizeCallFunction
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -291,6 +311,26 @@ Resources:
             reason: Customer can choose reserved concurrency based on their requirement.
           - id: W58
             reason: Managed policy already provides access to CloudWatch logs.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for QnABot integration function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
+      FunctionName: !Sub "QNA-SummarizeCall-${LMAStackName}"
+      Role: !GetAtt LambdaHookSummarizeCallRole.Arn
+      Handler: qna_summarize_call_function.handler
+      Runtime: python3.12
+      Timeout: 900
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          TRANSCRIPT_SUMMARY_FUNCTION_ARN: !Ref TranscriptSummaryFunctionArn
+      Code: ./src
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/QNASummarizeCallFunction
     DependsOn:
       - QNASummarizeCallFunctionLogGroup
 
@@ -301,6 +341,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/QNASummarizeCallFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   Boto3Layer:
     Type: "AWS::Lambda::LayerVersion"
@@ -322,6 +363,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyDocument:
             Version: 2012-10-17
@@ -334,6 +379,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - "bedrock:InvokeModel"
+                  - "bedrock:InvokeModelWithResponseStream"
                 Resource: 
                   - !Sub "arn:aws:bedrock:*::foundation-model/*"
                   - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
@@ -371,6 +417,17 @@ Resources:
   QNABedrockKnowledgeBaseFunction:
     Condition: ShouldConfigureBedrockKB
     Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for QnABot integration function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
       # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
       FunctionName: !Sub "QNA-${LMAStackName}-BedrockKB-LambdaHook"
@@ -380,6 +437,8 @@ Resources:
       Layers:
         - !Ref Boto3Layer
       Timeout: 900
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
@@ -391,13 +450,6 @@ Resources:
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/QNABedrockKnowledgeBaseFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
       - QNABedrockKnowledgeBaseFunctionLogGroup
 
@@ -409,6 +461,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/QNABedrockKnowledgeBaseFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   QNABedrockAgentFunctionRole:
     Condition: ShouldConfigureBedrockAgent
@@ -423,6 +476,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyDocument:
             Version: 2012-10-17
@@ -471,6 +528,17 @@ Resources:
   QNABedrockAgentFunction:
     Condition: ShouldConfigureBedrockAgent
     Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for QnABot integration function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
       # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
       FunctionName: !Sub "QNA-${LMAStackName}-BedrockAgent-LambdaHook"
@@ -480,6 +548,8 @@ Resources:
       Layers:
         - !Ref Boto3Layer
       Timeout: 900
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
@@ -490,13 +560,6 @@ Resources:
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/QNABedrockAgentFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
       - QNABedrockAgentFunctionLogGroup
 
@@ -508,6 +571,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/QNABedrockAgentFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   QNABedrockLLMFunctionRole:
     Condition: ShouldConfigureBedrockLLM
@@ -522,6 +586,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyDocument:
             Version: 2012-10-17
@@ -529,6 +597,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - "bedrock:InvokeModel"
+                  - "bedrock:InvokeModelWithResponseStream"
                 Resource: 
                   - !Sub "arn:aws:bedrock:*::foundation-model/*"
                   - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
@@ -561,6 +630,17 @@ Resources:
   QNABedrockLLMFunction:
     Condition: ShouldConfigureBedrockLLM
     Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for QnABot integration function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
       # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
       FunctionName: !Sub "QNA-${LMAStackName}-BedrockLLM-LambdaHook"
@@ -570,21 +650,21 @@ Resources:
       Layers:
         - !Ref Boto3Layer
       Timeout: 900
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
           MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
+          KB_ID: !Ref BedrockKnowledgeBaseId
+          KB_REGION: !Ref AWS::Region
+          KB_ACCOUNT_ID: !Ref AWS::AccountId
+          APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
+          ENABLE_STREAMING: "true"
       Code: ./src
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/QNABedrockLLMFunction
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
       - QNABedrockLLMFunctionLogGroup
 
@@ -596,6 +676,154 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/QNABedrockLLMFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # Strands Lambda Layer for Strands SDK
+  StrandsLayer:
+    Type: "AWS::Lambda::LayerVersion"
+    Condition: ShouldDeployStrandsFunction
+    Properties:
+      LayerName: !Sub "${LMAStackName}-strands-layer"
+      Description: "Strands Agents SDK for meeting assistance"
+      Content: ./strands_layer
+      CompatibleRuntimes:
+        - python3.12
+
+  StrandsMeetingAssistFunctionRole:
+    Condition: ShouldDeployStrandsFunction
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                  - "bedrock:InvokeModelWithResponseStream"
+                Resource: 
+                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:GetInferenceProfile"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:ApplyGuardrail"
+                Resource: "*"
+          PolicyName: BedrockPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:Retrieve"
+                  - "bedrock:RetrieveAndGenerate"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+          PolicyName: BedrockKBPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:Query"
+                  - "dynamodb:GetItem"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
+          PolicyName: DynamoDBPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                  - "kms:DescribeKey"
+                Resource:
+                  - !Ref CustomerManagedEncryptionKeyArn
+          PolicyName: KMSDecryptPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "appsync:GraphQL"
+                Resource:
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/addChatToken"
+          PolicyName: AppSyncGraphQLPolicy
+        - PolicyName: InlinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action: lambda:InvokeFunction
+                Effect: Allow
+                Resource: !Ref FetchTranscriptFunctionArn
+
+  StrandsMeetingAssistFunction:
+    Condition: ShouldDeployStrandsFunction
+    Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for meeting assist function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      FunctionName: !Sub "STRANDS-${LMAStackName}-MeetingAssist"
+      Role: !GetAtt StrandsMeetingAssistFunctionRole.Arn
+      Handler: strands_meeting_assist_function.handler
+      Runtime: python3.12
+      Layers:
+        - !Ref Boto3Layer
+        - !Ref StrandsLayer
+      Timeout: 300
+      MemorySize: 512
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
+          MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
+          KB_ID: !Ref BedrockKnowledgeBaseId
+          KB_REGION: !Ref AWS::Region
+          KB_ACCOUNT_ID: !Ref AWS::AccountId
+          APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
+          ENABLE_STREAMING: "true"
+      Code: ./src
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/StrandsMeetingAssistFunction
+    DependsOn:
+      - StrandsMeetingAssistFunctionLogGroup
+
+  StrandsMeetingAssistFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldDeployStrandsFunction
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/StrandsMeetingAssistFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   SetupFunctionRole:
     Type: "AWS::IAM::Role"
@@ -609,6 +837,10 @@ Resources:
         Version: 2012-10-17
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: InlinePolicy
           PolicyDocument:
@@ -627,11 +859,13 @@ Resources:
                 Resource:
                   - !Ref COGNITOSTACK
               - Action:
+                  - lambda:GetFunction
                   - lambda:GetFunctionConfiguration
                   - lambda:UpdateFunctionConfiguration
                 Effect: Allow
                 Resource:
                   - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}*"
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${LMAStackName}*"
               - Action:
                   - iam:ListRolePolicies
                   - iam:PutRolePolicy
@@ -685,18 +919,10 @@ Resources:
                   Effect: Allow
                   Resource:
                     - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}*"
+                    - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${LMAStackName}*"
                 - !Ref AWS::NoValue
   SetupFunction:
     Type: "AWS::Lambda::Function"
-    Properties:
-      Role: !GetAtt SetupFunctionRole.Arn
-      Handler: setup_function.handler
-      Runtime: python3.12
-      Timeout: 900
-      Code: ./src
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/SetupFunction
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -706,6 +932,20 @@ Resources:
             reason: Customer can choose reserved concurrency based on their requirement.
           - id: W58
             reason: Managed policy already provides access to CloudWatch logs.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for setup/configuration function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      Role: !GetAtt SetupFunctionRole.Arn
+      Handler: setup_function.handler
+      Runtime: python3.12
+      Timeout: 900
+      TracingConfig:
+        Mode: Active
+      Code: ./src
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/SetupFunction
     DependsOn:
       - SetupFunctionLogGroup
 
@@ -716,6 +956,7 @@ Resources:
         Fn::Sub: /${AWS::StackName}/lambda/SetupFunction
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   SetupFunctionResource:
     Type: AWS::CloudFormation::CustomResource
@@ -735,15 +976,21 @@ Resources:
       QnaMeetingAssistDemoJson: !Ref QnaMeetingAssistDemoJson
       QNASummarizeCallFunction: !Ref QNASummarizeCallFunction
       QNAMeetingAssistLambdaHookFunction: !If
-        - ShouldCreateQPlugin
-        - !Ref QBusinessLambdaHookFunction
+        - ShouldConfigureQnabot
         - !If
-          - ShouldConfigureBedrockKB
-          - !Ref QNABedrockKnowledgeBaseFunction
+          - ShouldCreateQPlugin
+          - !Ref QBusinessLambdaHookFunction
           - !If
-            - ShouldConfigureBedrockAgent
-            - !Ref QNABedrockAgentFunction
-            - !Ref QNABedrockLLMFunction
+            - ShouldConfigureBedrockKB
+            - !Ref QNABedrockKnowledgeBaseFunction
+            - !If
+              - ShouldConfigureBedrockAgent
+              - !Ref QNABedrockAgentFunction
+              - !Ref QNABedrockLLMFunction
+        - !If
+          - ShouldUseStrandsBedrock
+          - !Ref StrandsMeetingAssistFunction
+          - !Ref AWS::NoValue
       QnaBotSettings: !Ref QnaBotSettings
       TranscriptBedrockKnowledgeBaseId: !If
       - ShouldConfigureTranscriptBedrockKB
@@ -800,14 +1047,172 @@ Resources:
     Properties:
       KeySpec: "SYMMETRIC_DEFAULT"
       KeyUsage: "ENCRYPT_DECRYPT"
+      EnableKeyRotation: true
       KeyPolicy:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
               AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
-            Action: "kms:*"
+            Action:
+              - "kms:CreateAlias"
+              - "kms:CreateGrant"
+              - "kms:CreateKey"
+              - "kms:DescribeKey"
+              - "kms:EnableKey"
+              - "kms:EnableKeyRotation"
+              - "kms:ListAliases"
+              - "kms:ListGrants"
+              - "kms:ListKeys"
+              - "kms:ListKeyPolicies"
+              - "kms:ListResourceTags"
+              - "kms:PutKeyPolicy"
+              - "kms:UpdateAlias"
+              - "kms:UpdateKeyDescription"
+              - "kms:RevokeGrant"
+              - "kms:DisableKey"
+              - "kms:DisableKeyRotation"
+              - "kms:GetKeyPolicy"
+              - "kms:GetKeyRotationStatus"
+              - "kms:DeleteAlias"
+              - "kms:TagResource"
+              - "kms:UntagResource"
+              - "kms:ScheduleKeyDeletion"
+              - "kms:CancelKeyDeletion"
+              - "kms:Encrypt"
+              - "kms:Decrypt"
+              - "kms:ReEncryptFrom"
+              - "kms:ReEncryptTo"
+              - "kms:GenerateDataKey"
+              - "kms:GenerateDataKeyWithoutPlaintext"
             Resource: "*"
+
+  # EventBridge rule for KMS key monitoring
+  QPluginKMSKeyMonitoringEventRule:
+    Type: AWS::Events::Rule
+    Condition: ShouldCreateQPlugin
+    Properties:
+      Name: !Sub "${LMAStackName}-QPlugin-KMS-Key-Monitoring"
+      Description: "EventBridge rule to monitor Q Plugin KMS key events for compliance and security"
+      EventPattern:
+        source:
+          - "aws.kms"
+        detail:
+          eventSource:
+            - "kms.amazonaws.com"
+          eventName:
+            - "DisableKey"
+            - "ScheduleKeyDeletion"
+            - "CancelKeyDeletion"
+            - "CreateKey"
+            - "PutKeyPolicy"
+            - "EnableKey"
+            - "DisableKeyRotation"
+            - "EnableKeyRotation"
+          resources:
+            - !GetAtt KMSKey.Arn
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt QPluginKMSKeyMonitoringFunction.Arn
+          Id: "QPluginKMSKeyMonitoringTarget"
+
+  # Lambda function for Q Plugin KMS key monitoring
+  QPluginKMSKeyMonitoringFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldCreateQPlugin
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for monitoring function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 128
+      Description: "Lambda function to process Q Plugin KMS key events for monitoring and compliance"
+      InlineCode: |
+        import json
+        import boto3
+        import logging
+
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        def handler(event, context):
+            """
+            Process Q Plugin KMS key events for monitoring and compliance.
+            This function logs KMS key events and can be extended to send alerts.
+            """
+            try:
+                logger.info(f"Received Q Plugin KMS event: {json.dumps(event)}")
+                
+                # Extract event details
+                detail = event.get('detail', {})
+                event_name = detail.get('eventName', 'Unknown')
+                event_source = detail.get('eventSource', 'Unknown')
+                source_ip = detail.get('sourceIPAddress', 'Unknown')
+                user_identity = detail.get('userIdentity', {})
+                
+                # Log key information
+                logger.info(f"Q Plugin KMS Event: {event_name}")
+                logger.info(f"Source: {event_source}")
+                logger.info(f"Source IP: {source_ip}")
+                logger.info(f"User Identity: {json.dumps(user_identity)}")
+                
+                # Add custom logic here for specific event handling
+                if event_name in ['DisableKey', 'ScheduleKeyDeletion']:
+                    logger.warning(f"CRITICAL Q PLUGIN KMS EVENT: {event_name} - Key security may be compromised")
+                elif event_name == 'PutKeyPolicy':
+                    logger.info(f"Q Plugin KMS key policy updated - review for compliance")
+                
+                return {
+                    'statusCode': 200,
+                    'body': json.dumps({
+                        'message': f'Successfully processed Q Plugin KMS event: {event_name}',
+                        'eventProcessed': True
+                    })
+                }
+                
+            except Exception as e:
+                logger.error(f"Error processing Q Plugin KMS event: {str(e)}")
+                return {
+                    'statusCode': 500,
+                    'body': json.dumps({
+                        'message': f'Error processing Q Plugin KMS event: {str(e)}',
+                        'eventProcessed': False
+                    })
+                }
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/QPluginKMSKeyMonitoringFunction
+    DependsOn:
+      - QPluginKMSKeyMonitoringFunctionLogGroup
+
+  QPluginKMSKeyMonitoringFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldCreateQPlugin
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/QPluginKMSKeyMonitoringFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # Permission for EventBridge to invoke the Q Plugin Lambda function
+  QPluginKMSKeyMonitoringFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Condition: ShouldCreateQPlugin
+    Properties:
+      FunctionName: !Ref QPluginKMSKeyMonitoringFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt QPluginKMSKeyMonitoringEventRule.Arn
 
   CredentialsTable:
     Type: AWS::DynamoDB::Table
@@ -820,8 +1225,12 @@ Resources:
         - AttributeName: "jti"
           KeyType: "HASH"
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: True
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       TableName: !Sub "${LMAStackName}-QBusiness-CredentialsTable"
       TimeToLiveSpecification:
         AttributeName: ExpiresAt
@@ -830,6 +1239,12 @@ Resources:
   LambdaFunctionRole:
     Type: AWS::IAM::Role
     Condition: ShouldCreateQPlugin
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "QBusiness integration requires broad S3 access for transcript retrieval from various buckets"
+    # checkov:skip=CKV_AWS_111: "QBusiness integration requires broad S3 access for transcript retrieval from various buckets"
     Properties:
       RoleName: !Sub "QNA-${LMAStackName}-QBusiness-LambdaHook-FunctionRole"
       AssumeRolePolicyDocument:
@@ -841,6 +1256,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyDocument:
             Version: 2012-10-17
@@ -926,6 +1345,17 @@ Resources:
   QBusinessLambdaHookFunction:
     Type: AWS::Lambda::Function
     Condition: ShouldCreateQPlugin
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: No VPC resources.
+          - id: W92
+            reason: No requirements to set reserved concurrencies.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for QnABot integration function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
       # LambdaHook name must start with 'QNA-' to match QnAbot invoke policy
       FunctionName: !Sub "QNA-${LMAStackName}-QBusiness-LambdaHook"
@@ -936,6 +1366,8 @@ Resources:
         - !Ref Boto3Layer
       Timeout: 60
       MemorySize: 128
+      TracingConfig:
+        Mode: Active
       Environment:
         Variables:
           AWS_DATA_PATH: /opt/model
@@ -949,14 +1381,11 @@ Resources:
           MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
       Code: ./src
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: No VPC resources.
-          - id: W92
-            reason: No requirements to set reserved concurrencies.
 
 Outputs:
   QBusinessLambdaHookFunctionRoleArn:
     Value: !If [ShouldCreateQPlugin, !GetAtt "LambdaFunctionRole.Arn", "NA"]
+  
+  StrandsMeetingAssistFunctionArn:
+    Description: ARN of the Strands Meeting Assist Lambda function
+    Value: !If [ShouldUseStrandsBedrock, !GetAtt StrandsMeetingAssistFunction.Arn, "NA"]

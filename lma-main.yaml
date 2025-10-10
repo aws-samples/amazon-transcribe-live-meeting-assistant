@@ -1,16 +1,7 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License").
-# You may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
 ---
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
@@ -31,12 +22,13 @@ Parameters:
     Type: String
     AllowedValues:
       - "BEDROCK_LLM"
+      - "STRANDS_BEDROCK"
       - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
       - "BEDROCK_AGENT (Use Existing)"
       - "Q_BUSINESS (Use Existing)"
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
       - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)"
-    Description: Choose the knowledge base / LLM service to use
+    Description: Choose the knowledge base / LLM service to use. STRANDS_BEDROCK (experimental) provides a lightweight alternative to QnABot with agentic capabilities.
 
   MeetingAssistServiceBedrockModelID:
     Type: String
@@ -55,6 +47,7 @@ Parameters:
       - "us.anthropic.claude-sonnet-4-20250514-v1:0"
       - "us.anthropic.claude-opus-4-20250514-v1:0"
       - "us.anthropic.claude-opus-4-1-20250805-v1:0"
+      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
       - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
     Description: >-
@@ -391,6 +384,7 @@ Parameters:
       - "us.anthropic.claude-sonnet-4-20250514-v1:0"
       - "us.anthropic.claude-opus-4-20250514-v1:0"
       - "us.anthropic.claude-opus-4-1-20250805-v1:0"
+      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
       - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
     Description: >
@@ -610,6 +604,14 @@ Parameters:
       true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
     AllowedPattern: "^(|subnet-[a-zA-Z0-9-]+)$"
 
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
+      If provided, this policy will limit the maximum permissions that can be granted to IAM roles
+      in this stack, providing an additional layer of security.
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -709,6 +711,10 @@ Metadata:
           - PublicSubnet2
           - PrivateSubnet1
           - PrivateSubnet2
+      - Label:
+          default: Security Configuration
+        Parameters:
+          - PermissionsBoundaryArn
       - Label:
           default: Business Domain
         Parameters:
@@ -830,6 +836,8 @@ Metadata:
         default: Existing Private Subnet 1
       PrivateSubnet2:
         default: Existing Private Subnet 2
+      PermissionsBoundaryArn:
+        default: Permissions Boundary ARN
 
 Mappings:
   TranscribeToLexLocaleId:
@@ -928,23 +936,286 @@ Conditions:
     ]
   ShouldUseQBusiness:
     !Equals [!Ref MeetingAssistService, "Q_BUSINESS (Use Existing)"]
+  ShouldUseStrandsBedrock:
+    !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
   ShouldUseLLMOnly:
     !Not [
       !Or [
         !Condition ShouldUseBedrockKnowledgeBase,
         !Condition ShouldUseBedrockAgent,
         !Condition ShouldUseQBusiness,
+        !Condition ShouldUseStrandsBedrock,
       ],
     ]
+  ShouldDeployQnABot:
+    !Not [!Condition ShouldUseStrandsBedrock]
   ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
   ShouldCreateTranscriptKnowledgeBase:
     !Equals [!Ref TranscriptKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)"]
   ShouldUseTranscriptKnowledgeBase: !Condition ShouldCreateTranscriptKnowledgeBase
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
 Resources:
+  ##########################################################################
+  # Customer Managed KMS Key for encryption across all resources
+  ##########################################################################
+  CustomerManagedEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "Customer managed KMS key for ${AWS::StackName} encryption"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action:
+              - "kms:CreateAlias"
+              - "kms:CreateGrant"
+              - "kms:CreateKey"
+              - "kms:DescribeKey"
+              - "kms:EnableKey"
+              - "kms:EnableKeyRotation"
+              - "kms:ListAliases"
+              - "kms:ListGrants"
+              - "kms:ListKeys"
+              - "kms:ListKeyPolicies"
+              - "kms:ListResourceTags"
+              - "kms:PutKeyPolicy"
+              - "kms:UpdateAlias"
+              - "kms:UpdateKeyDescription"
+              - "kms:RevokeGrant"
+              - "kms:DisableKey"
+              - "kms:DisableKeyRotation"
+              - "kms:GetKeyPolicy"
+              - "kms:GetKeyRotationStatus"
+              - "kms:DeleteAlias"
+              - "kms:TagResource"
+              - "kms:UntagResource"
+              - "kms:ScheduleKeyDeletion"
+              - "kms:CancelKeyDeletion"
+              - "kms:Encrypt"
+              - "kms:Decrypt"
+              - "kms:ReEncryptFrom"
+              - "kms:ReEncryptTo"
+              - "kms:GenerateDataKey"
+              - "kms:GenerateDataKeyWithoutPlaintext"
+            Resource: "*"
+          - Sid: Allow DynamoDB Service
+            Effect: Allow
+            Principal:
+              Service: dynamodb.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+          - Sid: Allow CloudWatch Logs Service
+            Effect: Allow
+            Principal:
+              Service: logs.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+          - Sid: Allow S3 Service
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+          - Sid: Allow SNS Service
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+          - Sid: Allow SQS Service
+            Effect: Allow
+            Principal:
+              Service: sqs.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+
+  CustomerManagedEncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${AWS::StackName}-encryption-key"
+      TargetKeyId: !Ref CustomerManagedEncryptionKey
+
+  # EventBridge rule for KMS key monitoring
+  KMSKeyMonitoringEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-KMS-Key-Monitoring"
+      Description: "EventBridge rule to monitor KMS key events for compliance and security"
+      EventPattern:
+        source:
+          - "aws.kms"
+        detail:
+          eventSource:
+            - "kms.amazonaws.com"
+          eventName:
+            - "DisableKey"
+            - "ScheduleKeyDeletion"
+            - "CancelKeyDeletion"
+            - "CreateKey"
+            - "PutKeyPolicy"
+            - "EnableKey"
+            - "DisableKeyRotation"
+            - "EnableKeyRotation"
+          resources:
+            - !GetAtt CustomerManagedEncryptionKey.Arn
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt KMSKeyMonitoringFunction.Arn
+          Id: "KMSKeyMonitoringTarget"
+
+  # Lambda function for KMS key monitoring
+  KMSKeyMonitoringFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for monitoring function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 128
+      Description: "Lambda function to process KMS key events for monitoring and compliance"
+      InlineCode: |
+        import json
+        import boto3
+        import logging
+
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        def handler(event, context):
+            """
+            Process KMS key events for monitoring and compliance.
+            This function logs KMS key events and can be extended to send alerts.
+            """
+            try:
+                logger.info(f"Received KMS event: {json.dumps(event)}")
+                
+                # Extract event details
+                detail = event.get('detail', {})
+                event_name = detail.get('eventName', 'Unknown')
+                event_source = detail.get('eventSource', 'Unknown')
+                source_ip = detail.get('sourceIPAddress', 'Unknown')
+                user_identity = detail.get('userIdentity', {})
+                
+                # Log key information
+                logger.info(f"KMS Event: {event_name}")
+                logger.info(f"Source: {event_source}")
+                logger.info(f"Source IP: {source_ip}")
+                logger.info(f"User Identity: {json.dumps(user_identity)}")
+                
+                # Add custom logic here for specific event handling
+                if event_name in ['DisableKey', 'ScheduleKeyDeletion']:
+                    logger.warning(f"CRITICAL KMS EVENT: {event_name} - Key security may be compromised")
+                elif event_name == 'PutKeyPolicy':
+                    logger.info(f"KMS key policy updated - review for compliance")
+                
+                return {
+                    'statusCode': 200,
+                    'body': json.dumps({
+                        'message': f'Successfully processed KMS event: {event_name}',
+                        'eventProcessed': True
+                    })
+                }
+                
+            except Exception as e:
+                logger.error(f"Error processing KMS event: {str(e)}")
+                return {
+                    'statusCode': 500,
+                    'body': json.dumps({
+                        'message': f'Error processing KMS event: {str(e)}',
+                        'eventProcessed': False
+                    })
+                }
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/KMSKeyMonitoringFunction
+    DependsOn:
+      - KMSKeyMonitoringFunctionLogGroup
+
+  KMSKeyMonitoringFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/KMSKeyMonitoringFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  # Permission for EventBridge to invoke the Lambda function
+  KMSKeyMonitoringFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref KMSKeyMonitoringFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt KMSKeyMonitoringEventRule.Arn
+
   # Custom resource to enforce max length of StackName - prevent downstream failures
   StacknameCheckFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       Handler: index.handler
       Runtime: python3.12
@@ -968,13 +1239,6 @@ Resources:
       LoggingConfig:
         LogGroup:
           Ref: StacknameCheckFunctionLogGroup
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
       - StacknameCheckFunctionLogGroup
 
@@ -983,6 +1247,7 @@ Resources:
     Properties:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
   IsStacknameLengthOK:
     Type: Custom::StacknameCheck
@@ -1005,6 +1270,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyDocument:
             Version: 2012-10-17
@@ -1024,6 +1293,16 @@ Resources:
 
   ValidateParametersFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       Handler: index.handler
       Runtime: python3.12
@@ -1107,13 +1386,6 @@ Resources:
       LoggingConfig:
         LogGroup:
           Ref: ValidateParametersFunctionLogGroup
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
       - ValidateParametersFunctionLogGroup
 
@@ -1122,6 +1394,7 @@ Resources:
     Properties:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
   ValidateParameters:
     Type: Custom::ValidateParameters
@@ -1172,6 +1445,10 @@ Resources:
         Version: 2012-10-17
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       Policies:
         - PolicyName: updateSSMStore
           PolicyDocument:
@@ -1186,11 +1463,25 @@ Resources:
 
   UpdateLMASettingsFunction:
     Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+          - id: W58
+            reason: Managed policy already provides access to CloudWatch logs.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for settings update function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       Role: !GetAtt UpdateLMASettingsFunctionRole.Arn
       Handler: index.handler
       Runtime: python3.12
       Timeout: 900
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: |
           import boto3
@@ -1227,21 +1518,13 @@ Resources:
       LoggingConfig:
         LogGroup:
           Ref: UpdateLMASettingsFunctionLogGroup
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-          - id: W58
-            reason: Managed policy already provides access to CloudWatch logs.
 
   UpdateLMASettingsFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
   UpdateLMASettingsValues:
     Type: AWS::CloudFormation::CustomResource
@@ -1256,6 +1539,69 @@ Resources:
         - False
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
+
+  ## LOGGING BUCKET FOR S3 ACCESS LOGS
+  LoggingBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: "This is the logging destination bucket - does not require its own access logging"
+    # checkov:skip=CKV_AWS_18: "This is the logging destination bucket - does not require its own access logging"
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLogs
+            Status: Enabled
+            ExpirationInDays: 180
+            Prefix: ""
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  LoggingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LoggingBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowS3ServerAccessLogs
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource: !Sub "${LoggingBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+          - Sid: EnforceSSLOnly
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: 
+              - !Sub "${LoggingBucket.Arn}/*"
+              - !Sub "${LoggingBucket.Arn}"
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
 
   ## BUCKET TO STORE STEREO RECORDINGS AND TRANSCRIPTS FILES
   RecordingsBucket:
@@ -1279,6 +1625,9 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: "recordings-bucket-logs/"
       LifecycleConfiguration:
         Rules:
           - Id: AudioRetention
@@ -1311,6 +1660,16 @@ Resources:
 
   ToJSONFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       Handler: index.handler
       Runtime: python3.12
@@ -1335,13 +1694,6 @@ Resources:
       LoggingConfig:
         LogGroup:
           Ref: ToJSONFunctionLogGroup
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
     DependsOn:
       - ToJSONFunctionLogGroup
 
@@ -1350,9 +1702,11 @@ Resources:
     Properties:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
 
   QNABOT:
     Type: AWS::CloudFormation::Stack
+    Condition: ShouldDeployQnABot
     DependsOn:
       - IsStacknameLengthOK
       - ValidateParameters
@@ -1389,6 +1743,7 @@ Resources:
       Parameters:
         Domain: !Ref Domain
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
   COGNITOSTACK:
     Type: AWS::CloudFormation::Stack
@@ -1409,6 +1764,7 @@ Resources:
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         LMASettingsParameterName: !Ref LMASettingsParameter
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
   AISTACK:
     Type: AWS::CloudFormation::Stack
@@ -1435,7 +1791,18 @@ Resources:
         IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
-        IsLexAgentAssistEnabled: true
+        IsLexAgentAssistEnabled: !If
+          - ShouldUseStrandsBedrock
+          - false
+          - true
+        IsLambdaAgentAssistEnabled: !If
+          - ShouldUseStrandsBedrock
+          - true
+          - false
+        AgentAssistExistingLambdaFunctionArn: !If
+          - ShouldUseStrandsBedrock
+          - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
+          - ""
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
@@ -1456,6 +1823,9 @@ Resources:
         CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
         AppIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.AppIdentityPoolId
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        LoggingBucketName: !Ref LoggingBucket
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         BedrockKnowledgeBaseID: !If
           - ShouldUseTranscriptKnowledgeBase
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
@@ -1476,6 +1846,7 @@ Resources:
         pWebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
         pWebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
         pWebSyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
   BEDROCKAGENT:
     Type: AWS::CloudFormation::Stack
@@ -1493,6 +1864,9 @@ Resources:
         WebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
         WebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
         SNSEmailAddress: !Ref AdminEmail
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        LoggingBucketName: !Ref LoggingBucket
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
   TRANSCRIPTBEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -1564,7 +1938,10 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AISTACK: !Ref AISTACK
-        QNABOTSTACK: !Ref QNABOT
+        QNABOTSTACK: !If
+          - ShouldDeployQnABot
+          - !Ref QNABOT
+          - ""
         COGNITOSTACK: !Ref COGNITOSTACK
         MeetingAssistService: !Ref MeetingAssistService
         BedrockKnowledgeBaseId: !If
@@ -1595,10 +1972,15 @@ Resources:
           - ""
         IDCApplicationARN: !Ref IDCApplicationARN
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        LexMeetingAssistBotId: !GetAtt QNABOT.Outputs.LexV2BotId
-        LexMeetingAssistAliasId: !GetAtt QNABOT.Outputs.LexV2BotAliasId
-        LexMeetingAssistLocaleId:
-          !FindInMap [
+        LexMeetingAssistBotId: !If
+          - ShouldDeployQnABot
+          - !GetAtt QNABOT.Outputs.LexV2BotId
+          - ""
+        LexMeetingAssistAliasId: !If
+          - ShouldDeployQnABot
+          - !GetAtt QNABOT.Outputs.LexV2BotAliasId
+          - ""
+        LexMeetingAssistLocaleId: !FindInMap [
             TranscribeToLexLocaleId,
             !Ref TranscribeLanguageCode,
             Value,
@@ -1615,6 +1997,7 @@ Resources:
           - ""
         ModelValidation: !Ref ModelValidation
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         # Changes to Params below force AgentAssist Setup to update.
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
@@ -1628,6 +2011,7 @@ Resources:
         LexMeetingAssistUserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
         LexMeetingAssistDomainName: !GetAtt COGNITOSTACK.Outputs.CognitoLoginUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
+        AppSyncGraphQLUrl: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
         FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
         # QnaBotSettings - JSON param with new settings values based on options selected
@@ -1645,6 +2029,7 @@ Resources:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-vpc-stack/template.yaml
       Parameters:
         LMAStackName: !Ref "AWS::StackName"
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
   WEBSOCKETTRANSCRIBERSTACK:
     Type: AWS::CloudFormation::Stack
@@ -1680,6 +2065,9 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        LoggingBucketName: !Ref LoggingBucket
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         VPC: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.VPC
@@ -1728,6 +2116,7 @@ Resources:
         SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
         LMASettingsParameterName: !Ref LMASettingsParameter
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         GraphQLEndpoint: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
         VPTaskRegistryTableName: !GetAtt AISTACK.Outputs.VPTaskRegistryTableName
         VPC: !If
@@ -1759,6 +2148,7 @@ Resources:
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         SourceCodeLocation: <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
 Outputs:
   ApplicationCloudfrontEndpoint:
@@ -1775,7 +2165,10 @@ Outputs:
 
   QnaBotContentDesigner:
     Description: Agent Assist Content Designer URL (QnABot on AWS)
-    Value: !GetAtt QNABOT.Outputs.ContentDesignerURL
+    Value: !If
+      - ShouldDeployQnABot
+      - !GetAtt QNABOT.Outputs.ContentDesignerURL
+      - "QnABot not deployed - STRANDS_BEDROCK selected"
 
   RecordingsS3Bucket:
     Description: Bucket which contains all the call recordings

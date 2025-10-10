@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
 import React, { useState, useEffect } from 'react';
 import { API, graphqlOperation } from 'aws-amplify';
 import PropTypes from 'prop-types';
@@ -495,7 +500,7 @@ const VirtualParticipantList = () => {
     { label: 'Zoom', value: 'ZOOM', disabled: false },
     { label: 'Chime', value: 'CHIME', disabled: false },
     { label: 'Teams', value: 'TEAMS', disabled: false },
-    { label: 'WebEx', value: 'WEBEX', disabled: true },
+    { label: 'WebEx', value: 'WEBEX', disabled: false },
     { label: 'Google Meet', value: 'GOOGLE_MEET', disabled: true },
   ];
 

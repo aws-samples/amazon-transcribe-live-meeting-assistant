@@ -87,6 +87,7 @@ enum Channel {
 	AGENT_VOICETONE
 	CALLER_VOICETONE
 	AGENT_ASSISTANT
+	CHAT_ASSISTANT
 	CATEGORY_MATCH
 }
 
@@ -169,6 +170,8 @@ type Mutation @aws_iam {
 	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools
+	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -311,6 +314,10 @@ type Subscription {
 		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updatePcaUrl","updateAgent", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
+	onSendChatMessage(CallId: ID): SendChatMessageOutput
+		@aws_subscribe(mutations: ["sendChatMessage"])
+	onAddChatToken(CallId: ID!, MessageId: ID!): ChatToken
+		@aws_subscribe(mutations: ["addChatToken"])
 	onShareMeetings: ShareMeetingsOutput
 		@aws_subscribe(mutations: ["shareMeetings"])
 	onDeleteCall: DeleteCallOutput
@@ -477,6 +484,35 @@ input UnshareCallInput {
 type UnshareCallOutput @aws_iam {
 	CallId: ID!
 	SharedWith: [String!]
+}
+
+input SendChatMessageInput {
+	CallId: ID!
+	Message: String!
+}
+
+type SendChatMessageOutput @aws_cognito_user_pools @aws_iam {
+	MessageId: ID!
+	Status: String!
+	CallId: ID!
+	Response: String
+}
+
+input AddChatTokenInput {
+	CallId: ID!
+	MessageId: ID!
+	Token: String!
+	IsComplete: Boolean!
+	Sequence: Int!
+}
+
+type ChatToken @aws_cognito_user_pools @aws_iam {
+	CallId: ID!
+	MessageId: ID!
+	Token: String!
+	IsComplete: Boolean!
+	Sequence: Int!
+	Timestamp: AWSDateTime!
 }
 
 

@@ -1,9 +1,7 @@
 #!/bin/bash
-
-##############################################################################################
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-##############################################################################################
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 
 ##############################################################################################
 # Create new Cfn artifacts bucket if not already existing, and publish template and artifacts
@@ -61,6 +59,10 @@ https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX}/${NAME}/t
 echo "PACKAGING $NAME"
 echo "Packaging boto3_layer"
 pushd boto3_layer
+pip3 install --requirement ./requirements.txt --target=./python
+popd
+echo "Packaging strands_layer"
+pushd strands_layer
 pip3 install --requirement ./requirements.txt --target=./python
 popd
 aws cloudformation package \

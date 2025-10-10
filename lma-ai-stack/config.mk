@@ -1,5 +1,3 @@
-#  Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#  SPDX-License-Identifier: Apache-2.0
 # source this file from shell to override Makefile
 export TEMPLATE_FILE ?= deployment/lma-ai-stack.yaml
 # This maps to the sam cli --config-env option - see samconfig.toml
