@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.18] - 2025-10-13
+### Fixed
+- Github #197 issue : Fixed: Virtual Participant functionality not working with native Chime/Zoom applications in version 0.2.17
+
 ## [0.2.17] - 2025-10-10
 ### Added
 - Webex Virtual Participant support (joins Teams, Zoom, Chime, and Meet)
