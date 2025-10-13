@@ -12,7 +12,7 @@ RUN apt-get update && \
 
 RUN mkdir -p /etc/chromium/policies/managed/ && \
     echo '{ "ExternalProtocolDialogShowAlwaysOpenCheckbox": false }' > /etc/chromium/policies/managed/dialog-policy.json && \
-    echo '{ "URLAllowlist": ["https://*", "webex://*", "webexmeetings://*"] }' > /etc/chromium/policies/managed/allowlist.json && \
+    echo '{ "URLAllowlist": ["https://*", "webex://*", "webexmeetings://*", "chime://*", "zoom://*", "zoommtg://*"] }' > /etc/chromium/policies/managed/allowlist.json && \
     echo '{ "AutoSelectCertificateForUrls": [], "DefaultBrowserSettingEnabled": false }' > /etc/chromium/policies/managed/browser-policy.json
 
 
