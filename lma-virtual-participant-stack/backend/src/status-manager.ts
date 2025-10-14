@@ -242,6 +242,150 @@ export class VirtualParticipantStatusManager {
   async setFailed(errorMessage?: string): Promise<boolean> {
     return this.updateStatus('FAILED', errorMessage);
   }
+
+  /**
+   * Get the task's private IP address from ECS metadata
+   */
+  async getTaskPrivateIp(): Promise<string | null> {
+    try {
+      const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
+      if (!metadataUri) {
+        console.log('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
+        return null;
+      }
+
+      const taskMetadataUrl = `${metadataUri}/task`;
+      console.log(`Fetching task metadata for IP from: ${taskMetadataUrl}`);
+
+      const response = await fetch(taskMetadataUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch task metadata: ${response.status}`);
+      }
+
+      const metadata = await response.json();
+      
+      // Extract private IP from task metadata
+      // The structure is: Containers[0].Networks[0].IPv4Addresses[0]
+      if (metadata.Containers && metadata.Containers.length > 0) {
+        const container = metadata.Containers[0];
+        if (container.Networks && container.Networks.length > 0) {
+          const network = container.Networks[0];
+          if (network.IPv4Addresses && network.IPv4Addresses.length > 0) {
+            const privateIp = network.IPv4Addresses[0];
+            console.log(`Task private IP: ${privateIp}`);
+            return privateIp;
+          }
+        }
+      }
+
+      console.log('Could not extract private IP from task metadata');
+      return null;
+    } catch (error) {
+      console.error('Failed to get task private IP:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Publish VNC endpoint information via AppSync
+   * The vncEndpoint will contain the full API Gateway WebSocket URL
+   */
+  async setVncReady(endpoint: string, port: number = 5901, password?: string): Promise<boolean> {
+    try {
+      // Get API Gateway WebSocket URL from LMA Settings
+      const vncWebSocketUrl = process.env.VNC_WEBSOCKET_URL || '';
+      
+      console.log(`Publishing VNC endpoint for VP ${this.participantId}`);
+      console.log(`Task IP: ${endpoint}:${port}`);
+      console.log(`WebSocket URL: ${vncWebSocketUrl}`);
+
+      // First, get the current VP to preserve existing fields
+      const getQuery = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            status
+            CallId
+          }
+        }
+      `;
+
+      const currentVP = await this.signAndSendGraphQLRequest(getQuery, {
+        id: this.participantId
+      });
+
+      if (!currentVP?.getVirtualParticipant) {
+        console.error(`VP ${this.participantId} not found`);
+        return false;
+      }
+
+      const currentCallId = currentVP.getVirtualParticipant.CallId;
+
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {
+            id
+            status
+            vncEndpoint
+            vncPort
+            vncReady
+            CallId
+            updatedAt
+          }
+        }
+      `;
+
+      const variables: any = {
+        input: {
+          id: this.participantId,
+          vncEndpoint: vncWebSocketUrl || `${endpoint}:${port}`, // Use WebSocket URL if available, fallback to IP:port
+          vncPort: port,
+          vncReady: true,
+          status: 'VNC_READY', // Optional intermediate status
+        }
+      };
+
+      // Preserve CallId if it exists
+      if (currentCallId) {
+        variables.input.CallId = currentCallId;
+      }
+
+      // Include password if provided (for future use)
+      if (password) {
+        variables.input.vncPassword = password;
+      }
+
+      const result = await this.signAndSendGraphQLRequest(mutation, variables);
+      
+      if (result) {
+        console.log(`✓ Successfully published VNC endpoint: ${vncWebSocketUrl || endpoint + ':' + port}`);
+        return true;
+      } else {
+        console.error('Failed to publish VNC endpoint via GraphQL');
+        return false;
+      }
+
+    } catch (error) {
+      console.error('Failed to publish VNC endpoint:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Log VNC connection events for audit purposes
+   */
+  async logVncConnection(username: string, action: 'connect' | 'disconnect', clientIp?: string): Promise<void> {
+    const logEntry = {
+      vpId: this.participantId,
+      username,
+      action,
+      timestamp: new Date().toISOString(),
+      clientIp: clientIp || 'unknown',
+    };
+    
+    // Log to CloudWatch (will be picked up by container logs)
+    console.log('VNC_AUDIT:', JSON.stringify(logEntry));
+  }
 }
 
 // Convenience functions for easy integration

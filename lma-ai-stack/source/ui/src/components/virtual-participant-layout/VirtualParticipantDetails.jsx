@@ -21,6 +21,10 @@ import {
   Flashbar,
 } from '@awsui/components-react';
 import StatusTimeline from './StatusTimeline';
+import VNCViewer from './VNCViewer';
+
+// VNC WebSocket URL is published by the backend in the vncEndpoint field
+// Format: wss://{api-id}.execute-api.{region}.amazonaws.com/prod
 
 const getVirtualParticipant = `
   query GetVirtualParticipant($id: ID!) {
@@ -36,6 +40,9 @@ const getVirtualParticipant = `
       Owner
       SharedWith
       CallId
+      vncEndpoint
+      vncPort
+      vncReady
     }
   }
 `;
@@ -51,6 +58,9 @@ const onUpdateVirtualParticipantDetailed = `
       Owner
       SharedWith
       CallId
+      vncEndpoint
+      vncPort
+      vncReady
     }
   }
 `;
@@ -407,13 +417,21 @@ const VirtualParticipantDetails = () => {
       next: ({ value }) => {
         const updated = value?.data?.onUpdateVirtualParticipant;
         if (updated && updated.id === vpId) {
-          // Only update local state, no notifications (VirtualParticipantList handles notifications)
+          // Update local state, no notifications (VirtualParticipantList handles notifications), including VNC
           setVpDetails((prev) => ({
             ...prev,
             status: updated.status,
             updatedAt: updated.updatedAt,
-            CallId: updated.CallId || prev.CallId, // Update CallId if available
+            CallId: updated.CallId || prev?.CallId,
+            vncEndpoint: updated.vncEndpoint || prev?.vncEndpoint,
+            vncPort: updated.vncPort || prev?.vncPort,
+            vncReady: updated.vncReady !== undefined ? updated.vncReady : prev?.vncReady,
           }));
+
+          // Log VNC updates
+          if (updated.vncReady && updated.vncEndpoint) {
+            console.log('VNC endpoint received:', updated.vncEndpoint, 'Port:', updated.vncPort);
+          }
         }
       },
       error: (err) => {
@@ -545,6 +563,26 @@ const VirtualParticipantDetails = () => {
       <Container header={<Header variant="h3">Connection Details</Header>}>
         <ConnectionDetails vpDetails={vpDetails} />
       </Container>
+
+      {/* VNC Live View - Show when VNC is ready and VP is active */}
+      {vpDetails.vncReady && vpDetails.vncEndpoint && ['VNC_READY', 'JOINED', 'ACTIVE'].includes(vpDetails.status) && (
+        <VNCViewer vpId={vpId} vncEndpoint={vpDetails.vncEndpoint} websocketUrl={vpDetails.vncEndpoint} />
+      )}
+
+      {/* VNC Preparing Message - Show while VNC is starting up */}
+      {!vpDetails.vncReady && ['INITIALIZING', 'CONNECTING', 'JOINING'].includes(vpDetails.status) && (
+        <Container>
+          <Box textAlign="center" padding="l">
+            <Spinner size="large" />
+            <Box margin={{ top: 's' }}>
+              <strong>Preparing live view...</strong>
+            </Box>
+            <Box margin={{ top: 'xs' }} color="text-body-secondary">
+              VNC server is starting up. This usually takes 10-30 seconds.
+            </Box>
+          </Box>
+        </Container>
+      )}
 
       {/* Error Troubleshooting - Only show for failed status */}
       <ErrorTroubleshooting status={vpDetails.status} errorDetails={vpDetails.errorDetails} />

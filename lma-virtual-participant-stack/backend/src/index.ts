@@ -1,6 +1,7 @@
 import puppeteer from 'puppeteer';
 import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { promises as fs } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
 import Teams from './teams.js';
@@ -68,6 +69,51 @@ const main = async (): Promise<void> => {
             }
         } catch (error) {
             console.error(`Failed to initialize status manager: ${error}`);
+        }
+    }
+
+    // Wait for VNC server to be ready before proceeding
+    console.log('Waiting for VNC server to be ready...');
+    let vncReady = false;
+    let attempts = 0;
+    const maxAttempts = 30; // 30 seconds timeout
+    
+    while (!vncReady && attempts < maxAttempts) {
+        try {
+            await fs.access('/tmp/vnc_ready');
+            vncReady = true;
+            console.log('✓ VNC server is ready');
+            break;
+        } catch {
+            // File doesn't exist yet
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        attempts++;
+    }
+
+    if (!vncReady) {
+        console.error('VNC server failed to start within timeout');
+        if (statusManager) {
+            await statusManager.setFailed('VNC server initialization failed');
+        }
+        process.exit(1);
+    }
+
+    // Get task's private IP and publish VNC endpoint
+    if (statusManager) {
+        try {
+            const taskIp = await statusManager.getTaskPrivateIp();
+            
+            if (taskIp) {
+                // Publish VNC endpoint via AppSync
+                await statusManager.setVncReady(taskIp, 5901);
+                console.log(`✓ VNC endpoint published: ${taskIp}:5901`);
+            } else {
+                console.warn('Could not determine task IP - VNC endpoint not published');
+            }
+        } catch (error) {
+            console.error('Failed to publish VNC endpoint:', error);
+            // Non-critical - continue with meeting join
         }
     }
 

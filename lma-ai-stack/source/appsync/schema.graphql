@@ -215,6 +215,11 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
 	CallId: ID
+	vncEndpoint: String
+	vncPort: Int
+	vncReady: Boolean
+	taskPrivateIp: String
+	vncPassword: String
 }
 
 input CreateVirtualParticipantInput {
@@ -229,6 +234,11 @@ input UpdateVirtualParticipantInput {
 	id: ID!
 	status: String!
 	CallId: ID
+	vncEndpoint: String
+	vncPort: Int
+	vncReady: Boolean
+	taskPrivateIp: String
+	vncPassword: String
 }
 
 input EndVirtualParticipantInput {
