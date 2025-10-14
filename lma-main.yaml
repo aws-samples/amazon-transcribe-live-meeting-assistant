@@ -1826,7 +1826,6 @@ Resources:
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
-        VNCWebSocketURL: ""
         BedrockKnowledgeBaseID: !If
           - ShouldUseTranscriptKnowledgeBase
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
