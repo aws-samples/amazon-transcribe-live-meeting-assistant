@@ -67,9 +67,10 @@ fi
 
 echo "Starting WebSocket proxy (websockify)..."
 # Start websockify to proxy WebSocket connections from 5901 to VNC port 5900
+# Bind to 0.0.0.0 to accept external connections (not just localhost)
 /usr/share/novnc/utils/websockify/run \
     --web /usr/share/novnc \
-    5901 \
+    0.0.0.0:5901 \
     localhost:5900 \
     > /tmp/websockify.log 2>&1 &
 

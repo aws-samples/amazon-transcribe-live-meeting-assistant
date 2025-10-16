@@ -16,6 +16,7 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
   const [error, setError] = useState(null);
   const [viewOnly, setViewOnly] = useState(false);
   const [scaleViewport, setScaleViewport] = useState(true);
+  const [customScale, setCustomScale] = useState(100);
 
   useEffect(() => {
     if (!canvasRef.current || !vpId || !vncEndpoint) return undefined;
@@ -41,6 +42,12 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
       rfb.scaleViewport = scaleViewport;
       rfb.resizeSession = false;
       rfb.viewOnly = viewOnly;
+
+      // Apply custom scaling if not using scaleViewport
+      if (!scaleViewport && customScale !== 100) {
+        rfb.scaleViewport = false;
+        // We'll handle scaling via CSS transform
+      }
 
       // Event handlers
       rfb.addEventListener('connect', () => {
@@ -120,7 +127,14 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
               </Toggle>
               <Toggle
                 checked={scaleViewport}
-                onChange={({ detail }) => setScaleViewport(detail.checked)}
+                onChange={({ detail }) => {
+                  setScaleViewport(detail.checked);
+                  // Reset custom scale when enabling Scale to Fit
+                  if (detail.checked && canvasRef.current) {
+                    canvasRef.current.style.transform = 'scale(1)';
+                    setCustomScale(100);
+                  }
+                }}
                 disabled={!connected}
               >
                 Scale to Fit
@@ -168,6 +182,42 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
           </Alert>
         )}
 
+        {/* Custom Zoom Control - Only show when Scale to Fit is disabled */}
+        {!scaleViewport && connected && (
+          <Box padding={{ horizontal: 's', vertical: 'xs' }}>
+            <SpaceBetween direction="horizontal" size="s" alignItems="center">
+              <Box variant="awsui-key-label">Custom Zoom: {customScale}%</Box>
+              <input
+                type="range"
+                min="25"
+                max="200"
+                step="5"
+                value={customScale}
+                onChange={(e) => {
+                  const scale = parseInt(e.target.value, 10);
+                  setCustomScale(scale);
+                  if (canvasRef.current) {
+                    canvasRef.current.style.transform = `scale(${scale / 100})`;
+                    canvasRef.current.style.transformOrigin = 'top left';
+                  }
+                }}
+                style={{ width: '200px' }}
+              />
+              <Button
+                onClick={() => {
+                  setCustomScale(100);
+                  if (canvasRef.current) {
+                    canvasRef.current.style.transform = 'scale(1)';
+                  }
+                }}
+                variant="normal"
+              >
+                Reset Zoom
+              </Button>
+            </SpaceBetween>
+          </Box>
+        )}
+
         <div
           ref={canvasRef}
           style={{
@@ -179,6 +229,9 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
             justifyContent: 'center',
             alignItems: 'center',
             cursor: connected ? 'default' : 'wait',
+            transform: !scaleViewport ? `scale(${customScale / 100})` : 'none',
+            transformOrigin: 'top left',
+            transition: 'transform 0.2s ease',
           }}
         />
 
