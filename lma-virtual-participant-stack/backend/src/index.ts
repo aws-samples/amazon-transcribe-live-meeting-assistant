@@ -102,7 +102,7 @@ const main = async (): Promise<void> => {
     // Get task's private IP and publish VNC endpoint
     if (statusManager) {
         try {
-            const taskIp = await statusManager.getTaskPrivateIp();
+            const taskIp = await statusManager.getTaskPublicIp();
             
             if (taskIp) {
                 // Publish VNC endpoint via AppSync
