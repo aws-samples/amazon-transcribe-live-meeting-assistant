@@ -18,7 +18,7 @@ const WINDOW_HEIGHT = 1080;
 
 // Shared Puppeteer configuration
 const getPuppeteerConfig = () => ({
-    headless: true,
+    headless: false, // Changed to false to show browser window in VNC
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     ignoreDefaultArgs: ['--mute-audio'],
     protocolTimeout: details.meetingTimeout,

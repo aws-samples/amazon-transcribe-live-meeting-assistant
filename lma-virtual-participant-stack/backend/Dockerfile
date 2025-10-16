@@ -49,8 +49,8 @@ ENV CHROME_BIN=/usr/bin/chromium
 RUN npm ci && \
     npm run build
 
-# Expose VNC WebSocket port
-EXPOSE 5901
+# Expose VNC port (5900) and WebSocket port (5901)
+EXPOSE 5900 5901
     
 RUN chmod +x /srv/entrypoint.sh
 RUN useradd -m appuser

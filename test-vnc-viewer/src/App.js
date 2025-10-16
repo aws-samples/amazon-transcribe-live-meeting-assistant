@@ -10,7 +10,8 @@ function App() {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [viewOnly, setViewOnly] = useState(false);
-  const [scaleViewport, setScaleViewport] = useState(true);
+  const [scaleViewport, setScaleViewport] = useState(false);
+  const [customScale, setCustomScale] = useState(100);
   const [logs, setLogs] = useState([]);
 
   const addLog = (message, type = 'info') => {
@@ -34,6 +35,12 @@ function App() {
       rfb.scaleViewport = scaleViewport;
       rfb.resizeSession = false;
       rfb.viewOnly = viewOnly;
+      
+      // Apply custom scaling if not using scaleViewport
+      if (!scaleViewport && customScale !== 100) {
+        rfb.scaleViewport = false;
+        // We'll handle scaling via CSS transform
+      }
 
       rfb.addEventListener('connect', () => {
         addLog('✓ VNC connected successfully!', 'success');
@@ -162,6 +169,42 @@ function App() {
               Scale to Fit
             </label>
           </div>
+
+          <div className="zoom-control">
+            <label>
+              Custom Zoom: {customScale}%
+              <input
+                type="range"
+                min="25"
+                max="200"
+                step="5"
+                value={customScale}
+                onChange={(e) => {
+                  const scale = parseInt(e.target.value);
+                  setCustomScale(scale);
+                  if (canvasRef.current) {
+                    canvasRef.current.style.transform = `scale(${scale / 100})`;
+                    canvasRef.current.style.transformOrigin = 'top left';
+                  }
+                }}
+                disabled={!connected || scaleViewport}
+                style={{ width: '200px', marginLeft: '10px' }}
+              />
+            </label>
+            <button
+              onClick={() => {
+                setCustomScale(100);
+                if (canvasRef.current) {
+                  canvasRef.current.style.transform = 'scale(1)';
+                }
+              }}
+              disabled={!connected || scaleViewport}
+              className="btn-secondary"
+              style={{ marginLeft: '10px' }}
+            >
+              Reset Zoom
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -181,6 +224,9 @@ function App() {
           className="vnc-canvas"
           style={{
             cursor: connected ? 'default' : 'wait',
+            transform: !scaleViewport ? `scale(${customScale / 100})` : 'none',
+            transformOrigin: 'top left',
+            transition: 'transform 0.2s ease',
           }}
         />
 
