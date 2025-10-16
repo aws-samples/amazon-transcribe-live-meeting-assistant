@@ -2518,6 +2518,25 @@ Resources:
             $util.qr( $expValues.put(":CallId", $util.dynamodb.toDynamoDB($ctx.args.input.CallId)) )
         #end
         
+        ## Add VNC fields if provided **
+        #if( !$util.isNullOrBlank($ctx.args.input.vncEndpoint) )
+            $util.qr( $expSet.put("#vncEndpoint", ":vncEndpoint") )
+            $util.qr( $expNames.put("#vncEndpoint", "vncEndpoint") )
+            $util.qr( $expValues.put(":vncEndpoint", $util.dynamodb.toDynamoDB($ctx.args.input.vncEndpoint)) )
+        #end
+        
+        #if( !$util.isNull($ctx.args.input.vncPort) )
+            $util.qr( $expSet.put("#vncPort", ":vncPort") )
+            $util.qr( $expNames.put("#vncPort", "vncPort") )
+            $util.qr( $expValues.put(":vncPort", $util.dynamodb.toDynamoDB($ctx.args.input.vncPort)) )
+        #end
+        
+        #if( !$util.isNull($ctx.args.input.vncReady) )
+            $util.qr( $expSet.put("#vncReady", ":vncReady") )
+            $util.qr( $expNames.put("#vncReady", "vncReady") )
+            $util.qr( $expValues.put(":vncReady", $util.dynamodb.toDynamoDB($ctx.args.input.vncReady)) )
+        #end
+        
         
         ## Build the SET expression **
         #set( $expression = "SET" )

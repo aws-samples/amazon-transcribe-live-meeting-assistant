@@ -244,29 +244,6 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
-  # VNC/noVNC Parameters (passed from parent stack)
-  CognitoUserPoolArn:
-    Type: String
-    Description: >-
-      ARN of Cognito User Pool for VNC authentication.
-
-  CognitoUserPoolClientId:
-    Type: String
-    Description: >-
-      Cognito User Pool Client ID for VNC authentication.
-
-  CognitoUserPoolDomain:
-    Type: String
-    Description: >-
-      Cognito User Pool Domain for VNC authentication.
-
-  PublicSubnet1:
-    Description: Public subnet 1 for ALB
-    Type: String
-
-  PublicSubnet2:
-    Description: Public subnet 2 for ALB
-    Type: String
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -275,146 +252,20 @@ Conditions:
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
 
 Resources:
+  # ECS Security Group - No ingress rules by default
+  # IP whitelisting will be done dynamically via Lambda when user requests VNC access
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Websocket-fargate/service/Service/SecurityGroup
+      GroupDescription: Security group for Virtual Participant ECS tasks
       SecurityGroupEgress:
         - CidrIp: 0.0.0.0/0
           Description: Allow all outbound traffic by default
           IpProtocol: "-1"
       VpcId: !Ref VPC
-
-  # Network Load Balancer for VNC (internal, in private subnets)
-  VNCNetworkLoadBalancer:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Name: !Sub ${AWS::StackName}-vnc-nlb
-      Type: network
-      Scheme: internal
-      IpAddressType: ipv4
-      Subnets:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
       Tags:
         - Key: Name
-          Value: !Sub ${AWS::StackName}-vnc-nlb
-
-  # NLB Target Group for VNC WebSocket
-  VNCTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: !Sub ${AWS::StackName}-vnc-tg
-      Port: 5901
-      Protocol: TCP
-      TargetType: ip
-      VpcId: !Ref VPC
-      HealthCheckEnabled: true
-      HealthCheckProtocol: TCP
-      HealthCheckIntervalSeconds: 30
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 2
-      TargetGroupAttributes:
-        - Key: deregistration_delay.timeout_seconds
-          Value: '30'
-        - Key: preserve_client_ip.enabled
-          Value: 'true'
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-vnc-tg
-
-  # NLB Listener
-  VNCNLBListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref VNCNetworkLoadBalancer
-      Port: 5901
-      Protocol: TCP
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref VNCTargetGroup
-
-  # VPC Link for API Gateway to access private NLB
-  VNCVpcLink:
-    Type: AWS::ApiGatewayV2::VpcLink
-    Properties:
-      Name: !Sub ${AWS::StackName}-vnc-vpclink
-      SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
-      Tags:
-        Name: !Sub ${AWS::StackName}-vnc-vpclink
-
-  # API Gateway WebSocket API (with AWS-managed SSL certificate)
-  VNCWebSocketApi:
-    Type: AWS::ApiGatewayV2::Api
-    Properties:
-      Name: !Sub ${AWS::StackName}-vnc-websocket
-      ProtocolType: WEBSOCKET
-      RouteSelectionExpression: $request.body.action
-      Tags:
-        Name: !Sub ${AWS::StackName}-vnc-websocket
-
-  # API Gateway Integration to NLB
-  VNCWebSocketIntegration:
-    Type: AWS::ApiGatewayV2::Integration
-    Properties:
-      ApiId: !Ref VNCWebSocketApi
-      IntegrationType: HTTP_PROXY
-      IntegrationUri: !Sub "http://${VNCNetworkLoadBalancer.DNSName}:5901"
-      IntegrationMethod: ANY
-      ConnectionType: VPC_LINK
-      ConnectionId: !Ref VNCVpcLink
-      PayloadFormatVersion: "1.0"
-
-  # Default route (forwards all WebSocket traffic)
-  VNCWebSocketDefaultRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref VNCWebSocketApi
-      RouteKey: $default
-      Target: !Sub "integrations/${VNCWebSocketIntegration}"
-      AuthorizationType: AWS_IAM
-
-  # Connect route
-  VNCWebSocketConnectRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref VNCWebSocketApi
-      RouteKey: $connect
-      Target: !Sub "integrations/${VNCWebSocketIntegration}"
-      AuthorizationType: AWS_IAM
-
-  # Disconnect route
-  VNCWebSocketDisconnectRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref VNCWebSocketApi
-      RouteKey: $disconnect
-      Target: !Sub "integrations/${VNCWebSocketIntegration}"
-
-  # API Gateway Deployment
-  VNCWebSocketDeployment:
-    Type: AWS::ApiGatewayV2::Deployment
-    DependsOn:
-      - VNCWebSocketDefaultRoute
-      - VNCWebSocketConnectRoute
-      - VNCWebSocketDisconnectRoute
-    Properties:
-      ApiId: !Ref VNCWebSocketApi
-
-  # API Gateway Stage
-  VNCWebSocketStage:
-    Type: AWS::ApiGatewayV2::Stage
-    Properties:
-      ApiId: !Ref VNCWebSocketApi
-      DeploymentId: !Ref VNCWebSocketDeployment
-      StageName: prod
-      DefaultRouteSettings:
-        ThrottlingBurstLimit: 500
-        ThrottlingRateLimit: 1000
-      Tags:
-        Name: !Sub ${AWS::StackName}-vnc-stage
+          Value: !Sub ${LMAStackName}-vp-sg
 
   LogsPolicy:
     Type: "AWS::IAM::ManagedPolicy"
@@ -819,6 +670,18 @@ Resources:
                   - "dynamodb:UpdateItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+        - PolicyName: ECSDescribePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ecs:DescribeTasks"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "ec2:DescribeNetworkInterfaces"
+                Resource: "*"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -927,8 +790,6 @@ Resources:
               Value: !Ref VPTaskRegistryTableName
             - Name: ENABLE_AUDIO_RECORDING
               Value: !Ref EnableAudioRecording
-            - Name: VNC_WEBSOCKET_URL
-              Value: !Sub "wss://${VNCWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:
@@ -1195,7 +1056,7 @@ Resources:
                   "LaunchType": "FARGATE",
                   "NetworkConfiguration": {
                     "AwsvpcConfiguration": {
-                      "AssignPublicIp": "DISABLED",
+                      "AssignPublicIp": "ENABLED",
                       "SecurityGroups": [
                         "${SecurityGroup}"
                       ],
@@ -1391,7 +1252,6 @@ Resources:
       LCASettingsKeyValuePairs:
         LMAVirtualParticipantSchedulerStateMachine:
           !GetAtt [LMAVirtualParticipantSchedulerStateMachine, Arn]
-        VNCWebSocketURL: !Sub "wss://${VNCWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
@@ -1421,31 +1281,7 @@ Outputs:
       Name: !Sub "${AWS::StackName}-ECRRepositoryUri"
 
   SecurityGroupId:
-    Description: Security Group ID
+    Description: Security Group ID for Virtual Participant ECS tasks - manually whitelist IPs for VNC access on port 5901
     Value: !Ref SecurityGroup
     Export:
       Name: !Sub "${AWS::StackName}-SecurityGroupId"
-
-  VNCWebSocketApiId:
-    Description: API Gateway WebSocket API ID
-    Value: !Ref VNCWebSocketApi
-    Export:
-      Name: !Sub "${AWS::StackName}-VNCWebSocketApiId"
-
-  VNCWebSocketURL:
-    Description: WebSocket URL for noVNC connections (use this in UI) - includes AWS-managed SSL certificate
-    Value: !Sub "wss://${VNCWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
-    Export:
-      Name: !Sub "${AWS::StackName}-VNCWebSocketURL"
-
-  VNCNetworkLoadBalancerDNS:
-    Description: DNS name of the VNC Network Load Balancer (internal)
-    Value: !GetAtt VNCNetworkLoadBalancer.DNSName
-    Export:
-      Name: !Sub "${AWS::StackName}-VNCNetworkLoadBalancerDNS"
-
-  VNCTargetGroupArn:
-    Description: ARN of the VNC Target Group
-    Value: !Ref VNCTargetGroup
-    Export:
-      Name: !Sub "${AWS::StackName}-VNCTargetGroupArn"

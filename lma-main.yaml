@@ -2131,17 +2131,6 @@ Resources:
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.PrivateSubnet2
           - !Ref PrivateSubnet2
-        PublicSubnet1: !If
-          - ShouldCreateVPC
-          - !GetAtt VPCSTACK.Outputs.PublicSubnet1
-          - !Ref PublicSubnet1
-        PublicSubnet2: !If
-          - ShouldCreateVPC
-          - !GetAtt VPCSTACK.Outputs.PublicSubnet2
-          - !Ref PublicSubnet2
-        CognitoUserPoolArn: !GetAtt COGNITOSTACK.Outputs.UserPoolArn
-        CognitoUserPoolClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
-        CognitoUserPoolDomain: !GetAtt COGNITOSTACK.Outputs.CognitoUserPoolDomain
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack

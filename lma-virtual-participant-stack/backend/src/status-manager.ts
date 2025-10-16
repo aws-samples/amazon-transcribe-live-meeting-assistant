@@ -76,13 +76,16 @@ export class VirtualParticipantStatusManager {
 
   async updateStatus(status: string, errorMessage?: string): Promise<boolean> {
     try {
-      // First, get the current VP to preserve existing CallId
+      // First, get the current VP to preserve existing CallId and VNC fields
       const getQuery = `
         query GetVirtualParticipant($id: ID!) {
           getVirtualParticipant(id: $id) {
             id
             status
             CallId
+            vncEndpoint
+            vncPort
+            vncReady
           }
         }
       `;
@@ -96,16 +99,20 @@ export class VirtualParticipantStatusManager {
         return false;
       }
 
-      const currentCallId = currentVP.getVirtualParticipant.CallId;
-      console.log(`Preserving CallId: ${currentCallId} while updating status to ${status}`);
+      const current = currentVP.getVirtualParticipant;
+      console.log(`Current VP state from query:`, JSON.stringify(current, null, 2));
+      console.log(`Preserving CallId: ${current.CallId}, VNC fields while updating status to ${status}`);
 
-      // Update with new status while preserving CallId
+      // Update with new status while preserving CallId and VNC fields
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
           updateVirtualParticipant(input: $input) {
             id
             status
             CallId
+            vncEndpoint
+            vncPort
+            vncReady
             updatedAt
           }
         }
@@ -118,10 +125,18 @@ export class VirtualParticipantStatusManager {
         }
       };
 
-      // Include CallId if it exists
-      if (currentCallId) {
-        variables.input.CallId = currentCallId;
-        console.log(`Including CallId in update: ${currentCallId}`);
+      // Preserve CallId if it exists
+      if (current.CallId) {
+        variables.input.CallId = current.CallId;
+        console.log(`Including CallId in update: ${current.CallId}`);
+      }
+
+      // Preserve VNC fields if they exist
+      if (current.vncEndpoint) {
+        variables.input.vncEndpoint = current.vncEndpoint;
+        variables.input.vncPort = current.vncPort;
+        variables.input.vncReady = current.vncReady;
+        console.log(`Preserving VNC fields: ${current.vncEndpoint}:${current.vncPort}, ready: ${current.vncReady}`);
       }
 
       if (status === 'FAILED' && errorMessage) {
@@ -131,7 +146,7 @@ export class VirtualParticipantStatusManager {
       const result = await this.signAndSendGraphQLRequest(mutation, variables);
       
       if (result) {
-        console.log(`Successfully updated VP ${this.participantId} status to ${status} with preserved CallId: ${currentCallId}`);
+        console.log(`Successfully updated VP ${this.participantId} status to ${status} with preserved fields`);
         return true;
       } else {
         console.error('Failed to update VP status via GraphQL');
@@ -146,9 +161,9 @@ export class VirtualParticipantStatusManager {
 
   async storeTaskArnInRegistry(): Promise<void> {
     try {
-      console.log(`Storing task ARN for VP ${this.participantId} in registry...`);
+      console.log(`Storing task ARN and VNC endpoint for VP ${this.participantId} in registry...`);
 
-      // Get task ARN from ECS metadata endpoint
+      // Get task ARN and private IP from ECS metadata endpoint
       const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
       if (!metadataUri) {
         console.log('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
@@ -176,6 +191,19 @@ export class VirtualParticipantStatusManager {
         return;
       }
 
+      // Extract private IP from task metadata
+      let taskPrivateIp = null;
+      if (metadata.Containers && metadata.Containers.length > 0) {
+        const container = metadata.Containers[0];
+        if (container.Networks && container.Networks.length > 0) {
+          const network = container.Networks[0];
+          if (network.IPv4Addresses && network.IPv4Addresses.length > 0) {
+            taskPrivateIp = network.IPv4Addresses[0];
+            console.log(`Task private IP: ${taskPrivateIp}`);
+          }
+        }
+      }
+
       // Store in VPTaskRegistry table
       const registryTableName = details.vpTaskRegistryTableName;
       if (!registryTableName) {
@@ -188,21 +216,31 @@ export class VirtualParticipantStatusManager {
       // Calculate expiry time (24 hours from now)
       const expiryTime = Math.floor(Date.now() / 1000) + 86400;
 
+      const updateExpression = taskPrivateIp 
+        ? 'SET taskArn = :taskArn, clusterArn = :clusterArn, createdAt = :createdAt, taskStatus = :taskStatus, expiresAt = :expiresAt, vncEndpoint = :vncEndpoint'
+        : 'SET taskArn = :taskArn, clusterArn = :clusterArn, createdAt = :createdAt, taskStatus = :taskStatus, expiresAt = :expiresAt';
+
+      const expressionValues: any = {
+        ':taskArn': taskArn,
+        ':clusterArn': clusterArn,
+        ':createdAt': new Date().toISOString(),
+        ':taskStatus': 'RUNNING',
+        ':expiresAt': expiryTime,
+      };
+
+      if (taskPrivateIp) {
+        expressionValues[':vncEndpoint'] = taskPrivateIp;
+      }
+
       const putCommand = new UpdateItemCommand({
         TableName: registryTableName,
         Key: marshall({ vpId: this.participantId }),
-        UpdateExpression: 'SET taskArn = :taskArn, clusterArn = :clusterArn, createdAt = :createdAt, taskStatus = :taskStatus, expiresAt = :expiresAt',
-        ExpressionAttributeValues: marshall({
-          ':taskArn': taskArn,
-          ':clusterArn': clusterArn,
-          ':createdAt': new Date().toISOString(),
-          ':taskStatus': 'RUNNING',
-          ':expiresAt': expiryTime,
-        }),
+        UpdateExpression: updateExpression,
+        ExpressionAttributeValues: marshall(expressionValues),
       });
 
       await this.dynamoClient.send(putCommand);
-      console.log(`✓ Successfully stored task ARN in registry for VP ${this.participantId}`);
+      console.log(`✓ Successfully stored task ARN and VNC endpoint in registry for VP ${this.participantId}`);
 
     } catch (error) {
       console.error('Error storing task ARN in registry:', error);
@@ -287,17 +325,116 @@ export class VirtualParticipantStatusManager {
   }
 
   /**
-   * Publish VNC endpoint information via AppSync
-   * The vncEndpoint will contain the full API Gateway WebSocket URL
+   * Get the task's public IP address by querying ECS API
+   * This requires the task to have AssignPublicIp: ENABLED
    */
-  async setVncReady(endpoint: string, port: number = 5901, password?: string): Promise<boolean> {
+  async getTaskPublicIp(): Promise<string | null> {
     try {
-      // Get API Gateway WebSocket URL from LMA Settings
-      const vncWebSocketUrl = process.env.VNC_WEBSOCKET_URL || '';
+      const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
+      if (!metadataUri) {
+        console.log('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
+        return null;
+      }
+
+      // Get task ARN from metadata
+      const taskMetadataUrl = `${metadataUri}/task`;
+      const response = await fetch(taskMetadataUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch task metadata: ${response.status}`);
+      }
+
+      const metadata = await response.json();
+      const taskArn = metadata.TaskARN;
+      const clusterArn = metadata.Cluster;
+
+      if (!taskArn || !clusterArn) {
+        console.log('Could not get task ARN or cluster ARN from metadata');
+        return null;
+      }
+
+      // Query ECS API to get task details including public IP
+      const { ECSClient, DescribeTasksCommand } = await import('@aws-sdk/client-ecs');
+      const ecsClient = new ECSClient({ region: this.awsRegion });
+
+      const describeCommand = new DescribeTasksCommand({
+        cluster: clusterArn,
+        tasks: [taskArn],
+        include: ['TAGS']
+      });
+
+      const describeResponse = await ecsClient.send(describeCommand);
+      
+      if (!describeResponse.tasks || describeResponse.tasks.length === 0) {
+        console.log('No task found in ECS describe response');
+        return null;
+      }
+
+      const task = describeResponse.tasks[0];
+      
+      // Extract public IP from attachments
+      // For Fargate with public IP, it's in attachments with type "ElasticNetworkInterface"
+      if (task.attachments) {
+        for (const attachment of task.attachments) {
+          if (attachment.type === 'ElasticNetworkInterface' && attachment.details) {
+            for (const detail of attachment.details) {
+              if (detail.name === 'networkInterfaceId' && detail.value) {
+                const eniId = detail.value;
+                console.log(`Found ENI: ${eniId}`);
+                
+                // Query EC2 to get public IP from ENI
+                const { EC2Client, DescribeNetworkInterfacesCommand } = await import('@aws-sdk/client-ec2');
+                const ec2Client = new EC2Client({ region: this.awsRegion });
+                
+                const eniCommand = new DescribeNetworkInterfacesCommand({
+                  NetworkInterfaceIds: [eniId]
+                });
+                
+                const eniResponse = await ec2Client.send(eniCommand);
+                
+                if (eniResponse.NetworkInterfaces && eniResponse.NetworkInterfaces.length > 0) {
+                  const eni = eniResponse.NetworkInterfaces[0];
+                  const publicIp = eni.Association?.PublicIp;
+                  
+                  if (publicIp) {
+                    console.log(`✓ Task public IP: ${publicIp}`);
+                    return publicIp;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      console.log('No public IP found for task');
+      return null;
+    } catch (error) {
+      console.error('Failed to get task public IP:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Publish VNC endpoint information via AppSync
+   * For direct connection: publishes the task's public IP
+   * For ALB: publishes the ALB DNS name
+   */
+  async setVncReady(endpoint?: string, port: number = 5901, password?: string): Promise<boolean> {
+    try {
+      // If no endpoint provided, try to get the task's public IP
+      let vncEndpoint: string | null = endpoint || null;
+      if (!vncEndpoint) {
+        console.log('No endpoint provided, attempting to get task public IP...');
+        vncEndpoint = await this.getTaskPublicIp();
+        
+        if (!vncEndpoint) {
+          console.error('Failed to get task public IP');
+          return false;
+        }
+      }
       
       console.log(`Publishing VNC endpoint for VP ${this.participantId}`);
-      console.log(`Task IP: ${endpoint}:${port}`);
-      console.log(`WebSocket URL: ${vncWebSocketUrl}`);
+      console.log(`VNC Endpoint: ${vncEndpoint}:${port}`);
 
       // First, get the current VP to preserve existing fields
       const getQuery = `
@@ -338,7 +475,7 @@ export class VirtualParticipantStatusManager {
       const variables: any = {
         input: {
           id: this.participantId,
-          vncEndpoint: vncWebSocketUrl || `${endpoint}:${port}`, // Use WebSocket URL if available, fallback to IP:port
+          vncEndpoint: vncEndpoint, // Public IP or ALB DNS
           vncPort: port,
           vncReady: true,
           status: 'VNC_READY', // Optional intermediate status
@@ -355,10 +492,12 @@ export class VirtualParticipantStatusManager {
         variables.input.vncPassword = password;
       }
 
+      console.log('Sending VNC mutation with variables:', JSON.stringify(variables, null, 2));
       const result = await this.signAndSendGraphQLRequest(mutation, variables);
+      console.log('VNC mutation result:', JSON.stringify(result, null, 2));
       
       if (result) {
-        console.log(`✓ Successfully published VNC endpoint: ${vncWebSocketUrl || endpoint + ':' + port}`);
+        console.log(`✓ Successfully published VNC endpoint: ${vncEndpoint}:${port}`);
         return true;
       } else {
         console.error('Failed to publish VNC endpoint via GraphQL');

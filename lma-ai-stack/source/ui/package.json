@@ -21,7 +21,7 @@
     "@awsui/collection-hooks": "^1.0.25",
     "@awsui/components-react": "^3.0.496",
     "@awsui/global-styles": "^1.0.14",
-    "@novnc/novnc": "^1.4.0",
+    "@novnc/novnc": "1.5.0",
     "@testing-library/jest-dom": "^5.16.4",
     "@testing-library/react": "^12.1.5",
     "@testing-library/user-event": "^13.5.0",

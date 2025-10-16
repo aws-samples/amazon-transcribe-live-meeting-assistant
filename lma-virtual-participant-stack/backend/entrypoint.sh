@@ -16,17 +16,15 @@ echo "Starting window manager (Fluxbox)..."
 fluxbox > /dev/null 2>&1 &
 
 echo "Starting VNC server with WebSocket support..."
-# Use websockify wrapper for better WebSocket compatibility with noVNC
-/usr/share/novnc/utils/websockify/run \
-    --web /usr/share/novnc \
-    --wrap-mode=ignore \
-    5901 \
-    -- \
-    x11vnc \
+# Run x11vnc with built-in WebSocket support on port 5901
+# -httpport enables WebSocket connections (noVNC can connect directly)
+x11vnc \
     -display :99 \
     -forever \
     -shared \
-    -rfbport 5900 \
+    -rfbport 5901 \
+    -httpport 5901 \
+    -http_oneport \
     -nopw \
     -xkb \
     -cursor arrow \
@@ -35,7 +33,8 @@ echo "Starting VNC server with WebSocket support..."
     -speeds lan \
     -wait 10 \
     -defer 10 \
-    > /var/log/x11vnc.log 2>&1 &
+    -noxdamage \
+    > /tmp/x11vnc.log 2>&1 &
 
 VNC_PID=$!
 echo "VNC server started with PID: $VNC_PID"
@@ -62,7 +61,10 @@ done
 
 if [ "$VNC_READY" = false ]; then
     echo "ERROR: VNC server failed to start within timeout"
-    cat /var/log/x11vnc.log
+    echo "=== VNC Server Log ==="
+    cat /tmp/x11vnc.log 2>/dev/null || echo "No log file found"
+    echo "=== Process List ==="
+    ps aux | grep -E "(x11vnc|websockify|Xvfb)" || echo "No VNC processes found"
     exit 1
 fi
 

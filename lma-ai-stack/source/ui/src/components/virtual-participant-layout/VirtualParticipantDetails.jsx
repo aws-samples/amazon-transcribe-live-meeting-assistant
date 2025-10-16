@@ -413,34 +413,57 @@ const VirtualParticipantDetails = () => {
   useEffect(() => {
     if (!vpId) return undefined;
 
+    console.log('=== Setting up AppSync subscription for VP:', vpId);
     const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipantDetailed)).subscribe({
       next: ({ value }) => {
+        console.log('=== AppSync subscription received update ===');
+        console.log('Raw value:', JSON.stringify(value, null, 2));
+
         const updated = value?.data?.onUpdateVirtualParticipant;
+        console.log('Parsed update:', updated);
+
         if (updated && updated.id === vpId) {
+          console.log('Update is for our VP:', vpId);
+          console.log('VNC fields in update:', {
+            vncEndpoint: updated.vncEndpoint,
+            vncPort: updated.vncPort,
+            vncReady: updated.vncReady,
+          });
+
           // Update local state, no notifications (VirtualParticipantList handles notifications), including VNC
-          setVpDetails((prev) => ({
-            ...prev,
-            status: updated.status,
-            updatedAt: updated.updatedAt,
-            CallId: updated.CallId || prev?.CallId,
-            vncEndpoint: updated.vncEndpoint || prev?.vncEndpoint,
-            vncPort: updated.vncPort || prev?.vncPort,
-            vncReady: updated.vncReady !== undefined ? updated.vncReady : prev?.vncReady,
-          }));
+          setVpDetails((prev) => {
+            const newState = {
+              ...prev,
+              status: updated.status,
+              updatedAt: updated.updatedAt,
+              CallId: updated.CallId || prev?.CallId,
+              vncEndpoint: updated.vncEndpoint || prev?.vncEndpoint,
+              vncPort: updated.vncPort || prev?.vncPort,
+              vncReady: updated.vncReady !== undefined ? updated.vncReady : prev?.vncReady,
+            };
+            console.log('Updated VP state:', newState);
+            return newState;
+          });
 
           // Log VNC updates
           if (updated.vncReady && updated.vncEndpoint) {
-            console.log('VNC endpoint received:', updated.vncEndpoint, 'Port:', updated.vncPort);
+            console.log('✓ VNC is ready! Endpoint:', updated.vncEndpoint, 'Port:', updated.vncPort);
           }
+        } else {
+          console.log('Update is NOT for our VP. Update ID:', updated?.id, 'Our ID:', vpId);
         }
       },
       error: (err) => {
+        console.error('=== AppSync subscription error ===', err);
         logger.error('Subscription error:', err);
         // Don't retry on subscription errors to avoid infinite loops
       },
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      console.log('=== Unsubscribing from AppSync for VP:', vpId);
+      subscription.unsubscribe();
+    };
   }, [vpId]);
 
   const handleRefresh = () => {

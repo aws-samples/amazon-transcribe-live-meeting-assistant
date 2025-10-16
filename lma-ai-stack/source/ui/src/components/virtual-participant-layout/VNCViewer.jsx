@@ -5,8 +5,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
-// eslint-disable-next-line import/no-unresolved
-import RFB from '@novnc/novnc/core/rfb';
+import RFB from '@novnc/novnc/lib/rfb';
 import { Container, Header, SpaceBetween, Alert, Spinner, Box, Button, Toggle, Badge } from '@awsui/components-react';
 
 const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
@@ -19,17 +18,19 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
   const [scaleViewport, setScaleViewport] = useState(true);
 
   useEffect(() => {
-    if (!canvasRef.current || !vncEndpoint || !websocketUrl) return undefined;
+    if (!canvasRef.current || !vpId || !vncEndpoint) return undefined;
 
     setConnecting(true);
     setError(null);
 
-    // Use API Gateway WebSocket URL (includes AWS-managed SSL certificate)
-    // Format: wss://{api-id}.execute-api.{region}.amazonaws.com/prod
-    const wsUrl = websocketUrl;
+    // Direct connection to ECS task public IP with x11vnc WebSocket support
+    // Format: ws://{public-ip}:5901 (no TLS for initial validation)
+    // For production with ALB: wss://{alb-dns}:443
+    const wsUrl = `ws://${vncEndpoint}:5901`;
 
-    console.log('Connecting to VNC via API Gateway:', wsUrl);
-    console.log('Target endpoint:', vncEndpoint);
+    console.log('Connecting to VNC directly to ECS task:', wsUrl);
+    console.log('Virtual Participant ID:', vpId);
+    console.log('VNC Endpoint:', vncEndpoint);
 
     try {
       const rfb = new RFB(canvasRef.current, wsUrl, {
