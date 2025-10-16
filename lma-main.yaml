@@ -2123,6 +2123,14 @@ Resources:
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.VPC
           - !Ref VPC
+        PublicSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet1
+          - !Ref PublicSubnet1
+        PublicSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet2
+          - !Ref PublicSubnet2
         PrivateSubnet1: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.PrivateSubnet1

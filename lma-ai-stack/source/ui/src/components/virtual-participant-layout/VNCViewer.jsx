@@ -19,19 +19,17 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
   const [customScale, setCustomScale] = useState(100);
 
   useEffect(() => {
-    if (!canvasRef.current || !vpId || !vncEndpoint) return undefined;
+    if (!canvasRef.current || !vpId || !websocketUrl) return undefined;
 
     setConnecting(true);
     setError(null);
 
-    // Direct connection to ECS task public IP with x11vnc WebSocket support
-    // Format: ws://{public-ip}:5901 (no TLS for initial validation)
-    // For production with ALB: wss://{alb-dns}:443
-    const wsUrl = `ws://${vncEndpoint}:5901`;
+    // Connect via ALB with secure WebSocket (wss://)
+    // The websocketUrl comes from LMA Settings (VNCWebSocketURL)
+    const wsUrl = websocketUrl;
 
-    console.log('Connecting to VNC directly to ECS task:', wsUrl);
+    console.log('Connecting to VNC via ALB:', wsUrl);
     console.log('Virtual Participant ID:', vpId);
-    console.log('VNC Endpoint:', vncEndpoint);
 
     try {
       const rfb = new RFB(canvasRef.current, wsUrl, {

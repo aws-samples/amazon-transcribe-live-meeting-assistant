@@ -324,113 +324,19 @@ export class VirtualParticipantStatusManager {
     }
   }
 
-  /**
-   * Get the task's public IP address by querying ECS API
-   * This requires the task to have AssignPublicIp: ENABLED
-   */
-  async getTaskPublicIp(): Promise<string | null> {
-    try {
-      const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
-      if (!metadataUri) {
-        console.log('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
-        return null;
-      }
-
-      // Get task ARN from metadata
-      const taskMetadataUrl = `${metadataUri}/task`;
-      const response = await fetch(taskMetadataUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch task metadata: ${response.status}`);
-      }
-
-      const metadata = await response.json();
-      const taskArn = metadata.TaskARN;
-      const clusterArn = metadata.Cluster;
-
-      if (!taskArn || !clusterArn) {
-        console.log('Could not get task ARN or cluster ARN from metadata');
-        return null;
-      }
-
-      // Query ECS API to get task details including public IP
-      const { ECSClient, DescribeTasksCommand } = await import('@aws-sdk/client-ecs');
-      const ecsClient = new ECSClient({ region: this.awsRegion });
-
-      const describeCommand = new DescribeTasksCommand({
-        cluster: clusterArn,
-        tasks: [taskArn],
-        include: ['TAGS']
-      });
-
-      const describeResponse = await ecsClient.send(describeCommand);
-      
-      if (!describeResponse.tasks || describeResponse.tasks.length === 0) {
-        console.log('No task found in ECS describe response');
-        return null;
-      }
-
-      const task = describeResponse.tasks[0];
-      
-      // Extract public IP from attachments
-      // For Fargate with public IP, it's in attachments with type "ElasticNetworkInterface"
-      if (task.attachments) {
-        for (const attachment of task.attachments) {
-          if (attachment.type === 'ElasticNetworkInterface' && attachment.details) {
-            for (const detail of attachment.details) {
-              if (detail.name === 'networkInterfaceId' && detail.value) {
-                const eniId = detail.value;
-                console.log(`Found ENI: ${eniId}`);
-                
-                // Query EC2 to get public IP from ENI
-                const { EC2Client, DescribeNetworkInterfacesCommand } = await import('@aws-sdk/client-ec2');
-                const ec2Client = new EC2Client({ region: this.awsRegion });
-                
-                const eniCommand = new DescribeNetworkInterfacesCommand({
-                  NetworkInterfaceIds: [eniId]
-                });
-                
-                const eniResponse = await ec2Client.send(eniCommand);
-                
-                if (eniResponse.NetworkInterfaces && eniResponse.NetworkInterfaces.length > 0) {
-                  const eni = eniResponse.NetworkInterfaces[0];
-                  const publicIp = eni.Association?.PublicIp;
-                  
-                  if (publicIp) {
-                    console.log(`✓ Task public IP: ${publicIp}`);
-                    return publicIp;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-
-      console.log('No public IP found for task');
-      return null;
-    } catch (error) {
-      console.error('Failed to get task public IP:', error);
-      return null;
-    }
-  }
 
   /**
    * Publish VNC endpoint information via AppSync
-   * For direct connection: publishes the task's public IP
-   * For ALB: publishes the ALB DNS name
+   * Uses ALB DNS from VNC_ALB_DNS environment variable
    */
-  async setVncReady(endpoint?: string, port: number = 5901, password?: string): Promise<boolean> {
+  async setVncReady(endpoint?: string, port: number = 443, password?: string): Promise<boolean> {
     try {
-      // If no endpoint provided, try to get the task's public IP
-      let vncEndpoint: string | null = endpoint || null;
+      // Get ALB DNS from environment variable (set by CloudFormation)
+      const vncEndpoint = endpoint || process.env.VNC_ALB_DNS;
+      
       if (!vncEndpoint) {
-        console.log('No endpoint provided, attempting to get task public IP...');
-        vncEndpoint = await this.getTaskPublicIp();
-        
-        if (!vncEndpoint) {
-          console.error('Failed to get task public IP');
-          return false;
-        }
+        console.error('VNC endpoint not provided and VNC_ALB_DNS environment variable not set');
+        return false;
       }
       
       console.log(`Publishing VNC endpoint for VP ${this.participantId}`);

@@ -51,6 +51,14 @@ Parameters:
     Description: Private subnet 2 for Fargate
     Type: String
 
+  PublicSubnet1:
+    Description: Public subnet 1 for ALB
+    Type: String
+
+  PublicSubnet2:
+    Description: Public subnet 2 for ALB
+    Type: String
+
   LMASettingsParameterName:
     Type: String
     Description: LCA settings SSM Parameter store
@@ -252,12 +260,39 @@ Conditions:
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
 
 Resources:
-  # ECS Security Group - No ingress rules by default
-  # IP whitelisting will be done dynamically via Lambda when user requests VNC access
+  # ALB Security Group - No ingress rules by default (manually add your IP for testing)
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for VNC Application Load Balancer
+      VpcId: !Ref VPC
+      # SecurityGroupIngress:
+      #   - IpProtocol: tcp
+      #     FromPort: 443
+      #     ToPort: 443
+      #     CidrIp: 0.0.0.0/0
+      #     Description: Allow HTTPS for WSS connections
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 5901
+          ToPort: 5901
+          DestinationSecurityGroupId: !Ref SecurityGroup
+          Description: Allow traffic to ECS tasks on websockify port
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-alb-sg
+
+  # ECS Security Group - Allow traffic from ALB only
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Security group for Virtual Participant ECS tasks
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5901
+          ToPort: 5901
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Allow websockify traffic from ALB
       SecurityGroupEgress:
         - CidrIp: 0.0.0.0/0
           Description: Allow all outbound traffic by default
@@ -266,6 +301,74 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${LMAStackName}-vp-sg
+
+  ### VNC Application Load Balancer Resources ###
+
+  # Self-signed certificate for ALB HTTPS listener
+  VNCALBCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub "${LMAStackName}-vnc-alb.local"
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Sub "${LMAStackName}-vnc-alb.local"
+          HostedZoneId: !Ref AWS::NoValue
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-vnc-cert
+
+  # Application Load Balancer
+  VNCALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${LMAStackName}-vnc-alb
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-vnc-alb
+
+  # Target Group for ECS tasks
+  VNCTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${LMAStackName}-vnc-tg
+      Port: 5901
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: "30"
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-vnc-tg
+
+  # HTTPS Listener
+  VNCALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref VNCALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref VNCALBCertificate
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref VNCTargetGroup
 
   LogsPolicy:
     Type: "AWS::IAM::ManagedPolicy"
@@ -670,18 +773,6 @@ Resources:
                   - "dynamodb:UpdateItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
-        - PolicyName: ECSDescribePolicy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "ecs:DescribeTasks"
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - "ec2:DescribeNetworkInterfaces"
-                Resource: "*"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -790,6 +881,8 @@ Resources:
               Value: !Ref VPTaskRegistryTableName
             - Name: ENABLE_AUDIO_RECORDING
               Value: !Ref EnableAudioRecording
+            - Name: VNC_ALB_DNS
+              Value: !GetAtt VNCALB.DNSName
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:
@@ -1056,7 +1149,7 @@ Resources:
                   "LaunchType": "FARGATE",
                   "NetworkConfiguration": {
                     "AwsvpcConfiguration": {
-                      "AssignPublicIp": "ENABLED",
+                      "AssignPublicIp": "DISABLED",
                       "SecurityGroups": [
                         "${SecurityGroup}"
                       ],
@@ -1252,6 +1345,7 @@ Resources:
       LCASettingsKeyValuePairs:
         LMAVirtualParticipantSchedulerStateMachine:
           !GetAtt [LMAVirtualParticipantSchedulerStateMachine, Arn]
+        VNCWebSocketURL: !Sub "wss://${VNCALB.DNSName}"
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
@@ -1281,7 +1375,25 @@ Outputs:
       Name: !Sub "${AWS::StackName}-ECRRepositoryUri"
 
   SecurityGroupId:
-    Description: Security Group ID for Virtual Participant ECS tasks - manually whitelist IPs for VNC access on port 5901
+    Description: Security Group ID for Virtual Participant ECS tasks
     Value: !Ref SecurityGroup
     Export:
       Name: !Sub "${AWS::StackName}-SecurityGroupId"
+
+  ALBSecurityGroupId:
+    Description: Security Group ID for VNC ALB - manually add your IP for HTTPS (port 443) access
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-ALBSecurityGroupId"
+
+  VNCALBDNS:
+    Description: VNC ALB DNS name - use wss://<this-dns> for secure WebSocket connections
+    Value: !GetAtt VNCALB.DNSName
+    Export:
+      Name: !Sub "${AWS::StackName}-VNCALBDNS"
+
+  VNCWebSocketURL:
+    Description: Complete WSS URL for noVNC connections
+    Value: !Sub "wss://${VNCALB.DNSName}"
+    Export:
+      Name: !Sub "${AWS::StackName}-VNCWebSocketURL"

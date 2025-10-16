@@ -99,18 +99,12 @@ const main = async (): Promise<void> => {
         process.exit(1);
     }
 
-    // Get task's private IP and publish VNC endpoint
+    // Publish VNC endpoint via AppSync (ALB DNS from environment variable)
     if (statusManager) {
         try {
-            const taskIp = await statusManager.getTaskPublicIp();
-            
-            if (taskIp) {
-                // Publish VNC endpoint via AppSync
-                await statusManager.setVncReady(taskIp, 5901);
-                console.log(`✓ VNC endpoint published: ${taskIp}:5901`);
-            } else {
-                console.warn('Could not determine task IP - VNC endpoint not published');
-            }
+            // VNC_ALB_DNS environment variable is set by CloudFormation
+            await statusManager.setVncReady();
+            console.log('✓ VNC endpoint published via AppSync');
         } catch (error) {
             console.error('Failed to publish VNC endpoint:', error);
             // Non-critical - continue with meeting join
