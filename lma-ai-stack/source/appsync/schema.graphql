@@ -200,6 +200,7 @@ type Query @aws_cognito_user_pools
     queryKnowledgeBase(input: String!, sessionId: String): String
 	listVirtualParticipants: [VirtualParticipant] @aws_cognito_user_pools @aws_iam
 	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	parseMeetingInvitation(invitationText: String!): String @aws_cognito_user_pools @aws_iam
 }
 
 type VirtualParticipant @aws_cognito_user_pools @aws_iam {
@@ -208,6 +209,10 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	meetingPlatform: String
 	meetingId: String
 	meetingPassword: String
+	meetingTime: AWSTimestamp
+	scheduledFor: AWSDateTime
+	isScheduled: Boolean
+	scheduleId: String
 	status: String
 	owner: String
 	Owner: String
@@ -222,6 +227,8 @@ input CreateVirtualParticipantInput {
 	meetingPlatform: String!
 	meetingId: String!
 	meetingPassword: String
+	meetingTime: AWSTimestamp
+	isScheduled: Boolean
 	status: String!
 }
 

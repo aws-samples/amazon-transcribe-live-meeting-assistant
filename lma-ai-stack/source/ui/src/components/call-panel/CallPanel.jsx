@@ -164,6 +164,33 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
 
 // eslint-disable-next-line arrow-body-style
 const CallSummary = ({ item }) => {
+  const [setCopySuccess] = useState(false);
+
+  const copyToClipboard = async () => {
+    try {
+      const summaryText = getTextFileFormattedMeetingDetails(item);
+      await navigator.clipboard.writeText(summaryText);
+      setCopySuccess(true);
+      // Reset the success state after 2 seconds
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (err) {
+      logger.error('Failed to copy to clipboard:', err);
+      // Fallback for older browsers
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = getTextFileFormattedMeetingDetails(item);
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      } catch (fallbackErr) {
+        logger.error('Fallback copy failed:', fallbackErr);
+      }
+    }
+  };
+
   const downloadCallSummary = async (option) => {
     if (option.detail.id === 'download') {
       await exportToTextFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
@@ -171,6 +198,8 @@ const CallSummary = ({ item }) => {
       window.open(`mailto:?subject=${item.callId}&body=${getEmailFormattedSummary(item.callSummaryText)}`);
     } else if (option.detail.id === 'docx') {
       await exportToDocxFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
+    } else if (option.detail.id === 'copy') {
+      await copyToClipboard();
     }
   };
 
@@ -193,6 +222,7 @@ const CallSummary = ({ item }) => {
               {item.callSummaryText && (
                 <ButtonDropdown
                   items={[
+                    { text: 'Copy to clipboard', id: 'copy', disabled: false, iconName: 'copy' },
                     { text: 'Download summary', id: 'download', disabled: false, iconName: 'download' },
                     { text: 'Email summary (beta)', id: 'email', disabled: false, iconName: 'envelope' },
                     { text: 'Download as Word', id: 'docx', disabled: false, iconName: 'file' },

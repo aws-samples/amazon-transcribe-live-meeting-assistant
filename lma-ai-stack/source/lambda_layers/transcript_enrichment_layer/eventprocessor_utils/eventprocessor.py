@@ -59,13 +59,22 @@ def get_transcription_ttl():
 
 def get_owner_from_jwt(jwt_token, verifySignature):
     
-    if (verifySignature == False):
-        decoded_jwt = jwt.decode(jwt_token, options={"verify_signature": False})
-        print("DECODED JWT", decoded_jwt)
-    else:
-        decoded_jwt = verify_cognito_token(jwt_token)
-        
-    return decoded_jwt['username']
+    # Handle empty tokens by using AgentId as fallback (for VP service calls)
+    if not jwt_token or jwt_token == '':
+        print("Empty JWT token, using AgentId as owner")
+        return None  # Will be handled by caller to use AgentId
+    
+    try:
+        if (verifySignature == False):
+            decoded_jwt = jwt.decode(jwt_token, options={"verify_signature": False})
+            print("DECODED JWT", decoded_jwt)
+        else:
+            decoded_jwt = verify_cognito_token(jwt_token)
+            
+        return decoded_jwt['username']
+    except Exception as e:
+        print(f"JWT decode failed: {e}, using AgentId as owner")
+        return None  # Will be handled by caller to use AgentId
 
 def verify_cognito_token(token):
     try:

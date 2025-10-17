@@ -9,7 +9,7 @@ import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
-import { sendEndMeeting } from './kinesis-stream.js';
+import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
@@ -49,13 +49,30 @@ const main = async (): Promise<void> => {
     console.log(`Meeting ID: ${details.invite.meetingId}`);
     console.log(`Meeting Name: ${details.invite.meetingName}`);
     console.log(`LMA User: ${details.lmaUser}`);
-    console.log(`CallId: ${details.invite.meetingName}_${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    
+
 
     // Initialize status manager if VP_ID is provided
     vpId = details.invite.virtualParticipantId || null;
     if (vpId) {
         try {
             statusManager = new VirtualParticipantStatusManager(vpId);
+            
+            // Get existing CallId from VP record first
+            const existingCallId = await statusManager.getCallId();
+            
+            if (existingCallId) {
+                // Use existing CallId from VP record
+                process.env.VP_CALL_ID = existingCallId;
+                console.log(`Using existing VP CallId: ${existingCallId}`);
+            } else {
+                // Generate new CallId and set it in VP record
+                const { kinesisStreamManager } = await import('./kinesis-stream.js');
+                const callId = kinesisStreamManager.getCallId();
+                await statusManager.setCallId(callId);
+                console.log(`Generated and set new VP CallId: ${callId}`);
+            }
+            
             // Start with INITIALIZING status
             await statusManager.setInitializing();
             console.log(`VP ${vpId} status: INITIALIZING`);
