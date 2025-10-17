@@ -2091,6 +2091,8 @@ Resources:
 
   VIRTUALPARTICIPANTSTACK:
     Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - AISTACK
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-virtual-participant-stack/template.yaml
@@ -2119,6 +2121,8 @@ Resources:
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         GraphQLEndpoint: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
         VPTaskRegistryTableName: !GetAtt AISTACK.Outputs.VPTaskRegistryTableName
+        VirtualParticipantTableName: !GetAtt AISTACK.Outputs.VirtualParticipantTableName
+        VirtualParticipantTableStreamArn: !GetAtt AISTACK.Outputs.VirtualParticipantTableStreamArn
         VPC: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.VPC

@@ -69,7 +69,7 @@ class KinesisStreamManager {
       region: process.env.AWS_REGION || 'us-east-1',
     });
     
-    // Use Python CallId format: meeting_name_with_timestamp
+    // Use  CallId format: meeting_name_with_timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '-').replace('Z', '');
     this.callId = `${details.invite.meetingName}-${timestamp}`;
     this.streamName = details.callDataStreamName;
@@ -111,9 +111,9 @@ class KinesisStreamManager {
     const record: any = {
       EventType: 'START',
       CallId: this.callId,
-      CustomerPhoneNumber: 'Customer Phone',
-      SystemPhoneNumber: 'System Phone',
-      AgentId: details.lmaUser,
+      CustomerPhoneNumber: 'Virtual Participant',
+      SystemPhoneNumber: 'LMA System',
+      AgentId: details.lmaUser, // This will be used as owner by CallEventProcessor
       CreatedAt: new Date().toISOString(),
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
