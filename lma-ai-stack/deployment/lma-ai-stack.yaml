@@ -23,6 +23,7 @@ Parameters:
     Description: >-
       The Arn of Kinesis Data Stream to write the call data to.
 
+
   LMASettingsParameterName:
     Type: String
     Description: LMA settings SSM Parameter store
@@ -489,6 +490,7 @@ Conditions:
     - !Condition ShouldEnableBedrockSummarizer
 
   ShouldEnableAppSyncApiCache: !Equals [!Ref EnableAppSyncApiCache, "true"]
+  
 
 Outputs:
   CloudfrontEndpoint:
@@ -545,6 +547,12 @@ Outputs:
   VPTaskRegistryTableName:
     Description: Name of the VPTaskRegistry DynamoDB table
     Value: !Ref VPTaskRegistry
+  VirtualParticipantTableName:
+    Description: Name of the VirtualParticipant DynamoDB table
+    Value: !Ref VirtualParticipantTable
+  VirtualParticipantTableStreamArn:
+    Description: ARN of the VirtualParticipant DynamoDB table stream
+    Value: !GetAtt VirtualParticipantTable.StreamArn
   AppSyncGraphQLUrl:
     Description: AppSync GraphQL endpoint URL
     Value: !GetAtt AppSyncApiEncrypted.GraphQLUrl
@@ -1563,6 +1571,78 @@ Resources:
     DependsOn:
       - QueryKnowledgeBaseResolverFunctionLogGroup
 
+  MeetingInvitationParserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt MeetingInvitationParserFunctionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/meeting_invitation_parser
+      Description: Lambda function to parse meeting invitations using Bedrock AI
+      MemorySize: 512
+      Timeout: 60
+      Environment:
+        Variables:
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/MeetingInvitationParserFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    DependsOn:
+      - MeetingInvitationParserFunctionLogGroup
+
+  MeetingInvitationParserFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/MeetingInvitationParserFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MeetingInvitationParserFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Meeting Invitation Parser Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-MeetingInvitationParser
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "bedrock:GetInferenceProfile"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+
   QueryKnowledgeBaseResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -1629,7 +1709,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - lambda:InvokeFunction
-                Resource: !GetAtt QueryKnowledgeBaseResolverFunction.Arn
+                Resource: 
+                  - !GetAtt QueryKnowledgeBaseResolverFunction.Arn
+                  - !GetAtt MeetingInvitationParserFunction.Arn
 
   ##########################################################################
   # Meeting Controls Lambda - To share and delete meetings
@@ -1859,6 +1941,17 @@ Resources:
       ServiceRoleArn: !GetAtt AppSyncStrandsChatLambdaRole.Arn
       LambdaConfig:
         LambdaFunctionArn: !GetAtt StrandsChatInterfaceFunction.Arn
+
+  MeetingInvitationParserDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MeetingInvitationParser
+      Description: Data source for parsing meeting invitations using Bedrock AI
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MeetingInvitationParserFunction.Arn
 
   AppSyncStrandsChatLambdaRole:
     Type: AWS::IAM::Role
@@ -2359,6 +2452,29 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/queryKnowledgeBase.js
 
+  ParseMeetingInvitationResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt MeetingInvitationParserDataSource.Name
+      TypeName: Query
+      FieldName: parseMeetingInvitation
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
   SendChatMessageResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -2461,25 +2577,44 @@ Resources:
       DataSourceName: !GetAtt VirtualParticipantDataSource.Name
       RequestMappingTemplate: |
         #set($id = $util.autoId())
+        #set($now = $util.time.nowISO8601())
+        
+        ## Build input map for DynamoDB
+        #set($input = {})
+        $util.qr($input.put("id", $id))
+        $util.qr($input.put("meetingName", $ctx.args.input.meetingName))
+        $util.qr($input.put("meetingPlatform", $ctx.args.input.meetingPlatform))
+        $util.qr($input.put("meetingId", $ctx.args.input.meetingId))
+        $util.qr($input.put("status", $ctx.args.input.status))
+        $util.qr($input.put("owner", $ctx.identity.username))
+        $util.qr($input.put("Owner", $ctx.identity.username))
+        $util.qr($input.put("SharedWith", ""))
+        $util.qr($input.put("createdAt", $now))
+        $util.qr($input.put("updatedAt", $now))
+        
+        ## Add optional fields
+        #if(!$util.isNullOrBlank($ctx.args.input.meetingPassword))
+          $util.qr($input.put("meetingPassword", $ctx.args.input.meetingPassword))
+        #end
+        
+        #if($ctx.args.input.meetingTime)
+          $util.qr($input.put("meetingTime", $ctx.args.input.meetingTime))
+          #set($meetingTimeMillis = $util.math.multiply($ctx.args.input.meetingTime, 1000))
+          #set($scheduledDateTime = $util.time.epochMilliSecondsToISO8601($meetingTimeMillis))
+          $util.qr($input.put("scheduledFor", $scheduledDateTime))
+        #end
+        
+        #if(!$util.isNullOrBlank($ctx.args.input.isScheduled))
+          $util.qr($input.put("isScheduled", $ctx.args.input.isScheduled))
+        #end
+        
         {
           "version": "2018-05-29",
           "operation": "PutItem",
           "key": {
             "id": $util.dynamodb.toDynamoDBJson($id)
           },
-          "attributeValues": {
-            "id": $util.dynamodb.toDynamoDBJson($id),
-            "meetingName": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingName),
-            "meetingPlatform": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingPlatform),
-            "meetingId": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingId),
-            "meetingPassword": $util.dynamodb.toDynamoDBJson($ctx.args.input.meetingPassword),
-            "status": $util.dynamodb.toDynamoDBJson($ctx.args.input.status),
-            "owner": $util.dynamodb.toDynamoDBJson($ctx.identity.username),
-            "Owner": $util.dynamodb.toDynamoDBJson($ctx.identity.username),
-            "SharedWith": $util.dynamodb.toDynamoDBJson(""),
-            "createdAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601()),
-            "updatedAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601())
-          }
+          "attributeValues": $util.dynamodb.toMapValuesJson($input)
         }
       ResponseMappingTemplate: |
         #if($ctx.error)
@@ -2583,6 +2718,7 @@ Resources:
           $util.error($ctx.error.message, $ctx.error.type)
         #end
         $util.toJson($ctx.result)
+
 
   # Virtual Participant Manager Lambda Function
   VirtualParticipantManagerFunction:

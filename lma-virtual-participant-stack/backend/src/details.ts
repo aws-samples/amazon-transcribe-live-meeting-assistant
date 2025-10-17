@@ -6,6 +6,9 @@ export interface MeetingInvite {
   meetingPlatform: 'Chime' | 'Zoom' | 'Teams' | 'Webex' | 'CHIME' | 'ZOOM' | 'TEAMS' | 'WEBEX';
   meetingName: string;
   meetingTime: number;
+  scheduledFor?: string;
+  isScheduled?: boolean;
+  scheduleId?: string;
   userName: string;
   virtualParticipantId?: string;
 }

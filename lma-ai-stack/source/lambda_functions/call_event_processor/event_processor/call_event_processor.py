@@ -261,6 +261,10 @@ async def execute_create_call_mutation(
     CALL_ID = message.get("CallId", "")
 
     owner = get_owner_from_jwt(message.get("AccessToken"), False)
+    # If JWT decode fails (returns None), use AgentId as owner (for VP service calls)
+    if owner is None:
+        owner = message.get("AgentId", "system@lma.aws")
+        print(f"Using AgentId as owner: {owner}")
     message.update({"Owner": owner})
 
     # Contact Lens STARTED event type doesn't provide customer and system phone numbers, nor does it
