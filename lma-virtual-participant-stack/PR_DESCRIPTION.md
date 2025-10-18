@@ -10,19 +10,23 @@ Virtual participants can encounter CAPTCHAs or other interactive elements during
 
 ## Solution
 
-Implemented noVNC (browser-based VNC) with **API Gateway WebSocket + Lambda Proxy** architecture:
+Implemented noVNC (browser-based VNC) with **CloudFront + Application Load Balancer** architecture with dynamic target registration:
 
 ```
 Browser (noVNC client)
-  ↓ WSS (AWS-managed SSL certificate)
+  ↓ WSS (CloudFront default SSL certificate)
   ↓
-API Gateway WebSocket API
-  ↓ Lambda Integration
+CloudFront Distribution
+  ↓ Path: /vnc/{vpId}
   ↓
-Lambda Function (WebSocket Proxy)
-  ↓ TCP Socket (VPC)
+Application Load Balancer (HTTP:80)
+  ↓ Port 5901
   ↓
 ECS Task (x11vnc + websockify)
+  - Dynamically registers with ALB on startup
+  - Waits for health check to pass
+  - Signals VNC_READY only when healthy
+  - Deregisters on shutdown
 ```
 
 ## Key Features
@@ -30,11 +34,13 @@ ECS Task (x11vnc + websockify)
 - ✅ **Real-time viewing** - See exactly what the virtual participant sees
 - ✅ **Interactive control** - Full mouse/keyboard control for CAPTCHA handling
 - ✅ **Automatic connection** - VNC viewer appears automatically when VP is ready
-- ✅ **AWS-managed SSL** - No certificate management required
-- ✅ **Serverless proxy** - Lambda handles WebSocket connections, pay per use
-- ✅ **Secure** - IAM authorization, private networking, audit logging
+- ✅ **CloudFront SSL** - No certificate management required
+- ✅ **Dynamic registration** - Tasks self-register with ALB on startup
+- ✅ **Health checks** - Only signals ready after ALB health check passes
+- ✅ **Multi-user support** - Path-based routing with vpId
+- ✅ **Secure** - CloudFront IP restriction, private networking, audit logging
 - ✅ **Zero manual configuration** - Everything automated via CloudFormation
-- ✅ **No load balancers needed** - Simpler architecture, lower cost
+- ✅ **Automatic cleanup** - Tasks deregister from ALB on shutdown
 
 ## Architecture Highlights
 
@@ -42,99 +48,126 @@ ECS Task (x11vnc + websockify)
 - Added X11 display server (Xvfb) for virtual framebuffer
 - Added x11vnc with websockify for WebSocket-compatible VNC server
 - Automatic VNC server startup with readiness signaling
-- Publishes VNC endpoint (private IP) via AppSync when ready
+- **Dynamic ALB registration** - Task registers its private IP with target group
+- **Health check wait** - Waits for ALB health check before signaling ready
+- **Automatic deregistration** - Cleanup on normal and signal-based shutdown
 
 ### Infrastructure (CloudFormation)
-- **API Gateway WebSocket API** - Provides AWS-managed SSL certificate
-- **Lambda WebSocket Proxy** - Forwards WebSocket frames to VNC server via TCP
-- **DynamoDB Connections Table** - Stores WebSocket connection state with TTL
-- **VPC Networking** - Lambda deployed in VPC to reach ECS tasks
-- **Security Groups** - Lambda can connect to ECS tasks on port 5901
-- **No circular dependencies** - Clean stack architecture
 
-### Lambda Proxy Function
-- **Runtime**: Python 3.12
-- **Timeout**: 900 seconds (15 minutes for long sessions)
-- **Memory**: 512 MB
-- **VPC**: Deployed in private subnets
-- **Routes**:
-  - `$connect`: Validates vpId, retrieves VNC endpoint, stores connection state
-  - `$default`: Proxies WebSocket frames bidirectionally via TCP socket
-  - `$disconnect`: Cleans up connection state
+**AI Stack** (lma-ai-stack):
+- **CloudFront Distribution** - VNC origin pointing to ALB
+- **Cache Behavior** - `/vnc/*` path routes to ALB with WebSocket support
+- **Application Load Balancer** - Internet-facing in public subnets
+- **Target Group** - Port 5901, IP targets, HTTP health checks
+- **ALB Security Group** - Restricted to CloudFront IP prefix list
+- **ECS Security Group** - For Virtual Participant tasks
+- **Security Group Rules** - ALB → ECS on port 5901
+- **CloudFront Prefix List Lookup** - Custom resource for region-agnostic deployment
+
+**Virtual Participant Stack** (lma-virtual-participant-stack):
+- **ECS Cluster** - Fargate tasks
+- **Task Definition** - Includes `VNC_TARGET_GROUP_ARN` environment variable
+- **ECS Service** - DesiredCount: 0 (tasks managed by Step Functions)
+- **IAM Permissions** - Task role can register/deregister ALB targets
+- Uses security group and target group from AI stack
+
+### Status Manager (TypeScript)
+- `registerWithTargetGroup()` - Gets task IP from ECS metadata, registers with ALB
+- `waitForTargetHealthy()` - Polls ALB health check (up to 60s, checks every 2s)
+- `deregisterFromTargetGroup()` - Cleanup on shutdown
+- Uses AWS SDK `ElasticLoadBalancingV2Client`
+
+### Application Flow (index.ts)
+1. VNC server starts
+2. **Registers with ALB** and waits for healthy
+3. Signals VNC_READY via AppSync (only after healthy)
+4. Continues with meeting join
+5. On shutdown: Deregisters from ALB
 
 ### UI (React)
-- New VNCViewer component with interactive controls
+- VNCViewer component with interactive controls
 - Integrated into VirtualParticipantDetails page
 - Receives VNC WebSocket URL via GraphQL subscription
+- Connects to: `wss://cloudfront-domain/vnc/{vpId}`
 - Automatic connection when VP is ready
-- Passes vpId as query parameter for Lambda routing
 
 ## Implementation Details
 
 ### Files Added
 
-**Lambda:**
-- `lma-virtual-participant-stack/lambda/vnc-websocket-proxy.py` - WebSocket proxy function
-
 **Documentation:**
-- `lma-virtual-participant-stack/NOVNC_VERSION_NOTE.md` - noVNC version compatibility notes
+- `lma-virtual-participant-stack/CLOUDFRONT_VNC_IMPLEMENTATION.md` - Architecture details
+- `lma-virtual-participant-stack/NOVNC_VERSION_NOTE.md` - noVNC version compatibility
 
 ### Files Modified
 
 **Backend:**
 - `lma-virtual-participant-stack/backend/Dockerfile` - Added VNC packages
 - `lma-virtual-participant-stack/backend/entrypoint.sh` - VNC server startup
-- `lma-virtual-participant-stack/backend/src/status-manager.ts` - VNC signaling
-- `lma-virtual-participant-stack/backend/src/index.ts` - VNC integration
+- `lma-virtual-participant-stack/backend/package.json` - Added ELBv2 SDK
+- `lma-virtual-participant-stack/backend/src/status-manager.ts` - ALB registration methods
+- `lma-virtual-participant-stack/backend/src/index.ts` - Registration/deregistration calls
 
 **Infrastructure:**
+- `lma-ai-stack/deployment/lma-ai-stack.yaml` - ALB, CloudFront origin, security groups
 - `lma-ai-stack/source/appsync/schema.graphql` - Added VNC fields
-- `lma-virtual-participant-stack/template.yaml` - Lambda + API Gateway resources
-- `lma-cognito-stack/deployment/lma-cognito-stack.yaml` - Added outputs
-- `lma-main.yaml` - Stack orchestration
+- `lma-virtual-participant-stack/template.yaml` - Task definition, IAM permissions
+- `lma-main.yaml` - Stack orchestration, parameter passing
 
 **UI:**
-- `lma-ai-stack/source/ui/package.json` - Added @novnc/novnc@1.5.0 (pinned)
+- `lma-ai-stack/source/ui/package.json` - Added @novnc/novnc@1.5.0
 - `lma-ai-stack/source/ui/src/components/virtual-participant-layout/VNCViewer.jsx` - New component
 - `lma-ai-stack/source/ui/src/components/virtual-participant-layout/VirtualParticipantDetails.jsx` - Integration
 
-**Documentation:**
-- `lma-virtual-participant-stack/NOVNC_IMPLEMENTATION.md` - Technical details
-- `lma-virtual-participant-stack/DEPLOYMENT_GUIDE.md` - Deployment instructions
-- `lma-virtual-participant-stack/IMPLEMENTATION_SUMMARY.md` - Project overview
-
 ## Technical Decisions
 
-### Why Lambda Proxy Instead of Load Balancer?
+### Why CloudFront + ALB Instead of API Gateway?
 
-**Initial Approach (Rejected):**
-- API Gateway WebSocket + VPC Link + NLB
-- **Problem**: VPC Links V2 don't support WebSocket APIs (only HTTP APIs)
+**API Gateway WebSocket Approach (Rejected):**
+- Cannot handle binary VNC protocol (base64 encoding required)
+- High latency due to encoding/decoding overhead
+- Lambda timeout limits (15 minutes max)
 
-**Alternative Considered (Rejected):**
-- Application Load Balancer with Cognito authentication
-- **Problem**: Requires SSL certificate management, more complex, higher cost
+**CloudFront + ALB Approach (Implemented):**
+- ✅ Native WebSocket support (no encoding needed)
+- ✅ CloudFront provides SSL certificate
+- ✅ ALB handles load balancing and health checks
+- ✅ No timeout limits
+- ✅ Better performance (no Lambda in data path)
+
+### Why Dynamic Registration Instead of ECS Service?
+
+**ECS Service Approach (Rejected):**
+- Conflicts with Step Functions task management
+- Can't use both Service and direct `runTask`
+
+**Dynamic Registration Approach (Implemented):**
+- ✅ Works with existing Step Functions architecture
+- ✅ Each task manages its own ALB registration
+- ✅ Health checks ensure readiness
+- ✅ Automatic cleanup on shutdown
+- ✅ Supports multiple concurrent tasks
+
+### Why Move ALB to AI Stack?
+
+**Original Approach (Rejected):**
+- ALB in VP stack, CloudFront in AI stack
+- **Problem**: Circular dependency (AI needs ALB DNS, VP needs CloudFront domain)
 
 **Final Approach (Implemented):**
-- API Gateway WebSocket + Lambda Proxy
-- **Benefits**:
-  - ✅ No load balancer needed (simpler, cheaper)
-  - ✅ No SSL certificate management (API Gateway provides it)
-  - ✅ Serverless (pay per connection)
-  - ✅ Fully supported by AWS (no workarounds)
-
-### Why noVNC 1.5.0 Instead of 1.6.0?
-
-noVNC 1.6.0 introduced a top-level `await` in `lib/util/browser.js` that breaks webpack/babel bundling. Version 1.5.0 is the latest stable version compatible with react-scripts. See `NOVNC_VERSION_NOTE.md` for details.
+- ✅ Both ALB and CloudFront in AI stack
+- ✅ VP stack depends on AI stack (one-way dependency)
+- ✅ Clean architecture, no circular dependencies
 
 ## Security
 
-- **IAM Authorization** - API Gateway $connect route validates IAM credentials
-- **Network Isolation** - Lambda and ECS tasks in private subnets
-- **TLS Encryption** - AWS-managed SSL certificate on API Gateway
-- **Audit Logging** - VNC connection events logged to CloudWatch
+- **CloudFront IP Restriction** - ALB only accepts traffic from CloudFront IPs
+- **Network Isolation** - ECS tasks in private subnets
+- **TLS Encryption** - CloudFront default SSL certificate
+- **Security Groups** - Layered security (CloudFront → ALB → ECS)
+- **IAM Permissions** - Task role scoped to specific target group
 - **AppSync Authorization** - GraphQL mutations require Cognito authentication
-- **Connection State** - DynamoDB with TTL for automatic cleanup
+- **Audit Logging** - VNC connection events logged to CloudWatch
 
 ## Testing
 
@@ -143,7 +176,9 @@ noVNC 1.6.0 introduced a top-level `await` in `lib/util/browser.js` that breaks 
 - ✅ React build successful with noVNC 1.5.0
 - ✅ CloudFormation templates validated
 - ✅ No circular dependencies
-- ✅ Documentation complete
+- ✅ Manual testing: VNC connection works through CloudFront
+- ✅ Health checks pass before signaling ready
+- ✅ Automatic deregistration on shutdown
 
 ## Deployment
 
@@ -157,11 +192,11 @@ aws cloudformation deploy \
 ```
 
 The system automatically:
-1. Creates API Gateway WebSocket API with AWS-managed SSL
-2. Deploys Lambda proxy function in VPC
-3. Creates DynamoDB connections table
-4. Configures IAM authorization
-5. Publishes WebSocket URL via AppSync
+1. Creates CloudFront distribution with VNC origin
+2. Creates ALB with target group in public subnets
+3. Creates security groups with CloudFront prefix list
+4. Configures ECS tasks with ALB registration capability
+5. Publishes VNC WebSocket URL via AppSync
 6. UI connects automatically when VP is ready
 
 ## Usage
@@ -169,20 +204,20 @@ The system automatically:
 1. Start a virtual participant from the LMA UI
 2. Navigate to Virtual Participant Details page
 3. Wait 10-30 seconds for VNC server to start
-4. VNC viewer appears automatically with live view
-5. Click inside viewer to interact
-6. Handle CAPTCHAs or other manual interventions
-7. Use controls: View Only, Scale to Fit, Fullscreen, Ctrl+Alt+Del
+4. Wait for ALB health check to pass
+5. VNC viewer appears automatically with live view
+6. Click inside viewer to interact
+7. Handle CAPTCHAs or other manual interventions
+8. Use controls: View Only, Scale to Fit, Fullscreen, Ctrl+Alt+Del
 
 ## Cost Impact
 
-Estimated additional cost: ~$5-10/month
-- API Gateway WebSocket: Pay per connection/message (~$1-3/month)
-- Lambda: Pay per invocation (~$2-5/month for typical usage)
-- DynamoDB: Pay per request (minimal, <$1/month)
+Estimated additional cost: ~$20-25/month
+- CloudFront: Data transfer charges (~$5-10/month for typical usage)
+- Application Load Balancer: ~$16/month (fixed cost)
 - Increased ECS memory (4GB vs 2GB): ~$0.04/hour per active task
 
-**Cost savings vs ALB approach:** ~$10/month (no NLB/ALB charges)
+**Note:** ALB is a fixed cost but provides better performance and reliability than serverless alternatives.
 
 ## Breaking Changes
 
@@ -190,15 +225,16 @@ None - This is a new feature that doesn't affect existing functionality.
 
 ## Future Enhancements
 
-- [ ] Add Cognito authentication to WebSocket API (currently IAM only)
+- [ ] Add HTTPS listener to ALB with ACM certificate
 - [ ] Implement connection pooling for better performance
 - [ ] Add session recording capability
 - [ ] Support for multiple concurrent viewers per VP
+- [ ] Add metrics and monitoring dashboards
 
 ## Documentation
 
 Complete documentation available in:
-- `lma-virtual-participant-stack/NOVNC_IMPLEMENTATION.md` - Technical implementation
+- `lma-virtual-participant-stack/CLOUDFRONT_VNC_IMPLEMENTATION.md` - Architecture details
 - `lma-virtual-participant-stack/DEPLOYMENT_GUIDE.md` - Deployment steps
 - `lma-virtual-participant-stack/IMPLEMENTATION_SUMMARY.md` - High-level overview
 - `lma-virtual-participant-stack/NOVNC_VERSION_NOTE.md` - Version compatibility notes
@@ -206,5 +242,6 @@ Complete documentation available in:
 ## References
 
 - [noVNC GitHub](https://github.com/novnc/noVNC)
-- [API Gateway WebSocket APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html)
-- [Lambda VPC Networking](https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html)
+- [CloudFront WebSocket Support](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/distribution-working-with.websockets.html)
+- [Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html)
+- [ECS Task Networking](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-networking.html)

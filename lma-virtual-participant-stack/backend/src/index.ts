@@ -99,10 +99,27 @@ const main = async (): Promise<void> => {
         process.exit(1);
     }
 
-    // Publish VNC endpoint via AppSync (ALB DNS from environment variable)
+    // Register with ALB target group and wait for healthy
     if (statusManager) {
         try {
-            // VNC_ALB_DNS environment variable is set by CloudFormation
+            console.log('Registering task with ALB target group...');
+            const registered = await statusManager.registerWithTargetGroup();
+            if (!registered) {
+                console.error('Failed to register with target group');
+                await statusManager.setFailed('ALB registration failed');
+                process.exit(1);
+            }
+            console.log('✓ Task registered with ALB and healthy');
+        } catch (error) {
+            console.error('Error during ALB registration:', error);
+            await statusManager.setFailed('ALB registration error');
+            process.exit(1);
+        }
+    }
+
+    // Publish VNC endpoint via AppSync (only after ALB registration and health check)
+    if (statusManager) {
+        try {
             await statusManager.setVncReady();
             console.log('✓ VNC endpoint published via AppSync');
         } catch (error) {
@@ -236,6 +253,16 @@ const main = async (): Promise<void> => {
             console.error('Error handling recording cleanup:', error);
         }
 
+        // Deregister from ALB target group
+        if (statusManager) {
+            try {
+                await statusManager.deregisterFromTargetGroup();
+                console.log('✓ Deregistered from ALB target group');
+            } catch (error) {
+                console.error('Error deregistering from ALB:', error);
+            }
+        }
+
         try {
             // Close browser
             await browser.close();
@@ -264,6 +291,16 @@ const main = async (): Promise<void> => {
 const signalHandler = async (signal: string) => {
     console.log(`Received ${signal}, initiating graceful shutdown...`);
     shutdownRequested = true;
+    
+    // Deregister from ALB target group
+    if (statusManager) {
+        try {
+            await statusManager.deregisterFromTargetGroup();
+            console.log('✓ Deregistered from ALB target group');
+        } catch (error) {
+            console.error('Error deregistering from ALB:', error);
+        }
+    }
     
     // Send END event to Kinesis when externally terminated
     try {

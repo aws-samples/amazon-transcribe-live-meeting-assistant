@@ -71,9 +71,21 @@ Parameters:
     Type: String
     Description: AppSync GraphQL endpoint URL for Virtual Participant status updates
 
+  CloudFrontDomainName:
+    Type: String
+    Description: CloudFront domain name for VNC WebSocket URL construction
+
   VPTaskRegistryTableName:
     Type: String
     Description: Name of the VPTaskRegistry DynamoDB table from AI stack
+
+  VNCTargetGroupArn:
+    Type: String
+    Description: ARN of the VNC Target Group from AI stack
+
+  VPSecurityGroupId:
+    Type: String
+    Description: Security Group ID for Virtual Participant ECS tasks from AI stack
 
   # container source code
   SourceCodeLocation:
@@ -260,116 +272,6 @@ Conditions:
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
 
 Resources:
-  # ALB Security Group - No ingress rules by default (manually add your IP for testing)
-  ALBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for VNC Application Load Balancer
-      VpcId: !Ref VPC
-      # SecurityGroupIngress:
-      #   - IpProtocol: tcp
-      #     FromPort: 443
-      #     ToPort: 443
-      #     CidrIp: 0.0.0.0/0
-      #     Description: Allow HTTPS for WSS connections
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 5901
-          ToPort: 5901
-          DestinationSecurityGroupId: !Ref SecurityGroup
-          Description: Allow traffic to ECS tasks on websockify port
-      Tags:
-        - Key: Name
-          Value: !Sub ${LMAStackName}-alb-sg
-
-  # ECS Security Group - Allow traffic from ALB only
-  SecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Virtual Participant ECS tasks
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 5901
-          ToPort: 5901
-          SourceSecurityGroupId: !Ref ALBSecurityGroup
-          Description: Allow websockify traffic from ALB
-      SecurityGroupEgress:
-        - CidrIp: 0.0.0.0/0
-          Description: Allow all outbound traffic by default
-          IpProtocol: "-1"
-      VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: !Sub ${LMAStackName}-vp-sg
-
-  ### VNC Application Load Balancer Resources ###
-
-  # Self-signed certificate for ALB HTTPS listener
-  VNCALBCertificate:
-    Type: AWS::CertificateManager::Certificate
-    Properties:
-      DomainName: !Sub "${LMAStackName}-vnc-alb.local"
-      ValidationMethod: DNS
-      DomainValidationOptions:
-        - DomainName: !Sub "${LMAStackName}-vnc-alb.local"
-          HostedZoneId: !Ref AWS::NoValue
-      Tags:
-        - Key: Name
-          Value: !Sub ${LMAStackName}-vnc-cert
-
-  # Application Load Balancer
-  VNCALB:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Name: !Sub ${LMAStackName}-vnc-alb
-      Type: application
-      Scheme: internet-facing
-      IpAddressType: ipv4
-      Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
-      SecurityGroups:
-        - !Ref ALBSecurityGroup
-      Tags:
-        - Key: Name
-          Value: !Sub ${LMAStackName}-vnc-alb
-
-  # Target Group for ECS tasks
-  VNCTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: !Sub ${LMAStackName}-vnc-tg
-      Port: 5901
-      Protocol: HTTP
-      TargetType: ip
-      VpcId: !Ref VPC
-      HealthCheckEnabled: true
-      HealthCheckProtocol: HTTP
-      HealthCheckPath: /
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
-      TargetGroupAttributes:
-        - Key: deregistration_delay.timeout_seconds
-          Value: "30"
-      Tags:
-        - Key: Name
-          Value: !Sub ${LMAStackName}-vnc-tg
-
-  # HTTPS Listener
-  VNCALBListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref VNCALB
-      Port: 443
-      Protocol: HTTPS
-      Certificates:
-        - CertificateArn: !Ref VNCALBCertificate
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref VNCTargetGroup
-
   LogsPolicy:
     Type: "AWS::IAM::ManagedPolicy"
     Metadata:
@@ -773,6 +675,17 @@ Resources:
                   - "dynamodb:UpdateItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+        - PolicyName: ALBTargetRegistrationPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "elasticloadbalancing:RegisterTargets"
+                  - "elasticloadbalancing:DeregisterTargets"
+                  - "elasticloadbalancing:DescribeTargetHealth"
+                Resource:
+                  - !Ref VNCTargetGroupArn
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -881,8 +794,10 @@ Resources:
               Value: !Ref VPTaskRegistryTableName
             - Name: ENABLE_AUDIO_RECORDING
               Value: !Ref EnableAudioRecording
-            - Name: VNC_ALB_DNS
-              Value: !GetAtt VNCALB.DNSName
+            - Name: CLOUDFRONT_DOMAIN
+              Value: !Ref CloudFrontDomainName
+            - Name: VNC_TARGET_GROUP_ARN
+              Value: !Ref VNCTargetGroupArn
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:
@@ -909,6 +824,28 @@ Resources:
     DependsOn:
       - Cluster
       - BuildCustomResource
+
+  # ECS Service to register tasks with target group
+  VirtualParticipantService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub ${LMAStackName}-vp-service
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 0
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref VPSecurityGroupId
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+      LoadBalancers:
+        - ContainerName: scribe
+          ContainerPort: 5901
+          TargetGroupArn: !Ref VNCTargetGroupArn
 
   VirtualParticipantTaskDefContainerLogGroup:
     Type: AWS::Logs::LogGroup
@@ -1151,7 +1088,7 @@ Resources:
                     "AwsvpcConfiguration": {
                       "AssignPublicIp": "DISABLED",
                       "SecurityGroups": [
-                        "${SecurityGroup}"
+                        "${VPSecurityGroupId}"
                       ],
                       "Subnets": [
                         "${PrivateSubnet1}",
@@ -1234,7 +1171,7 @@ Resources:
                         "AwsvpcConfiguration": {
                           "AssignPublicIp": "DISABLED",
                           "SecurityGroups": [
-                            "${SecurityGroup}"
+                            "${VPSecurityGroupId}"
                           ],
                           "Subnets": [
                             "${PrivateSubnet1}",
@@ -1335,6 +1272,7 @@ Resources:
         - {
             ClusterArn: !GetAtt [Cluster, Arn],
             TargetECSRoleArn: !GetAtt [TargetECSRole, Arn],
+            VPSecurityGroupId: !Ref VPSecurityGroupId,
           }
 
   UpdateLMASettingsWithStateMachine:
@@ -1345,9 +1283,12 @@ Resources:
       LCASettingsKeyValuePairs:
         LMAVirtualParticipantSchedulerStateMachine:
           !GetAtt [LMAVirtualParticipantSchedulerStateMachine, Arn]
-        VNCWebSocketURL: !Sub "wss://${VNCALB.DNSName}"
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
+
+  # Note: VNC WebSocket URL will be set by AI stack using CloudFront domain
+  # Format: wss://<cloudfront-domain>/vnc
+  # This avoids circular dependency and uses CloudFront's certificate
 
 Outputs:
   StepFunctions:
@@ -1373,27 +1314,3 @@ Outputs:
     Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}"
     Export:
       Name: !Sub "${AWS::StackName}-ECRRepositoryUri"
-
-  SecurityGroupId:
-    Description: Security Group ID for Virtual Participant ECS tasks
-    Value: !Ref SecurityGroup
-    Export:
-      Name: !Sub "${AWS::StackName}-SecurityGroupId"
-
-  ALBSecurityGroupId:
-    Description: Security Group ID for VNC ALB - manually add your IP for HTTPS (port 443) access
-    Value: !Ref ALBSecurityGroup
-    Export:
-      Name: !Sub "${AWS::StackName}-ALBSecurityGroupId"
-
-  VNCALBDNS:
-    Description: VNC ALB DNS name - use wss://<this-dns> for secure WebSocket connections
-    Value: !GetAtt VNCALB.DNSName
-    Export:
-      Name: !Sub "${AWS::StackName}-VNCALBDNS"
-
-  VNCWebSocketURL:
-    Description: Complete WSS URL for noVNC connections
-    Value: !Sub "wss://${VNCALB.DNSName}"
-    Export:
-      Name: !Sub "${AWS::StackName}-VNCWebSocketURL"

@@ -19,16 +19,17 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
   const [customScale, setCustomScale] = useState(100);
 
   useEffect(() => {
-    if (!canvasRef.current || !vpId || !websocketUrl) return undefined;
+    if (!canvasRef.current || !vpId || !vncEndpoint) return undefined;
 
     setConnecting(true);
     setError(null);
 
-    // Connect via ALB with secure WebSocket (wss://)
-    // The websocketUrl comes from LMA Settings (VNCWebSocketURL)
-    const wsUrl = websocketUrl;
+    // Connect via CloudFront with secure WebSocket (wss://)
+    // The vncEndpoint comes from AppSync and includes the full URL with vpId path
+    // Format: wss://cloudfront-domain/vnc/{vpId}
+    const wsUrl = vncEndpoint;
 
-    console.log('Connecting to VNC via ALB:', wsUrl);
+    console.log('Connecting to VNC via CloudFront:', wsUrl);
     console.log('Virtual Participant ID:', vpId);
 
     try {

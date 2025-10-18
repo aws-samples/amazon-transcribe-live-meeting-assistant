@@ -1825,6 +1825,18 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
+        VPC: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.VPC
+          - !Ref VPC
+        PublicSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet1
+          - !Ref PublicSubnet1
+        PublicSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet2
+          - !Ref PublicSubnet2
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         BedrockKnowledgeBaseID: !If
           - ShouldUseTranscriptKnowledgeBase
@@ -2091,6 +2103,8 @@ Resources:
 
   VIRTUALPARTICIPANTSTACK:
     Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - AISTACK
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-virtual-participant-stack/template.yaml
@@ -2118,7 +2132,10 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         GraphQLEndpoint: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
+        CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         VPTaskRegistryTableName: !GetAtt AISTACK.Outputs.VPTaskRegistryTableName
+        VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
+        VPSecurityGroupId: !GetAtt AISTACK.Outputs.VPSecurityGroupId
         VPC: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.VPC

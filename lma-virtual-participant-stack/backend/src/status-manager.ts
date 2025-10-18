@@ -1,5 +1,11 @@
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { 
+  ElasticLoadBalancingV2Client, 
+  RegisterTargetsCommand, 
+  DeregisterTargetsCommand,
+  DescribeTargetHealthCommand 
+} from '@aws-sdk/client-elastic-load-balancing-v2';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
 
@@ -17,6 +23,8 @@ export class VirtualParticipantStatusManager {
   private graphqlEndpoint: string;
   private awsRegion: string;
   private dynamoClient: DynamoDBClient;
+  private elbClient: ElasticLoadBalancingV2Client;
+  private taskPrivateIp: string | null = null;
 
   constructor(participantId: string) {
     this.participantId = participantId;
@@ -28,6 +36,10 @@ export class VirtualParticipantStatusManager {
     }
 
     this.dynamoClient = new DynamoDBClient({
+      region: this.awsRegion,
+    });
+
+    this.elbClient = new ElasticLoadBalancingV2Client({
       region: this.awsRegion,
     });
   }
@@ -326,23 +338,163 @@ export class VirtualParticipantStatusManager {
 
 
   /**
-   * Publish VNC endpoint information via AppSync
-   * Uses ALB DNS from VNC_ALB_DNS environment variable
+   * Register this task's IP with the ALB target group
    */
-  async setVncReady(endpoint?: string, port: number = 443, password?: string): Promise<boolean> {
+  async registerWithTargetGroup(): Promise<boolean> {
     try {
-      // Get ALB DNS from environment variable (set by CloudFormation)
-      const vncEndpoint = endpoint || process.env.VNC_ALB_DNS;
+      const targetGroupArn = process.env.VNC_TARGET_GROUP_ARN;
+      if (!targetGroupArn) {
+        console.error('VNC_TARGET_GROUP_ARN environment variable not set');
+        return false;
+      }
+
+      // Get task private IP
+      const privateIp = await this.getTaskPrivateIp();
+      if (!privateIp) {
+        console.error('Could not get task private IP');
+        return false;
+      }
+
+      this.taskPrivateIp = privateIp;
+      console.log(`Registering task IP ${privateIp} with target group ${targetGroupArn}`);
+
+      const registerCommand = new RegisterTargetsCommand({
+        TargetGroupArn: targetGroupArn,
+        Targets: [
+          {
+            Id: privateIp,
+            Port: 5901,
+          },
+        ],
+      });
+
+      await this.elbClient.send(registerCommand);
+      console.log(`✓ Successfully registered ${privateIp} with target group`);
+
+      // Wait for target to become healthy
+      console.log('Waiting for target to become healthy...');
+      const isHealthy = await this.waitForTargetHealthy(targetGroupArn, privateIp);
       
-      if (!vncEndpoint) {
-        console.error('VNC endpoint not provided and VNC_ALB_DNS environment variable not set');
+      if (!isHealthy) {
+        console.error('Target did not become healthy within timeout');
+        return false;
+      }
+
+      console.log('✓ Target is healthy and ready to receive traffic');
+      return true;
+
+    } catch (error) {
+      console.error('Failed to register with target group:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Wait for target to become healthy in the target group
+   */
+  private async waitForTargetHealthy(targetGroupArn: string, targetId: string, maxWaitSeconds: number = 60): Promise<boolean> {
+    const startTime = Date.now();
+    const maxWaitMs = maxWaitSeconds * 1000;
+
+    while (Date.now() - startTime < maxWaitMs) {
+      try {
+        const healthCommand = new DescribeTargetHealthCommand({
+          TargetGroupArn: targetGroupArn,
+          Targets: [
+            {
+              Id: targetId,
+              Port: 5901,
+            },
+          ],
+        });
+
+        const healthResponse = await this.elbClient.send(healthCommand);
+        
+        if (healthResponse.TargetHealthDescriptions && healthResponse.TargetHealthDescriptions.length > 0) {
+          const targetHealth = healthResponse.TargetHealthDescriptions[0];
+          const state = targetHealth.TargetHealth?.State;
+          
+          console.log(`Target health state: ${state}`);
+          
+          if (state === 'healthy') {
+            return true;
+          }
+          
+          if (state === 'unhealthy') {
+            console.error(`Target is unhealthy: ${targetHealth.TargetHealth?.Reason}`);
+            return false;
+          }
+        }
+
+        // Wait 2 seconds before checking again
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+      } catch (error) {
+        console.error('Error checking target health:', error);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
+    console.error('Timeout waiting for target to become healthy');
+    return false;
+  }
+
+  /**
+   * Deregister this task from the ALB target group
+   */
+  async deregisterFromTargetGroup(): Promise<boolean> {
+    try {
+      const targetGroupArn = process.env.VNC_TARGET_GROUP_ARN;
+      if (!targetGroupArn || !this.taskPrivateIp) {
+        console.log('No target group ARN or task IP - skipping deregistration');
+        return true;
+      }
+
+      console.log(`Deregistering task IP ${this.taskPrivateIp} from target group`);
+
+      const deregisterCommand = new DeregisterTargetsCommand({
+        TargetGroupArn: targetGroupArn,
+        Targets: [
+          {
+            Id: this.taskPrivateIp,
+            Port: 5901,
+          },
+        ],
+      });
+
+      await this.elbClient.send(deregisterCommand);
+      console.log(`✓ Successfully deregistered ${this.taskPrivateIp} from target group`);
+      return true;
+
+    } catch (error) {
+      console.error('Failed to deregister from target group:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Signal that VNC is ready via AppSync
+   * Publishes the full VNC WebSocket URL with vpId path for multi-user routing
+   * Should only be called AFTER task is registered with ALB and healthy
+   */
+  async setVncReady(): Promise<boolean> {
+    try {
+      console.log(`Signaling VNC ready for VP ${this.participantId}`);
+      
+      // Get CloudFront domain from environment variable (same as AppSync URL pattern)
+      const cloudFrontDomain = process.env.CLOUDFRONT_DOMAIN;
+      
+      if (!cloudFrontDomain) {
+        console.error('CLOUDFRONT_DOMAIN environment variable not set');
         return false;
       }
       
-      console.log(`Publishing VNC endpoint for VP ${this.participantId}`);
-      console.log(`VNC Endpoint: ${vncEndpoint}:${port}`);
-
-      // First, get the current VP to preserve existing fields
+      // Construct full VNC URL with vpId path for multi-user routing
+      const vncEndpoint = `wss://${cloudFrontDomain}/vnc/${this.participantId}`;
+      
+      console.log(`VNC WebSocket URL with path: ${vncEndpoint}`);
+      
+      // Get current VP to preserve CallId
       const getQuery = `
         query GetVirtualParticipant($id: ID!) {
           getVirtualParticipant(id: $id) {
@@ -364,13 +516,13 @@ export class VirtualParticipantStatusManager {
 
       const currentCallId = currentVP.getVirtualParticipant.CallId;
 
+      // Update VP with vncReady flag and full URL
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
           updateVirtualParticipant(input: $input) {
             id
             status
             vncEndpoint
-            vncPort
             vncReady
             CallId
             updatedAt
@@ -381,10 +533,9 @@ export class VirtualParticipantStatusManager {
       const variables: any = {
         input: {
           id: this.participantId,
-          vncEndpoint: vncEndpoint, // Public IP or ALB DNS
-          vncPort: port,
+          vncEndpoint: vncEndpoint,
           vncReady: true,
-          status: 'VNC_READY', // Optional intermediate status
+          status: 'VNC_READY'
         }
       };
 
@@ -393,25 +544,18 @@ export class VirtualParticipantStatusManager {
         variables.input.CallId = currentCallId;
       }
 
-      // Include password if provided (for future use)
-      if (password) {
-        variables.input.vncPassword = password;
-      }
-
-      console.log('Sending VNC mutation with variables:', JSON.stringify(variables, null, 2));
       const result = await this.signAndSendGraphQLRequest(mutation, variables);
-      console.log('VNC mutation result:', JSON.stringify(result, null, 2));
       
       if (result) {
-        console.log(`✓ Successfully published VNC endpoint: ${vncEndpoint}:${port}`);
+        console.log(`✓ VNC ready with URL: ${vncEndpoint}`);
         return true;
       } else {
-        console.error('Failed to publish VNC endpoint via GraphQL');
+        console.error('Failed to publish VNC ready signal');
         return false;
       }
 
     } catch (error) {
-      console.error('Failed to publish VNC endpoint:', error);
+      console.error('Failed to signal VNC ready:', error);
       return false;
     }
   }
