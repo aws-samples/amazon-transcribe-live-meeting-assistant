@@ -588,9 +588,11 @@ const VirtualParticipantDetails = () => {
       </Container>
 
       {/* VNC Live View - Show when VNC is ready and VP is active */}
-      {vpDetails.vncReady && vpDetails.vncEndpoint && ['VNC_READY', 'JOINED', 'ACTIVE'].includes(vpDetails.status) && (
-        <VNCViewer vpId={vpId} vncEndpoint={vpDetails.vncEndpoint} websocketUrl={vpDetails.vncEndpoint} />
-      )}
+      {vpDetails.vncReady &&
+        vpDetails.vncEndpoint &&
+        ['VNC_READY', 'CONNECTING', 'JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status) && (
+          <VNCViewer vpId={vpId} vncEndpoint={vpDetails.vncEndpoint} websocketUrl={vpDetails.vncEndpoint} />
+        )}
 
       {/* VNC Preparing Message - Show while VNC is starting up */}
       {!vpDetails.vncReady && ['INITIALIZING', 'CONNECTING', 'JOINING'].includes(vpDetails.status) && (
