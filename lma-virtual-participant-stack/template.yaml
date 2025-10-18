@@ -683,9 +683,13 @@ Resources:
                 Action:
                   - "elasticloadbalancing:RegisterTargets"
                   - "elasticloadbalancing:DeregisterTargets"
-                  - "elasticloadbalancing:DescribeTargetHealth"
                 Resource:
                   - !Ref VNCTargetGroupArn
+              - Effect: Allow
+                Action:
+                  - "elasticloadbalancing:DescribeTargetHealth"
+                Resource:
+                  - "*"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
