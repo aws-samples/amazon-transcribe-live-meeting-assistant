@@ -95,10 +95,6 @@ ECS Task (x11vnc + websockify)
 
 ### Files Added
 
-**Documentation:**
-- `lma-virtual-participant-stack/CLOUDFRONT_VNC_IMPLEMENTATION.md` - Architecture details
-- `lma-virtual-participant-stack/NOVNC_VERSION_NOTE.md` - noVNC version compatibility
-
 ### Files Modified
 
 **Backend:**
@@ -121,13 +117,6 @@ ECS Task (x11vnc + websockify)
 
 ## Technical Decisions
 
-### Why CloudFront + ALB Instead of API Gateway?
-
-**API Gateway WebSocket Approach (Rejected):**
-- Cannot handle binary VNC protocol (base64 encoding required)
-- High latency due to encoding/decoding overhead
-- Lambda timeout limits (15 minutes max)
-
 **CloudFront + ALB Approach (Implemented):**
 - ✅ Native WebSocket support (no encoding needed)
 - ✅ CloudFront provides SSL certificate
@@ -135,29 +124,12 @@ ECS Task (x11vnc + websockify)
 - ✅ No timeout limits
 - ✅ Better performance (no Lambda in data path)
 
-### Why Dynamic Registration Instead of ECS Service?
-
-**ECS Service Approach (Rejected):**
-- Conflicts with Step Functions task management
-- Can't use both Service and direct `runTask`
-
 **Dynamic Registration Approach (Implemented):**
 - ✅ Works with existing Step Functions architecture
 - ✅ Each task manages its own ALB registration
 - ✅ Health checks ensure readiness
 - ✅ Automatic cleanup on shutdown
 - ✅ Supports multiple concurrent tasks
-
-### Why Move ALB to AI Stack?
-
-**Original Approach (Rejected):**
-- ALB in VP stack, CloudFront in AI stack
-- **Problem**: Circular dependency (AI needs ALB DNS, VP needs CloudFront domain)
-
-**Final Approach (Implemented):**
-- ✅ Both ALB and CloudFront in AI stack
-- ✅ VP stack depends on AI stack (one-way dependency)
-- ✅ Clean architecture, no circular dependencies
 
 ## Security
 
@@ -168,6 +140,17 @@ ECS Task (x11vnc + websockify)
 - **IAM Permissions** - Task role scoped to specific target group
 - **AppSync Authorization** - GraphQL mutations require Cognito authentication
 - **Audit Logging** - VNC connection events logged to CloudWatch
+
+**Initial version without cognito**
+- Users must authenticate to access the React app and create VPs via AppSync
+- VPs are ephemeral - they only exist during active meetings
+- WebSocket IDs are unpredictable - an attacker would need to:
+  - Be authenticated in the app
+  - Guess the correct WebSocket ID (VP creates it's own ALB target like wss://<cloudfront-url>/vnc/33260eca-3770-45a2-9c3d-f0ef52f64501)
+  - Do so within the meeting window (before VP terminates)
+- Network isolation - Only CloudFront can reach the ALB
+
+TODO: Cognito + cloudfront for comprehensive security
 
 ## Testing
 
@@ -183,13 +166,6 @@ ECS Task (x11vnc + websockify)
 ## Deployment
 
 No new parameters required! Simply deploy or update the main LMA stack:
-
-```bash
-aws cloudformation deploy \
-  --template-file lma-main.yaml \
-  --stack-name your-lma-stack \
-  --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND
-```
 
 The system automatically:
 1. Creates CloudFront distribution with VNC origin
@@ -217,27 +193,9 @@ Estimated additional cost: ~$20-25/month
 - Application Load Balancer: ~$16/month (fixed cost)
 - Increased ECS memory (4GB vs 2GB): ~$0.04/hour per active task
 
-**Note:** ALB is a fixed cost but provides better performance and reliability than serverless alternatives.
-
 ## Breaking Changes
 
 None - This is a new feature that doesn't affect existing functionality.
-
-## Future Enhancements
-
-- [ ] Add HTTPS listener to ALB with ACM certificate
-- [ ] Implement connection pooling for better performance
-- [ ] Add session recording capability
-- [ ] Support for multiple concurrent viewers per VP
-- [ ] Add metrics and monitoring dashboards
-
-## Documentation
-
-Complete documentation available in:
-- `lma-virtual-participant-stack/CLOUDFRONT_VNC_IMPLEMENTATION.md` - Architecture details
-- `lma-virtual-participant-stack/DEPLOYMENT_GUIDE.md` - Deployment steps
-- `lma-virtual-participant-stack/IMPLEMENTATION_SUMMARY.md` - High-level overview
-- `lma-virtual-participant-stack/NOVNC_VERSION_NOTE.md` - Version compatibility notes
 
 ## References
 
