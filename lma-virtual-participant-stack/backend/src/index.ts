@@ -96,7 +96,7 @@ const main = async (): Promise<void> => {
         if (statusManager) {
             await statusManager.setFailed('VNC server initialization failed');
         }
-        process.exit(1);
+        throw new Error('VNC server initialization failed');
     }
 
     // Register with ALB target group and wait for healthy
@@ -107,13 +107,13 @@ const main = async (): Promise<void> => {
             if (!registered) {
                 console.error('Failed to register with target group');
                 await statusManager.setFailed('ALB registration failed');
-                process.exit(1);
+                throw new Error('ALB registration failed');
             }
             console.log('✓ Task registered with ALB and healthy');
         } catch (error) {
             console.error('Error during ALB registration:', error);
             await statusManager.setFailed('ALB registration error');
-            process.exit(1);
+            throw new Error('ALB registration failed');
         }
     }
 
