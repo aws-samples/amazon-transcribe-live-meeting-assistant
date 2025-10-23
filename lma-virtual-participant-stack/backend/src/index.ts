@@ -3,6 +3,7 @@ import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
+import ZoomSDK from './zoom-sdk.js';
 import Teams from './teams.js';
 import Webex from './webex.js';
 import { details } from './details.js';
@@ -97,38 +98,20 @@ const main = async (): Promise<void> => {
         await new Promise(resolve => setTimeout(resolve, timestampDiff));
     }
 
-    // Set CONNECTING status when starting browser
+    // Set CONNECTING status when starting
     if (statusManager) {
         await statusManager.setConnecting();
         console.log(`VP ${vpId} status: CONNECTING`);
     }
 
-    // Launch Puppeteer browser
-    console.log('Launching browser...');
-    const isTeamsMeeting = details.invite.meetingPlatform === 'Teams' || details.invite.meetingPlatform === 'TEAMS';
-    let browser;
-    
-    if (isTeamsMeeting) {
-        console.log('DEBUG: Using puppeteer-extra with stealth plugin for Teams meeting');
-        // Configure puppeteer-extra with stealth plugin for Teams
-        puppeteerExtra.use(StealthPlugin());
-        browser = await puppeteerExtra.launch(getPuppeteerConfig());
-    } else {
-        console.log('DEBUG: Using standard puppeteer for non-Teams meeting');
-        browser = await puppeteer.launch(getPuppeteerConfig());
-    }
+    // Check if this is a Zoom meeting that should use SDK
+    const isZoomMeeting = details.invite.meetingPlatform === 'ZOOM' || details.invite.meetingPlatform === 'Zoom';
+    const useZoomSDK = isZoomMeeting && process.env.ZOOM_API_KEY && process.env.ZOOM_API_SECRET && process.env.ZOOM_BOT_JID;
 
-    const page = await browser.newPage();
-    await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
-    page.setDefaultTimeout(20000);
-
-    // Set user agent to avoid detection
-    await page.setUserAgent(
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
-
-    let meeting: Chime | Zoom | Teams | Webex;
+    let meeting: Chime | Zoom | ZoomSDK | Teams | Webex;
     let success = false;
+    let browser: any = null;
+    let page: any = null;
 
     try {
         // Set JOINING status before attempting to join meeting
@@ -141,33 +124,68 @@ const main = async (): Promise<void> => {
         console.log(`Initializing ${details.invite.meetingPlatform} handler...`);
         console.log(`DEBUG: Meeting platform value: "${details.invite.meetingPlatform}" (type: ${typeof details.invite.meetingPlatform})`);
         
-        switch (details.invite.meetingPlatform) {
-            case 'CHIME':
-                meeting = new Chime();
-                break;
-            case 'ZOOM':
-                meeting = new Zoom();
-                break;
-            case 'TEAMS':
-            case 'Teams':
-                meeting = new Teams();
-                break;
-            case 'WEBEX':
-                meeting = new Webex();
-                break;
-            default:
-                throw new Error(`Unsupported meeting platform: ${details.invite.meetingPlatform}`);
+        if (useZoomSDK) {
+            console.log('Using Zoom SDK bot for meeting');
+            meeting = new ZoomSDK();
+            
+            // Start recording service
+            recordingService.startRecording();
+            
+            // Join the meeting using SDK (no browser needed)
+            await meeting.initialize();
+            
+        } else {
+            // Use Puppeteer for other platforms or fallback Zoom
+            console.log('Launching browser...');
+            const isTeamsMeeting = details.invite.meetingPlatform === 'Teams' || details.invite.meetingPlatform === 'TEAMS';
+            
+            if (isTeamsMeeting) {
+                console.log('DEBUG: Using puppeteer-extra with stealth plugin for Teams meeting');
+                // Configure puppeteer-extra with stealth plugin for Teams
+                puppeteerExtra.use(StealthPlugin());
+                browser = await puppeteerExtra.launch(getPuppeteerConfig());
+            } else {
+                console.log('DEBUG: Using standard puppeteer for non-Teams meeting');
+                browser = await puppeteer.launch(getPuppeteerConfig());
+            }
+
+            page = await browser.newPage();
+            await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
+            page.setDefaultTimeout(20000);
+
+            // Set user agent to avoid detection
+            await page.setUserAgent(
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            );
+
+            switch (details.invite.meetingPlatform) {
+                case 'CHIME':
+                    meeting = new Chime();
+                    break;
+                case 'ZOOM':
+                    console.log('Using Puppeteer fallback for Zoom (SDK not configured)');
+                    meeting = new Zoom();
+                    break;
+                case 'TEAMS':
+                case 'Teams':
+                    meeting = new Teams();
+                    break;
+                case 'WEBEX':
+                    meeting = new Webex();
+                    break;
+                default:
+                    throw new Error(`Unsupported meeting platform: ${details.invite.meetingPlatform}`);
+            }
+
+            // Start recording service
+            recordingService.startRecording();
+
+            // Join the meeting
+            await meeting.initialize(page);
         }
-
-        // Start recording service
-        recordingService.startRecording();
-
-        // Join the meeting
-        await meeting.initialize(page);
         
         console.log('Meeting joined successfully');
         success = true;
-
 
     } catch (error: any) {
         console.error('Meeting failed:', error.message);
@@ -214,8 +232,10 @@ const main = async (): Promise<void> => {
         }
 
         try {
-            // Close browser
-            await browser.close();
+            // Close browser (only if it was created)
+            if (browser) {
+                await browser.close();
+            }
         } catch (error) {
             console.error('Error closing browser:', error);
         }
