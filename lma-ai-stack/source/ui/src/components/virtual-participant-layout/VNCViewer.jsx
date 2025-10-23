@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import RFB from '@novnc/novnc/lib/rfb';
 import { Container, Header, SpaceBetween, Alert, Spinner, Box, Button, Toggle, Badge } from '@awsui/components-react';
+import { Auth } from 'aws-amplify';
 
 const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
   const canvasRef = useRef(null);
@@ -15,7 +16,7 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [viewOnly, setViewOnly] = useState(false);
-  const [scaleViewport, setScaleViewport] = useState(true);
+  const [scaleViewport, setScaleViewport] = useState(false);
   const [customScale, setCustomScale] = useState(100);
 
   useEffect(() => {
@@ -24,65 +25,76 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
     setConnecting(true);
     setError(null);
 
-    // Connect via CloudFront with secure WebSocket (wss://)
-    // The vncEndpoint comes from AppSync and includes the full URL with vpId path
-    // Format: wss://cloudfront-domain/vnc/{vpId}
-    const wsUrl = vncEndpoint;
+    // Get Cognito token and connect
+    const connectWithAuth = async () => {
+      try {
+        // Get current Cognito session
+        const session = await Auth.currentSession();
+        const idToken = session.getIdToken().getJwtToken();
 
-    console.log('Connecting to VNC via CloudFront:', wsUrl);
-    console.log('Virtual Participant ID:', vpId);
+        // Append token as query parameter to the WebSocket URL
+        // Format: wss://cloudfront-domain/vnc/{vpId}?token={idToken}
+        const url = new URL(vncEndpoint);
+        url.searchParams.append('token', idToken);
+        const wsUrl = url.toString();
 
-    try {
-      const rfb = new RFB(canvasRef.current, wsUrl, {
-        credentials: { password: '' },
-      });
+        console.log('Connecting to VNC via CloudFront with authentication');
+        console.log('Virtual Participant ID:', vpId);
 
-      // Configure RFB
-      rfb.scaleViewport = scaleViewport;
-      rfb.resizeSession = false;
-      rfb.viewOnly = viewOnly;
+        const rfb = new RFB(canvasRef.current, wsUrl, {
+          credentials: { password: '' },
+        });
 
-      // Apply custom scaling if not using scaleViewport
-      if (!scaleViewport && customScale !== 100) {
-        rfb.scaleViewport = false;
-        // We'll handle scaling via CSS transform
-      }
+        // Configure RFB
+        rfb.scaleViewport = scaleViewport;
+        rfb.resizeSession = false;
+        rfb.viewOnly = viewOnly;
 
-      // Event handlers
-      rfb.addEventListener('connect', () => {
-        console.log('VNC connected successfully');
-        setConnected(true);
-        setConnecting(false);
-        setError(null);
-      });
-
-      rfb.addEventListener('disconnect', (e) => {
-        console.log('VNC disconnected:', e.detail);
-        setConnected(false);
-        setConnecting(false);
-        if (e.detail.clean === false) {
-          setError('Connection lost. The virtual participant may have ended.');
+        // Apply custom scaling if not using scaleViewport
+        if (!scaleViewport && customScale !== 100) {
+          rfb.scaleViewport = false;
+          // We'll handle scaling via CSS transform
         }
-      });
 
-      rfb.addEventListener('securityfailure', (e) => {
-        console.error('VNC security failure:', e.detail);
-        setError(`Security failure: ${e.detail.reason}`);
+        // Event handlers
+        rfb.addEventListener('connect', () => {
+          console.log('VNC connected successfully');
+          setConnected(true);
+          setConnecting(false);
+          setError(null);
+        });
+
+        rfb.addEventListener('disconnect', (e) => {
+          console.log('VNC disconnected:', e.detail);
+          setConnected(false);
+          setConnecting(false);
+          if (e.detail.clean === false) {
+            setError('Connection lost. The virtual participant may have ended.');
+          }
+        });
+
+        rfb.addEventListener('securityfailure', (e) => {
+          console.error('VNC security failure:', e.detail);
+          setError(`Security failure: ${e.detail.reason}`);
+          setConnecting(false);
+        });
+
+        rfb.addEventListener('credentialsrequired', () => {
+          console.log('VNC credentials required');
+          setError('Authentication required');
+          setConnecting(false);
+        });
+
+        rfbRef.current = rfb;
+      } catch (err) {
+        console.error('Failed to connect:', err);
+        setError(`Failed to connect: ${err.message}`);
         setConnecting(false);
-      });
+      }
+    };
 
-      rfb.addEventListener('credentialsrequired', () => {
-        console.log('VNC credentials required');
-        setError('Authentication required');
-        setConnecting(false);
-      });
-
-      rfbRef.current = rfb;
-    } catch (err) {
-      console.error('Failed to create RFB:', err);
-      setError(`Failed to connect: ${err.message}`);
-      setConnecting(false);
-    }
+    // Call the async function
+    connectWithAuth();
 
     return () => {
       if (rfbRef.current) {

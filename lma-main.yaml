@@ -612,6 +612,18 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable data retention on stack deletion for compliance requirements.
+      When true: DynamoDB tables, S3 buckets (recordings and logs), and encryption key will be retained.
+      When false (default): All resources deleted for clean stack removal.
+      Enterprise customers with compliance requirements should set to true.
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -697,6 +709,7 @@ Metadata:
           - TranscriptionExpirationInDays
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
+          - EnableDataRetentionOnDelete
       - Label:
           default: AppSync Configuration
         Parameters:
@@ -838,6 +851,8 @@ Metadata:
         default: Existing Private Subnet 2
       PermissionsBoundaryArn:
         default: Permissions Boundary ARN
+      EnableDataRetentionOnDelete:
+        default: Enable Data Retention On Stack Deletion
 
 Mappings:
   TranscribeToLexLocaleId:
@@ -911,6 +926,7 @@ Rules:
           is 'Q_BUSINESS (Use Existing)'
 
 Conditions:
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   IsHealthcareDomainSelected: !Equals [!Ref Domain, "Healthcare"]
   ShouldCreateRecordingBucket: !Equals [!Ref S3BucketName, ""]
   ShouldUseExistingBedrockKnowledgeBase:
@@ -961,6 +977,8 @@ Resources:
   ##########################################################################
   CustomerManagedEncryptionKey:
     Type: AWS::KMS::Key
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       Description: !Sub "Customer managed KMS key for ${AWS::StackName} encryption"
       EnableKeyRotation: true
@@ -1543,7 +1561,7 @@ Resources:
   ## LOGGING BUCKET FOR S3 ACCESS LOGS
   LoggingBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
     UpdateReplacePolicy: Retain
     Metadata:
       cfn_nag:
@@ -1606,7 +1624,7 @@ Resources:
   ## BUCKET TO STORE STEREO RECORDINGS AND TRANSCRIPTS FILES
   RecordingsBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
     UpdateReplacePolicy: Retain
     Condition: ShouldCreateRecordingBucket
     Properties:
@@ -1825,6 +1843,7 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
         VPC: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.VPC

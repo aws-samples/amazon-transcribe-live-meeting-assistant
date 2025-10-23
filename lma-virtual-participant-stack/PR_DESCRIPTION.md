@@ -133,24 +133,56 @@ ECS Task (x11vnc + websockify)
 
 ## Security
 
-- **CloudFront IP Restriction** - ALB only accepts traffic from CloudFront IPs
+### Multi-Layer Security Architecture
+
+**Layer 1: CloudFront Edge Authentication (Lambda@Edge)**
+- **Cognito Token Validation** - All `/vnc/*` requests validated at CloudFront edge
+- **JWT Verification** - Validates token signature, expiration, issuer, and client_id
+- **Path-Specific** - Only applies to VNC paths, doesn't affect other application routes
+- **401/403 Responses** - Returns appropriate HTTP status for invalid/missing tokens
+- **Global Deployment** - Lambda@Edge created in us-east-1, replicated to all edge locations
+- **Custom Resource** - Automatic deployment and cleanup across regions
+
+**Layer 2: Network Security**
+- **CloudFront IP Restriction** - ALB only accepts traffic from CloudFront IPs (prefix list)
 - **Network Isolation** - ECS tasks in private subnets
-- **TLS Encryption** - CloudFront default SSL certificate
+- **TLS Encryption** - CloudFront default SSL certificate (TLS 1.2+)
 - **Security Groups** - Layered security (CloudFront → ALB → ECS)
-- **IAM Permissions** - Task role scoped to specific target group
+
+**Layer 3: Application Security**
 - **AppSync Authorization** - GraphQL mutations require Cognito authentication
+- **User Context** - VP creation tied to authenticated user (owner field)
+- **IAM Permissions** - Task role scoped to specific target group
+
+**Layer 4: Authorization & Access Control**
+- **Ephemeral Resources** - VPs are short-lived (exist only during meetings)
+- **Unpredictable IDs** - WebSocket IDs dynamically generated (e.g., `/vnc/33260eca-3770-45a2-9c3d-f0ef52f64501`)
+- **Narrow Attack Window** - Attacker would need to guess ID before meeting ends
 - **Audit Logging** - VNC connection events logged to CloudWatch
 
-**Initial version without cognito**
-- Users must authenticate to access the React app and create VPs via AppSync
-- VPs are ephemeral - they only exist during active meetings
-- WebSocket IDs are unpredictable - an attacker would need to:
-  - Be authenticated in the app
-  - Guess the correct WebSocket ID (VP creates it's own ALB target like wss://<cloudfront-url>/vnc/33260eca-3770-45a2-9c3d-f0ef52f64501)
-  - Do so within the meeting window (before VP terminates)
-- Network isolation - Only CloudFront can reach the ALB
+### Authentication Flow
 
-TODO: Cognito + cloudfront for comprehensive security
+1. User authenticates to LMA via Cognito (React app)
+2. User creates virtual participant via AppSync (requires auth)
+3. User accesses `/vnc/{vpId}` via CloudFront
+4. **Lambda@Edge validates Cognito token** from cookies
+5. If valid → request forwarded to ALB → ECS
+6. If invalid → 401/403 returned immediately
+7. VNC WebSocket connection established (if authenticated)
+
+### Why This Security Model Is Strong
+
+Even without Lambda@Edge, the security was already robust:
+- Users must authenticate to create VPs
+- VPs are ephemeral and short-lived
+- WebSocket IDs are unpredictable
+- Network isolation via security groups
+
+**Lambda@Edge adds defense-in-depth:**
+- Prevents unauthenticated access at the edge
+- Validates tokens before reaching backend
+- Provides audit trail of authentication attempts
+- Works globally across all CloudFront edge locations
 
 ## Testing
 

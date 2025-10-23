@@ -435,6 +435,16 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable data retention on stack deletion for compliance requirements.
+      When true, DynamoDB tables will be retained. When false (default), all resources deleted.
+
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -479,6 +489,7 @@ Metadata:
           Transcript Summary is processed (existing)
 
 Conditions:
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
@@ -573,7 +584,7 @@ Outputs:
 Resources:
   EventSourcingTable:
     Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
     UpdateReplacePolicy: Retain
     Properties:
       AttributeDefinitions:
@@ -2754,6 +2765,113 @@ Resources:
 
 
   ##########################################################################
+  # Lambda@Edge for VNC Authentication
+  ##########################################################################
+
+  # IAM Role for Lambda@Edge function (must be assumable by both lambda and edgelambda)
+  EdgeAuthFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  # Custom resource Lambda to deploy Lambda@Edge in us-east-1
+  EdgeAuthDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: ManageLambdaEdge
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:DeleteFunction
+                  - lambda:GetFunction
+                  - lambda:ListVersionsByFunction
+                  - lambda:PublishVersion
+                Resource: !Sub 'arn:aws:lambda:us-east-1:${AWS::AccountId}:function:${AWS::StackName}-VNCEdgeAuth*'
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt EdgeAuthFunctionRole.Arn
+
+  EdgeAuthDeployerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-EdgeAuthDeployer'
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 256
+      Role: !GetAtt EdgeAuthDeployerRole.Arn
+      CodeUri: ../source/lambda_functions/edge_auth_deployer
+      LoggingConfig:
+        LogGroup: !Sub '/${AWS::StackName}/lambda/EdgeAuthDeployer'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for custom resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    DependsOn:
+      - EdgeAuthDeployerLogGroup
+
+  EdgeAuthDeployerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/${AWS::StackName}/lambda/EdgeAuthDeployer'
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # Custom resource to create Lambda@Edge function in us-east-1
+  EdgeAuthFunction:
+    Type: Custom::EdgeAuthFunction
+    Properties:
+      ServiceToken: !GetAtt EdgeAuthDeployerFunction.Arn
+      FunctionName: !Sub '${AWS::StackName}-VNCEdgeAuth'
+      RoleArn: !GetAtt EdgeAuthFunctionRole.Arn
+      UserPoolId: !Ref UserPoolId
+      Region: !Ref AWS::Region
+      ClientId: !Ref CognitoClientId
+      # Hash of the Lambda@Edge code - changing this forces the custom resource to update
+      # This value is replaced during the build process by the Makefile
+      CodeHash: "EDGE_AUTH_CODE_HASH_PLACEHOLDER"
+
+  ##########################################################################
   # VNC Application Load Balancer for VNC Viewer Remove FrameBuffer Stream
   ##########################################################################
 
@@ -2895,7 +3013,6 @@ Resources:
   VNCALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub ${LMAStackName}-vnc-alb-v2
       Type: application
       Scheme: internet-facing
       IpAddressType: ipv4
@@ -2912,7 +3029,6 @@ Resources:
   VNCTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub ${LMAStackName}-vnc-tg-v2
       Port: 5901
       Protocol: HTTP
       TargetType: ip
@@ -3175,6 +3291,9 @@ Resources:
             DefaultTTL: 0
             MinTTL: 0
             MaxTTL: 0
+            LambdaFunctionAssociations:
+              - EventType: viewer-request
+                LambdaFunctionARN: !GetAtt EdgeAuthFunction.FunctionArn
         PriceClass: !Ref CloudFrontPriceClass
         Restrictions: !If
           - ShouldEnableGeoRestriction
