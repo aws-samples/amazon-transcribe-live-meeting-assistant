@@ -1427,7 +1427,7 @@ Resources:
                               schedule_expression = f"at({scheduled_time.strftime('%Y-%m-%dT%H:%M:%S')})"
                               
                               response = scheduler_client.create_schedule(
-                                  ActionAfterCompletion='NONE',
+                                  ActionAfterCompletion='DELETE',
                                   FlexibleTimeWindow={'Mode': 'OFF'},
                                   GroupName=os.environ['SCHEDULE_GROUP_NAME'],
                                   Name=vp_id,

@@ -424,6 +424,13 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  VPScheduleGroupName:
+    Type: String
+    Default: "LMA-VIRTUALPARTICIPANTSTACK-1ICEYE8S4JXFV-vp-schedules"
+    Description: >-
+      Name of the EventBridge Schedule Group for Virtual Participants from the VP stack.
+      This should match the schedule group name created by the Virtual Participant stack.
+
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -2511,6 +2518,19 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/addChatToken.js
 
+  OnUpdateVirtualParticipantAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onUpdateVirtualParticipant
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
   ##########################################################################
   # Virtual Participant
   ##########################################################################
@@ -2694,8 +2714,7 @@ Resources:
           "version": "2018-05-29",
           "operation": "Scan"
         }
-      ResponseMappingTemplate: |
-        $util.toJson($ctx.result.items)
+      ResponseMappingTemplateS3Location: ../source/appsync/listVirtualParticipants.response.vtl
 
   GetVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
@@ -2713,11 +2732,7 @@ Resources:
             "id": $util.dynamodb.toDynamoDBJson($ctx.args.id)
           }
         }
-      ResponseMappingTemplate: |
-        #if($ctx.error)
-          $util.error($ctx.error.message, $ctx.error.type)
-        #end
-        $util.toJson($ctx.result)
+      ResponseMappingTemplateS3Location: ../source/appsync/getVirtualParticipant.response.vtl
 
 
   # Virtual Participant Manager Lambda Function
@@ -2736,6 +2751,7 @@ Resources:
           TABLE_NAME: !Ref VirtualParticipantTable
           KINESIS_STREAM_NAME: !Ref CallDataStream
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
+          VP_SCHEDULE_GROUP_NAME: !Ref VPScheduleGroupName
           LOG_LEVEL: DEBUG
       Policies:
         - DynamoDBCrudPolicy:
@@ -2769,6 +2785,12 @@ Resources:
               Action:
                 - dynamodb:ListTables
               Resource: "*"
+            - Effect: Allow
+              Action:
+                - scheduler:DeleteSchedule
+                - scheduler:GetSchedule
+              Resource: 
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${VPScheduleGroupName}/*"
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
     Metadata:
@@ -2847,6 +2869,69 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/endVirtualParticipant.js
+
+  ShareVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: shareVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "UpdateItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+          },
+          "update": {
+            "expression": "SET SharedWith = :val",
+            "expressionValues": {
+              ":val": $util.dynamodb.toDynamoDBJson($util.str.join($ctx.args.input.SharedWith, ","))
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson({
+          "id": $ctx.args.input.id,
+          "Owner": $ctx.args.input.Owner,
+          "SharedWith": $util.str.join($ctx.args.input.SharedWith, ",")
+        })
+
+  UnshareVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: unshareVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "UpdateItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+          },
+          "update": {
+            "expression": "SET SharedWith = :val",
+            "expressionValues": {
+              ":val": $util.dynamodb.toDynamoDBJson("")
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson({
+          "id": $ctx.args.input.id,
+          "SharedWith": $ctx.args.input.SharedWith
+        })
 
 
   ##########################################################################

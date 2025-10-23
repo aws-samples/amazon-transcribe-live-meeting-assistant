@@ -170,6 +170,8 @@ type Mutation @aws_iam {
 	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	shareVirtualParticipant(input: ShareVirtualParticipantInput!): ShareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
+	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
 	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
 }
@@ -242,6 +244,28 @@ input EndVirtualParticipantInput {
 	id: ID!
 	endReason: String!
 	endedBy: String
+}
+
+input ShareVirtualParticipantInput {
+	id: ID!
+	SharedWith: [String!]!
+	Owner: String
+}
+
+type ShareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam {
+	id: ID!
+	Owner: String
+	SharedWith: String
+}
+
+input UnshareVirtualParticipantInput {
+	id: ID!
+	SharedWith: [String!]!
+}
+
+type UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam {
+	id: ID!
+	SharedWith: [String!]
 }
 
 enum Sentiment {
