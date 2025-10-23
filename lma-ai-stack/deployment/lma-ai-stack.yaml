@@ -1567,7 +1567,7 @@ Resources:
     Properties:
       Handler: index.handler
       Role: !GetAtt QueryKnowledgeBaseResolverFunctionExecutionRole.Arn
-      Runtime: python3.9
+      Runtime: python3.12
       CodeUri: ../source/lambda_functions/query_knowledgebase_resolver
       Description: Lambda function to query the meeting transcript knowledge base
       MemorySize: 512

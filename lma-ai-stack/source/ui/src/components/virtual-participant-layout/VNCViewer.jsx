@@ -16,7 +16,7 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [viewOnly, setViewOnly] = useState(false);
-  const [scaleViewport, setScaleViewport] = useState(false);
+  const [scaleViewport, setScaleViewport] = useState(true);
   const [customScale, setCustomScale] = useState(100);
 
   useEffect(() => {
