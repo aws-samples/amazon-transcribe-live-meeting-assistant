@@ -1527,7 +1527,7 @@ Resources:
         Variables:
           TASK_DEFINITION_ARN: !Ref TaskDefinition
           CLUSTER_ARN: !GetAtt Cluster.Arn
-          SECURITY_GROUPS: !Sub '["${SecurityGroup}"]'
+          SECURITY_GROUPS: !Sub '["${VPSecurityGroupId}"]'
           SUBNETS: !Sub '["${PrivateSubnet1}", "${PrivateSubnet2}"]'
           CONTAINER_NAME: "scribe"
           GRAPHQL_ENDPOINT: !Ref GraphQLEndpoint
@@ -1577,12 +1577,6 @@ Outputs:
     Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}"
     Export:
       Name: !Sub "${AWS::StackName}-ECRRepositoryUri"
-
-  SecurityGroupId:
-    Description: Security Group ID
-    Value: !Ref SecurityGroup
-    Export:
-      Name: !Sub "${AWS::StackName}-SecurityGroupId"
 
   VPScheduleGroupName:
     Description: Name of the EventBridge Schedule Group for Virtual Participants
