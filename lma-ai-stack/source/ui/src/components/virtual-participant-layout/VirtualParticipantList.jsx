@@ -4,29 +4,51 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState, useEffect } from 'react';
-import { API, graphqlOperation } from 'aws-amplify';
-import PropTypes from 'prop-types';
+import { API, graphqlOperation, Logger } from 'aws-amplify';
 import {
   Table,
   Box,
   SpaceBetween,
-  Header,
-  Badge,
   Button,
   Modal,
   Form,
   FormField,
   Input,
   Select,
-  Container,
   Alert,
   Flashbar,
+  DatePicker,
+  TimeInput,
+  Checkbox,
+  Textarea,
+  Pagination,
+  TextFilter,
 } from '@awsui/components-react';
-import { Link as RouterLink } from 'react-router-dom';
 import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
+import { useCollection } from '@awsui/collection-hooks';
+
 import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
 import useSettingsContext from '../../contexts/settings';
+import useLocalStorage from '../common/local-storage';
+import { paginationLabels } from '../common/labels';
+import { getFilterCounterText, TableEmptyState, TableNoMatchState } from '../common/table';
+
+import {
+  VPCommonHeader,
+  VPPreferences,
+  COLUMN_DEFINITIONS_MAIN,
+  KEY_COLUMN_ID,
+  SELECTION_LABELS,
+  DEFAULT_PREFERENCES,
+  DEFAULT_SORT_COLUMN,
+  TIME_FILTER_STORAGE_KEY,
+  filterVPsByTime,
+} from './vp-table-config';
+
+import '@awsui/global-styles/index.css';
+
+const logger = new Logger('VirtualParticipantList');
 
 const listVirtualParticipants = `
   query ListVirtualParticipants {
@@ -35,7 +57,13 @@ const listVirtualParticipants = `
       meetingName
       meetingPlatform
       meetingId
+      meetingTime
+      scheduledFor
+      isScheduled
       status
+      owner
+      Owner
+      SharedWith
       createdAt
       updatedAt
     }
@@ -55,51 +83,18 @@ const createVirtualParticipant = /* GraphQL */ `
   }
 `;
 
-const StatusBadge = ({ status }) => {
-  const getStatusProps = (vpStatus) => {
-    switch (vpStatus) {
-      case 'INITIALIZING':
-        return { color: 'blue', children: 'Initializing' };
-      case 'CONNECTING':
-        return { color: 'blue', children: 'Connecting' };
-      case 'JOINING':
-        return { color: 'blue', children: 'Joining' };
-      case 'JOINED':
-        return { color: 'green', children: 'Joined' };
-      case 'ACTIVE':
-        return { color: 'green', children: 'Active' };
-      case 'COMPLETED':
-        return { color: 'green', children: 'Completed' };
-      case 'FAILED':
-        return { color: 'red', children: 'Failed' };
-      default:
-        return { color: 'grey', children: vpStatus || 'Unknown' };
-    }
-  };
-
-  const statusProps = getStatusProps(status);
-  return <Badge color={statusProps.color}>{statusProps.children}</Badge>;
-};
-
-StatusBadge.propTypes = {
-  status: PropTypes.string.isRequired,
-};
-
-// Render function for status cell - defined outside component to avoid re-creation
-const renderStatusCell = (item) => <StatusBadge status={item.status} />;
-
-// Render function for meeting name cell - defined outside component to avoid re-creation
-const renderMeetingNameCell = (item) => (
-  <RouterLink to={`/virtual-participant/${item.id}`} style={{ textDecoration: 'none', color: '#0972d3' }}>
-    {item.meetingName}
-  </RouterLink>
-);
+const parseMeetingInvitation = /* GraphQL */ `
+  query ParseMeetingInvitation($invitationText: String!) {
+    parseMeetingInvitation(invitationText: $invitationText)
+  }
+`;
 
 const VirtualParticipantList = () => {
   const { user, currentCredentials } = useAppContext();
   const { settings } = useSettingsContext();
 
   const [participants, setParticipants] = useState([]);
+  const [filteredParticipants, setFilteredParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({
@@ -107,18 +102,53 @@ const VirtualParticipantList = () => {
     meetingPlatform: 'ZOOM',
     meetingId: '',
     meetingPassword: '',
+    meetingDate: '',
+    meetingTime: '',
   });
+  const [meetingTimeError, setMeetingTimeError] = useState('');
+  const [consentChecked, setConsentChecked] = useState(false);
   const [notification, setNotification] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [creatingType, setCreatingType] = useState(null);
   const [popupNotifications, setPopupNotifications] = useState([]);
-  const [sortingColumn, setSortingColumn] = useState({ sortingField: 'createdAt', sortingDescending: true });
+
+  // Meeting invitation parser state
+  const [showPasteInviteModal, setShowPasteInviteModal] = useState(false);
+  const [invitationText, setInvitationText] = useState('');
+  const [isParsing, setIsParsing] = useState(false);
+  const [parseError, setParseError] = useState('');
+
+  // Advanced table features
+  const [preferences, setPreferences] = useLocalStorage('vp-list-preferences', DEFAULT_PREFERENCES);
+  const [timeFilter, setTimeFilter] = useLocalStorage(TIME_FILTER_STORAGE_KEY, 24); // Default to 1 day
+
+  // Collection hooks for advanced table functionality
+  const { items, actions, filteredItemsCount, collectionProps, filterProps, paginationProps } = useCollection(
+    filteredParticipants,
+    {
+      filtering: {
+        empty: <TableEmptyState resourceName="Virtual Participant" />,
+        noMatch: <TableNoMatchState onClearFilter={() => actions.setFiltering('')} />,
+      },
+      pagination: { pageSize: preferences.pageSize },
+      sorting: { defaultState: { sortingColumn: DEFAULT_SORT_COLUMN, isDescending: true } },
+      selection: {
+        keepSelection: false,
+        trackBy: KEY_COLUMN_ID,
+      },
+    },
+  );
 
   const loadParticipants = async () => {
     try {
       setLoading(true);
+      logger.debug('Loading virtual participants');
       const result = await API.graphql(graphqlOperation(listVirtualParticipants));
-      setParticipants(result.data.listVirtualParticipants || []);
+      const vpList = result.data.listVirtualParticipants || [];
+      logger.debug('Loaded virtual participants:', vpList);
+      setParticipants(vpList);
     } catch (error) {
+      logger.error('Failed to load virtual participants:', error);
       setNotification({
         type: 'error',
         content: 'Failed to load virtual participants',
@@ -127,6 +157,14 @@ const VirtualParticipantList = () => {
       setLoading(false);
     }
   };
+
+  // Apply time filtering whenever participants or timeFilter changes
+  useEffect(() => {
+    logger.debug('Applying time filter:', timeFilter);
+    const filtered = filterVPsByTime(participants, timeFilter);
+    logger.debug('Filtered participants:', filtered.length, 'of', participants.length);
+    setFilteredParticipants(filtered);
+  }, [participants, timeFilter]);
 
   // Load participants on component mount
   useEffect(() => {
@@ -158,7 +196,7 @@ const VirtualParticipantList = () => {
 
         setParticipants((prev) => {
           const existingParticipant = prev.find((p) => p.id === updatedParticipant.id);
-          const meetingName = updatedParticipant.meetingName || existingParticipant?.meetingName || 'Unknown Meeting';
+          const meetingName = updatedParticipant.meetingName || existingParticipant?.meetingName || 'Unknown';
           // Only show notification if status actually changed
           if (
             existingParticipant &&
@@ -201,34 +239,25 @@ const VirtualParticipantList = () => {
                 message = `Virtual Participant status updated to ${updatedParticipant.status} for "${meetingName}"`;
             }
 
-            // Check if a similar notification already exists to prevent duplicates
-            setPopupNotifications((current) => {
-              const existingNotification = current.find((n) => n.content === message && n.type === notificationType);
-
-              // If similar notification already exists, don't add a new one
-              if (existingNotification) {
-                return current;
-              }
-
-              const notificationId = `vp-${updatedParticipant.id}-${updatedParticipant.status}-${Date.now()}`;
-              const popupNotification = {
-                type: notificationType,
-                content: message,
-                dismissible: true,
-                dismissLabel: 'Dismiss',
-                id: notificationId,
-                onDismiss: () => {
-                  setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
-                },
-              };
-
-              // Auto-dismiss after 8 seconds
-              setTimeout(() => {
+            // Add popup notification
+            const notificationId = `vp-${updatedParticipant.id}-${updatedParticipant.status}-${Date.now()}`;
+            const popupNotification = {
+              type: notificationType,
+              content: message,
+              dismissible: true,
+              dismissLabel: 'Dismiss',
+              id: notificationId,
+              onDismiss: () => {
                 setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
-              }, 8000);
+              },
+            };
 
-              return [...current, popupNotification];
-            });
+            setPopupNotifications((current) => [...current, popupNotification]);
+
+            // Auto-dismiss after 8 seconds
+            setTimeout(() => {
+              setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
+            }, 8000);
           }
 
           return prev.map((p) => {
@@ -243,7 +272,9 @@ const VirtualParticipantList = () => {
           });
         });
       },
-      error: () => {
+      error: (error) => {
+        logger.error('Subscription error:', error);
+        // Fallback to polling
         const pollInterval = setInterval(() => {
           loadParticipants();
         }, 5000);
@@ -253,60 +284,65 @@ const VirtualParticipantList = () => {
     });
 
     return () => subscription.unsubscribe();
-  }, []); // Remove dependencies to prevent subscription recreation
+  }, []);
 
-  // Sorting function
-  const sortParticipants = (items, sortingConfig) => {
-    if (!sortingConfig.sortingField) return items;
+  // Handle parsing meeting invitation
+  const handleParseMeetingInvitation = async () => {
+    if (!invitationText.trim()) {
+      setParseError('Please paste a meeting invitation');
+      return;
+    }
 
-    return [...items].sort((a, b) => {
-      const aValue = a[sortingConfig.sortingField];
-      const bValue = b[sortingConfig.sortingField];
+    setIsParsing(true);
+    setParseError('');
 
-      let comparison = 0;
+    try {
+      const result = await API.graphql(
+        graphqlOperation(parseMeetingInvitation, {
+          invitationText: invitationText.trim(),
+        }),
+      );
 
-      // Handle different data types
-      if (sortingConfig.sortingField === 'createdAt') {
-        comparison = new Date(aValue) - new Date(bValue);
-      } else if (typeof aValue === 'string' && typeof bValue === 'string') {
-        comparison = aValue.toLowerCase().localeCompare(bValue.toLowerCase());
-      } else if (aValue < bValue) {
-        comparison = -1;
-      } else if (aValue > bValue) {
-        comparison = 1;
+      const parsedResponse = JSON.parse(result.data.parseMeetingInvitation);
+
+      if (parsedResponse.success && parsedResponse.data) {
+        const { data } = parsedResponse;
+
+        // Auto-fill the form with parsed data
+        setCreateForm((prev) => ({
+          ...prev,
+          meetingName: data.meetingName || prev.meetingName,
+          meetingPlatform: data.meetingPlatform || prev.meetingPlatform,
+          meetingId: data.meetingId || prev.meetingId,
+          meetingPassword: data.meetingPassword || prev.meetingPassword,
+          meetingDate: data.meetingDate || prev.meetingDate,
+          meetingTime: data.meetingTime || prev.meetingTime,
+        }));
+
+        // Close paste invite modal and open create modal
+        setShowPasteInviteModal(false);
+        setInvitationText('');
+        setShowCreateModal(true);
+
+        setNotification({
+          type: 'success',
+          content: 'Meeting invitation parsed successfully! Please review and verify the details.',
+        });
       } else {
-        comparison = 0;
+        setParseError(parsedResponse.error || 'Failed to parse meeting invitation');
       }
-
-      return sortingConfig.sortingDescending ? -comparison : comparison;
-    });
-  };
-
-  // Handle sorting change
-  const handleSortingChange = ({ detail }) => {
-    const newSortingField = detail.sortingColumn?.sortingField || detail.sortingField;
-
-    // If clicking the same column, toggle the direction
-    if (sortingColumn.sortingField === newSortingField) {
-      setSortingColumn({
-        sortingField: newSortingField,
-        sortingDescending: !sortingColumn.sortingDescending,
-      });
-    } else {
-      // If clicking a different column, start with ascending (false)
-      setSortingColumn({
-        sortingField: newSortingField,
-        sortingDescending: false,
-      });
+    } catch (error) {
+      console.error('Error parsing meeting invitation:', error);
+      setParseError('Failed to parse meeting invitation. Please try again or enter details manually.');
+    } finally {
+      setIsParsing(false);
     }
   };
 
-  // Get sorted participants
-  const sortedParticipants = sortParticipants(participants, sortingColumn);
-
   const parseStepFunctionError = (executionResult) => {
-    const output = executionResult.output ? JSON.parse(executionResult.output) : {};
-    const errorMessage = output.errorMessage || output.error || '';
+    const { output } = executionResult;
+    const parsedOutput = output ? JSON.parse(output) : {};
+    const errorMessage = parsedOutput.errorMessage || parsedOutput.error || '';
 
     // Check for specific error patterns
     if (
@@ -348,65 +384,73 @@ const VirtualParticipantList = () => {
     return errorMessage || 'Failed to join meeting. Please check your meeting details and try again.';
   };
 
-  const handleCreateParticipant = async () => {
+  const handleCreateParticipant = async (isScheduled = false) => {
     setIsCreating(true);
+    setCreatingType(isScheduled ? 'scheduled' : 'immediate');
 
     try {
       const userName = user?.attributes?.email || 'test-user@example.com';
 
+      // Calculate meeting time for scheduling
+      let meetingTimestamp = null;
+
+      if (isScheduled && createForm.meetingDate && createForm.meetingTime) {
+        const meetingDateTime = new Date(`${createForm.meetingDate}T${createForm.meetingTime}`);
+        meetingTimestamp = Math.floor(meetingDateTime.getTime() / 1000);
+      }
+
+      // Create VP record with scheduling information
+      const vpInput = {
+        meetingName: createForm.meetingName,
+        meetingPlatform: createForm.meetingPlatform,
+        meetingId: createForm.meetingId.replace(/ /g, ''),
+        meetingPassword: createForm.meetingPassword || '',
+        status: isScheduled ? 'SCHEDULED' : 'INITIALIZING',
+      };
+
+      // Add scheduling fields if this is a scheduled VP
+      if (isScheduled && meetingTimestamp) {
+        vpInput.meetingTime = meetingTimestamp;
+        vpInput.isScheduled = true;
+      }
+
       const vpResult = await API.graphql(
         graphqlOperation(createVirtualParticipant, {
-          input: {
-            meetingName: createForm.meetingName,
-            meetingPlatform: createForm.meetingPlatform,
-            meetingId: createForm.meetingId.replace(/ /g, ''),
-            meetingPassword: createForm.meetingPassword || '',
-            status: 'INITIALIZING',
-          },
+          input: vpInput,
         }),
       );
 
       const virtualParticipantId = vpResult.data.createVirtualParticipant.id;
 
-      const sfnClient = new SFNClient({
-        region: awsExports.aws_project_region,
-        credentials: currentCredentials,
-      });
-
-      const sfnParams = {
-        stateMachineArn: settings.LMAVirtualParticipantSchedulerStateMachine,
-        input: JSON.stringify({
-          apiInfo: { httpMethod: 'POST' },
-          data: {
-            meetingPlatform: createForm.meetingPlatform,
-            meetingID: createForm.meetingId.replace(/ /g, ''),
-            meetingPassword: createForm.meetingPassword,
-            meetingName: createForm.meetingName,
-            meetingTime: '',
-            userName,
-            virtualParticipantId,
-            accessToken: user.signInUserSession.accessToken.jwtToken,
-            idToken: user.signInUserSession.idToken.jwtToken,
-            rereshToken: user.signInUserSession.refreshToken.token,
-          },
-        }),
-      };
-
-      const data = await sfnClient.send(new StartSyncExecutionCommand(sfnParams));
-
-      if (data.status === 'FAILED') {
-        const errorMessage = parseStepFunctionError(data);
-        setNotification({
-          type: 'error',
-          content: errorMessage,
+      // For immediate execution, still use Step Functions (backward compatibility)
+      if (!isScheduled) {
+        const sfnClient = new SFNClient({
+          region: awsExports.aws_project_region,
+          credentials: currentCredentials,
         });
-        return;
-      }
 
-      if (data.status === 'SUCCEEDED') {
-        const output = data.output ? JSON.parse(data.output) : {};
+        const sfnParams = {
+          stateMachineArn: settings.LMAVirtualParticipantSchedulerStateMachine,
+          input: JSON.stringify({
+            apiInfo: { httpMethod: 'POST' },
+            data: {
+              meetingPlatform: createForm.meetingPlatform,
+              meetingID: createForm.meetingId.replace(/ /g, ''),
+              meetingPassword: createForm.meetingPassword,
+              meetingName: createForm.meetingName,
+              meetingTime: '',
+              userName,
+              virtualParticipantId,
+              accessToken: user.signInUserSession.accessToken.jwtToken,
+              idToken: user.signInUserSession.idToken.jwtToken,
+              rereshToken: user.signInUserSession.refreshToken.token,
+            },
+          }),
+        };
 
-        if (output.success === false || output.error) {
+        const data = await sfnClient.send(new StartSyncExecutionCommand(sfnParams));
+
+        if (data.status === 'FAILED') {
           const errorMessage = parseStepFunctionError(data);
           setNotification({
             type: 'error',
@@ -414,24 +458,51 @@ const VirtualParticipantList = () => {
           });
           return;
         }
+
+        if (data.status === 'SUCCEEDED') {
+          const { output } = data;
+          const parsedOutput = output ? JSON.parse(output) : {};
+
+          if (parsedOutput.success === false || parsedOutput.error) {
+            const errorMessage = parseStepFunctionError(data);
+            setNotification({
+              type: 'error',
+              content: errorMessage,
+            });
+            return;
+          }
+        }
       }
 
+      // Reset form and close modal
       setShowCreateModal(false);
       setCreateForm({
         meetingName: '',
         meetingPlatform: 'ZOOM',
         meetingId: '',
         meetingPassword: '',
+        meetingDate: '',
+        meetingTime: '',
       });
+      setMeetingTimeError('');
+      setConsentChecked(false);
 
       loadParticipants();
 
+      // Show appropriate success message
+      const scheduledDateTime = new Date(`${createForm.meetingDate}T${createForm.meetingTime}`);
+      const successMessage = isScheduled
+        ? `Virtual participant "${
+            createForm.meetingName
+          }" scheduled successfully for ${scheduledDateTime.toLocaleString()}.`
+        : `Virtual participant "${createForm.meetingName}" started successfully and is joining the meeting.`;
+
       setNotification({
         type: 'success',
-        content: `Virtual participant "${createForm.meetingName}" started successfully and is joining the meeting.`,
+        content: successMessage,
       });
     } catch (err) {
-      const errorMessage = err.message || '';
+      const { message: errorMessage } = err;
       if (errorMessage.includes('StateMachineDoesNotExist')) {
         setNotification({
           type: 'error',
@@ -460,41 +531,45 @@ const VirtualParticipantList = () => {
       }
     } finally {
       setIsCreating(false);
+      setCreatingType(null);
     }
   };
 
-  const columnDefinitions = [
-    {
-      id: 'meetingName',
-      header: 'Meeting Name',
-      cell: renderMeetingNameCell,
-      sortingField: 'meetingName',
-    },
-    {
-      id: 'meetingPlatform',
-      header: 'Platform',
-      cell: (item) => item.meetingPlatform,
-      sortingField: 'meetingPlatform',
-    },
-    {
-      id: 'meetingId',
-      header: 'Meeting ID',
-      cell: (item) => item.meetingId,
-      sortingField: 'meetingId',
-    },
-    {
-      id: 'status',
-      header: 'Status',
-      cell: renderStatusCell,
-      sortingField: 'status',
-    },
-    {
-      id: 'createdAt',
-      header: 'Created',
-      cell: (item) => new Date(item.createdAt).toLocaleString(),
-      sortingField: 'createdAt',
-    },
-  ];
+  // Validate meeting time for scheduling
+  const validateMeetingTime = (time) => {
+    if (!time) {
+      setMeetingTimeError('');
+      return;
+    }
+
+    if (time.length !== 5) {
+      setMeetingTimeError('Meeting time is incomplete.');
+      return;
+    }
+
+    if (!createForm.meetingDate) {
+      setMeetingTimeError('Please select a meeting date first.');
+      return;
+    }
+
+    // Create meeting datetime
+    const meetingDateTime = new Date(`${createForm.meetingDate}T${time}`);
+    const currentTime = new Date();
+    const minuteDifference = (meetingDateTime.getTime() - currentTime.getTime()) / (1000 * 60);
+
+    if (minuteDifference >= 2) {
+      setMeetingTimeError('');
+    } else {
+      setMeetingTimeError('Meeting time must be at least two minutes from now.');
+    }
+  };
+
+  // Check if form is ready for immediate execution
+  const isFormValidForImmediate = createForm.meetingName && createForm.meetingId && consentChecked;
+
+  // Check if form is ready for scheduling
+  const isFormValidForScheduling =
+    isFormValidForImmediate && createForm.meetingTime && createForm.meetingDate && !meetingTimeError;
 
   const platformOptions = [
     { label: 'Zoom', value: 'ZOOM', disabled: false },
@@ -504,6 +579,7 @@ const VirtualParticipantList = () => {
     { label: 'Google Meet', value: 'GOOGLE_MEET', disabled: true },
   ];
 
+  /* eslint-disable react/jsx-props-no-spreading */
   return (
     <SpaceBetween direction="vertical" size="l">
       {/* Popup notifications using Flashbar */}
@@ -515,37 +591,43 @@ const VirtualParticipantList = () => {
         </Alert>
       )}
 
-      <Container>
-        <Table
-          columnDefinitions={columnDefinitions}
-          items={sortedParticipants}
-          loading={loading}
-          sortingColumn={sortingColumn}
-          onSortingChange={handleSortingChange}
-          header={
-            <Header
-              counter={`(${participants.length})`}
-              actions={
-                <Button variant="primary" onClick={() => setShowCreateModal(true)}>
-                  Create Virtual Participant
-                </Button>
-              }
-            >
-              Virtual Participants
-            </Header>
-          }
-          empty={
-            <Box textAlign="center" color="inherit">
-              <b>No virtual participants</b>
-              <Box padding={{ bottom: 's' }} variant="p" color="inherit">
-                No virtual participants found.
-              </Box>
-              <Button onClick={() => setShowCreateModal(true)}>Create Virtual Participant</Button>
-            </Box>
-          }
-          sortingDisabled={false}
-        />
-      </Container>
+      <Table
+        {...collectionProps}
+        header={
+          <VPCommonHeader
+            resourceName="Virtual Participants"
+            selectedItems={collectionProps.selectedItems}
+            totalItems={filteredParticipants}
+            loading={loading}
+            timeFilter={timeFilter}
+            setTimeFilter={setTimeFilter}
+            onRefresh={loadParticipants}
+            onPasteInvite={() => setShowPasteInviteModal(true)}
+            onCreateVP={() => setShowCreateModal(true)}
+            items={filteredParticipants}
+          />
+        }
+        columnDefinitions={COLUMN_DEFINITIONS_MAIN}
+        items={items}
+        loading={loading}
+        loadingText="Loading virtual participants"
+        selectionType="multi"
+        ariaLabels={SELECTION_LABELS}
+        filter={
+          <TextFilter
+            {...filterProps}
+            filteringAriaLabel="Filter virtual participants"
+            filteringPlaceholder="Find virtual participants"
+            countText={getFilterCounterText(filteredItemsCount)}
+          />
+        }
+        wrapLines={preferences.wrapLines}
+        pagination={<Pagination {...paginationProps} ariaLabels={paginationLabels} />}
+        preferences={<VPPreferences preferences={preferences} setPreferences={setPreferences} />}
+        trackBy={KEY_COLUMN_ID}
+        visibleColumns={[KEY_COLUMN_ID, ...preferences.visibleContent]}
+        resizableColumns
+      />
 
       <Modal
         visible={showCreateModal}
@@ -559,12 +641,21 @@ const VirtualParticipantList = () => {
               </Button>
               <Button
                 variant="primary"
-                onClick={handleCreateParticipant}
-                disabled={!createForm.meetingName || !createForm.meetingId || isCreating}
-                loading={isCreating}
+                onClick={() => handleCreateParticipant(false)}
+                disabled={!isFormValidForImmediate || isCreating}
+                loading={isCreating && creatingType === 'immediate'}
                 loadingText="Starting Virtual Participant..."
               >
-                {isCreating ? 'Starting...' : 'Join Now'}
+                {isCreating && creatingType === 'immediate' ? 'Starting...' : 'Join Now'}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => handleCreateParticipant(true)}
+                disabled={!isFormValidForScheduling || isCreating}
+                loading={isCreating && creatingType === 'scheduled'}
+                loadingText="Scheduling Virtual Participant..."
+              >
+                {isCreating && creatingType === 'scheduled' ? 'Scheduling...' : 'Schedule for Later'}
               </Button>
             </SpaceBetween>
           </Box>
@@ -606,6 +697,138 @@ const VirtualParticipantList = () => {
                 type="password"
               />
             </FormField>
+
+            <FormField
+              label="Meeting Time (Optional)"
+              description="Choose a date and time that is at least two minutes from now to schedule the participant."
+              stretch
+            >
+              <SpaceBetween direction="horizontal" size="l">
+                <DatePicker
+                  onChange={({ detail }) => {
+                    setCreateForm((prev) => ({ ...prev, meetingDate: detail.value }));
+                    if (createForm.meetingTime) {
+                      validateMeetingTime(createForm.meetingTime);
+                    }
+                  }}
+                  value={createForm.meetingDate}
+                  isDateEnabled={(date) => {
+                    const currentDate = new Date();
+                    currentDate.setDate(currentDate.getDate() - 1);
+                    return date > currentDate;
+                  }}
+                  placeholder="YYYY/MM/DD"
+                />
+                <TimeInput
+                  onChange={({ detail }) => {
+                    setCreateForm((prev) => ({ ...prev, meetingTime: detail.value }));
+                    validateMeetingTime(detail.value);
+                  }}
+                  onBlur={() => validateMeetingTime(createForm.meetingTime)}
+                  value={createForm.meetingTime}
+                  disabled={createForm.meetingDate.length !== 10}
+                  format="hh:mm"
+                  placeholder="hh:mm (24-hour format)"
+                  use24Hour
+                />
+              </SpaceBetween>
+              {meetingTimeError && <Alert type="error">{meetingTimeError}</Alert>}
+            </FormField>
+
+            <Checkbox onChange={({ detail }) => setConsentChecked(detail.checked)} checked={consentChecked}>
+              I will not violate legal, corporate, or ethical restrictions that apply to meeting transcription and
+              recording.
+            </Checkbox>
+          </SpaceBetween>
+        </Form>
+      </Modal>
+
+      {/* Paste Meeting Invite Modal */}
+      <Modal
+        visible={showPasteInviteModal}
+        onDismiss={() => {
+          setShowPasteInviteModal(false);
+          setInvitationText('');
+          setParseError('');
+          // Reset the form completely when modal is closed
+          setCreateForm({
+            meetingName: '',
+            meetingPlatform: 'ZOOM',
+            meetingId: '',
+            meetingPassword: '',
+            meetingDate: '',
+            meetingTime: '',
+          });
+          setMeetingTimeError('');
+          setConsentChecked(false);
+        }}
+        header="Paste Meeting Invitation"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="link"
+                onClick={() => {
+                  setShowPasteInviteModal(false);
+                  setInvitationText('');
+                  setParseError('');
+                  // Reset the form completely when modal is cancelled
+                  setCreateForm({
+                    meetingName: '',
+                    meetingPlatform: 'ZOOM',
+                    meetingId: '',
+                    meetingPassword: '',
+                    meetingDate: '',
+                    meetingTime: '',
+                  });
+                  setMeetingTimeError('');
+                  setConsentChecked(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleParseMeetingInvitation}
+                disabled={!invitationText.trim() || isParsing}
+                loading={isParsing}
+                loadingText="Parsing invitation..."
+              >
+                {isParsing ? 'Parsing...' : 'Parse Invitation'}
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <Form>
+          <SpaceBetween direction="vertical" size="l">
+            <FormField
+              label="Meeting Invitation"
+              description="Paste your meeting invitation text here. The AI will extract meeting details."
+              stretch
+            >
+              <Textarea
+                value={invitationText}
+                onChange={({ detail }) => {
+                  setInvitationText(detail.value);
+                  setParseError('');
+                }}
+                placeholder="Paste your meeting invitation here...
+
+Example:
+Join Zoom Meeting
+https://zoom.us/j/1234567890?pwd=abcdef
+
+Meeting ID: 123 456 7890
+Passcode: 123456
+
+Topic: Weekly Team Standup
+Time: Dec 15, 2024 02:00 PM Eastern Time (US and Canada)"
+                rows={12}
+              />
+            </FormField>
+
+            {parseError && <Alert type="error">{parseError}</Alert>}
           </SpaceBetween>
         </Form>
       </Modal>

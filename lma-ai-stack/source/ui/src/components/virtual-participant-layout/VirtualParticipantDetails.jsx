@@ -33,6 +33,10 @@ const getVirtualParticipant = `
       meetingName
       meetingPlatform
       meetingId
+      meetingTime
+      scheduledFor
+      isScheduled
+      scheduleId
       status
       createdAt
       updatedAt
@@ -79,6 +83,13 @@ const logger = new Logger('VirtualParticipantDetails');
 
 // Status configuration with enhanced messaging
 const STATUS_CONFIG = {
+  SCHEDULED: {
+    message: 'Scheduled for future execution',
+    description: 'Virtual participant will automatically join at the scheduled time',
+    icon: 'calendar',
+    type: 'info',
+    color: 'blue',
+  },
   INITIALIZING: {
     message: 'Setting up virtual participant...',
     description: 'Preparing connection parameters and authentication',
@@ -131,6 +142,13 @@ const STATUS_CONFIG = {
   ENDED: {
     message: 'Virtual participant ended by user',
     description: 'Manually terminated by user action',
+    icon: 'status-stopped',
+    type: 'stopped',
+    color: 'grey',
+  },
+  CANCELLED: {
+    message: 'Schedule cancelled by user',
+    description: 'Scheduled virtual participant was cancelled before execution',
     icon: 'status-stopped',
     type: 'stopped',
     color: 'grey',
@@ -334,8 +352,9 @@ ErrorTroubleshooting.defaultProps = {
   errorDetails: null,
 };
 
-const ActionButtons = ({ vpDetails, onRefresh, onEnd }) => {
+const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule }) => {
   const canEnd = ['JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status);
+  const canCancelSchedule = vpDetails.status === 'SCHEDULED' && vpDetails.isScheduled;
 
   return (
     <Container header={<Header variant="h3">Actions</Header>}>
@@ -347,6 +366,12 @@ const ActionButtons = ({ vpDetails, onRefresh, onEnd }) => {
         {canEnd && (
           <Button variant="normal" iconName="close" onClick={onEnd}>
             End Virtual Participant
+          </Button>
+        )}
+
+        {canCancelSchedule && (
+          <Button variant="normal" iconName="close" onClick={onCancelSchedule}>
+            Cancel Schedule
           </Button>
         )}
 
@@ -368,9 +393,11 @@ ActionButtons.propTypes = {
   vpDetails: PropTypes.shape({
     status: PropTypes.string.isRequired,
     CallId: PropTypes.string,
+    isScheduled: PropTypes.bool,
   }).isRequired,
   onRefresh: PropTypes.func.isRequired,
   onEnd: PropTypes.func.isRequired,
+  onCancelSchedule: PropTypes.func.isRequired,
 };
 
 const VirtualParticipantDetails = () => {
@@ -509,6 +536,45 @@ const VirtualParticipantDetails = () => {
     }
   };
 
+  const handleCancelSchedule = async () => {
+    try {
+      console.log('=== FRONTEND: CALLING CANCEL SCHEDULE ===');
+      console.log('VP ID:', vpId);
+      // Use the endVirtualParticipant mutation with a different reason for scheduled VPs
+      const result = await API.graphql(
+        graphqlOperation(endVirtualParticipant, {
+          input: {
+            id: vpId,
+            endReason: 'Schedule cancelled by user',
+            endedBy: 'User',
+          },
+        }),
+      );
+      console.log('=== FRONTEND: CANCEL SCHEDULE RESULT ===');
+      console.log('Result:', JSON.stringify(result, null, 2));
+
+      const notification = {
+        type: 'success',
+        content: 'Virtual Participant schedule cancelled successfully',
+        dismissible: true,
+        id: `cancel-success-${Date.now()}`,
+      };
+      setNotifications((prev) => [...prev, notification]);
+
+      // Refresh the data to show updated status
+      loadVpDetails();
+    } catch (err) {
+      logger.error('Error cancelling VP schedule:', err);
+      const notification = {
+        type: 'error',
+        content: 'Failed to cancel Virtual Participant schedule. Please try again.',
+        dismissible: true,
+        id: `cancel-error-${Date.now()}`,
+      };
+      setNotifications((prev) => [...prev, notification]);
+    }
+  };
+
   if (loading) {
     return (
       <Container>
@@ -632,7 +698,12 @@ const VirtualParticipantDetails = () => {
       )}
 
       {/* Action Buttons */}
-      <ActionButtons vpDetails={vpDetails} onRefresh={handleRefresh} onEnd={handleEnd} />
+      <ActionButtons
+        vpDetails={vpDetails}
+        onRefresh={handleRefresh}
+        onEnd={handleEnd}
+        onCancelSchedule={handleCancelSchedule}
+      />
     </SpaceBetween>
   );
 };

@@ -2155,6 +2155,8 @@ Resources:
         VPTaskRegistryTableName: !GetAtt AISTACK.Outputs.VPTaskRegistryTableName
         VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
         VPSecurityGroupId: !GetAtt AISTACK.Outputs.VPSecurityGroupId
+        VirtualParticipantTableName: !GetAtt AISTACK.Outputs.VirtualParticipantTableName
+        VirtualParticipantTableStreamArn: !GetAtt AISTACK.Outputs.VirtualParticipantTableStreamArn
         VPC: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.VPC

@@ -86,6 +86,15 @@ Parameters:
   VPSecurityGroupId:
     Type: String
     Description: Security Group ID for Virtual Participant ECS tasks from AI stack
+  
+  VirtualParticipantTableName:
+    Type: String
+    Description: Name of the VirtualParticipant DynamoDB table from AI stack
+
+  VirtualParticipantTableStreamArn:
+    Type: String
+    Description: ARN of the VirtualParticipant DynamoDB table stream from AI stack
+
 
   # container source code
   SourceCodeLocation:
@@ -1290,9 +1299,259 @@ Resources:
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
-  # Note: VNC WebSocket URL will be set by AI stack using CloudFront domain
-  # Format: wss://<cloudfront-domain>/vnc
-  # This avoids circular dependency and uses CloudFront's certificate
+  ##########################################################################
+  # Virtual Participant Scheduler
+  ##########################################################################
+
+  # EventBridge Schedule Group for Virtual Participants
+  VPScheduleGroup:
+    Type: AWS::Scheduler::ScheduleGroup
+    Properties:
+      Name: !Sub "${AWS::StackName}-vp-schedules"
+
+  # IAM Role for EventBridge Scheduler to execute ECS tasks
+  VPSchedulerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - scheduler.amazonaws.com
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSTaskExecution
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:RunTask
+                Resource: 
+                  - !Ref TaskDefinition
+                  - !Sub "${TaskDefinition}:*"
+              - Effect: Allow
+                Action:
+                  - ecs:TagResource
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "ecs:CreateAction": "RunTask"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: "*"
+                Condition:
+                  StringLike:
+                    "iam:PassedToService": "ecs-tasks.amazonaws.com"
+
+  # IAM Role for Virtual Participant Scheduler Lambda Function
+  VirtualParticipantSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: SchedulerLambdaPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - scheduler:CreateSchedule
+                  - scheduler:DeleteSchedule
+                  - scheduler:GetSchedule
+                Resource: 
+                  - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${VPScheduleGroup}/*"
+                  - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/${VPScheduleGroup}"
+              - Effect: Allow
+                Action:
+                  - ecs:RunTask
+                Resource: 
+                  - !Ref TaskDefinition
+                  - !Sub "${TaskDefinition}:*"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt VPSchedulerExecutionRole.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:DescribeStream
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:ListStreams
+                Resource: !Ref VirtualParticipantTableStreamArn
+
+  # Virtual Participant Scheduler Lambda Function
+  VirtualParticipantSchedulerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-VPScheduler"
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import boto3
+          import logging
+          from datetime import datetime, timezone
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          scheduler_client = boto3.client('scheduler')
+          ecs_client = boto3.client('ecs')
+          
+          def lambda_handler(event, context):
+              logger.info("Processing VP scheduler request")
+              logger.info(f"Event: {json.dumps(event, default=str)}")
+              
+              try:
+                  for record in event.get('Records', []):
+                      event_name = record.get('eventName')
+                      dynamodb_data = record.get('dynamodb', {})
+                      
+                      keys = dynamodb_data.get('Keys', {})
+                      vp_id = keys.get('id', {}).get('S')
+                      
+                      if not vp_id:
+                          logger.warning("No VP ID found in record, skipping")
+                          continue
+                          
+                      logger.info(f"Processing {event_name} event for VP {vp_id}")
+                      
+                      if event_name == 'INSERT':
+                          new_image = dynamodb_data.get('NewImage', {})
+                          is_scheduled = new_image.get('isScheduled', {}).get('BOOL', False)
+                          meeting_time = new_image.get('meetingTime', {}).get('N')
+                          
+                          if is_scheduled and meeting_time:
+                              meeting_time_int = int(meeting_time)
+                              current_time = int(datetime.now().timestamp())
+                              
+                              # Schedule for future execution
+                              delay_seconds = 120  # 2 minutes before meeting
+                              scheduled_time = datetime.fromtimestamp(meeting_time_int - delay_seconds, tz=timezone.utc)
+                              
+                              ecs_params = {
+                                  'ClientToken': vp_id,
+                                  'TaskDefinition': os.environ['TASK_DEFINITION_ARN'],
+                                  'Cluster': os.environ['CLUSTER_ARN'],
+                                  'LaunchType': 'FARGATE',
+                                  'NetworkConfiguration': {
+                                      'AwsvpcConfiguration': {
+                                          'AssignPublicIp': 'DISABLED',
+                                          'SecurityGroups': json.loads(os.environ['SECURITY_GROUPS']),
+                                          'Subnets': json.loads(os.environ['SUBNETS']),
+                                      }
+                                  },
+                                  'Overrides': {
+                                      'ContainerOverrides': [{
+                                          'Name': os.environ['CONTAINER_NAME'],
+                                          'Environment': [
+                                              {'Name': 'VIRTUAL_PARTICIPANT_ID', 'Value': vp_id},
+                                              {'Name': 'MEETING_PLATFORM', 'Value': new_image.get('meetingPlatform', {}).get('S', '')},
+                                              {'Name': 'MEETING_ID', 'Value': new_image.get('meetingId', {}).get('S', '')},
+                                              {'Name': 'MEETING_PASSWORD', 'Value': new_image.get('meetingPassword', {}).get('S', '')},
+                                              {'Name': 'MEETING_NAME', 'Value': new_image.get('meetingName', {}).get('S', '')},
+                                              {'Name': 'MEETING_TIME', 'Value': str(meeting_time_int)},
+                                              {'Name': 'LMA_USER', 'Value': new_image.get('owner', {}).get('S', '')},
+                                              {'Name': 'GRAPHQL_ENDPOINT', 'Value': os.environ.get('GRAPHQL_ENDPOINT', '')},
+                                              {'Name': 'CALL_DATA_STREAM_NAME', 'Value': os.environ.get('CALL_DATA_STREAM_NAME', '')},
+                                              {'Name': 'RECORDINGS_BUCKET_NAME', 'Value': os.environ.get('RECORDINGS_BUCKET_NAME', '')},
+                                              {'Name': 'VP_TASK_REGISTRY_TABLE_NAME', 'Value': os.environ.get('VP_TASK_REGISTRY_TABLE_NAME', '')},
+                                          ]
+                                      }]
+                                  },
+                                  'EnableExecuteCommand': False
+                              }
+                              
+                              schedule_expression = f"at({scheduled_time.strftime('%Y-%m-%dT%H:%M:%S')})"
+                              
+                              response = scheduler_client.create_schedule(
+                                  ActionAfterCompletion='DELETE',
+                                  FlexibleTimeWindow={'Mode': 'OFF'},
+                                  GroupName=os.environ['SCHEDULE_GROUP_NAME'],
+                                  Name=vp_id,
+                                  ScheduleExpression=schedule_expression,
+                                  ScheduleExpressionTimezone='UTC',
+                                  State='ENABLED',
+                                  Target={
+                                      'Arn': 'arn:aws:scheduler:::aws-sdk:ecs:runTask',
+                                      'RoleArn': os.environ['SCHEDULER_ROLE_ARN'],
+                                      'Input': json.dumps(ecs_params)
+                                  }
+                              )
+                              
+                              logger.info(f"Successfully scheduled VP {vp_id} with schedule ARN: {response.get('ScheduleArn')}")
+                          else:
+                              logger.info(f"VP {vp_id} is not scheduled, skipping")
+                              
+                      elif event_name == 'REMOVE':
+                          try:
+                              scheduler_client.delete_schedule(
+                                  GroupName=os.environ['SCHEDULE_GROUP_NAME'],
+                                  Name=vp_id
+                              )
+                              logger.info(f"Successfully unscheduled VP {vp_id}")
+                          except scheduler_client.exceptions.ResourceNotFoundException:
+                              logger.info(f"Schedule for VP {vp_id} not found (may have already been executed)")
+                          except Exception as e:
+                              logger.error(f"Error unscheduling VP {vp_id}: {str(e)}")
+                  
+                  return {'statusCode': 200, 'body': json.dumps({'message': 'Successfully processed VP scheduler events'})}
+                  
+              except Exception as e:
+                  logger.error(f"Error processing VP scheduler events: {str(e)}")
+                  return {'statusCode': 500, 'body': json.dumps({'error': str(e)})}
+      Description: Virtual Participant Scheduler with EventBridge Scheduler integration
+      MemorySize: 512
+      Timeout: 300
+      Role: !GetAtt VirtualParticipantSchedulerRole.Arn
+      Environment:
+        Variables:
+          TASK_DEFINITION_ARN: !Ref TaskDefinition
+          CLUSTER_ARN: !GetAtt Cluster.Arn
+          SECURITY_GROUPS: !Sub '["${SecurityGroup}"]'
+          SUBNETS: !Sub '["${PrivateSubnet1}", "${PrivateSubnet2}"]'
+          CONTAINER_NAME: "scribe"
+          GRAPHQL_ENDPOINT: !Ref GraphQLEndpoint
+          CALL_DATA_STREAM_NAME: !Ref CallDataStreamName
+          RECORDINGS_BUCKET_NAME: !Ref S3BucketName
+          VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistryTableName
+          SCHEDULE_GROUP_NAME: !Ref VPScheduleGroup
+          SCHEDULER_ROLE_ARN: !GetAtt VPSchedulerExecutionRole.Arn
+  # DynamoDB Event Source Mapping for Scheduler Lambda
+  VirtualParticipantSchedulerEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !Ref VirtualParticipantTableStreamArn
+      FunctionName: !GetAtt VirtualParticipantSchedulerFunction.Arn
+      StartingPosition: LATEST
+      BatchSize: 10
+      MaximumBatchingWindowInSeconds: 5
+
+  VirtualParticipantSchedulerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/VPScheduler"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
 Outputs:
   StepFunctions:
@@ -1318,3 +1577,27 @@ Outputs:
     Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}"
     Export:
       Name: !Sub "${AWS::StackName}-ECRRepositoryUri"
+
+  SecurityGroupId:
+    Description: Security Group ID
+    Value: !Ref SecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-SecurityGroupId"
+
+  VPScheduleGroupName:
+    Description: Name of the EventBridge Schedule Group for Virtual Participants
+    Value: !Ref VPScheduleGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-VPScheduleGroupName"
+
+  VPSchedulerExecutionRoleArn:
+    Description: ARN of the EventBridge Scheduler execution role
+    Value: !GetAtt VPSchedulerExecutionRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-VPSchedulerExecutionRoleArn"
+
+  VirtualParticipantSchedulerFunctionArn:
+    Description: ARN of the Virtual Participant Scheduler Lambda function
+    Value: !GetAtt VirtualParticipantSchedulerFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-VPSchedulerFunctionArn"

@@ -36,11 +36,11 @@ export default class Zoom {
     });
 
     // Add error handlers
-    page.on('pageerror', (error: Error) => {
+    page.on('pageerror', (error: unknown) => {
         console.error('Page Error:', error);
     });
 
-    page.on('error', (error: Error) => {
+    page.on('error', (error: unknown) => {
         console.error('Browser Error:', error);
     });
 

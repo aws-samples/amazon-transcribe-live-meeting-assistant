@@ -260,7 +260,79 @@ export class VirtualParticipantStatusManager {
     }
   }
 
+  // Method to get CallId from VP record
+  async getCallId(): Promise<string | null> {
+    try {
+      const query = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            CallId
+          }
+        }
+      `;
+
+      const result = await this.signAndSendGraphQLRequest(query, {
+        id: this.participantId
+      });
+      
+      if (result?.getVirtualParticipant?.CallId) {
+        console.log(`Retrieved CallId ${result.getVirtualParticipant.CallId} for VP ${this.participantId}`);
+        return result.getVirtualParticipant.CallId;
+      } else {
+        console.log(`No CallId found for VP ${this.participantId}`);
+        return null;
+      }
+
+    } catch (error) {
+      console.error('Error getting CallId:', error);
+      return null;
+    }
+  }
+
+  // Method to set CallId in VP record
+  async setCallId(callId: string): Promise<boolean> {
+    try {
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {
+            id
+            CallId
+            updatedAt
+          }
+        }
+      `;
+
+      const variables = {
+        input: {
+          id: this.participantId,
+          status: 'SCHEDULED', // Keep current status
+          CallId: callId
+        }
+      };
+
+      const result = await this.signAndSendGraphQLRequest(mutation, variables);
+      
+      if (result) {
+        console.log(`Successfully set CallId ${callId} for VP ${this.participantId}`);
+        return true;
+      } else {
+        console.error('Failed to set CallId via GraphQL');
+        return false;
+      }
+
+    } catch (error) {
+      console.error('Error setting CallId:', error);
+      return false;
+    }
+  }
+
   // Status update methods matching Python implementation
+  async setScheduled(scheduledTime?: Date): Promise<boolean> {
+    const message = scheduledTime ? `Scheduled for ${scheduledTime.toISOString()}` : undefined;
+    return this.updateStatus('SCHEDULED', message);
+  }
+
   async setInitializing(): Promise<boolean> {
     return this.updateStatus('INITIALIZING');
   }
