@@ -228,7 +228,16 @@ export default class Chime {
             await new Promise((resolve, reject) => {
                 const checkInterval = setInterval(async () => {
                     try {
-                        // Check if page navigated away
+                        // Check for "Your meeting has ended" text
+                        const meetingEndedElement = await page.$('text/Your meeting has ended');
+                        if (meetingEndedElement) {
+                            console.log('Meeting ended: "Your meeting has ended" text detected');
+                            clearInterval(checkInterval);
+                            resolve(undefined);
+                            return;
+                        }
+                        
+                        // Fallback: Check if page navigated away
                         const currentUrl = await page.url();
                         if (currentUrl === 'about:blank' || !currentUrl.includes('chime.aws')) {
                             console.log('Meeting ended: Page navigated away');
@@ -241,7 +250,7 @@ export default class Chime {
                         clearInterval(checkInterval);
                         reject(error);
                     }
-                }, 5000); // Check every 5 seconds
+                }, 2000); // Check every 2 seconds for better responsiveness
                 
                 // Set up timeout
                 setTimeout(() => {
