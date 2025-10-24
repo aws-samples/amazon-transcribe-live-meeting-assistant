@@ -47,26 +47,6 @@ export default class Zoom {
         console.log('Getting Zoom meeting link.');
         await page.goto(`https://zoom.us/wc/${details.invite.meetingId}/join`);
 
-        // Check if authentication is required
-        try {
-            console.log('Checking if Zoom authentication is required...');
-            const loginLink = await page.waitForSelector('#pwa_signin', { timeout: 5000 });
-            if (loginLink) {
-                console.log('⚠️  ZOOM AUTHENTICATION REQUIRED');
-                console.log('The host requires authentication to join this meeting.');
-                console.log('Please use the VNC viewer to sign in with your Zoom account.');
-                console.log('Waiting 5 minutes for manual login...');
-                
-                // Wait 5 minutes for user to login via VNC
-                await new Promise(resolve => setTimeout(resolve, 300000));
-                
-                console.log('Login wait period completed. Attempting to continue...');
-            }
-        } catch (error) {
-            // Timeout means no login page - this is expected for most meetings
-            console.log('No authentication required, proceeding with meeting join.');
-        }
-
         // Handle meeting password if provided
         if (details.invite.meetingPassword) {
             console.log('Typing meeting password.');
@@ -80,7 +60,7 @@ export default class Zoom {
         }
 
         console.log('Clicking mute button.');
-        const muteButton = await page.waitForSelector('svg.SvgAudioMute');
+        const muteButton = await page.waitForSelector('svg.SvgAudioMute', { timeout: 180000 });
         await muteButton?.click();
 
         console.log('Clicking video button.');
