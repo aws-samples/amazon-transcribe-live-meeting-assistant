@@ -61,6 +61,12 @@ Parameters:
   CustomerManagedEncryptionKeyArn:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
+  
+  LoggingBucketName:
+    Type: String
+    Description: >-
+      Name of the S3 bucket used for access logging across the LMA solution.
+      This bucket is used to store access logs from other S3 buckets and CloudFront distributions.
 
   PermissionsBoundaryArn:
     Type: String
