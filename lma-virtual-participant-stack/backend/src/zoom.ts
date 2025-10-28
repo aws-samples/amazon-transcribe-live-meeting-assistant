@@ -60,7 +60,7 @@ export default class Zoom {
         }
 
         console.log('Clicking mute button.');
-        const muteButton = await page.waitForSelector('svg.SvgAudioMute');
+        const muteButton = await page.waitForSelector('svg.SvgAudioMute', { timeout: 300000 });
         await muteButton?.click();
 
         console.log('Clicking video button.');

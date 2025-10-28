@@ -1,7 +1,7 @@
-ARG NODE_VERSION=16
+ARG NODE_VERSION=20
 
 # First, build the project
-FROM public.ecr.aws/docker/library/node:16-stretch AS builder
+FROM public.ecr.aws/docker/library/node:20-bookworm AS builder
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ RUN npm run build
 RUN npm prune --production
 
 # Now create the runtime image and copy the build artifacts into it
-FROM public.ecr.aws/docker/library/node:16-slim AS runtime
+FROM public.ecr.aws/docker/library/node:20-slim AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production

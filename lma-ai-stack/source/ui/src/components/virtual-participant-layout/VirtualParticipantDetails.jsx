@@ -21,6 +21,10 @@ import {
   Flashbar,
 } from '@awsui/components-react';
 import StatusTimeline from './StatusTimeline';
+import VNCViewer from './VNCViewer';
+
+// VNC WebSocket URL is published by the backend in the vncEndpoint field
+// Format: wss://{api-id}.execute-api.{region}.amazonaws.com/prod
 
 const getVirtualParticipant = `
   query GetVirtualParticipant($id: ID!) {
@@ -40,6 +44,9 @@ const getVirtualParticipant = `
       Owner
       SharedWith
       CallId
+      vncEndpoint
+      vncPort
+      vncReady
     }
   }
 `;
@@ -55,6 +62,9 @@ const onUpdateVirtualParticipantDetailed = `
       Owner
       SharedWith
       CallId
+      vncEndpoint
+      vncPort
+      vncReady
     }
   }
 `;
@@ -430,26 +440,57 @@ const VirtualParticipantDetails = () => {
   useEffect(() => {
     if (!vpId) return undefined;
 
+    console.log('=== Setting up AppSync subscription for VP:', vpId);
     const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipantDetailed)).subscribe({
       next: ({ value }) => {
+        console.log('=== AppSync subscription received update ===');
+        console.log('Raw value:', JSON.stringify(value, null, 2));
+
         const updated = value?.data?.onUpdateVirtualParticipant;
+        console.log('Parsed update:', updated);
+
         if (updated && updated.id === vpId) {
-          // Only update local state, no notifications (VirtualParticipantList handles notifications)
-          setVpDetails((prev) => ({
-            ...prev,
-            status: updated.status,
-            updatedAt: updated.updatedAt,
-            CallId: updated.CallId || prev.CallId, // Update CallId if available
-          }));
+          console.log('Update is for our VP:', vpId);
+          console.log('VNC fields in update:', {
+            vncEndpoint: updated.vncEndpoint,
+            vncPort: updated.vncPort,
+            vncReady: updated.vncReady,
+          });
+
+          // Update local state, no notifications (VirtualParticipantList handles notifications), including VNC
+          setVpDetails((prev) => {
+            const newState = {
+              ...prev,
+              status: updated.status,
+              updatedAt: updated.updatedAt,
+              CallId: updated.CallId || prev?.CallId,
+              vncEndpoint: updated.vncEndpoint || prev?.vncEndpoint,
+              vncPort: updated.vncPort || prev?.vncPort,
+              vncReady: updated.vncReady !== undefined ? updated.vncReady : prev?.vncReady,
+            };
+            console.log('Updated VP state:', newState);
+            return newState;
+          });
+
+          // Log VNC updates
+          if (updated.vncReady && updated.vncEndpoint) {
+            console.log('✓ VNC is ready! Endpoint:', updated.vncEndpoint, 'Port:', updated.vncPort);
+          }
+        } else {
+          console.log('Update is NOT for our VP. Update ID:', updated?.id, 'Our ID:', vpId);
         }
       },
       error: (err) => {
+        console.error('=== AppSync subscription error ===', err);
         logger.error('Subscription error:', err);
         // Don't retry on subscription errors to avoid infinite loops
       },
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      console.log('=== Unsubscribing from AppSync for VP:', vpId);
+      subscription.unsubscribe();
+    };
   }, [vpId]);
 
   const handleRefresh = () => {
@@ -611,6 +652,28 @@ const VirtualParticipantDetails = () => {
       <Container header={<Header variant="h3">Connection Details</Header>}>
         <ConnectionDetails vpDetails={vpDetails} />
       </Container>
+
+      {/* VNC Live View - Show when VNC is ready and VP is active */}
+      {vpDetails.vncReady &&
+        vpDetails.vncEndpoint &&
+        ['VNC_READY', 'CONNECTING', 'JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status) && (
+          <VNCViewer vpId={vpId} vncEndpoint={vpDetails.vncEndpoint} websocketUrl={vpDetails.vncEndpoint} />
+        )}
+
+      {/* VNC Preparing Message - Show while VNC is starting up */}
+      {!vpDetails.vncReady && ['INITIALIZING', 'CONNECTING', 'JOINING'].includes(vpDetails.status) && (
+        <Container>
+          <Box textAlign="center" padding="l">
+            <Spinner size="large" />
+            <Box margin={{ top: 's' }}>
+              <strong>Preparing live view...</strong>
+            </Box>
+            <Box margin={{ top: 'xs' }} color="text-body-secondary">
+              VNC server is starting up. This usually takes 10-30 seconds.
+            </Box>
+          </Box>
+        </Container>
+      )}
 
       {/* Error Troubleshooting - Only show for failed status */}
       <ErrorTroubleshooting status={vpDetails.status} errorDetails={vpDetails.errorDetails} />
