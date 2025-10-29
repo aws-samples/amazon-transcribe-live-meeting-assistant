@@ -1,33 +1,33 @@
 
-FROM public.ecr.aws/docker/library/node:20-slim
+FROM public.ecr.aws/docker/library/node:20-alpine
 USER root
 WORKDIR /srv
 COPY . /srv
 
-RUN apt-get update && \
-    apt-get install -y \
+RUN apk update && \
+    apk add --no-cache \
     chromium \
+    chromium-chromedriver \
     ffmpeg \
     pulseaudio \
     dbus-x11 \
     xvfb \
     x11vnc \
     fluxbox \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libgbm1 \
-    libxss1 \
-    libnss3 \
+    font-liberation \
+    alsa-lib \
+    at-spi2-core \
+    mesa-dri-gallium \
+    libxkbcommon \
+    libxcomposite \
+    libxdamage \
+    libxrandr \
+    mesa-gbm \
+    libxscrnsaver \
+    nss \
     git \
     net-tools \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+    curl
 
 # Install noVNC and websockify for browser-based VNC access
 RUN git clone https://github.com/novnc/noVNC.git /usr/share/novnc && \
@@ -53,7 +53,7 @@ RUN npm ci && \
 EXPOSE 5900 5901
     
 RUN chmod +x /srv/entrypoint.sh
-RUN useradd -m appuser
+RUN adduser -D -h /home/appuser appuser
 RUN chown -R appuser:appuser /srv
 USER appuser
 ENTRYPOINT ["/srv/entrypoint.sh"]
