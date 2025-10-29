@@ -6,6 +6,10 @@ COPY . /srv
 
 RUN apk update && \
     apk add --no-cache \
+    bash \
+    python3 \
+    py3-pip \
+    py3-numpy \
     chromium \
     chromium-chromedriver \
     ffmpeg \
