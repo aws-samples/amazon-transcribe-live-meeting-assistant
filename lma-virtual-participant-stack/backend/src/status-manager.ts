@@ -453,6 +453,13 @@ export class VirtualParticipantStatusManager {
       }
 
       console.log('✓ Target is healthy and ready to receive traffic');
+      
+      // Additional delay to ensure ALB is fully ready to route WebSocket traffic
+      // This prevents race condition where frontend tries to connect before ALB routing is stable
+      console.log('Waiting additional 5 seconds for ALB routing to stabilize...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      console.log('✓ ALB routing stabilization complete');
+      
       return true;
 
     } catch (error) {
