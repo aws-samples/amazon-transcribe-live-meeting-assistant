@@ -50,6 +50,9 @@ Parameters:
       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
       - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "global.anthropic.claude-sonnet-4-20250514-v1:0"
+      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
     Description: >-
       Select a Bedrock LLM model from the list. Includes Nova models (cost-effective), 
       Claude 3.5/3.7 (advanced), and Claude 4 (cutting-edge). Some models require inference profiles.
@@ -387,6 +390,9 @@ Parameters:
       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
       - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "global.anthropic.claude-sonnet-4-20250514-v1:0"
+      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models. Includes Nova models (cost-effective), Claude 3.5/3.7 (advanced), 
