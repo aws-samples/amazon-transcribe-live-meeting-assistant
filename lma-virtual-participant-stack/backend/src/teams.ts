@@ -8,13 +8,74 @@ import { createStatusManager } from "./status-manager.js";
 // const bedrockClient = new BedrockRuntimeClient();
 
 export default class Teams {
+    // Helper function to generate random delay between min and max milliseconds
+    private randomDelay(min: number, max: number): number {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    // Helper function to wait with random delay
+    private async waitRandom(min: number, max: number): Promise<void> {
+        const delay = this.randomDelay(min, max);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    // Helper function to simulate human-like mouse movement before clicking
+    private async humanClick(page: Page, selector: string): Promise<void> {
+        const element = await page.waitForSelector(selector);
+        if (!element) return;
+
+        // Get element position
+        const box = await element.boundingBox();
+        if (box) {
+            // Move mouse to a random point within the element
+            const x = box.x + this.randomDelay(10, box.width - 10);
+            const y = box.y + this.randomDelay(10, box.height - 10);
+            
+            // Move mouse in a slightly curved path
+            await page.mouse.move(x - 50, y - 50, { steps: this.randomDelay(5, 10) });
+            await this.waitRandom(50, 150);
+            await page.mouse.move(x, y, { steps: this.randomDelay(5, 10) });
+            await this.waitRandom(100, 300);
+        }
+        
+        await element.click();
+    }
+
+    // Helper function to type with human-like delays
+    private async humanType(page: Page, selector: string, text: string): Promise<void> {
+        const element = await page.waitForSelector(selector);
+        if (!element) return;
+
+        await element.click();
+        await this.waitRandom(200, 500);
+
+        // Type each character with random delays
+        for (const char of text) {
+            await element.type(char, { delay: this.randomDelay(80, 200) });
+            // Occasionally pause longer (simulating thinking)
+            if (Math.random() < 0.1) {
+                await this.waitRandom(300, 800);
+            }
+        }
+    }
+
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
         const messageElement = await page.waitForSelector(".ck-placeholder");
         for (const message of messages) {
             await messageElement?.click();
-            await new Promise((resolve) => setTimeout(resolve, 500));
-            await messageElement?.type(message);
+            await this.waitRandom(400, 800);
+            
+            // Type message with human-like delays
+            for (const char of message) {
+                await messageElement?.type(char, { delay: this.randomDelay(80, 200) });
+                if (Math.random() < 0.1) {
+                    await this.waitRandom(200, 500);
+                }
+            }
+            
+            await this.waitRandom(300, 600);
             await messageElement?.press("Enter");
+            await this.waitRandom(500, 1000);
         }
     }
 
@@ -22,7 +83,7 @@ export default class Teams {
         try {
             console.log("Getting meeting link.");
             await page.goto(
-                `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?launchAgent=marketing_join&laentry=hero&p=${details.invite.meetingPassword}&anon=true`
+                `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?p=${details.invite.meetingPassword}&anon=true`
             );
         } catch {
             console.log("Your scribe was unable to join the meeting.");
@@ -30,26 +91,57 @@ export default class Teams {
         }
 
         console.log("Entering name.");
-        const nameTextElement = await page.waitForSelector(
-            '[data-tid="prejoin-display-name-input"]'
-        );
-        await nameTextElement?.type(details.scribeIdentity, { delay: 100 });
+        await this.waitRandom(500, 1000); // Pause before starting to type
+        await this.humanType(page, '[data-tid="prejoin-display-name-input"]', details.scribeIdentity);
+        await this.waitRandom(400, 800);
+        
+        const nameTextElement = await page.waitForSelector('[data-tid="prejoin-display-name-input"]');
         await nameTextElement?.press("Enter");
 
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await this.waitRandom(600, 1200);
         console.log("Clicking mute button.");
-        const muteButtonElement = await page.waitForSelector('[data-tid="toggle-mute"]');
-        await muteButtonElement?.click();
+        await this.humanClick(page, '[data-tid="toggle-mute"]');
 
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await this.waitRandom(500, 1000);
         console.log("Clicking video button.");
-        const videoButtonElement = await page.waitForSelector('[data-tid="toggle-video"]');
-        await videoButtonElement?.click();
+        await this.humanClick(page, '[data-tid="toggle-video"]');
 
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await this.waitRandom(800, 1500);
         console.log("Clicking join button.");
-        const joinButtonElement = await page.waitForSelector('[data-tid="prejoin-join-button"]');
-        await joinButtonElement?.click();
+        await this.humanClick(page, '[data-tid="prejoin-join-button"]');
+
+        // Wait for potential CAPTCHA with longer timeout
+        console.log("Checking for CAPTCHA...");
+        await this.waitRandom(2000, 4000);
+        
+        try {
+            const captchaElement = await page.waitForSelector(
+                '[data-tid="HIP-Captcha-Image"]',
+                { timeout: 5000 }
+            );
+            
+            if (captchaElement) {
+                console.log("CAPTCHA detected! Waiting for manual resolution...");
+                console.log("Please solve the CAPTCHA in the VNC viewer.");
+                
+                // Wait for CAPTCHA to be solved (join button to disappear or chat to appear)
+                await Promise.race([
+                    page.waitForSelector('[data-tid="prejoin-join-button"]', { 
+                        hidden: true, 
+                        timeout: 120000 // 2 minutes for manual CAPTCHA solving
+                    }),
+                    page.waitForSelector('#chat-button', { 
+                        timeout: 120000,
+                        visible: true 
+                    })
+                ]);
+                
+                console.log("CAPTCHA appears to be resolved, continuing...");
+                await this.waitRandom(1000, 2000);
+            }
+        } catch (error) {
+            console.log("No CAPTCHA detected or CAPTCHA timeout, continuing...");
+        }
 
         // try {
         //     const captchaImageElement = await page.waitForSelector(
@@ -113,12 +205,9 @@ export default class Teams {
         // }
 
         console.log("Opening chat panel.");
+        await this.waitRandom(1000, 2000);
         try {
-            const chatPanelElement = await page.waitForSelector("#chat-button", {
-                timeout: details.waitingTimeout,
-                visible: true,
-            });
-            await chatPanelElement?.click();
+            await this.humanClick(page, "#chat-button");
         } catch {
             console.log("Your scribe was not admitted into the meeting.");
             return;
@@ -130,19 +219,16 @@ export default class Teams {
             await statusManager.setJoined();
         }
         console.log("Sending introduction messages.");
+        await this.waitRandom(800, 1500);
         await this.sendMessages(page, details.introMessages);
 
         console.log("Opening view panel.");
-        const viewPanelElement = await page.waitForSelector("#custom-view-button", {
-            timeout: details.waitingTimeout,
-        });
-        await viewPanelElement?.click();
+        await this.waitRandom(1000, 2000);
+        await this.humanClick(page, "#custom-view-button");
 
         console.log("Selecting speaker view.");
-        const speakerViewElement = await page.waitForSelector("#SpeakerView-button", {
-            timeout: details.waitingTimeout,
-        });
-        await speakerViewElement?.click();
+        await this.waitRandom(600, 1200);
+        await this.humanClick(page, "#SpeakerView-button");
 
         // Set up simple attendee change monitoring
         await page.exposeFunction('attendeeChange', async (hasOthers: boolean) => {
