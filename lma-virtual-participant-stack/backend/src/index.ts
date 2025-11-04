@@ -20,13 +20,14 @@ const WINDOW_HEIGHT = 1080;
 const getPuppeteerConfig = () => ({
     headless: false, // Changed to false to show browser window in VNC
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    ignoreDefaultArgs: ['--mute-audio'],
+    ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
     protocolTimeout: details.meetingTimeout,
     timeout: details.meetingTimeout,
     args: [
         `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT}`,
         "--use-fake-ui-for-media-stream",
         "--use-fake-device-for-media-stream",
+        // "--disable-blink-features=AutomationControlled",
         "--disable-notifications",
         "--disable-extensions",
         "--disable-crash-reporter",
@@ -160,20 +161,10 @@ const main = async (): Promise<void> => {
         console.log(`VP ${vpId} status: CONNECTING`);
     }
 
-    // Launch Puppeteer browser
-    console.log('Launching browser...');
-    const isTeamsMeeting = details.invite.meetingPlatform === 'Teams' || details.invite.meetingPlatform === 'TEAMS';
-    let browser;
-
-    if (isTeamsMeeting) {
-        console.log('DEBUG: Using puppeteer-extra with stealth plugin for Teams meeting');
-        // Configure puppeteer-extra with stealth plugin for Teams
-        puppeteerExtra.use(StealthPlugin());
-        browser = await puppeteerExtra.launch(getPuppeteerConfig());
-    } else {
-        console.log('DEBUG: Using standard puppeteer for non-Teams meeting');
-        browser = await puppeteer.launch(getPuppeteerConfig());
-    }
+    // Launch Puppeteer browser with stealth plugin for all platforms
+    console.log('Launching browser with stealth plugin...');
+    puppeteerExtra.use(StealthPlugin());
+    const browser = await puppeteerExtra.launch(getPuppeteerConfig());
 
     const page = await browser.newPage();
     await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });

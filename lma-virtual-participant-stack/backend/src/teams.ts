@@ -22,7 +22,7 @@ export default class Teams {
         try {
             console.log("Getting meeting link.");
             await page.goto(
-                `https://teams.live.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?launchAgent=marketing_join&laentry=hero&p=${details.invite.meetingPassword}&anon=true`
+                `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?launchAgent=marketing_join&laentry=hero&p=${details.invite.meetingPassword}&anon=true`
             );
         } catch {
             console.log("Your scribe was unable to join the meeting.");

@@ -31,7 +31,9 @@ RUN apk update && \
     nss \
     git \
     net-tools \
-    curl
+    curl \
+    ca-certificates \
+    libstdc++
 
 # Install noVNC and websockify for browser-based VNC access
 RUN git clone https://github.com/novnc/noVNC.git /usr/share/novnc && \
