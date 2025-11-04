@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
  - Github #199 issue: Fixed: Deployment issues due to a logging bucket name missing issue. 
 
+## [0.2.20] - 2025-10-24
+### Added
+- Virtual Participant filtering and table
+- User-based access control (UBAC) enhancements for Virtual Participants with improved security and permissions
+- Terminate/end scheduled Virtual Participant tasks functionality with automated cleanup
+
 ## [0.2.19] - 2025-10-17
 ### Added
 - Virtual Participant scheduling feature for future meetings

@@ -21,6 +21,10 @@ import {
   Flashbar,
 } from '@awsui/components-react';
 import StatusTimeline from './StatusTimeline';
+import VNCViewer from './VNCViewer';
+
+// VNC WebSocket URL is published by the backend in the vncEndpoint field
+// Format: wss://{api-id}.execute-api.{region}.amazonaws.com/prod
 
 const getVirtualParticipant = `
   query GetVirtualParticipant($id: ID!) {
@@ -29,6 +33,10 @@ const getVirtualParticipant = `
       meetingName
       meetingPlatform
       meetingId
+      meetingTime
+      scheduledFor
+      isScheduled
+      scheduleId
       status
       createdAt
       updatedAt
@@ -36,6 +44,9 @@ const getVirtualParticipant = `
       Owner
       SharedWith
       CallId
+      vncEndpoint
+      vncPort
+      vncReady
     }
   }
 `;
@@ -51,6 +62,9 @@ const onUpdateVirtualParticipantDetailed = `
       Owner
       SharedWith
       CallId
+      vncEndpoint
+      vncPort
+      vncReady
     }
   }
 `;
@@ -69,6 +83,13 @@ const logger = new Logger('VirtualParticipantDetails');
 
 // Status configuration with enhanced messaging
 const STATUS_CONFIG = {
+  SCHEDULED: {
+    message: 'Scheduled for future execution',
+    description: 'Virtual participant will automatically join at the scheduled time',
+    icon: 'calendar',
+    type: 'info',
+    color: 'blue',
+  },
   INITIALIZING: {
     message: 'Setting up virtual participant...',
     description: 'Preparing connection parameters and authentication',
@@ -121,6 +142,13 @@ const STATUS_CONFIG = {
   ENDED: {
     message: 'Virtual participant ended by user',
     description: 'Manually terminated by user action',
+    icon: 'status-stopped',
+    type: 'stopped',
+    color: 'grey',
+  },
+  CANCELLED: {
+    message: 'Schedule cancelled by user',
+    description: 'Scheduled virtual participant was cancelled before execution',
     icon: 'status-stopped',
     type: 'stopped',
     color: 'grey',
@@ -324,8 +352,9 @@ ErrorTroubleshooting.defaultProps = {
   errorDetails: null,
 };
 
-const ActionButtons = ({ vpDetails, onRefresh, onEnd }) => {
+const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule }) => {
   const canEnd = ['JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status);
+  const canCancelSchedule = vpDetails.status === 'SCHEDULED' && vpDetails.isScheduled;
 
   return (
     <Container header={<Header variant="h3">Actions</Header>}>
@@ -337,6 +366,12 @@ const ActionButtons = ({ vpDetails, onRefresh, onEnd }) => {
         {canEnd && (
           <Button variant="normal" iconName="close" onClick={onEnd}>
             End Virtual Participant
+          </Button>
+        )}
+
+        {canCancelSchedule && (
+          <Button variant="normal" iconName="close" onClick={onCancelSchedule}>
+            Cancel Schedule
           </Button>
         )}
 
@@ -358,9 +393,11 @@ ActionButtons.propTypes = {
   vpDetails: PropTypes.shape({
     status: PropTypes.string.isRequired,
     CallId: PropTypes.string,
+    isScheduled: PropTypes.bool,
   }).isRequired,
   onRefresh: PropTypes.func.isRequired,
   onEnd: PropTypes.func.isRequired,
+  onCancelSchedule: PropTypes.func.isRequired,
 };
 
 const VirtualParticipantDetails = () => {
@@ -403,26 +440,57 @@ const VirtualParticipantDetails = () => {
   useEffect(() => {
     if (!vpId) return undefined;
 
+    console.log('=== Setting up AppSync subscription for VP:', vpId);
     const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipantDetailed)).subscribe({
       next: ({ value }) => {
+        console.log('=== AppSync subscription received update ===');
+        console.log('Raw value:', JSON.stringify(value, null, 2));
+
         const updated = value?.data?.onUpdateVirtualParticipant;
+        console.log('Parsed update:', updated);
+
         if (updated && updated.id === vpId) {
-          // Only update local state, no notifications (VirtualParticipantList handles notifications)
-          setVpDetails((prev) => ({
-            ...prev,
-            status: updated.status,
-            updatedAt: updated.updatedAt,
-            CallId: updated.CallId || prev.CallId, // Update CallId if available
-          }));
+          console.log('Update is for our VP:', vpId);
+          console.log('VNC fields in update:', {
+            vncEndpoint: updated.vncEndpoint,
+            vncPort: updated.vncPort,
+            vncReady: updated.vncReady,
+          });
+
+          // Update local state, no notifications (VirtualParticipantList handles notifications), including VNC
+          setVpDetails((prev) => {
+            const newState = {
+              ...prev,
+              status: updated.status,
+              updatedAt: updated.updatedAt,
+              CallId: updated.CallId || prev?.CallId,
+              vncEndpoint: updated.vncEndpoint || prev?.vncEndpoint,
+              vncPort: updated.vncPort || prev?.vncPort,
+              vncReady: updated.vncReady !== undefined ? updated.vncReady : prev?.vncReady,
+            };
+            console.log('Updated VP state:', newState);
+            return newState;
+          });
+
+          // Log VNC updates
+          if (updated.vncReady && updated.vncEndpoint) {
+            console.log('✓ VNC is ready! Endpoint:', updated.vncEndpoint, 'Port:', updated.vncPort);
+          }
+        } else {
+          console.log('Update is NOT for our VP. Update ID:', updated?.id, 'Our ID:', vpId);
         }
       },
       error: (err) => {
+        console.error('=== AppSync subscription error ===', err);
         logger.error('Subscription error:', err);
         // Don't retry on subscription errors to avoid infinite loops
       },
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      console.log('=== Unsubscribing from AppSync for VP:', vpId);
+      subscription.unsubscribe();
+    };
   }, [vpId]);
 
   const handleRefresh = () => {
@@ -463,6 +531,45 @@ const VirtualParticipantDetails = () => {
         content: 'Failed to end Virtual Participant. Please try again.',
         dismissible: true,
         id: `end-error-${Date.now()}`,
+      };
+      setNotifications((prev) => [...prev, notification]);
+    }
+  };
+
+  const handleCancelSchedule = async () => {
+    try {
+      console.log('=== FRONTEND: CALLING CANCEL SCHEDULE ===');
+      console.log('VP ID:', vpId);
+      // Use the endVirtualParticipant mutation with a different reason for scheduled VPs
+      const result = await API.graphql(
+        graphqlOperation(endVirtualParticipant, {
+          input: {
+            id: vpId,
+            endReason: 'Schedule cancelled by user',
+            endedBy: 'User',
+          },
+        }),
+      );
+      console.log('=== FRONTEND: CANCEL SCHEDULE RESULT ===');
+      console.log('Result:', JSON.stringify(result, null, 2));
+
+      const notification = {
+        type: 'success',
+        content: 'Virtual Participant schedule cancelled successfully',
+        dismissible: true,
+        id: `cancel-success-${Date.now()}`,
+      };
+      setNotifications((prev) => [...prev, notification]);
+
+      // Refresh the data to show updated status
+      loadVpDetails();
+    } catch (err) {
+      logger.error('Error cancelling VP schedule:', err);
+      const notification = {
+        type: 'error',
+        content: 'Failed to cancel Virtual Participant schedule. Please try again.',
+        dismissible: true,
+        id: `cancel-error-${Date.now()}`,
       };
       setNotifications((prev) => [...prev, notification]);
     }
@@ -546,6 +653,28 @@ const VirtualParticipantDetails = () => {
         <ConnectionDetails vpDetails={vpDetails} />
       </Container>
 
+      {/* VNC Live View - Show when VNC is ready and VP is active */}
+      {vpDetails.vncReady &&
+        vpDetails.vncEndpoint &&
+        ['VNC_READY', 'CONNECTING', 'JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status) && (
+          <VNCViewer vpId={vpId} vncEndpoint={vpDetails.vncEndpoint} websocketUrl={vpDetails.vncEndpoint} />
+        )}
+
+      {/* VNC Preparing Message - Show while VNC is starting up */}
+      {!vpDetails.vncReady && ['INITIALIZING', 'CONNECTING', 'JOINING'].includes(vpDetails.status) && (
+        <Container>
+          <Box textAlign="center" padding="l">
+            <Spinner size="large" />
+            <Box margin={{ top: 's' }}>
+              <strong>Preparing live view...</strong>
+            </Box>
+            <Box margin={{ top: 'xs' }} color="text-body-secondary">
+              VNC server is starting up. This usually takes 10-30 seconds.
+            </Box>
+          </Box>
+        </Container>
+      )}
+
       {/* Error Troubleshooting - Only show for failed status */}
       <ErrorTroubleshooting status={vpDetails.status} errorDetails={vpDetails.errorDetails} />
 
@@ -569,7 +698,12 @@ const VirtualParticipantDetails = () => {
       )}
 
       {/* Action Buttons */}
-      <ActionButtons vpDetails={vpDetails} onRefresh={handleRefresh} onEnd={handleEnd} />
+      <ActionButtons
+        vpDetails={vpDetails}
+        onRefresh={handleRefresh}
+        onEnd={handleEnd}
+        onCancelSchedule={handleCancelSchedule}
+      />
     </SpaceBetween>
   );
 };

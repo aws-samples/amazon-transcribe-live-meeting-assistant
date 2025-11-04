@@ -1,6 +1,7 @@
 import puppeteer from 'puppeteer';
 import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { promises as fs } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
 import Teams from './teams.js';
@@ -17,7 +18,7 @@ const WINDOW_HEIGHT = 1080;
 
 // Shared Puppeteer configuration
 const getPuppeteerConfig = () => ({
-    headless: true,
+    headless: false, // Changed to false to show browser window in VNC
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     ignoreDefaultArgs: ['--mute-audio'],
     protocolTimeout: details.meetingTimeout,
@@ -88,6 +89,62 @@ const main = async (): Promise<void> => {
         }
     }
 
+    // Wait for VNC server to be ready before proceeding
+    console.log('Waiting for VNC server to be ready...');
+    let vncReady = false;
+    let attempts = 0;
+    const maxAttempts = 30; // 30 seconds timeout
+    
+    while (!vncReady && attempts < maxAttempts) {
+        try {
+            await fs.access('/tmp/vnc_ready');
+            vncReady = true;
+            console.log('✓ VNC server is ready');
+            break;
+        } catch {
+            // File doesn't exist yet
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        attempts++;
+    }
+
+    if (!vncReady) {
+        console.error('VNC server failed to start within timeout');
+        if (statusManager) {
+            await statusManager.setFailed('VNC server initialization failed');
+        }
+        throw new Error('VNC server initialization failed');
+    }
+
+    // Register with ALB target group and wait for healthy
+    if (statusManager) {
+        try {
+            console.log('Registering task with ALB target group...');
+            const registered = await statusManager.registerWithTargetGroup();
+            if (!registered) {
+                console.error('Failed to register with target group');
+                await statusManager.setFailed('ALB registration failed');
+                throw new Error('ALB registration failed');
+            }
+            console.log('✓ Task registered with ALB and healthy');
+        } catch (error) {
+            console.error('Error during ALB registration:', error);
+            await statusManager.setFailed('ALB registration error');
+            throw new Error('ALB registration failed');
+        }
+    }
+
+    // Publish VNC endpoint via AppSync (only after ALB registration and health check)
+    if (statusManager) {
+        try {
+            await statusManager.setVncReady();
+            console.log('✓ VNC endpoint published via AppSync');
+        } catch (error) {
+            console.error('Failed to publish VNC endpoint:', error);
+            // Non-critical - continue with meeting join
+        }
+    }
+
     // Calculate sleep time if meeting is scheduled for future
     const currentTimestamp = Math.floor(Date.now() / 1000);
     const timestampDiff = Math.max(0, (details.invite.meetingTime - currentTimestamp - 10) * 1000);
@@ -107,7 +164,7 @@ const main = async (): Promise<void> => {
     console.log('Launching browser...');
     const isTeamsMeeting = details.invite.meetingPlatform === 'Teams' || details.invite.meetingPlatform === 'TEAMS';
     let browser;
-    
+
     if (isTeamsMeeting) {
         console.log('DEBUG: Using puppeteer-extra with stealth plugin for Teams meeting');
         // Configure puppeteer-extra with stealth plugin for Teams
@@ -140,7 +197,7 @@ const main = async (): Promise<void> => {
         // Initialize the appropriate meeting platform handler
         console.log(`Initializing ${details.invite.meetingPlatform} handler...`);
         console.log(`DEBUG: Meeting platform value: "${details.invite.meetingPlatform}" (type: ${typeof details.invite.meetingPlatform})`);
-        
+
         switch (details.invite.meetingPlatform) {
             case 'CHIME':
                 meeting = new Chime();
@@ -213,6 +270,16 @@ const main = async (): Promise<void> => {
             console.error('Error handling recording cleanup:', error);
         }
 
+        // Deregister from ALB target group
+        if (statusManager) {
+            try {
+                await statusManager.deregisterFromTargetGroup();
+                console.log('✓ Deregistered from ALB target group');
+            } catch (error) {
+                console.error('Error deregistering from ALB:', error);
+            }
+        }
+
         try {
             // Close browser
             await browser.close();
@@ -241,6 +308,16 @@ const main = async (): Promise<void> => {
 const signalHandler = async (signal: string) => {
     console.log(`Received ${signal}, initiating graceful shutdown...`);
     shutdownRequested = true;
+    
+    // Deregister from ALB target group
+    if (statusManager) {
+        try {
+            await statusManager.deregisterFromTargetGroup();
+            console.log('✓ Deregistered from ALB target group');
+        } catch (error) {
+            console.error('Error deregistering from ALB:', error);
+        }
+    }
     
     // Send END event to Kinesis when externally terminated
     try {

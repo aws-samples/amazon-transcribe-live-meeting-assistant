@@ -265,12 +265,22 @@ RELEASE_VERSION ?= $(shell cat $(VERSION_FILE))
 # substitute slashes with underscore for filenames
 RELEASE_S3_PREFIX_SUB := $(subst /,_,$(RELEASE_S3_PREFIX))
 
+# Compute hash of Lambda@Edge code to force updates when code changes
+EDGE_AUTH_CODE_HASH := $(shell \
+	find source/lambda_functions/edge_auth_deployer -type f -name '*.py' -exec sha256sum {} \; | \
+	sort | \
+	sha256sum | \
+	cut -d' ' -f1 | \
+	cut -c1-16 \
+)
+
 PACKAGE_RELEASE_REPLACE_OUT_FILE := $(OUT_DIR)/template-replaced-$(RELEASE_S3_BUCKET)-$(RELEASE_S3_PREFIX_SUB)-$(RELEASE_VERSION).yaml
 $(PACKAGE_RELEASE_REPLACE_OUT_FILE): $(TEMPLATE_FILE) | $(OUT_DIR)
 	@[ -z '$(RELEASE_S3_BUCKET_BASE)' ] && \
 	  echo '[ERROR] need to set env var: RELEASE_S3_BUCKET_BASE' && \
 	  exit 1 || true
 	@echo '[INFO] replacing default bootstrap values - BUCKET_BASE_NAME: [$(RELEASE_S3_BUCKET_BASE)] - REGION: [$(AWS_REGION)] - S3_PREFIX: [$(RELEASE_S3_PREFIX)] - VERSION: [$(RELEASE_VERSION)]'
+	@echo '[INFO] Lambda@Edge code hash: [$(EDGE_AUTH_CODE_HASH)]'
 	sed -E \
 		" \
 		/^ {2,}BootstrapBucketBaseName:/ , /^ {2,}Default:/ s@^(.*Default: {1,})(.*)@\1 $(RELEASE_S3_BUCKET_BASE)@ ; \
@@ -278,6 +288,7 @@ $(PACKAGE_RELEASE_REPLACE_OUT_FILE): $(TEMPLATE_FILE) | $(OUT_DIR)
 		/^ {2,}BootstrapVersion:/ , /^ {2,}Default:/ s@^(.*Default: {1,})(.*)@\1 $(RELEASE_VERSION)@ ; \
 		s@src-hash.zip@$(shell basename $(BUNDLE_RELEASE_FILE))@g ; \
 		s@<BUILD_DATE_TIME>@$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")@g ; \
+		s@EDGE_AUTH_CODE_HASH_PLACEHOLDER@$(EDGE_AUTH_CODE_HASH)@g ; \
 		" \
 		'$(<)' > '$(@)'
 
