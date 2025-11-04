@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.20] - 2025-11-04
+### Fixed
+ - Github #199 issue: Fixed: Deployment issues due to a logging bucket name missing issue. 
+
 ## [0.2.20] - 2025-10-24
 ### Added
 - Virtual Participant filtering and table
