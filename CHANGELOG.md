@@ -6,9 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-## [0.2.20] - 2025-11-04
-### Fixed
- - Github #199 issue: Fixed: Deployment issues due to a logging bucket name missing issue. 
 
 ## [0.2.20] - 2025-11-04
 ### Fixed
