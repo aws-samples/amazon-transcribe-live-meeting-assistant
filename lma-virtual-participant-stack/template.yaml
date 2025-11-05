@@ -1307,7 +1307,7 @@ Resources:
   VPScheduleGroup:
     Type: AWS::Scheduler::ScheduleGroup
     Properties:
-      Name: !Sub "${AWS::StackName}-vp-schedules"
+      Name: !Sub "${LMAStackName}-vp-schedules"
 
   # IAM Role for EventBridge Scheduler to execute ECS tasks
   VPSchedulerExecutionRole:
@@ -1400,7 +1400,7 @@ Resources:
   VirtualParticipantSchedulerFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-VPScheduler"
+      FunctionName: !Sub "${LMAStackName}-VPScheduler"
       Handler: index.lambda_handler
       Runtime: python3.12
       Code:

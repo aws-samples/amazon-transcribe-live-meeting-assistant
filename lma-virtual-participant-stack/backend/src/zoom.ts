@@ -61,10 +61,8 @@ export default class Zoom {
                     console.error('ERROR: Enterprise Zoom authentication required!');
                     console.error('The host requires authentication on the commercial Zoom platform.');
                     console.error('This meeting requires signing in with a commercial Zoom account.');
-                    // throw new Error('Enterprise Zoom authentication required - cannot join without credentials');
                     enterpriseLogin = true;
-                    // await new Promise(resolve => setTimeout(resolve, 500000));
-                    await page.waitForSelector('.video-avatar__avatar', { timeout: 500000 });
+                    await page.waitForSelector('.video-avatar__avatar', { timeout: 120000 }); // Give 2 minutes to login
                     await new Promise(resolve => setTimeout(resolve, 5000));
                 }
             }
