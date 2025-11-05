@@ -1307,7 +1307,7 @@ Resources:
   VPScheduleGroup:
     Type: AWS::Scheduler::ScheduleGroup
     Properties:
-      Name: !Sub "${AWS::StackName}-vp-sched"
+      Name: !Sub "${AWS::StackName}-vp-schedules"
 
   # IAM Role for EventBridge Scheduler to execute ECS tasks
   VPSchedulerExecutionRole:
