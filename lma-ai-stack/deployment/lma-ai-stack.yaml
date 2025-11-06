@@ -191,6 +191,9 @@ Parameters:
       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
       - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "global.anthropic.claude-sonnet-4-20250514-v1:0"
+      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
@@ -416,6 +419,18 @@ Parameters:
     Type: String
     Description: Name of the logging bucket for S3 access logs
 
+  VPC:
+    Type: String
+    Description: VPC ID for ALB deployment
+
+  PublicSubnet1:
+    Type: String
+    Description: Public subnet 1 for ALB
+
+  PublicSubnet2:
+    Type: String
+    Description: Public subnet 2 for ALB
+
   PermissionsBoundaryArn:
     Type: String
     Default: ""
@@ -423,6 +438,23 @@ Parameters:
       (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
+
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable data retention on stack deletion for compliance requirements.
+      When true, DynamoDB tables will be retained. When false (default), all resources deleted.
+
+  VPScheduleGroupName:
+    Type: String
+    Default: "LMA-VIRTUALPARTICIPANTSTACK-1ICEYE8S4JXFV-vp-schedules"
+    Description: >-
+      Name of the EventBridge Schedule Group for Virtual Participants from the VP stack.
+      This should match the schedule group name created by the Virtual Participant stack.
 
 
 Metadata:
@@ -468,6 +500,7 @@ Metadata:
           Transcript Summary is processed (existing)
 
 Conditions:
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
@@ -556,11 +589,20 @@ Outputs:
   AppSyncGraphQLUrl:
     Description: AppSync GraphQL endpoint URL
     Value: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+  VNCTargetGroupArn:
+    Description: ARN of the VNC Target Group for Virtual Participant ECS tasks
+    Value: !Ref VNCTargetGroup
+  VNCALBSecurityGroupId:
+    Description: Security Group ID for VNC ALB
+    Value: !Ref ALBSecurityGroup
+  VPSecurityGroupId:
+    Description: Security Group ID for Virtual Participant ECS tasks
+    Value: !Ref VPSecurityGroup
 
 Resources:
   EventSourcingTable:
     Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
     UpdateReplacePolicy: Retain
     Properties:
       AttributeDefinitions:
@@ -1543,7 +1585,7 @@ Resources:
     Properties:
       Handler: index.handler
       Role: !GetAtt QueryKnowledgeBaseResolverFunctionExecutionRole.Arn
-      Runtime: python3.9
+      Runtime: python3.12
       CodeUri: ../source/lambda_functions/query_knowledgebase_resolver
       Description: Lambda function to query the meeting transcript knowledge base
       MemorySize: 512
@@ -2511,6 +2553,19 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/addChatToken.js
 
+  OnUpdateVirtualParticipantAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onUpdateVirtualParticipant
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
   ##########################################################################
   # Virtual Participant
   ##########################################################################
@@ -2653,6 +2708,49 @@ Resources:
             $util.qr( $expValues.put(":CallId", $util.dynamodb.toDynamoDB($ctx.args.input.CallId)) )
         #end
         
+        ## Add VNC fields if provided **
+        #if( !$util.isNullOrBlank($ctx.args.input.vncEndpoint) )
+            $util.qr( $expSet.put("#vncEndpoint", ":vncEndpoint") )
+            $util.qr( $expNames.put("#vncEndpoint", "vncEndpoint") )
+            $util.qr( $expValues.put(":vncEndpoint", $util.dynamodb.toDynamoDB($ctx.args.input.vncEndpoint)) )
+        #end
+        
+        #if( !$util.isNull($ctx.args.input.vncPort) )
+            $util.qr( $expSet.put("#vncPort", ":vncPort") )
+            $util.qr( $expNames.put("#vncPort", "vncPort") )
+            $util.qr( $expValues.put(":vncPort", $util.dynamodb.toDynamoDB($ctx.args.input.vncPort)) )
+        #end
+        
+        #if( !$util.isNull($ctx.args.input.vncReady) )
+            $util.qr( $expSet.put("#vncReady", ":vncReady") )
+            $util.qr( $expNames.put("#vncReady", "vncReady") )
+            $util.qr( $expValues.put(":vncReady", $util.dynamodb.toDynamoDB($ctx.args.input.vncReady)) )
+        #end
+        
+        ## Add manual action fields if provided **
+        #if( !$util.isNullOrBlank($ctx.args.input.manualActionType) )
+            $util.qr( $expSet.put("#manualActionType", ":manualActionType") )
+            $util.qr( $expNames.put("#manualActionType", "manualActionType") )
+            $util.qr( $expValues.put(":manualActionType", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionType)) )
+        #end
+        
+        #if( !$util.isNullOrBlank($ctx.args.input.manualActionMessage) )
+            $util.qr( $expSet.put("#manualActionMessage", ":manualActionMessage") )
+            $util.qr( $expNames.put("#manualActionMessage", "manualActionMessage") )
+            $util.qr( $expValues.put(":manualActionMessage", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionMessage)) )
+        #end
+        
+        #if( !$util.isNull($ctx.args.input.manualActionTimeoutSeconds) )
+            $util.qr( $expSet.put("#manualActionTimeoutSeconds", ":manualActionTimeoutSeconds") )
+            $util.qr( $expNames.put("#manualActionTimeoutSeconds", "manualActionTimeoutSeconds") )
+            $util.qr( $expValues.put(":manualActionTimeoutSeconds", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionTimeoutSeconds)) )
+        #end
+        
+        #if( !$util.isNullOrBlank($ctx.args.input.manualActionStartTime) )
+            $util.qr( $expSet.put("#manualActionStartTime", ":manualActionStartTime") )
+            $util.qr( $expNames.put("#manualActionStartTime", "manualActionStartTime") )
+            $util.qr( $expValues.put(":manualActionStartTime", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionStartTime)) )
+        #end
         
         ## Build the SET expression **
         #set( $expression = "SET" )
@@ -2694,8 +2792,7 @@ Resources:
           "version": "2018-05-29",
           "operation": "Scan"
         }
-      ResponseMappingTemplate: |
-        $util.toJson($ctx.result.items)
+      ResponseMappingTemplateS3Location: ../source/appsync/listVirtualParticipants.response.vtl
 
   GetVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
@@ -2713,11 +2810,7 @@ Resources:
             "id": $util.dynamodb.toDynamoDBJson($ctx.args.id)
           }
         }
-      ResponseMappingTemplate: |
-        #if($ctx.error)
-          $util.error($ctx.error.message, $ctx.error.type)
-        #end
-        $util.toJson($ctx.result)
+      ResponseMappingTemplateS3Location: ../source/appsync/getVirtualParticipant.response.vtl
 
 
   # Virtual Participant Manager Lambda Function
@@ -2736,6 +2829,7 @@ Resources:
           TABLE_NAME: !Ref VirtualParticipantTable
           KINESIS_STREAM_NAME: !Ref CallDataStream
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
+          VP_SCHEDULE_GROUP_NAME: !Ref VPScheduleGroupName
           LOG_LEVEL: DEBUG
       Policies:
         - DynamoDBCrudPolicy:
@@ -2769,6 +2863,12 @@ Resources:
               Action:
                 - dynamodb:ListTables
               Resource: "*"
+            - Effect: Allow
+              Action:
+                - scheduler:DeleteSchedule
+                - scheduler:GetSchedule
+              Resource: 
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${VPScheduleGroupName}/*"
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
     Metadata:
@@ -2848,6 +2948,363 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/endVirtualParticipant.js
 
+  ShareVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: shareVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "UpdateItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+          },
+          "update": {
+            "expression": "SET SharedWith = :val",
+            "expressionValues": {
+              ":val": $util.dynamodb.toDynamoDBJson($util.str.join($ctx.args.input.SharedWith, ","))
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson({
+          "id": $ctx.args.input.id,
+          "Owner": $ctx.args.input.Owner,
+          "SharedWith": $util.str.join($ctx.args.input.SharedWith, ",")
+        })
+
+  UnshareVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: unshareVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "UpdateItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+          },
+          "update": {
+            "expression": "SET SharedWith = :val",
+            "expressionValues": {
+              ":val": $util.dynamodb.toDynamoDBJson("")
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson({
+          "id": $ctx.args.input.id,
+          "SharedWith": $ctx.args.input.SharedWith
+        })
+
+
+  ##########################################################################
+  # Lambda@Edge for VNC Authentication
+  ##########################################################################
+
+  # IAM Role for Lambda@Edge function (must be assumable by both lambda and edgelambda)
+  EdgeAuthFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  # Custom resource Lambda to deploy Lambda@Edge in us-east-1
+  EdgeAuthDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: ManageLambdaEdge
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:DeleteFunction
+                  - lambda:GetFunction
+                  - lambda:ListVersionsByFunction
+                  - lambda:PublishVersion
+                Resource: !Sub 'arn:aws:lambda:us-east-1:${AWS::AccountId}:function:${AWS::StackName}-VNCEdgeAuth*'
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt EdgeAuthFunctionRole.Arn
+
+  EdgeAuthDeployerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-EdgeAuthDeployer'
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 256
+      Role: !GetAtt EdgeAuthDeployerRole.Arn
+      CodeUri: ../source/lambda_functions/edge_auth_deployer
+      LoggingConfig:
+        LogGroup: !Sub '/${AWS::StackName}/lambda/EdgeAuthDeployer'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for custom resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    DependsOn:
+      - EdgeAuthDeployerLogGroup
+
+  EdgeAuthDeployerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/${AWS::StackName}/lambda/EdgeAuthDeployer'
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # Custom resource to create Lambda@Edge function in us-east-1
+  EdgeAuthFunction:
+    Type: Custom::EdgeAuthFunction
+    Properties:
+      ServiceToken: !GetAtt EdgeAuthDeployerFunction.Arn
+      FunctionName: !Sub '${AWS::StackName}-VNCEdgeAuth'
+      RoleArn: !GetAtt EdgeAuthFunctionRole.Arn
+      UserPoolId: !Ref UserPoolId
+      Region: !Ref AWS::Region
+      ClientId: !Ref CognitoClientId
+      # Hash of the Lambda@Edge code - changing this forces the custom resource to update
+      # This value is replaced during the build process by the Makefile
+      CodeHash: "EDGE_AUTH_CODE_HASH_PLACEHOLDER"
+
+  ##########################################################################
+  # VNC Application Load Balancer for VNC Viewer Remove FrameBuffer Stream
+  ##########################################################################
+
+  # Custom resource to get CloudFront prefix list ID dynamically
+  GetCloudFrontPrefixListRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: DescribePrefixLists
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeManagedPrefixLists
+                Resource: '*'
+
+  GetCloudFrontPrefixListFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      Role: !GetAtt GetCloudFrontPrefixListRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          
+          def handler(event, context):
+              try:
+                  if event['RequestType'] == 'Delete':
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  
+                  ec2 = boto3.client('ec2')
+                  response = ec2.describe_managed_prefix_lists(
+                      Filters=[
+                          {
+                              'Name': 'prefix-list-name',
+                              'Values': ['com.amazonaws.global.cloudfront.origin-facing']
+                          }
+                      ]
+                  )
+                  
+                  if response['PrefixLists']:
+                      prefix_list_id = response['PrefixLists'][0]['PrefixListId']
+                      print(f"Found CloudFront prefix list: {prefix_list_id}")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, 
+                                     {'PrefixListId': prefix_list_id})
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.FAILED, {},
+                                     reason='CloudFront prefix list not found')
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {},
+                                 reason=str(e))
+
+  CloudFrontPrefixList:
+    Type: Custom::CloudFrontPrefixList
+    Properties:
+      ServiceToken: !GetAtt GetCloudFrontPrefixListFunction.Arn
+
+  # ECS Security Group for Virtual Participant tasks
+  VPSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Virtual Participant ECS tasks
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+          IpProtocol: "-1"
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-vp-sg
+
+  # ALB Security Group - Allow traffic from CloudFront only
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for VNC Application Load Balancer
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId: !GetAtt CloudFrontPrefixList.PrefixListId
+          Description: Allow HTTP from CloudFront
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-alb-sg
+
+  # Security group rules between ALB and ECS
+  ALBToECSEgressRule:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5901
+      ToPort: 5901
+      DestinationSecurityGroupId: !Ref VPSecurityGroup
+      Description: Allow traffic to ECS tasks on websockify port
+
+  ECSFromALBIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref VPSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5901
+      ToPort: 5901
+      SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Description: Allow websockify traffic from ALB
+
+  # Application Load Balancer
+  VNCALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-vnc-alb
+
+  # Target Group for ECS tasks
+  VNCTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 5901
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: "30"
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-vnc-tg
+
+  # HTTP Listener (port 80)
+  VNCALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref VNCALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref VNCTargetGroup
 
   ##########################################################################
   # Web Site
@@ -3051,6 +3508,40 @@ Resources:
             DomainName: !GetAtt WebAppBucket.RegionalDomainName
             S3OriginConfig:
               OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+          - Id: vnc-alb
+            DomainName: !GetAtt VNCALB.DNSName
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: http-only
+        CacheBehaviors:
+          - PathPattern: /vnc/*
+            TargetOriginId: vnc-alb
+            ViewerProtocolPolicy: https-only
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+              - PUT
+              - POST
+              - PATCH
+              - DELETE
+            CachedMethods:
+              - GET
+              - HEAD
+            ForwardedValues:
+              QueryString: true
+              Headers:
+                - "*"
+              Cookies:
+                Forward: all
+            Compress: false
+            DefaultTTL: 0
+            MinTTL: 0
+            MaxTTL: 0
+            LambdaFunctionAssociations:
+              - EventType: viewer-request
+                LambdaFunctionARN: !GetAtt EdgeAuthFunction.FunctionArn
         PriceClass: !Ref CloudFrontPriceClass
         Restrictions: !If
           - ShouldEnableGeoRestriction

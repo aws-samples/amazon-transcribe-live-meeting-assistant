@@ -107,6 +107,12 @@ Outputs:
     Description: >-
       The id of Cognito user pool.
     Value: !Ref UserPool
+  UserPoolArn:
+    Description: The ARN of the Cognito User Pool
+    Value: !GetAtt UserPool.Arn
+  CognitoUserPoolDomain:
+    Description: The Cognito User Pool Domain
+    Value: !Ref LMAUserPoolDomain
   AppIdentityPoolId:
     Description: The Id for the App Cognito Identity Pool 
     Value: !Ref IdentityPool

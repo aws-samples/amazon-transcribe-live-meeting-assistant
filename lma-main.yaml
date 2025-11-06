@@ -50,6 +50,9 @@ Parameters:
       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
       - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "global.anthropic.claude-sonnet-4-20250514-v1:0"
+      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
     Description: >-
       Select a Bedrock LLM model from the list. Includes Nova models (cost-effective), 
       Claude 3.5/3.7 (advanced), and Claude 4 (cutting-edge). Some models require inference profiles.
@@ -387,6 +390,9 @@ Parameters:
       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
       - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "global.anthropic.claude-sonnet-4-20250514-v1:0"
+      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models. Includes Nova models (cost-effective), Claude 3.5/3.7 (advanced), 
@@ -612,6 +618,18 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable data retention on stack deletion for compliance requirements.
+      When true: DynamoDB tables, S3 buckets (recordings and logs), and encryption key will be retained.
+      When false (default): All resources deleted for clean stack removal.
+      Enterprise customers with compliance requirements should set to true.
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -697,6 +715,7 @@ Metadata:
           - TranscriptionExpirationInDays
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
+          - EnableDataRetentionOnDelete
       - Label:
           default: AppSync Configuration
         Parameters:
@@ -838,6 +857,8 @@ Metadata:
         default: Existing Private Subnet 2
       PermissionsBoundaryArn:
         default: Permissions Boundary ARN
+      EnableDataRetentionOnDelete:
+        default: Enable Data Retention On Stack Deletion
 
 Mappings:
   TranscribeToLexLocaleId:
@@ -911,6 +932,7 @@ Rules:
           is 'Q_BUSINESS (Use Existing)'
 
 Conditions:
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   IsHealthcareDomainSelected: !Equals [!Ref Domain, "Healthcare"]
   ShouldCreateRecordingBucket: !Equals [!Ref S3BucketName, ""]
   ShouldUseExistingBedrockKnowledgeBase:
@@ -961,6 +983,8 @@ Resources:
   ##########################################################################
   CustomerManagedEncryptionKey:
     Type: AWS::KMS::Key
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       Description: !Sub "Customer managed KMS key for ${AWS::StackName} encryption"
       EnableKeyRotation: true
@@ -1543,7 +1567,7 @@ Resources:
   ## LOGGING BUCKET FOR S3 ACCESS LOGS
   LoggingBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
     UpdateReplacePolicy: Retain
     Metadata:
       cfn_nag:
@@ -1606,7 +1630,7 @@ Resources:
   ## BUCKET TO STORE STEREO RECORDINGS AND TRANSCRIPTS FILES
   RecordingsBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
     UpdateReplacePolicy: Retain
     Condition: ShouldCreateRecordingBucket
     Properties:
@@ -1825,6 +1849,19 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
+        VPC: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.VPC
+          - !Ref VPC
+        PublicSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet1
+          - !Ref PublicSubnet1
+        PublicSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet2
+          - !Ref PublicSubnet2
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         BedrockKnowledgeBaseID: !If
           - ShouldUseTranscriptKnowledgeBase
@@ -2120,13 +2157,24 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         GraphQLEndpoint: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
+        CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         VPTaskRegistryTableName: !GetAtt AISTACK.Outputs.VPTaskRegistryTableName
+        VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
+        VPSecurityGroupId: !GetAtt AISTACK.Outputs.VPSecurityGroupId
         VirtualParticipantTableName: !GetAtt AISTACK.Outputs.VirtualParticipantTableName
         VirtualParticipantTableStreamArn: !GetAtt AISTACK.Outputs.VirtualParticipantTableStreamArn
         VPC: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.VPC
           - !Ref VPC
+        PublicSubnet1: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet1
+          - !Ref PublicSubnet1
+        PublicSubnet2: !If
+          - ShouldCreateVPC
+          - !GetAtt VPCSTACK.Outputs.PublicSubnet2
+          - !Ref PublicSubnet2
         PrivateSubnet1: !If
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.PrivateSubnet1

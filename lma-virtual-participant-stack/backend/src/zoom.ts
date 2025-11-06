@@ -16,65 +16,111 @@ export default class Zoom {
 
     public async initialize(page: Page): Promise<void> {
 
-    page.on('console', (message: ConsoleMessage) => {
-        const type = message.type();
-        const text = message.text();
+        page.on('console', (message: ConsoleMessage) => {
+            const type = message.type();
+            const text = message.text();
 
-        switch (type) {
-            case 'log':
-                console.log(`Browser Log: ${text}`);
-                break; 
-            case 'error':
-                console.error(`Browser Error: ${text}`);
-                break;
-            case 'info':
-                console.info(`Browser Info: ${text}`);
-                break;
-            default:
-                console.log(`Browser ${type}: ${text}`);
-        }
-    });
+            switch (type) {
+                case 'log':
+                    console.log(`Browser Log: ${text}`);
+                    break; 
+                case 'error':
+                    console.error(`Browser Error: ${text}`);
+                    break;
+                case 'info':
+                    console.info(`Browser Info: ${text}`);
+                    break;
+                default:
+                    console.log(`Browser ${type}: ${text}`);
+            }
+        });
 
-    // Add error handlers
-    page.on('pageerror', (error: Error) => {
-        console.error('Page Error:', error);
-    });
+        // Add error handlers
+        page.on('pageerror', (error: unknown) => {
+            console.error('Page Error:', error);
+        });
 
-    page.on('error', (error: Error) => {
-        console.error('Browser Error:', error);
-    });
+        page.on('error', (error: unknown) => {
+            console.error('Browser Error:', error);
+        });
 
         console.log('Getting Zoom meeting link.');
         await page.goto(`https://zoom.us/wc/${details.invite.meetingId}/join`);
 
-        // Handle meeting password if provided
-        if (details.invite.meetingPassword) {
-            console.log('Typing meeting password.');
+        // Check for enterprise Zoom authentication requirement
+        let enterpriseLogin = false;
+        try {
+            const authPrompt = await page.waitForSelector('#prompt', { timeout: 5000 });
+            if (authPrompt) {
+                const promptText = await page.evaluate(() => {
+                    const promptDiv = document.querySelector('#prompt');
+                    return promptDiv ? promptDiv.textContent : '';
+                });
+                
+                if (promptText && promptText.includes('Sign in to join this meeting')) {
+                    console.error('ERROR: Enterprise Zoom authentication required!');
+                    console.error('The host requires authentication on the commercial Zoom platform.');
+                    console.error('This meeting requires signing in with a commercial Zoom account.');
+                    enterpriseLogin = true;
+                    
+                    // Notify frontend that manual action is required
+                    const { details } = await import('./details.js');
+                    if (details.invite.virtualParticipantId) {
+                        const { createStatusManager } = await import('./status-manager.js');
+                        const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                        await statusManager.setManualActionRequired(
+                            'LOGIN',
+                            'Enterprise Zoom authentication required. Please sign in using the VNC viewer.',
+                            120
+                        );
+                    }
+                    
+                    await page.waitForSelector('.video-avatar__avatar', { timeout: 120000 }); // Give 2 minutes to login
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                    
+                    // Clear manual action notification after successful login
+                    if (details.invite.virtualParticipantId) {
+                        const { createStatusManager } = await import('./status-manager.js');
+                        const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                        await statusManager.clearManualAction();
+                    }
+                }
+            }
+        } catch (error) {
+            // If selector times out, continue normally (no auth required)
+        }
+
+        // if they logged in with enterprise they won't need to put in name password etc so skip
+        if (enterpriseLogin === false) {
+            // Handle meeting password if provided
+            if (details.invite.meetingPassword) {
+                console.log('Typing meeting password.');
+                try {
+                    const passwordTextElement = await page.waitForSelector('#input-for-pwd');
+                    await passwordTextElement?.type(details.invite.meetingPassword);
+                } catch (error) {
+                    console.log('LMA Virtual Participant was unable to join the meeting.');
+                    throw new Error('Meeting not found or invalid meeting ID');
+                }
+            }
+
+            console.log('Clicking mute button.');
+            const muteButton = await page.waitForSelector('svg.SvgAudioMute');
+            await muteButton?.click();
+
+            console.log('Clicking video button.');
+            const stopVideoButton = await page.waitForSelector('svg.SvgVideoOn');
+            await stopVideoButton?.click();
+
+            console.log('Entering name.');
             try {
-                const passwordTextElement = await page.waitForSelector('#input-for-pwd');
-                await passwordTextElement?.type(details.invite.meetingPassword);
+                const nameTextElement = await page.waitForSelector('#input-for-name');
+                await nameTextElement?.type(details.scribeIdentity);
+                await nameTextElement?.press('Enter');
             } catch (error) {
                 console.log('LMA Virtual Participant was unable to join the meeting.');
                 throw new Error('Meeting not found or invalid meeting ID');
             }
-        }
-
-        console.log('Clicking mute button.');
-        const muteButton = await page.waitForSelector('svg.SvgAudioMute');
-        await muteButton?.click();
-
-        console.log('Clicking video button.');
-        const stopVideoButton = await page.waitForSelector('svg.SvgVideoOn');
-        await stopVideoButton?.click();
-
-        console.log('Entering name.');
-        try {
-            const nameTextElement = await page.waitForSelector('#input-for-name');
-            await nameTextElement?.type(details.scribeIdentity);
-            await nameTextElement?.press('Enter');
-        } catch (error) {
-            console.log('LMA Virtual Participant was unable to join the meeting.');
-            throw new Error('Meeting not found or invalid meeting ID');
         }
 
         console.log('Waiting.');

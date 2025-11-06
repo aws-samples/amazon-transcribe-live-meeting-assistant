@@ -1,0 +1,18 @@
+#if ( $ctx.error )
+  $util.error($ctx.error.message, $ctx.error.type)
+#end
+
+## This resolver can be invoked by either a Lambda function with IAM authentication
+## or a User authenticated using Cognito. The Lambda function gets unrestricted access
+## while the User gets restricted access based on ownership and sharing permissions.
+#if($context.identity.userArn)
+  ## IAM authenticated request (Lambda function) - allow unrestricted access
+  $util.toJson($context.result)
+#elseif($context.identity.username 
+    && !$context.identity.groups.contains("Admin")
+    && $context.result.Owner != $context.identity.username
+    && !$context.result.SharedWith.contains($context.identity.username))
+  $util.error("User $context.identity.username is not authorized", "AuthorizationError")
+#else
+  $util.toJson($context.result)
+#end
