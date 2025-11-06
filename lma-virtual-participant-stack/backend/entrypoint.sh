@@ -25,8 +25,6 @@ x11vnc \
     -nopw \
     -xkb \
     -cursor arrow \
-    -ncache 10 \
-    -ncache_cr \
     -speeds lan \
     -wait 10 \
     -defer 10 \

@@ -16,7 +16,7 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [viewOnly, setViewOnly] = useState(false);
-  const [scaleViewport, setScaleViewport] = useState(false);
+  const [scaleViewport, setScaleViewport] = useState(true);
 
   useEffect(() => {
     if (!canvasRef.current || !vpId || !vncEndpoint) return undefined;
@@ -193,7 +193,7 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
             ref={canvasRef}
             style={{
               width: '100%',
-              height: scaleViewport ? '7100px' : '800px',
+              height: scaleViewport ? '100%' : '800px',
               border: '1px solid #ccc',
               backgroundColor: '#000',
               display: 'flex',
