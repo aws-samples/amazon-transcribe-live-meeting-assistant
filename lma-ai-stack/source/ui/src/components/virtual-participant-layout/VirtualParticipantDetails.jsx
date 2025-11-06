@@ -65,6 +65,10 @@ const onUpdateVirtualParticipantDetailed = `
       vncEndpoint
       vncPort
       vncReady
+      manualActionType
+      manualActionMessage
+      manualActionTimeoutSeconds
+      manualActionStartTime
     }
   }
 `;
@@ -152,6 +156,13 @@ const STATUS_CONFIG = {
     icon: 'status-stopped',
     type: 'stopped',
     color: 'grey',
+  },
+  MANUAL_ACTION_REQUIRED: {
+    message: 'Manual action required',
+    description: 'User interaction needed in VNC viewer',
+    icon: 'status-warning',
+    type: 'warning',
+    color: 'orange',
   },
 };
 
@@ -457,7 +468,8 @@ const VirtualParticipantDetails = () => {
             vncReady: updated.vncReady,
           });
 
-          // Update local state, no notifications (VirtualParticipantList handles notifications), including VNC
+          // Update local state, no notifications (VirtualParticipantList handles notifications),
+          // including VNC and manual action fields
           setVpDetails((prev) => {
             const newState = {
               ...prev,
@@ -467,6 +479,10 @@ const VirtualParticipantDetails = () => {
               vncEndpoint: updated.vncEndpoint || prev?.vncEndpoint,
               vncPort: updated.vncPort || prev?.vncPort,
               vncReady: updated.vncReady !== undefined ? updated.vncReady : prev?.vncReady,
+              manualActionType: updated.manualActionType || prev?.manualActionType,
+              manualActionMessage: updated.manualActionMessage || prev?.manualActionMessage,
+              manualActionTimeoutSeconds: updated.manualActionTimeoutSeconds || prev?.manualActionTimeoutSeconds,
+              manualActionStartTime: updated.manualActionStartTime || prev?.manualActionStartTime,
             };
             console.log('Updated VP state:', newState);
             return newState;
@@ -656,8 +672,19 @@ const VirtualParticipantDetails = () => {
       {/* VNC Live View - Show when VNC is ready and VP is active */}
       {vpDetails.vncReady &&
         vpDetails.vncEndpoint &&
-        ['VNC_READY', 'CONNECTING', 'JOINING', 'JOINED', 'ACTIVE'].includes(vpDetails.status) && (
-          <VNCViewer vpId={vpId} vncEndpoint={vpDetails.vncEndpoint} websocketUrl={vpDetails.vncEndpoint} />
+        ['VNC_READY', 'CONNECTING', 'JOINING', 'JOINED', 'ACTIVE', 'MANUAL_ACTION_REQUIRED'].includes(
+          vpDetails.status,
+        ) && (
+          <VNCViewer
+            vpId={vpId}
+            vncEndpoint={vpDetails.vncEndpoint}
+            websocketUrl={vpDetails.vncEndpoint}
+            status={vpDetails.status}
+            manualActionType={vpDetails.manualActionType}
+            manualActionMessage={vpDetails.manualActionMessage}
+            manualActionTimeoutSeconds={vpDetails.manualActionTimeoutSeconds}
+            manualActionStartTime={vpDetails.manualActionStartTime}
+          />
         )}
 
       {/* VNC Preparing Message - Show while VNC is starting up */}

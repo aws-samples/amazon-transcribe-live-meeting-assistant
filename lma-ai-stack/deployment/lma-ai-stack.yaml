@@ -2727,6 +2727,30 @@ Resources:
             $util.qr( $expValues.put(":vncReady", $util.dynamodb.toDynamoDB($ctx.args.input.vncReady)) )
         #end
         
+        ## Add manual action fields if provided **
+        #if( !$util.isNullOrBlank($ctx.args.input.manualActionType) )
+            $util.qr( $expSet.put("#manualActionType", ":manualActionType") )
+            $util.qr( $expNames.put("#manualActionType", "manualActionType") )
+            $util.qr( $expValues.put(":manualActionType", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionType)) )
+        #end
+        
+        #if( !$util.isNullOrBlank($ctx.args.input.manualActionMessage) )
+            $util.qr( $expSet.put("#manualActionMessage", ":manualActionMessage") )
+            $util.qr( $expNames.put("#manualActionMessage", "manualActionMessage") )
+            $util.qr( $expValues.put(":manualActionMessage", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionMessage)) )
+        #end
+        
+        #if( !$util.isNull($ctx.args.input.manualActionTimeoutSeconds) )
+            $util.qr( $expSet.put("#manualActionTimeoutSeconds", ":manualActionTimeoutSeconds") )
+            $util.qr( $expNames.put("#manualActionTimeoutSeconds", "manualActionTimeoutSeconds") )
+            $util.qr( $expValues.put(":manualActionTimeoutSeconds", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionTimeoutSeconds)) )
+        #end
+        
+        #if( !$util.isNullOrBlank($ctx.args.input.manualActionStartTime) )
+            $util.qr( $expSet.put("#manualActionStartTime", ":manualActionStartTime") )
+            $util.qr( $expNames.put("#manualActionStartTime", "manualActionStartTime") )
+            $util.qr( $expValues.put(":manualActionStartTime", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionStartTime)) )
+        #end
         
         ## Build the SET expression **
         #set( $expression = "SET" )

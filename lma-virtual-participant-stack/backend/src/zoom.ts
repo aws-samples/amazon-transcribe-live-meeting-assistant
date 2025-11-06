@@ -62,8 +62,28 @@ export default class Zoom {
                     console.error('The host requires authentication on the commercial Zoom platform.');
                     console.error('This meeting requires signing in with a commercial Zoom account.');
                     enterpriseLogin = true;
+                    
+                    // Notify frontend that manual action is required
+                    const { details } = await import('./details.js');
+                    if (details.invite.virtualParticipantId) {
+                        const { createStatusManager } = await import('./status-manager.js');
+                        const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                        await statusManager.setManualActionRequired(
+                            'LOGIN',
+                            'Enterprise Zoom authentication required. Please sign in using the VNC viewer.',
+                            120
+                        );
+                    }
+                    
                     await page.waitForSelector('.video-avatar__avatar', { timeout: 120000 }); // Give 2 minutes to login
                     await new Promise(resolve => setTimeout(resolve, 5000));
+                    
+                    // Clear manual action notification after successful login
+                    if (details.invite.virtualParticipantId) {
+                        const { createStatusManager } = await import('./status-manager.js');
+                        const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                        await statusManager.clearManualAction();
+                    }
                 }
             }
         } catch (error) {

@@ -365,6 +365,182 @@ export class VirtualParticipantStatusManager {
     return this.updateStatus('FAILED', errorMessage);
   }
 
+  async setManualActionRequired(
+    actionType: string,
+    message: string,
+    timeoutSeconds: number
+  ): Promise<boolean> {
+    try {
+      // First, get the current VP to preserve existing CallId and VNC fields
+      const getQuery = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            status
+            CallId
+            vncEndpoint
+            vncPort
+            vncReady
+          }
+        }
+      `;
+
+      const currentVP = await this.signAndSendGraphQLRequest(getQuery, {
+        id: this.participantId
+      });
+
+      if (!currentVP?.getVirtualParticipant) {
+        console.error(`VP ${this.participantId} not found`);
+        return false;
+      }
+
+      const current = currentVP.getVirtualParticipant;
+      console.log(`Setting manual action required: ${actionType} - ${message}`);
+
+      // Update with MANUAL_ACTION_REQUIRED status and metadata
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {
+            id
+            status
+            CallId
+            vncEndpoint
+            vncPort
+            vncReady
+            manualActionType
+            manualActionMessage
+            manualActionTimeoutSeconds
+            manualActionStartTime
+            updatedAt
+          }
+        }
+      `;
+
+      const variables: any = {
+        input: {
+          id: this.participantId,
+          status: 'MANUAL_ACTION_REQUIRED',
+          manualActionType: actionType,
+          manualActionMessage: message,
+          manualActionTimeoutSeconds: timeoutSeconds,
+          manualActionStartTime: new Date().toISOString()
+        }
+      };
+
+      // Preserve CallId if it exists
+      if (current.CallId) {
+        variables.input.CallId = current.CallId;
+      }
+
+      // Preserve VNC fields if they exist
+      if (current.vncEndpoint) {
+        variables.input.vncEndpoint = current.vncEndpoint;
+        variables.input.vncPort = current.vncPort;
+        variables.input.vncReady = current.vncReady;
+      }
+
+      const result = await this.signAndSendGraphQLRequest(mutation, variables);
+      
+      if (result) {
+        console.log(`Successfully set manual action required for VP ${this.participantId}`);
+        return true;
+      } else {
+        console.error('Failed to set manual action required via GraphQL');
+        return false;
+      }
+
+    } catch (error) {
+      console.error('Error setting manual action required:', error);
+      return false;
+    }
+  }
+
+  async clearManualAction(): Promise<boolean> {
+    try {
+      // Get current VP to preserve fields
+      const getQuery = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            status
+            CallId
+            vncEndpoint
+            vncPort
+            vncReady
+          }
+        }
+      `;
+
+      const currentVP = await this.signAndSendGraphQLRequest(getQuery, {
+        id: this.participantId
+      });
+
+      if (!currentVP?.getVirtualParticipant) {
+        console.error(`VP ${this.participantId} not found`);
+        return false;
+      }
+
+      const current = currentVP.getVirtualParticipant;
+      console.log(`Clearing manual action for VP ${this.participantId}`);
+
+      // Update to clear manual action fields by setting them to null
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {
+            id
+            status
+            CallId
+            vncEndpoint
+            vncPort
+            vncReady
+            manualActionType
+            manualActionMessage
+            manualActionTimeoutSeconds
+            manualActionStartTime
+            updatedAt
+          }
+        }
+      `;
+
+      const variables: any = {
+        input: {
+          id: this.participantId,
+          status: 'JOINING',
+          manualActionType: null,
+          manualActionMessage: null,
+          manualActionTimeoutSeconds: null,
+          manualActionStartTime: null
+        }
+      };
+
+      // Preserve CallId if it exists
+      if (current.CallId) {
+        variables.input.CallId = current.CallId;
+      }
+
+      // Preserve VNC fields if they exist
+      if (current.vncEndpoint) {
+        variables.input.vncEndpoint = current.vncEndpoint;
+        variables.input.vncPort = current.vncPort;
+        variables.input.vncReady = current.vncReady;
+      }
+
+      const result = await this.signAndSendGraphQLRequest(mutation, variables);
+      
+      if (result) {
+        console.log(`Successfully cleared manual action for VP ${this.participantId}`);
+        return true;
+      } else {
+        console.error('Failed to clear manual action via GraphQL');
+        return false;
+      }
+
+    } catch (error) {
+      console.error('Error clearing manual action:', error);
+      return false;
+    }
+  }
+
   /**
    * Get the task's private IP address from ECS metadata
    */

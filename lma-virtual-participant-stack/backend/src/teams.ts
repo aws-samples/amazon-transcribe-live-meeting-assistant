@@ -65,6 +65,16 @@ export default class Teams {
                 console.log("CAPTCHA detected! Waiting for manual resolution...");
                 console.log("Please solve the CAPTCHA in the VNC viewer.");
                 
+                // Notify frontend that manual action is required
+                if (details.invite.virtualParticipantId) {
+                    const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                    await statusManager.setManualActionRequired(
+                        'CAPTCHA',
+                        'CAPTCHA detected. Please solve the CAPTCHA in the VNC viewer.',
+                        120
+                    );
+                }
+                
                 // Wait for CAPTCHA to be solved (join button to disappear or chat to appear)
                 await Promise.race([
                     page.waitForSelector('[data-tid="prejoin-join-button"]', { 
@@ -79,6 +89,12 @@ export default class Teams {
                 
                 console.log("CAPTCHA appears to be resolved, continuing...");
                 await new Promise((resolve) => setTimeout(resolve, 250));
+                
+                // Clear manual action notification after CAPTCHA is resolved
+                if (details.invite.virtualParticipantId) {
+                    const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                    await statusManager.clearManualAction();
+                }
             }
         } catch (error) {
             console.log("No CAPTCHA detected or CAPTCHA timeout, continuing...");

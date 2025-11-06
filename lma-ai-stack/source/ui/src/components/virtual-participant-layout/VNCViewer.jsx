@@ -9,14 +9,61 @@ import RFB from '@novnc/novnc/lib/rfb';
 import { Container, Header, SpaceBetween, Alert, Spinner, Box, Button, Toggle, Badge } from '@awsui/components-react';
 import { Auth } from 'aws-amplify';
 
-const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
+const VNCViewer = ({
+  vpId,
+  vncEndpoint,
+  websocketUrl,
+  status,
+  manualActionType,
+  manualActionMessage,
+  manualActionTimeoutSeconds,
+  manualActionStartTime,
+}) => {
   const canvasRef = useRef(null);
   const rfbRef = useRef(null);
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState(null);
-  const [viewOnly, setViewOnly] = useState(false);
+  const [viewOnly, setViewOnly] = useState(true);
   const [scaleViewport, setScaleViewport] = useState(true);
+  const [manualActionTimeRemaining, setManualActionTimeRemaining] = useState(0);
+
+  // Determine if manual action is required based on props
+  const manualActionRequired = status === 'MANUAL_ACTION_REQUIRED' && manualActionType;
+
+  // Automatically disable viewOnly when manual action is required
+  useEffect(() => {
+    if (manualActionRequired && viewOnly === true) {
+      setViewOnly(false);
+    }
+  }, [manualActionRequired]);
+
+  // Calculate time remaining when manual action is required
+  useEffect(() => {
+    if (!manualActionRequired || !manualActionStartTime || !manualActionTimeoutSeconds) {
+      setManualActionTimeRemaining(0);
+      return undefined;
+    }
+
+    // Calculate initial time remaining
+    const startTime = new Date(manualActionStartTime).getTime();
+    const now = Date.now();
+    const elapsed = Math.floor((now - startTime) / 1000);
+    const remaining = Math.max(0, manualActionTimeoutSeconds - elapsed);
+    setManualActionTimeRemaining(remaining);
+
+    // Set up countdown timer
+    const timer = setInterval(() => {
+      setManualActionTimeRemaining((prev) => {
+        if (prev <= 1) {
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [manualActionRequired, manualActionStartTime, manualActionTimeoutSeconds]);
 
   useEffect(() => {
     if (!canvasRef.current || !vpId || !vncEndpoint) return undefined;
@@ -168,13 +215,39 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
           </Box>
         )}
 
-        {connected && (
+        {manualActionRequired && (
+          <Alert
+            type="warning"
+            header={`⚠️ MANUAL ACTION REQUIRED - Time remaining: ${Math.floor(manualActionTimeRemaining / 60)}:${String(
+              manualActionTimeRemaining % 60,
+            ).padStart(2, '0')}`}
+          >
+            <SpaceBetween direction="vertical" size="xs">
+              <div>
+                <strong>{manualActionType}:</strong> {manualActionMessage || 'Manual action required'}
+              </div>
+              <div>The virtual participant will continue automatically once the action is completed.</div>
+            </SpaceBetween>
+          </Alert>
+        )}
+
+        {connected && !manualActionRequired && (
           <Alert type="success">
             <SpaceBetween direction="vertical" size="xs">
               <div>
-                <strong>Connected</strong> - You can now interact with the virtual participant
+                <strong>Connected</strong> - Virtual participant is active
               </div>
-              <div>Click inside the viewer to control the virtual participant with your mouse and keyboard</div>
+              <div>
+                {viewOnly
+                  ? 'View Only mode is enabled. Toggle it off to interact with the virtual participant.'
+                  : 'Click inside the viewer to control the virtual participant with your mouse and keyboard.'}
+              </div>
+              {!viewOnly && (
+                <div>
+                  <strong>⚠️ Warning:</strong> Interacting with the virtual participant during automated steps may
+                  disrupt the automation process and cause subsequent steps to fail.
+                </div>
+              )}
             </SpaceBetween>
           </Alert>
         )}
@@ -211,9 +284,15 @@ const VNCViewer = ({ vpId, vncEndpoint, websocketUrl }) => {
               <strong>Tips for using the live view:</strong>
             </div>
             <ul style={{ margin: 0, paddingLeft: '20px' }}>
-              <li>Click inside the viewer to interact with the virtual participant</li>
-              <li>Use your mouse and keyboard normally to handle CAPTCHAs or other interactions</li>
-              <li>Enable &quot;View Only&quot; mode to prevent accidental interactions</li>
+              <li>
+                <strong>View Only mode is enabled by default</strong> to prevent accidental interactions during
+                automated steps
+              </li>
+              <li>Only disable View Only mode when manual action is required (e.g., CAPTCHA, login prompts)</li>
+              <li>
+                <strong>Warning:</strong> Interacting during automated steps may break the automation sequence
+              </li>
+              <li>Use your mouse and keyboard normally when handling manual actions</li>
               <li>Use &quot;Scale to Fit&quot; to adjust the display size</li>
               <li>Click &quot;Fullscreen&quot; for a larger view</li>
             </ul>
@@ -228,6 +307,19 @@ VNCViewer.propTypes = {
   vpId: PropTypes.string.isRequired,
   vncEndpoint: PropTypes.string.isRequired,
   websocketUrl: PropTypes.string.isRequired,
+  status: PropTypes.string,
+  manualActionType: PropTypes.string,
+  manualActionMessage: PropTypes.string,
+  manualActionTimeoutSeconds: PropTypes.number,
+  manualActionStartTime: PropTypes.string,
+};
+
+VNCViewer.defaultProps = {
+  status: null,
+  manualActionType: null,
+  manualActionMessage: null,
+  manualActionTimeoutSeconds: null,
+  manualActionStartTime: null,
 };
 
 export default VNCViewer;
