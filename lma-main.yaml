@@ -57,6 +57,17 @@ Parameters:
       Select a Bedrock LLM model from the list. Includes Nova models (cost-effective), 
       Claude 3.5/3.7 (advanced), and Claude 4 (cutting-edge). Some models require inference profiles.
 
+  TavilyApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional - STRANDS_BEDROCK only) API key for Tavily web search service to enable web search tool.
+      Get your API key from https://tavily.com. When provided, the Strands agent can search the web 
+      for current information during meetings. Leave blank to disable web search capability.
+    AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
+    ConstraintDescription: "Must be empty or a valid Tavily API key (20+ characters)"
+
   BedrockGuardrailId:
     Type: String
     Default: ""
@@ -643,6 +654,7 @@ Metadata:
         Parameters:
           - MeetingAssistService
           - MeetingAssistServiceBedrockModelID
+          - TavilyApiKey
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
@@ -763,6 +775,8 @@ Metadata:
         default: Meeting Assist Service
       MeetingAssistServiceBedrockModelID:
         default: Meeting Assist Service Bedrock Model ID
+      TavilyApiKey:
+        default: Tavily API Key for Web Search (STRANDS_BEDROCK only)
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
       MeetingAssistQnABotOpenSearchNodeCount:
@@ -2009,6 +2023,7 @@ Resources:
           - ""
         IDCApplicationARN: !Ref IDCApplicationARN
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
+        TavilyApiKey: !Ref TavilyApiKey
         LexMeetingAssistBotId: !If
           - ShouldDeployQnABot
           - !GetAtt QNABOT.Outputs.LexV2BotId

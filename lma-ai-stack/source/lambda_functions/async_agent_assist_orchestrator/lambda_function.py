@@ -247,6 +247,9 @@ def publish_lambda_agent_assist_transcript_segment(
     # Use "OriginalTranscript", if defined (optionally set by transcript lambda hook fn)"
     transcript: str = message.get("OriginalTranscript", message["Transcript"])
     created_at = datetime.utcnow().astimezone().isoformat()
+    
+    # Extract Owner (user email) for UBAC
+    owner = message.get("Owner", "")
 
     # Determine response channel based on input channel
     response_channel = "CHAT_ASSISTANT" if channel == "CHAT_ASSISTANT" else "AGENT_ASSISTANT"
@@ -264,6 +267,7 @@ def publish_lambda_agent_assist_transcript_segment(
         SegmentId=str(uuid.uuid4()),
         StartTime=start_time,
         Status="TRANSCRIBING",
+        Owner=owner,  # Pass Owner for userEmail extraction
     )
     
     # Add MessageId if provided (for token streaming)
@@ -291,6 +295,9 @@ def get_lambda_agent_assist_transcript(
 ):
     """Sends Lambda Agent Assist Requests"""
     call_id = transcript_segment_args["CallId"]
+    
+    # Extract Owner (user email) from transcript_segment_args if available
+    owner = transcript_segment_args.get("Owner", "")
 
     payload = {
         'text': content,
@@ -298,6 +305,7 @@ def get_lambda_agent_assist_transcript(
         'transcript_segment_args': transcript_segment_args,
         'dynamodb_table_name': DYNAMODB_TABLE_NAME,
         'dynamodb_pk': f"c#{call_id}",
+        'userEmail': owner,  # Add userEmail for tools that require UBAC
     }
 
     LOGGER.info("Agent Assist Lambda Request: %s", content)

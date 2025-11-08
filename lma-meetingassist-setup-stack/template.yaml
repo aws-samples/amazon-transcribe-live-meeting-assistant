@@ -53,6 +53,17 @@ Parameters:
     Type: String
     Default: "anthropic.claude-3-sonnet-20240229-v1:0"
 
+  TavilyApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional - STRANDS_BEDROCK only) API key for Tavily web search service to enable web search tool.
+      Get your API key from https://tavily.com. When provided, the Strands agent can search the web 
+      for current information during meetings. Leave blank to disable web search capability.
+    AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
+    ConstraintDescription: "Must be empty or a valid Tavily API key (20+ characters)"
+
   # Required when using QnABot, ignored for STRANDS_BEDROCK
   LexMeetingAssistBotId:
     Type: String
@@ -659,6 +670,8 @@ Resources:
           KB_ID: !Ref BedrockKnowledgeBaseId
           KB_REGION: !Ref AWS::Region
           KB_ACCOUNT_ID: !Ref AWS::AccountId
+          TRANSCRIPT_KB_ID: !Ref TranscriptBedrockKnowledgeBaseId
+          TAVILY_API_KEY: !Ref TavilyApiKey
           APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
           ENABLE_STREAMING: "true"
       Code: ./src
@@ -806,6 +819,8 @@ Resources:
           KB_ID: !Ref BedrockKnowledgeBaseId
           KB_REGION: !Ref AWS::Region
           KB_ACCOUNT_ID: !Ref AWS::AccountId
+          TRANSCRIPT_KB_ID: !Ref TranscriptBedrockKnowledgeBaseId
+          TAVILY_API_KEY: !Ref TavilyApiKey
           APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
           ENABLE_STREAMING: "true"
       Code: ./src
