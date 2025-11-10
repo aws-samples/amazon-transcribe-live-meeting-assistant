@@ -218,7 +218,11 @@ Conditions:
   ShouldConfigureBedrockAgent: !Not [!Equals [!Ref BedrockAgentId, ""]]
   ShouldCreateQPlugin: !Not [!Equals [!Ref AmazonQAppId, ""]]
   ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
-  ShouldDeployStrandsFunction: !Condition ShouldUseStrandsBedrock
+  ShouldUseStrandsBedrockWithKB: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Create)"]
+  ShouldDeployStrandsFunction: !Or [
+    !Condition ShouldUseStrandsBedrock,
+    !Condition ShouldUseStrandsBedrockWithKB
+  ]
   ShouldConfigureBedrockLLM:
     !And [
       !Condition ShouldConfigureQnabot,
@@ -1003,7 +1007,7 @@ Resources:
               - !Ref QNABedrockAgentFunction
               - !Ref QNABedrockLLMFunction
         - !If
-          - ShouldUseStrandsBedrock
+          - ShouldDeployStrandsFunction
           - !Ref StrandsMeetingAssistFunction
           - !Ref AWS::NoValue
       QnaBotSettings: !Ref QnaBotSettings
@@ -1403,4 +1407,4 @@ Outputs:
   
   StrandsMeetingAssistFunctionArn:
     Description: ARN of the Strands Meeting Assist Lambda function
-    Value: !If [ShouldUseStrandsBedrock, !GetAtt StrandsMeetingAssistFunction.Arn, "NA"]
+    Value: !If [ShouldDeployStrandsFunction, !GetAtt StrandsMeetingAssistFunction.Arn, "NA"]
