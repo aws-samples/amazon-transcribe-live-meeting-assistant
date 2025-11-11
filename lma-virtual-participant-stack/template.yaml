@@ -83,6 +83,10 @@ Parameters:
     Type: String
     Description: ARN of the VNC Target Group from AI stack
 
+  VNCALBListenerArn:
+    Type: String
+    Description: ARN of the VNC ALB Listener for creating dynamic routing rules
+
   VPSecurityGroupId:
     Type: String
     Description: Security Group ID for Virtual Participant ECS tasks from AI stack
@@ -684,21 +688,25 @@ Resources:
                   - "dynamodb:UpdateItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
-        - PolicyName: ALBTargetRegistrationPolicy
+        - PolicyName: ALBDynamicRoutingPolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
+                  - "elasticloadbalancing:CreateTargetGroup"
+                  - "elasticloadbalancing:DeleteTargetGroup"
+                  - "elasticloadbalancing:DescribeTargetGroups"
+                  - "elasticloadbalancing:ModifyTargetGroupAttributes"
                   - "elasticloadbalancing:RegisterTargets"
                   - "elasticloadbalancing:DeregisterTargets"
-                Resource:
-                  - !Ref VNCTargetGroupArn
-              - Effect: Allow
-                Action:
                   - "elasticloadbalancing:DescribeTargetHealth"
-                Resource:
-                  - "*"
+                  - "elasticloadbalancing:CreateRule"
+                  - "elasticloadbalancing:DeleteRule"
+                  - "elasticloadbalancing:DescribeRules"
+                  - "elasticloadbalancing:ModifyRule"
+                  - "elasticloadbalancing:AddTags"
+                Resource: "*"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -811,6 +819,10 @@ Resources:
               Value: !Ref CloudFrontDomainName
             - Name: VNC_TARGET_GROUP_ARN
               Value: !Ref VNCTargetGroupArn
+            - Name: VPC_ID
+              Value: !Ref VPC
+            - Name: ALB_LISTENER_ARN
+              Value: !Ref VNCALBListenerArn
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:

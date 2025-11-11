@@ -598,6 +598,11 @@ Outputs:
   VPSecurityGroupId:
     Description: Security Group ID for Virtual Participant ECS tasks
     Value: !Ref VPSecurityGroup
+  VNCALBListenerArn:
+    Description: ARN of the VNC ALB Listener for dynamic routing rules
+    Value: !Ref VNCALBListener
+    Export:
+      Name: !Sub "${AWS::StackName}-VNCALBListenerArn"
 
 Resources:
   EventSourcingTable:
