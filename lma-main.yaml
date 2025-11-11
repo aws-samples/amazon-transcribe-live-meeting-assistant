@@ -2189,6 +2189,7 @@ Resources:
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         VPTaskRegistryTableName: !GetAtt AISTACK.Outputs.VPTaskRegistryTableName
         VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
+        VNCALBListenerArn: !GetAtt AISTACK.Outputs.VNCALBListenerArn
         VPSecurityGroupId: !GetAtt AISTACK.Outputs.VPSecurityGroupId
         VirtualParticipantTableName: !GetAtt AISTACK.Outputs.VirtualParticipantTableName
         VirtualParticipantTableStreamArn: !GetAtt AISTACK.Outputs.VirtualParticipantTableStreamArn

@@ -4,7 +4,13 @@ import {
   ElasticLoadBalancingV2Client, 
   RegisterTargetsCommand, 
   DeregisterTargetsCommand,
-  DescribeTargetHealthCommand 
+  DescribeTargetHealthCommand,
+  CreateTargetGroupCommand,
+  DeleteTargetGroupCommand,
+  CreateRuleCommand,
+  DeleteRuleCommand,
+  DescribeRulesCommand,
+  DescribeTargetGroupsCommand
 } from '@aws-sdk/client-elastic-load-balancing-v2';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
@@ -25,6 +31,8 @@ export class VirtualParticipantStatusManager {
   private dynamoClient: DynamoDBClient;
   private elbClient: ElasticLoadBalancingV2Client;
   private taskPrivateIp: string | null = null;
+  private targetGroupArn: string | null = null;
+  private listenerRuleArn: string | null = null;
 
   constructor(participantId: string) {
     this.participantId = participantId;
@@ -586,16 +594,153 @@ export class VirtualParticipantStatusManager {
 
 
   /**
+   * Generate a unique priority number for ALB listener rule based on vpId
+   * Uses hash to ensure consistent priority for same vpId
+   */
+  private generateRulePriority(vpId: string): number {
+    // Simple hash function to generate priority between 1000-50000
+    let hash = 0;
+    for (let i = 0; i < vpId.length; i++) {
+      hash = ((hash << 5) - hash) + vpId.charCodeAt(i);
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    // Map to range 1000-50000
+    return 1000 + Math.abs(hash % 49000);
+  }
+
+  /**
+   * Create a dedicated target group for this VP
+   */
+  private async createVPTargetGroup(): Promise<string | null> {
+    try {
+      const vpcId = process.env.VPC_ID;
+      if (!vpcId) {
+        console.error('VPC_ID environment variable not set');
+        return null;
+      }
+
+      // Target group name max 32 chars, must be unique
+      const tgName = `vnc-${this.participantId.substring(0, 27)}`;
+      
+      console.log(`Creating target group: ${tgName}`);
+
+      const createTGCommand = new CreateTargetGroupCommand({
+        Name: tgName,
+        Protocol: 'HTTP',
+        Port: 5901,
+        VpcId: vpcId,
+        TargetType: 'ip',
+        HealthCheckEnabled: true,
+        HealthCheckProtocol: 'HTTP',
+        HealthCheckPath: '/',
+        HealthCheckIntervalSeconds: 30,
+        HealthCheckTimeoutSeconds: 5,
+        HealthyThresholdCount: 2,
+        UnhealthyThresholdCount: 3,
+        Tags: [
+          { Key: 'VirtualParticipantId', Value: this.participantId },
+          { Key: 'ManagedBy', Value: 'LMA-VirtualParticipant' }
+        ]
+      });
+
+      const response = await this.elbClient.send(createTGCommand);
+      
+      if (response.TargetGroups && response.TargetGroups.length > 0) {
+        const tgArn = response.TargetGroups[0].TargetGroupArn!;
+        console.log(`✓ Created target group: ${tgArn}`);
+        return tgArn;
+      }
+
+      console.error('Failed to create target group - no ARN returned');
+      return null;
+
+    } catch (error: any) {
+      if (error.name === 'DuplicateTargetGroupName') {
+        console.log('Target group already exists, attempting to find it...');
+        try {
+          const tgName = `vnc-${this.participantId.substring(0, 27)}`;
+          const describeCommand = new DescribeTargetGroupsCommand({
+            Names: [tgName]
+          });
+          const response = await this.elbClient.send(describeCommand);
+          if (response.TargetGroups && response.TargetGroups.length > 0) {
+            const tgArn = response.TargetGroups[0].TargetGroupArn!;
+            console.log(`✓ Found existing target group: ${tgArn}`);
+            return tgArn;
+          }
+        } catch (describeError) {
+          console.error('Failed to find existing target group:', describeError);
+        }
+      }
+      console.error('Failed to create target group:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Create ALB listener rule to route /vnc/{vpId}/* to this VP's target group
+   */
+  private async createListenerRule(targetGroupArn: string): Promise<string | null> {
+    try {
+      const listenerArn = process.env.ALB_LISTENER_ARN;
+      if (!listenerArn) {
+        console.error('ALB_LISTENER_ARN environment variable not set');
+        return null;
+      }
+
+      const priority = this.generateRulePriority(this.participantId);
+      const pathPattern = `/vnc/${this.participantId}`;
+
+      console.log(`Creating listener rule with priority ${priority} for path ${pathPattern}`);
+
+      const createRuleCommand = new CreateRuleCommand({
+        ListenerArn: listenerArn,
+        Priority: priority,
+        Conditions: [
+          {
+            Field: 'path-pattern',
+            Values: [pathPattern]
+          }
+        ],
+        Actions: [
+          {
+            Type: 'forward',
+            TargetGroupArn: targetGroupArn
+          }
+        ],
+        Tags: [
+          { Key: 'VirtualParticipantId', Value: this.participantId },
+          { Key: 'ManagedBy', Value: 'LMA-VirtualParticipant' }
+        ]
+      });
+
+      const response = await this.elbClient.send(createRuleCommand);
+
+      if (response.Rules && response.Rules.length > 0) {
+        const ruleArn = response.Rules[0].RuleArn!;
+        console.log(`✓ Created listener rule: ${ruleArn}`);
+        return ruleArn;
+      }
+
+      console.error('Failed to create listener rule - no ARN returned');
+      return null;
+
+    } catch (error: any) {
+      if (error.name === 'PriorityInUse') {
+        console.error(`Priority conflict - trying alternate priority`);
+        // Could implement retry with different priority here
+      }
+      console.error('Failed to create listener rule:', error);
+      return null;
+    }
+  }
+
+  /**
    * Register this task's IP with the ALB target group
+   * Now creates dedicated target group and listener rule per VP
    */
   async registerWithTargetGroup(): Promise<boolean> {
     try {
-      const targetGroupArn = process.env.VNC_TARGET_GROUP_ARN;
-      if (!targetGroupArn) {
-        console.error('VNC_TARGET_GROUP_ARN environment variable not set');
-        return false;
-      }
-
       // Get task private IP
       const privateIp = await this.getTaskPrivateIp();
       if (!privateIp) {
@@ -604,8 +749,30 @@ export class VirtualParticipantStatusManager {
       }
 
       this.taskPrivateIp = privateIp;
-      console.log(`Registering task IP ${privateIp} with target group ${targetGroupArn}`);
+      console.log(`Task private IP: ${privateIp}`);
 
+      // Step 1: Create dedicated target group for this VP
+      console.log('Step 1: Creating dedicated target group...');
+      const targetGroupArn = await this.createVPTargetGroup();
+      if (!targetGroupArn) {
+        console.error('Failed to create target group');
+        return false;
+      }
+      this.targetGroupArn = targetGroupArn;
+
+      // Step 2: Create listener rule to route /vnc/{vpId}/* to this target group
+      console.log('Step 2: Creating listener rule...');
+      const ruleArn = await this.createListenerRule(targetGroupArn);
+      if (!ruleArn) {
+        console.error('Failed to create listener rule');
+        // Clean up target group
+        await this.deleteVPTargetGroup();
+        return false;
+      }
+      this.listenerRuleArn = ruleArn;
+
+      // Step 3: Register this task's IP with the target group
+      console.log(`Step 3: Registering task IP ${privateIp} with target group...`);
       const registerCommand = new RegisterTargetsCommand({
         TargetGroupArn: targetGroupArn,
         Targets: [
@@ -619,8 +786,8 @@ export class VirtualParticipantStatusManager {
       await this.elbClient.send(registerCommand);
       console.log(`✓ Successfully registered ${privateIp} with target group`);
 
-      // Wait for target to become healthy
-      console.log('Waiting for target to become healthy...');
+      // Step 4: Wait for target to become healthy
+      console.log('Step 4: Waiting for target to become healthy...');
       const isHealthy = await this.waitForTargetHealthy(targetGroupArn, privateIp);
       
       if (!isHealthy) {
@@ -631,15 +798,17 @@ export class VirtualParticipantStatusManager {
       console.log('✓ Target is healthy and ready to receive traffic');
       
       // Additional delay to ensure ALB is fully ready to route WebSocket traffic
-      // This prevents race condition where frontend tries to connect before ALB routing is stable
       console.log('Waiting additional 5 seconds for ALB routing to stabilize...');
       await new Promise(resolve => setTimeout(resolve, 5000));
       console.log('✓ ALB routing stabilization complete');
       
+      console.log(`✓ VP ${this.participantId} fully registered with dedicated routing`);
       return true;
 
     } catch (error) {
       console.error('Failed to register with target group:', error);
+      // Attempt cleanup
+      await this.cleanupALBResources();
       return false;
     }
   }
@@ -695,30 +864,108 @@ export class VirtualParticipantStatusManager {
   }
 
   /**
-   * Deregister this task from the ALB target group
+   * Delete the listener rule created for this VP
    */
-  async deregisterFromTargetGroup(): Promise<boolean> {
+  private async deleteListenerRule(): Promise<boolean> {
     try {
-      const targetGroupArn = process.env.VNC_TARGET_GROUP_ARN;
-      if (!targetGroupArn || !this.taskPrivateIp) {
-        console.log('No target group ARN or task IP - skipping deregistration');
+      if (!this.listenerRuleArn) {
+        console.log('No listener rule ARN to delete');
         return true;
       }
 
-      console.log(`Deregistering task IP ${this.taskPrivateIp} from target group`);
+      console.log(`Deleting listener rule: ${this.listenerRuleArn}`);
 
-      const deregisterCommand = new DeregisterTargetsCommand({
-        TargetGroupArn: targetGroupArn,
-        Targets: [
-          {
-            Id: this.taskPrivateIp,
-            Port: 5901,
-          },
-        ],
+      const deleteRuleCommand = new DeleteRuleCommand({
+        RuleArn: this.listenerRuleArn
       });
 
-      await this.elbClient.send(deregisterCommand);
-      console.log(`✓ Successfully deregistered ${this.taskPrivateIp} from target group`);
+      await this.elbClient.send(deleteRuleCommand);
+      console.log(`✓ Deleted listener rule`);
+      this.listenerRuleArn = null;
+      return true;
+
+    } catch (error: any) {
+      if (error.name === 'RuleNotFound') {
+        console.log('Listener rule already deleted');
+        return true;
+      }
+      console.error('Failed to delete listener rule:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete the target group created for this VP
+   */
+  private async deleteVPTargetGroup(): Promise<boolean> {
+    try {
+      if (!this.targetGroupArn) {
+        console.log('No target group ARN to delete');
+        return true;
+      }
+
+      console.log(`Deleting target group: ${this.targetGroupArn}`);
+
+      // First deregister all targets
+      if (this.taskPrivateIp) {
+        try {
+          const deregisterCommand = new DeregisterTargetsCommand({
+            TargetGroupArn: this.targetGroupArn,
+            Targets: [{ Id: this.taskPrivateIp, Port: 5901 }]
+          });
+          await this.elbClient.send(deregisterCommand);
+          console.log('✓ Deregistered targets from target group');
+          
+          // Wait a bit for deregistration to complete
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } catch (deregError) {
+          console.log('Error deregistering targets (may already be deregistered):', deregError);
+        }
+      }
+
+      const deleteTGCommand = new DeleteTargetGroupCommand({
+        TargetGroupArn: this.targetGroupArn
+      });
+
+      await this.elbClient.send(deleteTGCommand);
+      console.log(`✓ Deleted target group`);
+      this.targetGroupArn = null;
+      return true;
+
+    } catch (error: any) {
+      if (error.name === 'TargetGroupNotFound') {
+        console.log('Target group already deleted');
+        return true;
+      }
+      console.error('Failed to delete target group:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Clean up all ALB resources (listener rule and target group)
+   */
+  private async cleanupALBResources(): Promise<void> {
+    console.log('Cleaning up ALB resources...');
+    
+    // Delete in correct order: rule first, then target group
+    await this.deleteListenerRule();
+    await this.deleteVPTargetGroup();
+    
+    console.log('✓ ALB resource cleanup complete');
+  }
+
+  /**
+   * Deregister this task from the ALB target group and clean up resources
+   */
+  async deregisterFromTargetGroup(): Promise<boolean> {
+    try {
+      console.log(`Deregistering VP ${this.participantId} from ALB`);
+      
+      // Clean up all ALB resources
+      await this.cleanupALBResources();
+      
+      console.log(`✓ Successfully deregistered VP ${this.participantId}`);
       return true;
 
     } catch (error) {
