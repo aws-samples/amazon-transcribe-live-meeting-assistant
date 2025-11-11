@@ -23,12 +23,13 @@ Parameters:
     AllowedValues:
       - "BEDROCK_LLM"
       - "STRANDS_BEDROCK"
+      - "STRANDS_BEDROCK_WITH_KB (Create)"
       - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
       - "BEDROCK_AGENT (Use Existing)"
       - "Q_BUSINESS (Use Existing)"
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
       - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)"
-    Description: Choose the knowledge base / LLM service to use. STRANDS_BEDROCK (experimental) provides a lightweight alternative to QnABot with agentic capabilities.
+    Description: Choose the knowledge base / LLM service to use. STRANDS_BEDROCK (experimental) provides a lightweight alternative to QnABot with agentic capabilities. STRANDS_BEDROCK_WITH_KB automatically creates a Knowledge Base for the document search tool.
 
   MeetingAssistServiceBedrockModelID:
     Type: String
@@ -56,6 +57,17 @@ Parameters:
     Description: >-
       Select a Bedrock LLM model from the list. Includes Nova models (cost-effective), 
       Claude 3.5/3.7 (advanced), and Claude 4 (cutting-edge). Some models require inference profiles.
+
+  TavilyApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional - STRANDS_BEDROCK only) API key for Tavily web search service to enable web search tool.
+      Get your API key from https://tavily.com. When provided, the Strands agent can search the web 
+      for current information during meetings. Leave blank to disable web search capability.
+    AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
+    ConstraintDescription: "Must be empty or a valid Tavily API key (20+ characters)"
 
   BedrockGuardrailId:
     Type: String
@@ -106,7 +118,7 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide the bucket 
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', 'STRANDS_BEDROCK_WITH_KB (Create)', or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide the bucket 
       name of an existing bucket with documents to ingest, or leave blank if you don't need an S3 data source. If you provide an S3 bucket name an S3 data
       source will be created for you automatically.
 
@@ -114,14 +126,14 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide comma separated list of optional S3 prefixes 
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', 'STRANDS_BEDROCK_WITH_KB (Create)', or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide comma separated list of optional S3 prefixes 
       with the paths to your source documents e.g. "prefix1/, prefix2/". If you leave blank, all documents in your S3 bucket will be scanned.
 
   BedrockKnowledgeBaseWebCrawlerURLs:
     Type: String
     Default: https://en.wikipedia.org/wiki/Life_insurance, https://en.wikipedia.org/wiki/Mortgage_loan
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', 'STRANDS_BEDROCK_WITH_KB (Create)', or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', provide comma separated list of public web sites to crawl,
       or leave blank if you don't need a Web data source. If you provide one or more Web URLs a Web crawler data source will be created for you automatically.
 
   BedrockKnowledgeBaseWebCrawlerScope:
@@ -132,7 +144,7 @@ Parameters:
       - "SUBDOMAINS"
     Default: DEFAULT
     Description: >-
-      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)' or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', specify the scope of what is crawled for your URLs.
+      If MeetingAssistService is 'BEDROCK_KNOWLEDGE_BASE (Create)', 'STRANDS_BEDROCK_WITH_KB (Create)', or 'BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create)', specify the scope of what is crawled for your URLs.
       Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
       Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
       Choose SUBDOMAINS to to include sub domains in addition to the host or primary domain.
@@ -643,6 +655,7 @@ Metadata:
         Parameters:
           - MeetingAssistService
           - MeetingAssistServiceBedrockModelID
+          - TavilyApiKey
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
@@ -763,6 +776,8 @@ Metadata:
         default: Meeting Assist Service
       MeetingAssistServiceBedrockModelID:
         default: Meeting Assist Service Bedrock Model ID
+      TavilyApiKey:
+        default: Tavily API Key for Web Search (STRANDS_BEDROCK only)
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
       MeetingAssistQnABotOpenSearchNodeCount:
@@ -938,7 +953,10 @@ Conditions:
   ShouldUseExistingBedrockKnowledgeBase:
     !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Use Existing)"]
   ShouldCreateBedrockKnowledgeBase:
-    !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Create)"]
+    !Or [
+      !Equals [!Ref MeetingAssistService, "BEDROCK_KNOWLEDGE_BASE (Create)"],
+      !Condition ShouldUseStrandsBedrockWithKB
+    ]
   ShouldUseBedrockKnowledgeBase:
     !Or [
       !Condition ShouldUseExistingBedrockKnowledgeBase,
@@ -960,17 +978,24 @@ Conditions:
     !Equals [!Ref MeetingAssistService, "Q_BUSINESS (Use Existing)"]
   ShouldUseStrandsBedrock:
     !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
+  ShouldUseStrandsBedrockWithKB:
+    !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Create)"]
+  ShouldUseAnyStrandsBedrock:
+    !Or [
+      !Condition ShouldUseStrandsBedrock,
+      !Condition ShouldUseStrandsBedrockWithKB
+    ]
   ShouldUseLLMOnly:
     !Not [
       !Or [
         !Condition ShouldUseBedrockKnowledgeBase,
         !Condition ShouldUseBedrockAgent,
         !Condition ShouldUseQBusiness,
-        !Condition ShouldUseStrandsBedrock,
+        !Condition ShouldUseAnyStrandsBedrock,
       ],
     ]
   ShouldDeployQnABot:
-    !Not [!Condition ShouldUseStrandsBedrock]
+    !Not [!Condition ShouldUseAnyStrandsBedrock]
   ShouldCreateVPC: !Equals [!Ref UseExistingVPC, "false"]
   ShouldCreateTranscriptKnowledgeBase:
     !Equals [!Ref TranscriptKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)"]
@@ -1816,15 +1841,15 @@ Resources:
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
         IsLexAgentAssistEnabled: !If
-          - ShouldUseStrandsBedrock
+          - ShouldUseAnyStrandsBedrock
           - false
           - true
         IsLambdaAgentAssistEnabled: !If
-          - ShouldUseStrandsBedrock
+          - ShouldUseAnyStrandsBedrock
           - true
           - false
         AgentAssistExistingLambdaFunctionArn: !If
-          - ShouldUseStrandsBedrock
+          - ShouldUseAnyStrandsBedrock
           - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
           - ""
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
@@ -1987,7 +2012,10 @@ Resources:
             - ShouldCreateBedrockKnowledgeBase
             - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
             - !Ref BedrockKnowledgeBaseId
-          - ""
+          - !If
+            - ShouldUseStrandsBedrockWithKB
+            - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
+            - ""
         BedrockAgentId: !If
           - ShouldUseBedrockAgent
           - !If
@@ -2009,6 +2037,7 @@ Resources:
           - ""
         IDCApplicationARN: !Ref IDCApplicationARN
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
+        TavilyApiKey: !Ref TavilyApiKey
         LexMeetingAssistBotId: !If
           - ShouldDeployQnABot
           - !GetAtt QNABOT.Outputs.LexV2BotId
