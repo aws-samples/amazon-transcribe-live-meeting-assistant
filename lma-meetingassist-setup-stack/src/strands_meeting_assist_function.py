@@ -84,25 +84,129 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
     return document_search
 
 
+def create_recent_meetings_tool(dynamodb_table_name: str, user_email: str):
+    """Factory function to create recent meetings list tool with closure"""
+    from strands import tool
+    from datetime import datetime, timedelta
+    
+    @tool
+    def recent_meetings_list(limit: int = 10) -> str:
+        """Get a chronological list of recent meetings sorted by date (most recent first).
+        
+        Use this when:
+        - User asks about "last meeting", "most recent meeting", or "latest meeting"
+        - Need to establish chronological context before semantic search
+        - Want to list recent meetings in time order
+        - Comparing current meeting to previous meetings
+        
+        Args:
+            limit: Number of recent meetings to return (default 10, max 50)
+            
+        Returns:
+            JSON list of recent meetings with CallId, date, and duration
+        """
+        if not dynamodb_table_name:
+            return "Recent meetings list not configured - no DynamoDB table available"
+        
+        if not user_email:
+            return "Recent meetings list requires user authentication"
+        
+        try:
+            # Limit to reasonable range
+            limit = min(max(1, limit), 50)
+            
+            logger.info(f"Recent meetings tool executing: limit={limit} for user: {user_email}")
+            
+            table = dynamodb.Table(dynamodb_table_name)
+            
+            # Query recent date shards (last 30 days) to find meetings
+            # DynamoDB structure: PK = cls#YYYY-MM-DD#s#NN, SK = ts#timestamp#callid
+            meetings = []
+            shards_per_day = 6  # 4-hour shards
+            
+            # Start from today and go backwards
+            current_date = datetime.utcnow()
+            
+            for days_back in range(30):  # Look back 30 days
+                query_date = current_date - timedelta(days=days_back)
+                date_str = query_date.strftime('%Y-%m-%d')
+                
+                # Query each shard for this date (in reverse order for efficiency)
+                for shard in range(shards_per_day - 1, -1, -1):
+                    pk = f"cls#{date_str}#s#{shard:02d}"
+                    
+                    try:
+                        response = table.query(
+                            KeyConditionExpression=Key('PK').eq(pk),
+                            FilterExpression=Attr('Owner').eq(user_email),
+                            ScanIndexForward=False  # Sort descending (most recent first)
+                        )
+                        
+                        for item in response.get('Items', []):
+                            meetings.append({
+                                'CallId': item.get('CallId', 'Unknown'),
+                                'Date': item.get('CreatedAt', 'Unknown'),
+                                'Duration': f"{int(item.get('TotalConversationDurationMillis', 0) / 1000)}s",
+                                'SK': item.get('SK', '')  # For sorting
+                            })
+                            
+                            # Stop if we have enough
+                            if len(meetings) >= limit:
+                                break
+                                
+                    except Exception as e:
+                        logger.warning(f"Error querying shard {pk}: {e}")
+                        continue
+                    
+                    if len(meetings) >= limit:
+                        break
+                
+                if len(meetings) >= limit:
+                    break
+            
+            # Sort all collected meetings by SK (timestamp) descending
+            meetings.sort(key=lambda x: x.get('SK', ''), reverse=True)
+            meetings = meetings[:limit]
+            
+            # Remove SK from output (internal use only)
+            for m in meetings:
+                m.pop('SK', None)
+            
+            if not meetings:
+                return "No recent meetings found"
+            
+            result = json.dumps(meetings, indent=2)
+            logger.info(f"Recent meetings returned {len(meetings)} meetings")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in recent meetings list: {str(e)}")
+            return f"Error retrieving recent meetings: {str(e)}"
+    
+    return recent_meetings_list
+
+
 def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_account_id: str, 
                                 model_id: str, user_email: str):
     """Factory function to create meeting history tool with closure"""
     from strands import tool
     
     @tool
-    def meeting_history(query: str) -> str:
-        """Search past meeting transcripts and summaries with user-based access control.
+    def meeting_history(query: str, call_ids: str = "") -> str:
+        """Search past meeting transcripts and summaries with semantic search and user-based access control.
         
         Use this when:
-        - User asks about previous meetings or discussions
-        - Need to reference past action items or decisions
-        - Looking for historical context
+        - User asks about meetings on specific topics (semantic search)
+        - Need detailed content from past meetings
+        - Following up on recent_meetings_list with specific CallIds
+        - Searching for action items, decisions, or discussions
         
         Args:
             query: The search query for past meetings
+            call_ids: Optional comma-separated CallIds to limit search to specific meetings (use after recent_meetings_list)
             
         Returns:
-            Information from past meetings the user has access to
+            Detailed information from past meetings the user has access to
         """
         if not transcript_kb_id:
             return "Meeting history not configured - no transcript knowledge base available"
@@ -407,6 +511,14 @@ def handler(event, context):
             ))
             logger.info("Document retrieval tool enabled")
         
+        # Add recent meetings list tool if DynamoDB table and transcript KB configured
+        if dynamodb_table_name and transcript_kb_id and user_email:
+            tools.append(create_recent_meetings_tool(
+                dynamodb_table_name=dynamodb_table_name,
+                user_email=user_email
+            ))
+            logger.info("Recent meetings list tool enabled")
+        
         # Add meeting history tool if transcript KB configured
         if transcript_kb_id and user_email:
             tools.append(create_meeting_history_tool(
@@ -557,23 +669,36 @@ def get_meeting_assistant_prompt_with_tools() -> str:
     return """You are an AI assistant helping participants during a live meeting. Your role is to:
 
 1. Answer questions based on the meeting context and transcript
-2. Use available tools to provide accurate, up-to-date information:
-   - Use web_search for current events, prices, or real-time information
-   - Use document_search for company policies, procedures, or internal documentation
-   - Use meeting_history for information from past meetings
+2. Use available tools intelligently to provide accurate, up-to-date information
 3. Keep responses concise and focused (under 100 words when possible)
 4. Be professional and supportive
 
-When using tools:
-- Choose the most appropriate tool for the question
-- If web search returns no results, acknowledge this and provide general guidance
-- When referencing past meetings, cite the meeting date if available
-- Combine information from multiple sources when helpful
-
 Tool usage guidelines:
+
+**For chronological queries (last/recent/latest meetings):**
+1. FIRST use recent_meetings_list to get chronologically ordered meetings
+2. THEN use meeting_history with specific CallIds if detailed content needed
+3. Example: "What was the last meeting about?" → recent_meetings_list(limit=1) → meeting_history with that CallId
+
+**For semantic queries (meetings about specific topics):**
+1. Use meeting_history directly for semantic search
+2. Optionally use recent_meetings_list first to establish time context
+3. Example: "Find meetings about budget" → meeting_history(query="budget")
+
+**For hybrid queries (recent meetings about X):**
+1. Use recent_meetings_list to get recent CallIds
+2. Use meeting_history with those CallIds to filter by topic
+3. Cross-reference results to find recent meetings matching the topic
+
+**Other tools:**
 - Use web_search for: current events, latest prices, recent news, real-time data
 - Use document_search for: company policies, product info, internal procedures
-- Use meeting_history for: past discussions, previous action items, historical decisions
+
+When using tools:
+- Always cite meeting dates when available
+- If recent_meetings_list returns no results, inform user no recent meetings found
+- Combine information from multiple tools when helpful
+- Be explicit about chronological vs semantic relevance
 
 Always maintain a helpful and professional tone."""
 
