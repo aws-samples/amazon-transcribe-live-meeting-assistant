@@ -229,49 +229,28 @@ export default class Zoom {
         console.log('Listening for speaker changes.');
         await page.evaluate(() => {
             let observer: MutationObserver | null = null;
-            let viewSwitchAttempted = false;
 
-            async function switchToSideBySideView() {
-                if (viewSwitchAttempted) {
-                    console.log('View switch already attempted, skipping');
-                    return false;
+            // Function to get current speaker from any view
+            function getCurrentSpeaker(): string | null {
+                const selectors = [
+                    // Screen sharing mode - suspension window (small video)
+                    '.single-suspension-container__video-frame .video-avatar__avatar-footer span',
+                    // Normal mode - main view
+                    '.single-main-container__video-frame .video-avatar__avatar-footer span',
+                    // Fallback - any avatar footer
+                    '.video-avatar__avatar-footer span[role="none"]'
+                ];
+                
+                for (const selector of selectors) {
+                    const element = document.querySelector(selector);
+                    if (element?.textContent?.trim()) {
+                        return element.textContent.trim();
+                    }
                 }
-                console.log('Switching to side-by-side view');
-                viewSwitchAttempted = true;
-                
-                // Wait longer for Zoom UI to be fully loaded
-                await new Promise(resolve => setTimeout(resolve, 2000));
-
-                console.log('Looking for view button...');
-                const viewButton = document.querySelector('#full-screen-dropdown button') as HTMLElement;
-                if (!viewButton) {
-                    console.log('View button not found with selector: #full-screen-dropdown button');
-                    return false;
-                }
-                
-                console.log('Found view button, clicking...');
-                viewButton.click();
-                console.log('Clicked view button, waiting for options to appear');
-                
-                // Wait longer for dropdown to appear
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                console.log('Looking for side-by-side option...');
-                const sideBySideOption = document.querySelector('a[aria-label="Side-by-side: Speaker"]') as HTMLElement;
-                if (!sideBySideOption) {
-                    console.log('Side-by-side option not found with selector: a[aria-label="Side-by-side: Speaker"]');
-                    return false;
-                }
-                
-                console.log('Found side-by-side option, clicking...');
-                sideBySideOption.click();
-                console.log('Clicked side-by-side option');
-                // Wait for view to change, then setup observer
-                setTimeout(setupObserver, 3000);
-                return true;
+                return null;
             }
 
-            async function setupObserver() {
+            function setupObserver() {
                 // Disconnect existing observer if any
                 if (observer) {
                     observer.disconnect();
@@ -285,38 +264,17 @@ export default class Zoom {
                     return;
                 }
 
-                // Check if speaker element exists
-                const speakerElement = document.querySelector(
-                    '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
-                );
-
-                if (!speakerElement) {
-                    console.log('Speaker element not found');
-                    if (!viewSwitchAttempted) {
-                        switchToSideBySideView();
-                    }
-                    return;
-                }
-
                 const config = { 
                     childList: true, 
-                    subtree: true 
+                    subtree: true,
+                    characterData: true
                 };
 
                 const callback = (mutationList: MutationRecord[]) => {
-                    const currentSpeakerElement = document.querySelector(
-                        '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
-                    );
-
-                    if (currentSpeakerElement) {
-                        const speakerName = currentSpeakerElement.textContent;
-                        if (speakerName) {
-                            console.log('Speaker detected:', speakerName);
-                            (window as any).speakerChange(speakerName);
-                        }
-                    } else if (!viewSwitchAttempted) {
-                        console.log('Speaker element lost, attempting to switch view');
-                        switchToSideBySideView();
+                    const speaker = getCurrentSpeaker();
+                    if (speaker) {
+                        console.log('Speaker detected:', speaker);
+                        (window as any).speakerChange(speaker);
                     }
                 };
 
@@ -324,22 +282,15 @@ export default class Zoom {
                 observer.observe(parentNode, config);
 
                 // Handle initial state
-                if (speakerElement.textContent) {
-                    (window as any).speakerChange(speakerElement.textContent);
+                const initialSpeaker = getCurrentSpeaker();
+                if (initialSpeaker) {
+                    console.log('Initial speaker:', initialSpeaker);
+                    (window as any).speakerChange(initialSpeaker);
                 }
             }
-            setTimeout(() => {
-                const initialSpeakerElement = document.querySelector(
-                    '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
-                );
 
-                if (!initialSpeakerElement) {
-                    console.log('Initial speaker element not found, attempting to switch view');
-                    switchToSideBySideView();
-                } else {
-                    setupObserver();
-                }
-            }, 2000);
+            // Wait for Zoom UI to be ready, then setup observer
+            setTimeout(setupObserver, 2000);
         });
 
         // Set up message monitoring with LMA features
