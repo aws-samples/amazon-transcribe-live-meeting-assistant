@@ -27,7 +27,7 @@ const getPuppeteerConfig = () => ({
         `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT}`,
         "--use-fake-ui-for-media-stream",
         "--use-fake-device-for-media-stream",
-        // "--disable-blink-features=AutomationControlled",
+        "--disable-blink-features=AutomationControlled",
         "--disable-notifications",
         "--disable-extensions",
         "--disable-crash-reporter",

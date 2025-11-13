@@ -104,13 +104,33 @@ export default class Zoom {
                 }
             }
 
-            console.log('Clicking mute button.');
-            const muteButton = await page.waitForSelector('svg.SvgAudioMute');
-            await muteButton?.click();
+            console.log('Checking audio button state.');
+            // Check if audio is already muted
+            const audioMuteButton = await page.$('svg.SvgAudioMute');
+            const audioUnmuteButton = await page.$('svg.SvgAudioUnmute');
+            
+            if (audioMuteButton) {
+                console.log('Audio is unmuted, clicking to mute it.');
+                await audioMuteButton.click();
+            } else if (audioUnmuteButton) {
+                console.log('Audio is already muted, skipping click.');
+            } else {
+                console.log('Warning: Could not find audio button in either state.');
+            }
 
-            console.log('Clicking video button.');
-            const stopVideoButton = await page.waitForSelector('svg.SvgVideoOn');
-            await stopVideoButton?.click();
+            console.log('Checking video button state.');
+            // Check if video is on or already off
+            const videoOnButton = await page.$('svg.SvgVideoOn');
+            const videoOffButton = await page.$('svg.SvgVideoOff');
+            
+            if (videoOnButton) {
+                console.log('Video is on, clicking to turn it off.');
+                await videoOnButton.click();
+            } else if (videoOffButton) {
+                console.log('Video is already off, skipping click.');
+            } else {
+                console.log('Warning: Could not find video button in either state.');
+            }
 
             console.log('Entering name.');
             try {

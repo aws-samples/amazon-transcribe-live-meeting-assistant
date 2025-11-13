@@ -47,7 +47,7 @@ RUN mkdir -p /etc/chromium/policies/managed/ && \
     echo '{ "AutoSelectCertificateForUrls": [], "DefaultBrowserSettingEnabled": false }' > /etc/chromium/policies/managed/browser-policy.json
 
 # Environment variables for headless Chrome with X11
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=false
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV DISPLAY=:99
 ENV CHROME_BIN=/usr/bin/chromium

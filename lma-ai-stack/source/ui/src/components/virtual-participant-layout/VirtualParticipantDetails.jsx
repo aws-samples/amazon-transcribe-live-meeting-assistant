@@ -696,7 +696,7 @@ const VirtualParticipantDetails = () => {
               <strong>Preparing live view...</strong>
             </Box>
             <Box margin={{ top: 'xs' }} color="text-body-secondary">
-              VNC server is starting up. This usually takes 10-30 seconds.
+              VNC viewer is waiting for the VP to start up. This may take ~60 seconds.
             </Box>
           </Box>
         </Container>
