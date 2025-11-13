@@ -3,6 +3,33 @@ import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
 
 export default class Zoom {
+    private async waitForButtonWithRetry(
+        page: Page,
+        selectors: string[],
+        maxRetries: number = 10,
+        delayMs: number = 500
+    ): Promise<{ element: any; selector: string } | null> {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            console.log(`Attempt ${attempt}/${maxRetries} to find button...`);
+            
+            for (const selector of selectors) {
+                const element = await page.$(selector);
+                if (element) {
+                    console.log(`Found button with selector: ${selector}`);
+                    return { element, selector };
+                }
+            }
+            
+            if (attempt < maxRetries) {
+                console.log(`Buttons not found, waiting ${delayMs}ms before retry...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+        
+        console.log(`Failed to find any button after ${maxRetries} attempts`);
+        return null;
+    }
+
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
         const messageElement = await page.waitForSelector(
             'p[data-placeholder="Type message here ..."]'
@@ -104,32 +131,40 @@ export default class Zoom {
                 }
             }
 
-            console.log('Checking audio button state.');
-            // Check if audio is already muted
-            const audioMuteButton = await page.$('svg.SvgAudioMute');
-            const audioUnmuteButton = await page.$('svg.SvgAudioUnmute');
+            console.log('Checking audio button state with retry...');
+            // Wait for audio button to appear (handles loading state)
+            const audioResult = await this.waitForButtonWithRetry(
+                page,
+                ['svg.SvgAudioMute', 'svg.SvgAudioUnmute']
+            );
             
-            if (audioMuteButton) {
-                console.log('Audio is unmuted, clicking to mute it.');
-                await audioMuteButton.click();
-            } else if (audioUnmuteButton) {
-                console.log('Audio is already muted, skipping click.');
+            if (audioResult) {
+                if (audioResult.selector === 'svg.SvgAudioMute') {
+                    console.log('Audio is unmuted, clicking to mute it.');
+                    await audioResult.element.click();
+                } else {
+                    console.log('Audio is already muted, skipping click.');
+                }
             } else {
-                console.log('Warning: Could not find audio button in either state.');
+                console.log('Warning: Could not find audio button in either state after retries.');
             }
 
-            console.log('Checking video button state.');
-            // Check if video is on or already off
-            const videoOnButton = await page.$('svg.SvgVideoOn');
-            const videoOffButton = await page.$('svg.SvgVideoOff');
+            console.log('Checking video button state with retry...');
+            // Wait for video button to appear (handles loading state)
+            const videoResult = await this.waitForButtonWithRetry(
+                page,
+                ['svg.SvgVideoOn', 'svg.SvgVideoOff']
+            );
             
-            if (videoOnButton) {
-                console.log('Video is on, clicking to turn it off.');
-                await videoOnButton.click();
-            } else if (videoOffButton) {
-                console.log('Video is already off, skipping click.');
+            if (videoResult) {
+                if (videoResult.selector === 'svg.SvgVideoOn') {
+                    console.log('Video is on, clicking to turn it off.');
+                    await videoResult.element.click();
+                } else {
+                    console.log('Video is already off, skipping click.');
+                }
             } else {
-                console.log('Warning: Could not find video button in either state.');
+                console.log('Warning: Could not find video button in either state after retries.');
             }
 
             console.log('Entering name.');
