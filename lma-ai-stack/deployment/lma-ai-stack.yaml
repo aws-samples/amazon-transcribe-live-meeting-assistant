@@ -2835,6 +2835,7 @@ Resources:
           KINESIS_STREAM_NAME: !Ref CallDataStream
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
           VP_SCHEDULE_GROUP_NAME: !Ref VPScheduleGroupName
+          ALB_LISTENER_ARN: !Ref VNCALBListener
           LOG_LEVEL: DEBUG
       Policies:
         - DynamoDBCrudPolicy:
@@ -2874,6 +2875,16 @@ Resources:
                 - scheduler:GetSchedule
               Resource: 
                 - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${VPScheduleGroupName}/*"
+            - Effect: Allow
+              Action:
+                - elasticloadbalancing:DescribeTargetGroups
+                - elasticloadbalancing:DeleteTargetGroup
+                - elasticloadbalancing:DescribeRules
+                - elasticloadbalancing:DeleteRule
+                - elasticloadbalancing:DeregisterTargets
+                - elasticloadbalancing:DescribeTargetHealth
+                - elasticloadbalancing:DescribeTags
+              Resource: "*"
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
     Metadata:
