@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.21] - TBD
+
+### Added
+- Strands-based Meeting Assistant Tools
+- noVNC Support for Real-Time Virtual Participant Viewing and Interaction
+- Claude Global Models
+- Tool for meeting chronology with DynamoDB query for finding last meeting
+
+### Changed
+- Update chime meeting ending functionality
+- Filters for virtual participant enhancements
+
+### Fixed
+- Fix zoom speaker detection
+- Zoom bugfix VNC wording
+- Fix: Virtual Participant VNC Routing for Multiple Concurrent Sessions
+- Remove ARN being detected in history for code defender
+- Teams captcha fix
+- Fixing logging bucket issue
+- Add detection and delay for Amazon Zoom to login with VNC viewer
+- Increase VNC connect delay for healthy for Zoom connect failure
+- Fix virtual participant issue
+- ECR vulnerabilities in VP stack
+
 ## [0.2.20] - 2025-11-04
 ### Fixed
  - Github #199 issue: Fixed: Deployment issues due to a logging bucket name missing issue. 
