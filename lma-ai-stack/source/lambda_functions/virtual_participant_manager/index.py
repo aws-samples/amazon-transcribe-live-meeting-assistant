@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from ecs_manager import ECSTaskManager
+from alb_cleanup import ALBCleanupManager
 
 # Configure logging
 logger = logging.getLogger()
@@ -28,6 +29,7 @@ class VirtualParticipantManager:
     def __init__(self, table_name: str):
         self.table = dynamodb.Table(table_name)
         self.ecs_manager = ECSTaskManager()
+        self.alb_cleanup_manager = ALBCleanupManager()
         
     def get_current_timestamp(self) -> str:
         """Get current timestamp in ISO format"""
@@ -80,6 +82,7 @@ class VirtualParticipantManager:
         
         # Stop ECS container using registry (only for active VPs)
         ecs_termination_success = False
+        alb_cleanup_success = False
         if not is_scheduled or vp_status != 'SCHEDULED':
             task_details = self.get_task_details_from_registry(vp_id)
             
@@ -90,6 +93,14 @@ class VirtualParticipantManager:
                 
                 # Direct termination using stored ARNs
                 ecs_termination_success = self.ecs_manager.stop_vp_task_by_arn(task_arn, cluster_arn, vp_id, end_reason)
+                
+                # Clean up ALB resources (target group and listener rule)
+                listener_arn = os.environ.get('ALB_LISTENER_ARN')
+                if listener_arn:
+                    logger.info(f"Cleaning up ALB resources for VP {vp_id}")
+                    alb_cleanup_success = self.alb_cleanup_manager.cleanup_vp_alb_resources(vp_id, listener_arn)
+                else:
+                    logger.warning("ALB_LISTENER_ARN environment variable not set, skipping ALB cleanup")
                 
                 # Clean up registry entry
                 if ecs_termination_success:
@@ -112,9 +123,10 @@ class VirtualParticipantManager:
                 update_expression += ", scheduleCancelled = :schedule_cancelled"
                 expression_values[':schedule_cancelled'] = schedule_cancelled
             else:
-                update_expression += ", ecsTerminated = :ecs_terminated, kinesisEndSent = :kinesis_end_sent"
+                update_expression += ", ecsTerminated = :ecs_terminated, kinesisEndSent = :kinesis_end_sent, albCleanedUp = :alb_cleanup"
                 expression_values[':ecs_terminated'] = ecs_termination_success
                 expression_values[':kinesis_end_sent'] = kinesis_end_success
+                expression_values[':alb_cleanup'] = alb_cleanup_success
             
             response = self.table.update_item(
                 Key={'id': vp_id},
