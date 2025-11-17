@@ -12,7 +12,7 @@ import json
 import os
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import logging
 
 # Configure logging
@@ -26,6 +26,236 @@ bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
 # Get AppSync endpoint from environment
 APPSYNC_GRAPHQL_URL = os.environ.get('APPSYNC_GRAPHQL_URL', '')
 ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
+
+
+def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, model_id: str):
+    """Factory function to create document search tool with closure"""
+    from strands import tool
+    
+    @tool
+    def document_search(query: str) -> str:
+        """Search company knowledge base for internal documents, policies, procedures, or reference materials.
+        
+        Use this when:
+        - User asks about company-specific information
+        - Need to reference internal documentation
+        - Questions about products, services, policies
+        
+        Args:
+            query: The search query for company documents
+            
+        Returns:
+            Relevant information from company knowledge base
+        """
+        if not kb_id:
+            return "Document retrieval not configured - no knowledge base available"
+        
+        try:
+            logger.info(f"Document search tool executing: {query}")
+            
+            # Determine model ARN based on model type
+            if model_id.startswith("anthropic"):
+                model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
+            else:
+                model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
+            
+            # Query knowledge base
+            kb_input = {
+                "input": {'text': query},
+                "retrieveAndGenerateConfiguration": {
+                    'knowledgeBaseConfiguration': {
+                        'knowledgeBaseId': kb_id,
+                        'modelArn': model_arn
+                    },
+                    'type': 'KNOWLEDGE_BASE'
+                }
+            }
+            
+            response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
+            result = response.get("output", {}).get("text", "No results found in knowledge base")
+            
+            logger.info(f"Document search result: {result[:100]}...")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in document search: {str(e)}")
+            return f"Error retrieving documents: {str(e)}"
+    
+    return document_search
+
+
+def create_recent_meetings_tool(dynamodb_table_name: str, user_email: str):
+    """Factory function to create recent meetings list tool with closure"""
+    from strands import tool
+    from datetime import datetime, timedelta
+    
+    @tool
+    def recent_meetings_list(limit: int = 10) -> str:
+        """Get a chronological list of recent meetings sorted by date (most recent first).
+        
+        Use this when:
+        - User asks about "last meeting", "most recent meeting", or "latest meeting"
+        - Need to establish chronological context before semantic search
+        - Want to list recent meetings in time order
+        - Comparing current meeting to previous meetings
+        
+        Args:
+            limit: Number of recent meetings to return (default 10, max 50)
+            
+        Returns:
+            JSON list of recent meetings with CallId, date, and duration
+        """
+        if not dynamodb_table_name:
+            return "Recent meetings list not configured - no DynamoDB table available"
+        
+        if not user_email:
+            return "Recent meetings list requires user authentication"
+        
+        try:
+            # Limit to reasonable range
+            limit = min(max(1, limit), 50)
+            
+            logger.info(f"Recent meetings tool executing: limit={limit} for user: {user_email}")
+            
+            table = dynamodb.Table(dynamodb_table_name)
+            
+            # Query recent date shards (last 30 days) to find meetings
+            # DynamoDB structure: PK = cls#YYYY-MM-DD#s#NN, SK = ts#timestamp#callid
+            meetings = []
+            shards_per_day = 6  # 4-hour shards
+            
+            # Start from today and go backwards
+            current_date = datetime.utcnow()
+            
+            for days_back in range(30):  # Look back 30 days
+                query_date = current_date - timedelta(days=days_back)
+                date_str = query_date.strftime('%Y-%m-%d')
+                
+                # Query each shard for this date (in reverse order for efficiency)
+                for shard in range(shards_per_day - 1, -1, -1):
+                    pk = f"cls#{date_str}#s#{shard:02d}"
+                    
+                    try:
+                        response = table.query(
+                            KeyConditionExpression=Key('PK').eq(pk),
+                            FilterExpression=Attr('Owner').eq(user_email),
+                            ScanIndexForward=False  # Sort descending (most recent first)
+                        )
+                        
+                        for item in response.get('Items', []):
+                            meetings.append({
+                                'CallId': item.get('CallId', 'Unknown'),
+                                'Date': item.get('CreatedAt', 'Unknown'),
+                                'Duration': f"{int(item.get('TotalConversationDurationMillis', 0) / 1000)}s",
+                                'SK': item.get('SK', '')  # For sorting
+                            })
+                            
+                            # Stop if we have enough
+                            if len(meetings) >= limit:
+                                break
+                                
+                    except Exception as e:
+                        logger.warning(f"Error querying shard {pk}: {e}")
+                        continue
+                    
+                    if len(meetings) >= limit:
+                        break
+                
+                if len(meetings) >= limit:
+                    break
+            
+            # Sort all collected meetings by SK (timestamp) descending
+            meetings.sort(key=lambda x: x.get('SK', ''), reverse=True)
+            meetings = meetings[:limit]
+            
+            # Remove SK from output (internal use only)
+            for m in meetings:
+                m.pop('SK', None)
+            
+            if not meetings:
+                return "No recent meetings found"
+            
+            result = json.dumps(meetings, indent=2)
+            logger.info(f"Recent meetings returned {len(meetings)} meetings")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in recent meetings list: {str(e)}")
+            return f"Error retrieving recent meetings: {str(e)}"
+    
+    return recent_meetings_list
+
+
+def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_account_id: str, 
+                                model_id: str, user_email: str):
+    """Factory function to create meeting history tool with closure"""
+    from strands import tool
+    
+    @tool
+    def meeting_history(query: str, call_ids: str = "") -> str:
+        """Search past meeting transcripts and summaries with semantic search and user-based access control.
+        
+        Use this when:
+        - User asks about meetings on specific topics (semantic search)
+        - Need detailed content from past meetings
+        - Following up on recent_meetings_list with specific CallIds
+        - Searching for action items, decisions, or discussions
+        
+        Args:
+            query: The search query for past meetings
+            call_ids: Optional comma-separated CallIds to limit search to specific meetings (use after recent_meetings_list)
+            
+        Returns:
+            Detailed information from past meetings the user has access to
+        """
+        if not transcript_kb_id:
+            return "Meeting history not configured - no transcript knowledge base available"
+        
+        if not user_email:
+            return "Meeting history requires user authentication"
+        
+        try:
+            logger.info(f"Meeting history tool executing: {query} for user: {user_email}")
+            
+            # Determine model ARN based on model type
+            if model_id.startswith("anthropic"):
+                model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
+            else:
+                model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
+            
+            # Query with user-based access control filter
+            kb_input = {
+                "input": {'text': query},
+                "retrieveAndGenerateConfiguration": {
+                    'knowledgeBaseConfiguration': {
+                        'knowledgeBaseId': transcript_kb_id,
+                        'modelArn': model_arn,
+                        "retrievalConfiguration": {
+                            "vectorSearchConfiguration": {
+                                "filter": {
+                                    "equals": {
+                                        "key": "Owner",
+                                        "value": user_email
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    'type': 'KNOWLEDGE_BASE'
+                }
+            }
+            
+            response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
+            result = response.get("output", {}).get("text", "No past meetings found matching your query")
+            
+            logger.info(f"Meeting history result: {result[:100]}...")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in meeting history search: {str(e)}")
+            return f"Error retrieving meeting history: {str(e)}"
+    
+    return meeting_history
 
 def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool, sequence: int):
     """
@@ -178,13 +408,14 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
 
 def handler(event, context):
     """
-    Lambda handler for Strands-based meeting assistance
+    Lambda handler for Strands-based meeting assistance with tools
     
     Expected event structure:
     {
         "transcript": "meeting transcript context",
         "userInput": "user question or request",
-        "callId": "unique call identifier"
+        "callId": "unique call identifier",
+        "userEmail": "user@example.com"
     }
     """
     try:
@@ -194,6 +425,7 @@ def handler(event, context):
         user_input = event.get('userInput', '') or event.get('text', '')
         call_id = event.get('callId', '') or event.get('call_id', '')
         dynamodb_table_name = event.get('dynamodb_table_name', '')
+        user_email = event.get('userEmail', '') or event.get('user_email', '')
         
         if not user_input:
             return {
@@ -203,25 +435,112 @@ def handler(event, context):
                 })
             }
         
+        # Get environment variables for tools
+        kb_id = os.environ.get('KB_ID', '')
+        transcript_kb_id = os.environ.get('TRANSCRIPT_KB_ID', '')
+        kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
+        kb_account_id = os.environ.get('KB_ACCOUNT_ID', '')
+        model_id = os.environ.get('MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
+        tavily_api_key = os.environ.get('TAVILY_API_KEY', '')
+        
         # Fetch meeting transcript from DynamoDB
         transcript = fetch_meeting_transcript(call_id, dynamodb_table_name) if dynamodb_table_name else event.get('transcript', '')
         
-        # Query knowledge base if configured
-        kb_context = query_knowledge_base(user_input, call_id)
+        # Initialize tools list
+        tools = []
+        
+        # Add web search tool if API key provided (auto-enable)
+        if tavily_api_key:
+            try:
+                from tavily import TavilyClient
+                from strands import tool
+                
+                # Create Tavily client in closure
+                tavily_client = TavilyClient(api_key=tavily_api_key)
+                
+                @tool
+                def web_search(query: str) -> str:
+                    """Search the web for current information, news, facts, or data.
+                    
+                    Use this when:
+                    - User asks about current events, prices, or statistics
+                    - Information is not in knowledge bases
+                    - Need real-time or recent information
+                    
+                    Args:
+                        query: The search query string
+                        
+                    Returns:
+                        Search results with titles, content, and source URLs
+                    """
+                    try:
+                        logger.info(f"Web search tool executing: {query}")
+                        response = tavily_client.search(query, max_results=3)
+                        
+                        # Format results
+                        results = []
+                        for result in response.get('results', []):
+                            title = result.get('title', '')
+                            content = result.get('content', '')
+                            url = result.get('url', '')
+                            results.append(f"{title}\n{content}\nSource: {url}")
+                        
+                        if not results:
+                            return "No web search results found"
+                        
+                        formatted_results = "\n\n".join(results)
+                        logger.info(f"Web search returned {len(results)} results")
+                        return formatted_results
+                        
+                    except Exception as e:
+                        logger.error(f"Error in web search: {str(e)}")
+                        return f"Error performing web search: {str(e)}"
+                
+                tools.append(web_search)
+                logger.info("Web search tool enabled")
+            except Exception as e:
+                logger.warning(f"Could not enable web search tool: {str(e)}")
+        
+        # Add document retrieval tool if KB configured
+        if kb_id:
+            tools.append(create_document_search_tool(
+                kb_id=kb_id,
+                kb_region=kb_region,
+                kb_account_id=kb_account_id,
+                model_id=model_id
+            ))
+            logger.info("Document retrieval tool enabled")
+        
+        # Add recent meetings list tool if DynamoDB table and transcript KB configured
+        if dynamodb_table_name and transcript_kb_id and user_email:
+            tools.append(create_recent_meetings_tool(
+                dynamodb_table_name=dynamodb_table_name,
+                user_email=user_email
+            ))
+            logger.info("Recent meetings list tool enabled")
+        
+        # Add meeting history tool if transcript KB configured
+        if transcript_kb_id and user_email:
+            tools.append(create_meeting_history_tool(
+                transcript_kb_id=transcript_kb_id,
+                kb_region=kb_region,
+                kb_account_id=kb_account_id,
+                model_id=model_id,
+                user_email=user_email
+            ))
+            logger.info("Meeting history tool enabled")
         
         # Initialize Strands Agent
         try:
             from strands import Agent
             from strands.models import BedrockModel
             
-            # Get model configuration from environment variables
-            model_id = os.environ.get('MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
-            
             # Get message ID for streaming - use MessageId if provided, otherwise fall back to SegmentId
             transcript_segment_args = event.get('transcript_segment_args', {})
             message_id = transcript_segment_args.get('MessageId') or transcript_segment_args.get('SegmentId', f"msg-{call_id}")
             
             logger.info(f"Using MessageId for streaming: {message_id}")
+            logger.info(f"Tools enabled: {len(tools)}")
             
             # Configure Bedrock model with streaming if enabled
             bedrock_model = BedrockModel(
@@ -230,10 +549,11 @@ def handler(event, context):
                 streaming=ENABLE_STREAMING
             )
             
-            # Create agent with meeting assistant prompt
+            # Create agent with tools
             agent = Agent(
                 model=bedrock_model,
-                system_prompt=get_meeting_assistant_prompt()
+                system_prompt=get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt(),
+                tools=tools if tools else None
             )
             
             # Prepare context for the agent
@@ -241,7 +561,6 @@ def handler(event, context):
 Meeting Transcript:
 {transcript if transcript else "No meeting transcript available yet."}
 
-{f"Knowledge Base Context:\n{kb_context}\n" if kb_context else ""}
 User Request: {user_input}
 """
             
@@ -341,6 +660,47 @@ When responding:
 - Provide actionable insights when possible
 - Ask clarifying questions if the request is ambiguous
 - Maintain a helpful and professional tone"""
+
+
+def get_meeting_assistant_prompt_with_tools() -> str:
+    """
+    Enhanced system prompt for agent with tools
+    """
+    return """You are an AI assistant helping participants during a live meeting. Your role is to:
+
+1. Answer questions based on the meeting context and transcript
+2. Use available tools intelligently to provide accurate, up-to-date information
+3. Keep responses concise and focused (under 100 words when possible)
+4. Be professional and supportive
+
+Tool usage guidelines:
+
+**For chronological queries (last/recent/latest meetings):**
+1. FIRST use recent_meetings_list to get chronologically ordered meetings
+2. THEN use meeting_history with specific CallIds if detailed content needed
+3. Example: "What was the last meeting about?" → recent_meetings_list(limit=1) → meeting_history with that CallId
+
+**For semantic queries (meetings about specific topics):**
+1. Use meeting_history directly for semantic search
+2. Optionally use recent_meetings_list first to establish time context
+3. Example: "Find meetings about budget" → meeting_history(query="budget")
+
+**For hybrid queries (recent meetings about X):**
+1. Use recent_meetings_list to get recent CallIds
+2. Use meeting_history with those CallIds to filter by topic
+3. Cross-reference results to find recent meetings matching the topic
+
+**Other tools:**
+- Use web_search for: current events, latest prices, recent news, real-time data
+- Use document_search for: company policies, product info, internal procedures
+
+When using tools:
+- Always cite meeting dates when available
+- If recent_meetings_list returns no results, inform user no recent meetings found
+- Combine information from multiple tools when helpful
+- Be explicit about chronological vs semantic relevance
+
+Always maintain a helpful and professional tone."""
 
 def fallback_bedrock_response(transcript: str, user_input: str, call_id: str) -> Dict[str, Any]:
     """

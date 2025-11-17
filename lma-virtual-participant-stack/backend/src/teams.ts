@@ -22,7 +22,7 @@ export default class Teams {
         try {
             console.log("Getting meeting link.");
             await page.goto(
-                `https://teams.live.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?launchAgent=marketing_join&laentry=hero&p=${details.invite.meetingPassword}&anon=true`
+                `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?p=${details.invite.meetingPassword}&anon=true`
             );
         } catch {
             console.log("Your scribe was unable to join the meeting.");
@@ -51,66 +51,54 @@ export default class Teams {
         const joinButtonElement = await page.waitForSelector('[data-tid="prejoin-join-button"]');
         await joinButtonElement?.click();
 
-        // try {
-        //     const captchaImageElement = await page.waitForSelector(
-        //         '[data-tid="HIP-Captcha-Image"]',
-        //         {
-        //             timeout: 5000,
-        //         }
-        //     );
-        //     await new Promise((resolve) => setTimeout(resolve, 250));
-        //     console.log("Solving captcha.");
-        //     const captchaScreenshot = await captchaImageElement!.screenshot({ encoding: "base64" });
-
-        //     // const response = await bedrockClient.send(
-        //     //     new ConverseCommand({
-        //     //         modelId: process.env.MODEL_ID!,
-        //     //         system: [
-        //     //             {
-        //     //                 text: `You are a meticulous assistant that deeply analyzes a captcha image and returns its exact characters left to right, top to bottom.
-        //     //                 You take your time and do your absolute best to not confuse numbers and letters.`,
-        //     //             },
-        //     //         ],
-        //     //         messages: [
-        //     //             {
-        //     //                 role: "user",
-        //     //                 content: [
-        //     //                     {
-        //     //                         image: {
-        //     //                             format: "png",
-        //     //                             source: {
-        //     //                                 bytes: Buffer.from(captchaScreenshot, "base64"),
-        //     //                             },
-        //     //                         },
-        //     //                     },
-        //     //                     {
-        //     //                         text: "What characters are in this captcha image? Respond with only the characters, no other text.",
-        //     //                     },
-        //     //                 ],
-        //     //             },
-        //     //         ],
-        //     //         inferenceConfig: {
-        //     //             maxTokens: 50,
-        //     //             temperature: 0.1,
-        //     //         },
-        //     //     })
-        //     // );
-        //     // const captchaText = response.output?.message?.content?.[0]?.text?.trim();
-        //     // const captchaInputElement = await page.waitForSelector(
-        //     //     '[data-tid="HIP-Captcha-Input"]'
-        //     // );
-        //     // await captchaInputElement?.type(captchaText || "rip", { delay: 250 });
-        //     // await captchaInputElement?.press("Enter");
-        //     try {
-        //         await page.waitForSelector('[data-tid="calling-retry-rejoinbutton"]', {
-        //             timeout: 3000,
-        //         });
-        //         console.log("Your scribe failed to solve the captcha.");
-        //         return;
-        //     } catch {}
-        // } catch {
-        //     console.log("No captcha found.");
-        // }
+        // Wait for potential CAPTCHA with longer timeout
+        console.log("Checking for CAPTCHA...");
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        
+        try {
+            const captchaElement = await page.waitForSelector(
+                '[data-tid="HIP-Captcha-Image"]',
+                { timeout: 5000 }
+            );
+            
+            if (captchaElement) {
+                console.log("CAPTCHA detected! Waiting for manual resolution...");
+                console.log("Please solve the CAPTCHA in the VNC viewer.");
+                
+                // Notify frontend that manual action is required
+                if (details.invite.virtualParticipantId) {
+                    const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                    await statusManager.setManualActionRequired(
+                        'CAPTCHA',
+                        'CAPTCHA detected. Please solve the CAPTCHA in the VNC viewer.',
+                        120
+                    );
+                }
+                
+                // Wait for CAPTCHA to be solved (join button to disappear or chat to appear)
+                await Promise.race([
+                    page.waitForSelector('[data-tid="prejoin-join-button"]', { 
+                        hidden: true, 
+                        timeout: 120000 // 2 minutes for manual CAPTCHA solving
+                    }),
+                    page.waitForSelector('#chat-button', { 
+                        timeout: 120000,
+                        visible: true 
+                    })
+                ]);
+                
+                console.log("CAPTCHA appears to be resolved, continuing...");
+                await new Promise((resolve) => setTimeout(resolve, 250));
+                
+                // Clear manual action notification after CAPTCHA is resolved
+                if (details.invite.virtualParticipantId) {
+                    const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                    await statusManager.clearManualAction();
+                }
+            }
+        } catch (error) {
+            console.log("No CAPTCHA detected or CAPTCHA timeout, continuing...");
+        }
 
         console.log("Opening chat panel.");
         try {

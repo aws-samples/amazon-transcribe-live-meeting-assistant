@@ -51,6 +51,14 @@ Parameters:
     Description: Private subnet 2 for Fargate
     Type: String
 
+  PublicSubnet1:
+    Description: Public subnet 1 for ALB
+    Type: String
+
+  PublicSubnet2:
+    Description: Public subnet 2 for ALB
+    Type: String
+
   LMASettingsParameterName:
     Type: String
     Description: LCA settings SSM Parameter store
@@ -63,10 +71,26 @@ Parameters:
     Type: String
     Description: AppSync GraphQL endpoint URL for Virtual Participant status updates
 
+  CloudFrontDomainName:
+    Type: String
+    Description: CloudFront domain name for VNC WebSocket URL construction
+
   VPTaskRegistryTableName:
     Type: String
     Description: Name of the VPTaskRegistry DynamoDB table from AI stack
 
+  VNCTargetGroupArn:
+    Type: String
+    Description: ARN of the VNC Target Group from AI stack
+
+  VNCALBListenerArn:
+    Type: String
+    Description: ARN of the VNC ALB Listener for creating dynamic routing rules
+
+  VPSecurityGroupId:
+    Type: String
+    Description: Security Group ID for Virtual Participant ECS tasks from AI stack
+  
   VirtualParticipantTableName:
     Type: String
     Description: Name of the VirtualParticipant DynamoDB table from AI stack
@@ -253,6 +277,7 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   ShouldEnableContentRedaction: !And
@@ -260,16 +285,6 @@ Conditions:
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
 
 Resources:
-  SecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Websocket-fargate/service/Service/SecurityGroup
-      SecurityGroupEgress:
-        - CidrIp: 0.0.0.0/0
-          Description: Allow all outbound traffic by default
-          IpProtocol: "-1"
-      VpcId: !Ref VPC
-
   LogsPolicy:
     Type: "AWS::IAM::ManagedPolicy"
     Metadata:
@@ -673,6 +688,25 @@ Resources:
                   - "dynamodb:UpdateItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+        - PolicyName: ALBDynamicRoutingPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "elasticloadbalancing:CreateTargetGroup"
+                  - "elasticloadbalancing:DeleteTargetGroup"
+                  - "elasticloadbalancing:DescribeTargetGroups"
+                  - "elasticloadbalancing:ModifyTargetGroupAttributes"
+                  - "elasticloadbalancing:RegisterTargets"
+                  - "elasticloadbalancing:DeregisterTargets"
+                  - "elasticloadbalancing:DescribeTargetHealth"
+                  - "elasticloadbalancing:CreateRule"
+                  - "elasticloadbalancing:DeleteRule"
+                  - "elasticloadbalancing:DescribeRules"
+                  - "elasticloadbalancing:ModifyRule"
+                  - "elasticloadbalancing:AddTags"
+                Resource: "*"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -781,8 +815,20 @@ Resources:
               Value: !Ref VPTaskRegistryTableName
             - Name: ENABLE_AUDIO_RECORDING
               Value: !Ref EnableAudioRecording
+            - Name: CLOUDFRONT_DOMAIN
+              Value: !Ref CloudFrontDomainName
+            - Name: VNC_TARGET_GROUP_ARN
+              Value: !Ref VNCTargetGroupArn
+            - Name: VPC_ID
+              Value: !Ref VPC
+            - Name: ALB_LISTENER_ARN
+              Value: !Ref VNCALBListenerArn
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
+          PortMappings:
+            - ContainerPort: 5901
+              Protocol: tcp
+              Name: vnc-websocket
           LogConfiguration:
             LogDriver: "awslogs"
             Options:
@@ -803,6 +849,28 @@ Resources:
     DependsOn:
       - Cluster
       - BuildCustomResource
+
+  # ECS Service to register tasks with target group
+  VirtualParticipantService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub ${LMAStackName}-vp-service
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 0
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref VPSecurityGroupId
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+      LoadBalancers:
+        - ContainerName: scribe
+          ContainerPort: 5901
+          TargetGroupArn: !Ref VNCTargetGroupArn
 
   VirtualParticipantTaskDefContainerLogGroup:
     Type: AWS::Logs::LogGroup
@@ -1045,7 +1113,7 @@ Resources:
                     "AwsvpcConfiguration": {
                       "AssignPublicIp": "DISABLED",
                       "SecurityGroups": [
-                        "${SecurityGroup}"
+                        "${VPSecurityGroupId}"
                       ],
                       "Subnets": [
                         "${PrivateSubnet1}",
@@ -1128,7 +1196,7 @@ Resources:
                         "AwsvpcConfiguration": {
                           "AssignPublicIp": "DISABLED",
                           "SecurityGroups": [
-                            "${SecurityGroup}"
+                            "${VPSecurityGroupId}"
                           ],
                           "Subnets": [
                             "${PrivateSubnet1}",
@@ -1229,6 +1297,7 @@ Resources:
         - {
             ClusterArn: !GetAtt [Cluster, Arn],
             TargetECSRoleArn: !GetAtt [TargetECSRole, Arn],
+            VPSecurityGroupId: !Ref VPSecurityGroupId,
           }
 
   UpdateLMASettingsWithStateMachine:
@@ -1250,7 +1319,7 @@ Resources:
   VPScheduleGroup:
     Type: AWS::Scheduler::ScheduleGroup
     Properties:
-      Name: !Sub "${AWS::StackName}-vp-schedules"
+      Name: !Sub "${LMAStackName}-vp-schedules"
 
   # IAM Role for EventBridge Scheduler to execute ECS tasks
   VPSchedulerExecutionRole:
@@ -1343,7 +1412,7 @@ Resources:
   VirtualParticipantSchedulerFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-VPScheduler"
+      FunctionName: !Sub "${LMAStackName}-VPScheduler"
       Handler: index.lambda_handler
       Runtime: python3.12
       Code:
@@ -1427,7 +1496,7 @@ Resources:
                               schedule_expression = f"at({scheduled_time.strftime('%Y-%m-%dT%H:%M:%S')})"
                               
                               response = scheduler_client.create_schedule(
-                                  ActionAfterCompletion='NONE',
+                                  ActionAfterCompletion='DELETE',
                                   FlexibleTimeWindow={'Mode': 'OFF'},
                                   GroupName=os.environ['SCHEDULE_GROUP_NAME'],
                                   Name=vp_id,
@@ -1470,7 +1539,7 @@ Resources:
         Variables:
           TASK_DEFINITION_ARN: !Ref TaskDefinition
           CLUSTER_ARN: !GetAtt Cluster.Arn
-          SECURITY_GROUPS: !Sub '["${SecurityGroup}"]'
+          SECURITY_GROUPS: !Sub '["${VPSecurityGroupId}"]'
           SUBNETS: !Sub '["${PrivateSubnet1}", "${PrivateSubnet2}"]'
           CONTAINER_NAME: "scribe"
           GRAPHQL_ENDPOINT: !Ref GraphQLEndpoint
@@ -1520,12 +1589,6 @@ Outputs:
     Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}"
     Export:
       Name: !Sub "${AWS::StackName}-ECRRepositoryUri"
-
-  SecurityGroupId:
-    Description: Security Group ID
-    Value: !Ref SecurityGroup
-    Export:
-      Name: !Sub "${AWS::StackName}-SecurityGroupId"
 
   VPScheduleGroupName:
     Description: Name of the EventBridge Schedule Group for Virtual Participants

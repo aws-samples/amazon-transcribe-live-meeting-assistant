@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from ecs_manager import ECSTaskManager
+from alb_cleanup import ALBCleanupManager
 
 # Configure logging
 logger = logging.getLogger()
@@ -22,11 +23,13 @@ logger.setLevel(logging.INFO)
 
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
+scheduler = boto3.client('scheduler')
 
 class VirtualParticipantManager:
     def __init__(self, table_name: str):
         self.table = dynamodb.Table(table_name)
         self.ecs_manager = ECSTaskManager()
+        self.alb_cleanup_manager = ALBCleanupManager()
         
     def get_current_timestamp(self) -> str:
         """Get current timestamp in ISO format"""
@@ -54,8 +57,21 @@ class VirtualParticipantManager:
             raise ValueError(f"Virtual Participant {vp_id} not found")
         
         call_id = vp.get('CallId')
+        is_scheduled = vp.get('isScheduled', False)
+        vp_status = vp.get('status', '')
         
-        # Send END event to Kinesis
+        # Handle scheduled VPs differently
+        schedule_cancelled = False
+        if is_scheduled and vp_status == 'SCHEDULED':
+            logger.info(f"VP {vp_id} is scheduled, attempting to cancel EventBridge schedule")
+            schedule_cancelled = self.cancel_eventbridge_schedule(vp_id)
+            
+            # For scheduled VPs that are cancelled, set status to CANCELLED instead of ENDED
+            final_status = 'CANCELLED' if 'cancelled' in end_reason.lower() else 'ENDED'
+        else:
+            final_status = 'ENDED'
+        
+        # Send END event to Kinesis (only for active VPs with CallId)
         kinesis_end_success = False
         if call_id:
             try:
@@ -64,42 +80,63 @@ class VirtualParticipantManager:
             except Exception as e:
                 logger.error(f"Failed to send END event to Kinesis: {e}")
         
-        # Stop ECS container using registry
-        task_details = self.get_task_details_from_registry(vp_id)
-        
-        if task_details:
-            task_arn = task_details.get('taskArn')
-            cluster_arn = task_details.get('clusterArn')
-            logger.info(f"Found task details in registry for VP {vp_id}")
+        # Stop ECS container using registry (only for active VPs)
+        ecs_termination_success = False
+        alb_cleanup_success = False
+        if not is_scheduled or vp_status != 'SCHEDULED':
+            task_details = self.get_task_details_from_registry(vp_id)
             
-            # Direct termination using stored ARNs
-            ecs_termination_success = self.ecs_manager.stop_vp_task_by_arn(task_arn, cluster_arn, vp_id, end_reason)
-            
-            # Clean up registry entry
-            if ecs_termination_success:
-                self.cleanup_registry_entry(vp_id)
-        else:
-            logger.warning(f"No task details found in registry for VP {vp_id}")
-            ecs_termination_success = False
+            if task_details:
+                task_arn = task_details.get('taskArn')
+                cluster_arn = task_details.get('clusterArn')
+                logger.info(f"Found task details in registry for VP {vp_id}")
+                
+                # Direct termination using stored ARNs
+                ecs_termination_success = self.ecs_manager.stop_vp_task_by_arn(task_arn, cluster_arn, vp_id, end_reason)
+                
+                # Clean up ALB resources (target group and listener rule)
+                listener_arn = os.environ.get('ALB_LISTENER_ARN')
+                if listener_arn:
+                    logger.info(f"Cleaning up ALB resources for VP {vp_id}")
+                    alb_cleanup_success = self.alb_cleanup_manager.cleanup_vp_alb_resources(vp_id, listener_arn)
+                else:
+                    logger.warning("ALB_LISTENER_ARN environment variable not set, skipping ALB cleanup")
+                
+                # Clean up registry entry
+                if ecs_termination_success:
+                    self.cleanup_registry_entry(vp_id)
+            else:
+                logger.warning(f"No task details found in registry for VP {vp_id}")
         
-        # Update VP status to ENDED
+        # Update VP status
         try:
+            update_expression = "SET #status = :status, updatedAt = :updated_at, endedAt = :ended_at, endReason = :end_reason"
+            expression_values = {
+                ':status': final_status,
+                ':updated_at': current_time,
+                ':ended_at': current_time,
+                ':end_reason': end_reason
+            }
+            
+            # Add additional fields based on VP type
+            if is_scheduled and vp_status == 'SCHEDULED':
+                update_expression += ", scheduleCancelled = :schedule_cancelled"
+                expression_values[':schedule_cancelled'] = schedule_cancelled
+            else:
+                update_expression += ", ecsTerminated = :ecs_terminated, kinesisEndSent = :kinesis_end_sent, albCleanedUp = :alb_cleanup"
+                expression_values[':ecs_terminated'] = ecs_termination_success
+                expression_values[':kinesis_end_sent'] = kinesis_end_success
+                expression_values[':alb_cleanup'] = alb_cleanup_success
+            
             response = self.table.update_item(
                 Key={'id': vp_id},
-                UpdateExpression="SET #status = :status, updatedAt = :updated_at, endedAt = :ended_at, endReason = :end_reason, ecsTerminated = :ecs_terminated, kinesisEndSent = :kinesis_end_sent",
+                UpdateExpression=update_expression,
                 ExpressionAttributeNames={'#status': 'status'},
-                ExpressionAttributeValues={
-                    ':status': 'ENDED',
-                    ':updated_at': current_time,
-                    ':ended_at': current_time,
-                    ':end_reason': end_reason,
-                    ':ecs_terminated': ecs_termination_success,
-                    ':kinesis_end_sent': kinesis_end_success
-                },
+                ExpressionAttributeValues=expression_values,
                 ReturnValues='ALL_NEW'
             )
             
-            logger.info(f"VP {vp_id} terminated successfully")
+            logger.info(f"VP {vp_id} terminated successfully with status {final_status}")
             return response['Attributes']
             
         except Exception as e:
@@ -171,6 +208,44 @@ class VirtualParticipantManager:
                 
         except Exception as e:
             logger.error(f"Error cleaning up registry entry: {e}")
+            return False
+    
+    def cancel_eventbridge_schedule(self, vp_id: str) -> bool:
+        """Cancel EventBridge schedule for a scheduled VP"""
+        try:
+            # Debug all environment variables
+            logger.info(f"All environment variables: {dict(os.environ)}")
+            
+            schedule_group_name = os.environ.get('VP_SCHEDULE_GROUP_NAME')
+            logger.info(f"VP_SCHEDULE_GROUP_NAME from environment: '{schedule_group_name}'")
+            
+            if not schedule_group_name or schedule_group_name.strip() == "":
+                logger.warning("VP_SCHEDULE_GROUP_NAME environment variable not set or empty")
+                # Try to use a fallback pattern based on the known format
+                logger.info("Attempting to use fallback schedule group name pattern")
+                # This is a temporary fallback - ideally the environment variable should be set
+                schedule_group_name = "LMA-VIRTUALPARTICIPANTSTACK-1ICEYE8S4JXFV-vp-schedules"
+                logger.info(f"Using fallback schedule group name: {schedule_group_name}")
+            
+            # The schedule name is the VP ID (as set by the VirtualParticipantSchedulerFunction)
+            schedule_name = vp_id
+            
+            logger.info(f"Attempting to delete schedule {schedule_name} from group {schedule_group_name}")
+            
+            scheduler.delete_schedule(
+                GroupName=schedule_group_name,
+                Name=schedule_name
+            )
+            
+            logger.info(f"Successfully cancelled EventBridge schedule for VP {vp_id}")
+            return True
+            
+        except scheduler.exceptions.ResourceNotFoundException:
+            logger.warning(f"Schedule for VP {vp_id} not found (may have already been executed or deleted)")
+            return True  # Consider this a success since the schedule is gone
+            
+        except Exception as e:
+            logger.error(f"Error cancelling EventBridge schedule for VP {vp_id}: {str(e)}")
             return False
 
 def lambda_handler(event, context):

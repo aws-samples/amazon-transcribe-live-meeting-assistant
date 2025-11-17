@@ -1,5 +1,17 @@
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { 
+  ElasticLoadBalancingV2Client, 
+  RegisterTargetsCommand, 
+  DeregisterTargetsCommand,
+  DescribeTargetHealthCommand,
+  CreateTargetGroupCommand,
+  DeleteTargetGroupCommand,
+  CreateRuleCommand,
+  DeleteRuleCommand,
+  DescribeRulesCommand,
+  DescribeTargetGroupsCommand
+} from '@aws-sdk/client-elastic-load-balancing-v2';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
 
@@ -17,6 +29,10 @@ export class VirtualParticipantStatusManager {
   private graphqlEndpoint: string;
   private awsRegion: string;
   private dynamoClient: DynamoDBClient;
+  private elbClient: ElasticLoadBalancingV2Client;
+  private taskPrivateIp: string | null = null;
+  private targetGroupArn: string | null = null;
+  private listenerRuleArn: string | null = null;
 
   constructor(participantId: string) {
     this.participantId = participantId;
@@ -28,6 +44,10 @@ export class VirtualParticipantStatusManager {
     }
 
     this.dynamoClient = new DynamoDBClient({
+      region: this.awsRegion,
+    });
+
+    this.elbClient = new ElasticLoadBalancingV2Client({
       region: this.awsRegion,
     });
   }
@@ -76,13 +96,16 @@ export class VirtualParticipantStatusManager {
 
   async updateStatus(status: string, errorMessage?: string): Promise<boolean> {
     try {
-      // First, get the current VP to preserve existing CallId
+      // First, get the current VP to preserve existing CallId and VNC fields
       const getQuery = `
         query GetVirtualParticipant($id: ID!) {
           getVirtualParticipant(id: $id) {
             id
             status
             CallId
+            vncEndpoint
+            vncPort
+            vncReady
           }
         }
       `;
@@ -96,16 +119,20 @@ export class VirtualParticipantStatusManager {
         return false;
       }
 
-      const currentCallId = currentVP.getVirtualParticipant.CallId;
-      console.log(`Preserving CallId: ${currentCallId} while updating status to ${status}`);
+      const current = currentVP.getVirtualParticipant;
+      console.log(`Current VP state from query:`, JSON.stringify(current, null, 2));
+      console.log(`Preserving CallId: ${current.CallId}, VNC fields while updating status to ${status}`);
 
-      // Update with new status while preserving CallId
+      // Update with new status while preserving CallId and VNC fields
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
           updateVirtualParticipant(input: $input) {
             id
             status
             CallId
+            vncEndpoint
+            vncPort
+            vncReady
             updatedAt
           }
         }
@@ -118,10 +145,18 @@ export class VirtualParticipantStatusManager {
         }
       };
 
-      // Include CallId if it exists
-      if (currentCallId) {
-        variables.input.CallId = currentCallId;
-        console.log(`Including CallId in update: ${currentCallId}`);
+      // Preserve CallId if it exists
+      if (current.CallId) {
+        variables.input.CallId = current.CallId;
+        console.log(`Including CallId in update: ${current.CallId}`);
+      }
+
+      // Preserve VNC fields if they exist
+      if (current.vncEndpoint) {
+        variables.input.vncEndpoint = current.vncEndpoint;
+        variables.input.vncPort = current.vncPort;
+        variables.input.vncReady = current.vncReady;
+        console.log(`Preserving VNC fields: ${current.vncEndpoint}:${current.vncPort}, ready: ${current.vncReady}`);
       }
 
       if (status === 'FAILED' && errorMessage) {
@@ -131,7 +166,7 @@ export class VirtualParticipantStatusManager {
       const result = await this.signAndSendGraphQLRequest(mutation, variables);
       
       if (result) {
-        console.log(`Successfully updated VP ${this.participantId} status to ${status} with preserved CallId: ${currentCallId}`);
+        console.log(`Successfully updated VP ${this.participantId} status to ${status} with preserved fields`);
         return true;
       } else {
         console.error('Failed to update VP status via GraphQL');
@@ -146,9 +181,9 @@ export class VirtualParticipantStatusManager {
 
   async storeTaskArnInRegistry(): Promise<void> {
     try {
-      console.log(`Storing task ARN for VP ${this.participantId} in registry...`);
+      console.log(`Storing task ARN and VNC endpoint for VP ${this.participantId} in registry...`);
 
-      // Get task ARN from ECS metadata endpoint
+      // Get task ARN and private IP from ECS metadata endpoint
       const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
       if (!metadataUri) {
         console.log('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
@@ -176,6 +211,19 @@ export class VirtualParticipantStatusManager {
         return;
       }
 
+      // Extract private IP from task metadata
+      let taskPrivateIp = null;
+      if (metadata.Containers && metadata.Containers.length > 0) {
+        const container = metadata.Containers[0];
+        if (container.Networks && container.Networks.length > 0) {
+          const network = container.Networks[0];
+          if (network.IPv4Addresses && network.IPv4Addresses.length > 0) {
+            taskPrivateIp = network.IPv4Addresses[0];
+            console.log(`Task private IP: ${taskPrivateIp}`);
+          }
+        }
+      }
+
       // Store in VPTaskRegistry table
       const registryTableName = details.vpTaskRegistryTableName;
       if (!registryTableName) {
@@ -188,21 +236,31 @@ export class VirtualParticipantStatusManager {
       // Calculate expiry time (24 hours from now)
       const expiryTime = Math.floor(Date.now() / 1000) + 86400;
 
+      const updateExpression = taskPrivateIp 
+        ? 'SET taskArn = :taskArn, clusterArn = :clusterArn, createdAt = :createdAt, taskStatus = :taskStatus, expiresAt = :expiresAt, vncEndpoint = :vncEndpoint'
+        : 'SET taskArn = :taskArn, clusterArn = :clusterArn, createdAt = :createdAt, taskStatus = :taskStatus, expiresAt = :expiresAt';
+
+      const expressionValues: any = {
+        ':taskArn': taskArn,
+        ':clusterArn': clusterArn,
+        ':createdAt': new Date().toISOString(),
+        ':taskStatus': 'RUNNING',
+        ':expiresAt': expiryTime,
+      };
+
+      if (taskPrivateIp) {
+        expressionValues[':vncEndpoint'] = taskPrivateIp;
+      }
+
       const putCommand = new UpdateItemCommand({
         TableName: registryTableName,
         Key: marshall({ vpId: this.participantId }),
-        UpdateExpression: 'SET taskArn = :taskArn, clusterArn = :clusterArn, createdAt = :createdAt, taskStatus = :taskStatus, expiresAt = :expiresAt',
-        ExpressionAttributeValues: marshall({
-          ':taskArn': taskArn,
-          ':clusterArn': clusterArn,
-          ':createdAt': new Date().toISOString(),
-          ':taskStatus': 'RUNNING',
-          ':expiresAt': expiryTime,
-        }),
+        UpdateExpression: updateExpression,
+        ExpressionAttributeValues: marshall(expressionValues),
       });
 
       await this.dynamoClient.send(putCommand);
-      console.log(`✓ Successfully stored task ARN in registry for VP ${this.participantId}`);
+      console.log(`✓ Successfully stored task ARN and VNC endpoint in registry for VP ${this.participantId}`);
 
     } catch (error) {
       console.error('Error storing task ARN in registry:', error);
@@ -313,6 +371,711 @@ export class VirtualParticipantStatusManager {
 
   async setFailed(errorMessage?: string): Promise<boolean> {
     return this.updateStatus('FAILED', errorMessage);
+  }
+
+  async setManualActionRequired(
+    actionType: string,
+    message: string,
+    timeoutSeconds: number
+  ): Promise<boolean> {
+    try {
+      // First, get the current VP to preserve existing CallId and VNC fields
+      const getQuery = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            status
+            CallId
+            vncEndpoint
+            vncPort
+            vncReady
+          }
+        }
+      `;
+
+      const currentVP = await this.signAndSendGraphQLRequest(getQuery, {
+        id: this.participantId
+      });
+
+      if (!currentVP?.getVirtualParticipant) {
+        console.error(`VP ${this.participantId} not found`);
+        return false;
+      }
+
+      const current = currentVP.getVirtualParticipant;
+      console.log(`Setting manual action required: ${actionType} - ${message}`);
+
+      // Update with MANUAL_ACTION_REQUIRED status and metadata
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {
+            id
+            status
+            CallId
+            vncEndpoint
+            vncPort
+            vncReady
+            manualActionType
+            manualActionMessage
+            manualActionTimeoutSeconds
+            manualActionStartTime
+            updatedAt
+          }
+        }
+      `;
+
+      const variables: any = {
+        input: {
+          id: this.participantId,
+          status: 'MANUAL_ACTION_REQUIRED',
+          manualActionType: actionType,
+          manualActionMessage: message,
+          manualActionTimeoutSeconds: timeoutSeconds,
+          manualActionStartTime: new Date().toISOString()
+        }
+      };
+
+      // Preserve CallId if it exists
+      if (current.CallId) {
+        variables.input.CallId = current.CallId;
+      }
+
+      // Preserve VNC fields if they exist
+      if (current.vncEndpoint) {
+        variables.input.vncEndpoint = current.vncEndpoint;
+        variables.input.vncPort = current.vncPort;
+        variables.input.vncReady = current.vncReady;
+      }
+
+      const result = await this.signAndSendGraphQLRequest(mutation, variables);
+      
+      if (result) {
+        console.log(`Successfully set manual action required for VP ${this.participantId}`);
+        return true;
+      } else {
+        console.error('Failed to set manual action required via GraphQL');
+        return false;
+      }
+
+    } catch (error) {
+      console.error('Error setting manual action required:', error);
+      return false;
+    }
+  }
+
+  async clearManualAction(): Promise<boolean> {
+    try {
+      // Get current VP to preserve fields
+      const getQuery = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            status
+            CallId
+            vncEndpoint
+            vncPort
+            vncReady
+          }
+        }
+      `;
+
+      const currentVP = await this.signAndSendGraphQLRequest(getQuery, {
+        id: this.participantId
+      });
+
+      if (!currentVP?.getVirtualParticipant) {
+        console.error(`VP ${this.participantId} not found`);
+        return false;
+      }
+
+      const current = currentVP.getVirtualParticipant;
+      console.log(`Clearing manual action for VP ${this.participantId}`);
+
+      // Update to clear manual action fields by setting them to null
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {
+            id
+            status
+            CallId
+            vncEndpoint
+            vncPort
+            vncReady
+            manualActionType
+            manualActionMessage
+            manualActionTimeoutSeconds
+            manualActionStartTime
+            updatedAt
+          }
+        }
+      `;
+
+      const variables: any = {
+        input: {
+          id: this.participantId,
+          status: 'JOINING',
+          manualActionType: null,
+          manualActionMessage: null,
+          manualActionTimeoutSeconds: null,
+          manualActionStartTime: null
+        }
+      };
+
+      // Preserve CallId if it exists
+      if (current.CallId) {
+        variables.input.CallId = current.CallId;
+      }
+
+      // Preserve VNC fields if they exist
+      if (current.vncEndpoint) {
+        variables.input.vncEndpoint = current.vncEndpoint;
+        variables.input.vncPort = current.vncPort;
+        variables.input.vncReady = current.vncReady;
+      }
+
+      const result = await this.signAndSendGraphQLRequest(mutation, variables);
+      
+      if (result) {
+        console.log(`Successfully cleared manual action for VP ${this.participantId}`);
+        return true;
+      } else {
+        console.error('Failed to clear manual action via GraphQL');
+        return false;
+      }
+
+    } catch (error) {
+      console.error('Error clearing manual action:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get the task's private IP address from ECS metadata
+   */
+  async getTaskPrivateIp(): Promise<string | null> {
+    try {
+      const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
+      if (!metadataUri) {
+        console.log('ECS_CONTAINER_METADATA_URI_V4 not found - not running in ECS');
+        return null;
+      }
+
+      const taskMetadataUrl = `${metadataUri}/task`;
+      console.log(`Fetching task metadata for IP from: ${taskMetadataUrl}`);
+
+      const response = await fetch(taskMetadataUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch task metadata: ${response.status}`);
+      }
+
+      const metadata = await response.json();
+      
+      // Extract private IP from task metadata
+      // The structure is: Containers[0].Networks[0].IPv4Addresses[0]
+      if (metadata.Containers && metadata.Containers.length > 0) {
+        const container = metadata.Containers[0];
+        if (container.Networks && container.Networks.length > 0) {
+          const network = container.Networks[0];
+          if (network.IPv4Addresses && network.IPv4Addresses.length > 0) {
+            const privateIp = network.IPv4Addresses[0];
+            console.log(`Task private IP: ${privateIp}`);
+            return privateIp;
+          }
+        }
+      }
+
+      console.log('Could not extract private IP from task metadata');
+      return null;
+    } catch (error) {
+      console.error('Failed to get task private IP:', error);
+      return null;
+    }
+  }
+
+
+  /**
+   * Generate a unique priority number for ALB listener rule based on vpId
+   * Uses hash to ensure consistent priority for same vpId
+   */
+  private generateRulePriority(vpId: string): number {
+    // Simple hash function to generate priority between 1000-50000
+    let hash = 0;
+    for (let i = 0; i < vpId.length; i++) {
+      hash = ((hash << 5) - hash) + vpId.charCodeAt(i);
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    // Map to range 1000-50000
+    return 1000 + Math.abs(hash % 49000);
+  }
+
+  /**
+   * Create a dedicated target group for this VP
+   */
+  private async createVPTargetGroup(): Promise<string | null> {
+    try {
+      const vpcId = process.env.VPC_ID;
+      if (!vpcId) {
+        console.error('VPC_ID environment variable not set');
+        return null;
+      }
+
+      // Target group name max 32 chars, must be unique
+      const tgName = `vnc-${this.participantId.substring(0, 27)}`;
+      
+      console.log(`Creating target group: ${tgName}`);
+
+      const createTGCommand = new CreateTargetGroupCommand({
+        Name: tgName,
+        Protocol: 'HTTP',
+        Port: 5901,
+        VpcId: vpcId,
+        TargetType: 'ip',
+        HealthCheckEnabled: true,
+        HealthCheckProtocol: 'HTTP',
+        HealthCheckPath: '/',
+        HealthCheckIntervalSeconds: 30,
+        HealthCheckTimeoutSeconds: 5,
+        HealthyThresholdCount: 2,
+        UnhealthyThresholdCount: 3,
+        Tags: [
+          { Key: 'VirtualParticipantId', Value: this.participantId },
+          { Key: 'ManagedBy', Value: 'LMA-VirtualParticipant' }
+        ]
+      });
+
+      const response = await this.elbClient.send(createTGCommand);
+      
+      if (response.TargetGroups && response.TargetGroups.length > 0) {
+        const tgArn = response.TargetGroups[0].TargetGroupArn!;
+        console.log(`✓ Created target group: ${tgArn}`);
+        return tgArn;
+      }
+
+      console.error('Failed to create target group - no ARN returned');
+      return null;
+
+    } catch (error: any) {
+      if (error.name === 'DuplicateTargetGroupName') {
+        console.log('Target group already exists, attempting to find it...');
+        try {
+          const tgName = `vnc-${this.participantId.substring(0, 27)}`;
+          const describeCommand = new DescribeTargetGroupsCommand({
+            Names: [tgName]
+          });
+          const response = await this.elbClient.send(describeCommand);
+          if (response.TargetGroups && response.TargetGroups.length > 0) {
+            const tgArn = response.TargetGroups[0].TargetGroupArn!;
+            console.log(`✓ Found existing target group: ${tgArn}`);
+            return tgArn;
+          }
+        } catch (describeError) {
+          console.error('Failed to find existing target group:', describeError);
+        }
+      }
+      console.error('Failed to create target group:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Create ALB listener rule to route /vnc/{vpId}/* to this VP's target group
+   */
+  private async createListenerRule(targetGroupArn: string): Promise<string | null> {
+    try {
+      const listenerArn = process.env.ALB_LISTENER_ARN;
+      if (!listenerArn) {
+        console.error('ALB_LISTENER_ARN environment variable not set');
+        return null;
+      }
+
+      const priority = this.generateRulePriority(this.participantId);
+      const pathPattern = `/vnc/${this.participantId}`;
+
+      console.log(`Creating listener rule with priority ${priority} for path ${pathPattern}`);
+
+      const createRuleCommand = new CreateRuleCommand({
+        ListenerArn: listenerArn,
+        Priority: priority,
+        Conditions: [
+          {
+            Field: 'path-pattern',
+            Values: [pathPattern]
+          }
+        ],
+        Actions: [
+          {
+            Type: 'forward',
+            TargetGroupArn: targetGroupArn
+          }
+        ],
+        Tags: [
+          { Key: 'VirtualParticipantId', Value: this.participantId },
+          { Key: 'ManagedBy', Value: 'LMA-VirtualParticipant' }
+        ]
+      });
+
+      const response = await this.elbClient.send(createRuleCommand);
+
+      if (response.Rules && response.Rules.length > 0) {
+        const ruleArn = response.Rules[0].RuleArn!;
+        console.log(`✓ Created listener rule: ${ruleArn}`);
+        return ruleArn;
+      }
+
+      console.error('Failed to create listener rule - no ARN returned');
+      return null;
+
+    } catch (error: any) {
+      if (error.name === 'PriorityInUse') {
+        console.error(`Priority conflict - trying alternate priority`);
+        // Could implement retry with different priority here
+      }
+      console.error('Failed to create listener rule:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Register this task's IP with the ALB target group
+   * Now creates dedicated target group and listener rule per VP
+   */
+  async registerWithTargetGroup(): Promise<boolean> {
+    try {
+      // Get task private IP
+      const privateIp = await this.getTaskPrivateIp();
+      if (!privateIp) {
+        console.error('Could not get task private IP');
+        return false;
+      }
+
+      this.taskPrivateIp = privateIp;
+      console.log(`Task private IP: ${privateIp}`);
+
+      // Step 1: Create dedicated target group for this VP
+      console.log('Step 1: Creating dedicated target group...');
+      const targetGroupArn = await this.createVPTargetGroup();
+      if (!targetGroupArn) {
+        console.error('Failed to create target group');
+        return false;
+      }
+      this.targetGroupArn = targetGroupArn;
+
+      // Step 2: Create listener rule to route /vnc/{vpId}/* to this target group
+      console.log('Step 2: Creating listener rule...');
+      const ruleArn = await this.createListenerRule(targetGroupArn);
+      if (!ruleArn) {
+        console.error('Failed to create listener rule');
+        // Clean up target group
+        await this.deleteVPTargetGroup();
+        return false;
+      }
+      this.listenerRuleArn = ruleArn;
+
+      // Step 3: Register this task's IP with the target group
+      console.log(`Step 3: Registering task IP ${privateIp} with target group...`);
+      const registerCommand = new RegisterTargetsCommand({
+        TargetGroupArn: targetGroupArn,
+        Targets: [
+          {
+            Id: privateIp,
+            Port: 5901,
+          },
+        ],
+      });
+
+      await this.elbClient.send(registerCommand);
+      console.log(`✓ Successfully registered ${privateIp} with target group`);
+
+      // Step 4: Wait for target to become healthy
+      console.log('Step 4: Waiting for target to become healthy...');
+      const isHealthy = await this.waitForTargetHealthy(targetGroupArn, privateIp);
+      
+      if (!isHealthy) {
+        console.error('Target did not become healthy within timeout');
+        return false;
+      }
+
+      console.log('✓ Target is healthy and ready to receive traffic');
+      
+      // Additional delay to ensure ALB is fully ready to route WebSocket traffic
+      console.log('Waiting additional 5 seconds for ALB routing to stabilize...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      console.log('✓ ALB routing stabilization complete');
+      
+      console.log(`✓ VP ${this.participantId} fully registered with dedicated routing`);
+      return true;
+
+    } catch (error) {
+      console.error('Failed to register with target group:', error);
+      // Attempt cleanup
+      await this.cleanupALBResources();
+      return false;
+    }
+  }
+
+  /**
+   * Wait for target to become healthy in the target group
+   */
+  private async waitForTargetHealthy(targetGroupArn: string, targetId: string, maxWaitSeconds: number = 60): Promise<boolean> {
+    const startTime = Date.now();
+    const maxWaitMs = maxWaitSeconds * 1000;
+
+    while (Date.now() - startTime < maxWaitMs) {
+      try {
+        const healthCommand = new DescribeTargetHealthCommand({
+          TargetGroupArn: targetGroupArn,
+          Targets: [
+            {
+              Id: targetId,
+              Port: 5901,
+            },
+          ],
+        });
+
+        const healthResponse = await this.elbClient.send(healthCommand);
+        
+        if (healthResponse.TargetHealthDescriptions && healthResponse.TargetHealthDescriptions.length > 0) {
+          const targetHealth = healthResponse.TargetHealthDescriptions[0];
+          const state = targetHealth.TargetHealth?.State;
+          
+          console.log(`Target health state: ${state}`);
+          
+          if (state === 'healthy') {
+            return true;
+          }
+          
+          if (state === 'unhealthy') {
+            console.error(`Target is unhealthy: ${targetHealth.TargetHealth?.Reason}`);
+            return false;
+          }
+        }
+
+        // Wait 2 seconds before checking again
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+      } catch (error) {
+        console.error('Error checking target health:', error);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
+    console.error('Timeout waiting for target to become healthy');
+    return false;
+  }
+
+  /**
+   * Delete the listener rule created for this VP
+   */
+  private async deleteListenerRule(): Promise<boolean> {
+    try {
+      if (!this.listenerRuleArn) {
+        console.log('No listener rule ARN to delete');
+        return true;
+      }
+
+      console.log(`Deleting listener rule: ${this.listenerRuleArn}`);
+
+      const deleteRuleCommand = new DeleteRuleCommand({
+        RuleArn: this.listenerRuleArn
+      });
+
+      await this.elbClient.send(deleteRuleCommand);
+      console.log(`✓ Deleted listener rule`);
+      this.listenerRuleArn = null;
+      return true;
+
+    } catch (error: any) {
+      if (error.name === 'RuleNotFound') {
+        console.log('Listener rule already deleted');
+        return true;
+      }
+      console.error('Failed to delete listener rule:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete the target group created for this VP
+   */
+  private async deleteVPTargetGroup(): Promise<boolean> {
+    try {
+      if (!this.targetGroupArn) {
+        console.log('No target group ARN to delete');
+        return true;
+      }
+
+      console.log(`Deleting target group: ${this.targetGroupArn}`);
+
+      // First deregister all targets
+      if (this.taskPrivateIp) {
+        try {
+          const deregisterCommand = new DeregisterTargetsCommand({
+            TargetGroupArn: this.targetGroupArn,
+            Targets: [{ Id: this.taskPrivateIp, Port: 5901 }]
+          });
+          await this.elbClient.send(deregisterCommand);
+          console.log('✓ Deregistered targets from target group');
+          
+          // Wait a bit for deregistration to complete
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } catch (deregError) {
+          console.log('Error deregistering targets (may already be deregistered):', deregError);
+        }
+      }
+
+      const deleteTGCommand = new DeleteTargetGroupCommand({
+        TargetGroupArn: this.targetGroupArn
+      });
+
+      await this.elbClient.send(deleteTGCommand);
+      console.log(`✓ Deleted target group`);
+      this.targetGroupArn = null;
+      return true;
+
+    } catch (error: any) {
+      if (error.name === 'TargetGroupNotFound') {
+        console.log('Target group already deleted');
+        return true;
+      }
+      console.error('Failed to delete target group:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Clean up all ALB resources (listener rule and target group)
+   */
+  private async cleanupALBResources(): Promise<void> {
+    console.log('Cleaning up ALB resources...');
+    
+    // Delete in correct order: rule first, then target group
+    await this.deleteListenerRule();
+    await this.deleteVPTargetGroup();
+    
+    console.log('✓ ALB resource cleanup complete');
+  }
+
+  /**
+   * Deregister this task from the ALB target group and clean up resources
+   */
+  async deregisterFromTargetGroup(): Promise<boolean> {
+    try {
+      console.log(`Deregistering VP ${this.participantId} from ALB`);
+      
+      // Clean up all ALB resources
+      await this.cleanupALBResources();
+      
+      console.log(`✓ Successfully deregistered VP ${this.participantId}`);
+      return true;
+
+    } catch (error) {
+      console.error('Failed to deregister from target group:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Signal that VNC is ready via AppSync
+   * Publishes the full VNC WebSocket URL with vpId path for multi-user routing
+   * Should only be called AFTER task is registered with ALB and healthy
+   */
+  async setVncReady(): Promise<boolean> {
+    try {
+      console.log(`Signaling VNC ready for VP ${this.participantId}`);
+      
+      // Get CloudFront domain from environment variable (same as AppSync URL pattern)
+      const cloudFrontDomain = process.env.CLOUDFRONT_DOMAIN;
+      
+      if (!cloudFrontDomain) {
+        console.error('CLOUDFRONT_DOMAIN environment variable not set');
+        return false;
+      }
+      
+      // Construct full VNC URL with vpId path for multi-user routing
+      const vncEndpoint = `wss://${cloudFrontDomain}/vnc/${this.participantId}`;
+      
+      console.log(`VNC WebSocket URL with path: ${vncEndpoint}`);
+      
+      // Get current VP to preserve CallId
+      const getQuery = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            status
+            CallId
+          }
+        }
+      `;
+
+      const currentVP = await this.signAndSendGraphQLRequest(getQuery, {
+        id: this.participantId
+      });
+
+      if (!currentVP?.getVirtualParticipant) {
+        console.error(`VP ${this.participantId} not found`);
+        return false;
+      }
+
+      const currentCallId = currentVP.getVirtualParticipant.CallId;
+
+      // Update VP with vncReady flag and full URL
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {
+            id
+            status
+            vncEndpoint
+            vncReady
+            CallId
+            updatedAt
+          }
+        }
+      `;
+
+      const variables: any = {
+        input: {
+          id: this.participantId,
+          vncEndpoint: vncEndpoint,
+          vncReady: true,
+          status: 'VNC_READY'
+        }
+      };
+
+      // Preserve CallId if it exists
+      if (currentCallId) {
+        variables.input.CallId = currentCallId;
+      }
+
+      const result = await this.signAndSendGraphQLRequest(mutation, variables);
+      
+      if (result) {
+        console.log(`✓ VNC ready with URL: ${vncEndpoint}`);
+        return true;
+      } else {
+        console.error('Failed to publish VNC ready signal');
+        return false;
+      }
+
+    } catch (error) {
+      console.error('Failed to signal VNC ready:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Log VNC connection events for audit purposes
+   */
+  async logVncConnection(username: string, action: 'connect' | 'disconnect', clientIp?: string): Promise<void> {
+    const logEntry = {
+      vpId: this.participantId,
+      username,
+      action,
+      timestamp: new Date().toISOString(),
+      clientIp: clientIp || 'unknown',
+    };
+    
+    // Log to CloudWatch (will be picked up by container logs)
+    console.log('VNC_AUDIT:', JSON.stringify(logEntry));
   }
 }
 

@@ -4,33 +4,51 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState, useEffect } from 'react';
-import { API, graphqlOperation } from 'aws-amplify';
-import PropTypes from 'prop-types';
+import { API, graphqlOperation, Logger } from 'aws-amplify';
 import {
   Table,
   Box,
   SpaceBetween,
-  Header,
-  Badge,
   Button,
   Modal,
   Form,
   FormField,
   Input,
   Select,
-  Container,
   Alert,
   Flashbar,
   DatePicker,
   TimeInput,
   Checkbox,
   Textarea,
+  Pagination,
+  TextFilter,
 } from '@awsui/components-react';
-import { Link as RouterLink } from 'react-router-dom';
 import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
+import { useCollection } from '@awsui/collection-hooks';
+
 import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
 import useSettingsContext from '../../contexts/settings';
+import useLocalStorage from '../common/local-storage';
+import { paginationLabels } from '../common/labels';
+import { getFilterCounterText, TableEmptyState, TableNoMatchState } from '../common/table';
+
+import {
+  VPCommonHeader,
+  VPPreferences,
+  COLUMN_DEFINITIONS_MAIN,
+  KEY_COLUMN_ID,
+  SELECTION_LABELS,
+  DEFAULT_PREFERENCES,
+  DEFAULT_SORT_COLUMN,
+  TIME_FILTER_STORAGE_KEY,
+  filterVPsByTime,
+} from './vp-table-config';
+
+import '@awsui/global-styles/index.css';
+
+const logger = new Logger('VirtualParticipantList');
 
 const listVirtualParticipants = `
   query ListVirtualParticipants {
@@ -43,6 +61,9 @@ const listVirtualParticipants = `
       scheduledFor
       isScheduled
       status
+      owner
+      Owner
+      SharedWith
       createdAt
       updatedAt
     }
@@ -68,53 +89,12 @@ const parseMeetingInvitation = /* GraphQL */ `
   }
 `;
 
-const StatusBadge = ({ status }) => {
-  const getStatusProps = (vpStatus) => {
-    switch (vpStatus) {
-      case 'SCHEDULED':
-        return { color: 'blue', children: 'Scheduled' };
-      case 'INITIALIZING':
-        return { color: 'blue', children: 'Initializing' };
-      case 'CONNECTING':
-        return { color: 'blue', children: 'Connecting' };
-      case 'JOINING':
-        return { color: 'blue', children: 'Joining' };
-      case 'JOINED':
-        return { color: 'green', children: 'Joined' };
-      case 'ACTIVE':
-        return { color: 'green', children: 'Active' };
-      case 'COMPLETED':
-        return { color: 'green', children: 'Completed' };
-      case 'FAILED':
-        return { color: 'red', children: 'Failed' };
-      default:
-        return { color: 'grey', children: vpStatus || 'Unknown' };
-    }
-  };
-
-  const statusProps = getStatusProps(status);
-  return <Badge color={statusProps.color}>{statusProps.children}</Badge>;
-};
-
-StatusBadge.propTypes = {
-  status: PropTypes.string.isRequired,
-};
-
-// Render function for status cell - defined outside component to avoid re-creation
-const renderStatusCell = (item) => <StatusBadge status={item.status} />;
-
-// Render function for meeting name cell - defined outside component to avoid re-creation
-const renderMeetingNameCell = (item) => (
-  <RouterLink to={`/virtual-participant/${item.id}`} style={{ textDecoration: 'none', color: '#0972d3' }}>
-    {item.meetingName}
-  </RouterLink>
-);
-
 const VirtualParticipantList = () => {
   const { user, currentCredentials } = useAppContext();
   const { settings } = useSettingsContext();
 
   const [participants, setParticipants] = useState([]);
+  const [filteredParticipants, setFilteredParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({
@@ -129,9 +109,8 @@ const VirtualParticipantList = () => {
   const [consentChecked, setConsentChecked] = useState(false);
   const [notification, setNotification] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
-  const [creatingType, setCreatingType] = useState(null); // 'immediate' or 'scheduled'
+  const [creatingType, setCreatingType] = useState(null);
   const [popupNotifications, setPopupNotifications] = useState([]);
-  const [sortingColumn, setSortingColumn] = useState({ sortingField: 'createdAt', sortingDescending: true });
 
   // Meeting invitation parser state
   const [showPasteInviteModal, setShowPasteInviteModal] = useState(false);
@@ -139,12 +118,37 @@ const VirtualParticipantList = () => {
   const [isParsing, setIsParsing] = useState(false);
   const [parseError, setParseError] = useState('');
 
+  // Advanced table features
+  const [preferences, setPreferences] = useLocalStorage('vp-list-preferences', DEFAULT_PREFERENCES);
+  const [timeFilter, setTimeFilter] = useLocalStorage(TIME_FILTER_STORAGE_KEY, 24); // Default to 1 day
+
+  // Collection hooks for advanced table functionality
+  const { items, actions, filteredItemsCount, collectionProps, filterProps, paginationProps } = useCollection(
+    filteredParticipants,
+    {
+      filtering: {
+        empty: <TableEmptyState resourceName="Virtual Participant" />,
+        noMatch: <TableNoMatchState onClearFilter={() => actions.setFiltering('')} />,
+      },
+      pagination: { pageSize: preferences.pageSize },
+      sorting: { defaultState: { sortingColumn: DEFAULT_SORT_COLUMN, isDescending: true } },
+      selection: {
+        keepSelection: false,
+        trackBy: KEY_COLUMN_ID,
+      },
+    },
+  );
+
   const loadParticipants = async () => {
     try {
       setLoading(true);
+      logger.debug('Loading virtual participants');
       const result = await API.graphql(graphqlOperation(listVirtualParticipants));
-      setParticipants(result.data.listVirtualParticipants || []);
+      const vpList = result.data.listVirtualParticipants || [];
+      logger.debug('Loaded virtual participants:', vpList);
+      setParticipants(vpList);
     } catch (error) {
+      logger.error('Failed to load virtual participants:', error);
       setNotification({
         type: 'error',
         content: 'Failed to load virtual participants',
@@ -153,6 +157,14 @@ const VirtualParticipantList = () => {
       setLoading(false);
     }
   };
+
+  // Apply time filtering whenever participants or timeFilter changes
+  useEffect(() => {
+    logger.debug('Applying time filter:', timeFilter);
+    const filtered = filterVPsByTime(participants, timeFilter);
+    logger.debug('Filtered participants:', filtered.length, 'of', participants.length);
+    setFilteredParticipants(filtered);
+  }, [participants, timeFilter]);
 
   // Load participants on component mount
   useEffect(() => {
@@ -184,7 +196,7 @@ const VirtualParticipantList = () => {
 
         setParticipants((prev) => {
           const existingParticipant = prev.find((p) => p.id === updatedParticipant.id);
-          const meetingName = updatedParticipant.meetingName || existingParticipant?.meetingName || 'Unknown Meeting';
+          const meetingName = updatedParticipant.meetingName || existingParticipant?.meetingName || 'Unknown';
           // Only show notification if status actually changed
           if (
             existingParticipant &&
@@ -227,34 +239,25 @@ const VirtualParticipantList = () => {
                 message = `Virtual Participant status updated to ${updatedParticipant.status} for "${meetingName}"`;
             }
 
-            // Check if a similar notification already exists to prevent duplicates
-            setPopupNotifications((current) => {
-              const existingNotification = current.find((n) => n.content === message && n.type === notificationType);
-
-              // If similar notification already exists, don't add a new one
-              if (existingNotification) {
-                return current;
-              }
-
-              const notificationId = `vp-${updatedParticipant.id}-${updatedParticipant.status}-${Date.now()}`;
-              const popupNotification = {
-                type: notificationType,
-                content: message,
-                dismissible: true,
-                dismissLabel: 'Dismiss',
-                id: notificationId,
-                onDismiss: () => {
-                  setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
-                },
-              };
-
-              // Auto-dismiss after 8 seconds
-              setTimeout(() => {
+            // Add popup notification
+            const notificationId = `vp-${updatedParticipant.id}-${updatedParticipant.status}-${Date.now()}`;
+            const popupNotification = {
+              type: notificationType,
+              content: message,
+              dismissible: true,
+              dismissLabel: 'Dismiss',
+              id: notificationId,
+              onDismiss: () => {
                 setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
-              }, 8000);
+              },
+            };
 
-              return [...current, popupNotification];
-            });
+            setPopupNotifications((current) => [...current, popupNotification]);
+
+            // Auto-dismiss after 8 seconds
+            setTimeout(() => {
+              setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
+            }, 8000);
           }
 
           return prev.map((p) => {
@@ -269,7 +272,9 @@ const VirtualParticipantList = () => {
           });
         });
       },
-      error: () => {
+      error: (error) => {
+        logger.error('Subscription error:', error);
+        // Fallback to polling
         const pollInterval = setInterval(() => {
           loadParticipants();
         }, 5000);
@@ -279,92 +284,7 @@ const VirtualParticipantList = () => {
     });
 
     return () => subscription.unsubscribe();
-  }, []); // Remove dependencies to prevent subscription recreation
-
-  // Sorting function
-  const sortParticipants = (items, sortingConfig) => {
-    if (!sortingConfig.sortingField) return items;
-
-    return [...items].sort((a, b) => {
-      const aValue = a[sortingConfig.sortingField];
-      const bValue = b[sortingConfig.sortingField];
-
-      let comparison = 0;
-
-      // Handle different data types
-      if (sortingConfig.sortingField === 'createdAt') {
-        comparison = new Date(aValue) - new Date(bValue);
-      } else if (typeof aValue === 'string' && typeof bValue === 'string') {
-        comparison = aValue.toLowerCase().localeCompare(bValue.toLowerCase());
-      } else if (aValue < bValue) {
-        comparison = -1;
-      } else if (aValue > bValue) {
-        comparison = 1;
-      } else {
-        comparison = 0;
-      }
-
-      return sortingConfig.sortingDescending ? -comparison : comparison;
-    });
-  };
-
-  // Handle sorting change
-  const handleSortingChange = ({ detail }) => {
-    const newSortingField = detail.sortingColumn?.sortingField || detail.sortingField;
-
-    // If clicking the same column, toggle the direction
-    if (sortingColumn.sortingField === newSortingField) {
-      setSortingColumn({
-        sortingField: newSortingField,
-        sortingDescending: !sortingColumn.sortingDescending,
-      });
-    } else {
-      // If clicking a different column, start with ascending (false)
-      setSortingColumn({
-        sortingField: newSortingField,
-        sortingDescending: false,
-      });
-    }
-  };
-
-  // Get sorted participants
-  const sortedParticipants = sortParticipants(participants, sortingColumn);
-
-  // Validate meeting time for scheduling
-  const validateMeetingTime = (time) => {
-    if (!time) {
-      setMeetingTimeError('');
-      return;
-    }
-
-    if (time.length !== 5) {
-      setMeetingTimeError('Meeting time is incomplete.');
-      return;
-    }
-
-    if (!createForm.meetingDate) {
-      setMeetingTimeError('Please select a meeting date first.');
-      return;
-    }
-
-    // Create meeting datetime
-    const meetingDateTime = new Date(`${createForm.meetingDate}T${time}`);
-    const currentTime = new Date();
-    const minuteDifference = (meetingDateTime.getTime() - currentTime.getTime()) / (1000 * 60);
-
-    if (minuteDifference >= 2) {
-      setMeetingTimeError('');
-    } else {
-      setMeetingTimeError('Meeting time must be at least two minutes from now.');
-    }
-  };
-
-  // Check if form is ready for immediate execution
-  const isFormValidForImmediate = createForm.meetingName && createForm.meetingId && consentChecked;
-
-  // Check if form is ready for scheduling
-  const isFormValidForScheduling =
-    isFormValidForImmediate && createForm.meetingTime && createForm.meetingDate && !meetingTimeError;
+  }, []);
 
   // Handle parsing meeting invitation
   const handleParseMeetingInvitation = async () => {
@@ -615,52 +535,41 @@ const VirtualParticipantList = () => {
     }
   };
 
-  const columnDefinitions = [
-    {
-      id: 'meetingName',
-      header: 'Meeting Name',
-      cell: renderMeetingNameCell,
-      sortingField: 'meetingName',
-    },
-    {
-      id: 'meetingPlatform',
-      header: 'Platform',
-      cell: (item) => item.meetingPlatform,
-      sortingField: 'meetingPlatform',
-    },
-    {
-      id: 'meetingId',
-      header: 'Meeting ID',
-      cell: (item) => item.meetingId,
-      sortingField: 'meetingId',
-    },
-    {
-      id: 'status',
-      header: 'Status',
-      cell: renderStatusCell,
-      sortingField: 'status',
-    },
-    {
-      id: 'scheduledFor',
-      header: 'Scheduled For',
-      cell: (item) => {
-        if (item.isScheduled && item.scheduledFor) {
-          return new Date(item.scheduledFor).toLocaleString();
-        }
-        if (item.meetingTime) {
-          return new Date(item.meetingTime * 1000).toLocaleString();
-        }
-        return '-';
-      },
-      sortingField: 'scheduledFor',
-    },
-    {
-      id: 'createdAt',
-      header: 'Created',
-      cell: (item) => new Date(item.createdAt).toLocaleString(),
-      sortingField: 'createdAt',
-    },
-  ];
+  // Validate meeting time for scheduling
+  const validateMeetingTime = (time) => {
+    if (!time) {
+      setMeetingTimeError('');
+      return;
+    }
+
+    if (time.length !== 5) {
+      setMeetingTimeError('Meeting time is incomplete.');
+      return;
+    }
+
+    if (!createForm.meetingDate) {
+      setMeetingTimeError('Please select a meeting date first.');
+      return;
+    }
+
+    // Create meeting datetime
+    const meetingDateTime = new Date(`${createForm.meetingDate}T${time}`);
+    const currentTime = new Date();
+    const minuteDifference = (meetingDateTime.getTime() - currentTime.getTime()) / (1000 * 60);
+
+    if (minuteDifference >= 2) {
+      setMeetingTimeError('');
+    } else {
+      setMeetingTimeError('Meeting time must be at least two minutes from now.');
+    }
+  };
+
+  // Check if form is ready for immediate execution
+  const isFormValidForImmediate = createForm.meetingName && createForm.meetingId && consentChecked;
+
+  // Check if form is ready for scheduling
+  const isFormValidForScheduling =
+    isFormValidForImmediate && createForm.meetingTime && createForm.meetingDate && !meetingTimeError;
 
   const platformOptions = [
     { label: 'Zoom', value: 'ZOOM', disabled: false },
@@ -670,6 +579,7 @@ const VirtualParticipantList = () => {
     { label: 'Google Meet', value: 'GOOGLE_MEET', disabled: true },
   ];
 
+  /* eslint-disable react/jsx-props-no-spreading */
   return (
     <SpaceBetween direction="vertical" size="l">
       {/* Popup notifications using Flashbar */}
@@ -681,42 +591,43 @@ const VirtualParticipantList = () => {
         </Alert>
       )}
 
-      <Container>
-        <Table
-          columnDefinitions={columnDefinitions}
-          items={sortedParticipants}
-          loading={loading}
-          sortingColumn={sortingColumn}
-          onSortingChange={handleSortingChange}
-          header={
-            <Header
-              counter={`(${participants.length})`}
-              actions={
-                <SpaceBetween direction="horizontal" size="xs">
-                  <Button variant="normal" onClick={() => setShowPasteInviteModal(true)}>
-                    Paste Meeting Invite
-                  </Button>
-                  <Button variant="primary" onClick={() => setShowCreateModal(true)}>
-                    Create Virtual Participant
-                  </Button>
-                </SpaceBetween>
-              }
-            >
-              Virtual Participants
-            </Header>
-          }
-          empty={
-            <Box textAlign="center" color="inherit">
-              <b>No virtual participants</b>
-              <Box padding={{ bottom: 's' }} variant="p" color="inherit">
-                No virtual participants found.
-              </Box>
-              <Button onClick={() => setShowCreateModal(true)}>Create Virtual Participant</Button>
-            </Box>
-          }
-          sortingDisabled={false}
-        />
-      </Container>
+      <Table
+        {...collectionProps}
+        header={
+          <VPCommonHeader
+            resourceName="Virtual Participants"
+            selectedItems={collectionProps.selectedItems}
+            totalItems={filteredParticipants}
+            loading={loading}
+            timeFilter={timeFilter}
+            setTimeFilter={setTimeFilter}
+            onRefresh={loadParticipants}
+            onPasteInvite={() => setShowPasteInviteModal(true)}
+            onCreateVP={() => setShowCreateModal(true)}
+            items={filteredParticipants}
+          />
+        }
+        columnDefinitions={COLUMN_DEFINITIONS_MAIN}
+        items={items}
+        loading={loading}
+        loadingText="Loading virtual participants"
+        selectionType="multi"
+        ariaLabels={SELECTION_LABELS}
+        filter={
+          <TextFilter
+            {...filterProps}
+            filteringAriaLabel="Filter virtual participants"
+            filteringPlaceholder="Find virtual participants"
+            countText={getFilterCounterText(filteredItemsCount)}
+          />
+        }
+        wrapLines={preferences.wrapLines}
+        pagination={<Pagination {...paginationProps} ariaLabels={paginationLabels} />}
+        preferences={<VPPreferences preferences={preferences} setPreferences={setPreferences} />}
+        trackBy={KEY_COLUMN_ID}
+        visibleColumns={[KEY_COLUMN_ID, ...preferences.visibleContent]}
+        resizableColumns
+      />
 
       <Modal
         visible={showCreateModal}
