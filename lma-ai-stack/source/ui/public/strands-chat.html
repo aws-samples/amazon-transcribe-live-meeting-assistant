@@ -51,6 +51,60 @@
             color: white;
             align-self: flex-start;
         }
+        /* Markdown formatting styles */
+        .message.assistant h1,
+        .message.assistant h2,
+        .message.assistant h3,
+        .message.assistant h4,
+        .message.assistant h5,
+        .message.assistant h6 {
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+        }
+        .message.assistant p {
+            margin: 0.5em 0;
+        }
+        .message.assistant ul,
+        .message.assistant ol {
+            margin: 0.5em 0;
+            padding-left: 1.5em;
+        }
+        .message.assistant li {
+            margin: 0.25em 0;
+        }
+        .message.assistant code {
+            background-color: rgba(0, 0, 0, 0.05);
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .message.assistant pre {
+            background-color: rgba(0, 0, 0, 0.05);
+            padding: 8px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .message.assistant pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .message.assistant blockquote {
+            border-left: 3px solid #007bff;
+            padding-left: 1em;
+            margin: 0.5em 0;
+            color: #666;
+        }
+        .message.assistant strong {
+            font-weight: 600;
+        }
+        .message.assistant em {
+            font-style: italic;
+        }
+        .message.assistant a {
+            color: #007bff;
+            text-decoration: underline;
+        }
         .input-container {
             padding: 20px;
             border-top: 1px solid #dee2e6;
@@ -102,6 +156,8 @@
             100% { transform: rotate(360deg); }
         }
     </style>
+    <!-- Include marked.js for markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
 </head>
 <body>
     <div class="chat-container">
@@ -127,7 +183,14 @@
         function addMessage(text, type = 'assistant') {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}`;
-            messageDiv.textContent = text;
+            
+            // Use markdown rendering for assistant messages, plain text for user/error
+            if (type === 'assistant' && typeof marked !== 'undefined') {
+                messageDiv.innerHTML = marked.parse(text);
+            } else {
+                messageDiv.textContent = text;
+            }
+            
             chatMessages.appendChild(messageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
@@ -221,6 +284,9 @@
             chatMessages.appendChild(streamingMessageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
             
+            // Track accumulated text for markdown rendering
+            let accumulatedText = '';
+            
             window.parent.postMessage({
                 type: 'STRANDS_SETUP_TOKEN_SUBSCRIPTION',
                 callId,
@@ -234,9 +300,22 @@
                     if (token.MessageId === messageId) {
                         if (token.IsComplete) {
                             removeLoadingMessage();
+                            // Final render with markdown
+                            if (typeof marked !== 'undefined' && accumulatedText) {
+                                streamingMessageDiv.innerHTML = marked.parse(accumulatedText);
+                            }
                             window.removeEventListener('message', tokenHandler);
                         } else {
-                            streamingMessageDiv.textContent += token.Token;
+                            // Accumulate tokens
+                            accumulatedText += token.Token;
+                            
+                            // Render markdown incrementally during streaming
+                            if (typeof marked !== 'undefined') {
+                                streamingMessageDiv.innerHTML = marked.parse(accumulatedText);
+                            } else {
+                                streamingMessageDiv.textContent = accumulatedText;
+                            }
+                            
                             chatMessages.scrollTop = chatMessages.scrollHeight;
                         }
                     }
