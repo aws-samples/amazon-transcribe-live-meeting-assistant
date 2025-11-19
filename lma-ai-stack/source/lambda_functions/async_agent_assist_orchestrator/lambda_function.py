@@ -279,6 +279,11 @@ def publish_lambda_agent_assist_transcript_segment(
         transcript_segment_args=transcript_segment_args,
     )
 
+    # write initial message to indicate that wake word was detected and request submitted.
+    checking_segment = {**transcript_segment_args,
+                        "Transcript": "Checking...", "IsPartial": True}
+    write_agent_assist_to_kds(checking_segment)
+
     transcript_segment = get_lambda_agent_assist_transcript(
         **lambda_agent_assist_input,
     )
@@ -632,6 +637,11 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
         )
 
     for agent_assist_args in send_lambda_agent_assist_args:
+        # write initial message to indicate that wake word was detected and request submitted.
+        checking_segment = {**agent_assist_args["transcript_segment_args"],
+                            "Transcript": "Checking...", "IsPartial": True}
+        write_agent_assist_to_kds(checking_segment)
+        
         transcript_segment = get_lambda_agent_assist_transcript(
             **agent_assist_args,
         )
