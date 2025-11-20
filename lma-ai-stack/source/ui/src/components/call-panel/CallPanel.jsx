@@ -1144,8 +1144,89 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   // Add message handler for STRANDS iframe requests
   useEffect(() => {
     const handleMessage = async (event) => {
+      // Handle button configuration requests
+      if (event.data && event.data.type === 'STRANDS_BUTTON_CONFIG_REQUEST') {
+        try {
+          const query = `
+            query GetChatButtonConfig($defaultId: ID!, $customId: ID!) {
+              default: getChatButtonConfig(ChatButtonConfigId: $defaultId) {
+                ChatButtonConfigId
+              }
+              custom: getChatButtonConfig(ChatButtonConfigId: $customId) {
+                ChatButtonConfigId
+              }
+            }
+          `;
+
+          const variables = {
+            defaultId: 'DefaultChatButtonConfig',
+            customId: 'CustomChatButtonConfig',
+          };
+
+          const result = await API.graphql(graphqlOperation(query, variables));
+
+          // Parse the JSON strings returned from the resolver
+          const defaultData = result?.data?.default?.ChatButtonConfigId
+            ? JSON.parse(result.data.default.ChatButtonConfigId)
+            : {};
+          const customData = result?.data?.custom?.ChatButtonConfigId
+            ? JSON.parse(result.data.custom.ChatButtonConfigId)
+            : {};
+
+          // Filter to only include button fields (format: N#LABEL)
+          const buttonPattern = /^\d+#/;
+          const filterButtons = (config) => {
+            const filtered = {};
+            Object.keys(config).forEach((key) => {
+              if (buttonPattern.test(key)) {
+                filtered[key] = config[key];
+              }
+            });
+            return filtered;
+          };
+
+          const defaultButtons = filterButtons(defaultData);
+          const customButtons = filterButtons(customData);
+
+          // If custom buttons exist, use only those; otherwise use defaults
+          const hasCustomButtons = Object.keys(customButtons).length > 0;
+          const mergedConfig = hasCustomButtons ? { ...customButtons } : { ...defaultButtons };
+
+          // Send success response back to iframe
+          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+          if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage(
+              {
+                type: 'STRANDS_BUTTON_CONFIG_RESPONSE',
+                requestId: event.data.requestId,
+                success: true,
+                config: mergedConfig,
+              },
+              '*',
+            );
+          }
+        } catch (error) {
+          console.error('[CallPanel] getChatButtonConfig call failed:', error);
+          logger.error('getChatButtonConfig call failed', error);
+
+          // Send error response back to iframe
+          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+          if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage(
+              {
+                type: 'STRANDS_BUTTON_CONFIG_RESPONSE',
+                requestId: event.data.requestId,
+                success: false,
+                error: error.message || error.errors?.[0]?.message || 'getChatButtonConfig call failed',
+              },
+              '*',
+            );
+          }
+        }
+      }
+
       // Handle chat message requests
-      if (event.data && event.data.type === 'STRANDS_CHAT_REQUEST') {
+      else if (event.data && event.data.type === 'STRANDS_CHAT_REQUEST') {
         try {
           const mutation = `
             mutation SendChatMessage($input: SendChatMessageInput!) {

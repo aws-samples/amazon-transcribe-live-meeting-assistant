@@ -204,14 +204,7 @@
             <div class="message assistant">
                 <p><em>LMA Meeting Assistant is ready. Ask knowledge base questions or request a summary of the current meeting.</em></p>
                 <div class="suggestions-container" id="suggestionsContainer">
-                    <button class="suggestion-button" data-prompt="Summarize this meeting">SUMMARIZE</button>
-                    <button class="suggestion-button" data-prompt="What were the action items?">ACTIONS</button>
-                    <button class="suggestion-button" data-prompt="What topics were discussed?">TOPICS</button>
-                    <button class="suggestion-button" data-prompt="Please respond to the last question or instruction in this meeting.">ASK ASSISTANT!</button>
-                    <button class="more-button" id="moreButton">MORE</button>
-                    <button class="suggestion-button extra-suggestion" data-prompt="Can you fact-check the recent statements made in this meeting?" style="display: none;">FACT CHECK</button>
-                    <button class="suggestion-button extra-suggestion" data-prompt="Based on what we're discussing in this meeting, have we talked about this topic in previous meetings?" style="display: none;">DISCUSSED BEFORE?</button>
-                    <button class="suggestion-button extra-suggestion" data-prompt="Based on the current meeting discussion, are there any relevant company documents or policies?" style="display: none;">FIND DOCS</button>
+                    <!-- Buttons will be loaded dynamically -->
                 </div>
             </div>
         </div>
@@ -228,6 +221,10 @@
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
+        
+        // Load button configuration on page load
+        let buttonConfig = null;
+        loadButtonConfiguration();
 
         function addMessage(text, type = 'assistant') {
             const messageDiv = document.createElement('div');
@@ -374,50 +371,178 @@
             window.addEventListener('message', tokenHandler);
         }
 
-        // Add click handlers for suggestion buttons
-        function setupSuggestionButtons() {
-            const suggestionButtons = document.querySelectorAll('.suggestion-button:not(.more-button)');
-            const moreButton = document.getElementById('moreButton');
-            const extraButtons = document.querySelectorAll('.extra-suggestion');
+        // Load button configuration from DynamoDB
+        async function loadButtonConfiguration() {
+            try {
+                const config = await fetchButtonConfiguration();
+                if (config) {
+                    buttonConfig = config;
+                    renderSuggestionButtons(config);
+                } else {
+                    // Fallback to default hardcoded buttons if config fetch fails
+                    renderDefaultButtons();
+                }
+            } catch (error) {
+                console.error('Error loading button configuration:', error);
+                renderDefaultButtons();
+            }
+        }
+        
+        async function fetchButtonConfiguration() {
+            return new Promise((resolve, reject) => {
+                const requestId = `button-config-${Date.now()}`;
+                
+                const configHandler = (event) => {
+                    if (event.data?.type === 'STRANDS_BUTTON_CONFIG_RESPONSE' && event.data.requestId === requestId) {
+                        window.removeEventListener('message', configHandler);
+                        event.data.success ? resolve(event.data.config) : reject(new Error(event.data.error));
+                    }
+                };
+                
+                window.addEventListener('message', configHandler);
+                
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'STRANDS_BUTTON_CONFIG_REQUEST',
+                        requestId
+                    }, '*');
+                    
+                    setTimeout(() => {
+                        window.removeEventListener('message', configHandler);
+                        reject(new Error('Button config request timeout'));
+                    }, 5000);
+                } else {
+                    reject(new Error('No parent window available'));
+                }
+            });
+        }
+        
+        function renderSuggestionButtons(config) {
+            const container = document.getElementById('suggestionsContainer');
+            container.innerHTML = '';
             
-            // Show More button initially
-            if (moreButton) {
-                moreButton.style.display = 'inline-block';
+            if (!config || Object.keys(config).length === 0) {
+                renderDefaultButtons();
+                return;
             }
             
-            // Handle More button click
-            if (moreButton) {
+            // Sort buttons by sequence number (N# prefix)
+            const sortedButtons = Object.entries(config)
+                .sort((a, b) => {
+                    const getSequence = (key) => {
+                        const match = key.match(/^(\d+)#/);
+                        return match ? parseInt(match[1]) : 999;
+                    };
+                    return getSequence(a[0]) - getSequence(b[0]);
+                });
+            
+            // Show first 4 buttons, hide rest initially
+            const visibleCount = 4;
+            let hasHiddenButtons = false;
+            
+            sortedButtons.forEach(([key, prompt], index) => {
+                // Skip if prompt is empty or "NONE"
+                if (!prompt || prompt.trim() === '' || prompt.toUpperCase() === 'NONE') {
+                    return;
+                }
+                
+                // Extract label from key (remove N# prefix)
+                const label = key.replace(/^\d+#/, '');
+                
+                const button = document.createElement('button');
+                button.className = 'suggestion-button';
+                button.setAttribute('data-prompt', prompt);
+                button.textContent = label;
+                
+                if (index >= visibleCount) {
+                    button.classList.add('extra-suggestion');
+                    button.style.display = 'none';
+                    hasHiddenButtons = true;
+                }
+                
+                button.addEventListener('click', () => {
+                    messageInput.value = prompt;
+                    messageInput.focus();
+                    sendMessage();
+                });
+                
+                container.appendChild(button);
+            });
+            
+            // Add MORE button if there are hidden buttons
+            if (hasHiddenButtons) {
+                const moreButton = document.createElement('button');
+                moreButton.className = 'more-button';
+                moreButton.id = 'moreButton';
+                moreButton.textContent = 'MORE';
                 moreButton.addEventListener('click', () => {
-                    // Show extra buttons
+                    const extraButtons = document.querySelectorAll('.extra-suggestion');
                     extraButtons.forEach(btn => {
                         btn.style.display = 'inline-block';
                     });
-                    // Hide More button
                     moreButton.style.display = 'none';
                 });
+                container.appendChild(moreButton);
             }
+        }
+        
+        function renderDefaultButtons() {
+            // Fallback to hardcoded default buttons (commented out, no defaults for now)
+            const defaultButtons = [
+                // { label: 'SUMMARIZE', prompt: 'Summarize this meeting' },
+                // { label: 'ACTIONS', prompt: 'What were the action items?' },
+                // { label: 'TOPICS', prompt: 'What topics were discussed?' },
+                // { label: 'ASK ASSISTANT!', prompt: 'Please respond to the last question or instruction in this meeting.' },
+                // { label: 'FACT CHECK', prompt: 'Can you fact-check the recent statements made in this meeting?', hidden: true },
+                // { label: 'DISCUSSED BEFORE?', prompt: 'Based on what we\'re discussing in this meeting, have we talked about this topic in previous meetings?', hidden: true },
+                // { label: 'FIND DOCS', prompt: 'Based on the current meeting discussion, are there any relevant company documents or policies?', hidden: true }
+            ];
             
-            // Handle suggestion button clicks
-            suggestionButtons.forEach(button => {
+            const container = document.getElementById('suggestionsContainer');
+            container.innerHTML = '';
+            
+            let hasHiddenButtons = false;
+            
+            defaultButtons.forEach(({ label, prompt, hidden }) => {
+                const button = document.createElement('button');
+                button.className = 'suggestion-button';
+                button.setAttribute('data-prompt', prompt);
+                button.textContent = label;
+                
+                if (hidden) {
+                    button.classList.add('extra-suggestion');
+                    button.style.display = 'none';
+                    hasHiddenButtons = true;
+                }
+                
                 button.addEventListener('click', () => {
-                    const prompt = button.getAttribute('data-prompt');
-                    
-                    if (prompt) {
-                        // Auto-fill and send the prompt
-                        messageInput.value = prompt;
-                        messageInput.focus();
-                        sendMessage();
-                    }
+                    messageInput.value = prompt;
+                    messageInput.focus();
+                    sendMessage();
                 });
+                
+                container.appendChild(button);
             });
+            
+            if (hasHiddenButtons) {
+                const moreButton = document.createElement('button');
+                moreButton.className = 'more-button';
+                moreButton.id = 'moreButton';
+                moreButton.textContent = 'MORE';
+                moreButton.addEventListener('click', () => {
+                    const extraButtons = document.querySelectorAll('.extra-suggestion');
+                    extraButtons.forEach(btn => {
+                        btn.style.display = 'inline-block';
+                    });
+                    moreButton.style.display = 'none';
+                });
+                container.appendChild(moreButton);
+            }
         }
 
         sendButton.addEventListener('click', sendMessage);
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
-        
-        // Initialize suggestion buttons
-        setupSuggestionButtons();
     </script>
 </body>
