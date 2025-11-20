@@ -105,6 +105,45 @@
             color: #007bff;
             text-decoration: underline;
         }
+        /* Suggestion buttons styling */
+        .suggestions-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 10px 0;
+            justify-content: flex-start;
+        }
+        .suggestion-button {
+            padding: 10px 20px;
+            background-color: #8ab4f8;
+            color: #1a1a1a;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .suggestion-button:hover {
+            background-color: #6fa0f6;
+        }
+        .suggestion-button:active {
+            transform: translateY(1px);
+        }
+        .more-button {
+            background: none;
+            border: none;
+            color: #007bff;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 300;
+            padding: 5px;
+            text-decoration: none;
+        }
+        .more-button:hover {
+            color: #0056b3;
+        }
         .input-container {
             padding: 20px;
             border-top: 1px solid #dee2e6;
@@ -163,7 +202,17 @@
     <div class="chat-container">
         <div class="chat-messages" id="chatMessages">
             <div class="message assistant">
-                Hello! I'm your STRANDS meeting assistant. I can help answer questions about the meeting or provide information. How can I assist you?
+                <p><em>LMA Meeting Assistant is ready. Ask knowledge base questions or request a summary of the current meeting.</em></p>
+                <div class="suggestions-container" id="suggestionsContainer">
+                    <button class="suggestion-button" data-prompt="Summarize this meeting">SUMMARIZE</button>
+                    <button class="suggestion-button" data-prompt="What were the action items?">ACTIONS</button>
+                    <button class="suggestion-button" data-prompt="What topics were discussed?">TOPICS</button>
+                    <button class="suggestion-button" data-prompt="Please respond to the last question or instruction in this meeting.">ASK ASSISTANT!</button>
+                    <button class="more-button" id="moreButton">MORE</button>
+                    <button class="suggestion-button extra-suggestion" data-prompt="Can you fact-check the recent statements made in this meeting?" style="display: none;">FACT CHECK</button>
+                    <button class="suggestion-button extra-suggestion" data-prompt="Based on what we're discussing in this meeting, have we talked about this topic in previous meetings?" style="display: none;">DISCUSSED BEFORE?</button>
+                    <button class="suggestion-button extra-suggestion" data-prompt="Based on the current meeting discussion, are there any relevant company documents or policies?" style="display: none;">FIND DOCS</button>
+                </div>
             </div>
         </div>
         <div class="input-container">
@@ -325,11 +374,50 @@
             window.addEventListener('message', tokenHandler);
         }
 
+        // Add click handlers for suggestion buttons
+        function setupSuggestionButtons() {
+            const suggestionButtons = document.querySelectorAll('.suggestion-button:not(.more-button)');
+            const moreButton = document.getElementById('moreButton');
+            const extraButtons = document.querySelectorAll('.extra-suggestion');
+            
+            // Show More button initially
+            if (moreButton) {
+                moreButton.style.display = 'inline-block';
+            }
+            
+            // Handle More button click
+            if (moreButton) {
+                moreButton.addEventListener('click', () => {
+                    // Show extra buttons
+                    extraButtons.forEach(btn => {
+                        btn.style.display = 'inline-block';
+                    });
+                    // Hide More button
+                    moreButton.style.display = 'none';
+                });
+            }
+            
+            // Handle suggestion button clicks
+            suggestionButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const prompt = button.getAttribute('data-prompt');
+                    
+                    if (prompt) {
+                        // Auto-fill and send the prompt
+                        messageInput.value = prompt;
+                        messageInput.focus();
+                        sendMessage();
+                    }
+                });
+            });
+        }
+
         sendButton.addEventListener('click', sendMessage);
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
-        messageInput.focus();
+        
+        // Initialize suggestion buttons
+        setupSuggestionButtons();
     </script>
 </body>
-</html>
