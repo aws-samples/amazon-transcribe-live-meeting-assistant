@@ -5,21 +5,26 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Badge,
   Box,
   Button,
   ButtonDropdown,
   ColumnLayout,
   Container,
+  FormField,
   Grid,
   Header,
   Icon,
+  Input,
   Link,
+  Modal,
   Popover,
   SpaceBetween,
   StatusIndicator,
   Tabs,
   TextContent,
+  Textarea,
   Toggle,
 } from '@awsui/components-react';
 import rehypeRaw from 'rehype-raw';
@@ -765,7 +770,244 @@ const CallInProgressTranscript = ({
   );
 };
 
-const getAgentAssistPanel = (item, collapseSentiment) => {
+const getAgentAssistPanel = (item, collapseSentiment, user) => {
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [buttonConfig, setButtonConfig] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [alertMessage, setAlertMessage] = useState(null);
+  const [alertType, setAlertType] = useState('success');
+
+  // Check if user is admin
+  const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
+  const isAdmin = userGroups.includes('Admin');
+
+  const loadButtonConfiguration = async () => {
+    setIsLoading(true);
+    setAlertMessage(null);
+
+    try {
+      const query = `
+        query GetChatButtonConfig($defaultId: ID!, $customId: ID!) {
+          default: getChatButtonConfig(ChatButtonConfigId: $defaultId) {
+            ChatButtonConfigId
+          }
+          custom: getChatButtonConfig(ChatButtonConfigId: $customId) {
+            ChatButtonConfigId
+          }
+        }
+      `;
+
+      const variables = {
+        defaultId: 'DefaultChatButtonConfig',
+        customId: 'CustomChatButtonConfig',
+      };
+
+      const result = await API.graphql(graphqlOperation(query, variables));
+
+      // Parse the JSON strings returned from the resolver
+      const defaultData = result?.data?.default?.ChatButtonConfigId
+        ? JSON.parse(result.data.default.ChatButtonConfigId)
+        : {};
+      const customData = result?.data?.custom?.ChatButtonConfigId
+        ? JSON.parse(result.data.custom.ChatButtonConfigId)
+        : {};
+
+      // Filter to only include button fields (format: N#LABEL)
+      const buttonPattern = /^\d+#/;
+      const filterButtons = (config) => {
+        const filtered = {};
+        Object.keys(config).forEach((key) => {
+          if (buttonPattern.test(key)) {
+            filtered[key] = config[key];
+          }
+        });
+        return filtered;
+      };
+
+      const defaultButtons = filterButtons(defaultData);
+      const customButtons = filterButtons(customData);
+
+      // If custom buttons exist, use those; otherwise use defaults
+      const hasCustomButtons = Object.keys(customButtons).length > 0;
+      setButtonConfig(hasCustomButtons ? customButtons : defaultButtons);
+    } catch (error) {
+      console.error('Failed to load button configuration:', error);
+      setAlertType('error');
+      setAlertMessage('Failed to load button configuration');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load button configuration when modal opens
+  useEffect(() => {
+    if (showEditModal && isAdmin) {
+      loadButtonConfiguration();
+    }
+  }, [showEditModal, isAdmin]);
+
+  const handleSave = async () => {
+    setIsLoading(true);
+    setAlertMessage(null);
+
+    try {
+      const mutation = `
+        mutation UpdateChatButtonConfig($input: UpdateChatButtonConfigInput!) {
+          updateChatButtonConfig(input: $input) {
+            ChatButtonConfigId
+            Success
+          }
+        }
+      `;
+
+      const variables = {
+        input: {
+          ChatButtonConfigId: 'CustomChatButtonConfig',
+          ButtonConfig: JSON.stringify(buttonConfig),
+        },
+      };
+
+      await API.graphql(graphqlOperation(mutation, variables));
+
+      setAlertType('success');
+      setAlertMessage('Button configuration saved successfully!');
+
+      // Notify iframe to reload button configuration
+      const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          {
+            type: 'STRANDS_RELOAD_BUTTONS',
+          },
+          '*',
+        );
+      }
+
+      // Close modal after short delay
+      setTimeout(() => {
+        setShowEditModal(false);
+      }, 1500);
+    } catch (error) {
+      console.error('Failed to save button configuration:', error);
+      setAlertType('error');
+      setAlertMessage('Failed to save button configuration');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (
+      !window.confirm('Are you sure you want to reset to default buttons? This will delete all custom configurations.')
+    ) {
+      return;
+    }
+
+    setIsLoading(true);
+    setAlertMessage(null);
+
+    try {
+      const mutation = `
+        mutation UpdateChatButtonConfig($input: UpdateChatButtonConfigInput!) {
+          updateChatButtonConfig(input: $input) {
+            ChatButtonConfigId
+            Success
+          }
+        }
+      `;
+
+      const variables = {
+        input: {
+          ChatButtonConfigId: 'CustomChatButtonConfig',
+          ButtonConfig: JSON.stringify({}),
+        },
+      };
+
+      await API.graphql(graphqlOperation(mutation, variables));
+
+      setAlertType('success');
+      setAlertMessage('Reset to defaults successfully!');
+
+      // Notify iframe to reload button configuration
+      const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          {
+            type: 'STRANDS_RELOAD_BUTTONS',
+          },
+          '*',
+        );
+      }
+
+      // Reload to show default config
+      setTimeout(() => {
+        loadButtonConfiguration();
+      }, 1500);
+    } catch (error) {
+      console.error('Failed to reset button configuration:', error);
+      setAlertType('error');
+      setAlertMessage('Failed to reset to defaults');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleButtonChange = (key, field, value) => {
+    if (field === 'label') {
+      // Update the key when label changes
+      const match = key.match(/^(\d+)#/);
+      if (match) {
+        const sequence = parseInt(match[1], 10);
+        const newKey = `${sequence}#${value}`;
+        const newConfig = { ...buttonConfig };
+        const oldPrompt = newConfig[key];
+        delete newConfig[key];
+        newConfig[newKey] = oldPrompt;
+        setButtonConfig(newConfig);
+      }
+    } else {
+      // Update prompt
+      setButtonConfig({
+        ...buttonConfig,
+        [key]: value,
+      });
+    }
+  };
+
+  const renderButtonEditors = () => {
+    if (!buttonConfig) return null;
+
+    // Sort by sequence number
+    const sortedEntries = Object.entries(buttonConfig).sort((a, b) => {
+      const getSequence = (key) => {
+        const match = key.match(/^(\d+)#/);
+        return match ? parseInt(match[1], 10) : 999;
+      };
+      return getSequence(a[0]) - getSequence(b[0]);
+    });
+
+    return sortedEntries.map(([key, prompt]) => {
+      const match = key.match(/^(\d+)#(.+)$/);
+      if (!match) return null;
+
+      const [, sequence, label] = match;
+
+      return (
+        <Box key={key} padding={{ vertical: 's' }}>
+          <SpaceBetween size="s">
+            <Box variant="h4">Button {sequence}</Box>
+            <FormField label="Label">
+              <Input value={label} onChange={(e) => handleButtonChange(key, 'label', e.detail.value)} />
+            </FormField>
+            <FormField label='Prompt (set to "NONE" to hide button)'>
+              <Textarea value={prompt} onChange={(e) => handleButtonChange(key, 'prompt', e.detail.value)} rows={3} />
+            </FormField>
+          </SpaceBetween>
+        </Box>
+      );
+    });
+  };
+
   if (process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true') {
     // Use STRANDS UI for Lambda mode, Lex UI for Lex mode
     const iframeSrc =
@@ -776,30 +1018,92 @@ const getAgentAssistPanel = (item, collapseSentiment) => {
     console.log(`DEBUG: Agent Assist Mode: ${process.env.REACT_APP_AGENT_ASSIST_MODE}, Using iframe: ${iframeSrc}`);
 
     return (
-      <Container
-        disableContentPaddings
-        header={
-          <Header
-            variant="h4"
-            info={
-              <Link variant="info" target="_blank" href="https://amazon.com/live-meeting-assistant">
-                Info
-              </Link>
-            }
-          >
-            Meeting Assist Bot
-          </Header>
-        }
-      >
-        <Box style={{ height: collapseSentiment ? '34vh' : '68vh' }}>
-          <iframe
-            style={{ border: '0px', height: collapseSentiment ? '34vh' : '68vh', margin: '0' }}
-            title="Meeting Assist"
-            src={iframeSrc}
-            width="100%"
-          />
-        </Box>
-      </Container>
+      <>
+        <Container
+          disableContentPaddings
+          header={
+            <Header
+              variant="h4"
+              info={
+                <Link variant="info" target="_blank" href="https://amazon.com/live-meeting-assistant">
+                  Info
+                </Link>
+              }
+              actions={
+                isAdmin && process.env.REACT_APP_AGENT_ASSIST_MODE === 'LAMBDA' ? (
+                  <ButtonDropdown
+                    items={[
+                      { text: 'Edit Chat Buttons', id: 'edit-buttons' },
+                      { text: 'Open VP Live View', id: 'live-view', disabled: true },
+                      { text: 'MCP Servers', id: 'mcp-servers', disabled: true },
+                    ]}
+                    variant="normal"
+                    onItemClick={(e) => {
+                      if (e.detail.id === 'edit-buttons') {
+                        setShowEditModal(true);
+                      }
+                    }}
+                    ariaLabel="Settings"
+                  >
+                    <Icon name="settings" />
+                  </ButtonDropdown>
+                ) : null
+              }
+            >
+              Meeting Assist Bot
+            </Header>
+          }
+        >
+          <Box style={{ height: collapseSentiment ? '34vh' : '68vh' }}>
+            <iframe
+              style={{ border: '0px', height: collapseSentiment ? '34vh' : '68vh', margin: '0' }}
+              title="Meeting Assist"
+              src={iframeSrc}
+              width="100%"
+            />
+          </Box>
+        </Container>
+
+        {/* Edit Buttons Modal */}
+        <Modal
+          visible={showEditModal}
+          onDismiss={() => setShowEditModal(false)}
+          size="large"
+          header="Edit Chat Buttons"
+          footer={
+            <Box float="right">
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button variant="normal" onClick={handleReset} disabled={isLoading}>
+                  Reset to Defaults
+                </Button>
+                <Button variant="link" onClick={() => setShowEditModal(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={handleSave} disabled={isLoading}>
+                  Save Changes
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+        >
+          <SpaceBetween size="m">
+            <Alert type={alertType} visible={!!alertMessage}>
+              {alertMessage}
+            </Alert>
+
+            <Box>
+              Customize the suggestion buttons that appear in the chat. Changes will apply to all users. Set prompt to
+              &quot;NONE&quot; to hide a button.
+            </Box>
+
+            {isLoading ? (
+              <Box textAlign="center">Loading...</Box>
+            ) : (
+              <SpaceBetween size="m">{renderButtonEditors()}</SpaceBetween>
+            )}
+          </SpaceBetween>
+        </Modal>
+      </>
     );
   }
   return null;
@@ -842,6 +1146,7 @@ const CallTranscriptContainer = ({
   translateClient,
   collapseSentiment,
   enableSentimentAnalysis,
+  user,
 }) => {
   // defaults to auto scroll when call is in progress
   const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
@@ -966,7 +1271,7 @@ const CallTranscriptContainer = ({
           enableSentimentAnalysis,
         })}
       </Container>
-      {getAgentAssistPanel(item, collapseSentiment)}
+      {getAgentAssistPanel(item, collapseSentiment, user)}
     </Grid>
   );
 };
@@ -1102,7 +1407,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
 );
 
 export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCallDetailsFromCallIds }) => {
-  const { currentCredentials } = useAppContext();
+  const { currentCredentials, user } = useAppContext();
 
   const { settings } = useSettingsContext();
   const [collapseSentiment, setCollapseSentiment] = useState(false);
@@ -1141,11 +1446,57 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     });
   }, [currentCredentials]);
 
+  // Send user context to iframe when it loads
+  useEffect(() => {
+    const sendUserContextToIframe = () => {
+      const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+      if (iframe && iframe.contentWindow && user) {
+        // Extract user groups from Cognito token
+        const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
+        const isAdmin = userGroups.includes('Admin');
+
+        iframe.contentWindow.postMessage(
+          {
+            type: 'STRANDS_USER_CONTEXT',
+            userGroups,
+            isAdmin,
+            email: user?.attributes?.email || '',
+          },
+          '*',
+        );
+      }
+    };
+
+    // Send user context after a short delay to ensure iframe is loaded
+    const timer = setTimeout(sendUserContextToIframe, 500);
+
+    return () => clearTimeout(timer);
+  }, [user, item.callId]);
+
   // Add message handler for STRANDS iframe requests
   useEffect(() => {
     const handleMessage = async (event) => {
+      // Handle user context request from iframe
+      if (event.data && event.data.type === 'STRANDS_REQUEST_USER_CONTEXT') {
+        const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
+        const isAdmin = userGroups.includes('Admin');
+
+        const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage(
+            {
+              type: 'STRANDS_USER_CONTEXT',
+              userGroups,
+              isAdmin,
+              email: user?.attributes?.email || '',
+            },
+            '*',
+          );
+        }
+      }
+
       // Handle button configuration requests
-      if (event.data && event.data.type === 'STRANDS_BUTTON_CONFIG_REQUEST') {
+      else if (event.data && event.data.type === 'STRANDS_BUTTON_CONFIG_REQUEST') {
         try {
           const query = `
             query GetChatButtonConfig($defaultId: ID!, $customId: ID!) {
@@ -1218,6 +1569,59 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
                 requestId: event.data.requestId,
                 success: false,
                 error: error.message || error.errors?.[0]?.message || 'getChatButtonConfig call failed',
+              },
+              '*',
+            );
+          }
+        }
+      }
+
+      // Handle update button configuration requests (admin only)
+      else if (event.data && event.data.type === 'STRANDS_UPDATE_BUTTON_CONFIG_REQUEST') {
+        try {
+          const mutation = `
+            mutation UpdateChatButtonConfig($input: UpdateChatButtonConfigInput!) {
+              updateChatButtonConfig(input: $input) {
+                ChatButtonConfigId
+                Success
+              }
+            }
+          `;
+
+          const variables = {
+            input: {
+              ChatButtonConfigId: 'CustomChatButtonConfig',
+              ButtonConfig: event.data.buttonConfig,
+            },
+          };
+
+          const result = await API.graphql(graphqlOperation(mutation, variables));
+
+          // Send success response back to iframe
+          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+          if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage(
+              {
+                type: 'STRANDS_UPDATE_BUTTON_CONFIG_RESPONSE',
+                requestId: event.data.requestId,
+                success: true,
+                result,
+              },
+              '*',
+            );
+          }
+        } catch (error) {
+          logger.error('updateChatButtonConfig call failed', error);
+
+          // Send error response back to iframe
+          const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
+          if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage(
+              {
+                type: 'STRANDS_UPDATE_BUTTON_CONFIG_RESPONSE',
+                requestId: event.data.requestId,
+                success: false,
+                error: error.message || error.errors?.[0]?.message || 'updateChatButtonConfig call failed',
               },
               '*',
             );
@@ -1331,7 +1735,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, []);
+  }, [user]);
 
   return (
     <SpaceBetween size="s">
@@ -1369,6 +1773,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         translateClient={translateClient}
         collapseSentiment={collapseSentiment}
         enableSentimentAnalysis={enableSentimentAnalysis}
+        user={user}
       />
     </SpaceBetween>
   );

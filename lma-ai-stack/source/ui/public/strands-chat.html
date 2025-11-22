@@ -226,6 +226,14 @@
         let buttonConfig = null;
         loadButtonConfiguration();
 
+        // Listen for reload message from parent
+        window.addEventListener('message', (event) => {
+            if (event.data?.type === 'STRANDS_RELOAD_BUTTONS') {
+                // Reload button configuration when admin saves changes
+                loadButtonConfiguration();
+            }
+        });
+
         function addMessage(text, type = 'assistant') {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}`;
