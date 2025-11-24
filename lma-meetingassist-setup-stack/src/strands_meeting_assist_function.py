@@ -257,6 +257,70 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
     
     return meeting_history
 
+
+def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: str):
+    """Factory function to create current meeting transcript tool with closure"""
+    from strands import tool
+    
+    @tool
+    def current_meeting_transcript(lines: int = 20, mode: str = "recent") -> str:
+        """Get transcript from the current meeting.
+        
+        Use this when:
+        - User asks about what was said in THIS meeting
+        - Need to reference recent statements or discussions
+        - Summarizing, extracting action items, or analyzing current meeting
+        - User asks about topics, decisions, or questions from current meeting
+        - Request is ambiguous but likely meeting-related
+        
+        DO NOT use for:
+        - General knowledge questions unrelated to the meeting
+        - Questions about past meetings (use meeting_history instead)
+        - Web searches or current events (use web_search instead)
+        
+        Args:
+            lines: Number of recent transcript lines to return (default 20, max 100)
+            mode: "recent" for last N lines, "full" for complete transcript, "semantic" for relevant excerpts
+            
+        Returns:
+            Meeting transcript text formatted with speaker names
+        """
+        if not dynamodb_table_name:
+            return "Current meeting transcript not available - no DynamoDB table configured"
+        
+        try:
+            # Limit to reasonable range
+            lines = min(max(1, lines), 100)
+            
+            logger.info(f"Current meeting transcript tool executing: lines={lines}, mode={mode}")
+            
+            # Fetch full transcript
+            full_transcript = fetch_meeting_transcript(call_id, dynamodb_table_name)
+            
+            if not full_transcript:
+                return "No transcript available for current meeting yet."
+            
+            if mode == "full":
+                return full_transcript
+            elif mode == "recent":
+                # Return last N lines
+                transcript_lines = full_transcript.split('\n')
+                recent_lines = transcript_lines[-lines:] if len(transcript_lines) > lines else transcript_lines
+                result = '\n'.join(recent_lines)
+                logger.info(f"Returning {len(recent_lines)} recent transcript lines")
+                return result
+            else:
+                # Default to recent
+                transcript_lines = full_transcript.split('\n')
+                recent_lines = transcript_lines[-lines:] if len(transcript_lines) > lines else transcript_lines
+                return '\n'.join(recent_lines)
+            
+        except Exception as e:
+            logger.error(f"Error in current meeting transcript: {str(e)}")
+            return f"Error retrieving current meeting transcript: {str(e)}"
+    
+    return current_meeting_transcript
+
 def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool, sequence: int):
     """
     Send a chat token to AppSync for real-time streaming
@@ -530,6 +594,14 @@ def handler(event, context):
             ))
             logger.info("Meeting history tool enabled")
         
+        # Add current meeting transcript tool
+        if dynamodb_table_name:
+            tools.append(create_current_meeting_transcript_tool(
+                call_id=call_id,
+                dynamodb_table_name=dynamodb_table_name
+            ))
+            logger.info("Current meeting transcript tool enabled")
+        
         # Initialize Strands Agent
         try:
             from strands import Agent
@@ -556,13 +628,9 @@ def handler(event, context):
                 tools=tools if tools else None
             )
             
-            # Prepare context for the agent
-            context_message = f"""
-Meeting Transcript:
-{transcript if transcript else "No meeting transcript available yet."}
-
-User Request: {user_input}
-"""
+            # Prepare context for the agent - don't include transcript by default
+            # The agent will use the current_meeting_transcript tool when needed
+            context_message = f"User Request: {user_input}"
             
             # Handle streaming vs non-streaming
             if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL:
@@ -668,37 +736,44 @@ def get_meeting_assistant_prompt_with_tools() -> str:
     """
     return """You are an AI assistant helping participants during a live meeting. Your role is to:
 
-1. Answer questions based on the meeting context and transcript
-2. Use available tools intelligently to provide accurate, up-to-date information
+1. Intelligently determine when meeting context is needed
+2. Use available tools to provide accurate, up-to-date information
 3. Keep responses concise and focused (under 100 words when possible)
 4. Be professional and supportive
 
 Tool usage guidelines:
 
-**For chronological queries (last/recent/latest meetings):**
-1. FIRST use recent_meetings_list to get chronologically ordered meetings
-2. THEN use meeting_history with specific CallIds if detailed content needed
-3. Example: "What was the last meeting about?" → recent_meetings_list(limit=1) → meeting_history with that CallId
+**For current meeting queries (USE current_meeting_transcript tool):**
+- Summarizing THIS meeting
+- Extracting action items from THIS meeting
+- Analyzing topics discussed in THIS meeting
+- Fact-checking recent statements in THIS meeting
+- Responding to questions about what was just said
+- When request is ambiguous but likely meeting-related
+- Default to using this tool for most meeting-related queries
 
-**For semantic queries (meetings about specific topics):**
-1. Use meeting_history directly for semantic search
-2. Optionally use recent_meetings_list first to establish time context
-3. Example: "Find meetings about budget" → meeting_history(query="budget")
+Examples:
+- "Summarize this meeting" → current_meeting_transcript(mode="full")
+- "What were the action items?" → current_meeting_transcript(mode="full")
+- "What did we just discuss?" → current_meeting_transcript(lines=20, mode="recent")
+- "Fact check that statement" → current_meeting_transcript(lines=10, mode="recent")
 
-**For hybrid queries (recent meetings about X):**
-1. Use recent_meetings_list to get recent CallIds
-2. Use meeting_history with those CallIds to filter by topic
-3. Cross-reference results to find recent meetings matching the topic
+**For past meetings queries:**
+- "Last meeting" → recent_meetings_list(limit=1) → meeting_history with CallId
+- "Meetings about X" → meeting_history(query="X")
+- "Have we discussed this before?" → meeting_history(query="topic")
 
-**Other tools:**
-- Use web_search for: current events, latest prices, recent news, real-time data
-- Use document_search for: company policies, product info, internal procedures
+**For general queries (DO NOT use current_meeting_transcript):**
+- General knowledge questions
+- Current events, weather, prices → web_search
+- Company policies, procedures → document_search
+- Questions explicitly unrelated to the meeting
 
-When using tools:
-- Always cite meeting dates when available
-- If recent_meetings_list returns no results, inform user no recent meetings found
-- Combine information from multiple tools when helpful
-- Be explicit about chronological vs semantic relevance
+**Decision logic:**
+1. If question mentions "this meeting", "current meeting", "just said", "action items", "summarize" → USE current_meeting_transcript
+2. If question is about past meetings → USE meeting_history or recent_meetings_list
+3. If question is general knowledge or current events → USE web_search or answer directly
+4. If ambiguous → DEFAULT to using current_meeting_transcript (most queries are meeting-related)
 
 Always maintain a helpful and professional tone."""
 

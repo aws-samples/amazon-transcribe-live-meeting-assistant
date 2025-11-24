@@ -51,6 +51,99 @@
             color: white;
             align-self: flex-start;
         }
+        /* Markdown formatting styles */
+        .message.assistant h1,
+        .message.assistant h2,
+        .message.assistant h3,
+        .message.assistant h4,
+        .message.assistant h5,
+        .message.assistant h6 {
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+        }
+        .message.assistant p {
+            margin: 0.5em 0;
+        }
+        .message.assistant ul,
+        .message.assistant ol {
+            margin: 0.5em 0;
+            padding-left: 1.5em;
+        }
+        .message.assistant li {
+            margin: 0.25em 0;
+        }
+        .message.assistant code {
+            background-color: rgba(0, 0, 0, 0.05);
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .message.assistant pre {
+            background-color: rgba(0, 0, 0, 0.05);
+            padding: 8px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .message.assistant pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .message.assistant blockquote {
+            border-left: 3px solid #007bff;
+            padding-left: 1em;
+            margin: 0.5em 0;
+            color: #666;
+        }
+        .message.assistant strong {
+            font-weight: 600;
+        }
+        .message.assistant em {
+            font-style: italic;
+        }
+        .message.assistant a {
+            color: #007bff;
+            text-decoration: underline;
+        }
+        /* Suggestion buttons styling */
+        .suggestions-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 10px 0;
+            justify-content: flex-start;
+        }
+        .suggestion-button {
+            padding: 10px 20px;
+            background-color: #8ab4f8;
+            color: #1a1a1a;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .suggestion-button:hover {
+            background-color: #6fa0f6;
+        }
+        .suggestion-button:active {
+            transform: translateY(1px);
+        }
+        .more-button {
+            background: none;
+            border: none;
+            color: #007bff;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 300;
+            padding: 5px;
+            text-decoration: none;
+        }
+        .more-button:hover {
+            color: #0056b3;
+        }
         .input-container {
             padding: 20px;
             border-top: 1px solid #dee2e6;
@@ -102,12 +195,17 @@
             100% { transform: rotate(360deg); }
         }
     </style>
+    <!-- Include marked.js for markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
 </head>
 <body>
     <div class="chat-container">
         <div class="chat-messages" id="chatMessages">
             <div class="message assistant">
-                Hello! I'm your STRANDS meeting assistant. I can help answer questions about the meeting or provide information. How can I assist you?
+                <p><em>LMA Meeting Assistant is ready. Ask knowledge base questions or request a summary of the current meeting.</em></p>
+                <div class="suggestions-container" id="suggestionsContainer">
+                    <!-- Buttons will be loaded dynamically -->
+                </div>
             </div>
         </div>
         <div class="input-container">
@@ -123,11 +221,30 @@
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
+        
+        // Load button configuration on page load
+        let buttonConfig = null;
+        loadButtonConfiguration();
+
+        // Listen for reload message from parent
+        window.addEventListener('message', (event) => {
+            if (event.data?.type === 'STRANDS_RELOAD_BUTTONS') {
+                // Reload button configuration when admin saves changes
+                loadButtonConfiguration();
+            }
+        });
 
         function addMessage(text, type = 'assistant') {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}`;
-            messageDiv.textContent = text;
+            
+            // Use markdown rendering for assistant messages, plain text for user/error
+            if (type === 'assistant' && typeof marked !== 'undefined') {
+                messageDiv.innerHTML = marked.parse(text);
+            } else {
+                messageDiv.textContent = text;
+            }
+            
             chatMessages.appendChild(messageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
@@ -221,6 +338,9 @@
             chatMessages.appendChild(streamingMessageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
             
+            // Track accumulated text for markdown rendering
+            let accumulatedText = '';
+            
             window.parent.postMessage({
                 type: 'STRANDS_SETUP_TOKEN_SUBSCRIPTION',
                 callId,
@@ -234,9 +354,22 @@
                     if (token.MessageId === messageId) {
                         if (token.IsComplete) {
                             removeLoadingMessage();
+                            // Final render with markdown
+                            if (typeof marked !== 'undefined' && accumulatedText) {
+                                streamingMessageDiv.innerHTML = marked.parse(accumulatedText);
+                            }
                             window.removeEventListener('message', tokenHandler);
                         } else {
-                            streamingMessageDiv.textContent += token.Token;
+                            // Accumulate tokens
+                            accumulatedText += token.Token;
+                            
+                            // Render markdown incrementally during streaming
+                            if (typeof marked !== 'undefined') {
+                                streamingMessageDiv.innerHTML = marked.parse(accumulatedText);
+                            } else {
+                                streamingMessageDiv.textContent = accumulatedText;
+                            }
+                            
                             chatMessages.scrollTop = chatMessages.scrollHeight;
                         }
                     }
@@ -246,11 +379,178 @@
             window.addEventListener('message', tokenHandler);
         }
 
+        // Load button configuration from DynamoDB
+        async function loadButtonConfiguration() {
+            try {
+                const config = await fetchButtonConfiguration();
+                if (config) {
+                    buttonConfig = config;
+                    renderSuggestionButtons(config);
+                } else {
+                    // Fallback to default hardcoded buttons if config fetch fails
+                    renderDefaultButtons();
+                }
+            } catch (error) {
+                console.error('Error loading button configuration:', error);
+                renderDefaultButtons();
+            }
+        }
+        
+        async function fetchButtonConfiguration() {
+            return new Promise((resolve, reject) => {
+                const requestId = `button-config-${Date.now()}`;
+                
+                const configHandler = (event) => {
+                    if (event.data?.type === 'STRANDS_BUTTON_CONFIG_RESPONSE' && event.data.requestId === requestId) {
+                        window.removeEventListener('message', configHandler);
+                        event.data.success ? resolve(event.data.config) : reject(new Error(event.data.error));
+                    }
+                };
+                
+                window.addEventListener('message', configHandler);
+                
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'STRANDS_BUTTON_CONFIG_REQUEST',
+                        requestId
+                    }, '*');
+                    
+                    setTimeout(() => {
+                        window.removeEventListener('message', configHandler);
+                        reject(new Error('Button config request timeout'));
+                    }, 5000);
+                } else {
+                    reject(new Error('No parent window available'));
+                }
+            });
+        }
+        
+        function renderSuggestionButtons(config) {
+            const container = document.getElementById('suggestionsContainer');
+            container.innerHTML = '';
+            
+            if (!config || Object.keys(config).length === 0) {
+                renderDefaultButtons();
+                return;
+            }
+            
+            // Sort buttons by sequence number (N# prefix)
+            const sortedButtons = Object.entries(config)
+                .sort((a, b) => {
+                    const getSequence = (key) => {
+                        const match = key.match(/^(\d+)#/);
+                        return match ? parseInt(match[1]) : 999;
+                    };
+                    return getSequence(a[0]) - getSequence(b[0]);
+                });
+            
+            // Show first 4 buttons, hide rest initially
+            const visibleCount = 4;
+            let hasHiddenButtons = false;
+            
+            sortedButtons.forEach(([key, prompt], index) => {
+                // Skip if prompt is empty or "NONE"
+                if (!prompt || prompt.trim() === '' || prompt.toUpperCase() === 'NONE') {
+                    return;
+                }
+                
+                // Extract label from key (remove N# prefix)
+                const label = key.replace(/^\d+#/, '');
+                
+                const button = document.createElement('button');
+                button.className = 'suggestion-button';
+                button.setAttribute('data-prompt', prompt);
+                button.textContent = label;
+                
+                if (index >= visibleCount) {
+                    button.classList.add('extra-suggestion');
+                    button.style.display = 'none';
+                    hasHiddenButtons = true;
+                }
+                
+                button.addEventListener('click', () => {
+                    messageInput.value = prompt;
+                    messageInput.focus();
+                    sendMessage();
+                });
+                
+                container.appendChild(button);
+            });
+            
+            // Add MORE button if there are hidden buttons
+            if (hasHiddenButtons) {
+                const moreButton = document.createElement('button');
+                moreButton.className = 'more-button';
+                moreButton.id = 'moreButton';
+                moreButton.textContent = 'MORE';
+                moreButton.addEventListener('click', () => {
+                    const extraButtons = document.querySelectorAll('.extra-suggestion');
+                    extraButtons.forEach(btn => {
+                        btn.style.display = 'inline-block';
+                    });
+                    moreButton.style.display = 'none';
+                });
+                container.appendChild(moreButton);
+            }
+        }
+        
+        function renderDefaultButtons() {
+            // Fallback to hardcoded default buttons (commented out, no defaults for now)
+            const defaultButtons = [
+                // { label: 'SUMMARIZE', prompt: 'Summarize this meeting' },
+                // { label: 'ACTIONS', prompt: 'What were the action items?' },
+                // { label: 'TOPICS', prompt: 'What topics were discussed?' },
+                // { label: 'ASK ASSISTANT!', prompt: 'Please respond to the last question or instruction in this meeting.' },
+                // { label: 'FACT CHECK', prompt: 'Can you fact-check the recent statements made in this meeting?', hidden: true },
+                // { label: 'DISCUSSED BEFORE?', prompt: 'Based on what we\'re discussing in this meeting, have we talked about this topic in previous meetings?', hidden: true },
+                // { label: 'FIND DOCS', prompt: 'Based on the current meeting discussion, are there any relevant company documents or policies?', hidden: true }
+            ];
+            
+            const container = document.getElementById('suggestionsContainer');
+            container.innerHTML = '';
+            
+            let hasHiddenButtons = false;
+            
+            defaultButtons.forEach(({ label, prompt, hidden }) => {
+                const button = document.createElement('button');
+                button.className = 'suggestion-button';
+                button.setAttribute('data-prompt', prompt);
+                button.textContent = label;
+                
+                if (hidden) {
+                    button.classList.add('extra-suggestion');
+                    button.style.display = 'none';
+                    hasHiddenButtons = true;
+                }
+                
+                button.addEventListener('click', () => {
+                    messageInput.value = prompt;
+                    messageInput.focus();
+                    sendMessage();
+                });
+                
+                container.appendChild(button);
+            });
+            
+            if (hasHiddenButtons) {
+                const moreButton = document.createElement('button');
+                moreButton.className = 'more-button';
+                moreButton.id = 'moreButton';
+                moreButton.textContent = 'MORE';
+                moreButton.addEventListener('click', () => {
+                    const extraButtons = document.querySelectorAll('.extra-suggestion');
+                    extraButtons.forEach(btn => {
+                        btn.style.display = 'inline-block';
+                    });
+                    moreButton.style.display = 'none';
+                });
+                container.appendChild(moreButton);
+            }
+        }
+
         sendButton.addEventListener('click', sendMessage);
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
-        messageInput.focus();
     </script>
 </body>
-</html>

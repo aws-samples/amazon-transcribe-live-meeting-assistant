@@ -1794,6 +1794,17 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
+  CHATBUTTONCONFIGSTACK:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-chat-button-config-stack/chat-button-config.yaml
+      Parameters:
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+
   COGNITOSTACK:
     Type: AWS::CloudFormation::Stack
     DependsOn:
@@ -1862,6 +1873,7 @@ Resources:
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
+        ChatButtonConfigTableName: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.ChatButtonConfigTableName
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CallDataStream: !Ref CallDataStream
         CallDataStreamArn: !GetAtt CallDataStream.Arn
@@ -2280,6 +2292,14 @@ Outputs:
       Edit the *custom* summary prompts. Attribute values here override
       the default summary prompts, and are preserved during stack updates.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
+
+  DefaultChatButtonConfig:
+    Description: View the *default* STRANDS agent chat button configuration. Do not edit. To override default buttons, add or edit attributes in the custom button config item.
+    Value: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.DefaultChatButtonConfig
+
+  CustomChatButtonConfig:
+    Description: Edit the *custom* STRANDS agent chat button configuration. Attribute values here override the default button config, and are preserved during stack updates.
+    Value: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.CustomChatButtonConfig
 
   CallDataStreamName:
     Description: >-

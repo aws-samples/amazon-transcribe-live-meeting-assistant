@@ -358,6 +358,12 @@ Parameters:
       The DynamoDB table name where the default and custom summary prompt
       templates are stored.
 
+  ChatButtonConfigTableName:
+    Type: String
+    Description:
+      The DynamoDB table name where the default and custom STRANDS agent chat button
+      configurations are stored.
+
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
@@ -2000,6 +2006,39 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt MeetingInvitationParserFunction.Arn
 
+  ChatButtonConfigDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ChatButtonConfigTable
+      Description: STRANDS Agent Chat Button Configuration DynamoDB Table
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt ChatButtonConfigDataSourceRole.Arn
+      DynamoDBConfig:
+        TableName: !Ref ChatButtonConfigTableName
+        AwsRegion: !Ref AWS::Region
+
+  ChatButtonConfigDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatButtonConfigTableName}"
+
   AppSyncStrandsChatLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -2521,6 +2560,54 @@ Resources:
           $util.error($ctx.error.message, $ctx.error.type)
         #end
         $util.toJson($ctx.result)
+
+  GetChatButtonConfigResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ChatButtonConfigDataSource.Name
+      TypeName: Query
+      FieldName: getChatButtonConfig
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({
+              ChatButtonConfigId: ctx.args.ChatButtonConfigId
+            })
+          };
+        }
+        
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          
+          // Return the full DynamoDB item as a JSON string in the ChatButtonConfigId field
+          // This allows us to bypass GraphQL's field filtering
+          return {
+            ChatButtonConfigId: JSON.stringify(ctx.result)
+          };
+        }
+
+  UpdateChatButtonConfigResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ChatButtonConfigDataSource.Name
+      TypeName: Mutation
+      FieldName: updateChatButtonConfig
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/updateChatButtonConfig.js
 
   SendChatMessageResolver:
     Type: AWS::AppSync::Resolver
