@@ -58,6 +58,8 @@ import {
 } from '../common/download-func';
 import useCallsContext from '../../contexts/calls';
 import { shareModal, deleteModal } from '../common/meeting-controls';
+import VNCViewer from '../virtual-participant-layout/VNCViewer';
+import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
 
 const logger = new Logger('CallPanel');
 
@@ -770,7 +772,7 @@ const CallInProgressTranscript = ({
   );
 };
 
-const getAgentAssistPanel = (item, collapseSentiment, user) => {
+const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP) => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [buttonConfig, setButtonConfig] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -1034,13 +1036,19 @@ const getAgentAssistPanel = (item, collapseSentiment, user) => {
                   <ButtonDropdown
                     items={[
                       { text: 'Edit Chat Buttons', id: 'edit-buttons' },
-                      { text: 'Open VP Live View', id: 'live-view', disabled: true },
+                      {
+                        text: showVNCPreview ? 'Close VP Live View' : 'Open VP Live View',
+                        id: 'live-view',
+                        disabled: !vpData || !vpData.vncReady || loadingVP,
+                      },
                       { text: 'MCP Servers', id: 'mcp-servers', disabled: true },
                     ]}
                     variant="normal"
                     onItemClick={(e) => {
                       if (e.detail.id === 'edit-buttons') {
                         setShowEditModal(true);
+                      } else if (e.detail.id === 'live-view') {
+                        setShowVNCPreview((prev) => !prev);
                       }
                     }}
                     ariaLabel="Settings"
@@ -1147,6 +1155,10 @@ const CallTranscriptContainer = ({
   collapseSentiment,
   enableSentimentAnalysis,
   user,
+  showVNCPreview,
+  setShowVNCPreview,
+  vpData,
+  loadingVP,
 }) => {
   // defaults to auto scroll when call is in progress
   const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
@@ -1271,7 +1283,7 @@ const CallTranscriptContainer = ({
           enableSentimentAnalysis,
         })}
       </Container>
-      {getAgentAssistPanel(item, collapseSentiment, user)}
+      {getAgentAssistPanel(item, collapseSentiment, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP)}
     </Grid>
   );
 };
@@ -1737,10 +1749,84 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     };
   }, [user]);
 
+  // VNC Preview state at CallPanel level
+  const [showVNCPreview, setShowVNCPreview] = useState(false);
+  const [vpData, setVpData] = useState(null);
+  const [loadingVP, setLoadingVP] = useState(false);
+
+  // Fetch Virtual Participant data for this call
+  useEffect(() => {
+    const fetchVPData = async () => {
+      if (!item.callId) return;
+
+      try {
+        setLoadingVP(true);
+        const result = await API.graphql(graphqlOperation(listVirtualParticipants));
+
+        const vps = result.data.listVirtualParticipants || [];
+        const matchingVP = vps.find((vp) => vp.CallId === item.callId);
+
+        if (matchingVP && matchingVP.vncReady) {
+          setVpData(matchingVP);
+          logger.info('Found VP for call:', matchingVP);
+        } else {
+          setVpData(null);
+        }
+      } catch (error) {
+        logger.error('Error fetching VP data:', error);
+        setVpData(null);
+      } finally {
+        setLoadingVP(false);
+      }
+    };
+
+    fetchVPData();
+  }, [item.callId]);
+
+  // Subscribe to VP updates
+  useEffect(() => {
+    if (!vpData?.id) return undefined;
+
+    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipant)).subscribe({
+      next: ({ value }) => {
+        const updated = value?.data?.onUpdateVirtualParticipant;
+        if (updated && updated.id === vpData.id) {
+          setVpData((prev) => ({
+            ...prev,
+            ...updated,
+          }));
+          logger.info('VP updated:', updated);
+        }
+      },
+      error: (err) => logger.error('VP subscription error:', err),
+    });
+
+    return () => subscription.unsubscribe();
+  }, [vpData?.id]);
+
   return (
     <SpaceBetween size="s">
       <CallAttributes item={item} setToolsOpen={setToolsOpen} getCallDetailsFromCallIds={getCallDetailsFromCallIds} />
-      <CallSummary item={item} />
+
+      {/* Show VNC Preview in place of Summary during active meeting if VP is available */}
+      {showVNCPreview && vpData && vpData.vncReady && item.recordingStatusLabel === IN_PROGRESS_STATUS ? (
+        <VNCViewer
+          vpId={vpData.id}
+          vncEndpoint={vpData.vncEndpoint}
+          websocketUrl={vpData.vncEndpoint}
+          status={vpData.status}
+          manualActionType={vpData.manualActionType}
+          manualActionMessage={vpData.manualActionMessage}
+          manualActionTimeoutSeconds={vpData.manualActionTimeoutSeconds}
+          manualActionStartTime={vpData.manualActionStartTime}
+          compact
+          onOpenNewTab={() => window.open(`#/virtual-participant/${vpData.id}`, '_blank')}
+          showHeader
+        />
+      ) : (
+        <CallSummary item={item} />
+      )}
+
       {(enableSentimentAnalysis || enableVoiceTone) && (
         <Grid
           gridDefinition={[
@@ -1774,6 +1860,10 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         collapseSentiment={collapseSentiment}
         enableSentimentAnalysis={enableSentimentAnalysis}
         user={user}
+        showVNCPreview={showVNCPreview}
+        setShowVNCPreview={setShowVNCPreview}
+        vpData={vpData}
+        loadingVP={loadingVP}
       />
     </SpaceBetween>
   );

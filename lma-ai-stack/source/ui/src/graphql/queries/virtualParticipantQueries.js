@@ -183,3 +183,40 @@ export const getVirtualParticipantMetrics = /* GraphQL */ `
     }
   }
 `;
+
+// Query to list Virtual Participants with VNC fields for CallPanel preview
+export const listVirtualParticipants = /* GraphQL */ `
+  query ListVirtualParticipants {
+    listVirtualParticipants {
+      id
+      CallId
+      vncEndpoint
+      vncPort
+      vncReady
+      status
+      manualActionType
+      manualActionMessage
+      manualActionTimeoutSeconds
+      manualActionStartTime
+      meetingName
+    }
+  }
+`;
+
+// Subscription for VNC preview updates
+export const onUpdateVirtualParticipant = /* GraphQL */ `
+  subscription OnUpdateVirtualParticipant {
+    onUpdateVirtualParticipant {
+      id
+      CallId
+      status
+      vncEndpoint
+      vncPort
+      vncReady
+      manualActionType
+      manualActionMessage
+      manualActionTimeoutSeconds
+      manualActionStartTime
+    }
+  }
+`;

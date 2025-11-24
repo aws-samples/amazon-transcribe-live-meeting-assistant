@@ -18,6 +18,9 @@ const VNCViewer = ({
   manualActionMessage,
   manualActionTimeoutSeconds,
   manualActionStartTime,
+  compact,
+  onOpenNewTab,
+  showHeader,
 }) => {
   const canvasRef = useRef(null);
   const rfbRef = useRef(null);
@@ -169,36 +172,43 @@ const VNCViewer = ({
   return (
     <Container
       header={
-        <Header
-          variant="h2"
-          actions={
-            <SpaceBetween direction="horizontal" size="xs">
-              <Toggle checked={viewOnly} onChange={({ detail }) => setViewOnly(detail.checked)} disabled={!connected}>
-                View Only
-              </Toggle>
-              <Toggle
-                checked={scaleViewport}
-                onChange={({ detail }) => setScaleViewport(detail.checked)}
-                disabled={!connected}
-              >
-                Scale to Fit
-              </Toggle>
-              <Button onClick={handleFullscreen} disabled={!connected} iconName="expand">
-                Fullscreen
-              </Button>
-              <Button onClick={handleCtrlAltDel} disabled={!connected}>
-                Ctrl+Alt+Del
-              </Button>
-              <Button onClick={handleRefresh} iconName="refresh">
-                Reconnect
-              </Button>
-            </SpaceBetween>
-          }
-        >
-          Live Virtual Participant View
-          {connected && <Badge color="green">Connected</Badge>}
-          {connecting && <Badge color="blue">Connecting...</Badge>}
-        </Header>
+        showHeader ? (
+          <Header
+            variant={compact ? 'h3' : 'h2'}
+            actions={
+              <SpaceBetween direction="horizontal" size="xs">
+                <Toggle checked={viewOnly} onChange={({ detail }) => setViewOnly(detail.checked)} disabled={!connected}>
+                  View Only
+                </Toggle>
+                <Toggle
+                  checked={scaleViewport}
+                  onChange={({ detail }) => setScaleViewport(detail.checked)}
+                  disabled={!connected}
+                >
+                  Scale to Fit
+                </Toggle>
+                <Button onClick={handleFullscreen} disabled={!connected} iconName="expand">
+                  Fullscreen
+                </Button>
+                {compact && onOpenNewTab && (
+                  <Button onClick={onOpenNewTab} iconName="external">
+                    Open in New Tab
+                  </Button>
+                )}
+                <Button onClick={handleCtrlAltDel} disabled={!connected}>
+                  Ctrl+Alt+Del
+                </Button>
+                <Button onClick={handleRefresh} iconName="refresh">
+                  Reconnect
+                </Button>
+              </SpaceBetween>
+            }
+          >
+            {compact ? 'VP Live Preview' : 'Live Virtual Participant View'}
+            {connected && <Badge color="green">Connected</Badge>}
+            {connecting && <Badge color="blue">Connecting...</Badge>}
+          </Header>
+        ) : null
       }
     >
       <SpaceBetween direction="vertical" size="s">
@@ -231,7 +241,7 @@ const VNCViewer = ({
           </Alert>
         )}
 
-        {connected && !manualActionRequired && (
+        {connected && !manualActionRequired && !compact && (
           <Alert type="success">
             <SpaceBetween direction="vertical" size="xs">
               <div>
@@ -256,7 +266,7 @@ const VNCViewer = ({
           style={
             scaleViewport
               ? {
-                  height: '600px',
+                  height: compact ? '300px' : '600px',
                   overflow: 'hidden',
                 }
               : {}
@@ -266,7 +276,10 @@ const VNCViewer = ({
             ref={canvasRef}
             style={{
               width: '100%',
-              height: scaleViewport ? '100%' : '800px',
+              height: (() => {
+                if (scaleViewport) return '100%';
+                return compact ? '300px' : '800px';
+              })(),
               border: '1px solid #ccc',
               backgroundColor: '#000',
               display: 'flex',
@@ -278,26 +291,28 @@ const VNCViewer = ({
           />
         </div>
 
-        <Alert type="info">
-          <SpaceBetween direction="vertical" size="xs">
-            <div>
-              <strong>Tips for using the live view:</strong>
-            </div>
-            <ul style={{ margin: 0, paddingLeft: '20px' }}>
-              <li>
-                <strong>View Only mode is enabled by default</strong> to prevent accidental interactions during
-                automated steps
-              </li>
-              <li>Only disable View Only mode when manual action is required (e.g., CAPTCHA, login prompts)</li>
-              <li>
-                <strong>Warning:</strong> Interacting during automated steps may break the automation sequence
-              </li>
-              <li>Use your mouse and keyboard normally when handling manual actions</li>
-              <li>Use &quot;Scale to Fit&quot; to adjust the display size</li>
-              <li>Click &quot;Fullscreen&quot; for a larger view</li>
-            </ul>
-          </SpaceBetween>
-        </Alert>
+        {!compact && (
+          <Alert type="info">
+            <SpaceBetween direction="vertical" size="xs">
+              <div>
+                <strong>Tips for using the live view:</strong>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                <li>
+                  <strong>View Only mode is enabled by default</strong> to prevent accidental interactions during
+                  automated steps
+                </li>
+                <li>Only disable View Only mode when manual action is required (e.g., CAPTCHA, login prompts)</li>
+                <li>
+                  <strong>Warning:</strong> Interacting during automated steps may break the automation sequence
+                </li>
+                <li>Use your mouse and keyboard normally when handling manual actions</li>
+                <li>Use &quot;Scale to Fit&quot; to adjust the display size</li>
+                <li>Click &quot;Fullscreen&quot; for a larger view</li>
+              </ul>
+            </SpaceBetween>
+          </Alert>
+        )}
       </SpaceBetween>
     </Container>
   );
@@ -312,6 +327,9 @@ VNCViewer.propTypes = {
   manualActionMessage: PropTypes.string,
   manualActionTimeoutSeconds: PropTypes.number,
   manualActionStartTime: PropTypes.string,
+  compact: PropTypes.bool,
+  onOpenNewTab: PropTypes.func,
+  showHeader: PropTypes.bool,
 };
 
 VNCViewer.defaultProps = {
@@ -320,6 +338,9 @@ VNCViewer.defaultProps = {
   manualActionMessage: null,
   manualActionTimeoutSeconds: null,
   manualActionStartTime: null,
+  compact: false,
+  onOpenNewTab: null,
+  showHeader: true,
 };
 
 export default VNCViewer;
