@@ -1820,7 +1820,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           manualActionTimeoutSeconds={vpData.manualActionTimeoutSeconds}
           manualActionStartTime={vpData.manualActionStartTime}
           compact
-          onOpenNewTab={() => window.open(`/virtual-participants/${vpData.id}`, '_blank')}
+          onOpenNewTab={() => window.open(`#/virtual-participant/${vpData.id}`, '_blank')}
           showHeader
         />
       ) : (
