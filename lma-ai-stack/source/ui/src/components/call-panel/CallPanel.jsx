@@ -1804,6 +1804,45 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     return () => subscription.unsubscribe();
   }, [vpData?.id]);
 
+  // Subscribe to VNC preview control from agent
+  useEffect(() => {
+    if (!item.callId) return undefined;
+
+    const subscription = API.graphql(
+      graphqlOperation(
+        `
+        subscription OnVNCPreviewToggle($callId: ID!) {
+          onVNCPreviewToggle(CallId: $callId) {
+            CallId
+            Action
+            Success
+            RequestedBy
+          }
+        }
+      `,
+        { callId: item.callId },
+      ),
+    ).subscribe({
+      next: ({ value }) => {
+        const control = value?.data?.onVNCPreviewToggle;
+        if (control) {
+          if (control.Success) {
+            const shouldShow = control.Action === 'open';
+            setShowVNCPreview(shouldShow);
+            logger.info(`VNC preview ${control.Action} by ${control.RequestedBy || 'agent'}`);
+          }
+        }
+      },
+      error: (err) => {
+        logger.error('VNC control subscription error:', err);
+      },
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [item.callId]);
+
   return (
     <SpaceBetween size="s">
       <CallAttributes item={item} setToolsOpen={setToolsOpen} getCallDetailsFromCallIds={getCallDetailsFromCallIds} />

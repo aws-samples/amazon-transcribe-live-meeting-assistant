@@ -781,6 +781,7 @@ Resources:
                   - "appsync:GraphQL"
                 Resource:
                   - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/addChatToken"
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/toggleVNCPreview"
           PolicyName: AppSyncGraphQLPolicy
         - PolicyName: InlinePolicy
           PolicyDocument:

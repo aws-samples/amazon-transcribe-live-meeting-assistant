@@ -321,6 +321,85 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
     
     return current_meeting_transcript
 
+
+def create_vnc_preview_control_tool(call_id: str, appsync_url: str):
+    """Factory function to create VNC preview control tool"""
+    from strands import tool
+    from gql import gql
+    from asst_gql_client import AppsyncRequestsGqlClient
+    
+    @tool
+    def control_vnc_preview(action: str) -> str:
+        """Control the VNC live view preview window on the meeting page.
+        
+        This tool allows you to show or hide the Virtual Participant's browser
+        screen directly on the meeting page. The user can watch in real-time
+        what the VP is doing.
+        
+        Use this when:
+        - User asks to "show me what the bot is doing"
+        - User wants to "see the virtual participant screen"
+        - User asks to "open the live view" or "show live preview"
+        - User wants to "close the preview" or "hide the screen"
+        - User wants to monitor VP browser activity
+        
+        Args:
+            action: Either "open" to show preview or "close" to hide it
+            
+        Returns:
+            Success message confirming the action
+            
+        Examples:
+            - User: "show me the virtual participant"
+            - User: "open the live view"
+            - User: "close the preview"
+        """
+        if action not in ['open', 'close']:
+            return "Invalid action. Please use 'open' to show the preview or 'close' to hide it."
+        
+        try:
+            logger.info(f"VNC preview control: {action} for call {call_id}")
+            
+            # Initialize AppSync client
+            appsync_client = AppsyncRequestsGqlClient(
+                url=appsync_url,
+                fetch_schema_from_transport=False
+            )
+            
+            # GraphQL mutation
+            mutation = gql("""
+            mutation ToggleVNCPreview($input: ToggleVNCPreviewInput!) {
+                toggleVNCPreview(input: $input) {
+                    CallId
+                    Action
+                    Success
+                    Timestamp
+                }
+            }
+            """)
+            
+            variables = {
+                'input': {
+                    'CallId': call_id,
+                    'Show': action == 'open'
+                }
+            }
+            
+            result = appsync_client.execute(mutation, variable_values=variables)
+            
+            if result.get('toggleVNCPreview', {}).get('Success'):
+                action_past = "opened" if action == "open" else "closed"
+                return f"✓ VNC live preview {action_past} successfully. The user can now {'see' if action == 'open' else 'no longer see'} the Virtual Participant's browser screen on the meeting page."
+            else:
+                return f"Failed to {action} VNC preview. Please try again."
+                
+        except Exception as e:
+            logger.error(f"Error controlling VNC preview: {str(e)}")
+            return f"Error controlling VNC preview: {str(e)}"
+    
+    return control_vnc_preview
+
+
 def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool, sequence: int):
     """
     Send a chat token to AppSync for real-time streaming
@@ -601,6 +680,14 @@ def handler(event, context):
                 dynamodb_table_name=dynamodb_table_name
             ))
             logger.info("Current meeting transcript tool enabled")
+        
+        # Add VNC preview control tool (available to all users)
+        if APPSYNC_GRAPHQL_URL:
+            tools.append(create_vnc_preview_control_tool(
+                call_id=call_id,
+                appsync_url=APPSYNC_GRAPHQL_URL
+            ))
+            logger.info("VNC preview control tool enabled")
         
         # Initialize Strands Agent
         try:
