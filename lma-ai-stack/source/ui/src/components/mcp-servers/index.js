@@ -4,5 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import MCPServersModal from './MCPServersModal';
+import PublicRegistryTab from './PublicRegistryTab';
 
 export default MCPServersModal;
+export { PublicRegistryTab };
