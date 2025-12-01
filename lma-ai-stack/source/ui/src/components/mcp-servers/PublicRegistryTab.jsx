@@ -16,7 +16,6 @@ import {
   Header,
   Input,
   Link,
-  Select,
   SpaceBetween,
   Spinner,
 } from '@awsui/components-react';
@@ -24,27 +23,44 @@ import { Logger } from 'aws-amplify';
 
 const logger = new Logger('PublicRegistryTab');
 
-// GitHub raw content URL for MCP servers registry
-const REGISTRY_URL = 'https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/index.json';
+// Official MCP Registry API
+const REGISTRY_API_BASE = 'https://registry.modelcontextprotocol.io/v0/servers';
+const SERVERS_PER_PAGE = 50;
 
 /**
- * Public Registry Tab - Browse and install MCP servers from Anthropic's registry
+ * Public Registry Tab - Browse and install MCP servers from official registry
  */
 const PublicRegistryTab = ({ onInstall }) => {
   const [servers, setServers] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState({ value: 'all', label: 'All Categories' });
+  const [nextCursor, setNextCursor] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
 
-  const fetchMCPRegistry = async () => {
-    setLoading(true);
+  const fetchMCPRegistry = async (searchTerm = '', cursor = null, append = false) => {
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+      setServers([]);
+    }
     setError(null);
 
     try {
-      logger.info('Fetching MCP registry from GitHub...');
+      logger.info(`Fetching MCP registry${cursor ? ' (next page)' : ''}...`);
 
-      const response = await fetch(REGISTRY_URL);
+      // Build URL
+      let url = `${REGISTRY_API_BASE}?limit=${SERVERS_PER_PAGE}`;
+      if (searchTerm) {
+        url += `&search=${encodeURIComponent(searchTerm)}`;
+      }
+      if (cursor) {
+        url += `&cursor=${encodeURIComponent(cursor)}`;
+      }
+
+      const response = await fetch(url);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch registry: ${response.statusText}`);
@@ -52,54 +68,91 @@ const PublicRegistryTab = ({ onInstall }) => {
 
       const data = await response.json();
 
-      // Transform registry data to our format
-      const serverList = Object.entries(data).map(([id, server]) => ({
-        id,
-        name: server.name || id.split('/').pop(),
-        description: server.description || 'No description available',
-        category: server.category || 'Other',
-        npmPackage: id,
-        transport: server.transport || ['stdio'],
-        verified: true,
-        requiresAuth: server.requiresAuth || false,
-        tools: server.tools || [],
-        homepage: server.homepage || `https://github.com/modelcontextprotocol/servers/tree/main/src/${id}`,
-      }));
+      // Transform API response
+      const serverList = (data.servers || [])
+        .filter((item) => {
+          // eslint-disable-next-line no-underscore-dangle
+          const meta = item._meta?.['io.modelcontextprotocol.registry/official'];
+          return meta?.isLatest;
+        })
+        .map((item) => {
+          const { server } = item;
+          const name = server.name.split('/').pop() || server.name;
 
-      setServers(serverList);
-      logger.info(`Loaded ${serverList.length} MCP servers from registry`);
+          const transports = [];
+          if (server.packages && server.packages.length > 0) {
+            transports.push('stdio');
+          }
+          if (server.remotes && server.remotes.length > 0) {
+            server.remotes.forEach((remote) => transports.push(remote.type));
+          }
+
+          const npmPackage = server.packages?.[0]?.identifier || server.name;
+
+          const requiresAuth =
+            (server.remotes && server.remotes.some((r) => r.headers && r.headers.length > 0)) ||
+            (server.packages &&
+              server.packages.some((p) => p.environmentVariables && p.environmentVariables.some((v) => v.isSecret)));
+
+          return {
+            id: server.name,
+            name: name.charAt(0).toUpperCase() + name.slice(1),
+            description: server.description || 'No description available',
+            category: 'Community',
+            npmPackage,
+            transport: transports.length > 0 ? transports : ['stdio'],
+            verified: true,
+            requiresAuth,
+            tools: [],
+            homepage: server.repository?.url || `https://registry.modelcontextprotocol.io/servers/${server.name}`,
+            version: server.version,
+          };
+        });
+
+      // Append or replace
+      if (append) {
+        setServers((prev) => [...prev, ...serverList]);
+      } else {
+        setServers(serverList);
+      }
+
+      // Update pagination
+      setNextCursor(data.metadata?.nextCursor || null);
+      setHasMore(!!data.metadata?.nextCursor);
+
+      logger.info(
+        `Loaded ${serverList.length} servers (total: ${
+          append ? servers.length + serverList.length : serverList.length
+        })`,
+      );
     } catch (err) {
       logger.error('Error fetching MCP registry:', err);
       setError(err.message || 'Failed to load MCP registry');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
-  // Fetch MCP servers from GitHub on mount
+  const loadMore = () => {
+    if (nextCursor && !loadingMore) {
+      fetchMCPRegistry(searchQuery, nextCursor, true);
+    }
+  };
+
+  // Fetch on mount
   useEffect(() => {
     fetchMCPRegistry();
   }, []);
 
-  // Filter servers by search and category
-  const filteredServers = servers.filter((server) => {
-    const matchesSearch =
-      searchQuery === '' ||
-      server.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      server.description.toLowerCase().includes(searchQuery.toLowerCase());
+  // Debounced search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchMCPRegistry(searchQuery);
+    }, 500);
 
-    const matchesCategory = categoryFilter.value === 'all' || server.category === categoryFilter.value;
-
-    return matchesSearch && matchesCategory;
-  });
-
-  // Get unique categories from servers
-  const categories = [
-    { value: 'all', label: 'All Categories' },
-    ...Array.from(new Set(servers.map((s) => s.category)))
-      .sort()
-      .map((cat) => ({ value: cat, label: cat })),
-  ];
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   return (
     <Container
@@ -108,7 +161,7 @@ const PublicRegistryTab = ({ onInstall }) => {
           variant="h3"
           description="Browse and install MCP servers from the official Model Context Protocol registry"
           actions={
-            <Button onClick={fetchMCPRegistry} iconName="refresh" disabled={loading}>
+            <Button onClick={() => fetchMCPRegistry(searchQuery)} iconName="refresh" disabled={loading}>
               Refresh
             </Button>
           }
@@ -119,35 +172,26 @@ const PublicRegistryTab = ({ onInstall }) => {
     >
       <SpaceBetween size="m">
         <Alert type="info">
-          These servers are from{' '}
-          <Link external href="https://github.com/modelcontextprotocol/servers">
-            Anthropic&apos;s official MCP registry
+          Browse servers from the{' '}
+          <Link external href="https://registry.modelcontextprotocol.io">
+            official MCP registry
           </Link>
           . Install servers to add new capabilities to your meeting assistant. Maximum 5 servers can be enabled.
         </Alert>
 
-        {/* Search and Filter */}
-        <ColumnLayout columns={2}>
-          <FormField label="Search servers">
-            <Input
-              placeholder="Search by name or description..."
-              value={searchQuery}
-              onChange={({ detail }) => setSearchQuery(detail.value)}
-              disabled={loading}
-            />
-          </FormField>
+        {/* Search */}
+        <FormField label="Search servers" description="Searches all servers in the official MCP registry">
+          <Input
+            placeholder="Try: calendar, slack, database, filesystem..."
+            value={searchQuery}
+            onChange={({ detail }) => setSearchQuery(detail.value)}
+            disabled={loading}
+            type="search"
+            clearAriaLabel="Clear search"
+          />
+        </FormField>
 
-          <FormField label="Category">
-            <Select
-              selectedOption={categoryFilter}
-              onChange={({ detail }) => setCategoryFilter(detail.selectedOption)}
-              options={categories}
-              disabled={loading}
-            />
-          </FormField>
-        </ColumnLayout>
-
-        {loading && (
+        {loading && !loadingMore && (
           <Box textAlign="center" padding="xxl">
             <Spinner size="large" />
             <Box margin={{ top: 's' }}>Loading MCP servers from registry...</Box>
@@ -158,27 +202,30 @@ const PublicRegistryTab = ({ onInstall }) => {
           <Alert type="error" header="Error Loading Registry">
             {error}
             <Box margin={{ top: 's' }}>
-              <Button onClick={fetchMCPRegistry} iconName="refresh">
+              <Button onClick={() => fetchMCPRegistry(searchQuery)} iconName="refresh">
                 Retry
               </Button>
             </Box>
           </Alert>
         )}
 
-        {!loading && !error && filteredServers.length === 0 && (
+        {!loading && !error && servers.length === 0 && (
           <Box textAlign="center" padding="xxl" color="text-body-secondary">
-            No servers found matching your search criteria
+            No servers found{searchQuery && ` matching "${searchQuery}"`}
           </Box>
         )}
 
-        {!loading && !error && filteredServers.length > 0 && (
+        {!loading && !error && servers.length > 0 && (
           <>
-            <Box>
-              Found {filteredServers.length} server{filteredServers.length !== 1 ? 's' : ''}
-            </Box>
+            <SpaceBetween direction="horizontal" size="xs">
+              <Box>
+                Showing {servers.length} server{servers.length !== 1 ? 's' : ''}
+              </Box>
+              {hasMore && <Box color="text-body-secondary">(More available)</Box>}
+            </SpaceBetween>
 
             <ColumnLayout columns={2}>
-              {filteredServers.map((server) => (
+              {servers.map((server) => (
                 <Container key={server.id}>
                   <SpaceBetween size="s">
                     {/* Server Header */}
@@ -198,17 +245,8 @@ const PublicRegistryTab = ({ onInstall }) => {
                     {/* Metadata */}
                     <ColumnLayout columns={2} variant="text-grid">
                       <Box>
-                        <Box variant="awsui-key-label">Category</Box>
-                        <Box>
-                          <span className={`mcp-category-badge mcp-category-${server.category.toLowerCase()}`}>
-                            {server.category}
-                          </span>
-                        </Box>
-                      </Box>
-
-                      <Box>
-                        <Box variant="awsui-key-label">Tools</Box>
-                        <Box>{server.tools.length} tools</Box>
+                        <Box variant="awsui-key-label">Version</Box>
+                        <Box>{server.version}</Box>
                       </Box>
 
                       <Box>
@@ -226,7 +264,7 @@ const PublicRegistryTab = ({ onInstall }) => {
 
                     {/* Auth Requirements */}
                     {server.requiresAuth && (
-                      <Alert type="warning" header={`Requires ${server.authType}`}>
+                      <Alert type="warning" header="Requires Authentication">
                         You&apos;ll need to provide credentials when installing this server.
                       </Alert>
                     )}
@@ -246,6 +284,15 @@ const PublicRegistryTab = ({ onInstall }) => {
                 </Container>
               ))}
             </ColumnLayout>
+
+            {/* Load More Button */}
+            {hasMore && (
+              <Box textAlign="center" margin={{ top: 'm' }}>
+                <Button onClick={loadMore} loading={loadingMore} iconName="angle-down">
+                  {loadingMore ? 'Loading More Servers...' : 'Load More Servers'}
+                </Button>
+              </Box>
+            )}
           </>
         )}
       </SpaceBetween>

@@ -112,56 +112,6 @@ const MCPServersModal = ({ visible, onDismiss, vpData }) => {
             id: 'active',
             content: (
               <SpaceBetween size="l">
-                {/* Lambda MCP Servers - Always Available */}
-                <Container
-                  header={
-                    <Header variant="h3" description="MCP servers running in the Strands agent (always available)">
-                      Agent MCP Servers
-                    </Header>
-                  }
-                >
-                  <SpaceBetween size="m">
-                    <Alert type="success" header="Available for All Meetings">
-                      These MCP servers run in the Strands agent Lambda function and are available for both active and
-                      completed meetings. They don&apos;t require a Virtual Participant.
-                    </Alert>
-
-                    <ColumnLayout columns={2}>
-                      {/* GitHub MCP */}
-                      <Container>
-                        <SpaceBetween size="xs">
-                          <Box>
-                            <Box variant="h4">GitHub</Box>
-                            <StatusIndicator type="info">Coming Soon</StatusIndicator>
-                          </Box>
-                          <Box fontSize="body-s">Search repositories, create issues, manage pull requests</Box>
-                          <Box>
-                            <Box variant="awsui-key-label">Tools</Box>
-                            <Box>8 tools (search_repos, create_issue, list_prs, ...)</Box>
-                          </Box>
-                        </SpaceBetween>
-                      </Container>
-
-                      {/* Slack MCP */}
-                      <Container>
-                        <SpaceBetween size="xs">
-                          <Box>
-                            <Box variant="h4">Slack</Box>
-                            <StatusIndicator type="info">Coming Soon</StatusIndicator>
-                          </Box>
-                          <Box fontSize="body-s">Send messages, list channels, search conversations</Box>
-                          <Box>
-                            <Box variant="awsui-key-label">Tools</Box>
-                            <Box>6 tools (send_message, list_channels, search, ...)</Box>
-                          </Box>
-                        </SpaceBetween>
-                      </Container>
-                    </ColumnLayout>
-
-                    <Alert type="info">Maximum 5 MCP servers can be enabled at once to maintain performance.</Alert>
-                  </SpaceBetween>
-                </Container>
-
                 {/* VP MCP Server - Only During Active Meetings */}
                 <Container
                   header={
@@ -254,6 +204,62 @@ const MCPServersModal = ({ visible, onDismiss, vpData }) => {
                         The MCP server is connected but no tools were found. This may indicate a configuration issue.
                       </Alert>
                     )}
+                  </SpaceBetween>
+                </Container>
+
+                {/* Lambda MCP Servers - Always Available */}
+                <Container
+                  header={
+                    <Header variant="h3" description="MCP servers running in the Strands agent (always available)">
+                      Agent MCP Servers
+                    </Header>
+                  }
+                >
+                  <SpaceBetween size="m">
+                    <Alert type="success" header="Available for All Meetings">
+                      These MCP servers run in the Strands agent Lambda function and are available for both active and
+                      completed meetings. They don&apos;t require a Virtual Participant.
+                    </Alert>
+
+                    <ColumnLayout columns={2}>
+                      {/* Outlook Calendar MCP */}
+                      <Container>
+                        <SpaceBetween size="xs">
+                          <Box>
+                            <Box variant="h4">Outlook Calendar</Box>
+                            <StatusIndicator type="info">Coming Soon</StatusIndicator>
+                          </Box>
+                          <Box fontSize="body-s">Manage event listing, reading, and updates</Box>
+                          <Box>
+                            <Box variant="awsui-key-label">Tools</Box>
+                            <Box>6 tools (create_event, delete_event, ...)</Box>
+                          </Box>
+                          <Box>
+                            <Box variant="awsui-key-label">Endpoint</Box>
+                            <Box>
+                              <code style={{ fontSize: '11px' }}>https://outlook-calendar.mintmcp.com/mcp</code>
+                            </Box>
+                          </Box>
+                        </SpaceBetween>
+                      </Container>
+
+                      {/* Slack MCP */}
+                      <Container>
+                        <SpaceBetween size="xs">
+                          <Box>
+                            <Box variant="h4">Slack</Box>
+                            <StatusIndicator type="info">Coming Soon</StatusIndicator>
+                          </Box>
+                          <Box fontSize="body-s">Send messages, list channels, search conversations</Box>
+                          <Box>
+                            <Box variant="awsui-key-label">Tools</Box>
+                            <Box>6 tools (send_message, list_channels, search, ...)</Box>
+                          </Box>
+                        </SpaceBetween>
+                      </Container>
+                    </ColumnLayout>
+
+                    <Alert type="info">Maximum 5 MCP servers can be enabled at once to maintain performance.</Alert>
                   </SpaceBetween>
                 </Container>
               </SpaceBetween>
