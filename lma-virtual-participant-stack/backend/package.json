@@ -10,27 +10,35 @@
     "dev": "ts-node --esm src/index.ts"
   },
   "dependencies": {
+    "@aws-crypto/sha256-js": "^5.2.0",
     "@aws-sdk/client-comprehend": "^3.726.1",
     "@aws-sdk/client-dynamodb": "^3.726.1",
     "@aws-sdk/client-elastic-load-balancing-v2": "^3.726.1",
     "@aws-sdk/client-kinesis": "^3.726.1",
     "@aws-sdk/client-s3": "^3.726.1",
     "@aws-sdk/client-transcribe-streaming": "^3.726.1",
+    "@aws-sdk/credential-provider-node": "^3.726.1",
     "@aws-sdk/util-dynamodb": "^3.726.1",
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@smithy/protocol-http": "^5.3.5",
+    "@smithy/signature-v4": "^5.3.5",
+    "aws-amplify": "^6.0.0",
     "aws-sigv4-fetch": "^4.3.0",
     "axios": "^1.7.7",
-    "ws": "^8.18.0",
-    "uuid": "^9.0.1",
+    "graphql": "^16.8.1",
+    "graphql-tag": "^2.12.6",
     "jsonwebtoken": "^9.0.2",
     "puppeteer": "^24.22.1",
     "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "uuid": "^9.0.1",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.6",
     "@types/uuid": "^9.0.8",
     "@types/ws": "^8.5.13",
-    "@types/jsonwebtoken": "^9.0.7",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3"
   }

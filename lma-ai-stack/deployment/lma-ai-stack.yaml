@@ -595,6 +595,15 @@ Outputs:
   AppSyncGraphQLUrl:
     Description: AppSync GraphQL endpoint URL
     Value: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+  AppSyncEventApiId:
+    Description: AppSync Event API ID
+    Value: !GetAtt AppSyncEventApi.ApiId
+  AppSyncEventApiUrl:
+    Description: AppSync Event API WebSocket URL for MCP commands
+    Value: !GetAtt EventApiDns.WebSocketUrl
+  AppSyncEventApiHttpUrl:
+    Description: AppSync Event API HTTP URL for publishing
+    Value: !GetAtt EventApiDns.HttpUrl
   VNCTargetGroupArn:
     Description: ARN of the VNC Target Group for Virtual Participant ECS tasks
     Value: !Ref VNCTargetGroup
@@ -1139,6 +1148,7 @@ Resources:
           IS_LAMBDA_AGENT_ASSIST_ENABLED: !Ref IsLambdaAgentAssistEnabled
           LAMBDA_AGENT_ASSIST_FUNCTION_ARN: !Ref AgentAssistExistingLambdaFunctionArn
           DYNAMODB_TABLE_NAME: !Ref EventSourcingTable
+          EVENT_API_HTTP_URL: !GetAtt EventApiDns.HttpUrl
       Timeout: 60
       MemorySize: 128
       Handler: lambda_function.handler
@@ -1261,6 +1271,18 @@ Resources:
                 Action:
                   - lex:RecognizeText
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${AppSyncApiEncrypted.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - appsync:EventConnect
+                  - appsync:EventSubscribe
+                  - appsync:EventPublish
+                Resource:
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncEventApi.ApiId}/*"
               - !If
                 - ShouldEnableLambdaAgentAssist
                 - Effect: Allow
@@ -1913,6 +1935,127 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: !GetAtt MeetingControlsResolverFunction.Arn
+
+  # AppSync Event API for MCP command delivery (separate from GraphQL API)
+  AppSyncEventApi:
+    Type: AWS::AppSync::Api
+    Properties:
+      Name: !Sub "MCPEvents-${AWS::StackName}"
+      EventConfig:
+        AuthProviders:
+          - AuthType: AWS_IAM
+        ConnectionAuthModes:
+          - AuthType: AWS_IAM
+        DefaultPublishAuthModes:
+          - AuthType: AWS_IAM
+        DefaultSubscribeAuthModes:
+          - AuthType: AWS_IAM
+
+  # Channel namespace for MCP commands
+  MCPChannelNamespace:
+    Type: AWS::AppSync::ChannelNamespace
+    Properties:
+      ApiId: !GetAtt AppSyncEventApi.ApiId
+      Name: mcp-commands
+
+  # Custom resource to get Event API DNS (not exposed by CloudFormation)
+  GetEventApiDnsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: AppSyncGetApi
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - appsync:GetApi
+                Resource: !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*"
+
+  GetEventApiDnsFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for custom resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      Role: !GetAtt GetEventApiDnsRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          appsync_client = boto3.client('appsync')
+          
+          def handler(event, context):
+              logger.info(f"Event: {event}")
+              
+              try:
+                  request_type = event['RequestType']
+                  
+                  if request_type == 'Delete':
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  
+                  api_id = event['ResourceProperties']['ApiId']
+                  logger.info(f"Getting DNS for Event API: {api_id}")
+                  
+                  response = appsync_client.get_api(apiId=api_id)
+                  dns = response['api']['dns']
+                  realtime_dns = dns['REALTIME']
+                  http_dns = dns['HTTP']
+                  
+                  logger.info(f"REALTIME DNS: {realtime_dns}")
+                  logger.info(f"HTTP DNS: {http_dns}")
+                  
+                  websocket_url = f"wss://{realtime_dns}/event"
+                  http_url = f"https://{http_dns}"
+                  
+                  response_data = {
+                      'RealtimeDns': realtime_dns,
+                      'HttpDns': http_dns,
+                      'WebSocketUrl': websocket_url,
+                      'HttpUrl': http_url
+                  }
+                  
+                  logger.info(f"Response data: {response_data}")
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                  
+              except Exception as e:
+                  logger.error(f"Error: {e}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
+
+  EventApiDns:
+    Type: Custom::EventApiDns
+    Properties:
+      ServiceToken: !GetAtt GetEventApiDnsFunction.Arn
+      ApiId: !GetAtt AppSyncEventApi.ApiId
 
   AppSyncApiEncrypted:
     Type: AWS::AppSync::GraphQLApi

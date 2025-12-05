@@ -11,6 +11,7 @@ import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
+import { MCPCommandHandler } from './mcp-command-handler.js';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
@@ -37,6 +38,7 @@ const getPuppeteerConfig = () => ({
         "--v=1",
         "--enable-logging=stderr",
         "--log-level=0",
+        "--remote-debugging-port=9222", // Enable remote debugging for MCP
     ],
 });
 
@@ -44,6 +46,7 @@ const getPuppeteerConfig = () => ({
 let shutdownRequested = false;
 let statusManager: VirtualParticipantStatusManager | null = null;
 let vpId: string | null = null;
+let mcpHandler: MCPCommandHandler | null = null;
 
 const main = async (): Promise<void> => {
     console.log('LMA Virtual Participant starting...');
@@ -72,6 +75,7 @@ const main = async (): Promise<void> => {
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
                 const callId = kinesisStreamManager.getCallId();
                 await statusManager.setCallId(callId);
+                process.env.VP_CALL_ID = callId;
                 console.log(`Generated and set new VP CallId: ${callId}`);
             }
             
@@ -165,6 +169,27 @@ const main = async (): Promise<void> => {
     console.log('Launching browser with stealth plugin...');
     puppeteerExtra.use(StealthPlugin());
     const browser = await puppeteerExtra.launch(getPuppeteerConfig());
+
+    // Wait for Chrome DevTools to be fully ready
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log('✓ Chrome launched with remote debugging on port 9222');
+
+    // Initialize MCP command handler AFTER browser is launched
+    if (statusManager && vpId) {
+        try {
+            const callId = process.env.VP_CALL_ID || '';
+            if (callId) {
+                mcpHandler = new MCPCommandHandler(vpId, callId);
+                await mcpHandler.start();
+                console.log('✓ MCP command handler started');
+            } else {
+                console.log('VP_CALL_ID not set - skipping MCP handler');
+            }
+        } catch (error) {
+            console.error('Failed to start MCP command handler:', error);
+            // Non-critical - continue with meeting join
+        }
+    }
 
     const page = await browser.newPage();
     await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
@@ -271,6 +296,16 @@ const main = async (): Promise<void> => {
             }
         }
 
+        // Stop MCP handler
+        if (mcpHandler) {
+            try {
+                await mcpHandler.stop();
+                console.log('✓ MCP handler stopped');
+            } catch (error) {
+                console.error('Error stopping MCP handler:', error);
+            }
+        }
+
         try {
             // Close browser
             await browser.close();
@@ -326,6 +361,15 @@ const signalHandler = async (signal: string) => {
             console.log(`VP ${vpId} status updated to COMPLETED due to external termination`);
         } catch (error) {
             console.error(`Failed to update status during shutdown: ${error}`);
+        }
+    }
+    
+    // Stop MCP handler
+    if (mcpHandler) {
+        try {
+            await mcpHandler.stop();
+        } catch (error) {
+            console.error('Error stopping MCP handler:', error);
         }
     }
     
