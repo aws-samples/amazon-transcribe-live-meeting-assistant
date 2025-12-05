@@ -6,6 +6,7 @@
 """
 Strands-based Meeting Assistant Lambda Function
 Provides a lightweight alternative to QnABot using AWS Strands SDK
+Supports dynamic MCP server loading from Public Registry
 """
 
 import json
@@ -14,6 +15,14 @@ import boto3
 from boto3.dynamodb.conditions import Key, Attr
 from typing import Dict, Any, Optional
 import logging
+
+# Import MCP server loader
+try:
+    from mcp_server_loader import load_account_mcp_servers
+    MCP_LOADER_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"MCP server loader not available: {e}")
+    MCP_LOADER_AVAILABLE = False
 
 # Configure logging
 logger = logging.getLogger()
@@ -857,6 +866,16 @@ def handler(event, context):
         
         # Initialize tools list
         tools = []
+        
+        # Load installed MCP servers (account-level)
+        if MCP_LOADER_AVAILABLE:
+            try:
+                logger.info("Loading installed MCP servers...")
+                mcp_tools = load_account_mcp_servers()
+                tools.extend(mcp_tools)
+                logger.info(f"Loaded {len(mcp_tools)} tools from installed MCP servers")
+            except Exception as e:
+                logger.warning(f"Failed to load MCP servers: {e}")
         
         # Add web search tool if API key provided (auto-enable)
         if tavily_api_key:

@@ -160,6 +160,11 @@ Parameters:
     Default: ""
     Description: The AppSync Event API HTTP URL for MCP browser control
 
+  MCPServersTableName:
+    Type: String
+    Default: ""
+    Description: The DynamoDB table name for MCP server configurations
+
   FetchTranscriptFunctionArn:
     Type: String
     Description: ARN of Fetch Transcript function
@@ -767,6 +772,11 @@ Resources:
                   - "dynamodb:GetItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:Query"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MCPServersTableName}"
           PolicyName: DynamoDBPolicy
         - PolicyDocument:
             Version: 2012-10-17
@@ -842,6 +852,8 @@ Resources:
           APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
           EVENT_API_HTTP_URL: !Ref EventApiHttpUrl
           ENABLE_STREAMING: "true"
+          MCP_SERVERS_TABLE: !Ref MCPServersTableName
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
       Code: ./src
       LoggingConfig:
         LogGroup:

@@ -176,6 +176,8 @@ type Mutation @aws_iam {
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
 	updateChatButtonConfig(input: UpdateChatButtonConfigInput!): UpdateChatButtonConfigOutput @aws_cognito_user_pools
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
+	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools
+	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -206,6 +208,8 @@ type Query @aws_cognito_user_pools
 	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	parseMeetingInvitation(invitationText: String!): String @aws_cognito_user_pools @aws_iam
 	getChatButtonConfig(ChatButtonConfigId: ID!): ChatButtonConfig @aws_cognito_user_pools @aws_iam
+	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
+	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 }
 
 type VirtualParticipant @aws_cognito_user_pools @aws_iam {
@@ -596,6 +600,45 @@ input ToggleVNCPreviewInput {
 	CallId: ID!
 	Show: Boolean!
 }
+# MCP Server Management (Account-Level)
+type MCPServer @aws_cognito_user_pools @aws_iam {
+	ServerId: ID!
+	AccountId: String!
+	Name: String!
+	NpmPackage: String!
+	Version: String
+	Transport: [String]
+	RequiresAuth: Boolean
+	AuthConfig: AWSJSON
+	Status: String
+	InstalledAt: AWSDateTime
+	UpdatedAt: AWSDateTime
+	BuildId: String
+}
+
+input InstallMCPServerInput {
+	ServerId: ID!
+	Name: String!
+	NpmPackage: String!
+	Version: String
+	Transport: [String]
+	RequiresAuth: Boolean
+	AuthConfig: AWSJSON
+}
+
+type InstallMCPServerOutput @aws_cognito_user_pools @aws_iam {
+	ServerId: ID!
+	Success: Boolean!
+	Message: String
+	BuildId: String
+}
+
+type UninstallMCPServerOutput @aws_cognito_user_pools @aws_iam {
+	ServerId: ID!
+	Success: Boolean!
+	Message: String
+}
+
 
 schema {
 	query: Query

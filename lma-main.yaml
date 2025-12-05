@@ -2095,6 +2095,7 @@ Resources:
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         AppSyncGraphQLUrl: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
         EventApiHttpUrl: !GetAtt AISTACK.Outputs.AppSyncEventApiHttpUrl
+        MCPServersTableName: !GetAtt AISTACK.Outputs.MCPServersTableName
         FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
         # QnaBotSettings - JSON param with new settings values based on options selected

@@ -620,6 +620,12 @@ Outputs:
     Value: !Ref VNCALBListener
     Export:
       Name: !Sub "${AWS::StackName}-VNCALBListenerArn"
+  MCPServersTableName:
+    Description: Name of the MCP Servers DynamoDB table
+    Value: !Ref MCPServersTable
+  MCPLayerBuildProjectName:
+    Description: Name of the CodeBuild project for MCP layer building
+    Value: !Ref MCPLayerBuildProject
 
 Resources:
   EventSourcingTable:
@@ -847,6 +853,167 @@ Resources:
               - "LEX"
           - Name: REACT_APP_CLOUDFRONT_DOMAIN
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
+  # CodeBuild project for building MCP servers Lambda layer
+  MCPLayerBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-MCP-Layer-Builder"
+      Description: Builds Lambda layer with installed MCP servers
+      ServiceRole: !Ref MCPLayerBuildRole
+      EncryptionKey: alias/aws/s3
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: !Sub |
+          version: 0.2
+          
+          env:
+            variables:
+              STACK_NAME: ${AWS::StackName}
+              MCP_SERVERS_TABLE: ${MCPServersTable}
+          
+          phases:
+            pre_build:
+              commands:
+                - echo "=== MCP Layer Builder ==="
+                - echo "Account ID: $AWS_ACCOUNT_ID"
+                - echo "Stack Name: $STACK_NAME"
+                - echo "MCP Servers Table: $MCP_SERVERS_TABLE"
+                - apt-get update -qq && apt-get install -y -qq jq zip > /dev/null
+                - npm install -g npm@latest
+            
+            build:
+              commands:
+                - echo "=== Querying DynamoDB for installed MCP servers ==="
+                - |
+                  SERVERS_JSON=$(aws dynamodb query \
+                    --table-name "$MCP_SERVERS_TABLE" \
+                    --key-condition-expression "AccountId = :accountId" \
+                    --expression-attribute-values "{\":accountId\":{\"S\":\"$AWS_ACCOUNT_ID\"}}" \
+                    --output json)
+                - echo "$SERVERS_JSON" | jq '.'
+                - SERVER_COUNT=$(echo "$SERVERS_JSON" | jq '.Items | length')
+                - echo "Found $SERVER_COUNT installed MCP servers"
+                
+                - |
+                  if [ "$SERVER_COUNT" -eq "0" ]; then
+                    echo "No MCP servers - creating empty layer"
+                    mkdir -p layer/nodejs && cd layer/nodejs && npm init -y && cd ../..
+                  else
+                    echo "=== Building layer with MCP servers ==="
+                    mkdir -p layer/nodejs && cd layer/nodejs
+                    
+                    cat > package.json <<'EOF'
+                  {
+                    "name": "lma-mcp-servers-layer",
+                    "version": "1.0.0",
+                    "dependencies": {
+                  EOF
+                    
+                    FIRST=true
+                    echo "$SERVERS_JSON" | jq -r '.Items[] | "\(.NpmPackage.S)@\(.Version.S // "latest")"' | while read package; do
+                      PKG_NAME="${package%@*}"
+                      PKG_VERSION="${package#*@}"
+                      if [ "$FIRST" = "true" ]; then
+                        echo "      \"$PKG_NAME\": \"$PKG_VERSION\"" >> package.json
+                        FIRST=false
+                      else
+                        echo "      ,\"$PKG_NAME\": \"$PKG_VERSION\"" >> package.json
+                      fi
+                    done
+                    
+                    cat >> package.json <<'EOF'
+                    }
+                  }
+                  EOF
+                    
+                    cat package.json
+                    npm install --production --no-optional
+                    cd ../..
+                  fi
+                
+                - cd layer && zip -r ../mcp-layer.zip . -q && cd ..
+                - du -h mcp-layer.zip
+                
+                - |
+                  LAYER_VERSION=$(aws lambda publish-layer-version \
+                    --layer-name "${STACK_NAME}-mcp-servers" \
+                    --description "MCP servers for account $AWS_ACCOUNT_ID" \
+                    --zip-file fileb://mcp-layer.zip \
+                    --compatible-runtimes python3.12 \
+                    --query 'Version' \
+                    --output text)
+                - echo "Published layer version: $LAYER_VERSION"
+                
+                - FUNCTION_NAME="STRANDS-${STACK_NAME}-MeetingAssist"
+                - |
+                  LAYER_ARN="arn:aws:lambda:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:layer:${STACK_NAME}-mcp-servers:${LAYER_VERSION}"
+                  CURRENT_LAYERS=$(aws lambda get-function-configuration \
+                    --function-name "$FUNCTION_NAME" \
+                    --query 'Layers[].LayerArn' \
+                    --output json)
+                  NEW_LAYERS=$(echo "$CURRENT_LAYERS" | jq -r --arg layer "$LAYER_ARN" \
+                    'map(select(. | contains("mcp-servers") | not)) + [$layer] | join(" ")')
+                  aws lambda update-function-configuration \
+                    --function-name "$FUNCTION_NAME" \
+                    --layers $NEW_LAYERS
+                
+                - |
+                  if [ -n "$SERVER_ID" ]; then
+                    aws dynamodb update-item \
+                      --table-name "$MCP_SERVERS_TABLE" \
+                      --key "{\"AccountId\":{\"S\":\"$AWS_ACCOUNT_ID\"},\"ServerId\":{\"S\":\"$SERVER_ID\"}}" \
+                      --update-expression "SET #status = :status, UpdatedAt = :updated" \
+                      --expression-attribute-names '{"#status":"Status"}' \
+                      --expression-attribute-values "{\":status\":{\"S\":\"ACTIVE\"},\":updated\":{\"S\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}"
+                  fi
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        Type: LINUX_CONTAINER
+      TimeoutInMinutes: 15
+
+  MCPLayerBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: codebuild.amazonaws.com
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: MCPLayerBuild
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt MCPServersTable.Arn
+              - Effect: Allow
+                Action:
+                  - lambda:PublishLayerVersion
+                  - lambda:GetFunctionConfiguration
+                  - lambda:UpdateFunctionConfiguration
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:${AWS::StackName}-mcp-servers"
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:${AWS::StackName}-mcp-servers:*"
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-*"
+
       TimeoutInMinutes: 10
 
   LambdaCodeBuildStartBuildExecutionRole:
@@ -2847,6 +3014,29 @@ Resources:
         PointInTimeRecoveryEnabled: true
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
+  # MCP Servers Table - Account-level MCP server configurations
+  MCPServersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-MCPServers"
+      AttributeDefinitions:
+        - AttributeName: AccountId
+          AttributeType: S
+        - AttributeName: ServerId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: AccountId
+          KeyType: HASH
+        - AttributeName: ServerId
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+
 
   # Data source for Virtual Participant table
   VirtualParticipantDataSource:
@@ -3184,6 +3374,190 @@ Resources:
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       Name: VirtualParticipantLambda
+  # MCP Server Manager Lambda Function
+  MCPServerManagerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-MCPServerManager"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/mcp_server_manager
+      Description: Manages MCP server installation and configuration
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          MCP_SERVERS_TABLE: !Ref MCPServersTable
+          CODEBUILD_PROJECT: !Ref MCPLayerBuildProject
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MCPServersTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - codebuild:StartBuild
+                - codebuild:BatchGetBuilds
+              Resource: !GetAtt MCPLayerBuildProject.Arn
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/MCPServerManager"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for management function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - MCPServerManagerLogGroup
+
+  MCPServerManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/MCPServerManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # AppSync data source for MCP Server Manager
+  MCPServerManagerDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MCPServerManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt MCPServerManagerDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MCPServerManagerFunction.Arn
+
+  MCPServerManagerDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt MCPServerManagerFunction.Arn
+
+  # AppSync Resolvers for MCP Server Management
+  InstallMCPServerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: installMCPServer
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "installMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  UninstallMCPServerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: uninstallMCPServer
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "uninstallMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ListInstalledMCPServersResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: listInstalledMCPServers
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "listInstalledMCPServers"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  GetMCPServerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMCPServer
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "getMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
       Type: AWS_LAMBDA
       ServiceRoleArn: !GetAtt VirtualParticipantLambdaDataSourceRole.Arn
       LambdaConfig:

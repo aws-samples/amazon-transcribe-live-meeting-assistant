@@ -19,7 +19,7 @@ import {
   SpaceBetween,
   Spinner,
 } from '@awsui/components-react';
-import { Logger } from 'aws-amplify';
+import { API, graphqlOperation, Logger } from 'aws-amplify';
 
 const logger = new Logger('PublicRegistryTab');
 
@@ -38,6 +38,9 @@ const PublicRegistryTab = ({ onInstall }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [nextCursor, setNextCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
+  const [installing, setInstalling] = useState({});
+  const [installSuccess, setInstallSuccess] = useState(null);
+  const [installError, setInstallError] = useState(null);
 
   const fetchMCPRegistry = async (searchTerm = '', cursor = null, append = false) => {
     if (append) {
@@ -140,6 +143,60 @@ const PublicRegistryTab = ({ onInstall }) => {
     }
   };
 
+  const handleInstall = async (server) => {
+    setInstalling((prev) => ({ ...prev, [server.id]: true }));
+    setInstallError(null);
+    setInstallSuccess(null);
+
+    try {
+      logger.info('Installing MCP server:', server.id);
+
+      const mutation = `
+        mutation InstallMCPServer($input: InstallMCPServerInput!) {
+          installMCPServer(input: $input) {
+            ServerId
+            Success
+            Message
+            BuildId
+          }
+        }
+      `;
+
+      const result = await API.graphql(
+        graphqlOperation(mutation, {
+          input: {
+            ServerId: server.id,
+            Name: server.name,
+            NpmPackage: server.npmPackage,
+            Version: server.version,
+            Transport: server.transport,
+            RequiresAuth: server.requiresAuth,
+          },
+        }),
+      );
+
+      const response = result.data.installMCPServer;
+
+      if (response.Success) {
+        setInstallSuccess(`${server.name} installation started. Build ID: ${response.BuildId || 'N/A'}`);
+        logger.info('Installation started:', response);
+
+        // Call parent callback if provided
+        if (onInstall) {
+          onInstall(server);
+        }
+      } else {
+        setInstallError(response.Message || 'Installation failed');
+        logger.error('Installation failed:', response.Message);
+      }
+    } catch (err) {
+      logger.error('Error installing server:', err);
+      setInstallError(err.message || 'Failed to install server');
+    } finally {
+      setInstalling((prev) => ({ ...prev, [server.id]: false }));
+    }
+  };
+
   // Fetch on mount
   useEffect(() => {
     fetchMCPRegistry();
@@ -171,6 +228,22 @@ const PublicRegistryTab = ({ onInstall }) => {
       }
     >
       <SpaceBetween size="m">
+        {installSuccess && (
+          <Alert type="success" dismissible onDismiss={() => setInstallSuccess(null)} header="Installation Started">
+            {installSuccess}
+            <Box margin={{ top: 's' }}>
+              The MCP server layer is being built. This may take 2-3 minutes. The server will be available for use once
+              the build completes.
+            </Box>
+          </Alert>
+        )}
+
+        {installError && (
+          <Alert type="error" dismissible onDismiss={() => setInstallError(null)} header="Installation Failed">
+            {installError}
+          </Alert>
+        )}
+
         <Alert type="info">
           Browse servers from the{' '}
           <Link external href="https://registry.modelcontextprotocol.io">
@@ -275,8 +348,13 @@ const PublicRegistryTab = ({ onInstall }) => {
                         <Button variant="link" iconName="external" href={server.homepage} target="_blank">
                           Documentation
                         </Button>
-                        <Button variant="primary" onClick={() => onInstall(server)} disabled>
-                          Install
+                        <Button
+                          variant="primary"
+                          onClick={() => handleInstall(server)}
+                          loading={installing[server.id]}
+                          disabled={installing[server.id]}
+                        >
+                          {installing[server.id] ? 'Installing...' : 'Install'}
                         </Button>
                       </SpaceBetween>
                     </Box>
