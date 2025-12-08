@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## [0.2.22] - 12/08/25
+
+### Added
+- Virtual Participant browser control via Strands agent
+- VNC preview control tool for programmatic show/hide
+- Meeting controls shortcut buttons with edit UI
+- Amazon Nova 2 Lite model support
+
+### Changed
+- VNC viewer resolution increased to 1920x1120 for full window visibility
+
+### Fixed
+- VNC viewer top cutoff - Chrome tabs and controls now fully visible
+- VP browser tab management - opens new tabs correctly
+
 
 ## [0.2.21] - 11/17/25
 
