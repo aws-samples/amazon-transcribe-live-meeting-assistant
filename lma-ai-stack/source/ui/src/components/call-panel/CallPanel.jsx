@@ -1043,7 +1043,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
                         id: 'live-view',
                         disabled: !vpData || !vpData.vncReady || loadingVP,
                       },
-                      { text: 'MCP Servers', id: 'mcp-servers', disabled: false },
+                      { text: 'MCP Servers', id: 'mcp-servers', disabled: true },
                     ]}
                     variant="normal"
                     onItemClick={(e) => {
