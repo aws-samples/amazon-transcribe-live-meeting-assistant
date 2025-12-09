@@ -174,6 +174,8 @@ type Mutation @aws_iam {
 	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
 	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
+	updateChatButtonConfig(input: UpdateChatButtonConfigInput!): UpdateChatButtonConfigOutput @aws_cognito_user_pools
+	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -203,6 +205,7 @@ type Query @aws_cognito_user_pools
 	listVirtualParticipants: [VirtualParticipant] @aws_cognito_user_pools @aws_iam
 	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	parseMeetingInvitation(invitationText: String!): String @aws_cognito_user_pools @aws_iam
+	getChatButtonConfig(ChatButtonConfigId: ID!): ChatButtonConfig @aws_cognito_user_pools @aws_iam
 }
 
 type VirtualParticipant @aws_cognito_user_pools @aws_iam {
@@ -375,6 +378,8 @@ type Subscription {
 		@aws_subscribe(mutations: ["unshareCall"])
 	onUpdateVirtualParticipant: VirtualParticipant
 		@aws_subscribe(mutations: ["updateVirtualParticipant", "endVirtualParticipant"])
+	onVNCPreviewToggle(CallId: ID!): VNCPreviewControl
+		@aws_subscribe(mutations: ["toggleVNCPreview"])
 }
 
 type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
@@ -564,6 +569,33 @@ type ChatToken @aws_cognito_user_pools @aws_iam {
 	Timestamp: AWSDateTime!
 }
 
+type ChatButtonConfig @aws_cognito_user_pools @aws_iam {
+	ChatButtonConfigId: ID!
+}
+
+input UpdateChatButtonConfigInput {
+	ChatButtonConfigId: ID!
+	ButtonConfig: String!
+}
+
+type UpdateChatButtonConfigOutput @aws_cognito_user_pools @aws_iam {
+	ChatButtonConfigId: ID!
+	Success: Boolean!
+}
+
+# VNC Preview Control
+type VNCPreviewControl @aws_cognito_user_pools @aws_iam {
+	CallId: ID!
+	Action: String!
+	Timestamp: AWSDateTime!
+	Success: Boolean!
+	RequestedBy: String
+}
+
+input ToggleVNCPreviewInput {
+	CallId: ID!
+	Show: Boolean!
+}
 
 schema {
 	query: Query

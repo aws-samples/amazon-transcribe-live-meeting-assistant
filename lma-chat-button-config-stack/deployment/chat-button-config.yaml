@@ -1,0 +1,115 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Amazon Transcribe Live Meeting Assistant - STRANDS Agent Chat Button Configuration
+
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs.
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
+Resources:
+  ChatButtonConfigTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      KeySchema:
+        - AttributeName: ChatButtonConfigId
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: ChatButtonConfigId
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  ChatButtonUploadRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: allow-dynamodb-access
+          PolicyDocument:
+            Statement:
+              Effect: Allow
+              Resource:
+                - !GetAtt ChatButtonConfigTable.Arn
+              Action:
+                - "dynamodb:PutItem"
+                - "dynamodb:UpdateItem"
+
+  ChatButtonUploadFunction:
+    Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Properties:
+      Code: ../source/lambda_functions
+      Handler: chat_button_upload.lambda_handler
+      Role: !GetAtt ChatButtonUploadRole.Arn
+      Runtime: python3.12
+      MemorySize: 128
+      Timeout: 60
+      TracingConfig:
+        Mode: Active
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/ChatButtonUploadFunction
+    DependsOn:
+      - ChatButtonUploadFunctionLogGroup
+
+  ChatButtonUploadFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/ChatButtonUploadFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  ChatButtonStoreConfig:
+    Type: "AWS::CloudFormation::CustomResource"
+    Properties:
+      ServiceToken: !GetAtt ChatButtonUploadFunction.Arn
+      ChatButtonConfigTableName: !Ref ChatButtonConfigTable
+      # hash below is updated by publish.sh script- used to force template updates when source has changed.
+      source_hash: fd817f1e6b137804
+
+Outputs:
+  ChatButtonConfigTableName:
+    Value: !Ref ChatButtonConfigTable
+    Description: DynamoDB table name for chat button configuration
+  
+  DefaultChatButtonConfig:
+    Description: View the *default* STRANDS agent chat button configuration. Do not edit. To override default buttons, add or edit attributes in the custom button config item.
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=DefaultChatButtonConfig&route=ROUTE_ITEM_EXPLORER&table=${ChatButtonConfigTable}"
+  
+  CustomChatButtonConfig:
+    Description: Edit the *custom* STRANDS agent chat button configuration. Attribute values here override the default button config, and are preserved during stack updates.
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomChatButtonConfig&route=ROUTE_ITEM_EXPLORER&table=${ChatButtonConfigTable}"

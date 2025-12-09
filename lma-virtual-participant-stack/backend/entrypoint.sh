@@ -6,7 +6,8 @@ echo "Starting D-Bus..."
 dbus-daemon --system --fork 2>/dev/null || echo "D-Bus already running or not needed"
 
 echo "Starting virtual display (Xvfb)..."
-Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
+# Increased height to 1120 to account for window decorations and ensure full visibility
+Xvfb :99 -screen 0 1920x1120x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
 export DISPLAY=:99
 
 echo "Waiting for display to initialize..."

@@ -71,6 +71,10 @@ Parameters:
     Type: String
     Description: AppSync GraphQL endpoint URL for Virtual Participant status updates
 
+  AppSyncEventApiUrl:
+    Type: String
+    Description: AppSync Event API WebSocket URL for MCP command delivery
+
   CloudFrontDomainName:
     Type: String
     Description: CloudFront domain name for VNC WebSocket URL construction
@@ -667,6 +671,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - "appsync:GraphQL"
+                  - "appsync:EventConnect"
+                  - "appsync:EventSubscribe"
+                  - "appsync:EventPublish"
                 Resource: "*"
         - PolicyName: VirtualParticipantTablePolicy
           PolicyDocument:
@@ -811,6 +818,8 @@ Resources:
               Value: !Ref ExitMessage
             - Name: GRAPHQL_ENDPOINT
               Value: !Ref GraphQLEndpoint
+            - Name: APPSYNC_EVENTS_URL
+              Value: !Ref AppSyncEventApiUrl
             - Name: VP_TASK_REGISTRY_TABLE_NAME
               Value: !Ref VPTaskRegistryTableName
             - Name: ENABLE_AUDIO_RECORDING

@@ -155,6 +155,11 @@ Parameters:
     Type: String
     Description: The AppSync GraphQL API URL
 
+  EventApiHttpUrl:
+    Type: String
+    Default: ""
+    Description: The AppSync Event API HTTP URL for MCP browser control
+
   FetchTranscriptFunctionArn:
     Type: String
     Description: ARN of Fetch Transcript function
@@ -781,6 +786,15 @@ Resources:
                   - "appsync:GraphQL"
                 Resource:
                   - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/addChatToken"
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/toggleVNCPreview"
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/executeMCPCommand"
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/publishMCPResult"
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Query/fields/getMCPCommand"
+              - Effect: Allow
+                Action:
+                  - "appsync:EventPublish"
+                Resource:
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/channelNamespace/mcp-commands"
           PolicyName: AppSyncGraphQLPolicy
         - PolicyName: InlinePolicy
           PolicyDocument:
@@ -826,6 +840,7 @@ Resources:
           TRANSCRIPT_KB_ID: !Ref TranscriptBedrockKnowledgeBaseId
           TAVILY_API_KEY: !Ref TavilyApiKey
           APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
+          EVENT_API_HTTP_URL: !Ref EventApiHttpUrl
           ENABLE_STREAMING: "true"
       Code: ./src
       LoggingConfig:

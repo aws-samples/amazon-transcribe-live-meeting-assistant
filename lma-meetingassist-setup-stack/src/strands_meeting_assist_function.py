@@ -25,6 +25,7 @@ bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
 
 # Get AppSync endpoint from environment
 APPSYNC_GRAPHQL_URL = os.environ.get('APPSYNC_GRAPHQL_URL', '')
+EVENT_API_HTTP_URL = os.environ.get('EVENT_API_HTTP_URL', '')
 ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
 
 
@@ -256,6 +257,414 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             return f"Error retrieving meeting history: {str(e)}"
     
     return meeting_history
+
+
+def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: str):
+    """Factory function to create current meeting transcript tool with closure"""
+    from strands import tool
+    
+    @tool
+    def current_meeting_transcript(lines: int = 20, mode: str = "recent") -> str:
+        """Get transcript from the current meeting.
+        
+        Use this when:
+        - User asks about what was said in THIS meeting
+        - Need to reference recent statements or discussions
+        - Summarizing, extracting action items, or analyzing current meeting
+        - User asks about topics, decisions, or questions from current meeting
+        - Request is ambiguous but likely meeting-related
+        
+        DO NOT use for:
+        - General knowledge questions unrelated to the meeting
+        - Questions about past meetings (use meeting_history instead)
+        - Web searches or current events (use web_search instead)
+        
+        Args:
+            lines: Number of recent transcript lines to return (default 20, max 100)
+            mode: "recent" for last N lines, "full" for complete transcript, "semantic" for relevant excerpts
+            
+        Returns:
+            Meeting transcript text formatted with speaker names
+        """
+        if not dynamodb_table_name:
+            return "Current meeting transcript not available - no DynamoDB table configured"
+        
+        try:
+            # Limit to reasonable range
+            lines = min(max(1, lines), 100)
+            
+            logger.info(f"Current meeting transcript tool executing: lines={lines}, mode={mode}")
+            
+            # Fetch full transcript
+            full_transcript = fetch_meeting_transcript(call_id, dynamodb_table_name)
+            
+            if not full_transcript:
+                return "No transcript available for current meeting yet."
+            
+            if mode == "full":
+                return full_transcript
+            elif mode == "recent":
+                # Return last N lines
+                transcript_lines = full_transcript.split('\n')
+                recent_lines = transcript_lines[-lines:] if len(transcript_lines) > lines else transcript_lines
+                result = '\n'.join(recent_lines)
+                logger.info(f"Returning {len(recent_lines)} recent transcript lines")
+                return result
+            else:
+                # Default to recent
+                transcript_lines = full_transcript.split('\n')
+                recent_lines = transcript_lines[-lines:] if len(transcript_lines) > lines else transcript_lines
+                return '\n'.join(recent_lines)
+            
+        except Exception as e:
+            logger.error(f"Error in current meeting transcript: {str(e)}")
+            return f"Error retrieving current meeting transcript: {str(e)}"
+    
+    return current_meeting_transcript
+
+
+def create_vnc_preview_control_tool(call_id: str, appsync_url: str):
+    """Factory function to create VNC preview control tool"""
+    from strands import tool
+    from gql import gql
+    from asst_gql_client import AppsyncRequestsGqlClient
+    
+    @tool
+    def control_vnc_preview(action: str) -> str:
+        """Control the VNC live view preview window on the meeting page.
+        
+        This tool allows you to show or hide the Virtual Participant's browser
+        screen directly on the meeting page. The user can watch in real-time
+        what the VP is doing.
+        
+        Use this when:
+        - User asks to "show me what the bot is doing"
+        - User wants to "see the virtual participant screen"
+        - User asks to "open the live view" or "show live preview"
+        - User wants to "close the preview" or "hide the screen"
+        - User wants to monitor VP browser activity
+        
+        Args:
+            action: Either "open" to show preview or "close" to hide it
+            
+        Returns:
+            Success message confirming the action
+            
+        Examples:
+            - User: "show me the virtual participant"
+            - User: "open the live view"
+            - User: "close the preview"
+        """
+        if action not in ['open', 'close']:
+            return "Invalid action. Please use 'open' to show the preview or 'close' to hide it."
+        
+        try:
+            logger.info(f"VNC preview control: {action} for call {call_id}")
+            
+            # Initialize AppSync client
+            appsync_client = AppsyncRequestsGqlClient(
+                url=appsync_url,
+                fetch_schema_from_transport=False
+            )
+            
+            # GraphQL mutation
+            mutation = gql("""
+            mutation ToggleVNCPreview($input: ToggleVNCPreviewInput!) {
+                toggleVNCPreview(input: $input) {
+                    CallId
+                    Action
+                    Success
+                    Timestamp
+                }
+            }
+            """)
+            
+            variables = {
+                'input': {
+                    'CallId': call_id,
+                    'Show': action == 'open'
+                }
+            }
+            
+            result = appsync_client.execute(mutation, variable_values=variables)
+            
+            if result.get('toggleVNCPreview', {}).get('Success'):
+                action_past = "opened" if action == "open" else "closed"
+                return f"✓ VNC live preview {action_past} successfully. The user can now {'see' if action == 'open' else 'no longer see'} the Virtual Participant's browser screen on the meeting page."
+            else:
+                return f"Failed to {action} VNC preview. Please try again."
+                
+        except Exception as e:
+            logger.error(f"Error controlling VNC preview: {str(e)}")
+            return f"Error controlling VNC preview: {str(e)}"
+    
+    return control_vnc_preview
+
+
+def create_vp_browser_control_tool(call_id: str, event_api_http_url: str):
+    """Factory function to create VP browser control tool using Event API HTTP endpoint"""
+    from strands import tool
+    import uuid
+    from datetime import datetime
+    import requests
+    from botocore.auth import SigV4Auth
+    from botocore.awsrequest import AWSRequest
+    import hashlib
+    
+    @tool
+    def control_vp_browser(action: str, url: str = "") -> str:
+        """Control the Virtual Participant's browser to perform web searches and research during meetings.
+        
+        🔧 DEBUG: Tool entry point - parameters will be logged
+        
+        This tool allows you to navigate to websites and take screenshots through the Virtual Participant.
+        Perfect for visual research, fact-checking, and gathering information during meetings.
+        
+        **IMPORTANT:** Before using this tool, you MUST first use control_vnc_preview(action="open")
+        to open the VNC live preview window so the user can see the browser activity.
+        
+        Use this when:
+        - User asks to "search for X online" or "look up X"
+        - User wants to "show me X website" or "open X"
+        - Need to fact-check information with visual proof
+        - User wants screenshots or visual evidence
+        - Researching products, competitors, or references
+        
+        Available actions:
+        - "open_url": Open a URL in a new foreground tab (requires url parameter)
+        - "screenshot": Take a screenshot of current page
+        
+        Args:
+            action: The browser action to perform
+            url: URL to open (for open_url action)
+            
+        Returns:
+            Result of the browser action
+            
+        Examples:
+            - User: "search for AWS pricing"
+              → control_vp_browser(action="open_url", url="https://aws.amazon.com/pricing")
+            
+            - User: "show me the competitor's website"
+              → control_vp_browser(action="open_url", url="https://competitor.com")
+            
+            - User: "take a screenshot"
+              → control_vp_browser(action="screenshot")
+        """
+        logger.info("=" * 80)
+        logger.info("🔧 VP BROWSER CONTROL TOOL CALLED")
+        logger.info(f"  Action: {action}")
+        logger.info(f"  URL: {url}")
+        logger.info(f"  CallId: {call_id}")
+        logger.info(f"  Event API HTTP URL configured: {bool(event_api_http_url)}")
+        logger.info(f"  Event API HTTP URL value: {event_api_http_url}")
+        logger.info("=" * 80)
+        
+        valid_actions = ['open_url', 'screenshot']
+        
+        if action not in valid_actions:
+            logger.error(f"❌ Invalid action: {action}")
+            return f"Invalid action. Please use one of: {', '.join(valid_actions)}"
+        
+        # Validate required parameters
+        if action == 'open_url' and not url:
+            logger.error("❌ Missing URL for open_url action")
+            return "URL parameter is required for open_url action"
+        
+        if not event_api_http_url:
+            logger.error("❌ Event API HTTP URL not configured!")
+            logger.error(f"   EVENT_API_HTTP_URL env var: {os.environ.get('EVENT_API_HTTP_URL', 'NOT SET')}")
+            return "Event API not configured - VP browser control unavailable"
+        
+        logger.info("✓ All validations passed, proceeding with Event API publish")
+        
+        try:
+            logger.info(f"🚀 Starting VP browser control: {action} for call {call_id}")
+            
+            # For open_url, we need to use new_page with url parameter
+            # According to chrome-devtools-mcp docs, new_page can accept a url parameter
+            # which will create a new page AND navigate to that URL
+            
+            if action == 'open_url':
+                command_id = str(uuid.uuid4())
+                timestamp = datetime.utcnow().isoformat() + 'Z'
+                
+                # Use new_page with url parameter to create new page and navigate
+                event_payload = {
+                    'commandId': command_id,
+                    'CallId': call_id,
+                    'toolName': 'new_page',
+                    'arguments': json.dumps({
+                        'url': url  # new_page accepts url parameter to navigate immediately
+                    }),
+                    'requestedBy': 'strands-agent',
+                    'timestamp': timestamp,
+                    'status': 'pending'
+                }
+                
+                call_id_hash = hashlib.sha256(call_id.encode()).hexdigest()[:16]
+                channel_name = f'/mcp-commands/{call_id_hash}'
+                
+                logger.info(f"Publishing MCP new_page command with URL to Event API")
+                logger.info(f"  Original CallId: {call_id}")
+                logger.info(f"  Channel hash: {call_id_hash}")
+                logger.info(f"  Channel: {channel_name}")
+                logger.info(f"  Event API HTTP URL: {event_api_http_url}")
+                logger.info(f"  Command (new_page with url): {command_id} -> {url}")
+                
+                body = json.dumps({
+                    'channel': channel_name,
+                    'events': [json.dumps(event_payload)]
+                })
+                
+                logger.info(f"  Request body: {body}")
+                
+                # Create AWS request for SigV4 signing
+                request = AWSRequest(
+                    method='POST',
+                    url=f"{event_api_http_url}/event",
+                    data=body,
+                    headers={
+                        'Content-Type': 'application/json',
+                        'accept': 'application/json, text/javascript',
+                        'content-encoding': 'amz-1.0'
+                    }
+                )
+                
+                # Sign request with SigV4
+                credentials = boto3.Session().get_credentials()
+                SigV4Auth(credentials, 'appsync', os.environ.get('AWS_REGION', 'us-east-1')).add_auth(request)
+                
+                logger.info(f"  Sending HTTP POST to: {event_api_http_url}/event")
+                
+                # Send HTTP request
+                response = requests.post(
+                    f"{event_api_http_url}/event",
+                    data=body,
+                    headers=dict(request.headers)
+                )
+                
+                logger.info(f"📥 Response received:")
+                logger.info(f"  Status: {response.status_code}")
+                logger.info(f"  Headers: {dict(response.headers)}")
+                logger.info(f"  Body: {response.text}")
+                
+                if response.status_code != 200:
+                    logger.error(f"❌ Event API returned non-200 status: {response.status_code}")
+                    logger.error(f"   Response: {response.text}")
+                
+                response.raise_for_status()
+                
+                logger.info("=" * 80)
+                logger.info("✅ NEW_PAGE COMMAND PUBLISHED SUCCESSFULLY")
+                logger.info(f"✅ Creating new page with URL: {url}")
+                logger.info(f"✅ Command: {command_id}")
+                logger.info("=" * 80)
+                
+                return f"✓ Opening {url} in new tab in Virtual Participant browser"
+                
+            elif action == 'screenshot':
+                tool_name = 'take_screenshot'
+                arguments = {'format': 'png', 'quality': 90}
+            else:
+                return f"Action {action} not yet implemented"
+            
+            # For screenshot, send single command
+            command_id = str(uuid.uuid4())
+            timestamp = datetime.utcnow().isoformat() + 'Z'
+            
+            event_payload = {
+                'commandId': command_id,
+                'CallId': call_id,
+                'toolName': tool_name,
+                'arguments': json.dumps(arguments),
+                'requestedBy': 'strands-agent',
+                'timestamp': timestamp,
+                'status': 'pending'
+            }
+            
+            # Publish to Event API channel via HTTP
+            # Use SHA256 hash of CallId (first 16 chars) for channel name
+            call_id_hash = hashlib.sha256(call_id.encode()).hexdigest()[:16]
+            channel_name = f'/mcp-commands/{call_id_hash}'
+            
+            logger.info(f"Publishing MCP command to Event API")
+            logger.info(f"  Original CallId: {call_id}")
+            logger.info(f"  Channel hash: {call_id_hash}")
+            logger.info(f"  Channel: {channel_name}")
+            logger.info(f"  Event API HTTP URL: {event_api_http_url}")
+            logger.info(f"  Event payload: {json.dumps(event_payload)}")
+            
+            # Prepare HTTP request body
+            body = json.dumps({
+                'channel': channel_name,
+                'events': [json.dumps(event_payload)]
+            })
+            
+            logger.info(f"  Request body: {body}")
+            
+            # Create AWS request for SigV4 signing
+            request = AWSRequest(
+                method='POST',
+                url=f"{event_api_http_url}/event",
+                data=body,
+                headers={
+                    'Content-Type': 'application/json',
+                    'accept': 'application/json, text/javascript',
+                    'content-encoding': 'amz-1.0'
+                }
+            )
+            
+            # Sign request with SigV4
+            credentials = boto3.Session().get_credentials()
+            SigV4Auth(credentials, 'appsync', os.environ.get('AWS_REGION', 'us-east-1')).add_auth(request)
+            
+            logger.info(f"  Sending HTTP POST to: {event_api_http_url}/event")
+            
+            # Send HTTP request
+            response = requests.post(
+                f"{event_api_http_url}/event",
+                data=body,
+                headers=dict(request.headers)
+            )
+            
+            logger.info(f"📥 Response received:")
+            logger.info(f"  Status: {response.status_code}")
+            logger.info(f"  Headers: {dict(response.headers)}")
+            logger.info(f"  Body: {response.text}")
+            
+            if response.status_code != 200:
+                logger.error(f"❌ Event API returned non-200 status: {response.status_code}")
+                logger.error(f"   Response: {response.text}")
+            
+            response.raise_for_status()
+            
+            logger.info("=" * 80)
+            logger.info("✅ EVENT PUBLISHED SUCCESSFULLY TO EVENT API")
+            logger.info(f"✅ MCP command sent: {command_id}")
+            logger.info(f"✅ Channel: {channel_name}")
+            logger.info(f"✅ Tool: {tool_name}")
+            logger.info("=" * 80)
+            
+            if action == 'screenshot':
+                return f"✓ Screenshot captured. Command ID: {command_id}"
+            else:
+                return f"✓ Browser action '{action}' completed. Command ID: {command_id}"
+                
+        except Exception as e:
+            logger.error("=" * 80)
+            logger.error("❌ EXCEPTION IN VP BROWSER CONTROL")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            logger.error(f"   Exception message: {str(e)}")
+            logger.error(f"   Action attempted: {action}")
+            logger.error(f"   CallId: {call_id}")
+            logger.error("=" * 80)
+            import traceback
+            logger.error(f"   Full traceback:\n{traceback.format_exc()}")
+            return f"Error controlling Virtual Participant browser: {str(e)}"
+    
+    return control_vp_browser
+
 
 def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool, sequence: int):
     """
@@ -530,6 +939,30 @@ def handler(event, context):
             ))
             logger.info("Meeting history tool enabled")
         
+        # Add current meeting transcript tool
+        if dynamodb_table_name:
+            tools.append(create_current_meeting_transcript_tool(
+                call_id=call_id,
+                dynamodb_table_name=dynamodb_table_name
+            ))
+            logger.info("Current meeting transcript tool enabled")
+        
+        # Add VNC preview control tool (available to all users)
+        if APPSYNC_GRAPHQL_URL:
+            tools.append(create_vnc_preview_control_tool(
+                call_id=call_id,
+                appsync_url=APPSYNC_GRAPHQL_URL
+            ))
+            logger.info("VNC preview control tool enabled")
+        
+        # Add VP browser control tool (available to all users)
+        if EVENT_API_HTTP_URL:
+            tools.append(create_vp_browser_control_tool(
+                call_id=call_id,
+                event_api_http_url=EVENT_API_HTTP_URL
+            ))
+            logger.info("VP browser control tool enabled (Event API HTTP)")
+        
         # Initialize Strands Agent
         try:
             from strands import Agent
@@ -556,13 +989,9 @@ def handler(event, context):
                 tools=tools if tools else None
             )
             
-            # Prepare context for the agent
-            context_message = f"""
-Meeting Transcript:
-{transcript if transcript else "No meeting transcript available yet."}
-
-User Request: {user_input}
-"""
+            # Prepare context for the agent - don't include transcript by default
+            # The agent will use the current_meeting_transcript tool when needed
+            context_message = f"User Request: {user_input}"
             
             # Handle streaming vs non-streaming
             if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL:
@@ -668,37 +1097,56 @@ def get_meeting_assistant_prompt_with_tools() -> str:
     """
     return """You are an AI assistant helping participants during a live meeting. Your role is to:
 
-1. Answer questions based on the meeting context and transcript
-2. Use available tools intelligently to provide accurate, up-to-date information
+1. Intelligently determine when meeting context is needed
+2. Use available tools to provide accurate, up-to-date information
 3. Keep responses concise and focused (under 100 words when possible)
 4. Be professional and supportive
 
 Tool usage guidelines:
 
-**For chronological queries (last/recent/latest meetings):**
-1. FIRST use recent_meetings_list to get chronologically ordered meetings
-2. THEN use meeting_history with specific CallIds if detailed content needed
-3. Example: "What was the last meeting about?" → recent_meetings_list(limit=1) → meeting_history with that CallId
+**For VP browser control (IMPORTANT - TWO STEP PROCESS):**
+When using control_vp_browser, you MUST ALWAYS:
+1. FIRST call control_vnc_preview(action="open") to open the live preview window
+2. THEN call control_vp_browser(action="open_url", url="...") to open the website
 
-**For semantic queries (meetings about specific topics):**
-1. Use meeting_history directly for semantic search
-2. Optionally use recent_meetings_list first to establish time context
-3. Example: "Find meetings about budget" → meeting_history(query="budget")
+Example workflow:
+- User: "show me apple.com"
+  Step 1: control_vnc_preview(action="open")  ← REQUIRED FIRST
+  Step 2: control_vp_browser(action="open_url", url="https://apple.com")
 
-**For hybrid queries (recent meetings about X):**
-1. Use recent_meetings_list to get recent CallIds
-2. Use meeting_history with those CallIds to filter by topic
-3. Cross-reference results to find recent meetings matching the topic
+This ensures the user can see the browser activity in real-time.
 
-**Other tools:**
-- Use web_search for: current events, latest prices, recent news, real-time data
-- Use document_search for: company policies, product info, internal procedures
+**For current meeting queries (USE current_meeting_transcript tool):**
+- Summarizing THIS meeting
+- Extracting action items from THIS meeting
+- Analyzing topics discussed in THIS meeting
+- Fact-checking recent statements in THIS meeting
+- Responding to questions about what was just said
+- When request is ambiguous but likely meeting-related
+- Default to using this tool for most meeting-related queries
 
-When using tools:
-- Always cite meeting dates when available
-- If recent_meetings_list returns no results, inform user no recent meetings found
-- Combine information from multiple tools when helpful
-- Be explicit about chronological vs semantic relevance
+Examples:
+- "Summarize this meeting" → current_meeting_transcript(mode="full")
+- "What were the action items?" → current_meeting_transcript(mode="full")
+- "What did we just discuss?" → current_meeting_transcript(lines=20, mode="recent")
+- "Fact check that statement" → current_meeting_transcript(lines=10, mode="recent")
+
+**For past meetings queries:**
+- "Last meeting" → recent_meetings_list(limit=1) → meeting_history with CallId
+- "Meetings about X" → meeting_history(query="X")
+- "Have we discussed this before?" → meeting_history(query="topic")
+
+**For general queries (DO NOT use current_meeting_transcript):**
+- General knowledge questions
+- Current events, weather, prices → web_search
+- Company policies, procedures → document_search
+- Questions explicitly unrelated to the meeting
+
+**Decision logic:**
+1. If question mentions "this meeting", "current meeting", "just said", "action items", "summarize" → USE current_meeting_transcript
+2. If question is about past meetings → USE meeting_history or recent_meetings_list
+3. If question is general knowledge or current events → USE web_search or answer directly
+4. If ambiguous → DEFAULT to using current_meeting_transcript (most queries are meeting-related)
 
 Always maintain a helpful and professional tone."""
 
