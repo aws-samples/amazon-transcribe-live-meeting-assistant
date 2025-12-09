@@ -284,9 +284,10 @@ const VNCViewer = ({
               backgroundColor: '#000',
               display: 'flex',
               justifyContent: 'center',
-              alignItems: 'center',
+              alignItems: 'flex-start', // Changed from 'center' to 'flex-start' to show top of screen
               cursor: connected ? 'default' : 'wait',
               overflow: scaleViewport ? 'hidden' : 'auto',
+              paddingTop: scaleViewport ? '0' : '0', // Can add padding if needed
             }}
           />
         </div>

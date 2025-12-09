@@ -60,6 +60,7 @@ import useCallsContext from '../../contexts/calls';
 import { shareModal, deleteModal } from '../common/meeting-controls';
 import VNCViewer from '../virtual-participant-layout/VNCViewer';
 import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
+import MCPServersModal from '../mcp-servers';
 
 const logger = new Logger('CallPanel');
 
@@ -774,6 +775,7 @@ const CallInProgressTranscript = ({
 
 const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP) => {
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showMCPModal, setShowMCPModal] = useState(false);
   const [buttonConfig, setButtonConfig] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [alertMessage, setAlertMessage] = useState(null);
@@ -1049,6 +1051,8 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
                         setShowEditModal(true);
                       } else if (e.detail.id === 'live-view') {
                         setShowVNCPreview((prev) => !prev);
+                      } else if (e.detail.id === 'mcp-servers') {
+                        setShowMCPModal(true);
                       }
                     }}
                     ariaLabel="Settings"
@@ -1111,6 +1115,9 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
             )}
           </SpaceBetween>
         </Modal>
+
+        {/* MCP Servers Modal */}
+        <MCPServersModal visible={showMCPModal} onDismiss={() => setShowMCPModal(false)} vpData={vpData} />
       </>
     );
   }
