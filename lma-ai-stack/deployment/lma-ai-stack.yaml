@@ -865,113 +865,111 @@ Resources:
         Type: NO_ARTIFACTS
       Source:
         Type: NO_SOURCE
-        BuildSpec: !Sub |
+        BuildSpec: |
           version: 0.2
-          
-          env:
-            variables:
-              STACK_NAME: ${AWS::StackName}
-              MCP_SERVERS_TABLE: ${MCPServersTable}
-          
           phases:
             pre_build:
               commands:
-                - echo "=== MCP Layer Builder ==="
-                - echo "Account ID: $AWS_ACCOUNT_ID"
-                - echo "Stack Name: $STACK_NAME"
-                - echo "MCP Servers Table: $MCP_SERVERS_TABLE"
-                - apt-get update -qq && apt-get install -y -qq jq zip > /dev/null
-                - npm install -g npm@latest
-            
+                - echo "MCP Layer Builder"
+                - yum install -y jq zip python3.12 python3.12-pip
+                - python3.12 --version
+                - python3.12 -m pip --version
             build:
               commands:
-                - echo "=== Querying DynamoDB for installed MCP servers ==="
+                - echo "Querying DynamoDB for installed MCP servers"
+                - aws dynamodb query --table-name "$MCP_SERVERS_TABLE" --key-condition-expression "AccountId = :accountId" --expression-attribute-values '{":accountId":{"S":"'$AWS_ACCOUNT_ID'"}}' --output json > /tmp/servers.json
+                - SERVER_COUNT=$(jq '.Items | length' /tmp/servers.json)
+                - echo "Found $SERVER_COUNT MCP servers"
+                - echo "Building Lambda layer with Python dependencies"
+                - mkdir -p layer/python && cd layer/python
+                - echo "Step 1 - Installing base Python dependencies (required for Lambda function)"
+                - echo "strands-agents>=0.1.0" > requirements.txt
+                - echo "boto3>=1.28.0" >> requirements.txt
+                - echo "botocore>=1.31.0" >> requirements.txt
+                - echo "tavily-python>=0.3.0" >> requirements.txt
+                - echo "gql>=3.4.0" >> requirements.txt
+                - echo "requests>=2.31.0" >> requirements.txt
+                - echo "requests-toolbelt>=0.10.0" >> requirements.txt
+                - cat requirements.txt
+                - python3.12 -m pip install -r requirements.txt -t . --no-cache-dir --upgrade
+                - echo "Base dependencies installed successfully"
                 - |
-                  SERVERS_JSON=$(aws dynamodb query \
-                    --table-name "$MCP_SERVERS_TABLE" \
-                    --key-condition-expression "AccountId = :accountId" \
-                    --expression-attribute-values "{\":accountId\":{\"S\":\"$AWS_ACCOUNT_ID\"}}" \
-                    --output json)
-                - echo "$SERVERS_JSON" | jq '.'
-                - SERVER_COUNT=$(echo "$SERVERS_JSON" | jq '.Items | length')
-                - echo "Found $SERVER_COUNT installed MCP servers"
-                
-                - |
-                  if [ "$SERVER_COUNT" -eq "0" ]; then
-                    echo "No MCP servers - creating empty layer"
-                    mkdir -p layer/nodejs && cd layer/nodejs && npm init -y && cd ../..
+                  if [ "$SERVER_COUNT" -gt "0" ]; then
+                    echo "Step 2 - Installing MCP server packages from DynamoDB";
+                    jq -r '.Items[] | .NpmPackage.S' /tmp/servers.json > mcp-servers.txt;
+                    echo "MCP servers to install:";
+                    cat mcp-servers.txt;
+                    while IFS= read -r package; do
+                      if [ -n "$package" ]; then
+                        echo "Attempting to install: $package";
+                        if python3.12 -m pip install "$package" -t . --no-cache-dir 2>&1; then
+                          echo "Successfully installed $package";
+                        else
+                          echo "WARNING: Failed to install $package (package may not exist in PyPI)";
+                          echo "Continuing with build...";
+                        fi;
+                      fi;
+                    done < mcp-servers.txt;
                   else
-                    echo "=== Building layer with MCP servers ==="
-                    mkdir -p layer/nodejs && cd layer/nodejs
-                    
-                    cat > package.json <<'EOF'
-                  {
-                    "name": "lma-mcp-servers-layer",
-                    "version": "1.0.0",
-                    "dependencies": {
-                  EOF
-                    
-                    FIRST=true
-                    echo "$SERVERS_JSON" | jq -r '.Items[] | "\(.NpmPackage.S)@\(.Version.S // "latest")"' | while read package; do
-                      PKG_NAME="${package%@*}"
-                      PKG_VERSION="${package#*@}"
-                      if [ "$FIRST" = "true" ]; then
-                        echo "      \"$PKG_NAME\": \"$PKG_VERSION\"" >> package.json
-                        FIRST=false
-                      else
-                        echo "      ,\"$PKG_NAME\": \"$PKG_VERSION\"" >> package.json
-                      fi
-                    done
-                    
-                    cat >> package.json <<'EOF'
-                    }
-                  }
-                  EOF
-                    
-                    cat package.json
-                    npm install --production --no-optional
-                    cd ../..
+                    echo "Step 2 - No MCP servers configured, skipping MCP package installation";
                   fi
-                
+                - cd ../..
+                - echo "Packaging Lambda layer"
                 - cd layer && zip -r ../mcp-layer.zip . -q && cd ..
-                - du -h mcp-layer.zip
-                
+                - LAYER_SIZE_BYTES=$(stat -c%s mcp-layer.zip)
+                - LAYER_SIZE_MB=$((LAYER_SIZE_BYTES / 1024 / 1024))
+                - echo "Layer size is ${LAYER_SIZE_MB}MB"
                 - |
-                  LAYER_VERSION=$(aws lambda publish-layer-version \
-                    --layer-name "${STACK_NAME}-mcp-servers" \
-                    --description "MCP servers for account $AWS_ACCOUNT_ID" \
-                    --zip-file fileb://mcp-layer.zip \
-                    --compatible-runtimes python3.12 \
-                    --query 'Version' \
-                    --output text)
-                - echo "Published layer version: $LAYER_VERSION"
-                
-                - FUNCTION_NAME="STRANDS-${STACK_NAME}-MeetingAssist"
+                  if [ "$LAYER_SIZE_BYTES" -gt "50000000" ]; then
+                    echo "Layer exceeds 70MB limit - uploading to S3 first";
+                    echo "Using S3 bucket: $S3_BUCKET";
+                    S3_KEY="mcp-layers/$STACK_NAME-mcp-servers-$(date +%s).zip";
+                    echo "Uploading to s3://$S3_BUCKET/$S3_KEY";
+                    aws s3 cp mcp-layer.zip "s3://$S3_BUCKET/$S3_KEY";
+                    echo "Publishing layer from S3";
+                    if aws lambda publish-layer-version --layer-name "$STACK_NAME-mcp-servers" --description "MCP servers and dependencies" --content "S3Bucket=$S3_BUCKET,S3Key=$S3_KEY" --compatible-runtimes python3.12 --query 'Version' --output text > /tmp/version.txt 2>&1; then
+                      echo "Layer published successfully";
+                    else
+                      echo "ERROR: Layer unzipped size exceeds Lambda's 250MB limit";
+                      echo "This MCP server has too many dependencies for Lambda layers";
+                      echo "Marking server as FAILED in DynamoDB";
+                      if [ -n "$SERVER_ID" ]; then
+                        aws dynamodb update-item --table-name "$MCP_SERVERS_TABLE" --key "{\"AccountId\":{\"S\":\"$AWS_ACCOUNT_ID\"},\"ServerId\":{\"S\":\"$SERVER_ID\"}}" --update-expression "SET #status = :status, ErrorMessage = :error" --expression-attribute-names '{"#status":"Status"}' --expression-attribute-values "{\":status\":{\"S\":\"FAILED\"},\":error\":{\"S\":\"Layer too large: unzipped size exceeds 250MB limit\"}}";
+                      fi;
+                      exit 1;
+                    fi;
+                  else
+                    echo "Layer size OK - publishing directly";
+                    aws lambda publish-layer-version --layer-name "$STACK_NAME-mcp-servers" --description "MCP servers and dependencies" --zip-file fileb://mcp-layer.zip --compatible-runtimes python3.12 --query 'Version' --output text > /tmp/version.txt;
+                  fi
+                - echo "Published layer version $(cat /tmp/version.txt)"
+                - FUNCTION_NAME=$(aws lambda list-functions --query "Functions[?contains(FunctionName, 'MeetingAssist')].FunctionName" --output text)
+                - echo "Found Lambda function $FUNCTION_NAME"
+                - aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --query 'Layers[].LayerArn' --output json > /tmp/current.json
+                - jq -r --arg layer "arn:aws:lambda:$AWS_DEFAULT_REGION:$AWS_ACCOUNT_ID:layer:$STACK_NAME-mcp-servers:$(cat /tmp/version.txt)" 'map(select(. | contains("mcp-servers") | not)) + [$layer] | join(" ")' /tmp/current.json > /tmp/layers.txt
+                - aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --layers $(cat /tmp/layers.txt)
+                - echo "Lambda function updated with new layer"
                 - |
-                  LAYER_ARN="arn:aws:lambda:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:layer:${STACK_NAME}-mcp-servers:${LAYER_VERSION}"
-                  CURRENT_LAYERS=$(aws lambda get-function-configuration \
-                    --function-name "$FUNCTION_NAME" \
-                    --query 'Layers[].LayerArn' \
-                    --output json)
-                  NEW_LAYERS=$(echo "$CURRENT_LAYERS" | jq -r --arg layer "$LAYER_ARN" \
-                    'map(select(. | contains("mcp-servers") | not)) + [$layer] | join(" ")')
-                  aws lambda update-function-configuration \
-                    --function-name "$FUNCTION_NAME" \
-                    --layers $NEW_LAYERS
-                
-                - |
-                  if [ -n "$SERVER_ID" ]; then
-                    aws dynamodb update-item \
-                      --table-name "$MCP_SERVERS_TABLE" \
-                      --key "{\"AccountId\":{\"S\":\"$AWS_ACCOUNT_ID\"},\"ServerId\":{\"S\":\"$SERVER_ID\"}}" \
-                      --update-expression "SET #status = :status, UpdatedAt = :updated" \
-                      --expression-attribute-names '{"#status":"Status"}' \
-                      --expression-attribute-values "{\":status\":{\"S\":\"ACTIVE\"},\":updated\":{\"S\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}"
+                  if [ "$ACTION" = "INSTALL_MCP_SERVER" ] && [ -n "$SERVER_ID" ]; then
+                    echo "Updating DynamoDB server status to ACTIVE";
+                    aws dynamodb update-item --table-name "$MCP_SERVERS_TABLE" --key "{\"AccountId\":{\"S\":\"$AWS_ACCOUNT_ID\"},\"ServerId\":{\"S\":\"$SERVER_ID\"}}" --update-expression "SET #status = :status, UpdatedAt = :updated" --expression-attribute-names '{"#status":"Status"}' --expression-attribute-values "{\":status\":{\"S\":\"ACTIVE\"},\":updated\":{\"S\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}";
+                    echo "Server status updated to ACTIVE";
                   fi
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
         Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: STACK_NAME
+            Value: !Ref AWS::StackName
+          - Name: MCP_SERVERS_TABLE
+            Value: !Ref MCPServersTable
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: S3_BUCKET
+            Value: !Sub "${BootstrapBucketBaseName}-${AWS::Region}"
       TimeoutInMinutes: 15
 
   MCPLayerBuildRole:
@@ -1006,15 +1004,37 @@ Resources:
                 Resource: !GetAtt MCPServersTable.Arn
               - Effect: Allow
                 Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+              - Effect: Allow
+                Action:
+                  - lambda:ListFunctions
+                Resource: "*"
+              - Effect: Allow
+                Action:
                   - lambda:PublishLayerVersion
+                  - lambda:GetLayerVersion
                   - lambda:GetFunctionConfiguration
                   - lambda:UpdateFunctionConfiguration
                 Resource:
-                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:${AWS::StackName}-mcp-servers"
-                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:${AWS::StackName}-mcp-servers:*"
-                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-*"
-
-      TimeoutInMinutes: 10
+                  - !Sub
+                    - "arn:aws:lambda:${Region}:${AccountId}:layer:${StackName}-mcp-servers"
+                    - Region: !Ref AWS::Region
+                      AccountId: !Ref AWS::AccountId
+                      StackName: !Ref AWS::StackName
+                  - !Sub
+                    - "arn:aws:lambda:${Region}:${AccountId}:layer:${StackName}-mcp-servers:*"
+                    - Region: !Ref AWS::Region
+                      AccountId: !Ref AWS::AccountId
+                      StackName: !Ref AWS::StackName
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${LMAStackName}-*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/mcp-layers/*"
 
   LambdaCodeBuildStartBuildExecutionRole:
     Type: AWS::IAM::Role
@@ -1458,7 +1478,11 @@ Resources:
                   Action:
                     - lambda:InvokeFunction
                   Resource:
-                    - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${LMAStackName}-*"
+                    - !Sub
+                      - "arn:aws:lambda:${Region}:${AccountId}:function:STRANDS-${StackName}-*"
+                      - Region: !Ref AWS::Region
+                        AccountId: !Ref AWS::AccountId
+                        StackName: !Ref LMAStackName
                     - !Sub "${AgentAssistExistingLambdaFunctionArn}"
                 - Ref: AWS::NoValue
 
@@ -3374,6 +3398,11 @@ Resources:
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       Name: VirtualParticipantLambda
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt VirtualParticipantLambdaDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt VirtualParticipantManagerFunction.Arn
+
   # MCP Server Manager Lambda Function
   MCPServerManagerFunction:
     Type: AWS::Serverless::Function
@@ -3399,6 +3428,11 @@ Resources:
                 - codebuild:StartBuild
                 - codebuild:BatchGetBuilds
               Resource: !GetAtt MCPLayerBuildProject.Arn
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/MCPServerManager"
     Metadata:
@@ -3557,11 +3591,6 @@ Resources:
           $util.error($ctx.error.message, $ctx.error.type)
         #end
         $util.toJson($ctx.result)
-
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt VirtualParticipantLambdaDataSourceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt VirtualParticipantManagerFunction.Arn
 
   VirtualParticipantLambdaDataSourceRole:
     Type: AWS::IAM::Role

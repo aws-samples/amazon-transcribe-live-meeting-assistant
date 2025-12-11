@@ -76,7 +76,9 @@ const PublicRegistryTab = ({ onInstall }) => {
         .filter((item) => {
           // eslint-disable-next-line no-underscore-dangle
           const meta = item._meta?.['io.modelcontextprotocol.registry/official'];
-          return meta?.isLatest;
+          // Only include latest versions with packages
+          const hasPackages = item.server.packages && item.server.packages.length > 0;
+          return meta?.isLatest && hasPackages;
         })
         .map((item) => {
           const { server } = item;
@@ -90,7 +92,12 @@ const PublicRegistryTab = ({ onInstall }) => {
             server.remotes.forEach((remote) => transports.push(remote.type));
           }
 
-          const npmPackage = server.packages?.[0]?.identifier || server.name;
+          // Get first package and check if it's PyPI (Python packages are supported)
+          const firstPackage = server.packages[0];
+          const packageType = firstPackage.registryType || 'unknown';
+          const isPyPiPackage = packageType === 'pypi';
+          const packageIdentifier = firstPackage.identifier;
+          const packageVersion = firstPackage.version || server.version;
 
           const requiresAuth =
             (server.remotes && server.remotes.some((r) => r.headers && r.headers.length > 0)) ||
@@ -102,13 +109,15 @@ const PublicRegistryTab = ({ onInstall }) => {
             name: name.charAt(0).toUpperCase() + name.slice(1),
             description: server.description || 'No description available',
             category: 'Community',
-            npmPackage,
+            npmPackage: packageIdentifier, // Actually stores PyPI or npm package name
+            packageType,
+            isSupported: isPyPiPackage, // Only PyPI packages are supported (Python Lambda)
             transport: transports.length > 0 ? transports : ['stdio'],
             verified: true,
             requiresAuth,
             tools: [],
             homepage: server.repository?.url || `https://registry.modelcontextprotocol.io/servers/${server.name}`,
-            version: server.version,
+            version: packageVersion,
           };
         });
 
@@ -306,6 +315,8 @@ const PublicRegistryTab = ({ onInstall }) => {
                       <SpaceBetween direction="horizontal" size="xs">
                         <Box variant="h4">{server.name}</Box>
                         {server.verified && <Badge color="green">Verified</Badge>}
+                        <Badge color={server.isSupported ? 'grey' : 'red'}>{server.packageType}</Badge>
+                        {!server.isSupported && <Badge color="red">Unsupported</Badge>}
                         {server.requiresAuth && <Badge color="blue">Requires Auth</Badge>}
                       </SpaceBetween>
                     </Box>
@@ -335,8 +346,16 @@ const PublicRegistryTab = ({ onInstall }) => {
                       </Box>
                     </ColumnLayout>
 
+                    {/* Unsupported Package Type Warning */}
+                    {!server.isSupported && (
+                      <Alert type="warning" header="Unsupported Package Type">
+                        This server uses {server.packageType} packages. Only PyPI (Python) packages are currently
+                        supported. The STRANDS agent is Python-based and requires Python MCP servers.
+                      </Alert>
+                    )}
+
                     {/* Auth Requirements */}
-                    {server.requiresAuth && (
+                    {server.requiresAuth && server.isSupported && (
                       <Alert type="warning" header="Requires Authentication">
                         You&apos;ll need to provide credentials when installing this server.
                       </Alert>
@@ -352,9 +371,13 @@ const PublicRegistryTab = ({ onInstall }) => {
                           variant="primary"
                           onClick={() => handleInstall(server)}
                           loading={installing[server.id]}
-                          disabled={installing[server.id]}
+                          disabled={installing[server.id] || !server.isSupported}
                         >
-                          {installing[server.id] ? 'Installing...' : 'Install'}
+                          {(() => {
+                            if (installing[server.id]) return 'Installing...';
+                            if (server.isSupported) return 'Install';
+                            return 'Unsupported';
+                          })()}
                         </Button>
                       </SpaceBetween>
                     </Box>
