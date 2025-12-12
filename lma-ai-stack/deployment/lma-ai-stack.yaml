@@ -890,6 +890,7 @@ Resources:
                 - echo "gql>=3.4.0" >> requirements.txt
                 - echo "requests>=2.31.0" >> requirements.txt
                 - echo "requests-toolbelt>=0.10.0" >> requirements.txt
+                - echo "mcp>=1.0.0" >> requirements.txt
                 - cat requirements.txt
                 - python3.12 -m pip install -r requirements.txt -t . --no-cache-dir --upgrade
                 - echo "Base dependencies installed successfully"
