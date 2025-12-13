@@ -178,6 +178,7 @@ type Mutation @aws_iam {
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools
 	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools
+	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -606,6 +607,7 @@ type MCPServer @aws_cognito_user_pools @aws_iam {
 	AccountId: String!
 	Name: String!
 	NpmPackage: String!
+	PackageType: String
 	Version: String
 	Transport: [String]
 	RequiresAuth: Boolean
@@ -614,16 +616,20 @@ type MCPServer @aws_cognito_user_pools @aws_iam {
 	InstalledAt: AWSDateTime
 	UpdatedAt: AWSDateTime
 	BuildId: String
+	ErrorMessage: String
+	ServerUrl: String
 }
 
 input InstallMCPServerInput {
 	ServerId: ID!
 	Name: String!
 	NpmPackage: String!
+	PackageType: String
 	Version: String
 	Transport: [String]
 	RequiresAuth: Boolean
 	AuthConfig: AWSJSON
+	ServerUrl: String
 }
 
 type InstallMCPServerOutput @aws_cognito_user_pools @aws_iam {
@@ -639,6 +645,17 @@ type UninstallMCPServerOutput @aws_cognito_user_pools @aws_iam {
 	Message: String
 }
 
+input UpdateMCPServerInput {
+	ServerId: ID!
+	Version: String!
+}
+
+type UpdateMCPServerOutput @aws_cognito_user_pools @aws_iam {
+	ServerId: ID!
+	Success: Boolean!
+	Message: String
+	BuildId: String
+}
 
 schema {
 	query: Query

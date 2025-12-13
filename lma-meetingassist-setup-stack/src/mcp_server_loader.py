@@ -29,6 +29,49 @@ MCP_SERVERS_TABLE = os.environ.get('MCP_SERVERS_TABLE', '')
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID', '')
 
 
+def load_http_mcp_server(server_id: str, server_url: str, auth_headers: dict = None) -> list:
+    """
+    Load an HTTP-based MCP server (streamable-http transport)
+    
+    HTTP servers don't require installation - they're external services.
+    We just need to connect to them via HTTP transport.
+    
+    Args:
+        server_id: Server identifier
+        server_url: HTTP endpoint URL
+        auth_headers: Optional authentication headers
+        
+    Returns:
+        List of tools from the HTTP server
+    """
+    try:
+        from strands.tools.mcp import MCPClient
+        from mcp.client.streamable_http import streamablehttp_client
+        
+        logger.info(f"Loading HTTP MCP server: {server_id} at {server_url}")
+        
+        # Create MCP client with HTTP transport
+        mcp_client = MCPClient(
+            lambda: streamablehttp_client(
+                url=server_url,
+                headers=auth_headers or {}
+            ),
+            prefix=server_id.replace('/', '_').replace('.', '_')
+        )
+        
+        # Connect and retrieve tools
+        with mcp_client:
+            tools = mcp_client.list_tools_sync()
+            logger.info(f"Loaded {len(tools)} tools from HTTP server {server_id}")
+            return tools
+            
+    except Exception as e:
+        logger.warning(f"Failed to load HTTP MCP server {server_id}: {e}")
+        import traceback
+        logger.debug(f"Traceback: {traceback.format_exc()}")
+        return []
+
+
 def discover_console_script_path(package_name: str) -> Optional[tuple]:
     """
     Discover the console_scripts entry point and construct full path for execution.

@@ -106,18 +106,29 @@ def install_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # Store server configuration in DynamoDB
         now = datetime.utcnow().isoformat() + 'Z'
+        package_type = input_data.get('PackageType', 'pypi')  # Default to pypi for backward compatibility
+        server_url = input_data.get('ServerUrl')  # For HTTP servers
+        
         item = {
             'AccountId': account_id,
             'ServerId': server_id,
             'Name': name,
             'NpmPackage': npm_package,
+            'PackageType': package_type,
             'Version': version,
             'Transport': transport,
             'RequiresAuth': requires_auth,
-            'Status': 'INSTALLING',
             'InstalledAt': now,
             'UpdatedAt': now
         }
+        
+        # HTTP servers are immediately active (no build needed)
+        if package_type == 'streamable-http':
+            item['Status'] = 'ACTIVE'
+            if server_url:
+                item['ServerUrl'] = server_url
+        else:
+            item['Status'] = 'INSTALLING'
         
         if auth_config:
             item['AuthConfig'] = auth_config
@@ -125,9 +136,9 @@ def install_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         table.put_item(Item=item)
         logger.info(f"Stored MCP server config: {server_id}")
         
-        # Trigger CodeBuild to rebuild Strands Lambda layer
+        # Trigger CodeBuild only for package-based servers (not HTTP servers)
         build_id = None
-        if CODEBUILD_PROJECT:
+        if CODEBUILD_PROJECT and package_type != 'streamable-http':
             try:
                 build_response = codebuild.start_build(
                     projectName=CODEBUILD_PROJECT,
@@ -180,12 +191,20 @@ def install_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'Message': f'Failed to start build: {str(build_error)}'
                 }
         
-        return {
-            'ServerId': server_id,
-            'Success': True,
-            'Message': 'Server installation started',
-            'BuildId': build_id
-        }
+        # Return appropriate message based on server type
+        if package_type == 'streamable-http':
+            return {
+                'ServerId': server_id,
+                'Success': True,
+                'Message': 'HTTP server activated immediately (no build required)'
+            }
+        else:
+            return {
+                'ServerId': server_id,
+                'Success': True,
+                'Message': 'Server installation started',
+                'BuildId': build_id
+            }
         
     except Exception as e:
         logger.error(f"Error installing MCP server: {str(e)}")
@@ -278,9 +297,146 @@ def uninstall_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
 
 
+def update_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Update an MCP server to a new version
+    
+    Args:
+        event: GraphQL resolver event with input containing:
+            - ServerId: Server to update
+            - Version: New version to install
+    
+    Returns:
+        UpdateMCPServerOutput with success status and build ID
+    """
+    try:
+        logger.info(f"Update MCP server request: {json.dumps(event)}")
+        
+        # Extract input
+        input_data = event.get('arguments', {}).get('input', {})
+        server_id = input_data.get('ServerId')
+        new_version = input_data.get('Version')
+        
+        # Use AWS Account ID
+        account_id = ACCOUNT_ID or os.environ.get('AWS_ACCOUNT_ID', 'unknown')
+        
+        if not server_id or not new_version:
+            return {
+                'ServerId': server_id or 'unknown',
+                'Success': False,
+                'Message': 'Missing required fields: ServerId, Version'
+            }
+        
+        if not MCP_SERVERS_TABLE:
+            return {
+                'ServerId': server_id,
+                'Success': False,
+                'Message': 'MCP Servers table not configured'
+            }
+        
+        table = dynamodb.Table(MCP_SERVERS_TABLE)
+        
+        # Get current server config
+        response = table.get_item(
+            Key={
+                'AccountId': account_id,
+                'ServerId': server_id
+            }
+        )
+        
+        if 'Item' not in response:
+            return {
+                'ServerId': server_id,
+                'Success': False,
+                'Message': 'Server not found'
+            }
+        
+        # Update version and status
+        now = datetime.utcnow().isoformat() + 'Z'
+        table.update_item(
+            Key={'AccountId': account_id, 'ServerId': server_id},
+            UpdateExpression='SET Version = :version, #status = :status, UpdatedAt = :updated',
+            ExpressionAttributeNames={'#status': 'Status'},
+            ExpressionAttributeValues={
+                ':version': new_version,
+                ':status': 'UPDATING',
+                ':updated': now
+            }
+        )
+        
+        logger.info(f"Updated server {server_id} to version {new_version}")
+        
+        # Trigger CodeBuild to rebuild layer with new version
+        build_id = None
+        if CODEBUILD_PROJECT:
+            try:
+                build_response = codebuild.start_build(
+                    projectName=CODEBUILD_PROJECT,
+                    environmentVariablesOverride=[
+                        {
+                            'name': 'ACCOUNT_ID',
+                            'value': account_id,
+                            'type': 'PLAINTEXT'
+                        },
+                        {
+                            'name': 'ACTION',
+                            'value': 'UPDATE_MCP_SERVER',
+                            'type': 'PLAINTEXT'
+                        },
+                        {
+                            'name': 'SERVER_ID',
+                            'value': server_id,
+                            'type': 'PLAINTEXT'
+                        }
+                    ]
+                )
+                build_id = build_response['build']['id']
+                logger.info(f"Started CodeBuild for update: {build_id}")
+                
+                # Update with build ID
+                table.update_item(
+                    Key={'AccountId': account_id, 'ServerId': server_id},
+                    UpdateExpression='SET BuildId = :buildId',
+                    ExpressionAttributeValues={':buildId': build_id}
+                )
+            except Exception as build_error:
+                logger.error(f"Failed to start CodeBuild: {build_error}")
+                # Revert status
+                table.update_item(
+                    Key={'AccountId': account_id, 'ServerId': server_id},
+                    UpdateExpression='SET #status = :status, ErrorMessage = :error',
+                    ExpressionAttributeNames={'#status': 'Status'},
+                    ExpressionAttributeValues={
+                        ':status': 'FAILED',
+                        ':error': str(build_error)
+                    }
+                )
+                return {
+                    'ServerId': server_id,
+                    'Success': False,
+                    'Message': f'Failed to start build: {str(build_error)}'
+                }
+        
+        return {
+            'ServerId': server_id,
+            'Success': True,
+            'Message': f'Server update to version {new_version} started',
+            'BuildId': build_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating MCP server: {str(e)}")
+        return {
+            'ServerId': input_data.get('ServerId', 'unknown'),
+            'Success': False,
+            'Message': f'Update failed: {str(e)}'
+        }
+
+
 def list_installed_servers(event: Dict[str, Any], context: Any) -> list:
     """
-    List all MCP servers installed by the current user
+    List all MCP servers installed for the account
+    (Account-level management - all users share installed servers)
     
     Returns:
         List of MCPServer objects
@@ -288,8 +444,8 @@ def list_installed_servers(event: Dict[str, Any], context: Any) -> list:
     try:
         logger.info("List installed MCP servers request")
         
-        identity = event.get('identity', {})
-        user_id = identity.get('username', 'unknown')
+        # Use AWS Account ID for account-level management
+        account_id = ACCOUNT_ID or os.environ.get('AWS_ACCOUNT_ID', 'unknown')
         
         if not MCP_SERVERS_TABLE:
             logger.warning("MCP Servers table not configured")
@@ -297,14 +453,14 @@ def list_installed_servers(event: Dict[str, Any], context: Any) -> list:
         
         table = dynamodb.Table(MCP_SERVERS_TABLE)
         
-        # Query all servers for this user
+        # Query all servers for this account
         response = table.query(
-            KeyConditionExpression='UserId = :userId',
-            ExpressionAttributeValues={':userId': user_id}
+            KeyConditionExpression='AccountId = :accountId',
+            ExpressionAttributeValues={':accountId': account_id}
         )
         
         servers = response.get('Items', [])
-        logger.info(f"Found {len(servers)} installed servers for user {user_id}")
+        logger.info(f"Found {len(servers)} installed servers for account {account_id}")
         
         return servers
         
@@ -316,14 +472,16 @@ def list_installed_servers(event: Dict[str, Any], context: Any) -> list:
 def get_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Get details of a specific installed MCP server
+    (Account-level management)
     
     Returns:
         MCPServer object or None
     """
     try:
         server_id = event.get('arguments', {}).get('serverId')
-        identity = event.get('identity', {})
-        user_id = identity.get('username', 'unknown')
+        
+        # Use AWS Account ID
+        account_id = ACCOUNT_ID or os.environ.get('AWS_ACCOUNT_ID', 'unknown')
         
         if not server_id or not MCP_SERVERS_TABLE:
             return None
@@ -332,7 +490,7 @@ def get_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         response = table.get_item(
             Key={
-                'UserId': user_id,
+                'AccountId': account_id,
                 'ServerId': server_id
             }
         )
@@ -356,6 +514,8 @@ def handler(event: Dict[str, Any], context: Any) -> Any:
         return install_mcp_server(event, context)
     elif field_name == 'uninstallMCPServer':
         return uninstall_mcp_server(event, context)
+    elif field_name == 'updateMCPServer':
+        return update_mcp_server(event, context)
     elif field_name == 'listInstalledMCPServers':
         return list_installed_servers(event, context)
     elif field_name == 'getMCPServer':
