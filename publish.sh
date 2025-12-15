@@ -118,9 +118,13 @@ echo $HASH
 haschanged() {
   local dir=$1
   local checksum_file="${dir}/.checksum"
-  # Compute current checksum of the directory's modification times excluding specified directories, and the publish target S3 location.
+  # Compute current checksum including:
+  # 1. File count (detects new/deleted files)
+  # 2. File modification times (detects file changes)
+  # 3. Publish target S3 location
+  file_count=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -print | wc -l)
   dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -exec stat --format='%Y' {} \; | sha256sum | awk '{ print $1 }')
-  combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $dir_checksum"
+  combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $file_count $dir_checksum"
   current_checksum=$(echo -n "$combined_string" | sha256sum | awk '{ print $1 }')
   # Check if the checksum file exists and read the previous checksum
   if [ -f "$checksum_file" ]; then
@@ -137,9 +141,10 @@ haschanged() {
 update_checksum() {
   local dir=$1
   local checksum_file="${dir}/.checksum"
-  # Compute current checksum of the directory's modification times excluding specified directories, and the publish target S3 location.
+  # Compute current checksum including file count and modification times
+  file_count=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -print | wc -l)
   dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -exec stat --format='%Y' {} \; | sha256sum | awk '{ print $1 }')
-  combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $dir_checksum"
+  combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $file_count $dir_checksum"
   current_checksum=$(echo -n "$combined_string" | sha256sum | awk '{ print $1 }')
   # Save the current checksum
   echo "$current_checksum" > "$checksum_file"
