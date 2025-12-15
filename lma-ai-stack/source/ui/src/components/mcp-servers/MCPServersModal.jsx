@@ -140,7 +140,7 @@ const MCPServersModal = ({ visible, onDismiss, vpData }) => {
       logger.info('Uninstalling MCP server:', serverId);
 
       const mutation = `
-        mutation UninstallMCPServer($serverId: String!) {
+        mutation UninstallMCPServer($serverId: ID!) {
           uninstallMCPServer(serverId: $serverId) {
             ServerId
             Success

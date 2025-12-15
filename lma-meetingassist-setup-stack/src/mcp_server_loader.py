@@ -161,8 +161,39 @@ def load_account_mcp_servers() -> List:
         # Load each server's tools
         for server in servers:
             server_id = server.get('ServerId', 'unknown')
-            package_name = server.get('NpmPackage', '')  # Actually PyPI package name
+            package_name = server.get('NpmPackage', '')  # PyPI package name or HTTP URL
+            package_type = server.get('PackageType', 'pypi')  # Default to pypi for backward compatibility
+            server_url = server.get('ServerUrl')
+            auth_config = server.get('AuthConfig')
             
+            # Handle HTTP servers separately
+            if package_type == 'streamable-http':
+                logger.info(f"Loading HTTP MCP server: {server_id}")
+                
+                # Parse auth config if present
+                auth_headers = {}
+                if auth_config:
+                    try:
+                        import json
+                        auth_data = json.loads(auth_config) if isinstance(auth_config, str) else auth_config
+                        
+                        # Support different auth types
+                        if auth_data.get('type') == 'smithery':
+                            auth_headers['X-Smithery-Key'] = auth_data.get('apiKey', '')
+                        elif auth_data.get('type') == 'api_key':
+                            auth_headers['Authorization'] = f"Bearer {auth_data.get('apiKey', '')}"
+                        elif auth_data.get('type') == 'custom':
+                            # Custom headers from auth config
+                            auth_headers.update(auth_data.get('headers', {}))
+                    except Exception as e:
+                        logger.warning(f"Could not parse auth config for {server_id}: {e}")
+                
+                # Load HTTP server
+                http_tools = load_http_mcp_server(server_id, server_url, auth_headers)
+                tools.extend(http_tools)
+                continue
+            
+            # Handle PyPI package-based servers
             # Dynamically discover the console script entry point
             entry_point = discover_console_script_path(package_name)
             
@@ -176,7 +207,7 @@ def load_account_mcp_servers() -> List:
             module_path, func_name = entry_point
             
             try:
-                logger.info(f"Loading MCP server: {server_id} ({package_name})")
+                logger.info(f"Loading PyPI MCP server: {server_id} ({package_name})")
                 logger.info(f"Using entry point: {module_path}:{func_name}")
                 
                 # In Lambda layers, console scripts are installed in /opt/python/bin/

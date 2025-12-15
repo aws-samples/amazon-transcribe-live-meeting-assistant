@@ -267,7 +267,7 @@ const PublicRegistryTab = ({ onInstall, installedServers = [] }) => {
       logger.info('Uninstalling MCP server:', server.id);
 
       const mutation = `
-        mutation UninstallMCPServer($serverId: String!) {
+        mutation UninstallMCPServer($serverId: ID!) {
           uninstallMCPServer(serverId: $serverId) {
             ServerId
             Success
