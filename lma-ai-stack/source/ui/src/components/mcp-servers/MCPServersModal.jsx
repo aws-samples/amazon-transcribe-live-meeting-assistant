@@ -22,6 +22,7 @@ import {
 } from '@awsui/components-react';
 import { API, graphqlOperation, Logger } from 'aws-amplify';
 import PublicRegistryTab from './PublicRegistryTab';
+import CustomServersTab from './CustomServersTab';
 import './mcp-servers.css';
 
 const logger = new Logger('MCPServersModal');
@@ -472,34 +473,7 @@ const MCPServersModal = ({ visible, onDismiss, vpData }) => {
           {
             label: 'Custom Servers',
             id: 'custom',
-            content: (
-              <Container
-                header={
-                  <Header variant="h3" description="Add your own MCP server endpoints">
-                    Custom MCP Servers
-                  </Header>
-                }
-              >
-                <SpaceBetween size="m">
-                  <Alert type="info">
-                    Connect to your own MCP server endpoints via HTTP or WebSocket. Useful for internal company tools or
-                    custom integrations.
-                  </Alert>
-
-                  <Box textAlign="center" padding={{ vertical: 'xxl' }}>
-                    <Box variant="h3" color="text-body-secondary">
-                      Custom Servers
-                    </Box>
-                    <Box color="text-body-secondary" margin={{ top: 's' }}>
-                      Connect to your own MCP server endpoints
-                    </Box>
-                    <Box margin={{ top: 'm' }}>
-                      <StatusIndicator type="info">Feature in development</StatusIndicator>
-                    </Box>
-                  </Box>
-                </SpaceBetween>
-              </Container>
-            ),
+            content: <CustomServersTab onInstall={handleInstallServer} />,
           },
         ]}
       />
