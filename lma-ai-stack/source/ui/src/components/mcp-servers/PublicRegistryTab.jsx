@@ -144,7 +144,7 @@ const PublicRegistryTab = ({ onInstall, installedServers = [] }) => {
             tools: [],
             homepage:
               server.repository?.url ||
-              `https://registry.modelcontextprotocol.io/v0.1/servers/${server.name}/versions/${server.version}`,
+              `https://registry.modelcontextprotocol.io/v0.1/servers/${encodeURIComponent(server.name)}/versions/${server.version}`,
             version: packageVersion,
             serverUrl, // For HTTP servers
           };
