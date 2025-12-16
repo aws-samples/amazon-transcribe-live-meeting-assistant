@@ -534,6 +534,9 @@ Conditions:
   
 
 Outputs:
+  QuickSightManifestUrl:
+    Description: S3 URL for QuickSight manifest file to import recordings bucket data
+    Value: !Sub "https://${S3BucketName}.s3.${AWS::Region}.amazonaws.com/quicksight-recordingsbucket-manifest.json"
   CloudfrontEndpoint:
     Description: Endpoint for Cloudfront distribution
     Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
@@ -4119,6 +4122,137 @@ Resources:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # Lambda to upload QuickSight manifest file
+  UploadManifestLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:PutObject"
+                  - "s3:DeleteObject"
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}/quicksight-recordingsbucket-manifest.json"
+          PolicyName: uploadManifestS3Policy
+
+  UploadManifestLambda:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: "index.lambda_handler"
+      Runtime: python3.12
+      MemorySize: 128
+      Timeout: 60
+      Role: !GetAtt UploadManifestLambdaRole.Arn
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: !Sub |
+          import boto3
+          import json
+          import cfnresponse
+          
+          def lambda_handler(event, context):
+            print(event)
+            responseData = {}
+            status = cfnresponse.SUCCESS
+            reason = "Success"
+            
+            if event['RequestType'] in ['Create', 'Update']:
+              try:
+                s3 = boto3.client('s3')
+                bucket_name = event['ResourceProperties']['BucketName']
+                prefix = event['ResourceProperties']['Prefix']
+                
+                # Standard manifest for nested JSON
+                manifest = {
+                  "fileLocations": [
+                    {
+                      "URIPrefixes": [
+                        f"s3://{bucket_name}/{prefix}"
+                      ]
+                    }
+                  ],
+                  "globalUploadSettings": {
+                    "format": "JSON"
+                  }
+                }
+                
+                s3.put_object(
+                  Bucket=bucket_name,
+                  Key='quicksight-recordingsbucket-manifest.json',
+                  Body=json.dumps(manifest, indent=2),
+                  ContentType='application/json'
+                )
+                
+                print(f"Uploaded manifest to s3://{bucket_name}/quicksight-recordingsbucket-manifest.json")
+                
+              except Exception as e:
+                print(e)
+                reason = f"Exception thrown: {e}"
+                status = cfnresponse.FAILED
+                
+            elif event['RequestType'] == 'Delete':
+              try:
+                s3 = boto3.client('s3')
+                bucket_name = event['ResourceProperties']['BucketName']
+                s3.delete_object(
+                  Bucket=bucket_name,
+                  Key='quicksight-recordingsbucket-manifest.json'
+                )
+                print(f"Deleted manifest from s3://{bucket_name}/quicksight-recordingsbucket-manifest.json")
+              except Exception as e:
+                print(e)
+                # Don't fail on delete errors
+                
+            cfnresponse.send(event, context, status, responseData, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UploadManifestLambda
+    DependsOn:
+      - UploadManifestLambdaLogGroup
+
+  UploadManifestLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UploadManifestLambda
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UploadQuickSightManifest:
+    Type: Custom::UploadQuickSightManifest
+    Properties:
+      ServiceToken: !GetAtt UploadManifestLambda.Arn
+      BucketName: !Ref S3BucketName
+      Prefix: !Ref TranscriptFilePrefix
 
   RemoveWebAppBucketOnDelete:
     Type: Custom::RemoveWebAppBucketOnDelete

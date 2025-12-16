@@ -1700,7 +1700,35 @@ Resources:
       PolicyDocument:
         Version: 2012-10-17
         Statement:
-          - Action:
+          - Sid: AllowQuickSightServiceRoleAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/aws-quicksight-service-role-v0"
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:ListBucket
+              - s3:GetBucketLocation
+            Resource:
+              - !GetAtt RecordingsBucket.Arn
+              - !Sub "${RecordingsBucket.Arn}/*"
+          - Sid: AllowQuickSightServiceAccess
+            Effect: Allow
+            Principal:
+              Service: quicksight.amazonaws.com
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:ListBucket
+              - s3:GetBucketLocation
+            Resource:
+              - !GetAtt RecordingsBucket.Arn
+              - !Sub "${RecordingsBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+          - Sid: EnforceSSLOnly
+            Action:
               - "s3:*"
             Effect: "Deny"
             Principal: "*"
@@ -2252,6 +2280,10 @@ Resources:
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
 Outputs:
+  QuickSightManifestUrl:
+    Description: S3 URL for QuickSight manifest file to import recordings bucket data
+    Value: !GetAtt AISTACK.Outputs.QuickSightManifestUrl
+
   ApplicationCloudfrontEndpoint:
     Description: LMA User Interface URL
     Value: !GetAtt AISTACK.Outputs.CloudfrontEndpoint

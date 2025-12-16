@@ -29,7 +29,7 @@ MCP_SERVERS_TABLE = os.environ.get('MCP_SERVERS_TABLE', '')
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID', '')
 
 
-def load_http_mcp_server(server_id: str, server_url: str, auth_headers: dict = None) -> list:
+def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = None) -> list:
     """
     Load an HTTP-based MCP server (streamable-http transport)
     
@@ -39,7 +39,7 @@ def load_http_mcp_server(server_id: str, server_url: str, auth_headers: dict = N
     Args:
         server_id: Server identifier
         server_url: HTTP endpoint URL
-        auth_headers: Optional authentication headers
+        auth_config: Optional authentication configuration with headers and params
         
     Returns:
         List of tools from the HTTP server
@@ -50,11 +50,21 @@ def load_http_mcp_server(server_id: str, server_url: str, auth_headers: dict = N
         
         logger.info(f"Loading HTTP MCP server: {server_id} at {server_url}")
         
+        # Extract headers and params from auth config
+        headers = auth_config.get('headers', {}) if auth_config else {}
+        params = auth_config.get('params', {}) if auth_config else {}
+        
+        if headers:
+            logger.info(f"Using auth headers: {list(headers.keys())}")
+        if params:
+            logger.info(f"Using auth params: {list(params.keys())}")
+        
         # Create MCP client with HTTP transport
         mcp_client = MCPClient(
             lambda: streamablehttp_client(
                 url=server_url,
-                headers=auth_headers or {}
+                headers=headers,
+                params=params
             ),
             prefix=server_id.replace('/', '_').replace('.', '_')
         )
@@ -170,26 +180,33 @@ def load_account_mcp_servers() -> List:
             if package_type == 'streamable-http':
                 logger.info(f"Loading HTTP MCP server: {server_id}")
                 
-                # Parse auth config if present
-                auth_headers = {}
+                # Parse auth config - support flexible headers and params
+                http_auth_config = {'headers': {}, 'params': {}}
+                
                 if auth_config:
                     try:
                         import json
                         auth_data = json.loads(auth_config) if isinstance(auth_config, str) else auth_config
+                        logger.info(f"Auth config for {server_id}: {json.dumps(auth_data, default=str)[:300]}")
                         
-                        # Support different auth types
-                        if auth_data.get('type') == 'smithery':
-                            auth_headers['X-Smithery-Key'] = auth_data.get('apiKey', '')
-                        elif auth_data.get('type') == 'api_key':
-                            auth_headers['Authorization'] = f"Bearer {auth_data.get('apiKey', '')}"
-                        elif auth_data.get('type') == 'custom':
-                            # Custom headers from auth config
-                            auth_headers.update(auth_data.get('headers', {}))
+                        # Direct headers/params (most flexible - user can specify exactly what they need)
+                        if 'headers' in auth_data:
+                            http_auth_config['headers'] = auth_data['headers']
+                            logger.info(f"Using custom headers from config")
+                        
+                        if 'params' in auth_data:
+                            http_auth_config['params'] = auth_data['params']
+                            logger.info(f"Using custom params from config")
+                        
                     except Exception as e:
                         logger.warning(f"Could not parse auth config for {server_id}: {e}")
+                        import traceback
+                        logger.debug(f"Traceback: {traceback.format_exc()}")
+                else:
+                    logger.info(f"No auth config found for HTTP server {server_id}")
                 
-                # Load HTTP server
-                http_tools = load_http_mcp_server(server_id, server_url, auth_headers)
+                # Load HTTP server with auth config
+                http_tools = load_http_mcp_server(server_id, server_url, http_auth_config)
                 tools.extend(http_tools)
                 continue
             
