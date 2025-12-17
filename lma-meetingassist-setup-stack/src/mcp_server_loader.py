@@ -39,7 +39,7 @@ def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = No
     Args:
         server_id: Server identifier
         server_url: HTTP endpoint URL
-        auth_config: Optional authentication configuration with headers and params
+        auth_config: Optional authentication configuration with headers
         
     Returns:
         List of tools from the HTTP server
@@ -50,21 +50,18 @@ def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = No
         
         logger.info(f"Loading HTTP MCP server: {server_id} at {server_url}")
         
-        # Extract headers and params from auth config
+        # Extract headers from auth config
         headers = auth_config.get('headers', {}) if auth_config else {}
-        params = auth_config.get('params', {}) if auth_config else {}
         
         if headers:
             logger.info(f"Using auth headers: {list(headers.keys())}")
-        if params:
-            logger.info(f"Using auth params: {list(params.keys())}")
         
         # Create MCP client with HTTP transport
+        # Note: streamablehttp_client only supports url and headers, not params
         mcp_client = MCPClient(
             lambda: streamablehttp_client(
                 url=server_url,
-                headers=headers,
-                params=params
+                headers=headers
             ),
             prefix=server_id.replace('/', '_').replace('.', '_')
         )
@@ -180,8 +177,8 @@ def load_account_mcp_servers() -> List:
             if package_type == 'streamable-http':
                 logger.info(f"Loading HTTP MCP server: {server_id}")
                 
-                # Parse auth config - support flexible headers and params
-                http_auth_config = {'headers': {}, 'params': {}}
+                # Parse auth config - support flexible headers
+                http_auth_config = {'headers': {}}
                 
                 if auth_config:
                     try:
@@ -189,14 +186,16 @@ def load_account_mcp_servers() -> List:
                         auth_data = json.loads(auth_config) if isinstance(auth_config, str) else auth_config
                         logger.info(f"Auth config for {server_id}: {json.dumps(auth_data, default=str)[:300]}")
                         
-                        # Direct headers/params (most flexible - user can specify exactly what they need)
+                        # Check for direct headers (most flexible)
                         if 'headers' in auth_data:
                             http_auth_config['headers'] = auth_data['headers']
                             logger.info(f"Using custom headers from config")
-                        
-                        if 'params' in auth_data:
-                            http_auth_config['params'] = auth_data['params']
-                            logger.info(f"Using custom params from config")
+                        else:
+                            # Convert UI format (api_key or smithery_api_key) to headers
+                            api_key = auth_data.get('api_key') or auth_data.get('smithery_api_key')
+                            if api_key:
+                                http_auth_config['headers']['Authorization'] = f"Bearer {api_key}"
+                                logger.info(f"Converted API key to Authorization header")
                         
                     except Exception as e:
                         logger.warning(f"Could not parse auth config for {server_id}: {e}")
