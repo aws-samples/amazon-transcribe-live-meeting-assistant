@@ -177,26 +177,54 @@ def load_account_mcp_servers() -> List:
             if package_type == 'streamable-http':
                 logger.info(f"Loading HTTP MCP server: {server_id}")
                 
-                # Parse auth config - support flexible headers
+                # Parse auth config and apply headers generically (MCP spec compliant)
                 http_auth_config = {'headers': {}}
                 
                 if auth_config:
                     try:
                         import json
                         auth_data = json.loads(auth_config) if isinstance(auth_config, str) else auth_config
-                        logger.info(f"Auth config for {server_id}: {json.dumps(auth_data, default=str)[:300]}")
+                        auth_type = auth_data.get('authType', 'bearer')  # Default to bearer
                         
-                        # Check for direct headers (most flexible)
-                        if 'headers' in auth_data:
-                            http_auth_config['headers'] = auth_data['headers']
-                            logger.info(f"Using custom headers from config")
+                        logger.info(f"Auth config for {server_id}: authType={auth_type}")
+                        
+                        # Generic auth handling per MCP spec - no hardcoded server names
+                        if auth_type == 'bearer':
+                            # Bearer token authentication (RFC 6750)
+                            token = auth_data.get('token', '')
+                            if token:
+                                http_auth_config['headers']['Authorization'] = f"Bearer {token}"
+                                logger.info(f"Applied Bearer token authentication for {server_id}")
+                            else:
+                                logger.warning(f"Bearer auth configured but no token found for {server_id}")
+                        
+                        elif auth_type == 'custom_headers':
+                            # Custom headers - user provides complete header dict
+                            custom_headers = auth_data.get('headers', {})
+                            if custom_headers and isinstance(custom_headers, dict):
+                                http_auth_config['headers'].update(custom_headers)
+                                logger.info(f"Applied custom headers for {server_id}: {list(custom_headers.keys())}")
+                            else:
+                                logger.warning(f"Custom headers auth configured but no valid headers found for {server_id}")
+                        
+                        elif auth_type == 'oauth2':
+                            # OAuth 2.1 - use access token from stored credentials
+                            oauth_data = auth_data.get('oauth', {})
+                            access_token = oauth_data.get('accessToken', '')
+                            if access_token:
+                                http_auth_config['headers']['Authorization'] = f"Bearer {access_token}"
+                                logger.info(f"Applied OAuth 2.1 access token for {server_id}")
+                                
+                                # TODO: Check if token is expired and refresh if needed
+                                # expires_at = oauth_data.get('expiresAt', 0)
+                                # if time.time() > expires_at:
+                                #     access_token = refresh_oauth_token(oauth_data)
+                            else:
+                                logger.warning(f"OAuth auth configured but no access token found for {server_id}")
+                        
                         else:
-                            # Convert UI format (api_key or smithery_api_key) to headers
-                            api_key = auth_data.get('api_key') or auth_data.get('smithery_api_key')
-                            if api_key:
-                                http_auth_config['headers']['Authorization'] = f"Bearer {api_key}"
-                                logger.info(f"Converted API key to Authorization header")
-                        
+                            logger.warning(f"Unknown auth type '{auth_type}' for {server_id}")
+                    
                     except Exception as e:
                         logger.warning(f"Could not parse auth config for {server_id}: {e}")
                         import traceback
@@ -204,7 +232,7 @@ def load_account_mcp_servers() -> List:
                 else:
                     logger.info(f"No auth config found for HTTP server {server_id}")
                 
-                # Load HTTP server with auth config
+                # Load HTTP server with auth headers
                 http_tools = load_http_mcp_server(server_id, server_url, http_auth_config)
                 tools.extend(http_tools)
                 continue
@@ -239,6 +267,39 @@ def load_account_mcp_servers() -> List:
                     env['PYTHONPATH'] = f"/opt/python:{python_path}"
                 else:
                     env['PYTHONPATH'] = "/opt/python"
+                
+                # Add environment variables from auth config for PyPI servers
+                # PyPI servers use env vars, not HTTP headers
+                if auth_config:
+                    try:
+                        import json
+                        auth_data = json.loads(auth_config) if isinstance(auth_config, str) else auth_config
+                        auth_type = auth_data.get('authType', 'bearer')
+                        
+                        # For PyPI servers, environment variables are used instead of headers
+                        if auth_type == 'bearer':
+                            # Single token - use common env var name
+                            token = auth_data.get('token', '')
+                            if token:
+                                env['MCP_API_KEY'] = token
+                                logger.info(f"Set MCP_API_KEY environment variable for {server_id}")
+                        
+                        elif auth_type == 'custom_headers':
+                            # For PyPI servers, "headers" actually means environment variables
+                            env_vars = auth_data.get('headers', {})
+                            if env_vars and isinstance(env_vars, dict):
+                                env.update(env_vars)
+                                logger.info(f"Set custom environment variables for {server_id}: {list(env_vars.keys())}")
+                        
+                        elif auth_type == 'env_vars':
+                            # Explicit environment variables
+                            env_vars = auth_data.get('env', {})
+                            if env_vars and isinstance(env_vars, dict):
+                                env.update(env_vars)
+                                logger.info(f"Set environment variables for {server_id}: {list(env_vars.keys())}")
+                    
+                    except Exception as e:
+                        logger.warning(f"Could not parse auth config for PyPI server {server_id}: {e}")
                 
                 mcp_client = MCPClient(
                     lambda mod=module_path, fn=func_name, environment=env: stdio_client(
