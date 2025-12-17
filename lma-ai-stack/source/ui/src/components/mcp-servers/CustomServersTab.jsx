@@ -147,7 +147,12 @@ const CustomServersTab = ({ onInstall }) => {
         visible={showAuthModal}
         onDismiss={() => setShowAuthModal(false)}
         onSubmit={handleAuthSubmit}
-        server={{ name: serverName, requiresAuth: true }}
+        server={{
+          name: serverName,
+          requiresAuth: true,
+          packageType: 'streamable-http',
+          transport: ['streamable-http'],
+        }}
       />
 
       <Container

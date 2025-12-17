@@ -471,7 +471,7 @@ const MCPServersModal = ({ visible, onDismiss, vpData }) => {
             content: <PublicRegistryTab onInstall={handleInstallServer} installedServers={installedServers} />,
           },
           {
-            label: 'Custom Servers',
+            label: 'Custom Server',
             id: 'custom',
             content: <CustomServersTab onInstall={handleInstallServer} />,
           },
