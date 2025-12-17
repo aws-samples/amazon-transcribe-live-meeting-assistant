@@ -29,7 +29,7 @@ MCP_SERVERS_TABLE = os.environ.get('MCP_SERVERS_TABLE', '')
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID', '')
 
 
-def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = None) -> list:
+def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = None):
     """
     Load an HTTP-based MCP server (streamable-http transport)
     
@@ -42,7 +42,7 @@ def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = No
         auth_config: Optional authentication configuration with headers
         
     Returns:
-        List of tools from the HTTP server
+        MCPClient object (not tools) for managed integration
     """
     try:
         from strands.tools.mcp import MCPClient
@@ -66,17 +66,14 @@ def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = No
             prefix=server_id.replace('/', '_').replace('.', '_')
         )
         
-        # Connect and retrieve tools
-        with mcp_client:
-            tools = mcp_client.list_tools_sync()
-            logger.info(f"Loaded {len(tools)} tools from HTTP server {server_id}")
-            return tools
+        logger.info(f"Created HTTP MCP client for {server_id}")
+        return mcp_client
             
     except Exception as e:
         logger.warning(f"Failed to load HTTP MCP server {server_id}: {e}")
         import traceback
         logger.debug(f"Traceback: {traceback.format_exc()}")
-        return []
+        return None
 
 
 def discover_console_script_path(package_name: str) -> Optional[tuple]:
@@ -118,19 +115,19 @@ def discover_console_script_path(package_name: str) -> Optional[tuple]:
 
 def load_account_mcp_servers() -> List:
     """
-    Load MCP server tools for the current AWS account using Strands MCPClient
+    Load MCP server clients for the current AWS account using Strands MCPClient
     
     This function:
     1. Queries DynamoDB for ACTIVE MCP servers
     2. Dynamically discovers each server's Python module entry point
     3. Spawns each server as subprocess with stdio transport
-    4. Connects via Strands MCPClient to retrieve tools
-    5. Returns list of tools that can be used by Strands Agent
+    4. Creates Strands MCPClient instances
+    5. Returns list of MCPClient objects for managed integration with Agent
     
     Returns:
-        List of Strands AgentTool objects from installed MCP servers
+        List of MCPClient objects (not tools) for use with Agent's managed integration
     """
-    tools = []
+    mcp_clients = []
     
     if not MCP_SERVERS_TABLE:
         logger.warning("MCP_SERVERS_TABLE not configured")
@@ -232,9 +229,10 @@ def load_account_mcp_servers() -> List:
                 else:
                     logger.info(f"No auth config found for HTTP server {server_id}")
                 
-                # Load HTTP server with auth headers
-                http_tools = load_http_mcp_server(server_id, server_url, http_auth_config)
-                tools.extend(http_tools)
+                # Load HTTP server - returns MCPClient object
+                http_client = load_http_mcp_server(server_id, server_url, http_auth_config)
+                if http_client:
+                    mcp_clients.append(http_client)
                 continue
             
             # Handle PyPI package-based servers
@@ -312,25 +310,21 @@ def load_account_mcp_servers() -> List:
                     prefix=package_name.replace('-', '_')  # Prefix tools to avoid conflicts
                 )
                 
-                # Connect to server and retrieve tools
-                with mcp_client:
-                    server_tools = mcp_client.list_tools_sync()
-                    tools.extend(server_tools)
-                    logger.info(f"Loaded {len(server_tools)} tools from {server_id}")
-                
-                logger.info(f"MCP server {server_id} loaded successfully")
+                # Store client for managed integration (don't extract tools here)
+                mcp_clients.append(mcp_client)
+                logger.info(f"Created MCP client for {server_id}")
                 
             except Exception as e:
-                logger.warning(f"Failed to load MCP server {server_id}: {e}")
+                logger.warning(f"Failed to create MCP client for {server_id}: {e}")
                 import traceback
                 logger.debug(f"Traceback: {traceback.format_exc()}")
                 continue
         
-        logger.info(f"Loaded {len(tools)} tools from {len(servers)} MCP servers")
+        logger.info(f"Created {len(mcp_clients)} MCP clients from {len(servers)} MCP servers")
         
     except Exception as e:
-        logger.error(f"Error loading MCP servers: {e}")
+        logger.error(f"Error creating MCP clients: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
     
-    return tools
+    return mcp_clients

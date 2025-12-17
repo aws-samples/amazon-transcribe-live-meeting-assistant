@@ -864,16 +864,17 @@ def handler(event, context):
         # Fetch meeting transcript from DynamoDB
         transcript = fetch_meeting_transcript(call_id, dynamodb_table_name) if dynamodb_table_name else event.get('transcript', '')
         
-        # Initialize tools list
+        # Initialize tools list (includes both regular tools and MCP clients)
         tools = []
         
-        # Load installed MCP servers (account-level)
+        # Load installed MCP servers (account-level) - returns MCPClient objects
         if MCP_LOADER_AVAILABLE:
             try:
                 logger.info("Loading installed MCP servers...")
-                mcp_tools = load_account_mcp_servers()
-                tools.extend(mcp_tools)
-                logger.info(f"Loaded {len(mcp_tools)} tools from installed MCP servers")
+                mcp_clients = load_account_mcp_servers()
+                tools.extend(mcp_clients)
+                logger.info(f"Loaded {len(mcp_clients)} MCP clients from installed MCP servers")
+                logger.info("Using Strands Managed Integration (experimental) - MCP clients will manage their own lifecycle")
             except Exception as e:
                 logger.warning(f"Failed to load MCP servers: {e}")
         
@@ -1001,12 +1002,16 @@ def handler(event, context):
                 streaming=ENABLE_STREAMING
             )
             
-            # Create agent with tools
+            # Create agent with tools (includes MCPClient objects for managed integration)
+            # Per Strands docs: "The MCPClient implements the experimental ToolProvider interface,
+            # enabling direct usage in the Agent constructor with automatic lifecycle management"
             agent = Agent(
                 model=bedrock_model,
                 system_prompt=get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt(),
                 tools=tools if tools else None
             )
+            
+            logger.info(f"Agent created with {len(tools)} tools/clients (managed integration)")
             
             # Prepare context for the agent - don't include transcript by default
             # The agent will use the current_meeting_transcript tool when needed
