@@ -18,7 +18,6 @@ import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
 import CallList from '../call-list';
 import CallDetails from '../call-details';
 import MeetingsQueryLayout from '../meetings-query-layout';
-import MCPServersPage from '../mcp-servers-page/MCPServersPage';
 import { appLayoutLabels } from '../common/labels';
 
 import Navigation from './navigation';
@@ -127,9 +126,6 @@ const CallAnalyticsLayout = () => {
             </Route>
             <Route path={`${path}/query`}>
               <MeetingsQueryLayout />
-            </Route>
-            <Route path="/configuration/mcp-servers">
-              <MCPServersPage />
             </Route>
             <Route path={`${path}/:callId`}>
               <CallDetails />

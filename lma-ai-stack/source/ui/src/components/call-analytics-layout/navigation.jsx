@@ -168,7 +168,7 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
   }
   return (
     <Switch>
-      <Route path={CALLS_PATH}>
+      <Route path={[CALLS_PATH, MCP_SERVERS_PATH]}>
         <SideNavigation
           items={navigationItems}
           header={header || callsNavHeader}
