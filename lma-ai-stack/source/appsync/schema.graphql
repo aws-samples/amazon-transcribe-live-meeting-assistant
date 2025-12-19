@@ -545,9 +545,16 @@ type UnshareCallOutput @aws_iam {
 	SharedWith: [String!]
 }
 
+input ChatMessageInput {
+	role: String!
+	content: String!
+	timestamp: String
+}
+
 input SendChatMessageInput {
 	CallId: ID!
 	Message: String!
+	ConversationHistory: [ChatMessageInput]
 }
 
 type SendChatMessageOutput @aws_cognito_user_pools @aws_iam {

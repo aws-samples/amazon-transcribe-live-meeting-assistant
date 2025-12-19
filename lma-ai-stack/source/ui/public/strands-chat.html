@@ -222,6 +222,10 @@
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
         
+        // Conversation history tracking
+        const conversationHistory = [];
+        const MAX_HISTORY_MESSAGES = 10; // 5 pairs (user + assistant)
+        
         // Load button configuration on page load
         let buttonConfig = null;
         loadButtonConfiguration();
@@ -247,6 +251,20 @@
             
             chatMessages.appendChild(messageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            // Store in conversation history (skip error messages)
+            if (type !== 'error') {
+                conversationHistory.push({
+                    role: type === 'user' ? 'user' : 'assistant',
+                    content: text,
+                    timestamp: new Date().toISOString()
+                });
+                
+                // Keep only last N messages
+                if (conversationHistory.length > MAX_HISTORY_MESSAGES) {
+                    conversationHistory.shift(); // Remove oldest
+                }
+            }
         }
 
         function addLoadingMessage() {
@@ -317,7 +335,8 @@
                         type: 'STRANDS_CHAT_REQUEST',
                         messageId,
                         callId,
-                        message
+                        message,
+                        conversationHistory: conversationHistory
                     }, '*');
                     
                     setTimeout(() => {
@@ -358,6 +377,21 @@
                             if (typeof marked !== 'undefined' && accumulatedText) {
                                 streamingMessageDiv.innerHTML = marked.parse(accumulatedText);
                             }
+                            
+                            // Add completed response to conversation history
+                            if (accumulatedText) {
+                                conversationHistory.push({
+                                    role: 'assistant',
+                                    content: accumulatedText,
+                                    timestamp: new Date().toISOString()
+                                });
+                                
+                                // Keep only last N messages
+                                if (conversationHistory.length > MAX_HISTORY_MESSAGES) {
+                                    conversationHistory.shift(); // Remove oldest
+                                }
+                            }
+                            
                             window.removeEventListener('message', tokenHandler);
                         } else {
                             // Accumulate tokens

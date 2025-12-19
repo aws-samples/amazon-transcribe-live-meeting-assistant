@@ -1666,6 +1666,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
             input: {
               CallId: event.data.callId,
               Message: event.data.message,
+              ConversationHistory: event.data.conversationHistory || [],
             },
           };
 

@@ -250,6 +250,9 @@ def publish_lambda_agent_assist_transcript_segment(
     
     # Extract Owner (user email) for UBAC
     owner = message.get("Owner", "")
+    
+    # Extract conversation history if provided (for chat messages)
+    conversation_history = message.get("ConversationHistory", [])
 
     # Determine response channel based on input channel
     response_channel = "CHAT_ASSISTANT" if channel == "CHAT_ASSISTANT" else "AGENT_ASSISTANT"
@@ -268,6 +271,7 @@ def publish_lambda_agent_assist_transcript_segment(
         StartTime=start_time,
         Status="TRANSCRIBING",
         Owner=owner,  # Pass Owner for userEmail extraction
+        ConversationHistory=conversation_history,  # Pass conversation history
     )
     
     # Add MessageId if provided (for token streaming)
@@ -307,6 +311,7 @@ def get_lambda_agent_assist_transcript(
     payload = {
         'text': content,
         'call_id': call_id,
+        'conversation_history': transcript_segment_args.get('ConversationHistory', []),  # Pass conversation history
         'transcript_segment_args': transcript_segment_args,
         'dynamodb_table_name': DYNAMODB_TABLE_NAME,
         'dynamodb_pk': f"c#{call_id}",

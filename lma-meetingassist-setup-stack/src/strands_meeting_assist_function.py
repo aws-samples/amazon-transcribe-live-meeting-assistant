@@ -842,6 +842,7 @@ def handler(event, context):
         # Extract parameters from event - handle both 'text' and 'userInput' for compatibility
         user_input = event.get('userInput', '') or event.get('text', '')
         call_id = event.get('callId', '') or event.get('call_id', '')
+        conversation_history = event.get('conversation_history', [])
         dynamodb_table_name = event.get('dynamodb_table_name', '')
         user_email = event.get('userEmail', '') or event.get('user_email', '')
         
@@ -1013,9 +1014,20 @@ def handler(event, context):
             
             logger.info(f"Agent created with {len(tools)} tools/clients (managed integration)")
             
-            # Prepare context for the agent - don't include transcript by default
-            # The agent will use the current_meeting_transcript tool when needed
-            context_message = f"User Request: {user_input}"
+            # Prepare context for the agent with conversation history
+            if conversation_history:
+                # Format last 10 messages (5 pairs) for context
+                recent_history = conversation_history[-10:]
+                history_text = "\n\nPrevious conversation:\n"
+                for msg in recent_history:
+                    role = "User" if msg.get('role') == 'user' else "Assistant"
+                    content = msg.get('content', '')
+                    history_text += f"{role}: {content}\n"
+                
+                context_message = f"{history_text}\n\nCurrent User Request: {user_input}"
+                logger.info(f"Including {len(recent_history)} messages from conversation history")
+            else:
+                context_message = f"User Request: {user_input}"
             
             # Handle streaming vs non-streaming
             if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL:
