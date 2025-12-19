@@ -22,21 +22,27 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
   // Determine if this is an HTTP or PyPI server based on transport
   const isHttpServer = server?.transport?.includes('streamable-http') || server?.packageType === 'streamable-http';
 
-  const authTypeOptions = [
-    { value: 'bearer', label: 'Bearer Token' },
-    {
-      value: 'custom_headers',
-      label: isHttpServer ? 'Custom Headers (JSON)' : 'Environment Variables (JSON)',
-    },
-    { value: 'oauth2', label: 'OAuth 2.1 (Coming Soon)', disabled: true },
-  ];
+  const authTypeOptions = isHttpServer
+    ? [
+        { value: 'bearer', label: 'Bearer Token' },
+        { value: 'custom_headers', label: 'Custom Headers (JSON)' },
+        { value: 'oauth2', label: 'OAuth 2.1 (Coming Soon)', disabled: true },
+      ]
+    : [
+        { value: 'bearer', label: 'Bearer Token' },
+        { value: 'env_vars', label: 'Environment Variables (JSON)' },
+        { value: 'oauth2', label: 'OAuth 2.1 (Coming Soon)', disabled: true },
+      ];
 
   const validateCustomHeaders = () => {
-    const jsonToValidate = authType.value === 'custom_headers' ? customHeaders : envVars;
+    const jsonToValidate =
+      authType.value === 'custom_headers' || authType.value === 'env_vars' ? customHeaders : envVars;
     try {
       const parsed = JSON.parse(jsonToValidate);
       if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return isHttpServer ? 'Headers must be a JSON object' : 'Environment variables must be a JSON object';
+        return authType.value === 'custom_headers'
+          ? 'Headers must be a JSON object'
+          : 'Environment variables must be a JSON object';
       }
       return null;
     } catch (e) {
@@ -53,7 +59,7 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
         setError('Bearer token is required');
         return;
       }
-    } else if (authType.value === 'custom_headers') {
+    } else if (authType.value === 'custom_headers' || authType.value === 'env_vars') {
       const validationError = validateCustomHeaders();
       if (validationError) {
         setError(validationError);
@@ -72,13 +78,11 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
       if (authType.value === 'bearer') {
         authConfig.token = bearerToken.trim();
       } else if (authType.value === 'custom_headers') {
-        if (isHttpServer) {
-          // HTTP servers use headers
-          authConfig.headers = JSON.parse(customHeaders);
-        } else {
-          // PyPI servers use environment variables
-          authConfig.env = JSON.parse(customHeaders);
-        }
+        // HTTP servers use headers
+        authConfig.headers = JSON.parse(customHeaders);
+      } else if (authType.value === 'env_vars') {
+        // PyPI servers use environment variables
+        authConfig.env = JSON.parse(customHeaders);
       }
 
       await onSubmit(authConfig);
@@ -157,7 +161,7 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
           </FormField>
         )}
 
-        {authType.value === 'custom_headers' && isHttpServer && (
+        {authType.value === 'custom_headers' && (
           <FormField
             label="Custom Headers (JSON)"
             description="Provide a JSON object with custom HTTP headers. These will be sent with every request."
@@ -173,7 +177,7 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
           </FormField>
         )}
 
-        {authType.value === 'custom_headers' && !isHttpServer && (
+        {authType.value === 'env_vars' && (
           <FormField
             label="Environment Variables (JSON)"
             description="Provide a JSON object with environment variables. Passed to the MCP server process."
@@ -208,8 +212,11 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
               {isHttpServer ? 'Sent as Authorization header.' : 'Passed as MCP_API_KEY environment variable.'}
             </Box>
             <Box>
-              <strong>{isHttpServer ? 'Custom Headers' : 'Environment Variables'}:</strong> For advanced authentication
-              requiring multiple {isHttpServer ? 'HTTP headers' : 'environment variables'}. Provide as JSON object.
+              <strong>Custom Headers:</strong> For HTTP servers requiring multiple HTTP headers. Provide as JSON object.
+            </Box>
+            <Box>
+              <strong>Environment Variables:</strong> For PyPI servers requiring multiple environment variables. Provide
+              as JSON object.
             </Box>
             <Box>
               <strong>OAuth 2.1:</strong> Coming soon - for services requiring OAuth flow with token refresh.

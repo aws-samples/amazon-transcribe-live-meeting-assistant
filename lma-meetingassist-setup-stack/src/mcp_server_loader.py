@@ -236,21 +236,8 @@ def load_account_mcp_servers() -> List:
                 continue
             
             # Handle PyPI package-based servers
-            # Dynamically discover the console script entry point
-            entry_point = discover_console_script_path(package_name)
-            
-            if not entry_point:
-                logger.warning(
-                    f"Could not discover entry point for MCP server {server_id} ({package_name}). "
-                    f"The package may not have a registered console_scripts entry point."
-                )
-                continue
-            
-            module_path, func_name = entry_point
-            
             try:
                 logger.info(f"Loading PyPI MCP server: {server_id} ({package_name})")
-                logger.info(f"Using entry point: {module_path}:{func_name}")
                 
                 # In Lambda layers, console scripts are installed in /opt/python/bin/
                 # We need to add /opt/python to PYTHONPATH so imports work
@@ -282,33 +269,100 @@ def load_account_mcp_servers() -> List:
                                 env['MCP_API_KEY'] = token
                                 logger.info(f"Set MCP_API_KEY environment variable for {server_id}")
                         
-                        elif auth_type == 'custom_headers':
-                            # For PyPI servers, "headers" actually means environment variables
-                            env_vars = auth_data.get('headers', {})
-                            if env_vars and isinstance(env_vars, dict):
-                                env.update(env_vars)
-                                logger.info(f"Set custom environment variables for {server_id}: {list(env_vars.keys())}")
-                        
                         elif auth_type == 'env_vars':
-                            # Explicit environment variables
+                            # Environment variables for PyPI servers (new standard)
                             env_vars = auth_data.get('env', {})
                             if env_vars and isinstance(env_vars, dict):
                                 env.update(env_vars)
                                 logger.info(f"Set environment variables for {server_id}: {list(env_vars.keys())}")
+                            else:
+                                logger.warning(f"env_vars auth configured but no 'env' field found for {server_id}")
+                        
+                        elif auth_type == 'custom_headers':
+                            # Backward compatibility: check both 'env' and 'headers' fields
+                            # This handles old installations that used 'custom_headers' for PyPI servers
+                            env_vars = auth_data.get('env', {}) or auth_data.get('headers', {})
+                            if env_vars and isinstance(env_vars, dict):
+                                env.update(env_vars)
+                                logger.info(f"Set environment variables for {server_id} (legacy custom_headers): {list(env_vars.keys())}")
+                            else:
+                                logger.warning(f"custom_headers auth configured but no env vars found for {server_id}")
                     
                     except Exception as e:
                         logger.warning(f"Could not parse auth config for PyPI server {server_id}: {e}")
                 
-                mcp_client = MCPClient(
-                    lambda mod=module_path, fn=func_name, environment=env: stdio_client(
-                        StdioServerParameters(
-                            command=sys.executable,
-                            args=["-c", f"from {mod} import {fn}; {fn}()"],
-                            env=environment
+                # Try to find the console script entry point
+                entry_point = discover_console_script_path(package_name)
+                
+                if entry_point:
+                    module_path, func_name = entry_point
+                    logger.info(f"Using console script entry point: {module_path}:{func_name}")
+                    
+                    # Check if console script file exists in /opt/python/bin/
+                    script_name = None
+                    try:
+                        dist = importlib.metadata.distribution(package_name)
+                        for ep in dist.entry_points:
+                            if ep.group == 'console_scripts':
+                                script_name = ep.name
+                                break
+                    except:
+                        pass
+                    
+                    if script_name:
+                        script_path = f"/opt/python/bin/{script_name}"
+                        # Check if script actually exists
+                        if os.path.exists(script_path):
+                            logger.info(f"Using console script: {script_path}")
+                            mcp_client = MCPClient(
+                                lambda script=script_path, environment=env: stdio_client(
+                                    StdioServerParameters(
+                                        command=sys.executable,
+                                        args=[script],
+                                        env=environment
+                                    )
+                                ),
+                                prefix=package_name.replace('-', '_')
+                            )
+                        else:
+                            # Script doesn't exist, use module execution
+                            logger.info(f"Console script {script_path} not found, using module execution")
+                            mcp_client = MCPClient(
+                                lambda mod=module_path, fn=func_name, environment=env: stdio_client(
+                                    StdioServerParameters(
+                                        command=sys.executable,
+                                        args=["-c", f"from {mod} import {fn}; import asyncio; asyncio.run({fn}())"],
+                                        env=environment
+                                    )
+                                ),
+                                prefix=package_name.replace('-', '_')
+                            )
+                    else:
+                        # No script name, use module execution
+                        logger.info(f"No console script name found, using module execution: {module_path}:{func_name}")
+                        mcp_client = MCPClient(
+                            lambda mod=module_path, fn=func_name, environment=env: stdio_client(
+                                StdioServerParameters(
+                                    command=sys.executable,
+                                    args=["-c", f"from {mod} import {fn}; import asyncio; asyncio.run({fn}())"],
+                                    env=environment
+                                )
+                            ),
+                            prefix=package_name.replace('-', '_')
                         )
-                    ),
-                    prefix=package_name.replace('-', '_')  # Prefix tools to avoid conflicts
-                )
+                else:
+                    # No entry point found, try running as module with __main__
+                    logger.info(f"No entry point found, trying python -m {package_name.replace('-', '_')}")
+                    mcp_client = MCPClient(
+                        lambda pkg=package_name.replace('-', '_'), environment=env: stdio_client(
+                            StdioServerParameters(
+                                command=sys.executable,
+                                args=["-m", pkg],
+                                env=environment
+                            )
+                        ),
+                        prefix=package_name.replace('-', '_')
+                    )
                 
                 # Store client for managed integration (don't extract tools here)
                 mcp_clients.append(mcp_client)
