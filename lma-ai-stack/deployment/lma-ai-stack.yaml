@@ -1384,6 +1384,8 @@ Resources:
     Properties:
       Role: !GetAtt StrandsChatInterfaceFunctionExecutionRole.Arn
       Runtime: python3.12
+      SnapStart:
+        ApplyOn: PublishedVersions
       Environment:
         Variables:
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
