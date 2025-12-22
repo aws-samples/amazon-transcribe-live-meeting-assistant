@@ -777,6 +777,11 @@ Resources:
                   - "dynamodb:Query"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MCPServersTableName}"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:UpdateItem"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MCPServersTableName}"
           PolicyName: DynamoDBPolicy
         - PolicyDocument:
             Version: 2012-10-17
@@ -784,10 +789,11 @@ Resources:
               - Effect: Allow
                 Action:
                   - "kms:Decrypt"
+                  - "kms:Encrypt"
                   - "kms:DescribeKey"
                 Resource:
                   - !Ref CustomerManagedEncryptionKeyArn
-          PolicyName: KMSDecryptPolicy
+          PolicyName: KMSPolicy
         - PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -854,6 +860,7 @@ Resources:
           ENABLE_STREAMING: "true"
           MCP_SERVERS_TABLE: !Ref MCPServersTableName
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
       Code: ./src
       LoggingConfig:
         LogGroup:
