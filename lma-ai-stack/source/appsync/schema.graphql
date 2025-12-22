@@ -179,6 +179,8 @@ type Mutation @aws_iam {
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools
 	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools
 	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools
+	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools
+	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -662,6 +664,36 @@ type UpdateMCPServerOutput @aws_cognito_user_pools @aws_iam {
 	Success: Boolean!
 	Message: String
 	BuildId: String
+}
+
+# OAuth 2.1 Flow Types
+input InitOAuthFlowInput {
+	serverId: ID!
+	provider: String!
+	clientId: String!
+	authorizationUrl: String!
+	tokenUrl: String!
+	scopes: [String!]
+	codeChallenge: String!
+}
+
+type InitOAuthFlowOutput @aws_cognito_user_pools @aws_iam {
+	authorizationUrl: String!
+	state: String!
+	success: Boolean
+	error: String
+}
+
+input OAuthCallbackInput {
+	code: String!
+	state: String!
+	codeVerifier: String
+}
+
+type OAuthCallbackOutput @aws_cognito_user_pools @aws_iam {
+	success: Boolean!
+	serverId: String
+	error: String
 }
 
 schema {

@@ -629,6 +629,12 @@ Outputs:
   MCPLayerBuildProjectName:
     Description: Name of the CodeBuild project for MCP layer building
     Value: !Ref MCPLayerBuildProject
+  OAuthCallbackUrl:
+    Description: OAuth callback URL for MCP server authorization
+    Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/oauth/callback"
+  OAuthStateTableName:
+    Description: Name of the OAuth State DynamoDB table
+    Value: !Ref OAuthStateTable
 
 Resources:
   EventSourcingTable:
@@ -3080,6 +3086,164 @@ Resources:
         SSEType: KMS
         KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
 
+  # OAuth State Table - Temporary storage for OAuth flow state
+  OAuthStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-OAuthState"
+      AttributeDefinitions:
+        - AttributeName: State
+          AttributeType: S
+      KeySchema:
+        - AttributeName: State
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ExpiresAt
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # OAuth Manager Lambda Function
+  OAuthManagerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-OAuthManager"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/oauth_manager
+      Description: Manages OAuth 2.1 flow for MCP servers
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          OAUTH_STATE_TABLE: !Ref OAuthStateTable
+          MCP_SERVERS_TABLE: !Ref MCPServersTable
+          KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
+          OAUTH_CALLBACK_URL: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/oauth/callback"
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OAuthStateTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MCPServersTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:Encrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/OAuthManager"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for OAuth management function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - OAuthManagerLogGroup
+
+  OAuthManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/OAuthManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # AppSync data source for OAuth Manager
+  OAuthManagerDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: OAuthManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt OAuthManagerDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt OAuthManagerFunction.Arn
+
+  OAuthManagerDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt OAuthManagerFunction.Arn
+
+  # AppSync Resolvers for OAuth Flow
+  InitOAuthFlowResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: initOAuthFlow
+      DataSourceName: !GetAtt OAuthManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "initOAuthFlow"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  HandleOAuthCallbackResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: handleOAuthCallback
+      DataSourceName: !GetAtt OAuthManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "handleOAuthCallback"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
 
   # Data source for Virtual Participant table
   VirtualParticipantDataSource:

@@ -18,15 +18,168 @@ from typing import List, Optional
 import sys
 import importlib.metadata
 import importlib.util
+import time
+import base64
+import json
+import requests
 
 logger = logging.getLogger(__name__)
 
-# Initialize DynamoDB client
+# Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
+kms = boto3.client('kms')
 
 # Environment variables
 MCP_SERVERS_TABLE = os.environ.get('MCP_SERVERS_TABLE', '')
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID', '')
+KMS_KEY_ID = os.environ.get('KMS_KEY_ID', '')
+
+
+def decrypt_token(encrypted_token: str) -> str:
+    """Decrypt token using KMS"""
+    try:
+        decrypted = kms.decrypt(
+            CiphertextBlob=base64.b64decode(encrypted_token),
+            KeyId=KMS_KEY_ID
+        )
+        return decrypted['Plaintext'].decode('utf-8')
+    except Exception as e:
+        logger.error(f"Token decryption failed: {e}")
+        raise
+
+
+def encrypt_token(token: str) -> str:
+    """Encrypt token using KMS"""
+    try:
+        encrypted = kms.encrypt(
+            KeyId=KMS_KEY_ID,
+            Plaintext=token.encode('utf-8')
+        )
+        return base64.b64encode(encrypted['CiphertextBlob']).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Token encryption failed: {e}")
+        raise
+
+
+def refresh_oauth_token_inline(server_id: str, account_id: str, oauth_config: dict) -> str:
+    """
+    Refresh OAuth token inline (just-in-time refresh)
+    
+    Args:
+        server_id: MCP server identifier
+        account_id: AWS account ID
+        oauth_config: OAuth configuration from AuthConfig
+        
+    Returns:
+        New decrypted access token
+    """
+    try:
+        logger.info(f"Refreshing OAuth token for {server_id}")
+        
+        # Decrypt refresh token
+        refresh_token = decrypt_token(oauth_config['refreshToken'])
+        
+        # Request new tokens from OAuth provider
+        token_response = requests.post(
+            oauth_config['tokenUrl'],
+            data={
+                'grant_type': 'refresh_token',
+                'refresh_token': refresh_token,
+                'client_id': oauth_config['clientId'],
+            },
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            timeout=30
+        )
+        
+        if token_response.status_code != 200:
+            raise Exception(f"Token refresh failed: {token_response.text}")
+        
+        tokens = token_response.json()
+        
+        # Encrypt new tokens
+        encrypted_access = encrypt_token(tokens['access_token'])
+        # Some providers return new refresh token, others reuse existing
+        encrypted_refresh = encrypt_token(
+            tokens.get('refresh_token', refresh_token)
+        )
+        
+        # Calculate new expiration
+        expires_at = int(time.time()) + tokens.get('expires_in', 3600)
+        
+        # Update DynamoDB
+        table = dynamodb.Table(MCP_SERVERS_TABLE)
+        
+        # Get current AuthConfig
+        response = table.get_item(
+            Key={'AccountId': account_id, 'ServerId': server_id}
+        )
+        
+        if 'Item' in response:
+            server = response['Item']
+            auth_config_str = server.get('AuthConfig', '{}')
+            auth_data = json.loads(auth_config_str) if isinstance(auth_config_str, str) else auth_config_str
+            
+            # Update OAuth tokens
+            if 'oauth' not in auth_data:
+                auth_data['oauth'] = {}
+            
+            auth_data['oauth']['accessToken'] = encrypted_access
+            auth_data['oauth']['refreshToken'] = encrypted_refresh
+            auth_data['oauth']['expiresAt'] = expires_at
+            auth_data['oauth']['lastRefreshed'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+            
+            # Save back to DynamoDB
+            table.update_item(
+                Key={'AccountId': account_id, 'ServerId': server_id},
+                UpdateExpression='SET AuthConfig = :config, UpdatedAt = :updated',
+                ExpressionAttributeValues={
+                    ':config': json.dumps(auth_data),
+                    ':updated': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+                }
+            )
+        
+        logger.info(f"Token refreshed for {server_id}, expires at {expires_at}")
+        return tokens['access_token']
+        
+    except Exception as e:
+        logger.error(f"Token refresh failed for {server_id}: {e}")
+        raise
+
+
+def get_valid_oauth_token(server_id: str, account_id: str, oauth_config: dict) -> str:
+    """
+    Get valid OAuth access token with just-in-time refresh
+    
+    This function checks if the token is expired or expiring soon (< 5 minutes)
+    and refreshes it if necessary.
+    
+    Args:
+        server_id: MCP server identifier
+        account_id: AWS account ID
+        oauth_config: OAuth configuration from AuthConfig
+        
+    Returns:
+        Valid decrypted access token
+    """
+    try:
+        # Decrypt current access token
+        access_token = decrypt_token(oauth_config['accessToken'])
+        
+        # Check expiration (refresh if < 5 minutes remaining)
+        expires_at = oauth_config.get('expiresAt', 0)
+        time_until_expiry = expires_at - time.time()
+        
+        if time_until_expiry < 300:  # Less than 5 minutes
+            logger.info(f"Token expiring in {int(time_until_expiry)}s for {server_id}, refreshing...")
+            access_token = refresh_oauth_token_inline(server_id, account_id, oauth_config)
+        else:
+            logger.info(f"Token valid for {int(time_until_expiry)}s for {server_id}")
+        
+        return access_token
+        
+    except Exception as e:
+        logger.error(f"Failed to get valid OAuth token for {server_id}: {e}")
+        raise
 
 
 def load_http_mcp_server(server_id: str, server_url: str, auth_config: dict = None):
@@ -205,19 +358,17 @@ def load_account_mcp_servers() -> List:
                                 logger.warning(f"Custom headers auth configured but no valid headers found for {server_id}")
                         
                         elif auth_type == 'oauth2':
-                            # OAuth 2.1 - use access token from stored credentials
+                            # OAuth 2.1 - get valid access token with just-in-time refresh
                             oauth_data = auth_data.get('oauth', {})
-                            access_token = oauth_data.get('accessToken', '')
-                            if access_token:
+                            try:
+                                # This handles token expiration check and refresh automatically
+                                access_token = get_valid_oauth_token(server_id, AWS_ACCOUNT_ID, oauth_data)
                                 http_auth_config['headers']['Authorization'] = f"Bearer {access_token}"
                                 logger.info(f"Applied OAuth 2.1 access token for {server_id}")
-                                
-                                # TODO: Check if token is expired and refresh if needed
-                                # expires_at = oauth_data.get('expiresAt', 0)
-                                # if time.time() > expires_at:
-                                #     access_token = refresh_oauth_token(oauth_data)
-                            else:
-                                logger.warning(f"OAuth auth configured but no access token found for {server_id}")
+                            except Exception as e:
+                                logger.error(f"Failed to get OAuth token for {server_id}: {e}")
+                                # Skip this server but continue loading others
+                                continue
                         
                         else:
                             logger.warning(f"Unknown auth type '{auth_type}' for {server_id}")
