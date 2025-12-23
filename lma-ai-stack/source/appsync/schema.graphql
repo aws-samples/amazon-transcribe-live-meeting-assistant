@@ -675,6 +675,8 @@ input InitOAuthFlowInput {
 	tokenUrl: String!
 	scopes: [String!]
 	codeChallenge: String!
+	serverUrl: String
+	serverName: String
 }
 
 type InitOAuthFlowOutput @aws_cognito_user_pools @aws_iam {

@@ -82,6 +82,8 @@ def init_oauth_flow(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         token_url = input_data.get('tokenUrl')
         scopes = input_data.get('scopes', [])
         code_challenge = input_data.get('codeChallenge')
+        server_url = input_data.get('serverUrl')
+        server_name = input_data.get('serverName')
         
         if not all([server_id, client_id, authorization_url, token_url]):
             return {
@@ -95,7 +97,7 @@ def init_oauth_flow(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # Store state in DynamoDB with TTL (10 minutes)
         state_table = dynamodb.Table(OAUTH_STATE_TABLE)
-        state_table.put_item(Item={
+        state_item = {
             'State': state,
             'ServerId': server_id,
             'AccountId': ACCOUNT_ID,
@@ -105,7 +107,12 @@ def init_oauth_flow(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'CodeChallenge': code_challenge,
             'CreatedAt': datetime.utcnow().isoformat(),
             'ExpiresAt': int(time.time()) + 600  # 10 minutes TTL
-        })
+        }
+        if server_url:
+            state_item['ServerUrl'] = server_url
+        if server_name:
+            state_item['ServerName'] = server_name
+        state_table.put_item(Item=state_item)
         
         # Build authorization URL with PKCE
         params = {
@@ -250,46 +257,64 @@ def handle_oauth_callback(event: Dict[str, Any], context: Any) -> Dict[str, Any]
         # Calculate expiration
         expires_at = int(time.time()) + tokens.get('expires_in', 3600)
         
-        # Get current server config
+        # Get or create server config
         servers_table = dynamodb.Table(MCP_SERVERS_TABLE)
         server_response = servers_table.get_item(
             Key={'AccountId': account_id, 'ServerId': server_id}
         )
         
-        if 'Item' not in server_response:
-            return {
-                'success': False,
-                'error': 'Server not found'
+        # Build OAuth config
+        auth_config = {
+            'authType': 'oauth2',
+            'oauth': {
+                'provider': state_data['Provider'],
+                'clientId': client_id,
+                'tokenUrl': token_url,
+                'accessToken': encrypted_access,
+                'refreshToken': encrypted_refresh,
+                'expiresAt': expires_at,
+                'tokenType': tokens.get('token_type', 'Bearer'),
+                'lastRefreshed': datetime.utcnow().isoformat(),
             }
+        }
         
-        server = server_response['Item']
-        auth_config = json.loads(server.get('AuthConfig', '{}')) if isinstance(server.get('AuthConfig'), str) else server.get('AuthConfig', {})
-        
-        # Update with OAuth tokens
-        if 'oauth' not in auth_config:
-            auth_config['oauth'] = {}
-        
-        auth_config['authType'] = 'oauth2'
-        auth_config['oauth'].update({
-            'provider': state_data['Provider'],
-            'clientId': client_id,
-            'tokenUrl': token_url,
-            'accessToken': encrypted_access,
-            'refreshToken': encrypted_refresh,
-            'expiresAt': expires_at,
-            'tokenType': tokens.get('token_type', 'Bearer'),
-            'lastRefreshed': datetime.utcnow().isoformat(),
-        })
-        
-        # Update server in DynamoDB
-        servers_table.update_item(
-            Key={'AccountId': account_id, 'ServerId': server_id},
-            UpdateExpression='SET AuthConfig = :config, UpdatedAt = :updated',
-            ExpressionAttributeValues={
-                ':config': json.dumps(auth_config),
-                ':updated': datetime.utcnow().isoformat()
+        if 'Item' in server_response:
+            # Server exists - update auth config
+            logger.info(f"Updating existing server {server_id} with OAuth tokens")
+            servers_table.update_item(
+                Key={'AccountId': account_id, 'ServerId': server_id},
+                UpdateExpression='SET AuthConfig = :config, UpdatedAt = :updated',
+                ExpressionAttributeValues={
+                    ':config': json.dumps(auth_config),
+                    ':updated': datetime.utcnow().isoformat()
+                }
+            )
+        else:
+            # Server doesn't exist - create it with OAuth config
+            # This happens when OAuth is done before installation
+            logger.info(f"Creating new server entry {server_id} with OAuth tokens")
+            now = datetime.utcnow().isoformat() + 'Z'
+            
+            server_item = {
+                'AccountId': account_id,
+                'ServerId': server_id,
+                'Name': state_data.get('ServerName', server_id),
+                'NpmPackage': server_id,  # Required by GraphQL schema
+                'PackageType': 'streamable-http',  # OAuth servers are typically HTTP
+                'Version': 'latest',
+                'Transport': ['streamable-http'],
+                'Status': 'ACTIVE',  # HTTP servers are immediately active
+                'AuthConfig': json.dumps(auth_config),
+                'RequiresAuth': True,
+                'InstalledAt': now,
+                'UpdatedAt': now
             }
-        )
+            
+            # Add ServerUrl if provided
+            if 'ServerUrl' in state_data:
+                server_item['ServerUrl'] = state_data['ServerUrl']
+            
+            servers_table.put_item(Item=server_item)
         
         # Clean up state
         state_table.delete_item(Key={'State': state})

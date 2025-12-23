@@ -160,6 +160,8 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
             tokenUrl: oauthTokenUrl.trim(),
             scopes: oauthScopes.split(' ').filter((s) => s.trim()),
             codeChallenge,
+            serverUrl: server?.serverUrl || server?.url,
+            serverName: server?.name || serverId,
           },
         },
       });
@@ -515,6 +517,7 @@ AuthConfigModal.propTypes = {
     ServerId: PropTypes.string,
     name: PropTypes.string,
     serverUrl: PropTypes.string,
+    url: PropTypes.string,
     homepage: PropTypes.string,
     transport: PropTypes.arrayOf(PropTypes.string),
     packageType: PropTypes.string,
