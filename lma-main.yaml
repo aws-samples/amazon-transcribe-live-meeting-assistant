@@ -2372,3 +2372,7 @@ Outputs:
       - !GetAtt BEDROCKAGENT.Outputs.SNSTopicForAgentMessages
       - "BEDROCK_AGENT_WITH_KNOWLEDGE_BASE (Create) option not selected"
     Description: Agent SendMessage SNS Topic ARN - Add subscriptions to this topic to receive messages from the LMA meeting assistant agent
+
+  OAuthCallbackUrl:
+    Description: OAuth callback URL for MCP server authorization (use this in your OAuth provider configuration)
+    Value: !GetAtt AISTACK.Outputs.OAuthCallbackUrl

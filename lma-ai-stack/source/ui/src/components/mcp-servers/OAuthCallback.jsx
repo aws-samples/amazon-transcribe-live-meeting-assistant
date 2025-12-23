@@ -4,9 +4,10 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useEffect, useState } from 'react';
-import { API } from 'aws-amplify';
+import { Amplify, API } from 'aws-amplify';
 import { Box, SpaceBetween, Spinner } from '@awsui/components-react';
 import { handleOAuthCallback } from '../../graphql/mutations';
+import awsExports from '../../aws-exports';
 
 /**
  * OAuth Callback Handler Component
@@ -17,6 +18,9 @@ const OAuthCallback = () => {
   const [message, setMessage] = useState('Completing authorization...');
 
   useEffect(() => {
+    // Configure Amplify in popup window context
+    Amplify.configure(awsExports);
+
     const processCallback = async () => {
       try {
         // Parse URL parameters
@@ -85,17 +89,20 @@ const OAuthCallback = () => {
           sessionStorage.removeItem('oauth_code_verifier');
           sessionStorage.removeItem('oauth_server_id');
 
-          // Auto-close after 2 seconds
-          setTimeout(() => {
-            window.close();
-          }, 2000);
+          // Auto-close disabled for debugging
+          // setTimeout(() => {
+          //   window.close();
+          // }, 2000);
         } else {
           throw new Error(result.error || 'Token exchange failed');
         }
       } catch (err) {
         console.error('OAuth callback error:', err);
+        console.error('Error details:', JSON.stringify(err, null, 2));
+        console.error('Error message:', err.message);
+        console.error('Error stack:', err.stack);
         setStatus('error');
-        setMessage(`❌ Authorization failed: ${err.message}`);
+        setMessage(`❌ Authorization failed: ${err.message || JSON.stringify(err)}`);
 
         // Notify parent window of error
         if (window.opener) {
@@ -108,10 +115,10 @@ const OAuthCallback = () => {
           );
         }
 
-        // Auto-close after 5 seconds on error
-        setTimeout(() => {
-          window.close();
-        }, 5000);
+        // Auto-close disabled for debugging
+        // setTimeout(() => {
+        //   window.close();
+        // }, 5000);
       }
     };
 

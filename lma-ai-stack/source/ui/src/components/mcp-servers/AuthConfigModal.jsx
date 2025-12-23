@@ -115,6 +115,23 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
     setError(null);
 
     try {
+      console.log('handleOAuthAuthorize called with server:', server);
+      console.log('server?.id:', server?.id);
+      console.log('server?.ServerId:', server?.ServerId);
+      console.log('server?.name:', server?.name);
+      console.log('server?.serverUrl:', server?.serverUrl);
+
+      // Get server ID - for registry servers use name, for installed servers use ServerId
+      const serverId = server?.id || server?.ServerId || server?.name || server?.serverUrl;
+
+      console.log('Computed serverId:', serverId);
+
+      if (!serverId) {
+        throw new Error(`Server ID not found. Server object: ${JSON.stringify(server)}`);
+      }
+
+      console.log('Using serverId for OAuth:', serverId);
+
       // Validate inputs
       if (!oauthClientId.trim()) {
         throw new Error('Client ID is required');
@@ -129,14 +146,14 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
 
       // Store for callback
       sessionStorage.setItem('oauth_code_verifier', codeVerifier);
-      sessionStorage.setItem('oauth_server_id', server.id);
+      sessionStorage.setItem('oauth_server_id', serverId);
 
       // Initialize OAuth flow
       const response = await API.graphql({
         query: initOAuthFlow,
         variables: {
           input: {
-            serverId: server.id,
+            serverId,
             provider: oauthProvider,
             clientId: oauthClientId.trim(),
             authorizationUrl: oauthAuthUrl.trim(),
@@ -495,6 +512,7 @@ AuthConfigModal.propTypes = {
   onSubmit: PropTypes.func.isRequired,
   server: PropTypes.shape({
     id: PropTypes.string,
+    ServerId: PropTypes.string,
     name: PropTypes.string,
     serverUrl: PropTypes.string,
     homepage: PropTypes.string,

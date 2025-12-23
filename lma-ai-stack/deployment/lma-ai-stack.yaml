@@ -630,8 +630,8 @@ Outputs:
     Description: Name of the CodeBuild project for MCP layer building
     Value: !Ref MCPLayerBuildProject
   OAuthCallbackUrl:
-    Description: OAuth callback URL for MCP server authorization
-    Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/oauth/callback"
+    Description: OAuth callback URL for MCP server authorization (use this in your OAuth provider)
+    Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
   OAuthStateTableName:
     Description: Name of the OAuth State DynamoDB table
     Value: !Ref OAuthStateTable
@@ -3124,7 +3124,7 @@ Resources:
           OAUTH_STATE_TABLE: !Ref OAuthStateTable
           MCP_SERVERS_TABLE: !Ref MCPServersTable
           KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
-          OAUTH_CALLBACK_URL: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/oauth/callback"
+          OAUTH_CALLBACK_URL: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
       Policies:
         - DynamoDBCrudPolicy:
