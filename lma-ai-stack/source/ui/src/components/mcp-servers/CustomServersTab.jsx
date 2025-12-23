@@ -149,6 +149,7 @@ const CustomServersTab = ({ onInstall }) => {
         onSubmit={handleAuthSubmit}
         server={{
           name: serverName,
+          serverUrl,
           requiresAuth: true,
           packageType: 'streamable-http',
           transport: ['streamable-http'],

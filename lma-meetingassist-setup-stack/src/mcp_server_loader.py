@@ -61,6 +61,51 @@ def encrypt_token(token: str) -> str:
         raise
 
 
+def get_client_credentials_token(oauth_config: dict) -> str:
+    """
+    Get OAuth token using client credentials grant
+    
+    Args:
+        oauth_config: OAuth configuration with clientId, clientSecret, tokenUrl
+        
+    Returns:
+        Access token
+    """
+    try:
+        logger.info("Getting token with client credentials")
+        
+        # Decrypt client secret
+        client_secret = decrypt_token(oauth_config['clientSecret'])
+        
+        # Request token with client credentials
+        token_data = {
+            'grant_type': 'client_credentials',
+            'client_id': oauth_config['clientId'],
+            'client_secret': client_secret,
+        }
+        
+        # Add scopes if provided
+        if oauth_config.get('scopes'):
+            token_data['scope'] = ' '.join(oauth_config['scopes'])
+        
+        token_response = requests.post(
+            oauth_config['tokenUrl'],
+            data=token_data,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            timeout=30
+        )
+        
+        if token_response.status_code != 200:
+            raise Exception(f"Token request failed: {token_response.text}")
+        
+        tokens = token_response.json()
+        return tokens['access_token']
+        
+    except Exception as e:
+        logger.error(f"Client credentials token request failed: {e}")
+        raise
+
+
 def refresh_oauth_token_inline(server_id: str, account_id: str, oauth_config: dict) -> str:
     """
     Refresh OAuth token inline (just-in-time refresh)
@@ -76,6 +121,14 @@ def refresh_oauth_token_inline(server_id: str, account_id: str, oauth_config: di
     try:
         logger.info(f"Refreshing OAuth token for {server_id}")
         
+        # Check grant type
+        grant_type = oauth_config.get('grantType', 'authorization_code')
+        
+        if grant_type == 'client_credentials':
+            # For client credentials, just get a new token
+            return get_client_credentials_token(oauth_config)
+        
+        # For authorization code flow, use refresh token
         # Decrypt refresh token
         refresh_token = decrypt_token(oauth_config['refreshToken'])
         
@@ -162,7 +215,25 @@ def get_valid_oauth_token(server_id: str, account_id: str, oauth_config: dict) -
         Valid decrypted access token
     """
     try:
-        # Decrypt current access token
+        grant_type = oauth_config.get('grantType', 'authorization_code')
+        
+        # For client credentials, check if we have a token
+        if grant_type == 'client_credentials':
+            # Check if we have a cached token
+            if 'accessToken' in oauth_config:
+                access_token = decrypt_token(oauth_config['accessToken'])
+                expires_at = oauth_config.get('expiresAt', 0)
+                time_until_expiry = expires_at - time.time()
+                
+                if time_until_expiry > 300:  # More than 5 minutes
+                    logger.info(f"Using cached client credentials token for {server_id}")
+                    return access_token
+            
+            # Get new token with client credentials
+            logger.info(f"Getting new client credentials token for {server_id}")
+            return get_client_credentials_token(oauth_config)
+        
+        # For authorization code flow, decrypt and check expiration
         access_token = decrypt_token(oauth_config['accessToken'])
         
         # Check expiration (refresh if < 5 minutes remaining)

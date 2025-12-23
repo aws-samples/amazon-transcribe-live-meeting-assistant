@@ -24,6 +24,7 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
   // OAuth state
   const [oauthProvider, setOauthProvider] = useState('salesforce');
   const [oauthClientId, setOauthClientId] = useState('');
+  const [oauthClientSecret, setOauthClientSecret] = useState('');
   const [oauthScopes, setOauthScopes] = useState('');
   const [oauthAuthUrl, setOauthAuthUrl] = useState('');
   const [oauthTokenUrl, setOauthTokenUrl] = useState('');
@@ -59,10 +60,10 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
       name: 'Salesforce',
       authorizationUrl: 'https://login.salesforce.com/services/oauth2/authorize',
       tokenUrl: 'https://login.salesforce.com/services/oauth2/token',
-      defaultScopes: 'api refresh_token offline_access',
+      defaultScopes: 'api refresh_token offline_access sfap_api einstein_gpt_api',
       instructions:
         'Create a Connected App in Salesforce Setup with OAuth enabled. ' +
-        'Use the OAuth Callback URL from your stack outputs.',
+        'Enable PKCE and select scopes: api, refresh_token, offline_access, sfap_api, einstein_gpt_api',
     },
     google: {
       name: 'Google',
@@ -91,12 +92,14 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
     ? [
         { value: 'bearer', label: 'Bearer Token' },
         { value: 'custom_headers', label: 'Custom Headers (JSON)' },
-        { value: 'oauth2', label: 'OAuth 2.1 with PKCE' },
+        { value: 'oauth2', label: 'OAuth 2.1 with PKCE (User Authorization)' },
+        { value: 'oauth_client_credentials', label: 'OAuth Client Credentials (Machine-to-Machine)' },
       ]
     : [
         { value: 'bearer', label: 'Bearer Token' },
         { value: 'env_vars', label: 'Environment Variables (JSON)' },
         { value: 'oauth2', label: 'OAuth 2.1 with PKCE (HTTP servers only)', disabled: true },
+        { value: 'oauth_client_credentials', label: 'OAuth Client Credentials (HTTP servers only)', disabled: true },
       ];
 
   // Update OAuth URLs when provider changes
@@ -259,6 +262,12 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
         setError(validationError);
         return;
       }
+    } else if (authType.value === 'oauth_client_credentials') {
+      // Validate OAuth Client Credentials
+      if (!oauthClientId.trim() || !oauthClientSecret.trim() || !oauthTokenUrl.trim()) {
+        setError('Client ID, Client Secret, and Token URL are required');
+        return;
+      }
     }
 
     setLoading(true);
@@ -277,6 +286,15 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
       } else if (authType.value === 'env_vars') {
         // PyPI servers use environment variables
         authConfig.env = JSON.parse(customHeaders);
+      } else if (authType.value === 'oauth_client_credentials') {
+        // OAuth Client Credentials - store credentials, tokens will be fetched on first use
+        authConfig.oauth = {
+          grantType: 'client_credentials',
+          clientId: oauthClientId.trim(),
+          clientSecret: oauthClientSecret.trim(),
+          tokenUrl: oauthTokenUrl.trim(),
+          scopes: oauthScopes.split(' ').filter((s) => s.trim()),
+        };
       }
 
       await onSubmit(authConfig);
@@ -285,6 +303,10 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
       setBearerToken('');
       setCustomHeaders('{\n  "X-API-Key": "your-key-here"\n}');
       setEnvVars('{\n  "API_KEY": "your-key-here"\n}');
+      setOauthClientId('');
+      setOauthClientSecret('');
+      setOauthTokenUrl('');
+      setOauthScopes('');
       onDismiss();
     } catch (err) {
       setError(err.message || 'Failed to save credentials');
@@ -466,7 +488,53 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
           </>
         )}
 
-        {authType.value !== 'oauth2' && (
+        {authType.value === 'oauth_client_credentials' && (
+          <>
+            <Alert type="info" header="OAuth Client Credentials">
+              OAuth Client Credentials provides machine-to-machine authentication without user authorization. Tokens are
+              automatically refreshed before expiration.
+            </Alert>
+
+            <FormField label="Client ID" description="Your OAuth application's client ID">
+              <Input
+                value={oauthClientId}
+                onChange={({ detail }) => setOauthClientId(detail.value)}
+                placeholder="Enter client ID"
+                disabled={loading}
+              />
+            </FormField>
+
+            <FormField label="Client Secret" description="Your OAuth application's client secret (will be encrypted)">
+              <Input
+                value={oauthClientSecret}
+                onChange={({ detail }) => setOauthClientSecret(detail.value)}
+                placeholder="Enter client secret"
+                type="password"
+                disabled={loading}
+              />
+            </FormField>
+
+            <FormField label="Token URL" description="OAuth token endpoint">
+              <Input
+                value={oauthTokenUrl}
+                onChange={({ detail }) => setOauthTokenUrl(detail.value)}
+                placeholder="https://provider.com/oauth2/token"
+                disabled={loading}
+              />
+            </FormField>
+
+            <FormField label="Scopes (Optional)" description="Space-separated list of OAuth scopes">
+              <Input
+                value={oauthScopes}
+                onChange={({ detail }) => setOauthScopes(detail.value)}
+                placeholder="Leave blank if not required"
+                disabled={loading}
+              />
+            </FormField>
+          </>
+        )}
+
+        {authType.value !== 'oauth2' && authType.value !== 'oauth_client_credentials' && (
           <Alert type="warning" header="Authentication Type Guide">
             <SpaceBetween size="xs">
               <Box>
