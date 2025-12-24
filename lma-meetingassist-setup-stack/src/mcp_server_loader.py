@@ -74,8 +74,8 @@ def get_client_credentials_token(oauth_config: dict) -> str:
     try:
         logger.info("Getting token with client credentials")
         
-        # Decrypt client secret
-        client_secret = decrypt_token(oauth_config['clientSecret'])
+        # Get client secret
+        client_secret = oauth_config.get('clientSecret', '')
         
         # Request token with client credentials
         token_data = {
@@ -438,6 +438,18 @@ def load_account_mcp_servers() -> List:
                                 logger.info(f"Applied OAuth 2.1 access token for {server_id}")
                             except Exception as e:
                                 logger.error(f"Failed to get OAuth token for {server_id}: {e}")
+                                # Skip this server but continue loading others
+                                continue
+                        
+                        elif auth_type == 'oauth_client_credentials':
+                            # OAuth Client Credentials - get token with client_id + client_secret
+                            oauth_data = auth_data.get('oauth', {})
+                            try:
+                                access_token = get_valid_oauth_token(server_id, AWS_ACCOUNT_ID, oauth_data)
+                                http_auth_config['headers']['Authorization'] = f"Bearer {access_token}"
+                                logger.info(f"Applied OAuth Client Credentials token for {server_id}")
+                            except Exception as e:
+                                logger.error(f"Failed to get OAuth Client Credentials token for {server_id}: {e}")
                                 # Skip this server but continue loading others
                                 continue
                         

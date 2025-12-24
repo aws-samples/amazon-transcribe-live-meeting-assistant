@@ -89,10 +89,9 @@ const OAuthCallback = () => {
           sessionStorage.removeItem('oauth_code_verifier');
           sessionStorage.removeItem('oauth_server_id');
 
-          // Auto-close disabled for debugging
-          // setTimeout(() => {
-          //   window.close();
-          // }, 2000);
+          setTimeout(() => {
+            window.close();
+          }, 2000);
         } else {
           throw new Error(result.error || 'Token exchange failed');
         }
@@ -115,10 +114,9 @@ const OAuthCallback = () => {
           );
         }
 
-        // Auto-close disabled for debugging
-        // setTimeout(() => {
-        //   window.close();
-        // }, 5000);
+        setTimeout(() => {
+          window.close();
+        }, 5000);
       }
     };
 
