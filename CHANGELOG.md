@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.2.23] - 12/24/25
+
+### Added
+- MCP (Model Context Protocol) server support with public registry integration from modelcontextprotocol.io
+- OAuth 2.1 authentication with PKCE, OAuth 2.0 fallback, for secure MCP server connections
+- OAuth Client Credentials support for machine-to-machine authentication
+- Custom header, env variables, and bearer token authenticaiton options
+- Automatic OAuth token refresh before expiration
+- Salesforce MCP server integration with full CRUD operations
+- MCP Servers UI with dual installation modes (Custom and Registry tabs)
+- Lambda SnapStart for faster cold starts on agent functions
+- QuickSight S3 manifest CloudFormation output for analytics integration
+- Salesforce MCP setup documentation
+
+### Changed
+- MCP servers now support multiple authentication methods (Bearer, OAuth 2.1, OAuth Client Credentials, Custom Headers)
+- Build automation improved with automatic file change detection
+
 ## [0.2.22] - 12/08/25
 
 ### Added

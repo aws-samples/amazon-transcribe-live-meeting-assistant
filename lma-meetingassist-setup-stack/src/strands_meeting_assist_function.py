@@ -6,6 +6,7 @@
 """
 Strands-based Meeting Assistant Lambda Function
 Provides a lightweight alternative to QnABot using AWS Strands SDK
+Supports dynamic MCP server loading from Public Registry
 """
 
 import json
@@ -14,6 +15,14 @@ import boto3
 from boto3.dynamodb.conditions import Key, Attr
 from typing import Dict, Any, Optional
 import logging
+
+# Import MCP server loader
+try:
+    from mcp_server_loader import load_account_mcp_servers
+    MCP_LOADER_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"MCP server loader not available: {e}")
+    MCP_LOADER_AVAILABLE = False
 
 # Configure logging
 logger = logging.getLogger()
@@ -833,6 +842,7 @@ def handler(event, context):
         # Extract parameters from event - handle both 'text' and 'userInput' for compatibility
         user_input = event.get('userInput', '') or event.get('text', '')
         call_id = event.get('callId', '') or event.get('call_id', '')
+        conversation_history = event.get('conversation_history', [])
         dynamodb_table_name = event.get('dynamodb_table_name', '')
         user_email = event.get('userEmail', '') or event.get('user_email', '')
         
@@ -855,8 +865,19 @@ def handler(event, context):
         # Fetch meeting transcript from DynamoDB
         transcript = fetch_meeting_transcript(call_id, dynamodb_table_name) if dynamodb_table_name else event.get('transcript', '')
         
-        # Initialize tools list
+        # Initialize tools list (includes both regular tools and MCP clients)
         tools = []
+        
+        # Load installed MCP servers (account-level) - returns MCPClient objects
+        if MCP_LOADER_AVAILABLE:
+            try:
+                logger.info("Loading installed MCP servers...")
+                mcp_clients = load_account_mcp_servers()
+                tools.extend(mcp_clients)
+                logger.info(f"Loaded {len(mcp_clients)} MCP clients from installed MCP servers")
+                logger.info("Using Strands Managed Integration (experimental) - MCP clients will manage their own lifecycle")
+            except Exception as e:
+                logger.warning(f"Failed to load MCP servers: {e}")
         
         # Add web search tool if API key provided (auto-enable)
         if tavily_api_key:
@@ -982,16 +1003,31 @@ def handler(event, context):
                 streaming=ENABLE_STREAMING
             )
             
-            # Create agent with tools
+            # Create agent with tools (includes MCPClient objects for managed integration)
+            # Per Strands docs: "The MCPClient implements the experimental ToolProvider interface,
+            # enabling direct usage in the Agent constructor with automatic lifecycle management"
             agent = Agent(
                 model=bedrock_model,
                 system_prompt=get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt(),
                 tools=tools if tools else None
             )
             
-            # Prepare context for the agent - don't include transcript by default
-            # The agent will use the current_meeting_transcript tool when needed
-            context_message = f"User Request: {user_input}"
+            logger.info(f"Agent created with {len(tools)} tools/clients (managed integration)")
+            
+            # Prepare context for the agent with conversation history
+            if conversation_history:
+                # Format last 10 messages (5 pairs) for context
+                recent_history = conversation_history[-10:]
+                history_text = "\n\nPrevious conversation:\n"
+                for msg in recent_history:
+                    role = "User" if msg.get('role') == 'user' else "Assistant"
+                    content = msg.get('content', '')
+                    history_text += f"{role}: {content}\n"
+                
+                context_message = f"{history_text}\n\nCurrent User Request: {user_input}"
+                logger.info(f"Including {len(recent_history)} messages from conversation history")
+            else:
+                context_message = f"User Request: {user_input}"
             
             # Handle streaming vs non-streaming
             if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL:
