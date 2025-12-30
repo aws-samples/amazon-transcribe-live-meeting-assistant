@@ -192,6 +192,43 @@ Parameters:
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
     Description: Use meeting transcripts as knowledge base content
 
+  TranscriptKnowledgeBaseVectorStore:
+    Type: String
+    Default: "S3_VECTORS"
+    AllowedValues:
+      - "OPENSEARCH_SERVERLESS"
+      - "S3_VECTORS"
+    Description: >-
+      Vector store for transcript knowledge base. S3 Vectors (default) provides
+      40-60% cost savings with sub-second latency. OpenSearch Serverless for sub-millisecond queries.
+
+  MeetingAssistKnowledgeBaseVectorStore:
+    Type: String
+    Default: "S3_VECTORS"
+    AllowedValues:
+      - "OPENSEARCH_SERVERLESS"
+      - "S3_VECTORS"
+    Description: >-
+      Vector store for meeting assist knowledge base (STRANDS_BEDROCK_WITH_KB and
+      BEDROCK_KNOWLEDGE_BASE Create options). S3 Vectors (default) provides 40-60% cost savings.
+
+  EnableMCP:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Enable MCP server integration for external application access
+      (Amazon Quick Suite, Claude Desktop, etc.). Provides standardized API for agentic systems.
+
+  MCPServerCallbackURLs:
+    Type: String
+    Default: "https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback,https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback,http://localhost:3000/callback"
+    Description: >-
+      Comma-separated list of OAuth callback URLs for MCP clients.
+      Default includes Quick Suite (us-east-1, us-west-2) and localhost for testing.
+      Add your custom MCP client callback URLs here.
+      Example: https://my-app.com/callback,https://another-app.com/oauth/callback
+
   S3BucketName:
     Type: String
     Description: >
@@ -689,6 +726,16 @@ Metadata:
           default: Transcript Knowledge Base Configuration
         Parameters:
           - TranscriptKnowledgeBase
+          - TranscriptKnowledgeBaseVectorStore
+      - Label:
+          default: Vector Store Configuration
+        Parameters:
+          - MeetingAssistKnowledgeBaseVectorStore
+      - Label:
+          default: MCP Server Integration
+        Parameters:
+          - EnableMCP
+          - MCPServerCallbackURLs
       - Label:
           default: Amazon S3 Configuration
         Parameters:
@@ -810,6 +857,14 @@ Metadata:
         default: IDC Application ARN (existing)
       TranscriptKnowledgeBase:
         default: Transcript Knowledge Base
+      TranscriptKnowledgeBaseVectorStore:
+        default: Transcript Knowledge Base Vector Store
+      MeetingAssistKnowledgeBaseVectorStore:
+        default: Meeting Assist Knowledge Base Vector Store
+      EnableMCP:
+        default: Enable MCP Server Integration
+      MCPServerCallbackURLs:
+        default: MCP Server OAuth Callback URLs
       IsPartialTranscriptEnabled:
         default: Enable Partial Transcripts
       IsContentRedactionEnabled:
@@ -1004,6 +1059,9 @@ Conditions:
   ShouldCreateTranscriptKnowledgeBase:
     !Equals [!Ref TranscriptKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)"]
   ShouldUseTranscriptKnowledgeBase: !Condition ShouldCreateTranscriptKnowledgeBase
+  IsS3VectorsForTranscript: !Equals [!Ref TranscriptKnowledgeBaseVectorStore, "S3_VECTORS"]
+  IsS3VectorsForMeetingAssist: !Equals [!Ref MeetingAssistKnowledgeBaseVectorStore, "S3_VECTORS"]
+  ShouldEnableMCP: !Equals [!Ref EnableMCP, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
 Resources:
@@ -1126,6 +1184,22 @@ Resources:
             Condition:
               StringEquals:
                 "aws:SourceAccount": !Ref "AWS::AccountId"
+          - !If
+            - IsS3VectorsForTranscript
+            - Sid: Allow S3 Vectors indexing service
+              Effect: Allow
+              Principal:
+                Service: indexing.s3vectors.amazonaws.com
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  "aws:SourceAccount": !Ref "AWS::AccountId"
+            - !Ref AWS::NoValue
 
   CustomerManagedEncryptionKeyAlias:
     Type: AWS::KMS::Alias
@@ -1936,6 +2010,8 @@ Resources:
           - ShouldUseTranscriptKnowledgeBase
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
           - ""
+        EnableMCPServer: !Ref EnableMCP
+        MCPServerCallbackURLs: !Ref MCPServerCallbackURLs
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -2376,3 +2452,4 @@ Outputs:
   OAuthCallbackUrl:
     Description: OAuth callback URL for MCP server authorization (use this in your OAuth provider configuration)
     Value: !GetAtt AISTACK.Outputs.OAuthCallbackUrl
+

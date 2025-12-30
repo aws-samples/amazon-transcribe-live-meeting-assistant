@@ -423,6 +423,20 @@ Parameters:
     Description: >
       Provide the *id* (not name) of an existing Bedrock Knowledge Base to be used for Agent Assist bot.
 
+  EnableMCPServer:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Enable MCP Server integration to allow external applications (Amazon Quick Suite,
+      Claude Desktop, custom agentic systems) to access LMA meeting data via MCP protocol.
+
+  MCPServerCallbackURLs:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Comma-separated list of additional OAuth callback URLs for custom MCP clients.
+
   LoggingBucketName:
     Type: String
     Description: Name of the logging bucket for S3 access logs
@@ -513,6 +527,8 @@ Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
+  ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
+  HasCustomMCPServerCallbackURLs: !Not [!Equals [!Ref MCPServerCallbackURLs, ""]]
   ShouldEnableLambdaAgentAssist:
     !Equals [!Ref IsLambdaAgentAssistEnabled, "true"]
   ShouldEnableTranscriptLambdaHookFunction:
@@ -635,6 +651,44 @@ Outputs:
   OAuthStateTableName:
     Description: Name of the OAuth State DynamoDB table
     Value: !Ref OAuthStateTable
+  
+  MCPServerEndpoint:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      MCP Server endpoint for external applications to connect and access LMA meeting data.
+      Use this URL with Amazon Quick Suite, Claude Desktop, or custom MCP clients.
+    Value: !GetAtt MCPServerGateway.GatewayUrl
+  
+  MCPServerClientId:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      Cognito Client ID for external applications to authenticate with LMA's MCP Server.
+      Use with MCPServerClientSecret to obtain OAuth tokens.
+    Value: !Ref MCPServerExternalAppClient
+  
+  MCPServerClientSecret:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      Cognito Client Secret for external applications. STORE SECURELY!
+      Use with MCPServerClientId to obtain OAuth tokens for MCP Server access.
+    Value: !GetAtt MCPServerExternalAppClient.ClientSecret
+  
+  MCPServerUserPoolId:
+    Condition: ShouldEnableMCPServer
+    Description: Cognito User Pool ID for MCP Server authentication
+    Value: !Ref UserPoolId
+  
+  MCPServerTokenURL:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      OAuth token endpoint for obtaining access tokens to LMA's MCP Server.
+      Example: curl -X POST <this-url> -d "grant_type=client_credentials&client_id=<MCPServerClientId>&client_secret=<MCPServerClientSecret>"
+    Value: !Sub "https://${UserPoolId}.auth.${AWS::Region}.amazoncognito.com/oauth2/token"
+  
+  MCPServerAuthorizationURL:
+    Condition: ShouldEnableMCPServer
+    Description: OAuth authorization endpoint for authorization code flow (browser-based authentication)
+    Value: !Sub "https://${UserPoolId}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
 
 Resources:
   EventSourcingTable:
@@ -3802,6 +3856,188 @@ Resources:
           $util.error($ctx.error.message, $ctx.error.type)
         #end
         $util.toJson($ctx.result)
+
+  ##########################################################################
+  # MCP Server Resources - Allow external applications to access LMA data
+  # (Separate from existing MCP client functionality above)
+  ##########################################################################
+  
+  # External App Cognito Client for MCP Server authentication
+  MCPServerExternalAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: ShouldEnableMCPServer
+    Properties:
+      ClientName: "LMA-MCPServer-ExternalApp-Client"
+      UserPoolId: !Ref UserPoolId
+      GenerateSecret: true
+      ExplicitAuthFlows:
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AllowedOAuthFlows:
+        - code
+        - client_credentials
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      CallbackURLs: !Split [",", !Ref MCPServerCallbackURLs]
+      LogoutURLs:
+        - !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
+
+  # MCP Server Gateway Manager Lambda
+  MCPServerGatewayManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableMCPServer
+    Properties:
+      LogGroupName: !Sub "/${LMAStackName}/lambda/MCPServerGatewayManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MCPServerGatewayManagerFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldEnableMCPServer
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_116: "DLQ not required for custom resource"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-MCPServerGatewayManager"
+      CodeUri: ../source/lambda_functions/agentcore_gateway_manager/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 512
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+      LoggingConfig:
+        LogGroup: !Ref MCPServerGatewayManagerLogGroup
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock-agentcore:*
+                - bedrock-agentcore-control:*
+                - iam:PassRole
+                - cognito-idp:DescribeUserPool
+                - logs:CreateLogGroup
+                - logs:PutLogEvents
+              Resource: "*"
+    DependsOn:
+      - MCPServerGatewayManagerLogGroup
+
+  # MCP Server Gateway Execution Role
+  MCPServerGatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableMCPServer
+    Properties:
+      RoleName: !Sub "${LMAStackName}-MCPServerGatewayExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"
+      Policies:
+        - PolicyName: InvokeLambdaPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt MCPServerAnalyticsFunction.Arn
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  # MCP Server Analytics Lambda
+  MCPServerAnalyticsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableMCPServer
+    Properties:
+      LogGroupName: !Sub "/${LMAStackName}/lambda/MCPServerAnalytics"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MCPServerAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldEnableMCPServer
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_116: "DLQ not required for MCP handler"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-MCPServerAnalytics"
+      CodeUri: ../source/lambda_functions/mcp_analytics/
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+          CALLS_TABLE: !Ref EventSourcingTable
+          RECORDINGS_BUCKET: !Ref S3BucketName
+          TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix
+          TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
+          MODEL_ARN: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+      LoggingConfig:
+        LogGroup: !Ref MCPServerAnalyticsLogGroup
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventSourcingTable
+        - S3ReadPolicy:
+            BucketName: !Ref S3BucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:Retrieve
+                - bedrock:RetrieveAndGenerate
+              Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+    DependsOn:
+      - MCPServerAnalyticsLogGroup
+
+  # MCP Server Gateway Custom Resource
+  MCPServerGateway:
+    Type: Custom::MCPServerGateway
+    Condition: ShouldEnableMCPServer
+    DependsOn:
+      - MCPServerAnalyticsFunction
+      - MCPServerExternalAppClient
+      - MCPServerGatewayExecutionRole
+    Properties:
+      ServiceToken: !GetAtt MCPServerGatewayManagerFunction.Arn
+      StackName: !Ref LMAStackName
+      Region: !Ref AWS::Region
+      LambdaArn: !GetAtt MCPServerAnalyticsFunction.Arn
+      UserPoolId: !Ref UserPoolId
+      ClientId: !Ref MCPServerExternalAppClient
+      ClientSecret: !GetAtt MCPServerExternalAppClient.ClientSecret
+      ExecutionRoleArn: !GetAtt MCPServerGatewayExecutionRole.Arn
 
   VirtualParticipantLambdaDataSourceRole:
     Type: AWS::IAM::Role
