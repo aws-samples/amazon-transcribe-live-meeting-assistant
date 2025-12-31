@@ -26,6 +26,7 @@ export function response(ctx) {
     Token: input.Token,
     IsComplete: input.IsComplete,
     Sequence: input.Sequence,
-    Timestamp: util.time.nowISO8601()
+    Timestamp: util.time.nowISO8601(),
+    ThinkingStep: input.ThinkingStep || null
   };
 }

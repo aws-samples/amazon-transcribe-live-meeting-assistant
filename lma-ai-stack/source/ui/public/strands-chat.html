@@ -194,6 +194,139 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        
+        /* Thinking process container styles */
+        .thinking-container {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 12px;
+            margin: 10px 0;
+            max-width: 80%;
+            align-self: flex-start;
+            overflow: clip;
+        }
+        
+        .thinking-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background-color: #e9ecef;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s;
+        }
+        
+        .thinking-header:hover {
+            background-color: #dee2e6;
+        }
+        
+        .thinking-current-step {
+            font-size: 14px;
+            color: #495057;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+        }
+        
+        .thinking-toggle {
+            font-size: 12px;
+            color: #6c757d;
+            font-weight: 500;
+        }
+        
+        .thinking-details {
+            padding: 16px;
+            display: none;
+            max-height: 400px;
+            overflow-y: auto;
+            background-color: white;
+        }
+        
+        .thinking-details.expanded {
+            display: block;
+        }
+        
+        .thinking-step {
+            padding: 12px;
+            margin-bottom: 8px;
+            border-left: 3px solid #007bff;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        
+        .thinking-step.reasoning {
+            border-left-color: #007bff;
+            background-color: #e7f3ff;
+        }
+        
+        .thinking-step.tool-use {
+            border-left-color: #28a745;
+            background-color: #e8f5e9;
+        }
+        
+        .thinking-step.tool-result {
+            border-left-color: #17a2b8;
+            background-color: #e0f7fa;
+        }
+        
+        .thinking-step.tool-result.error {
+            border-left-color: #dc3545;
+            background-color: #ffebee;
+        }
+        
+        .thinking-step.status {
+            border-left-color: #ffc107;
+            background-color: #fff8e1;
+        }
+        
+        .thinking-step-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            color: #212529;
+        }
+        
+        .thinking-step-content {
+            font-size: 12px;
+            color: #495057;
+            margin-left: 24px;
+            line-height: 1.5;
+        }
+        
+        .thinking-step-timestamp {
+            font-size: 11px;
+            color: #6c757d;
+            margin-left: 24px;
+            margin-top: 4px;
+        }
+        
+        .tool-params {
+            background-color: #e9ecef;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            margin-top: 4px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .thinking-spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
     </style>
     <!-- Include marked.js for markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
@@ -226,6 +359,9 @@
         const conversationHistory = [];
         const MAX_HISTORY_MESSAGES = 10; // 5 pairs (user + assistant)
         
+        // Thinking steps tracking
+        const thinkingSteps = new Map();
+        
         // Load button configuration on page load
         let buttonConfig = null;
         loadButtonConfiguration();
@@ -237,6 +373,234 @@
                 loadButtonConfiguration();
             }
         });
+        
+        // Thinking process functions
+        function createThinkingContainer(messageId) {
+            console.log('[STRANDS] createThinkingContainer called for:', messageId);
+            const container = document.createElement('div');
+            container.className = 'thinking-container';
+            container.id = `thinking-${messageId}`;
+            
+            const header = document.createElement('div');
+            header.className = 'thinking-header';
+            
+            const currentStep = document.createElement('div');
+            currentStep.className = 'thinking-current-step';
+            currentStep.innerHTML = '<div style="width: 12px;"><span class="thinking-spinner"></span></div> <span id="current-step-text-' + messageId + '">Analyzing request...</span>';
+            
+            const toggle = document.createElement('div');
+            toggle.className = 'thinking-toggle';
+            toggle.textContent = '▼';
+            
+            header.appendChild(currentStep);
+            header.appendChild(toggle);
+            
+            const details = document.createElement('div');
+            details.className = 'thinking-details';
+            details.id = `thinking-details-${messageId}`;
+            
+            container.appendChild(header);
+            container.appendChild(details);
+            
+            // Toggle expand/collapse
+            header.addEventListener('click', () => {
+                details.classList.toggle('expanded');
+                toggle.textContent = details.classList.contains('expanded')
+                    ? '▲'
+                    : '▼';
+            });
+            
+            chatMessages.appendChild(container);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return container;
+        }
+        
+        function addThinkingStep(messageId, step) {
+            console.log('[STRANDS] addThinkingStep called:', messageId, step);
+            if (!thinkingSteps.has(messageId)) {
+                thinkingSteps.set(messageId, []);
+            }
+            
+            const steps = thinkingSteps.get(messageId);
+            steps.push(step);
+            console.log('[STRANDS] Total thinking steps for message:', steps.length);
+            
+            // Update current step display
+            updateCurrentStepDisplay(messageId, step);
+            
+            // Add to detailed view
+            addStepToDetailedView(messageId, step);
+        }
+        
+        function updateCurrentStepDisplay(messageId, step) {
+            console.log('[STRANDS] updateCurrentStepDisplay:', messageId, step.Type);
+            const currentStepText = document.getElementById(`current-step-text-${messageId}`);
+            if (!currentStepText) {
+                console.warn('[STRANDS] current-step-text element not found for:', messageId);
+                return;
+            }
+            
+            let displayText = '';
+            let icon = '';
+            
+            switch(step.Type) {
+                case 'reasoning':
+                    icon = '🧠';
+                    displayText = step.Content || 'Thinking...';
+                    if (displayText.length > 60) {
+                        displayText = displayText.substring(0, 60) + '...';
+                    }
+                    break;
+                case 'tool_use':
+                    icon = '🔧';
+                    displayText = `Using ${formatToolName(step.ToolName)}...`;
+                    break;
+                case 'tool_result':
+                    icon = step.Success ? '✅' : '❌';
+                    displayText = step.Success
+                        ? `Completed ${formatToolName(step.ToolName)}`
+                        : `Error in ${formatToolName(step.ToolName)}`;
+                    break;
+                case 'status':
+                    icon = '⚙️';
+                    displayText = step.Content || 'Processing...';
+                    break;
+            }
+            
+            currentStepText.innerHTML = `${icon} ${displayText}`;
+        }
+        
+        function addStepToDetailedView(messageId, step) {
+            console.log('[STRANDS] addStepToDetailedView:', messageId, step.Type);
+            const details = document.getElementById(`thinking-details-${messageId}`);
+            if (!details) {
+                console.warn('[STRANDS] thinking-details element not found for:', messageId);
+                return;
+            }
+            
+            const stepDiv = document.createElement('div');
+            let stepClass = 'thinking-step ' + step.Type.replace('_', '-');
+            if (step.Type === 'tool_result' && !step.Success) {
+                stepClass += ' error';
+            }
+            stepDiv.className = stepClass;
+            
+            const header = document.createElement('div');
+            header.className = 'thinking-step-header';
+            
+            let icon = '';
+            let title = '';
+            
+            switch(step.Type) {
+                case 'reasoning':
+                    icon = '🧠';
+                    title = 'Reasoning';
+                    break;
+                case 'tool_use':
+                    icon = '🔧';
+                    title = `Tool: ${formatToolName(step.ToolName)}`;
+                    break;
+                case 'tool_result':
+                    icon = step.Success ? '✅' : '❌';
+                    title = step.Success ? 'Result' : 'Error';
+                    break;
+                case 'status':
+                    icon = '⚙️';
+                    title = 'Status';
+                    break;
+            }
+            
+            header.innerHTML = `<span>${icon}</span><span>${title}</span>`;
+            stepDiv.appendChild(header);
+            
+            if (step.Content) {
+                const content = document.createElement('div');
+                content.className = 'thinking-step-content';
+                content.textContent = step.Content;
+                stepDiv.appendChild(content);
+            }
+            
+            if (step.ToolInput) {
+                const params = document.createElement('div');
+                params.className = 'tool-params';
+                try {
+                    const parsed = JSON.parse(step.ToolInput);
+                    params.textContent = `Parameters: ${JSON.stringify(parsed, null, 2)}`;
+                } catch (e) {
+                    params.textContent = `Parameters: ${step.ToolInput}`;
+                }
+                stepDiv.appendChild(params);
+            }
+            
+            if (step.ToolResult) {
+                const result = document.createElement('div');
+                result.className = 'thinking-step-content';
+                result.textContent = truncateText(step.ToolResult, 200);
+                stepDiv.appendChild(result);
+            }
+            
+            const timestamp = document.createElement('div');
+            timestamp.className = 'thinking-step-timestamp';
+            timestamp.textContent = formatTimestamp(step.Timestamp);
+            stepDiv.appendChild(timestamp);
+            
+            details.appendChild(stepDiv);
+            
+            if (details.classList.contains('expanded')) {
+                details.scrollTop = details.scrollHeight;
+            }
+        }
+        
+        function formatToolName(toolName) {
+            if (!toolName) return 'tool';
+            return toolName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+        
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '';
+            
+            try {
+                // Handle ISO 8601 format timestamps
+                const date = new Date(timestamp);
+                
+                // Check if date is valid
+                if (isNaN(date.getTime())) {
+                    return '';
+                }
+                
+                // Format as HH:MM:SS
+                return date.toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                });
+            } catch (e) {
+                console.error('Error formatting timestamp:', e);
+                return '';
+            }
+        }
+        
+        function truncateText(text, maxLength) {
+            if (!text) return '';
+            if (text.length <= maxLength) return text;
+            return text.substring(0, maxLength) + '...';
+        }
+        
+        function finalizeThinkingContainer(messageId) {
+            const currentStepText = document.getElementById(`current-step-text-${messageId}`);
+            if (currentStepText) {
+                currentStepText.innerHTML = '✓ Complete';
+            }
+            
+            const container = document.getElementById(`thinking-${messageId}`);
+            if (container) {
+                const spinner = container.querySelector('.thinking-spinner');
+                if (spinner) {
+                    spinner.remove();
+                }
+            }
+        }
 
         function addMessage(text, type = 'assistant') {
             const messageDiv = document.createElement('div');
@@ -291,26 +655,28 @@
             addMessage(message, 'user');
             messageInput.value = '';
             sendButton.disabled = true;
-            addLoadingMessage();
 
             try {
                 const response = await callSendChatMessageAPI(message, callId);
                 
                 if (response?.data?.sendChatMessage) {
                     const messageId = response.data.sendChatMessage.MessageId;
+                    
+                    // Create thinking container (replaces old loading message)
+                    createThinkingContainer(messageId);
+                    
+                    // Subscribe to token stream (thinking steps come through here too)
                     subscribeToTokenStream(messageId);
                     
                     // Fallback for non-streaming responses
                     if (response.data.sendChatMessage.Response) {
-                        removeLoadingMessage();
+                        finalizeThinkingContainer(messageId);
                         addMessage(response.data.sendChatMessage.Response, 'assistant');
                     }
                 } else {
-                    removeLoadingMessage();
                     addMessage('Unexpected response format', 'error');
                 }
             } catch (error) {
-                removeLoadingMessage();
                 addMessage(`Error: ${error.message}`, 'error');
             }
 
@@ -371,8 +737,15 @@
                     const token = event.data.token;
                     
                     if (token.MessageId === messageId) {
+                        // Check if this token contains a thinking step
+                        if (token.ThinkingStep) {
+                            console.log('[STRANDS] Received thinking step in token:', token.ThinkingStep);
+                            addThinkingStep(messageId, token.ThinkingStep);
+                        }
+                        
                         if (token.IsComplete) {
-                            removeLoadingMessage();
+                            finalizeThinkingContainer(messageId);
+                            
                             // Final render with markdown
                             if (typeof marked !== 'undefined' && accumulatedText) {
                                 streamingMessageDiv.innerHTML = marked.parse(accumulatedText);
@@ -393,8 +766,8 @@
                             }
                             
                             window.removeEventListener('message', tokenHandler);
-                        } else {
-                            // Accumulate tokens
+                        } else if (token.Token) {
+                            // Only accumulate if there's actual token text (not just thinking steps)
                             accumulatedText += token.Token;
                             
                             // Render markdown incrementally during streaming
