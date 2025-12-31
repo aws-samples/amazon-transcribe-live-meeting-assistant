@@ -376,7 +376,6 @@
         
         // Thinking process functions
         function createThinkingContainer(messageId) {
-            console.log('[STRANDS] createThinkingContainer called for:', messageId);
             const container = document.createElement('div');
             container.className = 'thinking-container';
             container.id = `thinking-${messageId}`;
@@ -416,14 +415,12 @@
         }
         
         function addThinkingStep(messageId, step) {
-            console.log('[STRANDS] addThinkingStep called:', messageId, step);
             if (!thinkingSteps.has(messageId)) {
                 thinkingSteps.set(messageId, []);
             }
             
             const steps = thinkingSteps.get(messageId);
             steps.push(step);
-            console.log('[STRANDS] Total thinking steps for message:', steps.length);
             
             // Update current step display
             updateCurrentStepDisplay(messageId, step);
@@ -433,7 +430,6 @@
         }
         
         function updateCurrentStepDisplay(messageId, step) {
-            console.log('[STRANDS] updateCurrentStepDisplay:', messageId, step.Type);
             const currentStepText = document.getElementById(`current-step-text-${messageId}`);
             if (!currentStepText) {
                 console.warn('[STRANDS] current-step-text element not found for:', messageId);
@@ -471,7 +467,6 @@
         }
         
         function addStepToDetailedView(messageId, step) {
-            console.log('[STRANDS] addStepToDetailedView:', messageId, step.Type);
             const details = document.getElementById(`thinking-details-${messageId}`);
             if (!details) {
                 console.warn('[STRANDS] thinking-details element not found for:', messageId);
@@ -739,7 +734,6 @@
                     if (token.MessageId === messageId) {
                         // Check if this token contains a thinking step
                         if (token.ThinkingStep) {
-                            console.log('[STRANDS] Received thinking step in token:', token.ThinkingStep);
                             addThinkingStep(messageId, token.ThinkingStep);
                         }
                         
