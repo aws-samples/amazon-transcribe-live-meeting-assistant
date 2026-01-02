@@ -572,6 +572,16 @@ input AddChatTokenInput {
 	Token: String!
 	IsComplete: Boolean!
 	Sequence: Int!
+	ThinkingStep: ThinkingStepDataInput
+}
+
+input ThinkingStepDataInput {
+	Type: String!
+	Content: String
+	ToolName: String
+	ToolInput: AWSJSON
+	ToolResult: String
+	Success: Boolean
 }
 
 type ChatToken @aws_cognito_user_pools @aws_iam {
@@ -581,6 +591,16 @@ type ChatToken @aws_cognito_user_pools @aws_iam {
 	IsComplete: Boolean!
 	Sequence: Int!
 	Timestamp: AWSDateTime!
+	ThinkingStep: ThinkingStepData
+}
+
+type ThinkingStepData @aws_cognito_user_pools @aws_iam {
+	Type: String!
+	Content: String
+	ToolName: String
+	ToolInput: AWSJSON
+	ToolResult: String
+	Success: Boolean
 }
 
 type ChatButtonConfig @aws_cognito_user_pools @aws_iam {
