@@ -1716,6 +1716,14 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
                 IsComplete
                 Sequence
                 Timestamp
+                ThinkingStep {
+                  Type
+                  Content
+                  ToolName
+                  ToolInput
+                  ToolResult
+                  Success
+                }
               }
             }
           `;
