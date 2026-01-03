@@ -325,57 +325,10 @@ Resources:
       ServiceToken: !GetAtt GetSeedUrlsFunction.Arn
       WebCrawlerURLs: !Ref pWebCrawlerURLs
 
-  #
-  # Vector Store Migration Manager (handles switching between OpenSearch and S3 Vectors)
-  #
-  VectorStoreMigrationRole:
-    Type: AWS::IAM::Role
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W11
-            reason: Migration requires broad permissions to detect and clean up resources
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      Policies:
-        - PolicyName: VectorStoreMigrationAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - bedrock:ListKnowledgeBases
-                  - bedrock:GetKnowledgeBase
-                  - bedrock:DeleteKnowledgeBase
-                  - bedrock:ListDataSources
-                  - bedrock:GetDataSource
-                  - bedrock:DeleteDataSource
-                  - bedrock:UpdateDataSource
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - aoss:ListCollections
-                  - aoss:DeleteCollection
-                  - aoss:BatchGetCollection
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - s3vectors:ListVectorBuckets
-                  - s3vectors:DeleteVectorBucket
-                  - s3vectors:GetVectorBucket
-                Resource: "*"
-
-  VectorStoreMigrationFunction:
+  # Generate short S3 vector bucket name using hash
+  GetS3VectorBucketNameFunction:
     Type: AWS::Serverless::Function
+    Condition: UseS3Vectors
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -383,124 +336,64 @@ Resources:
             reason: Function does not require VPC access
           - id: W92
             reason: Function does not require reserved concurrency
-    # checkov:skip=CKV_AWS_116: "DLQ not required for migration function"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     Properties:
-      Handler: handler.lambda_handler
-      Role: !GetAtt VectorStoreMigrationRole.Arn
+      Handler: index.handler
       Runtime: python3.12
-      Timeout: 900
-      MemorySize: 512
-      CodeUri: ./src/vector_store_migration
-      Environment:
-        Variables:
-          LOG_LEVEL: INFO
+      Timeout: 30
+      InlineCode: |
+        import cfnresponse
+        import hashlib
+        def handler(event, context):
+            try:
+                stack_name = event['ResourceProperties'].get('StackName', '')
+                # Create a 12-char hash to ensure uniqueness
+                hash_suffix = hashlib.sha256(stack_name.encode()).hexdigest()[:12]
+                # Generate bucket name: lma-s3v-{hash} = max 20 chars
+                bucket_name = f"lma-s3v-{hash_suffix}"
+                responseData = {'BucketName': bucket_name}
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+            except Exception as e:
+                cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
 
-  VectorStoreMigration:
-    Type: Custom::VectorStoreMigration
+  S3VectorBucketName:
+    Type: Custom::GetS3VectorBucketName
+    Condition: UseS3Vectors
     Properties:
-      ServiceToken: !GetAtt VectorStoreMigrationFunction.Arn
-      CurrentVectorStore: OPENSEARCH_SERVERLESS  # Assume existing stacks use OpenSearch
-      TargetVectorStore: !Ref pVectorStoreType
-      Region: !Ref AWS::Region
+      ServiceToken: !GetAtt GetS3VectorBucketNameFunction.Arn
       StackName: !Ref AWS::StackName
 
   #
-  # S3 Vectors Resources (NEW - conditional)
+  # S3 Vectors Resources (Native CloudFormation)
   #
-  S3VectorManagerRole:
-    Type: AWS::IAM::Role
-    Condition: UseS3Vectors
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W11
-            reason: S3 Vectors permissions do not apply to specific resources
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      Policies:
-        - PolicyName: S3VectorsAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3vectors:CreateVectorBucket
-                  - s3vectors:DeleteVectorBucket
-                  - s3vectors:GetVectorBucket
-                  - s3vectors:ListVectorBuckets
-                  - s3vectors:CreateIndex
-                  - s3vectors:DeleteIndex
-                  - s3vectors:GetIndex
-                  - s3vectors:ListIndexes
-                  - s3vectors:PutVectors
-                  - s3vectors:GetVectors
-                  - s3vectors:QueryVectors
-                  - s3vectors:DeleteVectors
-                Resource: "*"
-        - PolicyName: BedrockAgentAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - bedrock:CreateKnowledgeBase
-                  - bedrock:DeleteKnowledgeBase
-                  - bedrock:GetKnowledgeBase
-                  - bedrock:UpdateKnowledgeBase
-                  - bedrock:ListKnowledgeBases
-                Resource: "*"
-              - Effect: Allow
-                Action: iam:PassRole
-                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/*"
-
-  S3VectorManagerFunction:
-    Type: AWS::Serverless::Function
-    Condition: UseS3Vectors
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Function does not require VPC access as it only interacts with AWS services via APIs
-          - id: W92
-            reason: Function does not require reserved concurrency as it scales based on demand
-    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    Properties:
-      Handler: handler.lambda_handler
-      Role: !GetAtt S3VectorManagerRole.Arn
-      Runtime: python3.12
-      Timeout: 600
-      MemorySize: 512
-      CodeUri: ./src/s3_vectors_manager
-
-  S3VectorBucketAndIndex:
-    Type: Custom::S3VectorBucketAndIndex
+  S3VectorBucket:
+    Type: AWS::S3Vectors::VectorBucket
     Condition: UseS3Vectors
     Properties:
-      ServiceToken: !GetAtt S3VectorManagerFunction.Arn
-      BucketName: !If
+      VectorBucketName: !If
         - HasS3VectorBucketName
         - !Ref pS3VectorBucketName
-        - !Sub "${AWS::StackName}-s3-vectors"
+        - !GetAtt S3VectorBucketName.BucketName
+
+  S3VectorIndex:
+    Type: AWS::S3Vectors::Index
+    Condition: UseS3Vectors
+    DependsOn:
+      - S3VectorBucket
+      - S3VectorBucketName
+    Properties:
+      VectorBucketName: !If
+        - HasS3VectorBucketName
+        - !Ref pS3VectorBucketName
+        - !GetAtt S3VectorBucketName.BucketName
       IndexName: !Ref pS3VectorIndexName
-      EmbeddingModel: !Ref pEmbedModel
-      Region: !Ref AWS::Region
-      VectorDimension: 1024
-      DistanceMetric: "cosine"
+      DataType: float32
+      Dimension: 1024
+      DistanceMetric: cosine
       MetadataConfiguration:
-        nonFilterableMetadataKeys:
+        NonFilterableMetadataKeys:
           - "AMAZON_BEDROCK_METADATA"
           - "AMAZON_BEDROCK_TEXT_CHUNK"
 
@@ -836,7 +729,7 @@ Resources:
                     - s3vectors:PutVectors
                     - s3vectors:GetVectors
                     - s3vectors:DeleteVectors
-                  Resource: !GetAtt S3VectorBucketAndIndex.IndexArn
+                  Resource: !GetAtt S3VectorIndex.IndexArn
           - !Ref "AWS::NoValue"
         - !If
           - IsS3DataSource
@@ -851,7 +744,7 @@ Resources:
                   Resource: !If
                     - UseS3Vectors
                     - - !Sub "arn:aws:s3:::${pKnowledgeBaseBucketName}"
-                      - !GetAtt S3VectorBucketAndIndex.BucketArn
+                      - !GetAtt S3VectorBucket.VectorBucketArn
                     - - !Sub "arn:aws:s3:::${pKnowledgeBaseBucketName}"
                 - Sid: S3GetObject
                   Effect: Allow
@@ -860,7 +753,7 @@ Resources:
                   Resource: !If
                     - UseS3Vectors
                     - - !Sub "arn:aws:s3:::${pKnowledgeBaseBucketName}/*"
-                      - !Sub "${S3VectorBucketAndIndex.BucketArn}/*"
+                      - !Sub "${S3VectorBucket.VectorBucketArn}/*"
                     - - !Sub "arn:aws:s3:::${pKnowledgeBaseBucketName}/*"
           - !Ref "AWS::NoValue"
 
@@ -872,7 +765,6 @@ Resources:
     Condition: UseOpenSearchServerless
     DependsOn:
       - OSSIndexCustomResource
-      - VectorStoreMigration
     Properties:
       Description: LMA Bedrock Knowledge Base with OpenSearch Serverless
       KnowledgeBaseConfiguration:
@@ -897,20 +789,22 @@ Resources:
             Ref: pIndexName
 
   KnowledgeBaseS3Vectors:
-    Type: Custom::S3VectorsKnowledgeBase
+    Type: AWS::Bedrock::KnowledgeBase
     Condition: UseS3Vectors
     DependsOn:
-      - S3VectorBucketAndIndex
-      - VectorStoreMigration
+      - S3VectorIndex
     Properties:
-      ServiceToken: !GetAtt S3VectorManagerFunction.Arn
-      ResourceType: S3VectorsKnowledgeBase
       Name: !Sub "${AWS::StackName}-S3Vectors"
       Description: "LMA Bedrock Knowledge Base with S3 Vectors"
       RoleArn: !GetAtt KnowledgeBaseServiceRole.Arn
-      EmbeddingModelArn: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${pEmbedModel}"
-      IndexArn: !GetAtt S3VectorBucketAndIndex.IndexArn
-      Region: !Ref AWS::Region
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${pEmbedModel}"
+      StorageConfiguration:
+        Type: S3_VECTORS
+        S3VectorsConfiguration:
+          IndexArn: !GetAtt S3VectorIndex.IndexArn
 
   # Unified KB ID reference for data sources and outputs
   KnowledgeBaseIdParameter:
@@ -920,7 +814,7 @@ Resources:
       Type: String
       Value: !If
         - UseS3Vectors
-        - !GetAtt KnowledgeBaseS3Vectors.KnowledgeBaseId
+        - !Ref KnowledgeBaseS3Vectors
         - !Ref KnowledgeBaseOpenSearch
       Description: Unified Knowledge Base ID (works with either vector store)
 
@@ -1161,13 +1055,18 @@ Outputs:
   
   S3VectorBucketName:
     Condition: UseS3Vectors
-    Value: !GetAtt S3VectorBucketAndIndex.BucketName
+    Value: !Ref S3VectorBucket
     Description: S3 Vector bucket name (S3 Vectors only)
   
   S3VectorBucketArn:
     Condition: UseS3Vectors
-    Value: !GetAtt S3VectorBucketAndIndex.BucketArn
+    Value: !GetAtt S3VectorBucket.VectorBucketArn
     Description: S3 Vector bucket ARN (S3 Vectors only)
+  
+  S3VectorIndexArn:
+    Condition: UseS3Vectors
+    Value: !GetAtt S3VectorIndex.IndexArn
+    Description: S3 Vector index ARN (S3 Vectors only)
   
   OpenSearchCollectionName:
     Condition: UseOpenSearchServerless

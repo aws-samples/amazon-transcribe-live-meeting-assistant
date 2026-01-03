@@ -3862,7 +3862,7 @@ Resources:
   # (Separate from existing MCP client functionality above)
   ##########################################################################
   
-  # External App Cognito Client for MCP Server authentication
+  # External App Cognito Client for MCP Server authentication (Authorization Code flow)
   MCPServerExternalAppClient:
     Type: AWS::Cognito::UserPoolClient
     Condition: ShouldEnableMCPServer
@@ -3871,75 +3871,30 @@ Resources:
       UserPoolId: !Ref UserPoolId
       GenerateSecret: true
       ExplicitAuthFlows:
-        - ALLOW_ADMIN_USER_PASSWORD_AUTH
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
       AllowedOAuthFlows:
         - code
-        - client_credentials
       AllowedOAuthFlowsUserPoolClient: true
       AllowedOAuthScopes:
         - openid
         - email
         - profile
-      CallbackURLs: !Split [",", !Ref MCPServerCallbackURLs]
+      CallbackURLs: !If
+        - HasCustomMCPServerCallbackURLs
+        - !Split [",", !Ref MCPServerCallbackURLs]
+        - - !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
       LogoutURLs:
         - !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
-
-  # MCP Server Gateway Manager Lambda
-  MCPServerGatewayManagerLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: ShouldEnableMCPServer
-    Properties:
-      LogGroupName: !Sub "/${LMAStackName}/lambda/MCPServerGatewayManager"
-      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  MCPServerGatewayManagerFunction:
-    Type: AWS::Serverless::Function
-    Condition: ShouldEnableMCPServer
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Function does not require VPC access
-          - id: W92
-            reason: Function does not require reserved concurrency
-    # checkov:skip=CKV_AWS_116: "DLQ not required for custom resource"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
-    Properties:
-      FunctionName: !Sub "${LMAStackName}-MCPServerGatewayManager"
-      CodeUri: ../source/lambda_functions/agentcore_gateway_manager/
-      Handler: index.handler
-      Runtime: python3.12
-      Timeout: 900
-      MemorySize: 512
-      Environment:
-        Variables:
-          LOG_LEVEL: INFO
-      LoggingConfig:
-        LogGroup: !Ref MCPServerGatewayManagerLogGroup
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action:
-                - bedrock-agentcore:*
-                - bedrock-agentcore-control:*
-                - iam:PassRole
-                - cognito-idp:DescribeUserPool
-                - logs:CreateLogGroup
-                - logs:PutLogEvents
-              Resource: "*"
-    DependsOn:
-      - MCPServerGatewayManagerLogGroup
+      SupportedIdentityProviders:
+        - COGNITO
 
   # MCP Server Gateway Execution Role
   MCPServerGatewayExecutionRole:
     Type: AWS::IAM::Role
     Condition: ShouldEnableMCPServer
     Properties:
-      RoleName: !Sub "${LMAStackName}-MCPServerGatewayExecutionRole"
+      RoleName: !Sub "${LMAStackName}-MCPServerGatewayRole"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -3962,6 +3917,10 @@ Resources:
                 Resource: !GetAtt MCPServerAnalyticsFunction.Arn
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
 
   # MCP Server Analytics Lambda
   MCPServerAnalyticsLogGroup:
@@ -4021,23 +3980,125 @@ Resources:
     DependsOn:
       - MCPServerAnalyticsLogGroup
 
-  # MCP Server Gateway Custom Resource
+  # MCP Server Gateway (Native CloudFormation)
   MCPServerGateway:
-    Type: Custom::MCPServerGateway
+    Type: AWS::BedrockAgentCore::Gateway
     Condition: ShouldEnableMCPServer
     DependsOn:
       - MCPServerAnalyticsFunction
       - MCPServerExternalAppClient
       - MCPServerGatewayExecutionRole
     Properties:
-      ServiceToken: !GetAtt MCPServerGatewayManagerFunction.Arn
-      StackName: !Ref LMAStackName
-      Region: !Ref AWS::Region
-      LambdaArn: !GetAtt MCPServerAnalyticsFunction.Arn
-      UserPoolId: !Ref UserPoolId
-      ClientId: !Ref MCPServerExternalAppClient
-      ClientSecret: !GetAtt MCPServerExternalAppClient.ClientSecret
-      ExecutionRoleArn: !GetAtt MCPServerGatewayExecutionRole.Arn
+      Name: !Sub "${LMAStackName}-MCP-Gateway"
+      Description: "LMA MCP Server Gateway for external application access"
+      ProtocolType: MCP
+      AuthorizerType: CUSTOM_JWT
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPoolId}/.well-known/openid-configuration"
+          AllowedClients:
+            - !Ref MCPServerExternalAppClient
+      RoleArn: !GetAtt MCPServerGatewayExecutionRole.Arn
+      Tags:
+        Application: LMA
+        Component: MCPServer
+
+  # MCP Server Gateway Target (Lambda)
+  MCPServerGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Condition: ShouldEnableMCPServer
+    DependsOn: MCPServerGateway
+    Properties:
+      GatewayIdentifier: !Ref MCPServerGateway
+      Name: "LMAAnalyticsTarget"
+      Description: "LMA meeting analytics and transcript access tools"
+      TargetConfiguration:
+        LambdaTarget:
+          LambdaArn: !GetAtt MCPServerAnalyticsFunction.Arn
+          ToolSchema:
+            InlinePayload:
+              - Name: search_lma_meetings
+                Description: "Search across all meeting transcripts and summaries using natural language queries"
+                InputSchema:
+                  Type: object
+                  Properties:
+                    query:
+                      Type: string
+                      Description: "Natural language search query"
+                    startDate:
+                      Type: string
+                      Description: "Optional ISO 8601 start date"
+                    endDate:
+                      Type: string
+                      Description: "Optional ISO 8601 end date"
+                    maxResults:
+                      Type: number
+                      Description: "Maximum results to return"
+                      Default: 10
+                  Required:
+                    - query
+              - Name: get_meeting_transcript
+                Description: "Retrieve the complete transcript for a specific meeting"
+                InputSchema:
+                  Type: object
+                  Properties:
+                    meetingId:
+                      Type: string
+                      Description: "Meeting ID (CallId)"
+                    format:
+                      Type: string
+                      Enum:
+                        - json
+                        - text
+                        - srt
+                      Description: "Output format"
+                      Default: text
+                  Required:
+                    - meetingId
+              - Name: get_meeting_summary
+                Description: "Get AI-generated summary and action items for a meeting"
+                InputSchema:
+                  Type: object
+                  Properties:
+                    meetingId:
+                      Type: string
+                      Description: "Meeting ID (CallId)"
+                    includeActionItems:
+                      Type: boolean
+                      Description: "Include action items"
+                      Default: true
+                    includeTopics:
+                      Type: boolean
+                      Description: "Include key topics"
+                      Default: true
+                  Required:
+                    - meetingId
+              - Name: list_meetings
+                Description: "List meetings with optional filters"
+                InputSchema:
+                  Type: object
+                  Properties:
+                    startDate:
+                      Type: string
+                      Description: "ISO 8601 start date"
+                    endDate:
+                      Type: string
+                      Description: "ISO 8601 end date"
+                    participant:
+                      Type: string
+                      Description: "Filter by participant name"
+                    status:
+                      Type: string
+                      Enum:
+                        - STARTED
+                        - ENDED
+                        - ALL
+                      Default: ALL
+                    limit:
+                      Type: number
+                      Default: 20
+                      Maximum: 100
+      CredentialProviderConfigurations: []
 
   VirtualParticipantLambdaDataSourceRole:
     Type: AWS::IAM::Role
