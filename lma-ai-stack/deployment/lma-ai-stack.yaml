@@ -4012,93 +4012,82 @@ Resources:
       GatewayIdentifier: !Ref MCPServerGateway
       Name: "LMAAnalyticsTarget"
       Description: "LMA meeting analytics and transcript access tools"
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
       TargetConfiguration:
-        LambdaTarget:
-          LambdaArn: !GetAtt MCPServerAnalyticsFunction.Arn
-          ToolSchema:
-            InlinePayload:
-              - Name: search_lma_meetings
-                Description: "Search across all meeting transcripts and summaries using natural language queries"
-                InputSchema:
-                  Type: object
-                  Properties:
-                    query:
-                      Type: string
-                      Description: "Natural language search query"
-                    startDate:
-                      Type: string
-                      Description: "Optional ISO 8601 start date"
-                    endDate:
-                      Type: string
-                      Description: "Optional ISO 8601 end date"
-                    maxResults:
-                      Type: number
-                      Description: "Maximum results to return"
-                      Default: 10
-                  Required:
-                    - query
-              - Name: get_meeting_transcript
-                Description: "Retrieve the complete transcript for a specific meeting"
-                InputSchema:
-                  Type: object
-                  Properties:
-                    meetingId:
-                      Type: string
-                      Description: "Meeting ID (CallId)"
-                    format:
-                      Type: string
-                      Enum:
-                        - json
-                        - text
-                        - srt
-                      Description: "Output format"
-                      Default: text
-                  Required:
-                    - meetingId
-              - Name: get_meeting_summary
-                Description: "Get AI-generated summary and action items for a meeting"
-                InputSchema:
-                  Type: object
-                  Properties:
-                    meetingId:
-                      Type: string
-                      Description: "Meeting ID (CallId)"
-                    includeActionItems:
-                      Type: boolean
-                      Description: "Include action items"
-                      Default: true
-                    includeTopics:
-                      Type: boolean
-                      Description: "Include key topics"
-                      Default: true
-                  Required:
-                    - meetingId
-              - Name: list_meetings
-                Description: "List meetings with optional filters"
-                InputSchema:
-                  Type: object
-                  Properties:
-                    startDate:
-                      Type: string
-                      Description: "ISO 8601 start date"
-                    endDate:
-                      Type: string
-                      Description: "ISO 8601 end date"
-                    participant:
-                      Type: string
-                      Description: "Filter by participant name"
-                    status:
-                      Type: string
-                      Enum:
-                        - STARTED
-                        - ENDED
-                        - ALL
-                      Default: ALL
-                    limit:
-                      Type: number
-                      Default: 20
-                      Maximum: 100
-      CredentialProviderConfigurations: []
+        Mcp:
+          Lambda:
+            LambdaArn: !GetAtt MCPServerAnalyticsFunction.Arn
+            ToolSchema:
+              InlinePayload:
+                - Name: search_lma_meetings
+                  Description: "Search across all meeting transcripts and summaries using natural language queries"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      query:
+                        Type: string
+                        Description: "Natural language search query"
+                      startDate:
+                        Type: string
+                        Description: "Optional ISO 8601 start date"
+                      endDate:
+                        Type: string
+                        Description: "Optional ISO 8601 end date"
+                      maxResults:
+                        Type: number
+                        Description: "Maximum results to return"
+                    Required:
+                      - query
+                - Name: get_meeting_transcript
+                  Description: "Retrieve the complete transcript for a specific meeting"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID (CallId)"
+                      format:
+                        Type: string
+                        Description: "Output format (json, text, or srt)"
+                    Required:
+                      - meetingId
+                - Name: get_meeting_summary
+                  Description: "Get AI-generated summary and action items for a meeting"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID (CallId)"
+                      includeActionItems:
+                        Type: boolean
+                        Description: "Include action items"
+                      includeTopics:
+                        Type: boolean
+                        Description: "Include key topics"
+                    Required:
+                      - meetingId
+                - Name: list_meetings
+                  Description: "List meetings with optional filters"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      startDate:
+                        Type: string
+                        Description: "ISO 8601 start date"
+                      endDate:
+                        Type: string
+                        Description: "ISO 8601 end date"
+                      participant:
+                        Type: string
+                        Description: "Filter by participant name"
+                      status:
+                        Type: string
+                        Description: "Meeting status filter"
+                      limit:
+                        Type: number
+                        Description: "Maximum number of meetings to return"
 
   VirtualParticipantLambdaDataSourceRole:
     Type: AWS::IAM::Role
