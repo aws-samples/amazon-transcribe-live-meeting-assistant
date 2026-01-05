@@ -2012,6 +2012,7 @@ Resources:
           - ""
         EnableMCPServer: !Ref EnableMCP
         MCPServerCallbackURLs: !Ref MCPServerCallbackURLs
+        CognitoUserPoolDomain: !GetAtt COGNITOSTACK.Outputs.CognitoUserPoolDomain
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack

@@ -437,6 +437,12 @@ Parameters:
     Description: >-
       (Optional) Comma-separated list of additional OAuth callback URLs for custom MCP clients.
 
+  CognitoUserPoolDomain:
+    Type: String
+    Default: ""
+    Description: >-
+      Cognito User Pool domain prefix for OAuth URLs (passed from COGNITOSTACK)
+
   LoggingBucketName:
     Type: String
     Description: Name of the logging bucket for S3 access logs
@@ -682,13 +688,13 @@ Outputs:
     Condition: ShouldEnableMCPServer
     Description: >-
       OAuth token endpoint for obtaining access tokens to LMA's MCP Server.
-      Example: curl -X POST <this-url> -d "grant_type=client_credentials&client_id=<MCPServerClientId>&client_secret=<MCPServerClientSecret>"
-    Value: !Sub "https://${UserPoolId}.auth.${AWS::Region}.amazoncognito.com/oauth2/token"
+      Example: curl -X POST <this-url> -d "grant_type=authorization_code&client_id=<MCPServerClientId>&client_secret=<MCPServerClientSecret>&code=<auth_code>&redirect_uri=<callback_url>"
+    Value: !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token"
   
   MCPServerAuthorizationURL:
     Condition: ShouldEnableMCPServer
     Description: OAuth authorization endpoint for authorization code flow (browser-based authentication)
-    Value: !Sub "https://${UserPoolId}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
+    Value: !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
 
 Resources:
   EventSourcingTable:
