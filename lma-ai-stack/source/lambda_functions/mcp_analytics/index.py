@@ -27,13 +27,20 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Routes tool calls to appropriate implementations.
     Enforces user-based access control (UBAC).
     """
-    logger.info(f"MCP Analytics request: {json.dumps(event, default=str)}")
+    logger.info(f"MCP Analytics full event: {json.dumps(event, default=str)}")
+    logger.info(f"Event keys: {list(event.keys())}")
     
     try:
         # Extract user context from JWT claims (provided by AgentCore Gateway)
+        # Try multiple possible event structures
         request_context = event.get('requestContext', {})
         authorizer = request_context.get('authorizer', {})
         claims = authorizer.get('claims', {})
+        
+        # Log what we're finding
+        logger.info(f"requestContext keys: {list(request_context.keys())}")
+        logger.info(f"authorizer keys: {list(authorizer.keys())}")
+        logger.info(f"claims: {claims}")
         
         # Get user ID from JWT sub claim
         user_id = claims.get('sub')
@@ -45,14 +52,24 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         logger.info(f"User: {username}, ID: {user_id}, Admin: {is_admin}")
         
-        # Extract tool call information
-        tool_name = event.get('tool', {}).get('name')
-        tool_input = event.get('tool', {}).get('input', {})
+        # AgentCore Gateway passes only the input parameters (not tool name)
+        # Infer tool from input parameters
+        tool_input = event
         
-        if not tool_name:
-            return error_response(400, "Missing tool name")
+        # Determine which tool based on input parameters
+        if 'query' in tool_input and 'maxResults' in tool_input:
+            tool_name = 'search_lma_meetings'
+        elif 'meetingId' in tool_input and 'format' in tool_input:
+            tool_name = 'get_meeting_transcript'
+        elif 'meetingId' in tool_input and ('includeActionItems' in tool_input or 'includeTopics' in tool_input):
+            tool_name = 'get_meeting_summary'
+        elif 'limit' in tool_input or 'status' in tool_input or 'participant' in tool_input:
+            tool_name = 'list_meetings'
+        else:
+            # Default to list_meetings if we can't determine
+            tool_name = 'list_meetings'
         
-        logger.info(f"Tool: {tool_name}, Input: {json.dumps(tool_input)}")
+        logger.info(f"Inferred tool: {tool_name}, Input: {json.dumps(tool_input)}")
         
         # Route to appropriate tool
         if tool_name == 'search_lma_meetings':
