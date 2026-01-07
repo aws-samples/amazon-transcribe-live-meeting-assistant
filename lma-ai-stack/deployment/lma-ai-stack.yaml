@@ -469,13 +469,13 @@ Parameters:
 
   EnableDataRetentionOnDelete:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues:
       - "true"
       - "false"
     Description: >-
       Enable data retention on stack deletion for compliance requirements.
-      When true, DynamoDB tables will be retained. When false (default), all resources deleted.
+      When true (default), DynamoDB tables will be retained. When false, all resources deleted.
 
   VPScheduleGroupName:
     Type: String
@@ -3978,6 +3978,17 @@ Resources:
                 - bedrock:Retrieve
                 - bedrock:RetrieveAndGenerate
               Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            - Effect: Allow
+              Action:
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
             - Effect: Allow
               Action:
                 - kms:Decrypt

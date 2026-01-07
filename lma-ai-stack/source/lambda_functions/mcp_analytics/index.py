@@ -50,6 +50,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         groups = claims.get('cognito:groups', '')
         is_admin = 'Admin' in groups if isinstance(groups, str) else 'Admin' in groups
         
+        # WORKAROUND: AgentCore Gateway doesn't pass user context
+        # Treat all authenticated requests as admin until we can get user context
+        if not user_id:
+            logger.warning("No user context from AgentCore Gateway - treating as admin")
+            user_id = "mcp-server-user"
+            username = "MCP Server User"
+            is_admin = True
+        
         logger.info(f"User: {username}, ID: {user_id}, Admin: {is_admin}")
         
         # AgentCore Gateway passes only the input parameters (not tool name)

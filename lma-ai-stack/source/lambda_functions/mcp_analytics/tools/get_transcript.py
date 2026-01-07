@@ -39,19 +39,50 @@ def execute(meeting_id: str, format: str = 'text', user_id: str = None,
         raise PermissionError(f"Access denied to meeting {meeting_id}")
     
     # Fetch transcript from S3
+    # LMA transcript files use underscores instead of spaces in filenames
     s3 = boto3.client('s3')
     bucket = os.environ.get('RECORDINGS_BUCKET')
     prefix = os.environ.get('TRANSCRIPT_PREFIX', 'lma-transcripts/')
-    key = f"{prefix}{meeting_id}/transcript.json"
     
-    try:
-        response = s3.get_object(Bucket=bucket, Key=key)
-        transcript_data = json.loads(response['Body'].read())
-    except s3.exceptions.NoSuchKey:
+    # Convert meeting ID: spaces and hyphens to underscores (LMA filename format)
+    filename_safe_id = meeting_id.replace(' ', '_').replace('-', '_').replace('/', '_').replace(':', '_')
+    
+    # Try multiple possible transcript file patterns
+    possible_keys = [
+        f"{prefix}{filename_safe_id}-TRANSCRIPT.txt",
+        f"{prefix}{meeting_id}-TRANSCRIPT.txt",
+        f"{prefix}{meeting_id}/transcript.json",
+        f"{prefix}{filename_safe_id}/transcript.json"
+    ]
+    
+    transcript_data = None
+    key_found = None
+    
+    for key in possible_keys:
+        try:
+            logger.info(f"Trying transcript key: {key}")
+            response = s3.get_object(Bucket=bucket, Key=key)
+            
+            # Handle both JSON and text formats
+            content = response['Body'].read()
+            if key.endswith('.json'):
+                transcript_data = json.loads(content)
+            else:
+                # Text format - parse into segments
+                transcript_data = {'text': content.decode('utf-8')}
+            
+            key_found = key
+            logger.info(f"Found transcript at: {key}")
+            break
+            
+        except s3.exceptions.NoSuchKey:
+            continue
+        except Exception as e:
+            logger.warning(f"Error reading {key}: {e}")
+            continue
+    
+    if not transcript_data:
         raise ValueError(f"Transcript not found for meeting {meeting_id}")
-    except Exception as e:
-        logger.error(f"Error fetching transcript: {e}")
-        raise ValueError(f"Failed to retrieve transcript: {str(e)}")
     
     # Format based on requested format
     if format == 'json':
@@ -91,7 +122,7 @@ def can_access_meeting(meeting_id: str, user_id: str, is_admin: bool) -> bool:
     
     try:
         response = table.get_item(
-            Key={'PK': f'c#{meeting_id}', 'SK': 'metadata'}
+            Key={'PK': f'c#{meeting_id}', 'SK': f'c#{meeting_id}'}
         )
         
         meeting = response.get('Item', {})
@@ -109,9 +140,15 @@ def format_as_text(transcript_data: Dict[str, Any]) -> str:
     """
     Format transcript as readable text with speaker attribution.
     
-    Format:
-    [HH:MM:SS] Speaker Name: Transcript text
+    Handles two formats:
+    1. Plain text (already formatted): {'text': 'Speaker: content...'}
+    2. JSON segments: {'segments': [...]}
     """
+    # If already plain text, return as-is
+    if 'text' in transcript_data and isinstance(transcript_data['text'], str):
+        return transcript_data['text']
+    
+    # Otherwise format from segments
     lines = []
     segments = transcript_data.get('segments', transcript_data.get('Segments', []))
     

@@ -673,14 +673,14 @@ Parameters:
 
   EnableDataRetentionOnDelete:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues:
       - "true"
       - "false"
     Description: >-
       Enable data retention on stack deletion for compliance requirements.
-      When true: DynamoDB tables, S3 buckets (recordings and logs), and encryption key will be retained.
-      When false (default): All resources deleted for clean stack removal.
+      When true (default): DynamoDB tables, S3 buckets (recordings and logs), and encryption key will be retained.
+      When false: All resources deleted for clean stack removal.
       Enterprise customers with compliance requirements should set to true.
 
 Metadata:

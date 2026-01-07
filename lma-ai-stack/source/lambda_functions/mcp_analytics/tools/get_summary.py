@@ -45,9 +45,9 @@ def execute(meeting_id: str, include_action_items: bool = True,
     table = dynamodb.Table(table_name)
     
     try:
-        # Get meeting metadata
+        # Get meeting metadata (LMA stores with PK = SK = "c#{CallId}")
         response = table.get_item(
-            Key={'PK': f'c#{meeting_id}', 'SK': 'metadata'}
+            Key={'PK': f'c#{meeting_id}', 'SK': f'c#{meeting_id}'}
         )
         
         meeting = response.get('Item', {})
@@ -55,7 +55,7 @@ def execute(meeting_id: str, include_action_items: bool = True,
         if not meeting:
             raise ValueError(f"Meeting {meeting_id} not found")
         
-        # Build response
+        # Build response (LMA uses CallSummaryText field)
         result = {
             'meetingId': meeting_id,
             'meetingName': meeting.get('MeetingTopic', meeting.get('CallId', '')),
@@ -65,7 +65,7 @@ def execute(meeting_id: str, include_action_items: bool = True,
             'participants': meeting.get('Participants', []),
             'owner': meeting.get('Owner', meeting.get('AgentId', '')),
             'status': meeting.get('Status', 'UNKNOWN'),
-            'summary': meeting.get('Summary', 'No summary available')
+            'summary': meeting.get('CallSummaryText', meeting.get('Summary', 'No summary available'))
         }
         
         # Add action items if requested
@@ -98,7 +98,7 @@ def can_access_meeting(meeting_id: str, user_id: str, is_admin: bool) -> bool:
     
     try:
         response = table.get_item(
-            Key={'PK': f'c#{meeting_id}', 'SK': 'metadata'}
+            Key={'PK': f'c#{meeting_id}', 'SK': f'c#{meeting_id}'}
         )
         
         meeting = response.get('Item', {})
@@ -120,8 +120,8 @@ def parse_action_items(meeting: Dict[str, Any]) -> list:
     if 'ActionItems' in meeting:
         return meeting['ActionItems']
     
-    # Try to extract from Summary field
-    summary = meeting.get('Summary', '')
+    # Try to extract from CallSummaryText or Summary field
+    summary = meeting.get('CallSummaryText', meeting.get('Summary', ''))
     action_items = []
     
     # Look for action items section in summary
@@ -155,8 +155,8 @@ def parse_topics(meeting: Dict[str, Any]) -> list:
     if 'Topics' in meeting:
         return meeting['Topics']
     
-    # Try to extract from Summary field
-    summary = meeting.get('Summary', '')
+    # Try to extract from CallSummaryText or Summary field
+    summary = meeting.get('CallSummaryText', meeting.get('Summary', ''))
     topics = []
     
     # Look for topics/key points section in summary

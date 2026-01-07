@@ -43,10 +43,15 @@ def execute(start_date: Optional[str] = None, end_date: Optional[str] = None,
         # Query strategy depends on filters
         if start_date and end_date:
             # Use date-based query for efficiency
-            meetings = query_by_date_range(table, start_date, end_date, limit * 2)
+            meetings = query_by_date_range(table, start_date, end_date, limit)
         else:
-            # Scan for recent meetings
-            meetings = scan_recent_meetings(table, limit * 2)
+            # Query recent meetings using today's date shards
+            from datetime import datetime, timedelta
+            today = datetime.utcnow()
+            # Query last 7 days to ensure we find meetings
+            start = (today - timedelta(days=7)).strftime('%Y-%m-%d')
+            end = today.strftime('%Y-%m-%d')
+            meetings = query_by_date_range(table, start, end, limit)
         
         # Apply UBAC filter
         if not is_admin:
@@ -86,40 +91,72 @@ def execute(start_date: Optional[str] = None, end_date: Optional[str] = None,
 
 def query_by_date_range(table, start_date: str, end_date: str, limit: int) -> List[Dict]:
     """
-    Query meetings by date range using GSI.
-    LMA uses DateShardIndex for efficient date-based queries.
+    Query meetings by date range using date-sharded list items.
+    LMA uses cls#YYYY-MM-DD#s#NN pattern for efficient queries.
     """
+    from datetime import datetime, timedelta
+    
     meetings = []
+    meeting_ids = set()  # Track unique meetings
     
-    # Extract date for shard key
-    date = start_date[:10] if start_date else datetime.utcnow().strftime('%Y-%m-%d')
+    # Parse dates
+    start = datetime.fromisoformat(start_date[:10]) if start_date else datetime.utcnow() - timedelta(days=7)
+    end = datetime.fromisoformat(end_date[:10]) if end_date else datetime.utcnow()
     
-    # LMA uses sharded date index (6 shards per day)
-    for shard in range(6):
-        shard_pad = f"{shard:02d}"
-        pk = f"list#{date}#s#{shard_pad}"
+    # Query each date in range
+    current = start
+    while current <= end and len(meetings) < limit:
+        date_str = current.strftime('%Y-%m-%d')
         
-        try:
-            response = table.query(
-                KeyConditionExpression='PK = :pk AND SK BETWEEN :start AND :end',
-                ExpressionAttributeValues={
-                    ':pk': pk,
-                    ':start': f'ts#{start_date}',
-                    ':end': f'ts#{end_date}'
-                },
-                Limit=limit
-            )
-            
-            meetings.extend(response.get('Items', []))
-            
+        # LMA uses 6 shards per day (00-05)
+        for shard in range(6):
             if len(meetings) >= limit:
                 break
+                
+            shard_pad = f"{shard:02d}"
+            pk = f"cls#{date_str}#s#{shard_pad}"
+            
+            try:
+                logger.info(f"Querying list items: {pk}")
+                response = table.query(
+                    KeyConditionExpression='PK = :pk',
+                    ExpressionAttributeValues={
+                        ':pk': pk
+                    },
+                    Limit=limit
+                )
+                
+                # Extract CallIds from list items
+                for item in response.get('Items', []):
+                    call_id = item.get('CallId')
+                    if call_id and call_id not in meeting_ids:
+                        meeting_ids.add(call_id)
+                        # Get full meeting data
+                        meeting = get_meeting_by_id(table, call_id)
+                        if meeting:
+                            meetings.append(meeting)
+                
+                logger.info(f"Found {len(meetings)} meetings so far")
+                
+            except Exception as e:
+                logger.warning(f"Error querying {pk}: {e}")
+                continue
         
-        except Exception as e:
-            logger.warning(f"Error querying shard {shard}: {e}")
-            continue
+        current += timedelta(days=1)
     
-    return meetings
+    return meetings[:limit]
+
+
+def get_meeting_by_id(table, call_id: str) -> Optional[Dict]:
+    """Get full meeting data by CallId"""
+    try:
+        response = table.get_item(
+            Key={'PK': f'c#{call_id}', 'SK': f'c#{call_id}'}
+        )
+        return response.get('Item')
+    except Exception as e:
+        logger.warning(f"Error getting meeting {call_id}: {e}")
+        return None
 
 
 def scan_recent_meetings(table, limit: int) -> List[Dict]:
@@ -128,19 +165,27 @@ def scan_recent_meetings(table, limit: int) -> List[Dict]:
     Used when no date filter specified.
     """
     try:
+        # LMA stores meeting metadata with PK = SK = "c#{CallId}"
+        logger.info(f"Scanning for meetings with limit {limit}")
         response = table.scan(
-            FilterExpression='begins_with(PK, :prefix) AND SK = :sk',
+            FilterExpression='begins_with(PK, :prefix)',
             ExpressionAttributeValues={
-                ':prefix': 'c#',
-                ':sk': 'metadata'
+                ':prefix': 'c#'
             },
-            Limit=limit
+            Limit=limit * 10  # Get more items since we'll filter
         )
         
-        return response.get('Items', [])
+        all_items = response.get('Items', [])
+        logger.info(f"Scan returned {len(all_items)} items total")
+        
+        # Filter to only meeting metadata items (where PK = SK)
+        meetings = [item for item in all_items if item.get('PK') == item.get('SK')]
+        logger.info(f"Found {len(meetings)} meeting items after filtering")
+        
+        return meetings[:limit]
     
     except Exception as e:
-        logger.error(f"Error scanning meetings: {e}")
+        logger.error(f"Error scanning meetings: {e}", exc_info=True)
         return []
 
 
