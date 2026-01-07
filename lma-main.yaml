@@ -2023,6 +2023,7 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
       Parameters:
+        pVectorStoreType: !Ref MeetingAssistKnowledgeBaseVectorStore
         pKnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
         pInputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
         pS3SyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
@@ -2030,6 +2031,7 @@ Resources:
         pWebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
         pWebSyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
   BEDROCKAGENT:
     Type: AWS::CloudFormation::Stack
@@ -2060,9 +2062,11 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
       Parameters:
+        pVectorStoreType: !Ref TranscriptKnowledgeBaseVectorStore
         pKnowledgeBaseBucketName: !Ref RecordingsBucket
         pInputDocumentUploadFolderPrefix: !Ref TranscriptFilePrefix
         pS3SyncScheduleExpression: "cron(0/15 * ? * * *)"  # default is to sync transcripts every 15 minutes
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
 
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP

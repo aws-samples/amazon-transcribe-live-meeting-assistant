@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP (Model Context Protocol) server with OAuth 2.0 authentication
 - Four MCP tools: list_meetings, search_lma_meetings, get_meeting_summary, get_meeting_transcript
 - MCP server test suite with quickstart guide
+- EnableDataRetentionOnDelete parameter support for S3 Vectors and OpenSearch resources
 
 ### Changed
 - Replaced custom Lambda resources with native CloudFormation (AWS::S3Vectors::*, AWS::BedrockAgentCore::*)

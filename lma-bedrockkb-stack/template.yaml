@@ -139,6 +139,16 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable to retain vector store data (S3 Vectors bucket or OpenSearch collection) when stack is deleted.
+      When enabled, data is preserved for recovery. When disabled, all data is permanently deleted with the stack.
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -257,6 +267,7 @@ Conditions:
       - Condition: IsChunkingStrategyFixed
       - Condition: IsChunkingStrategyDefault
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
 
 Resources:
   # Custom resource to transform input to lowercase.
@@ -371,6 +382,8 @@ Resources:
   S3VectorBucket:
     Type: AWS::S3Vectors::VectorBucket
     Condition: UseS3Vectors
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       VectorBucketName: !If
         - HasS3VectorBucketName
@@ -403,6 +416,8 @@ Resources:
   OSSCollection:
     Type: "AWS::OpenSearchServerless::Collection"
     Condition: UseOpenSearchServerless
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       Name: !Sub "${AdjustedStackName.OutputString}"
       Type: VECTORSEARCH
