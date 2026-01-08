@@ -12,7 +12,7 @@ import json
 import os
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 
 logger = logging.getLogger()
@@ -42,10 +42,20 @@ def execute(
     if not meeting_name or not meeting_platform or not meeting_id:
         raise ValueError("meeting_name, meeting_platform, and meeting_id are required")
     
-    # Validate platform
-    valid_platforms = ['Zoom', 'Teams', 'Chime', 'Webex']
-    if meeting_platform not in valid_platforms:
-        raise ValueError(f"Invalid platform. Must be one of: {', '.join(valid_platforms)}")
+    # Validate and normalize platform (VP code expects uppercase)
+    valid_platforms = {
+        'zoom': 'ZOOM',
+        'teams': 'TEAMS',
+        'chime': 'CHIME',
+        'webex': 'WEBEX'
+    }
+    
+    platform_lower = meeting_platform.lower()
+    if platform_lower not in valid_platforms:
+        raise ValueError(f"Invalid platform. Must be one of: Zoom, Teams, Chime, Webex")
+    
+    # Convert to uppercase for VP infrastructure
+    meeting_platform = valid_platforms[platform_lower]
     
     # Create virtual participant via GraphQL mutation
     appsync_url = os.environ.get('APPSYNC_GRAPHQL_URL')
@@ -54,7 +64,10 @@ def execute(
     
     # Generate unique VP ID
     vp_id = str(uuid.uuid4())
-    current_timestamp = int(datetime.now(timezone.utc).timestamp())
+    
+    # Schedule for 5 seconds in the future (workaround: VP infrastructure only launches scheduled VPs)
+    scheduled_dt = datetime.now(timezone.utc) + timedelta(seconds=5)
+    current_timestamp = int(scheduled_dt.timestamp())
     
     # Prepare GraphQL mutation
     mutation = """
@@ -82,8 +95,8 @@ def execute(
             "meetingId": meeting_id,
             "meetingPassword": meeting_password or "",
             "meetingTime": current_timestamp,
-            "isScheduled": False,
-            "status": "STARTING"
+            "isScheduled": True,
+            "status": "SCHEDULED"
         }
     }
     
@@ -138,7 +151,7 @@ def execute(
             "meetingId": vp_data['meetingId'],
             "status": vp_data['status'],
             "owner": vp_data.get('owner', user_id),
-            "message": "Virtual participant is starting. It will join the meeting shortly."
+            "message": "Virtual participant scheduled to join in 5 seconds. Check LMA UI for live status."
         }
         
         # Add CallId if available

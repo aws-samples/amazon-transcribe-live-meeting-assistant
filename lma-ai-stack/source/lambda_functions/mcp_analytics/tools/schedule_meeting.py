@@ -44,10 +44,20 @@ def execute(
     if not meeting_name or not meeting_platform or not meeting_id or not scheduled_time:
         raise ValueError("meeting_name, meeting_platform, meeting_id, and scheduled_time are required")
     
-    # Validate platform
-    valid_platforms = ['Zoom', 'Teams', 'Chime', 'Webex']
-    if meeting_platform not in valid_platforms:
-        raise ValueError(f"Invalid platform. Must be one of: {', '.join(valid_platforms)}")
+    # Validate and normalize platform (VP code expects uppercase)
+    valid_platforms = {
+        'zoom': 'ZOOM',
+        'teams': 'TEAMS',
+        'chime': 'CHIME',
+        'webex': 'WEBEX'
+    }
+    
+    platform_lower = meeting_platform.lower()
+    if platform_lower not in valid_platforms:
+        raise ValueError(f"Invalid platform. Must be one of: Zoom, Teams, Chime, Webex")
+    
+    # Convert to uppercase for VP infrastructure
+    meeting_platform = valid_platforms[platform_lower]
     
     # Validate and parse scheduled time
     try:
