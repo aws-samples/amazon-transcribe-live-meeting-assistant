@@ -4125,7 +4125,7 @@ Resources:
                         Description: "Platform (Zoom, Teams, Chime, Webex)"
                       meetingId:
                         Type: string
-                        Description: "Meeting ID or URL"
+                        Description: "Meeting ID (numeric ID only)"
                       scheduledTime:
                         Type: string
                         Description: "ISO 8601 datetime when meeting should start"
@@ -4150,7 +4150,7 @@ Resources:
                         Description: "Platform (Zoom, Teams, Chime, Webex)"
                       meetingId:
                         Type: string
-                        Description: "Meeting ID or URL"
+                        Description: "Meeting ID (numeric ID only)"
                       meetingPassword:
                         Type: string
                         Description: "Optional meeting password"

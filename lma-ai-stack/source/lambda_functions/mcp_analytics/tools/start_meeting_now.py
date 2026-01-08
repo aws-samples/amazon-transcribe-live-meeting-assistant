@@ -31,7 +31,7 @@ def execute(
     Args:
         meeting_name: Name/title of the meeting
         meeting_platform: Platform (Zoom, Teams, Chime, Webex)
-        meeting_id: Meeting ID or URL
+        meeting_id: Meeting ID (numeric ID only, not URL)
         meeting_password: Optional meeting password
         user_id: User ID for access control
         is_admin: Whether user is admin
@@ -41,6 +41,9 @@ def execute(
     """
     if not meeting_name or not meeting_platform or not meeting_id:
         raise ValueError("meeting_name, meeting_platform, and meeting_id are required")
+    
+    # Remove ALL whitespace from meeting_id (including internal spaces)
+    meeting_id = ''.join(meeting_id.split())
     
     # Validate and normalize platform (VP code expects uppercase)
     valid_platforms = {
