@@ -6,7 +6,7 @@
 """
 MCP Analytics Lambda Function
 Implements MCP protocol tools for LMA meeting data access
-Provides 4 core tools: search, get transcript, get summary, list meetings
+Provides 6 tools: search, get transcript, get summary, list meetings, schedule meeting, start meeting
 """
 
 import json
@@ -15,7 +15,7 @@ import os
 from typing import Dict, Any
 
 # Import tool implementations
-from tools import search_meetings, get_transcript, get_summary, list_meetings
+from tools import search_meetings, get_transcript, get_summary, list_meetings, schedule_meeting, start_meeting_now
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
@@ -71,6 +71,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             tool_name = 'get_meeting_transcript'
         elif 'meetingId' in tool_input and ('includeActionItems' in tool_input or 'includeTopics' in tool_input):
             tool_name = 'get_meeting_summary'
+        elif 'meetingPlatform' in tool_input and 'scheduledTime' in tool_input:
+            tool_name = 'schedule_meeting'
+        elif 'meetingPlatform' in tool_input and 'meetingName' in tool_input and 'scheduledTime' not in tool_input:
+            tool_name = 'start_meeting_now'
         elif 'limit' in tool_input or 'status' in tool_input or 'participant' in tool_input:
             tool_name = 'list_meetings'
         else:
@@ -114,6 +118,27 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 participant=tool_input.get('participant'),
                 status=tool_input.get('status', 'ALL'),
                 limit=tool_input.get('limit', 20),
+                user_id=user_id,
+                is_admin=is_admin
+            )
+        
+        elif tool_name == 'schedule_meeting':
+            result = schedule_meeting.execute(
+                meeting_name=tool_input.get('meetingName'),
+                meeting_platform=tool_input.get('meetingPlatform'),
+                meeting_id=tool_input.get('meetingId'),
+                scheduled_time=tool_input.get('scheduledTime'),
+                meeting_password=tool_input.get('meetingPassword'),
+                user_id=user_id,
+                is_admin=is_admin
+            )
+        
+        elif tool_name == 'start_meeting_now':
+            result = start_meeting_now.execute(
+                meeting_name=tool_input.get('meetingName'),
+                meeting_platform=tool_input.get('meetingPlatform'),
+                meeting_id=tool_input.get('meetingId'),
+                meeting_password=tool_input.get('meetingPassword'),
                 user_id=user_id,
                 is_admin=is_admin
             )

@@ -3965,6 +3965,7 @@ Resources:
           TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix
           TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
           MODEL_ARN: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+          APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
       LoggingConfig:
         LogGroup: !Ref MCPServerAnalyticsLogGroup
       Policies:
@@ -3994,6 +3995,12 @@ Resources:
                 - kms:Decrypt
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
+            - Effect: Allow
+              Action:
+                - appsync:GraphQL
+              Resource:
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createVirtualParticipant"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
     DependsOn:
       - MCPServerAnalyticsLogGroup
 
@@ -4105,6 +4112,52 @@ Resources:
                       limit:
                         Type: number
                         Description: "Maximum number of meetings to return"
+                - Name: schedule_meeting
+                  Description: "Schedule a future meeting with virtual participant"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingName:
+                        Type: string
+                        Description: "Name/title of the meeting"
+                      meetingPlatform:
+                        Type: string
+                        Description: "Platform (Zoom, Teams, Chime, Webex)"
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID or URL"
+                      scheduledTime:
+                        Type: string
+                        Description: "ISO 8601 datetime when meeting should start"
+                      meetingPassword:
+                        Type: string
+                        Description: "Optional meeting password"
+                    Required:
+                      - meetingName
+                      - meetingPlatform
+                      - meetingId
+                      - scheduledTime
+                - Name: start_meeting_now
+                  Description: "Start a meeting immediately with virtual participant"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingName:
+                        Type: string
+                        Description: "Name/title of the meeting"
+                      meetingPlatform:
+                        Type: string
+                        Description: "Platform (Zoom, Teams, Chime, Webex)"
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID or URL"
+                      meetingPassword:
+                        Type: string
+                        Description: "Optional meeting password"
+                    Required:
+                      - meetingName
+                      - meetingPlatform
+                      - meetingId
 
   VirtualParticipantLambdaDataSourceRole:
     Type: AWS::IAM::Role
