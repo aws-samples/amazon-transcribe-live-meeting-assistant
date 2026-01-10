@@ -12,7 +12,7 @@ import json
 import os
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import uuid
 
 logger = logging.getLogger()
@@ -65,13 +65,6 @@ def execute(
     if not appsync_url:
         raise ValueError("APPSYNC_GRAPHQL_URL environment variable not set")
     
-    # Generate unique VP ID
-    vp_id = str(uuid.uuid4())
-    
-    # Schedule for 5 seconds in the future (workaround: VP infrastructure only launches scheduled VPs)
-    scheduled_dt = datetime.now(timezone.utc) + timedelta(seconds=5)
-    current_timestamp = int(scheduled_dt.timestamp())
-    
     # Prepare GraphQL mutation
     mutation = """
     mutation CreateVirtualParticipant($input: CreateVirtualParticipantInput!) {
@@ -97,9 +90,7 @@ def execute(
             "meetingPlatform": meeting_platform,
             "meetingId": meeting_id,
             "meetingPassword": meeting_password or "",
-            "meetingTime": current_timestamp,
-            "isScheduled": True,
-            "status": "SCHEDULED"
+            "status": "INITIALIZING"
         }
     }
     
@@ -145,16 +136,61 @@ def execute(
             raise ValueError(f"Failed to start meeting: {result['errors'][0]['message']}")
         
         vp_data = result['data']['createVirtualParticipant']
+        vp_id = vp_data['id']
+        
+        # Step 2: Invoke Step Functions State Machine to launch ECS task
+        # This is what the UI does after creating the VP record
+        sfn = boto3.client('stepfunctions')
+        
+        # Get state machine ARN from SSM parameter
+        ssm = boto3.client('ssm')
+        settings_param = os.environ.get('LMA_SETTINGS_PARAMETER')
+        if not settings_param:
+            raise ValueError("LMA_SETTINGS_PARAMETER environment variable not set")
+        
+        settings_response = ssm.get_parameter(Name=settings_param)
+        settings = json.loads(settings_response['Parameter']['Value'])
+        state_machine_arn = settings.get('LMAVirtualParticipantSchedulerStateMachine')
+        
+        if not state_machine_arn:
+            raise ValueError("LMAVirtualParticipantSchedulerStateMachine not found in settings")
+        
+        # Invoke state machine (matches UI behavior)
+        sfn_input = {
+            "apiInfo": {
+                "httpMethod": "POST"
+            },
+            "data": {
+                "meetingPlatform": meeting_platform,
+                "meetingID": meeting_id,
+                "meetingPassword": meeting_password or "",
+                "meetingName": meeting_name,
+                "meetingTime": "",  # Empty string triggers immediate RunTask path
+                "userName": user_id or "mcp-server-user",
+                "virtualParticipantId": vp_id,
+                "accessToken": "",
+                "idToken": "",
+                "refreshToken": "",
+                "rereshToken": ""  # Typo in VP template (line 1168) - workaround
+            }
+        }
+        
+        logger.info(f"Invoking state machine: {state_machine_arn}")
+        sfn.start_execution(
+            stateMachineArn=state_machine_arn,
+            input=json.dumps(sfn_input)
+        )
+        logger.info(f"State machine execution started for VP {vp_id}")
         
         # Build response
         response_data = {
-            "virtualParticipantId": vp_data['id'],
+            "virtualParticipantId": vp_id,
             "meetingName": vp_data['meetingName'],
             "meetingPlatform": vp_data['meetingPlatform'],
             "meetingId": vp_data['meetingId'],
             "status": vp_data['status'],
             "owner": vp_data.get('owner', user_id),
-            "message": "Virtual participant scheduled to join in 5 seconds. Check LMA UI for live status."
+            "message": "Virtual participant is initializing and will join the meeting shortly. Check LMA UI for live status."
         }
         
         # Add CallId if available

@@ -3966,6 +3966,7 @@ Resources:
           TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
           MODEL_ARN: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+          LMA_SETTINGS_PARAMETER: !Ref LMASettingsParameterName
       LoggingConfig:
         LogGroup: !Ref MCPServerAnalyticsLogGroup
       Policies:
@@ -4001,6 +4002,16 @@ Resources:
               Resource:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createVirtualParticipant"
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource:
+                - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
     DependsOn:
       - MCPServerAnalyticsLogGroup
 
