@@ -671,6 +671,47 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  # Virtual Participant Startup Optimization Parameters
+  VPLaunchType:
+    Type: String
+    Default: FARGATE
+    AllowedValues:
+      - FARGATE
+      - EC2
+    Description: >-
+      Launch type for Virtual Participant containers.
+      FARGATE (default): Serverless with SOCI for 40-60% faster startup (~$2/month).
+      EC2: Warm instances with cached images for 85-90% faster startup (~$33/month).
+
+  VPInstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+    Description: >-
+      EC2 instance type for Virtual Participant (only used if VPLaunchType=EC2).
+      t3.medium recommended for 1-2 concurrent VPs.
+
+  VPMinInstances:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 10
+    Description: >-
+      Minimum number of warm EC2 instances (only used if VPLaunchType=EC2).
+      Set to 1 for fastest startup, 0 to save costs when not in use.
+
+  VPMaxInstances:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 100
+    Description: >-
+      Maximum number of EC2 instances for scaling (only used if VPLaunchType=EC2).
+
   EnableDataRetentionOnDelete:
     Type: String
     Default: "true"
@@ -794,6 +835,13 @@ Metadata:
           - PublicSubnet2
           - PrivateSubnet1
           - PrivateSubnet2
+      - Label:
+          default: Virtual Participant Startup Optimization
+        Parameters:
+          - VPLaunchType
+          - VPInstanceType
+          - VPMinInstances
+          - VPMaxInstances
       - Label:
           default: Security Configuration
         Parameters:
@@ -929,6 +977,14 @@ Metadata:
         default: Existing Private Subnet 1
       PrivateSubnet2:
         default: Existing Private Subnet 2
+      VPLaunchType:
+        default: VP Launch Type (FARGATE or EC2)
+      VPInstanceType:
+        default: VP EC2 Instance Type
+      VPMinInstances:
+        default: VP Minimum Warm Instances
+      VPMaxInstances:
+        default: VP Maximum Instances
       PermissionsBoundaryArn:
         default: Permissions Boundary ARN
       EnableDataRetentionOnDelete:
@@ -2341,6 +2397,13 @@ Resources:
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.PrivateSubnet2
           - !Ref PrivateSubnet2
+        VPLaunchType: !Ref VPLaunchType
+        VPInstanceType: !Ref VPInstanceType
+        VPMinInstances: !Ref VPMinInstances
+        VPMaxInstances: !Ref VPMaxInstances
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        ShowSpeakerLabel: "false"
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack

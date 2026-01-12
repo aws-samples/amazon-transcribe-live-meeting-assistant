@@ -281,12 +281,47 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  # Startup Optimization Parameters
+  VPLaunchType:
+    Type: String
+    Default: FARGATE
+    AllowedValues:
+      - FARGATE
+      - EC2
+    Description: Launch type for Virtual Participant containers (FARGATE with SOCI or EC2 with caching)
+
+  VPInstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+    Description: EC2 instance type (only used if VPLaunchType=EC2)
+
+  VPMinInstances:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 10
+    Description: Minimum warm EC2 instances (only used if VPLaunchType=EC2)
+
+  VPMaxInstances:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 100
+    Description: Maximum EC2 instances (only used if VPLaunchType=EC2)
+
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
+  UseEC2LaunchType: !Equals [!Ref VPLaunchType, "EC2"]
+  UseFargateLaunchType: !Equals [!Ref VPLaunchType, "FARGATE"]
 
 Resources:
   LogsPolicy:
@@ -352,6 +387,8 @@ Resources:
               - Effect: "Allow"
                 Action:
                   - "ecr:BatchCheckLayerAvailability"
+                  - "ecr:BatchGetImage"
+                  - "ecr:GetDownloadUrlForLayer"
                   - "ecr:CompleteLayerUpload"
                   - "ecr:InitiateLayerUpload"
                   - "ecr:PutImage"
@@ -378,25 +415,47 @@ Resources:
                 commands:
                   - echo Logging in to Amazon ECR...
                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+                  - echo Installing SOCI CLI for image optimization...
+                  - wget --quiet https://github.com/awslabs/soci-snapshotter/releases/download/v0.12.1/soci-snapshotter-0.12.1-linux-amd64.tar.gz
+                  - tar xzf soci-snapshotter-0.12.1-linux-amd64.tar.gz soci
+                  - mv soci /usr/local/bin/soci
+                  - soci --version
+                  - echo SOCI CLI installed successfully
+                  - export PASSWORD=$(aws ecr get-login-password --region ${AWS::Region})
               build:
                 commands:
                   - echo Build started on `date`
                   - echo `pwd`
                   - echo `ls -altr`
+                  - echo Building container image...
                   - docker build -t ${ImageRepo} backend
                   - docker tag ${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                  - echo Pushing image to ECR...
+                  - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                  - echo Exporting image for SOCI indexing...
+                  - docker save ${ImageRepo}:latest -o ./image.tar
+                  - echo Importing image to containerd...
+                  - ctr image import ./image.tar
+                  - echo Tagging for SOCI...
+                  - ctr image tag docker.io/library/${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
               post_build:
                 commands:
-                  - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                  - echo Generating SOCI index for faster startup...
+                  - soci create ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                  - echo Pushing SOCI index to ECR...
+                  - soci push --user AWS:$PASSWORD ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
                   - echo Build completed on `date`
           - { ImageRepo: !Ref ImageRepo }
       Environment:
         Type: LINUX_CONTAINER
         Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
         ComputeType: BUILD_GENERAL1_SMALL
+        PrivilegedMode: true
         EnvironmentVariables:
           - Name: SOURCE_CODE_LOCATION
             Value: !Sub "${SourceCodeLocation}"
+          - Name: CONTAINERD_ADDRESS
+            Value: "/var/run/docker/containerd/containerd.sock"
       ServiceRole: !GetAtt BuildRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
@@ -747,13 +806,104 @@ Resources:
     DependsOn:
       - ECSRoleCustomResource
 
+  # EC2 Launch Type Resources (conditional)
+  
+  VPInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: UseEC2LaunchType
+    Properties:
+      Roles:
+        - !Ref VPInstanceRole
 
+  VPInstanceRole:
+    Type: AWS::IAM::Role
+    Condition: UseEC2LaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  VPLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Condition: UseEC2LaunchType
+    Properties:
+      LaunchTemplateName: !Sub "${AWS::StackName}-VP-LaunchTemplate"
+      LaunchTemplateData:
+        ImageId: !Sub '{{resolve:ssm:/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id}}'
+        InstanceType: !Ref VPInstanceType
+        IamInstanceProfile:
+          Arn: !GetAtt VPInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref VPSecurityGroupId
+        MetadataOptions:
+          HttpTokens: required
+          HttpPutResponseHopLimit: 1
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -e
+            echo "ECS_CLUSTER=${Cluster}" >> /etc/ecs/ecs.config
+            echo "ECS_IMAGE_PULL_BEHAVIOR=prefer-cached" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_CONTAINER_METADATA=true" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE=true" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true" >> /etc/ecs/ecs.config
+            aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+            docker pull ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+            systemctl enable --now ecs
+
+  VPAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Condition: UseEC2LaunchType
+    Properties:
+      AutoScalingGroupName: !Sub "${AWS::StackName}-VP-ASG"
+      MinSize: !Ref VPMinInstances
+      MaxSize: !Ref VPMaxInstances
+      DesiredCapacity: !Ref VPMinInstances
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      LaunchTemplate:
+        LaunchTemplateId: !Ref VPLaunchTemplate
+        Version: !GetAtt VPLaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      NewInstancesProtectedFromScaleIn: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-VP-Instance"
+          PropagateAtLaunch: true
+
+  VPCapacityProvider:
+    Type: AWS::ECS::CapacityProvider
+    Condition: UseEC2LaunchType
+    Properties:
+      Name: !Sub "${AWS::StackName}-VP-CapacityProvider"
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn: !Ref VPAutoScalingGroup
+        ManagedScaling:
+          Status: ENABLED
+          TargetCapacity: 100
+          MinimumScalingStepSize: 1
+          MaximumScalingStepSize: 10
+        ManagedTerminationProtection: ENABLED
 
   TaskDefinition:
     Type: "AWS::ECS::TaskDefinition"
     Properties:
       ContainerDefinitions:
-        - Environment:
+        - Memory: !If [UseEC2LaunchType, 3500, !Ref AWS::NoValue]
+          Environment:
             - Name: AWS_REGION
               Value: !Ref AWS::Region
             - Name: SHOULD_RECORD_CALL
@@ -851,10 +1001,12 @@ Resources:
       TaskRoleArn: !Ref TaskRole
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       NetworkMode: "awsvpc"
-      RequiresCompatibilities:
-        - "FARGATE"
-      Cpu: "1 vCPU"
-      Memory: "4 GB"
+      RequiresCompatibilities: !If
+        - UseEC2LaunchType
+        - - EC2
+        - - FARGATE
+      Cpu: !If [UseFargateLaunchType, "1 vCPU", !Ref AWS::NoValue]
+      Memory: !If [UseFargateLaunchType, "4 GB", !Ref AWS::NoValue]
     DependsOn:
       - Cluster
       - BuildCustomResource
@@ -863,11 +1015,11 @@ Resources:
   VirtualParticipantService:
     Type: AWS::ECS::Service
     Properties:
-      ServiceName: !Sub ${LMAStackName}-vp-service
+      ServiceName: !Sub "${LMAStackName}-vp-service-${VPLaunchType}"
       Cluster: !Ref Cluster
       TaskDefinition: !Ref TaskDefinition
       DesiredCount: 0
-      LaunchType: FARGATE
+      LaunchType: !Ref VPLaunchType
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -880,6 +1032,11 @@ Resources:
         - ContainerName: scribe
           ContainerPort: 5901
           TargetGroupArn: !Ref VNCTargetGroupArn
+      PlacementStrategies: !If
+        - UseEC2LaunchType
+        - - Type: spread
+            Field: instanceId
+        - !Ref AWS::NoValue
 
   VirtualParticipantTaskDefContainerLogGroup:
     Type: AWS::Logs::LogGroup
@@ -1117,7 +1274,7 @@ Resources:
                 "Parameters": {
                   "Cluster": "${ClusterArn}",
                   "TaskDefinition": "${TaskDefinition}",
-                  "LaunchType": "FARGATE",
+                  "LaunchType": "${VPLaunchType}",
                   "NetworkConfiguration": {
                     "AwsvpcConfiguration": {
                       "AssignPublicIp": "DISABLED",
@@ -1200,7 +1357,7 @@ Resources:
                     "EcsParameters": {
                       "EnableECSManagedTags": false,
                       "EnableExecuteCommand": false,
-                      "LaunchType": "FARGATE",
+                      "LaunchType": "${VPLaunchType}",
                       "NetworkConfiguration": {
                         "AwsvpcConfiguration": {
                           "AssignPublicIp": "DISABLED",
@@ -1307,6 +1464,7 @@ Resources:
             ClusterArn: !GetAtt [Cluster, Arn],
             TargetECSRoleArn: !GetAtt [TargetECSRole, Arn],
             VPSecurityGroupId: !Ref VPSecurityGroupId,
+            VPLaunchType: !Ref VPLaunchType,
           }
 
   UpdateLMASettingsWithStateMachine:
