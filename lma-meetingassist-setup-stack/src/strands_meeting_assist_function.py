@@ -6,6 +6,7 @@
 """
 Strands-based Meeting Assistant Lambda Function
 Provides a lightweight alternative to QnABot using AWS Strands SDK
+Supports dynamic MCP server loading from Public Registry
 """
 
 import json
@@ -14,6 +15,23 @@ import boto3
 from boto3.dynamodb.conditions import Key, Attr
 from typing import Dict, Any, Optional
 import logging
+from datetime import datetime
+
+# Import MCP server loader
+try:
+    from mcp_server_loader import load_account_mcp_servers
+    MCP_LOADER_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"MCP server loader not available: {e}")
+    MCP_LOADER_AVAILABLE = False
+
+# Import thinking tool wrapper
+try:
+    from thinking_tool_wrapper import wrap_tool_with_thinking, get_next_sequence
+    THINKING_WRAPPER_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Thinking tool wrapper not available: {e}")
+    THINKING_WRAPPER_AVAILABLE = False
 
 # Configure logging
 logger = logging.getLogger()
@@ -29,7 +47,117 @@ EVENT_API_HTTP_URL = os.environ.get('EVENT_API_HTTP_URL', '')
 ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
 
 
-def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, model_id: str):
+class ThinkingStepHookProvider:
+    """Hook provider to track tool usage and send thinking steps to AppSync"""
+    
+    def __init__(self, call_id: str, message_id: str):
+        self.call_id = call_id
+        self.message_id = message_id
+        self.sequence_counter = 100  # Start at 100 to avoid conflicts with manual sequences
+    
+    def register_hooks(self, registry):
+        """Register hook callbacks for tool lifecycle events"""
+        from strands.hooks.events import BeforeToolCallEvent, AfterToolCallEvent
+        
+        registry.add_callback(BeforeToolCallEvent, self.on_before_tool_call)
+        registry.add_callback(AfterToolCallEvent, self.on_after_tool_call)
+    
+    def on_before_tool_call(self, event):
+        """Called before a tool is executed"""
+        try:
+            logger.info(f"🔧 Hook: on_before_tool_call FIRED!")
+            
+            if not APPSYNC_GRAPHQL_URL:
+                logger.warning("   APPSYNC_GRAPHQL_URL not configured, skipping thinking step")
+                return
+            
+            # Get tool name - MCPAgentTool uses tool_name property, regular tools use name
+            if event.selected_tool:
+                tool_name = getattr(event.selected_tool, 'tool_name', None) or getattr(event.selected_tool, 'name', None) or 'unknown'
+            else:
+                tool_name = 'unknown'
+            
+            # Get tool input
+            tool_input = {}
+            if hasattr(event.tool_use, 'input'):
+                tool_input = event.tool_use.input
+            elif hasattr(event.tool_use, 'arguments'):
+                tool_input = event.tool_use.arguments
+            
+            logger.info(f"   Tool name: {tool_name}")
+            logger.info(f"   Tool input: {tool_input}")
+            
+            thinking_step = {
+                'type': 'tool_use',
+                'tool_name': tool_name,
+                'tool_input': tool_input,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            
+            logger.info(f"🔧 Hook: Sending thinking step for tool - {tool_name}")
+            send_thinking_step_to_appsync(self.call_id, self.message_id, thinking_step, self.sequence_counter)
+            self.sequence_counter += 1
+            logger.info(f"✓ Hook: Thinking step sent successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Error in on_before_tool_call hook: {str(e)}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+    
+    def on_after_tool_call(self, event):
+        """Called after a tool is executed"""
+        try:
+            logger.info(f"✅ Hook: on_after_tool_call FIRED!")
+            
+            if not APPSYNC_GRAPHQL_URL:
+                logger.warning("   APPSYNC_GRAPHQL_URL not configured, skipping thinking step")
+                return
+            
+            # Get tool name - MCPAgentTool uses tool_name property, regular tools use name
+            if event.selected_tool:
+                tool_name = getattr(event.selected_tool, 'tool_name', None) or getattr(event.selected_tool, 'name', None) or 'unknown'
+            else:
+                tool_name = 'unknown'
+            
+            # Check if there was an exception
+            is_error = getattr(event.result, 'is_error', False)
+            
+            # Get result content - try multiple possible attributes
+            result_content = ''
+            if hasattr(event.result, 'content'):
+                result_content = str(event.result.content)[:500]
+            elif hasattr(event.result, 'output'):
+                result_content = str(event.result.output)[:500]
+            elif hasattr(event.result, 'text'):
+                result_content = str(event.result.text)[:500]
+            else:
+                result_content = str(event.result)[:500]
+            
+            logger.info(f"   Tool name: {tool_name}")
+            logger.info(f"   Success: {not is_error}")
+            logger.info(f"   Result (truncated): {result_content[:100]}")
+            
+            thinking_step = {
+                'type': 'tool_result',
+                'tool_name': tool_name,
+                'result': result_content,
+                'success': not is_error,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            
+            logger.info(f"✅ Hook: Sending result thinking step for tool - {tool_name}")
+            send_thinking_step_to_appsync(self.call_id, self.message_id, thinking_step, self.sequence_counter)
+            self.sequence_counter += 1
+            logger.info(f"✓ Hook: Result thinking step sent successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Error in on_after_tool_call hook: {str(e)}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+
+
+def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, model_id: str,
+                                call_id: str = None, message_id: str = None):
     """Factory function to create document search tool with closure"""
     from strands import tool
     
@@ -52,6 +180,17 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
             return "Document retrieval not configured - no knowledge base available"
         
         try:
+            # Send tool use thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_use',
+                    'tool_name': 'document_search',
+                    'tool_input': {'query': query},
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
+            
             logger.info(f"Document search tool executing: {query}")
             
             # Determine model ARN based on model type
@@ -75,6 +214,18 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
             response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
             result = response.get("output", {}).get("text", "No results found in knowledge base")
             
+            # Send tool result thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'document_search',
+                    'result': result[:200],
+                    'success': True,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+            
             logger.info(f"Document search result: {result[:100]}...")
             return result
             
@@ -85,7 +236,7 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
     return document_search
 
 
-def create_recent_meetings_tool(dynamodb_table_name: str, user_email: str):
+def create_recent_meetings_tool(dynamodb_table_name: str, user_email: str, call_id: str = None, message_id: str = None):
     """Factory function to create recent meetings list tool with closure"""
     from strands import tool
     from datetime import datetime, timedelta
@@ -113,6 +264,17 @@ def create_recent_meetings_tool(dynamodb_table_name: str, user_email: str):
             return "Recent meetings list requires user authentication"
         
         try:
+            # Send tool use thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_use',
+                    'tool_name': 'recent_meetings_list',
+                    'tool_input': {'limit': limit},
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
+            
             # Limit to reasonable range
             limit = min(max(1, limit), 50)
             
@@ -174,21 +336,48 @@ def create_recent_meetings_tool(dynamodb_table_name: str, user_email: str):
                 m.pop('SK', None)
             
             if not meetings:
-                return "No recent meetings found"
+                result = "No recent meetings found"
+            else:
+                result = json.dumps(meetings, indent=2)
+                logger.info(f"Recent meetings returned {len(meetings)} meetings")
             
-            result = json.dumps(meetings, indent=2)
-            logger.info(f"Recent meetings returned {len(meetings)} meetings")
+            # Send tool result thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'recent_meetings_list',
+                    'result': result[:200],
+                    'success': True,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+            
             return result
             
         except Exception as e:
             logger.error(f"Error in recent meetings list: {str(e)}")
-            return f"Error retrieving recent meetings: {str(e)}"
+            error_msg = f"Error retrieving recent meetings: {str(e)}"
+            
+            # Send error thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'recent_meetings_list',
+                    'result': error_msg,
+                    'success': False,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+            
+            return error_msg
     
     return recent_meetings_list
 
 
-def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_account_id: str, 
-                                model_id: str, user_email: str):
+def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_account_id: str,
+                                model_id: str, user_email: str, call_id: str = None, message_id: str = None):
     """Factory function to create meeting history tool with closure"""
     from strands import tool
     
@@ -216,6 +405,17 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             return "Meeting history requires user authentication"
         
         try:
+            # Send tool use thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_use',
+                    'tool_name': 'meeting_history',
+                    'tool_input': {'query': query, 'call_ids': call_ids},
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
+            
             logger.info(f"Meeting history tool executing: {query} for user: {user_email}")
             
             # Determine model ARN based on model type
@@ -249,17 +449,43 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
             result = response.get("output", {}).get("text", "No past meetings found matching your query")
             
+            # Send tool result thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'meeting_history',
+                    'result': result[:200],
+                    'success': True,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+            
             logger.info(f"Meeting history result: {result[:100]}...")
             return result
             
         except Exception as e:
             logger.error(f"Error in meeting history search: {str(e)}")
-            return f"Error retrieving meeting history: {str(e)}"
+            error_msg = f"Error retrieving meeting history: {str(e)}"
+            
+            # Send error thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'meeting_history',
+                    'result': error_msg,
+                    'success': False,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+            
+            return error_msg
     
     return meeting_history
 
 
-def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: str):
+def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: str, message_id: str = None):
     """Factory function to create current meeting transcript tool with closure"""
     from strands import tool
     
@@ -290,6 +516,17 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
             return "Current meeting transcript not available - no DynamoDB table configured"
         
         try:
+            # Send tool use thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_use',
+                    'tool_name': 'current_meeting_transcript',
+                    'tool_input': {'lines': lines, 'mode': mode},
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
+            
             # Limit to reasonable range
             lines = min(max(1, lines), 100)
             
@@ -299,31 +536,57 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
             full_transcript = fetch_meeting_transcript(call_id, dynamodb_table_name)
             
             if not full_transcript:
-                return "No transcript available for current meeting yet."
-            
-            if mode == "full":
-                return full_transcript
+                result = "No transcript available for current meeting yet."
+            elif mode == "full":
+                result = full_transcript
             elif mode == "recent":
                 # Return last N lines
                 transcript_lines = full_transcript.split('\n')
                 recent_lines = transcript_lines[-lines:] if len(transcript_lines) > lines else transcript_lines
                 result = '\n'.join(recent_lines)
                 logger.info(f"Returning {len(recent_lines)} recent transcript lines")
-                return result
             else:
                 # Default to recent
                 transcript_lines = full_transcript.split('\n')
                 recent_lines = transcript_lines[-lines:] if len(transcript_lines) > lines else transcript_lines
-                return '\n'.join(recent_lines)
+                result = '\n'.join(recent_lines)
+            
+            # Send tool result thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'current_meeting_transcript',
+                    'result': result[:200],
+                    'success': True,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error in current meeting transcript: {str(e)}")
-            return f"Error retrieving current meeting transcript: {str(e)}"
+            error_msg = f"Error retrieving current meeting transcript: {str(e)}"
+            
+            # Send error thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'current_meeting_transcript',
+                    'result': error_msg,
+                    'success': False,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+            
+            return error_msg
     
     return current_meeting_transcript
 
 
-def create_vnc_preview_control_tool(call_id: str, appsync_url: str):
+def create_vnc_preview_control_tool(call_id: str, appsync_url: str, message_id: str = None):
     """Factory function to create VNC preview control tool"""
     from strands import tool
     from gql import gql
@@ -359,6 +622,17 @@ def create_vnc_preview_control_tool(call_id: str, appsync_url: str):
             return "Invalid action. Please use 'open' to show the preview or 'close' to hide it."
         
         try:
+            # Send tool use thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_use',
+                    'tool_name': 'control_vnc_preview',
+                    'tool_input': {'action': action},
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
+            
             logger.info(f"VNC preview control: {action} for call {call_id}")
             
             # Initialize AppSync client
@@ -390,18 +664,60 @@ def create_vnc_preview_control_tool(call_id: str, appsync_url: str):
             
             if result.get('toggleVNCPreview', {}).get('Success'):
                 action_past = "opened" if action == "open" else "closed"
-                return f"✓ VNC live preview {action_past} successfully. The user can now {'see' if action == 'open' else 'no longer see'} the Virtual Participant's browser screen on the meeting page."
+                success_msg = f"✓ VNC live preview {action_past} successfully. The user can now {'see' if action == 'open' else 'no longer see'} the Virtual Participant's browser screen on the meeting page."
+                
+                # Send tool result thinking step
+                if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                    from datetime import datetime
+                    thinking_step = {
+                        'type': 'tool_result',
+                        'tool_name': 'control_vnc_preview',
+                        'result': success_msg,
+                        'success': True,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+                
+                return success_msg
             else:
-                return f"Failed to {action} VNC preview. Please try again."
+                error_msg = f"Failed to {action} VNC preview. Please try again."
+                
+                # Send error thinking step
+                if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                    from datetime import datetime
+                    thinking_step = {
+                        'type': 'tool_result',
+                        'tool_name': 'control_vnc_preview',
+                        'result': error_msg,
+                        'success': False,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+                
+                return error_msg
                 
         except Exception as e:
             logger.error(f"Error controlling VNC preview: {str(e)}")
-            return f"Error controlling VNC preview: {str(e)}"
+            error_msg = f"Error controlling VNC preview: {str(e)}"
+            
+            # Send error thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'control_vnc_preview',
+                    'result': error_msg,
+                    'success': False,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+            
+            return error_msg
     
     return control_vnc_preview
 
 
-def create_vp_browser_control_tool(call_id: str, event_api_http_url: str):
+def create_vp_browser_control_tool(call_id: str, event_api_http_url: str, message_id: str = None):
     """Factory function to create VP browser control tool using Event API HTTP endpoint"""
     from strands import tool
     import uuid
@@ -451,6 +767,17 @@ def create_vp_browser_control_tool(call_id: str, event_api_http_url: str):
             - User: "take a screenshot"
               → control_vp_browser(action="screenshot")
         """
+        # Send tool use thinking step
+        if call_id and message_id and APPSYNC_GRAPHQL_URL:
+            from datetime import datetime
+            thinking_step = {
+                'type': 'tool_use',
+                'tool_name': 'control_vp_browser',
+                'tool_input': {'action': action, 'url': url},
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
+        
         logger.info("=" * 80)
         logger.info("🔧 VP BROWSER CONTROL TOOL CALLED")
         logger.info(f"  Action: {action}")
@@ -561,7 +888,21 @@ def create_vp_browser_control_tool(call_id: str, event_api_http_url: str):
                 logger.info(f"✅ Command: {command_id}")
                 logger.info("=" * 80)
                 
-                return f"✓ Opening {url} in new tab in Virtual Participant browser"
+                success_msg = f"✓ Opening {url} in new tab in Virtual Participant browser"
+                
+                # Send tool result thinking step
+                if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                    from datetime import datetime
+                    thinking_step = {
+                        'type': 'tool_result',
+                        'tool_name': 'control_vp_browser',
+                        'result': success_msg,
+                        'success': True,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+                
+                return success_msg
                 
             elif action == 'screenshot':
                 tool_name = 'take_screenshot'
@@ -647,9 +988,23 @@ def create_vp_browser_control_tool(call_id: str, event_api_http_url: str):
             logger.info("=" * 80)
             
             if action == 'screenshot':
-                return f"✓ Screenshot captured. Command ID: {command_id}"
+                success_msg = f"✓ Screenshot captured. Command ID: {command_id}"
             else:
-                return f"✓ Browser action '{action}' completed. Command ID: {command_id}"
+                success_msg = f"✓ Browser action '{action}' completed. Command ID: {command_id}"
+            
+            # Send tool result thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'control_vp_browser',
+                    'result': success_msg,
+                    'success': True,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+            
+            return success_msg
                 
         except Exception as e:
             logger.error("=" * 80)
@@ -661,7 +1016,21 @@ def create_vp_browser_control_tool(call_id: str, event_api_http_url: str):
             logger.error("=" * 80)
             import traceback
             logger.error(f"   Full traceback:\n{traceback.format_exc()}")
-            return f"Error controlling Virtual Participant browser: {str(e)}"
+            error_msg = f"Error controlling Virtual Participant browser: {str(e)}"
+            
+            # Send error thinking step
+            if call_id and message_id and APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'control_vp_browser',
+                    'result': error_msg,
+                    'success': False,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+            
+            return error_msg
     
     return control_vp_browser
 
@@ -695,6 +1064,14 @@ def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_com
                 IsComplete
                 Sequence
                 Timestamp
+                ThinkingStep {
+                    Type
+                    Content
+                    ToolName
+                    ToolInput
+                    ToolResult
+                    Success
+                }
             }
         }
         """)
@@ -715,6 +1092,85 @@ def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_com
         
     except Exception as e:
         logger.error(f"Error sending token to AppSync: {str(e)}")
+
+
+def send_thinking_step_to_appsync(call_id: str, message_id: str, thinking_step: Dict[str, Any], sequence: int):
+    """
+    Send a thinking step via the existing addChatToken mutation (piggyback on token stream)
+    
+    This reuses the existing subscription infrastructure instead of creating a separate one.
+    The thinking step is embedded in the ChatToken's ThinkingStep field.
+    
+    Args:
+        call_id: The call/meeting ID
+        message_id: The message ID for this conversation
+        thinking_step: Dict containing thinking step data
+        sequence: Sequence number for ordering
+    """
+    try:
+        if not APPSYNC_GRAPHQL_URL:
+            logger.warning("APPSYNC_GRAPHQL_URL not configured, skipping thinking step streaming")
+            return
+        
+        from asst_gql_client import AppsyncRequestsGqlClient
+        from datetime import datetime
+        from gql import gql
+        
+        # Initialize AppSync client
+        appsync_client = AppsyncRequestsGqlClient(
+            url=APPSYNC_GRAPHQL_URL,
+            fetch_schema_from_transport=False
+        )
+        
+        # Use addChatToken mutation but with empty token and thinking step data
+        mutation = gql("""
+        mutation AddChatToken($input: AddChatTokenInput!) {
+            addChatToken(input: $input) {
+                CallId
+                MessageId
+                Token
+                IsComplete
+                Sequence
+                Timestamp
+                ThinkingStep {
+                    Type
+                    Content
+                    ToolName
+                    ToolInput
+                    ToolResult
+                    Success
+                }
+            }
+        }
+        """)
+        
+        # Create thinking step data
+        thinking_step_data = {
+            'Type': thinking_step.get('type', 'unknown'),
+            'Content': thinking_step.get('content'),
+            'ToolName': thinking_step.get('tool_name'),
+            'ToolInput': json.dumps(thinking_step.get('tool_input', {})) if thinking_step.get('tool_input') else None,
+            'ToolResult': thinking_step.get('result'),
+            'Success': thinking_step.get('success', True)
+        }
+        
+        variables = {
+            'input': {
+                'CallId': call_id,
+                'MessageId': message_id,
+                'Token': '',  # Empty token for thinking steps
+                'IsComplete': False,
+                'Sequence': sequence,
+                'ThinkingStep': thinking_step_data
+            }
+        }
+        
+        # Execute mutation
+        result = appsync_client.execute(mutation, variable_values=variables)
+        logger.debug(f"Sent thinking step {sequence} ({thinking_step.get('type')}) via ChatToken")
+        
+    except Exception as e:
+        logger.error(f"Error sending thinking step to AppSync: {str(e)}")
 
 def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
     """
@@ -833,6 +1289,7 @@ def handler(event, context):
         # Extract parameters from event - handle both 'text' and 'userInput' for compatibility
         user_input = event.get('userInput', '') or event.get('text', '')
         call_id = event.get('callId', '') or event.get('call_id', '')
+        conversation_history = event.get('conversation_history', [])
         dynamodb_table_name = event.get('dynamodb_table_name', '')
         user_email = event.get('userEmail', '') or event.get('user_email', '')
         
@@ -855,8 +1312,52 @@ def handler(event, context):
         # Fetch meeting transcript from DynamoDB
         transcript = fetch_meeting_transcript(call_id, dynamodb_table_name) if dynamodb_table_name else event.get('transcript', '')
         
-        # Initialize tools list
+        # Get message ID early for tool wrappers and status updates
+        transcript_segment_args = event.get('transcript_segment_args', {})
+        message_id = transcript_segment_args.get('MessageId') or transcript_segment_args.get('SegmentId', f"msg-{call_id}")
+        
+        # Initialize tools list (includes both regular tools and MCP clients)
         tools = []
+        
+        # Load installed MCP servers (account-level) - returns MCPClient objects
+        if MCP_LOADER_AVAILABLE:
+            try:
+                # Send status update: Loading MCP servers
+                if APPSYNC_GRAPHQL_URL:
+                    from datetime import datetime
+                    thinking_step = {
+                        'type': 'status',
+                        'content': 'Loading MCP servers...',
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
+                
+                logger.info("Loading installed MCP servers...")
+                mcp_clients = load_account_mcp_servers()
+                tools.extend(mcp_clients)
+                logger.info(f"Loaded {len(mcp_clients)} MCP clients from installed MCP servers")
+                logger.info("Using Strands Managed Integration (experimental) - MCP clients will manage their own lifecycle")
+                
+                # Send status update: MCP servers loaded
+                if APPSYNC_GRAPHQL_URL:
+                    from datetime import datetime
+                    thinking_step = {
+                        'type': 'status',
+                        'content': f'Loaded {len(mcp_clients)} MCP servers',
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+            except Exception as e:
+                logger.warning(f"Failed to load MCP servers: {e}")
+                # Send error status
+                if APPSYNC_GRAPHQL_URL:
+                    from datetime import datetime
+                    thinking_step = {
+                        'type': 'status',
+                        'content': f'Failed to load MCP servers: {str(e)}',
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
         
         # Add web search tool if API key provided (auto-enable)
         if tavily_api_key:
@@ -866,6 +1367,10 @@ def handler(event, context):
                 
                 # Create Tavily client in closure
                 tavily_client = TavilyClient(api_key=tavily_api_key)
+                
+                # Capture call_id and message_id in closure for thinking steps
+                _call_id = call_id
+                _message_id = message_id
                 
                 @tool
                 def web_search(query: str) -> str:
@@ -883,6 +1388,19 @@ def handler(event, context):
                         Search results with titles, content, and source URLs
                     """
                     try:
+                        # Send tool_use thinking step
+                        if THINKING_WRAPPER_AVAILABLE and APPSYNC_GRAPHQL_URL:
+                            from datetime import datetime
+                            sequence = get_next_sequence(_message_id)
+                            thinking_step = {
+                                'type': 'tool_use',
+                                'tool_name': 'web_search',
+                                'tool_input': {'query': query},
+                                'timestamp': datetime.utcnow().isoformat()
+                            }
+                            logger.info(f"🔧 Sending tool_use thinking step: web_search")
+                            send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
+                        
                         logger.info(f"Web search tool executing: {query}")
                         response = tavily_client.search(query, max_results=3)
                         
@@ -895,13 +1413,41 @@ def handler(event, context):
                             results.append(f"{title}\n{content}\nSource: {url}")
                         
                         if not results:
-                            return "No web search results found"
+                            formatted_results = "No web search results found"
+                        else:
+                            formatted_results = "\n\n".join(results)
                         
-                        formatted_results = "\n\n".join(results)
+                        # Send tool_result thinking step
+                        if THINKING_WRAPPER_AVAILABLE and APPSYNC_GRAPHQL_URL:
+                            from datetime import datetime
+                            sequence = get_next_sequence(_message_id)
+                            thinking_step = {
+                                'type': 'tool_result',
+                                'tool_name': 'web_search',
+                                'result': formatted_results[:500],  # Truncate
+                                'success': True,
+                                'timestamp': datetime.utcnow().isoformat()
+                            }
+                            logger.info(f"✓ Sending tool_result thinking step: web_search")
+                            send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
+                        
                         logger.info(f"Web search returned {len(results)} results")
                         return formatted_results
                         
                     except Exception as e:
+                        # Send error thinking step
+                        if THINKING_WRAPPER_AVAILABLE and APPSYNC_GRAPHQL_URL:
+                            from datetime import datetime
+                            sequence = get_next_sequence(_message_id)
+                            thinking_step = {
+                                'type': 'tool_result',
+                                'tool_name': 'web_search',
+                                'result': f"Error: {str(e)}",
+                                'success': False,
+                                'timestamp': datetime.utcnow().isoformat()
+                            }
+                            send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
+                        
                         logger.error(f"Error in web search: {str(e)}")
                         return f"Error performing web search: {str(e)}"
                 
@@ -916,7 +1462,9 @@ def handler(event, context):
                 kb_id=kb_id,
                 kb_region=kb_region,
                 kb_account_id=kb_account_id,
-                model_id=model_id
+                model_id=model_id,
+                call_id=call_id,
+                message_id=message_id
             ))
             logger.info("Document retrieval tool enabled")
         
@@ -924,7 +1472,9 @@ def handler(event, context):
         if dynamodb_table_name and transcript_kb_id and user_email:
             tools.append(create_recent_meetings_tool(
                 dynamodb_table_name=dynamodb_table_name,
-                user_email=user_email
+                user_email=user_email,
+                call_id=call_id,
+                message_id=message_id
             ))
             logger.info("Recent meetings list tool enabled")
         
@@ -935,7 +1485,9 @@ def handler(event, context):
                 kb_region=kb_region,
                 kb_account_id=kb_account_id,
                 model_id=model_id,
-                user_email=user_email
+                user_email=user_email,
+                call_id=call_id,
+                message_id=message_id
             ))
             logger.info("Meeting history tool enabled")
         
@@ -943,7 +1495,8 @@ def handler(event, context):
         if dynamodb_table_name:
             tools.append(create_current_meeting_transcript_tool(
                 call_id=call_id,
-                dynamodb_table_name=dynamodb_table_name
+                dynamodb_table_name=dynamodb_table_name,
+                message_id=message_id
             ))
             logger.info("Current meeting transcript tool enabled")
         
@@ -951,7 +1504,8 @@ def handler(event, context):
         if APPSYNC_GRAPHQL_URL:
             tools.append(create_vnc_preview_control_tool(
                 call_id=call_id,
-                appsync_url=APPSYNC_GRAPHQL_URL
+                appsync_url=APPSYNC_GRAPHQL_URL,
+                message_id=message_id
             ))
             logger.info("VNC preview control tool enabled")
         
@@ -959,7 +1513,8 @@ def handler(event, context):
         if EVENT_API_HTTP_URL:
             tools.append(create_vp_browser_control_tool(
                 call_id=call_id,
-                event_api_http_url=EVENT_API_HTTP_URL
+                event_api_http_url=EVENT_API_HTTP_URL,
+                message_id=message_id
             ))
             logger.info("VP browser control tool enabled (Event API HTTP)")
         
@@ -975,23 +1530,66 @@ def handler(event, context):
             logger.info(f"Using MessageId for streaming: {message_id}")
             logger.info(f"Tools enabled: {len(tools)}")
             
-            # Configure Bedrock model with streaming if enabled
+            # Send status update: Initializing agent
+            if APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'status',
+                    'content': 'Initializing agent...',
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 2)
+            
+            # Configure Bedrock model with streaming
+            # Note: Extended thinking mode not supported by all models
             bedrock_model = BedrockModel(
                 model_id=model_id,
                 temperature=0.3,
                 streaming=ENABLE_STREAMING
             )
+            logger.info(f"Bedrock model configured: {model_id}")
             
-            # Create agent with tools
+            # Create hook provider for tracking tool usage
+            thinking_hook = ThinkingStepHookProvider(call_id=call_id, message_id=message_id)
+            logger.info(f"Created ThinkingStepHookProvider for call_id={call_id}, message_id={message_id}")
+            
+            # Create agent with tools (includes MCPClient objects for managed integration)
+            # Per Strands docs: "The MCPClient implements the experimental ToolProvider interface,
+            # enabling direct usage in the Agent constructor with automatic lifecycle management"
             agent = Agent(
                 model=bedrock_model,
                 system_prompt=get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt(),
-                tools=tools if tools else None
+                tools=tools if tools else None,
+                hooks=[thinking_hook]  # Add hook provider to track all tool usage
             )
             
-            # Prepare context for the agent - don't include transcript by default
-            # The agent will use the current_meeting_transcript tool when needed
-            context_message = f"User Request: {user_input}"
+            logger.info(f"Agent created with {len(tools)} tools/clients and hook provider (managed integration)")
+            logger.info(f"Hook provider registered: {thinking_hook}")
+            
+            # Send status update: Agent ready
+            if APPSYNC_GRAPHQL_URL:
+                from datetime import datetime
+                thinking_step = {
+                    'type': 'status',
+                    'content': f'Agent ready with {len(tools)} tools',
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 3)
+            
+            # Prepare context for the agent with conversation history
+            if conversation_history:
+                # Format last 10 messages (5 pairs) for context
+                recent_history = conversation_history[-10:]
+                history_text = "\n\nPrevious conversation:\n"
+                for msg in recent_history:
+                    role = "User" if msg.get('role') == 'user' else "Assistant"
+                    content = msg.get('content', '')
+                    history_text += f"{role}: {content}\n"
+                
+                context_message = f"{history_text}\n\nCurrent User Request: {user_input}"
+                logger.info(f"Including {len(recent_history)} messages from conversation history")
+            else:
+                context_message = f"User Request: {user_input}"
             
             # Handle streaming vs non-streaming
             if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL:
@@ -1001,21 +1599,96 @@ def handler(event, context):
                 import asyncio
                 
                 async def stream_response():
+                    from datetime import datetime
                     sequence = 0
+                    thinking_sequence = 0
                     full_response = []
                     
                     # Use stream_async to get async iterator
                     async for event in agent.stream_async(context_message):
-                        # Check if this is a data event with text content
-                        if isinstance(event, dict) and 'data' in event:
-                            token_text = event['data']
-                            full_response.append(token_text)
+                        logger.debug(f"Stream event received: {type(event)} - {event}")
+                        
+                        # Handle different event types from Strands SDK
+                        if isinstance(event, dict):
+                            event_type = event.get('type', 'unknown')
                             
-                            # Send token to AppSync
+                            # Reasoning/thinking events
+                            if event_type == 'thinking' or event_type == 'reasoning':
+                                thinking_step = {
+                                    'type': 'reasoning',
+                                    'content': event.get('content', event.get('text', '')),
+                                    'timestamp': datetime.utcnow().isoformat()
+                                }
+                                send_thinking_step_to_appsync(
+                                    call_id=call_id,
+                                    message_id=message_id,
+                                    thinking_step=thinking_step,
+                                    sequence=thinking_sequence
+                                )
+                                thinking_sequence += 1
+                            
+                            # Tool use events
+                            elif event_type == 'tool_use' or event_type == 'tool_call':
+                                tool_name = event.get('name', event.get('tool_name', 'unknown'))
+                                tool_input = event.get('input', event.get('parameters', {}))
+                                thinking_step = {
+                                    'type': 'tool_use',
+                                    'tool_name': tool_name,
+                                    'tool_input': tool_input,
+                                    'timestamp': datetime.utcnow().isoformat()
+                                }
+                                send_thinking_step_to_appsync(
+                                    call_id=call_id,
+                                    message_id=message_id,
+                                    thinking_step=thinking_step,
+                                    sequence=thinking_sequence
+                                )
+                                thinking_sequence += 1
+                                logger.info(f"Tool use detected: {tool_name}")
+                            
+                            # Tool result events
+                            elif event_type == 'tool_result' or event_type == 'tool_response':
+                                tool_name = event.get('name', event.get('tool_name', 'unknown'))
+                                result = event.get('content', event.get('result', ''))
+                                is_error = event.get('is_error', False)
+                                thinking_step = {
+                                    'type': 'tool_result',
+                                    'tool_name': tool_name,
+                                    'result': str(result)[:500],  # Truncate long results
+                                    'success': not is_error,
+                                    'timestamp': datetime.utcnow().isoformat()
+                                }
+                                send_thinking_step_to_appsync(
+                                    call_id=call_id,
+                                    message_id=message_id,
+                                    thinking_step=thinking_step,
+                                    sequence=thinking_sequence
+                                )
+                                thinking_sequence += 1
+                                logger.info(f"Tool result received: {tool_name} - Success: {not is_error}")
+                            
+                            # Final response data tokens
+                            elif 'data' in event:
+                                token_text = event['data']
+                                full_response.append(token_text)
+                                
+                                # Send token to AppSync
+                                send_chat_token_to_appsync(
+                                    call_id=call_id,
+                                    message_id=message_id,
+                                    token=token_text,
+                                    is_complete=False,
+                                    sequence=sequence
+                                )
+                                sequence += 1
+                        
+                        # Handle string events (simple text tokens)
+                        elif isinstance(event, str):
+                            full_response.append(event)
                             send_chat_token_to_appsync(
                                 call_id=call_id,
                                 message_id=message_id,
-                                token=token_text,
+                                token=event,
                                 is_complete=False,
                                 sequence=sequence
                             )
@@ -1030,7 +1703,7 @@ def handler(event, context):
                         sequence=sequence
                     )
                     
-                    logger.info(f"Streaming complete. Total tokens: {sequence}")
+                    logger.info(f"Streaming complete. Response tokens: {sequence}, Thinking steps: {thinking_sequence}")
                     return ''.join(full_response)
                 
                 # Run the async streaming function

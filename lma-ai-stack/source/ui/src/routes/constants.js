@@ -8,6 +8,7 @@ export const LOGOUT_PATH = '/logout';
 export const CALLS_PATH = '/calls';
 export const STREAM_AUDIO_PATH = '/stream';
 export const VIRTUAL_PARTICIPANT_PATH = '/virtual-participant';
+export const MCP_SERVERS_PATH = '/configuration/mcp-servers';
 export const DEFAULT_PATH = CALLS_PATH;
 export const REDIRECT_URL_PARAM = 'redirect';
 export const MEETINGS_QUERY_PATH = `${CALLS_PATH}/query`;

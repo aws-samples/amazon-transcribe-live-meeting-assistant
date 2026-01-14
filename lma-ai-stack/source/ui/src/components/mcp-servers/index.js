@@ -5,6 +5,7 @@
  */
 import MCPServersModal from './MCPServersModal';
 import PublicRegistryTab from './PublicRegistryTab';
+import CustomServersTab from './CustomServersTab';
 
 export default MCPServersModal;
-export { PublicRegistryTab };
+export { PublicRegistryTab, CustomServersTab };

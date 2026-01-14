@@ -534,6 +534,9 @@ Conditions:
   
 
 Outputs:
+  QuickSightManifestUrl:
+    Description: S3 URL for QuickSight manifest file to import recordings bucket data
+    Value: !Sub "https://${S3BucketName}.s3.${AWS::Region}.amazonaws.com/quicksight-recordingsbucket-manifest.json"
   CloudfrontEndpoint:
     Description: Endpoint for Cloudfront distribution
     Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
@@ -620,6 +623,18 @@ Outputs:
     Value: !Ref VNCALBListener
     Export:
       Name: !Sub "${AWS::StackName}-VNCALBListenerArn"
+  MCPServersTableName:
+    Description: Name of the MCP Servers DynamoDB table
+    Value: !Ref MCPServersTable
+  MCPLayerBuildProjectName:
+    Description: Name of the CodeBuild project for MCP layer building
+    Value: !Ref MCPLayerBuildProject
+  OAuthCallbackUrl:
+    Description: OAuth callback URL for MCP server authorization (use this in your OAuth provider)
+    Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+  OAuthStateTableName:
+    Description: Name of the OAuth State DynamoDB table
+    Value: !Ref OAuthStateTable
 
 Resources:
   EventSourcingTable:
@@ -847,7 +862,202 @@ Resources:
               - "LEX"
           - Name: REACT_APP_CLOUDFRONT_DOMAIN
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
-      TimeoutInMinutes: 10
+  # CodeBuild project for building MCP servers Lambda layer
+  MCPLayerBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-MCP-Layer-Builder"
+      Description: Builds Lambda layer with installed MCP servers
+      ServiceRole: !Ref MCPLayerBuildRole
+      EncryptionKey: alias/aws/s3
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - echo "MCP Layer Builder"
+                - yum install -y jq zip python3.12 python3.12-pip
+                - python3.12 --version
+                - python3.12 -m pip --version
+            build:
+              commands:
+                - echo "Querying DynamoDB for installed MCP servers"
+                - aws dynamodb query --table-name "$MCP_SERVERS_TABLE" --key-condition-expression "AccountId = :accountId" --expression-attribute-values '{":accountId":{"S":"'$AWS_ACCOUNT_ID'"}}' --output json > /tmp/servers.json
+                - SERVER_COUNT=$(jq '.Items | length' /tmp/servers.json)
+                - echo "Found $SERVER_COUNT MCP servers"
+                - echo "Building Lambda layer with Python dependencies"
+                - mkdir -p layer/python && cd layer/python
+                - echo "Step 1 - Installing base Python dependencies (required for Lambda function)"
+                - echo "strands-agents>=0.1.0" > requirements.txt
+                - echo "boto3>=1.28.0" >> requirements.txt
+                - echo "botocore>=1.31.0" >> requirements.txt
+                - echo "tavily-python>=0.3.0" >> requirements.txt
+                - echo "gql>=3.4.0" >> requirements.txt
+                - echo "requests>=2.31.0" >> requirements.txt
+                - echo "requests-toolbelt>=0.10.0" >> requirements.txt
+                - echo "mcp>=1.0.0" >> requirements.txt
+                - cat requirements.txt
+                - python3.12 -m pip install -r requirements.txt -t . --no-cache-dir --upgrade
+                - echo "Base dependencies installed successfully"
+                - |
+                  if [ "$SERVER_COUNT" -gt "0" ]; then
+                    echo "Step 2 - Installing MCP server packages from DynamoDB";
+                    
+                    # Filter out HTTP servers (they don't need package installation)
+                    jq -r '.Items[] | select(.PackageType.S != "streamable-http" and .PackageType.S != null) | .NpmPackage.S' /tmp/servers.json > mcp-servers.txt;
+                    
+                    # Also include servers without PackageType (backward compatibility - assume pypi)
+                    jq -r '.Items[] | select(.PackageType.S == null) | .NpmPackage.S' /tmp/servers.json >> mcp-servers.txt;
+                    
+                    PACKAGE_COUNT=$(wc -l < mcp-servers.txt | tr -d ' ')
+                    echo "Found $PACKAGE_COUNT package-based servers to install";
+                    
+                    if [ "$PACKAGE_COUNT" -gt "0" ]; then
+                      echo "MCP packages to install:";
+                      cat mcp-servers.txt;
+                      while IFS= read -r package; do
+                        if [ -n "$package" ]; then
+                          echo "Attempting to install: $package";
+                          if python3.12 -m pip install "$package" -t . --no-cache-dir 2>&1; then
+                            echo "Successfully installed $package";
+                          else
+                            echo "WARNING: Failed to install $package (package may not exist in PyPI)";
+                            echo "Continuing with build...";
+                          fi;
+                        fi;
+                      done < mcp-servers.txt;
+                    else
+                      echo "No package-based servers to install (all servers are HTTP-based)";
+                    fi;
+                  else
+                    echo "Step 2 - No MCP servers configured, skipping MCP package installation";
+                  fi
+                - cd ../..
+                - echo "Packaging Lambda layer"
+                - cd layer && zip -r ../mcp-layer.zip . -q && cd ..
+                - LAYER_SIZE_BYTES=$(stat -c%s mcp-layer.zip)
+                - LAYER_SIZE_MB=$((LAYER_SIZE_BYTES / 1024 / 1024))
+                - echo "Layer size is ${LAYER_SIZE_MB}MB"
+                - |
+                  if [ "$LAYER_SIZE_BYTES" -gt "50000000" ]; then
+                    echo "Layer exceeds 70MB limit - uploading to S3 first";
+                    echo "Using S3 bucket: $S3_BUCKET";
+                    S3_KEY="mcp-layers/$STACK_NAME-mcp-servers-$(date +%s).zip";
+                    echo "Uploading to s3://$S3_BUCKET/$S3_KEY";
+                    aws s3 cp mcp-layer.zip "s3://$S3_BUCKET/$S3_KEY";
+                    echo "Publishing layer from S3";
+                    if aws lambda publish-layer-version --layer-name "$STACK_NAME-mcp-servers" --description "MCP servers and dependencies" --content "S3Bucket=$S3_BUCKET,S3Key=$S3_KEY" --compatible-runtimes python3.12 --query 'Version' --output text > /tmp/version.txt 2>&1; then
+                      echo "Layer published successfully";
+                    else
+                      echo "ERROR: Layer unzipped size exceeds Lambda's 250MB limit";
+                      echo "This MCP server has too many dependencies for Lambda layers";
+                      echo "Marking server as FAILED in DynamoDB";
+                      if [ -n "$SERVER_ID" ]; then
+                        aws dynamodb update-item --table-name "$MCP_SERVERS_TABLE" --key "{\"AccountId\":{\"S\":\"$AWS_ACCOUNT_ID\"},\"ServerId\":{\"S\":\"$SERVER_ID\"}}" --update-expression "SET #status = :status, ErrorMessage = :error" --expression-attribute-names '{"#status":"Status"}' --expression-attribute-values "{\":status\":{\"S\":\"FAILED\"},\":error\":{\"S\":\"Layer too large: unzipped size exceeds 250MB limit\"}}";
+                      fi;
+                      exit 1;
+                    fi;
+                  else
+                    echo "Layer size OK - publishing directly";
+                    aws lambda publish-layer-version --layer-name "$STACK_NAME-mcp-servers" --description "MCP servers and dependencies" --zip-file fileb://mcp-layer.zip --compatible-runtimes python3.12 --query 'Version' --output text > /tmp/version.txt;
+                  fi
+                - echo "Published layer version $(cat /tmp/version.txt)"
+                - FUNCTION_NAME=$(aws lambda list-functions --query "Functions[?contains(FunctionName, 'MeetingAssist')].FunctionName" --output text)
+                - echo "Found Lambda function $FUNCTION_NAME"
+                - aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --query 'Layers[].LayerArn' --output json > /tmp/current.json
+                - jq -r --arg layer "arn:aws:lambda:$AWS_DEFAULT_REGION:$AWS_ACCOUNT_ID:layer:$STACK_NAME-mcp-servers:$(cat /tmp/version.txt)" 'map(select(. | contains("mcp-servers") | not)) + [$layer] | join(" ")' /tmp/current.json > /tmp/layers.txt
+                - aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --layers $(cat /tmp/layers.txt)
+                - echo "Lambda function updated with new layer"
+                - |
+                  if [ "$ACTION" = "INSTALL_MCP_SERVER" ] && [ -n "$SERVER_ID" ]; then
+                    echo "Updating DynamoDB server status to ACTIVE";
+                    aws dynamodb update-item --table-name "$MCP_SERVERS_TABLE" --key "{\"AccountId\":{\"S\":\"$AWS_ACCOUNT_ID\"},\"ServerId\":{\"S\":\"$SERVER_ID\"}}" --update-expression "SET #status = :status, UpdatedAt = :updated" --expression-attribute-names '{"#status":"Status"}' --expression-attribute-values "{\":status\":{\"S\":\"ACTIVE\"},\":updated\":{\"S\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}";
+                    echo "Server status updated to ACTIVE";
+                  fi
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: STACK_NAME
+            Value: !Ref AWS::StackName
+          - Name: MCP_SERVERS_TABLE
+            Value: !Ref MCPServersTable
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: S3_BUCKET
+            Value: !Sub "${BootstrapBucketBaseName}-${AWS::Region}"
+      TimeoutInMinutes: 15
+
+  MCPLayerBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: codebuild.amazonaws.com
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: MCPLayerBuild
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt MCPServersTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+              - Effect: Allow
+                Action:
+                  - lambda:ListFunctions
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - lambda:PublishLayerVersion
+                  - lambda:GetLayerVersion
+                  - lambda:GetFunctionConfiguration
+                  - lambda:UpdateFunctionConfiguration
+                Resource:
+                  - !Sub
+                    - "arn:aws:lambda:${Region}:${AccountId}:layer:${StackName}-mcp-servers"
+                    - Region: !Ref AWS::Region
+                      AccountId: !Ref AWS::AccountId
+                      StackName: !Ref AWS::StackName
+                  - !Sub
+                    - "arn:aws:lambda:${Region}:${AccountId}:layer:${StackName}-mcp-servers:*"
+                    - Region: !Ref AWS::Region
+                      AccountId: !Ref AWS::AccountId
+                      StackName: !Ref AWS::StackName
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${LMAStackName}-*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/mcp-layers/*"
 
   LambdaCodeBuildStartBuildExecutionRole:
     Type: AWS::IAM::Role
@@ -1180,6 +1390,8 @@ Resources:
     Properties:
       Role: !GetAtt StrandsChatInterfaceFunctionExecutionRole.Arn
       Runtime: python3.12
+      SnapStart:
+        ApplyOn: PublishedVersions
       Environment:
         Variables:
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
@@ -1291,7 +1503,11 @@ Resources:
                   Action:
                     - lambda:InvokeFunction
                   Resource:
-                    - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${LMAStackName}-*"
+                    - !Sub
+                      - "arn:aws:lambda:${Region}:${AccountId}:function:STRANDS-${StackName}-*"
+                      - Region: !Ref AWS::Region
+                        AccountId: !Ref AWS::AccountId
+                        StackName: !Ref LMAStackName
                     - !Sub "${AgentAssistExistingLambdaFunctionArn}"
                 - Ref: AWS::NoValue
 
@@ -2847,6 +3063,187 @@ Resources:
         PointInTimeRecoveryEnabled: true
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
+  # MCP Servers Table - Account-level MCP server configurations
+  MCPServersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-MCPServers"
+      AttributeDefinitions:
+        - AttributeName: AccountId
+          AttributeType: S
+        - AttributeName: ServerId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: AccountId
+          KeyType: HASH
+        - AttributeName: ServerId
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # OAuth State Table - Temporary storage for OAuth flow state
+  OAuthStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-OAuthState"
+      AttributeDefinitions:
+        - AttributeName: State
+          AttributeType: S
+      KeySchema:
+        - AttributeName: State
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ExpiresAt
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # OAuth Manager Lambda Function
+  OAuthManagerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-OAuthManager"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/oauth_manager
+      Description: Manages OAuth 2.1 flow for MCP servers
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          OAUTH_STATE_TABLE: !Ref OAuthStateTable
+          MCP_SERVERS_TABLE: !Ref MCPServersTable
+          KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
+          OAUTH_CALLBACK_URL: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OAuthStateTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MCPServersTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:Encrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/OAuthManager"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for OAuth management function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - OAuthManagerLogGroup
+
+  OAuthManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/OAuthManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # AppSync data source for OAuth Manager
+  OAuthManagerDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: OAuthManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt OAuthManagerDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt OAuthManagerFunction.Arn
+
+  OAuthManagerDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt OAuthManagerFunction.Arn
+
+  # AppSync Resolvers for OAuth Flow
+  InitOAuthFlowResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: initOAuthFlow
+      DataSourceName: !GetAtt OAuthManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "initOAuthFlow"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  HandleOAuthCallbackResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: handleOAuthCallback
+      DataSourceName: !GetAtt OAuthManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "handleOAuthCallback"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
 
   # Data source for Virtual Participant table
   VirtualParticipantDataSource:
@@ -3188,6 +3585,223 @@ Resources:
       ServiceRoleArn: !GetAtt VirtualParticipantLambdaDataSourceRole.Arn
       LambdaConfig:
         LambdaFunctionArn: !GetAtt VirtualParticipantManagerFunction.Arn
+
+  # MCP Server Manager Lambda Function
+  MCPServerManagerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-MCPServerManager"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/mcp_server_manager
+      Description: Manages MCP server installation and configuration
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          MCP_SERVERS_TABLE: !Ref MCPServersTable
+          CODEBUILD_PROJECT: !Ref MCPLayerBuildProject
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MCPServersTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - codebuild:StartBuild
+                - codebuild:BatchGetBuilds
+              Resource: !GetAtt MCPLayerBuildProject.Arn
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/MCPServerManager"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for management function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - MCPServerManagerLogGroup
+
+  MCPServerManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/MCPServerManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # AppSync data source for MCP Server Manager
+  MCPServerManagerDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MCPServerManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt MCPServerManagerDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MCPServerManagerFunction.Arn
+
+  MCPServerManagerDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt MCPServerManagerFunction.Arn
+
+  # AppSync Resolvers for MCP Server Management
+  InstallMCPServerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: installMCPServer
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "installMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  UninstallMCPServerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: uninstallMCPServer
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "uninstallMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+  
+  UpdateMCPServerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateMCPServer
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "updateMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+        $util.toJson($ctx.result)
+
+  ListInstalledMCPServersResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: listInstalledMCPServers
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "listInstalledMCPServers"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  GetMCPServerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMCPServer
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "getMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
 
   VirtualParticipantLambdaDataSourceRole:
     Type: AWS::IAM::Role
@@ -3674,6 +4288,137 @@ Resources:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # Lambda to upload QuickSight manifest file
+  UploadManifestLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:PutObject"
+                  - "s3:DeleteObject"
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}/quicksight-recordingsbucket-manifest.json"
+          PolicyName: uploadManifestS3Policy
+
+  UploadManifestLambda:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: "index.lambda_handler"
+      Runtime: python3.12
+      MemorySize: 128
+      Timeout: 60
+      Role: !GetAtt UploadManifestLambdaRole.Arn
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: !Sub |
+          import boto3
+          import json
+          import cfnresponse
+          
+          def lambda_handler(event, context):
+            print(event)
+            responseData = {}
+            status = cfnresponse.SUCCESS
+            reason = "Success"
+            
+            if event['RequestType'] in ['Create', 'Update']:
+              try:
+                s3 = boto3.client('s3')
+                bucket_name = event['ResourceProperties']['BucketName']
+                prefix = event['ResourceProperties']['Prefix']
+                
+                # Standard manifest for nested JSON
+                manifest = {
+                  "fileLocations": [
+                    {
+                      "URIPrefixes": [
+                        f"s3://{bucket_name}/{prefix}"
+                      ]
+                    }
+                  ],
+                  "globalUploadSettings": {
+                    "format": "JSON"
+                  }
+                }
+                
+                s3.put_object(
+                  Bucket=bucket_name,
+                  Key='quicksight-recordingsbucket-manifest.json',
+                  Body=json.dumps(manifest, indent=2),
+                  ContentType='application/json'
+                )
+                
+                print(f"Uploaded manifest to s3://{bucket_name}/quicksight-recordingsbucket-manifest.json")
+                
+              except Exception as e:
+                print(e)
+                reason = f"Exception thrown: {e}"
+                status = cfnresponse.FAILED
+                
+            elif event['RequestType'] == 'Delete':
+              try:
+                s3 = boto3.client('s3')
+                bucket_name = event['ResourceProperties']['BucketName']
+                s3.delete_object(
+                  Bucket=bucket_name,
+                  Key='quicksight-recordingsbucket-manifest.json'
+                )
+                print(f"Deleted manifest from s3://{bucket_name}/quicksight-recordingsbucket-manifest.json")
+              except Exception as e:
+                print(e)
+                # Don't fail on delete errors
+                
+            cfnresponse.send(event, context, status, responseData, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UploadManifestLambda
+    DependsOn:
+      - UploadManifestLambdaLogGroup
+
+  UploadManifestLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UploadManifestLambda
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UploadQuickSightManifest:
+    Type: Custom::UploadQuickSightManifest
+    Properties:
+      ServiceToken: !GetAtt UploadManifestLambda.Arn
+      BucketName: !Ref S3BucketName
+      Prefix: !Ref TranscriptFilePrefix
 
   RemoveWebAppBucketOnDelete:
     Type: Custom::RemoveWebAppBucketOnDelete

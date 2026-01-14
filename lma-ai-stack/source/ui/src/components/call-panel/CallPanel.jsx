@@ -1043,7 +1043,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
                         id: 'live-view',
                         disabled: !vpData || !vpData.vncReady || loadingVP,
                       },
-                      { text: 'MCP Servers', id: 'mcp-servers', disabled: true },
+                      { text: 'MCP Servers', id: 'mcp-servers', disabled: false },
                     ]}
                     variant="normal"
                     onItemClick={(e) => {
@@ -1666,6 +1666,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
             input: {
               CallId: event.data.callId,
               Message: event.data.message,
+              ConversationHistory: event.data.conversationHistory || [],
             },
           };
 
@@ -1715,6 +1716,14 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
                 IsComplete
                 Sequence
                 Timestamp
+                ThinkingStep {
+                  Type
+                  Content
+                  ToolName
+                  ToolInput
+                  ToolResult
+                  Success
+                }
               }
             }
           `;
