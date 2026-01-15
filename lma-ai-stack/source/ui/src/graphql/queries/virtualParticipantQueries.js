@@ -217,6 +217,8 @@ export const onUpdateVirtualParticipant = /* GraphQL */ `
       manualActionMessage
       manualActionTimeoutSeconds
       manualActionStartTime
+      Owner
+      SharedWith
     }
   }
 `;

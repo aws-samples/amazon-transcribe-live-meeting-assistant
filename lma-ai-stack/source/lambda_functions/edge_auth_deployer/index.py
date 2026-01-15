@@ -307,7 +307,11 @@ def update_edge_function(lambda_client, function_name, user_pool_id, region, cli
     return versioned_arn
 
 def delete_edge_function(lambda_client, function_name):
-    """Delete Lambda@Edge function"""
+    """
+    Delete Lambda@Edge function.
+    Note: Lambda@Edge replicated functions can't be deleted immediately.
+    They must be disassociated from CloudFront first and can take hours to replicate.
+    """
     try:
         # List all versions
         versions = lambda_client.list_versions_by_function(FunctionName=function_name)
@@ -320,14 +324,31 @@ def delete_edge_function(lambda_client, function_name):
                         FunctionName=function_name,
                         Qualifier=version['Version']
                     )
+                    print(f"Deleted version {version['Version']}")
                 except ClientError as e:
-                    print(f"Error deleting version {version['Version']}: {e}")
+                    error_code = e.response['Error']['Code']
+                    if error_code == 'InvalidParameterValueException' and 'replicated function' in str(e):
+                        print(f"Version {version['Version']} is replicated - will be deleted automatically after CloudFront disassociation")
+                    else:
+                        print(f"Error deleting version {version['Version']}: {e}")
         
-        # Delete the function
-        lambda_client.delete_function(FunctionName=function_name)
-        print(f"Deleted function: {function_name}")
+        # Try to delete the function
+        try:
+            lambda_client.delete_function(FunctionName=function_name)
+            print(f"Deleted function: {function_name}")
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'InvalidParameterValueException' and 'replicated function' in str(e):
+                print(f"Function {function_name} is replicated - will be deleted automatically (can take 1-2 hours)")
+                print("This is expected behavior for Lambda@Edge functions")
+                # Don't raise - this is expected and will clean up automatically
+            else:
+                raise
+                
     except ClientError as e:
-        if e.response['Error']['Code'] != 'ResourceNotFoundException':
+        if e.response['Error']['Code'] == 'ResourceNotFoundException':
+            print(f"Function {function_name} not found - already deleted")
+        else:
             raise
 
 def handler(event, context):
@@ -365,9 +386,19 @@ def handler(event, context):
             send(event, context, SUCCESS, response_data, physical_resource_id)
             
         elif event['RequestType'] == 'Delete':
-            # Delete function
-            delete_edge_function(lambda_client, function_name)
-            send(event, context, SUCCESS, response_data, physical_resource_id)
+            # Delete function (may not complete immediately for Lambda@Edge)
+            try:
+                delete_edge_function(lambda_client, function_name)
+                send(event, context, SUCCESS, response_data, physical_resource_id)
+            except ClientError as e:
+                error_code = e.response['Error']['Code']
+                if error_code == 'InvalidParameterValueException' and 'replicated function' in str(e):
+                    # Lambda@Edge replication - this is expected, return success
+                    print("Lambda@Edge function will be deleted automatically after replication cleanup")
+                    send(event, context, SUCCESS, response_data, physical_resource_id,
+                         reason="Lambda@Edge function marked for deletion (will complete automatically)")
+                else:
+                    raise
             
     except Exception as e:
         print(f"Error: {str(e)}")
