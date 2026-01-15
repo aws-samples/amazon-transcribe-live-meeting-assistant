@@ -18,12 +18,12 @@ Parameters:
     Description: Select the appropriate domain as necessary, or leave it at default
 
   MeetingAssistService:
-    Default: "BEDROCK_LLM"
+    Default: "STRANDS_BEDROCK"
     Type: String
     AllowedValues:
-      - "BEDROCK_LLM"
       - "STRANDS_BEDROCK"
       - "STRANDS_BEDROCK_WITH_KB (Create)"
+      - "BEDROCK_LLM"
       - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
       - "BEDROCK_AGENT (Use Existing)"
       - "Q_BUSINESS (Use Existing)"
