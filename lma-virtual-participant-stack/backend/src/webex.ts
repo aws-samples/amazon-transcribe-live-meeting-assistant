@@ -27,7 +27,13 @@ export default class Webex {
         const joinFromBrowserButton = await page.waitForSelector('#broadcom-center-right', { timeout: 10000 });
         if (joinFromBrowserButton) {
             console.log('Found "Join from this browser" button, clicking it.');
-            await joinFromBrowserButton.click();
+            await Promise.all([
+                page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
+                    console.log('Navigation wait timed out or not needed, continuing...');
+                }),
+                joinFromBrowserButton.click()
+            ]);
+            console.log('Navigation completed after button click.');
         }
         console.log('Launching app.');
         const frameElement = await page.waitForSelector(this.iframe, { timeout: 15000 });

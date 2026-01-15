@@ -18,12 +18,12 @@ Parameters:
     Description: Select the appropriate domain as necessary, or leave it at default
 
   MeetingAssistService:
-    Default: "BEDROCK_LLM"
+    Default: "STRANDS_BEDROCK"
     Type: String
     AllowedValues:
-      - "BEDROCK_LLM"
       - "STRANDS_BEDROCK"
       - "STRANDS_BEDROCK_WITH_KB (Create)"
+      - "BEDROCK_LLM"
       - "BEDROCK_KNOWLEDGE_BASE (Use Existing)"
       - "BEDROCK_AGENT (Use Existing)"
       - "Q_BUSINESS (Use Existing)"
@@ -55,7 +55,7 @@ Parameters:
       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "global.amazon.nova-2-lite-v1:0"
-      # - "global.amazon.nova-2-pro-v1:0"
+      - "global.amazon.nova-2-pro-v1:0"
     Description: >-
       Select a Bedrock LLM model from the list. Includes Nova models (cost-effective), 
       Claude 3.5/3.7 (advanced), and Claude 4 (cutting-edge). Some models require inference profiles.
@@ -191,6 +191,43 @@ Parameters:
       - "DISABLED"
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
     Description: Use meeting transcripts as knowledge base content
+
+  TranscriptKnowledgeBaseVectorStore:
+    Type: String
+    Default: "S3_VECTORS"
+    AllowedValues:
+      - "OPENSEARCH_SERVERLESS"
+      - "S3_VECTORS"
+    Description: >-
+      Vector store for transcript knowledge base. S3 Vectors (default) provides
+      40-60% cost savings with sub-second latency. OpenSearch Serverless for sub-millisecond queries.
+
+  MeetingAssistKnowledgeBaseVectorStore:
+    Type: String
+    Default: "S3_VECTORS"
+    AllowedValues:
+      - "OPENSEARCH_SERVERLESS"
+      - "S3_VECTORS"
+    Description: >-
+      Vector store for meeting assist knowledge base (STRANDS_BEDROCK_WITH_KB and
+      BEDROCK_KNOWLEDGE_BASE Create options). S3 Vectors (default) provides 40-60% cost savings.
+
+  EnableMCP:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Enable MCP server integration for external application access
+      (Amazon Quick Suite, Claude Desktop, etc.). Provides standardized API for agentic systems.
+
+  MCPServerCallbackURLs:
+    Type: String
+    Default: "https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback,https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback,http://localhost:3000/callback"
+    Description: >-
+      Comma-separated list of OAuth callback URLs for MCP clients.
+      Default includes Quick Suite (us-east-1, us-west-2) and localhost for testing.
+      Add your custom MCP client callback URLs here.
+      Example: https://my-app.com/callback,https://another-app.com/oauth/callback
 
   S3BucketName:
     Type: String
@@ -408,7 +445,7 @@ Parameters:
       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "global.amazon.nova-2-lite-v1:0"
-      # - "global.amazon.nova-2-pro-v1:0"
+      - "global.amazon.nova-2-pro-v1:0"
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models. Includes Nova models (cost-effective), Claude 3.5/3.7 (advanced), 
@@ -634,16 +671,57 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  # Virtual Participant Startup Optimization Parameters
+  VPLaunchType:
+    Type: String
+    Default: FARGATE
+    AllowedValues:
+      - FARGATE
+      - EC2
+    Description: >-
+      Launch type for Virtual Participant containers.
+      FARGATE (default): Serverless with SOCI for 40-60% faster startup (~$2/month).
+      EC2: Warm instances with cached images for 85-90% faster startup (~$33/month).
+
+  VPInstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+    Description: >-
+      EC2 instance type for Virtual Participant (only used if VPLaunchType=EC2).
+      t3.medium recommended for 1-2 concurrent VPs.
+
+  VPMinInstances:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 10
+    Description: >-
+      Minimum number of warm EC2 instances (only used if VPLaunchType=EC2).
+      Set to 1 for fastest startup, 0 to save costs when not in use.
+
+  VPMaxInstances:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 100
+    Description: >-
+      Maximum number of EC2 instances for scaling (only used if VPLaunchType=EC2).
+
   EnableDataRetentionOnDelete:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues:
       - "true"
       - "false"
     Description: >-
       Enable data retention on stack deletion for compliance requirements.
-      When true: DynamoDB tables, S3 buckets (recordings and logs), and encryption key will be retained.
-      When false (default): All resources deleted for clean stack removal.
+      When true (default): DynamoDB tables, S3 buckets (recordings and logs), and encryption key will be retained.
+      When false: All resources deleted for clean stack removal.
       Enterprise customers with compliance requirements should set to true.
 
 Metadata:
@@ -689,6 +767,16 @@ Metadata:
           default: Transcript Knowledge Base Configuration
         Parameters:
           - TranscriptKnowledgeBase
+          - TranscriptKnowledgeBaseVectorStore
+      - Label:
+          default: Vector Store Configuration
+        Parameters:
+          - MeetingAssistKnowledgeBaseVectorStore
+      - Label:
+          default: MCP Server Integration
+        Parameters:
+          - EnableMCP
+          - MCPServerCallbackURLs
       - Label:
           default: Amazon S3 Configuration
         Parameters:
@@ -747,6 +835,13 @@ Metadata:
           - PublicSubnet2
           - PrivateSubnet1
           - PrivateSubnet2
+      - Label:
+          default: Virtual Participant Startup Optimization
+        Parameters:
+          - VPLaunchType
+          - VPInstanceType
+          - VPMinInstances
+          - VPMaxInstances
       - Label:
           default: Security Configuration
         Parameters:
@@ -810,6 +905,14 @@ Metadata:
         default: IDC Application ARN (existing)
       TranscriptKnowledgeBase:
         default: Transcript Knowledge Base
+      TranscriptKnowledgeBaseVectorStore:
+        default: Transcript Knowledge Base Vector Store
+      MeetingAssistKnowledgeBaseVectorStore:
+        default: Meeting Assist Knowledge Base Vector Store
+      EnableMCP:
+        default: Enable MCP Server Integration
+      MCPServerCallbackURLs:
+        default: MCP Server OAuth Callback URLs
       IsPartialTranscriptEnabled:
         default: Enable Partial Transcripts
       IsContentRedactionEnabled:
@@ -874,6 +977,14 @@ Metadata:
         default: Existing Private Subnet 1
       PrivateSubnet2:
         default: Existing Private Subnet 2
+      VPLaunchType:
+        default: VP Launch Type (FARGATE or EC2)
+      VPInstanceType:
+        default: VP EC2 Instance Type
+      VPMinInstances:
+        default: VP Minimum Warm Instances
+      VPMaxInstances:
+        default: VP Maximum Instances
       PermissionsBoundaryArn:
         default: Permissions Boundary ARN
       EnableDataRetentionOnDelete:
@@ -1004,6 +1115,9 @@ Conditions:
   ShouldCreateTranscriptKnowledgeBase:
     !Equals [!Ref TranscriptKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)"]
   ShouldUseTranscriptKnowledgeBase: !Condition ShouldCreateTranscriptKnowledgeBase
+  IsS3VectorsForTranscript: !Equals [!Ref TranscriptKnowledgeBaseVectorStore, "S3_VECTORS"]
+  IsS3VectorsForMeetingAssist: !Equals [!Ref MeetingAssistKnowledgeBaseVectorStore, "S3_VECTORS"]
+  ShouldEnableMCP: !Equals [!Ref EnableMCP, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
 Resources:
@@ -1126,6 +1240,22 @@ Resources:
             Condition:
               StringEquals:
                 "aws:SourceAccount": !Ref "AWS::AccountId"
+          - !If
+            - IsS3VectorsForTranscript
+            - Sid: Allow S3 Vectors indexing service
+              Effect: Allow
+              Principal:
+                Service: indexing.s3vectors.amazonaws.com
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  "aws:SourceAccount": !Ref "AWS::AccountId"
+            - !Ref AWS::NoValue
 
   CustomerManagedEncryptionKeyAlias:
     Type: AWS::KMS::Alias
@@ -1700,33 +1830,6 @@ Resources:
       PolicyDocument:
         Version: 2012-10-17
         Statement:
-          - Sid: AllowQuickSightServiceRoleAccess
-            Effect: Allow
-            Principal:
-              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/aws-quicksight-service-role-v0"
-            Action:
-              - s3:GetObject
-              - s3:GetObjectVersion
-              - s3:ListBucket
-              - s3:GetBucketLocation
-            Resource:
-              - !GetAtt RecordingsBucket.Arn
-              - !Sub "${RecordingsBucket.Arn}/*"
-          - Sid: AllowQuickSightServiceAccess
-            Effect: Allow
-            Principal:
-              Service: quicksight.amazonaws.com
-            Action:
-              - s3:GetObject
-              - s3:GetObjectVersion
-              - s3:ListBucket
-              - s3:GetBucketLocation
-            Resource:
-              - !GetAtt RecordingsBucket.Arn
-              - !Sub "${RecordingsBucket.Arn}/*"
-            Condition:
-              StringEquals:
-                "aws:SourceAccount": !Ref "AWS::AccountId"
           - Sid: EnforceSSLOnly
             Action:
               - "s3:*"
@@ -1936,6 +2039,9 @@ Resources:
           - ShouldUseTranscriptKnowledgeBase
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
           - ""
+        EnableMCPServer: !Ref EnableMCP
+        MCPServerCallbackURLs: !Ref MCPServerCallbackURLs
+        CognitoUserPoolDomain: !GetAtt COGNITOSTACK.Outputs.CognitoUserPoolDomain
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -1946,6 +2052,7 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
       Parameters:
+        pVectorStoreType: !Ref MeetingAssistKnowledgeBaseVectorStore
         pKnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
         pInputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
         pS3SyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
@@ -1953,6 +2060,7 @@ Resources:
         pWebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
         pWebSyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
   BEDROCKAGENT:
     Type: AWS::CloudFormation::Stack
@@ -1983,9 +2091,11 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
       Parameters:
+        pVectorStoreType: !Ref TranscriptKnowledgeBaseVectorStore
         pKnowledgeBaseBucketName: !Ref RecordingsBucket
         pInputDocumentUploadFolderPrefix: !Ref TranscriptFilePrefix
         pS3SyncScheduleExpression: "cron(0/15 * ? * * *)"  # default is to sync transcripts every 15 minutes
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
 
   # Format nested JSON strings before nesting them in QnABotSettings in MEETINGASSISTSETUP
@@ -2260,6 +2370,13 @@ Resources:
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.PrivateSubnet2
           - !Ref PrivateSubnet2
+        VPLaunchType: !Ref VPLaunchType
+        VPInstanceType: !Ref VPInstanceType
+        VPMinInstances: !Ref VPMinInstances
+        VPMaxInstances: !Ref VPMaxInstances
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        ShowSpeakerLabel: "false"
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack
@@ -2376,3 +2493,4 @@ Outputs:
   OAuthCallbackUrl:
     Description: OAuth callback URL for MCP server authorization (use this in your OAuth provider configuration)
     Value: !GetAtt AISTACK.Outputs.OAuthCallbackUrl
+

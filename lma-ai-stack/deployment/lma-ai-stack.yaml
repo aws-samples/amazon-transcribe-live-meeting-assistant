@@ -195,7 +195,7 @@ Parameters:
       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "global.amazon.nova-2-lite-v1:0"
-      # - "global.amazon.nova-2-pro-v1:0"
+      - "global.amazon.nova-2-pro-v1:0"
 
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
@@ -423,6 +423,26 @@ Parameters:
     Description: >
       Provide the *id* (not name) of an existing Bedrock Knowledge Base to be used for Agent Assist bot.
 
+  EnableMCPServer:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Enable MCP Server integration to allow external applications (Amazon Quick Suite,
+      Claude Desktop, custom agentic systems) to access LMA meeting data via MCP protocol.
+
+  MCPServerCallbackURLs:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Comma-separated list of additional OAuth callback URLs for custom MCP clients.
+
+  CognitoUserPoolDomain:
+    Type: String
+    Default: ""
+    Description: >-
+      Cognito User Pool domain prefix for OAuth URLs (passed from COGNITOSTACK)
+
   LoggingBucketName:
     Type: String
     Description: Name of the logging bucket for S3 access logs
@@ -449,13 +469,13 @@ Parameters:
 
   EnableDataRetentionOnDelete:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues:
       - "true"
       - "false"
     Description: >-
       Enable data retention on stack deletion for compliance requirements.
-      When true, DynamoDB tables will be retained. When false (default), all resources deleted.
+      When true (default), DynamoDB tables will be retained. When false, all resources deleted.
 
   VPScheduleGroupName:
     Type: String
@@ -513,6 +533,8 @@ Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
+  ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
+  HasCustomMCPServerCallbackURLs: !Not [!Equals [!Ref MCPServerCallbackURLs, ""]]
   ShouldEnableLambdaAgentAssist:
     !Equals [!Ref IsLambdaAgentAssistEnabled, "true"]
   ShouldEnableTranscriptLambdaHookFunction:
@@ -635,6 +657,44 @@ Outputs:
   OAuthStateTableName:
     Description: Name of the OAuth State DynamoDB table
     Value: !Ref OAuthStateTable
+  
+  MCPServerEndpoint:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      MCP Server endpoint for external applications to connect and access LMA meeting data.
+      Use this URL with Amazon Quick Suite, Claude Desktop, or custom MCP clients.
+    Value: !GetAtt MCPServerGateway.GatewayUrl
+  
+  MCPServerClientId:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      Cognito Client ID for external applications to authenticate with LMA's MCP Server.
+      Use with MCPServerClientSecret to obtain OAuth tokens.
+    Value: !Ref MCPServerExternalAppClient
+  
+  MCPServerClientSecret:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      Cognito Client Secret for external applications. STORE SECURELY!
+      Use with MCPServerClientId to obtain OAuth tokens for MCP Server access.
+    Value: !GetAtt MCPServerExternalAppClient.ClientSecret
+  
+  MCPServerUserPoolId:
+    Condition: ShouldEnableMCPServer
+    Description: Cognito User Pool ID for MCP Server authentication
+    Value: !Ref UserPoolId
+  
+  MCPServerTokenURL:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      OAuth token endpoint for obtaining access tokens to LMA's MCP Server.
+      Example: curl -X POST <this-url> -d "grant_type=authorization_code&client_id=<MCPServerClientId>&client_secret=<MCPServerClientSecret>&code=<auth_code>&redirect_uri=<callback_url>"
+    Value: !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token"
+  
+  MCPServerAuthorizationURL:
+    Condition: ShouldEnableMCPServer
+    Description: OAuth authorization endpoint for authorization code flow (browser-based authentication)
+    Value: !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
 
 Resources:
   EventSourcingTable:
@@ -3802,6 +3862,313 @@ Resources:
           $util.error($ctx.error.message, $ctx.error.type)
         #end
         $util.toJson($ctx.result)
+
+  ##########################################################################
+  # MCP Server Resources - Allow external applications to access LMA data
+  # (Separate from existing MCP client functionality above)
+  ##########################################################################
+  
+  # External App Cognito Client for MCP Server authentication (Authorization Code flow)
+  MCPServerExternalAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: ShouldEnableMCPServer
+    Properties:
+      ClientName: "LMA-MCPServer-ExternalApp-Client"
+      UserPoolId: !Ref UserPoolId
+      GenerateSecret: true
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      CallbackURLs: !If
+        - HasCustomMCPServerCallbackURLs
+        - !Split [",", !Ref MCPServerCallbackURLs]
+        - - !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+      LogoutURLs:
+        - !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
+      SupportedIdentityProviders:
+        - COGNITO
+
+  # MCP Server Gateway Execution Role
+  MCPServerGatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableMCPServer
+    Properties:
+      RoleName: !Sub "${LMAStackName}-MCPServerGatewayRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"
+      Policies:
+        - PolicyName: InvokeLambdaPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt MCPServerAnalyticsFunction.Arn
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  # MCP Server Analytics Lambda
+  MCPServerAnalyticsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableMCPServer
+    Properties:
+      LogGroupName: !Sub "/${LMAStackName}/lambda/MCPServerAnalytics"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MCPServerAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldEnableMCPServer
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_116: "DLQ not required for MCP handler"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-MCPServerAnalytics"
+      CodeUri: ../source/lambda_functions/mcp_analytics/
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+          CALLS_TABLE: !Ref EventSourcingTable
+          RECORDINGS_BUCKET: !Ref S3BucketName
+          TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix
+          TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
+          MODEL_ARN: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+          APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+          LMA_SETTINGS_PARAMETER: !Ref LMASettingsParameterName
+      LoggingConfig:
+        LogGroup: !Ref MCPServerAnalyticsLogGroup
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventSourcingTable
+        - S3ReadPolicy:
+            BucketName: !Ref S3BucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:Retrieve
+                - bedrock:RetrieveAndGenerate
+              Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            - Effect: Allow
+              Action:
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            - Effect: Allow
+              Action:
+                - appsync:GraphQL
+              Resource:
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createVirtualParticipant"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource:
+                - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
+    DependsOn:
+      - MCPServerAnalyticsLogGroup
+
+  # MCP Server Gateway (Native CloudFormation)
+  MCPServerGateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Condition: ShouldEnableMCPServer
+    DependsOn:
+      - MCPServerAnalyticsFunction
+      - MCPServerExternalAppClient
+      - MCPServerGatewayExecutionRole
+    Properties:
+      Name: !Sub "${LMAStackName}-MCP-Gateway"
+      Description: "LMA MCP Server Gateway for external application access"
+      ProtocolType: MCP
+      AuthorizerType: CUSTOM_JWT
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPoolId}/.well-known/openid-configuration"
+          AllowedClients:
+            - !Ref MCPServerExternalAppClient
+      RoleArn: !GetAtt MCPServerGatewayExecutionRole.Arn
+      Tags:
+        Application: LMA
+        Component: MCPServer
+
+  # MCP Server Gateway Target (Lambda)
+  MCPServerGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Condition: ShouldEnableMCPServer
+    DependsOn: MCPServerGateway
+    Properties:
+      GatewayIdentifier: !Ref MCPServerGateway
+      Name: "LMAAnalyticsTarget"
+      Description: "LMA meeting analytics and transcript access tools"
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !GetAtt MCPServerAnalyticsFunction.Arn
+            ToolSchema:
+              InlinePayload:
+                - Name: search_lma_meetings
+                  Description: "Search across all meeting transcripts and summaries using natural language queries"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      query:
+                        Type: string
+                        Description: "Natural language search query"
+                      startDate:
+                        Type: string
+                        Description: "Optional ISO 8601 start date"
+                      endDate:
+                        Type: string
+                        Description: "Optional ISO 8601 end date"
+                      maxResults:
+                        Type: number
+                        Description: "Maximum results to return"
+                    Required:
+                      - query
+                - Name: get_meeting_transcript
+                  Description: "Retrieve the complete transcript for a specific meeting"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID (CallId)"
+                      format:
+                        Type: string
+                        Description: "Output format (json, text, or srt)"
+                    Required:
+                      - meetingId
+                - Name: get_meeting_summary
+                  Description: "Get AI-generated summary and action items for a meeting"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID (CallId)"
+                      includeActionItems:
+                        Type: boolean
+                        Description: "Include action items"
+                      includeTopics:
+                        Type: boolean
+                        Description: "Include key topics"
+                    Required:
+                      - meetingId
+                - Name: list_meetings
+                  Description: "List meetings with optional filters"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      startDate:
+                        Type: string
+                        Description: "ISO 8601 start date"
+                      endDate:
+                        Type: string
+                        Description: "ISO 8601 end date"
+                      participant:
+                        Type: string
+                        Description: "Filter by participant name"
+                      status:
+                        Type: string
+                        Description: "Meeting status filter"
+                      limit:
+                        Type: number
+                        Description: "Maximum number of meetings to return"
+                - Name: schedule_meeting
+                  Description: "Schedule a future meeting with virtual participant"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingName:
+                        Type: string
+                        Description: "Name/title of the meeting"
+                      meetingPlatform:
+                        Type: string
+                        Description: "Platform (Zoom, Teams, Chime, Webex)"
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID (numeric ID only)"
+                      scheduledTime:
+                        Type: string
+                        Description: "ISO 8601 datetime when meeting should start"
+                      meetingPassword:
+                        Type: string
+                        Description: "Optional meeting password"
+                    Required:
+                      - meetingName
+                      - meetingPlatform
+                      - meetingId
+                      - scheduledTime
+                - Name: start_meeting_now
+                  Description: "Start a meeting immediately with virtual participant"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingName:
+                        Type: string
+                        Description: "Name/title of the meeting"
+                      meetingPlatform:
+                        Type: string
+                        Description: "Platform (Zoom, Teams, Chime, Webex)"
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID (numeric ID only)"
+                      meetingPassword:
+                        Type: string
+                        Description: "Optional meeting password"
+                    Required:
+                      - meetingName
+                      - meetingPlatform
+                      - meetingId
 
   VirtualParticipantLambdaDataSourceRole:
     Type: AWS::IAM::Role
