@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - S3 Vectors integration for Knowledge Base storage (40-60% cost reduction vs OpenSearch)
 - MCP (Model Context Protocol) server with OAuth 2.0 authentication
-- Four MCP tools: list_meetings, search_lma_meetings, get_meeting_summary, get_meeting_transcript
+- Six MCP tools: list_meetings, search_lma_meetings, get_meeting_summary, get_meeting_transcript, start_meeting_now, schedule_meeting
 - MCP server test suite with quickstart guide
 - EnableDataRetentionOnDelete parameter support for S3 Vectors and OpenSearch resources
 - Add Nova 2 Pro model
