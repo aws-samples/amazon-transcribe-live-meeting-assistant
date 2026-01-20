@@ -48,8 +48,14 @@ let statusManager: VirtualParticipantStatusManager | null = null;
 let vpId: string | null = null;
 let mcpHandler: MCPCommandHandler | null = null;
 
+// Local testing mode - skip ALB registration and AppSync updates
+const isLocalTest = process.env.LOCAL_TEST === 'true';
+
 const main = async (): Promise<void> => {
     console.log('LMA Virtual Participant starting...');
+    if (isLocalTest) {
+        console.log('*** LOCAL TEST MODE - Skipping ALB registration and AppSync updates ***');
+    }
     console.log(`Meeting Platform: ${details.invite.meetingPlatform}`);
     console.log(`Meeting ID: ${details.invite.meetingId}`);
     console.log(`Meeting Name: ${details.invite.meetingName}`);
@@ -57,9 +63,9 @@ const main = async (): Promise<void> => {
     
 
 
-    // Initialize status manager if VP_ID is provided
+    // Initialize status manager if VP_ID is provided (skip in local test mode)
     vpId = details.invite.virtualParticipantId || null;
-    if (vpId) {
+    if (vpId && !isLocalTest) {
         try {
             statusManager = new VirtualParticipantStatusManager(vpId);
             
@@ -92,6 +98,13 @@ const main = async (): Promise<void> => {
         } catch (error) {
             console.error(`Failed to initialize status manager: ${error}`);
         }
+    } else if (isLocalTest) {
+        console.log('✓ Skipping status manager initialization (local test mode)');
+        // Generate a local CallId for testing
+        const { kinesisStreamManager } = await import('./kinesis-stream.js');
+        const callId = kinesisStreamManager.getCallId();
+        process.env.VP_CALL_ID = callId;
+        console.log(`Generated local test CallId: ${callId}`);
     }
 
     // Wait for VNC server to be ready before proceeding
@@ -121,8 +134,8 @@ const main = async (): Promise<void> => {
         throw new Error('VNC server initialization failed');
     }
 
-    // Register with ALB target group and wait for healthy
-    if (statusManager) {
+    // Register with ALB target group and wait for healthy (skip in local test mode)
+    if (statusManager && !isLocalTest) {
         try {
             console.log('Registering task with ALB target group...');
             const registered = await statusManager.registerWithTargetGroup();
@@ -137,10 +150,12 @@ const main = async (): Promise<void> => {
             await statusManager.setFailed('ALB registration error');
             throw new Error('ALB registration failed');
         }
+    } else if (isLocalTest) {
+        console.log('✓ Skipping ALB registration (local test mode)');
     }
 
     // Publish VNC endpoint via AppSync (only after ALB registration and health check)
-    if (statusManager) {
+    if (statusManager && !isLocalTest) {
         try {
             await statusManager.setVncReady();
             console.log('✓ VNC endpoint published via AppSync');
@@ -148,6 +163,8 @@ const main = async (): Promise<void> => {
             console.error('Failed to publish VNC endpoint:', error);
             // Non-critical - continue with meeting join
         }
+    } else if (isLocalTest) {
+        console.log('✓ Skipping AppSync VNC ready update (local test mode)');
     }
 
     // Calculate sleep time if meeting is scheduled for future
