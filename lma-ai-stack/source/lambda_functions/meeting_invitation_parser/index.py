@@ -72,24 +72,26 @@ You are a meeting invitation parser. Extract the following information from the 
 - isRecurring: Boolean indicating if this is a recurring meeting
 - recurrencePattern: Description of recurrence (e.g., "weekly", "every Wednesday") if recurring
 
-CRITICAL DATE AND TIME RULES:
+CRITICAL MEETING ID RULES:
 1. If information is not available or cannot be determined, use null for that field
 2. For meetingPlatform, use one of: ZOOM, TEAMS, CHIME, WEBEX, GOOGLE_MEET
 3. Extract meeting ID from URLs when possible (e.g., Zoom meeting ID from zoom.us URLs)
-4. For Zoom, extract the numeric meeting ID, not the full URL
+4. For Zoom, extract the numeric meeting ID, not the full URL. Remove any spaces from the meeting ID (e.g., "961 8750 1703" should become "96187501703")
 5. For Teams, extract the meeting URL or conference ID
+6. For Webex, extract ONLY the numeric meeting ID from URLs. Webex URLs look like https://meetXXXX.webex.com/meet/prYYYYYYYYYY where the meeting ID is ONLY the numeric part (YYYYYYYYYY) WITHOUT the "pr" prefix. For example, from https://meet1648.webex.com/meet/pr2552362251, the meetingId should be "2552362251" (not "pr2552362251")
+7. IMPORTANT: Always remove spaces from meeting IDs. Meeting IDs should be continuous strings without spaces (e.g., "96187501703" not "961 8750 1703")
 
 DATE AND TIME HANDLING:
-6. If NO specific date or time is mentioned in the invitation, set meetingDate and meetingTime to null
-7. If the meeting is recurring (contains words like "every", "weekly", "occurs", "recurring"), set isRecurring to true
-8. For recurring meetings, DO NOT use the start date from the invitation if it's in the past
-9. Instead, calculate the NEXT occurrence based on the recurrence pattern
-10. For "every Wednesday" meetings, find the next Wednesday from today
-11. For "weekly" meetings, find the next occurrence based on the day of the week mentioned
-12. ALWAYS ensure the final date is today or in the future
-13. If today matches the recurring day, use today's date only if the time is in the future
-14. If you cannot determine a specific date or time with confidence, leave those fields as null
-15. Do NOT guess or make up dates/times - only extract what is clearly stated
+7. If NO specific date or time is mentioned in the invitation, set meetingDate and meetingTime to null
+8. If the meeting is recurring (contains words like "every", "weekly", "occurs", "recurring"), set isRecurring to true
+9. For recurring meetings, DO NOT use the start date from the invitation if it's in the past
+10. Instead, calculate the NEXT occurrence based on the recurrence pattern
+11. For "every Wednesday" meetings, find the next Wednesday from today
+12. For "weekly" meetings, find the next occurrence based on the day of the week mentioned
+13. ALWAYS ensure the final date is today or in the future
+14. If today matches the recurring day, use today's date only if the time is in the future
+15. If you cannot determine a specific date or time with confidence, leave those fields as null
+16. Do NOT guess or make up dates/times - only extract what is clearly stated
 
 CURRENT CONTEXT:
 - Today's date: {current_date}
@@ -212,6 +214,10 @@ def validate_parsed_data(data):
     if not isinstance(data, dict):
         return data
     
+    # Remove spaces from meeting ID (common in formatted meeting IDs like "961 8750 1703")
+    if data.get("meetingId"):
+        data["meetingId"] = data["meetingId"].replace(" ", "")
+    
     # Validate platform
     valid_platforms = ["ZOOM", "TEAMS", "CHIME", "WEBEX", "GOOGLE_MEET"]
     if data.get("meetingPlatform") and data["meetingPlatform"] not in valid_platforms:
@@ -237,6 +243,21 @@ def validate_parsed_data(data):
         zoom_id_match = re.search(r'(\d{9,11})', meeting_id)
         if zoom_id_match:
             data["meetingId"] = zoom_id_match.group(1)
+    
+    # Clean up meeting ID for Webex (extract numeric ID, remove "pr" prefix)
+    # Webex URLs look like: https://meetXXXX.webex.com/meet/prYYYYYYYYYY
+    # The meeting ID should be ONLY the numeric part (YYYYYYYYYY) without "pr"
+    if data.get("meetingPlatform") == "WEBEX" and data.get("meetingId"):
+        meeting_id = data["meetingId"]
+        # If it's a full URL, extract the path part after /meet/
+        webex_url_match = re.search(r'webex\.com/meet/(?:pr)?(\d+)', meeting_id, re.IGNORECASE)
+        if webex_url_match:
+            data["meetingId"] = webex_url_match.group(1)
+        else:
+            # If it starts with "pr" followed by digits, remove the "pr" prefix
+            webex_pr_match = re.match(r'^pr(\d+)$', meeting_id, re.IGNORECASE)
+            if webex_pr_match:
+                data["meetingId"] = webex_pr_match.group(1)
     
     # Calculate next occurrence for recurring meetings
     data = calculate_next_occurrence(data)
