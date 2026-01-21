@@ -72,7 +72,7 @@ You are a meeting invitation parser. Extract the following information from the 
 - isRecurring: Boolean indicating if this is a recurring meeting
 - recurrencePattern: Description of recurrence (e.g., "weekly", "every Wednesday") if recurring
 
-CRITICAL MEETING ID RULES:
+CRITICAL MEETING ID AND PASSWORD RULES:
 1. If information is not available or cannot be determined, use null for that field
 2. For meetingPlatform, use one of: ZOOM, TEAMS, CHIME, WEBEX, GOOGLE_MEET
 3. Extract meeting ID from URLs when possible (e.g., Zoom meeting ID from zoom.us URLs)
@@ -80,6 +80,7 @@ CRITICAL MEETING ID RULES:
 5. For Teams, extract the meeting URL or conference ID
 6. For Webex, extract ONLY the numeric meeting ID from URLs. Webex URLs look like https://meetXXXX.webex.com/meet/prYYYYYYYYYY where the meeting ID is ONLY the numeric part (YYYYYYYYYY) WITHOUT the "pr" prefix. For example, from https://meet1648.webex.com/meet/pr2552362251, the meetingId should be "2552362251" (not "pr2552362251")
 7. IMPORTANT: Always remove spaces from meeting IDs. Meeting IDs should be continuous strings without spaces (e.g., "96187501703" not "961 8750 1703")
+8. For Zoom passwords from URLs: Extract the COMPLETE password from the URL's pwd parameter. The password can contain letters, numbers, and special characters including periods (.). Extract everything after "pwd=" up to the next "&" or end of URL. Do NOT truncate the password at periods or other special characters.
 
 DATE AND TIME HANDLING:
 7. If NO specific date or time is mentioned in the invitation, set meetingDate and meetingTime to null

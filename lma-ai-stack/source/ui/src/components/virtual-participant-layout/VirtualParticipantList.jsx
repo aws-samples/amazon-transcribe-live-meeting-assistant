@@ -694,7 +694,6 @@ const VirtualParticipantList = () => {
                 value={createForm.meetingPassword}
                 onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, meetingPassword: detail.value }))}
                 placeholder="Enter meeting password if required"
-                type="password"
               />
             </FormField>
 
