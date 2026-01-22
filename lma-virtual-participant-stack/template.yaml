@@ -400,6 +400,33 @@ Resources:
                   - "ecr:GetAuthorizationToken"
                 Resource:
                   - "*"
+        - PolicyName: "ECSDeploymentPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "ecs:UpdateService"
+                  - "ecs:DescribeServices"
+                  - "ecs:ListServices"
+                  - "ecs:DescribeClusters"
+                  - "ecs:ListContainerInstances"
+                  - "ecs:DescribeContainerInstances"
+                Resource:
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "autoscaling:DescribeAutoScalingGroups"
+                  - "autoscaling:TerminateInstanceInAutoScalingGroup"
+                  - "autoscaling:SetDesiredCapacity"
+                Resource:
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "ec2:DescribeInstances"
+                  - "ec2:TerminateInstances"
+                Resource:
+                  - "*"
 
   VirtualParticipantBuildProject:
     Type: AWS::CodeBuild::Project
@@ -445,7 +472,63 @@ Resources:
                   - echo Pushing SOCI index to ECR...
                   - soci push --user AWS:$PASSWORD ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
                   - echo Build completed on `date`
-          - { ImageRepo: !Ref ImageRepo }
+                  - |
+                    echo "Deploying new image to ECS..."
+                    # Find the ECS service for this stack
+                    CLUSTER_ARN="${ClusterArn}"
+                    SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_ARN --region ${AWS::Region} --query 'serviceArns[0]' --output text)
+                    
+                    if [ "$SERVICE_NAME" != "None" ] && [ -n "$SERVICE_NAME" ]; then
+                      echo "Found ECS service: $SERVICE_NAME"
+                      
+                      # Get service details to determine launch type
+                      LAUNCH_TYPE=$(aws ecs describe-services --cluster $CLUSTER_ARN --services $SERVICE_NAME --region ${AWS::Region} --query 'services[0].launchType' --output text)
+                      echo "Launch type: $LAUNCH_TYPE"
+                      
+                      # Force new deployment to pull latest image
+                      echo "Forcing ECS service update to deploy new image..."
+                      aws ecs update-service --cluster $CLUSTER_ARN --service $SERVICE_NAME --force-new-deployment --region ${AWS::Region}
+                      
+                      # For EC2 launch type, terminate instances to force fresh pull
+                      if [ "$LAUNCH_TYPE" = "EC2" ]; then
+                        echo "EC2 launch type detected - terminating instances to force image refresh..."
+                        
+                        # Get container instances
+                        CONTAINER_INSTANCES=$(aws ecs list-container-instances --cluster $CLUSTER_ARN --region ${AWS::Region} --query 'containerInstanceArns' --output text)
+                        
+                        if [ -n "$CONTAINER_INSTANCES" ]; then
+                          # Get EC2 instance IDs from container instances
+                          for CONTAINER_INSTANCE in $CONTAINER_INSTANCES; do
+                            EC2_INSTANCE_ID=$(aws ecs describe-container-instances --cluster $CLUSTER_ARN --container-instances $CONTAINER_INSTANCE --region ${AWS::Region} --query 'containerInstances[0].ec2InstanceId' --output text)
+                            
+                            if [ -n "$EC2_INSTANCE_ID" ] && [ "$EC2_INSTANCE_ID" != "None" ]; then
+                              echo "Terminating EC2 instance: $EC2_INSTANCE_ID"
+                              
+                              # Check if instance is in an Auto Scaling Group
+                              ASG_NAME=$(aws autoscaling describe-auto-scaling-instances --instance-ids $EC2_INSTANCE_ID --region ${AWS::Region} --query 'AutoScalingInstances[0].AutoScalingGroupName' --output text 2>/dev/null || echo "")
+                              
+                              if [ -n "$ASG_NAME" ] && [ "$ASG_NAME" != "None" ]; then
+                                echo "Instance is in ASG: $ASG_NAME - terminating via ASG..."
+                                aws autoscaling terminate-instance-in-auto-scaling-group --instance-id $EC2_INSTANCE_ID --should-decrement-desired-capacity false --region ${AWS::Region}
+                              else
+                                echo "Instance not in ASG - terminating directly..."
+                                aws ec2 terminate-instances --instance-ids $EC2_INSTANCE_ID --region ${AWS::Region}
+                              fi
+                            fi
+                          done
+                          echo "EC2 instances terminated. Auto Scaling will launch new instances with fresh Docker image."
+                        else
+                          echo "No container instances found in cluster."
+                        fi
+                      else
+                        echo "FARGATE launch type - service update will automatically use new image."
+                      fi
+                      
+                      echo "Deployment initiated successfully!"
+                    else
+                      echo "No ECS service found in cluster - skipping deployment."
+                    fi
+          - { ImageRepo: !Ref ImageRepo, ClusterArn: !GetAtt Cluster.Arn }
       Environment:
         Type: LINUX_CONTAINER
         Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
