@@ -1092,7 +1092,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1125,7 +1125,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1158,7 +1158,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1213,7 +1213,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1224,7 +1224,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1246,7 +1246,7 @@
     "fix": "Manually verify that the TaskRole permissions align with the container's actual requirements. Follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1268,7 +1268,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1301,7 +1301,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "Checkov",
@@ -1336,7 +1336,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1369,7 +1369,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1402,7 +1402,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1435,7 +1435,7 @@
     "fix": "Avoid using wildcard actions like '*' or 'service:*'. Specify only the exact actions required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1446,7 +1446,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1457,7 +1457,7 @@
     "fix": "Store sensitive parameters in AWS Secrets Manager or SSM Parameter Store as SecureString and reference them using secrets in the task definition.",
     "priority": "HIGH",
     "check_id": "ECS-002",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1468,7 +1468,7 @@
     "fix": "Manually verify that the TaskRole permissions align with the container's actual requirements. Follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1490,7 +1490,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -1501,7 +1501,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "security-matrix",
@@ -2132,7 +2132,7 @@
     "check_id": "B105",
     "priority": "High",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html",
-    "status": "suppressed"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -2274,7 +2274,7 @@
     "check_id": "CKV_AWS_119",
     "priority": "INFO",
     "fix": "Configure AWS::DynamoDB::Table with customer-managed KMS encryption by setting 'SSESpecification' with 'SSEEnabled: true' and 'KMSMasterKeyId' referencing an AWS::KMS::Key resource instead of using default AWS-owned keys for enhanced control.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "DynamoDB Table",
     "resourceName": "VirtualParticipantTable",
@@ -2288,7 +2288,7 @@
     "check_id": "CKV_AWS_117",
     "priority": "LOW",
     "fix": "Configure AWS::Lambda::Function to run within VPC by setting 'VpcConfig' with 'SubnetIds' and 'SecurityGroupIds' properties. This provides network isolation and enables access to VPC-only resources like RDS instances.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "VirtualParticipantManagerFunction",
@@ -2302,7 +2302,7 @@
     "check_id": "CKV_AWS_116",
     "priority": "LOW",
     "fix": "Configure AWS::Lambda::Function with Dead Letter Queue by setting 'DeadLetterConfig' with 'TargetArn' referencing an AWS::SQS::Queue or AWS::SNS::Topic resource. This captures failed function invocations for debugging and reprocessing.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "VirtualParticipantManagerFunction",
@@ -2316,7 +2316,7 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "VirtualParticipantManagerFunction",
@@ -2330,7 +2330,7 @@
     "check_id": "CKV_AWS_115",
     "priority": "LOW",
     "fix": "Configure AWS::Lambda::Function with concurrent execution limit by setting 'ReservedConcurrencyLimit' property to an appropriate value. This prevents the function from consuming all available concurrent executions in your account.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "VirtualParticipantManagerFunction",
@@ -2344,7 +2344,7 @@
     "check_id": "CKV_AWS_119",
     "priority": "INFO",
     "fix": "Configure AWS::DynamoDB::Table with customer-managed KMS encryption by setting 'SSESpecification' with 'SSEEnabled: true' and 'KMSMasterKeyId' referencing an AWS::KMS::Key resource instead of using default AWS-owned keys for enhanced control.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "DynamoDB Table",
     "resourceName": "VPTaskRegistry",
@@ -2358,7 +2358,7 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "MCPServerAnalyticsFunction",
@@ -2372,7 +2372,7 @@
     "check_id": "CKV_AWS_91",
     "priority": "INFO",
     "fix": "Enable Application/Network Load Balancer access logging by adding 'LoadBalancerAttributes' with 'Key: access_logs.s3.enabled', 'Value: true' and 'Key: access_logs.s3.bucket' with S3 bucket name in AWS::ElasticLoadBalancingV2::LoadBalancer resource for comprehensive traffic monitoring.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "ElasticLoadBalancingV2 LoadBalancer",
     "resourceName": "VNCALB",
@@ -2386,7 +2386,7 @@
     "check_id": "CKV_AWS_131",
     "priority": "MEDIUM",
     "fix": "Configure your AWS::ElasticLoadBalancingV2::LoadBalancer to drop invalid HTTP headers by setting the 'LoadBalancerAttributes' property to include an attribute with 'Key: routing.http.drop_invalid_header_fields.enabled' and 'Value: true'. This prevents potentially malicious HTTP headers from being forwarded to your application.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "ElasticLoadBalancingV2 LoadBalancer",
     "resourceName": "VNCALB",
@@ -2400,7 +2400,7 @@
     "check_id": "CKV_AWS_103",
     "priority": "HIGH",
     "fix": "Configure Application Load Balancer listeners to use TLS 1.2 or higher by setting appropriate 'SslPolicy' (e.g., 'ELBSecurityPolicy-TLS-1-2-2017-01') in the AWS::ElasticLoadBalancingV2::Listener resource. This ensures secure communication using modern encryption protocols.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "ElasticLoadBalancingV2 Listener",
     "resourceName": "VNCALBListener",
@@ -2414,7 +2414,7 @@
     "check_id": "CKV_AWS_2",
     "priority": "MEDIUM",
     "fix": "For AWS::ElasticLoadBalancingV2::Listener resources, ensure the 'Protocol' property is set to 'HTTPS' or 'TLS' rather than 'HTTP' or 'TCP'. If you need to support HTTP, create a redirect listener with 'DefaultActions.Type' set to 'redirect' and 'RedirectConfig.Protocol' set to 'HTTPS'. This enforces encrypted communications between clients and your load balancer.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "ElasticLoadBalancingV2 Listener",
     "resourceName": "VNCALBListener",
@@ -2610,7 +2610,7 @@
     "check_id": "CKV_AWS_117",
     "priority": "LOW",
     "fix": "Configure AWS::Lambda::Function to run within VPC by setting 'VpcConfig' with 'SubnetIds' and 'SecurityGroupIds' properties. This provides network isolation and enables access to VPC-only resources like RDS instances.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-virtual-participant-stack-template",
     "resourceType": "Lambda Function",
     "resourceName": "VirtualParticipantSchedulerFunction",
@@ -2624,7 +2624,7 @@
     "check_id": "CKV_AWS_116",
     "priority": "LOW",
     "fix": "Configure AWS::Lambda::Function with Dead Letter Queue by setting 'DeadLetterConfig' with 'TargetArn' referencing an AWS::SQS::Queue or AWS::SNS::Topic resource. This captures failed function invocations for debugging and reprocessing.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-virtual-participant-stack-template",
     "resourceType": "Lambda Function",
     "resourceName": "VirtualParticipantSchedulerFunction",
@@ -2638,7 +2638,7 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-virtual-participant-stack-template",
     "resourceType": "Lambda Function",
     "resourceName": "VirtualParticipantSchedulerFunction",
@@ -2652,7 +2652,7 @@
     "check_id": "CKV_AWS_115",
     "priority": "LOW",
     "fix": "Configure AWS::Lambda::Function with concurrent execution limit by setting 'ReservedConcurrencyLimit' property to an appropriate value. This prevents the function from consuming all available concurrent executions in your account.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-virtual-participant-stack-template",
     "resourceType": "Lambda Function",
     "resourceName": "VirtualParticipantSchedulerFunction",
@@ -2667,7 +2667,7 @@
     "fix": "Ensure the IAM role has at least CloudWatch Logs and Systems Manager permissions. Consider adding the AmazonSSMManagedInstanceCore and CloudWatchAgentServerPolicy managed policies.",
     "priority": "HIGH",
     "check_id": "EC2-002",
-    "status": "Open",
+    "status": "suppressed",
     "isCustomResource": false
   },
   {
@@ -2679,7 +2679,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open",
+    "status": "resolved",
     "isCustomResource": false
   },
   {
@@ -2691,7 +2691,7 @@
     "fix": "Ensure the TaskRoleArn references an IAM role with least-privilege policies that grant only the permissions required for the task to function.",
     "priority": "HIGH",
     "check_id": "ECS-006",
-    "status": "Open",
+    "status": "suppressed",
     "isCustomResource": false
   },
   {
@@ -2703,7 +2703,7 @@
     "fix": "Replace wildcard resource '*' with specific ARNs to limit the scope of permissions to only the resources required by the container's functional purpose.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open",
+    "status": "resolved",
     "isCustomResource": false
   },
   {
@@ -2715,7 +2715,7 @@
     "fix": "Add PermissionsBoundary to limit IAM resource creation scope",
     "priority": "HIGH",
     "check_id": "IAM-009",
-    "status": "Open",
+    "status": "suppressed",
     "isCustomResource": false
   },
   {
@@ -2727,7 +2727,7 @@
     "fix": "Ensure IAM roles follow the principle of least privilege by granting only the specific permissions needed by the container workload.",
     "priority": "HIGH",
     "check_id": "ECS-010",
-    "status": "Open",
+    "status": "resolved",
     "isCustomResource": false
   },
   {
@@ -2752,6 +2752,227 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed",
+    "isCustomResource": false
+  },
+  {
+    "source": "Bandit",
+    "path": "lma-ai-stack/source/lambda_layers/transcript_enrichment_layer/eventprocessor_utils/eventprocessor.py",
+    "line": 75,
+    "issue": "Possible hardcoded password: ''",
+    "fix": "Remove hardcoded password strings from source code. Create a .env file named after the Python file (e.g., for script.py create script.env in the same directory) containing the ACTUAL secret values extracted from the code. Update the Python code to: 1) add 'from dotenv import load_dotenv' import if not present, 2) call load_dotenv('script.env') near the top of the file to load the environment file, 3) use os.environ.get() to read the values. Add *.env to the project root .gitignore.",
+    "check_id": "B105",
+    "priority": "High",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html",
+    "status": "suppressed"
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 3114,
+    "issue": "Ensure DynamoDB Tables are encrypted using a KMS Customer Managed CMK",
+    "check_id": "CKV_AWS_119",
+    "priority": "INFO",
+    "fix": "Configure AWS::DynamoDB::Table with customer-managed KMS encryption by setting 'SSESpecification' with 'SSEEnabled: true' and 'KMSMasterKeyId' referencing an AWS::KMS::Key resource instead of using default AWS-owned keys for enhanced control.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "DynamoDB Table",
+    "resourceName": "VirtualParticipantTable",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 3540,
+    "issue": "Ensure that AWS Lambda function is configured inside a VPC",
+    "check_id": "CKV_AWS_117",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function to run within VPC by setting 'VpcConfig' with 'SubnetIds' and 'SecurityGroupIds' properties. This provides network isolation and enables access to VPC-only resources like RDS instances.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 3540,
+    "issue": "Ensure that AWS Lambda function is configured for a Dead Letter Queue(DLQ)",
+    "check_id": "CKV_AWS_116",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function with Dead Letter Queue by setting 'DeadLetterConfig' with 'TargetArn' referencing an AWS::SQS::Queue or AWS::SNS::Topic resource. This captures failed function invocations for debugging and reprocessing.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 3540,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 3540,
+    "issue": "Ensure that AWS Lambda function is configured for function-level concurrent execution limit",
+    "check_id": "CKV_AWS_115",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function with concurrent execution limit by setting 'ReservedConcurrencyLimit' property to an appropriate value. This prevents the function from consuming all available concurrent executions in your account.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 3624,
+    "issue": "Ensure DynamoDB Tables are encrypted using a KMS Customer Managed CMK",
+    "check_id": "CKV_AWS_119",
+    "priority": "INFO",
+    "fix": "Configure AWS::DynamoDB::Table with customer-managed KMS encryption by setting 'SSESpecification' with 'SSEEnabled: true' and 'KMSMasterKeyId' referencing an AWS::KMS::Key resource instead of using default AWS-owned keys for enhanced control.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "DynamoDB Table",
+    "resourceName": "VPTaskRegistry",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 3943,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "MCPServerAnalyticsFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4522,
+    "issue": "Ensure the ELBv2 (Application/Network) has access logging enabled",
+    "check_id": "CKV_AWS_91",
+    "priority": "INFO",
+    "fix": "Enable Application/Network Load Balancer access logging by adding 'LoadBalancerAttributes' with 'Key: access_logs.s3.enabled', 'Value: true' and 'Key: access_logs.s3.bucket' with S3 bucket name in AWS::ElasticLoadBalancingV2::LoadBalancer resource for comprehensive traffic monitoring.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "ElasticLoadBalancingV2 LoadBalancer",
+    "resourceName": "VNCALB",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4522,
+    "issue": "Ensure that ALB drops HTTP headers",
+    "check_id": "CKV_AWS_131",
+    "priority": "MEDIUM",
+    "fix": "Configure your AWS::ElasticLoadBalancingV2::LoadBalancer to drop invalid HTTP headers by setting the 'LoadBalancerAttributes' property to include an attribute with 'Key: routing.http.drop_invalid_header_fields.enabled' and 'Value: true'. This prevents potentially malicious HTTP headers from being forwarded to your application.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "ElasticLoadBalancingV2 LoadBalancer",
+    "resourceName": "VNCALB",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4560,
+    "issue": "Ensure that Load Balancer Listener is using at least TLS v1.2",
+    "check_id": "CKV_AWS_103",
+    "priority": "HIGH",
+    "fix": "Configure Application Load Balancer listeners to use TLS 1.2 or higher by setting appropriate 'SslPolicy' (e.g., 'ELBSecurityPolicy-TLS-1-2-2017-01') in the AWS::ElasticLoadBalancingV2::Listener resource. This ensures secure communication using modern encryption protocols.",
+    "status": "suppressed",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "ElasticLoadBalancingV2 Listener",
+    "resourceName": "VNCALBListener",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4560,
+    "issue": "Ensure ALB protocol is HTTPS",
+    "check_id": "CKV_AWS_2",
+    "priority": "MEDIUM",
+    "fix": "For AWS::ElasticLoadBalancingV2::Listener resources, ensure the 'Protocol' property is set to 'HTTPS' or 'TLS' rather than 'HTTP' or 'TCP'. If you need to support HTTP, create a redirect listener with 'DefaultActions.Type' set to 'redirect' and 'RedirectConfig.Protocol' set to 'HTTPS'. This enforces encrypted communications between clients and your load balancer.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "ElasticLoadBalancingV2 Listener",
+    "resourceName": "VNCALBListener",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-virtual-participant-stack/template.yaml",
+    "line": 1580,
+    "issue": "Ensure that AWS Lambda function is configured inside a VPC",
+    "check_id": "CKV_AWS_117",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function to run within VPC by setting 'VpcConfig' with 'SubnetIds' and 'SecurityGroupIds' properties. This provides network isolation and enables access to VPC-only resources like RDS instances.",
+    "status": "Open",
+    "stack": "lma-virtual-participant-stack-template",
+    "resourceType": "Lambda Function",
+    "resourceName": "VirtualParticipantSchedulerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-virtual-participant-stack/template.yaml",
+    "line": 1580,
+    "issue": "Ensure that AWS Lambda function is configured for a Dead Letter Queue(DLQ)",
+    "check_id": "CKV_AWS_116",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function with Dead Letter Queue by setting 'DeadLetterConfig' with 'TargetArn' referencing an AWS::SQS::Queue or AWS::SNS::Topic resource. This captures failed function invocations for debugging and reprocessing.",
+    "status": "Open",
+    "stack": "lma-virtual-participant-stack-template",
+    "resourceType": "Lambda Function",
+    "resourceName": "VirtualParticipantSchedulerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-virtual-participant-stack/template.yaml",
+    "line": 1580,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "Open",
+    "stack": "lma-virtual-participant-stack-template",
+    "resourceType": "Lambda Function",
+    "resourceName": "VirtualParticipantSchedulerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-virtual-participant-stack/template.yaml",
+    "line": 1580,
+    "issue": "Ensure that AWS Lambda function is configured for function-level concurrent execution limit",
+    "check_id": "CKV_AWS_115",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function with concurrent execution limit by setting 'ReservedConcurrencyLimit' property to an appropriate value. This prevents the function from consuming all available concurrent executions in your account.",
+    "status": "Open",
+    "stack": "lma-virtual-participant-stack-template",
+    "resourceType": "Lambda Function",
+    "resourceName": "VirtualParticipantSchedulerFunction",
     "isCustomResource": false
   }
 ]
