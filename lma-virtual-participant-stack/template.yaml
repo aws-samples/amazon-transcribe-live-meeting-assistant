@@ -1540,6 +1540,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
@@ -1582,6 +1583,8 @@ Resources:
       FunctionName: !Sub "${LMAStackName}-VPScheduler"
       Handler: index.lambda_handler
       Runtime: python3.12
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: |
           import os
