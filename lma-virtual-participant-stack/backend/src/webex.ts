@@ -9,10 +9,23 @@ export default class Webex {
         frame: Frame,
         messages: string[]
     ): Promise<void> {
-        const messageElement = await frame.waitForSelector('.ql-editor[contenteditable="true"]');
+        // Try normal Webex chat input (Quill editor)
+        let messageElement = await frame.$('.ql-editor[contenteditable="true"]');
+        
+        // If not found, try enterprise Webex chat input (textarea)
+        if (!messageElement) {
+            console.log('Standard chat input not found, trying enterprise selector...');
+            messageElement = await frame.$('textarea[placeholder="Type your message here"]');
+        }
+        
+        if (!messageElement) {
+            throw new Error('Chat input field not found with any selector');
+        }
+        
         for (const message of messages) {
-            await messageElement?.type(message);
-            await messageElement?.press('Enter');
+            await messageElement.type(message);
+            await messageElement.press('Enter');
+            await new Promise(resolve => setTimeout(resolve, 500)); // Small delay between messages
         }
         console.log('Sent messages:', messages);
     }
@@ -57,8 +70,13 @@ export default class Webex {
                 const thinIframe = await thinIframeElement.contentFrame();
                 
                 if (thinIframe) {
+                    // Wait a moment for iframe content to load
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
                     // Check for guest form (name/email)
                     const nameInput = await thinIframe.$('input[aria-labelledby="nameLabel"]');
+                    console.log(`Guest form name input found: ${nameInput !== null}`);
+                    
                     if (nameInput) {
                         usedEnterpriseFlow = true;
                         console.log('Enterprise Webex guest form detected, auto-filling name and email...');
@@ -110,23 +128,32 @@ export default class Webex {
                             const audioButton = await thinIframe.$('#audioControlButton');
                             if (audioButton) {
                                 const audioButtonText = await audioButton.evaluate((el: Element) => el.textContent || '');
+                                console.log(`Audio button text: "${audioButtonText}"`);
                                 if (audioButtonText.includes('Mute')) {
                                     console.log('Clicking Mute button...');
                                     await audioButton.click();
                                     await new Promise(resolve => setTimeout(resolve, 1000));
+                                } else {
+                                    console.log('Audio already muted');
                                 }
+                            } else {
+                                console.log('Audio control button not found');
                             }
                             
                             console.log('Looking for video control button...');
-                            const videoButtons = await thinIframe.$$('button');
-                            for (const button of videoButtons) {
-                                const text = await button.evaluate((el: Element) => el.textContent || '');
-                                if (text.includes('Stop video')) {
+                            const videoButton = await thinIframe.$('button[data-doi="VIDEO:STOP_VIDEO:MEETSIMPLE_INTERSTITIAL"]');
+                            if (videoButton) {
+                                const videoButtonText = await videoButton.evaluate((el: Element) => el.textContent || '');
+                                console.log(`Video button text: "${videoButtonText}"`);
+                                if (videoButtonText.includes('Stop video')) {
                                     console.log('Clicking Stop video button...');
-                                    await button.click();
+                                    await videoButton.click();
                                     await new Promise(resolve => setTimeout(resolve, 1000));
-                                    break;
+                                } else {
+                                    console.log('Video already stopped');
                                 }
+                            } else {
+                                console.log('Video control button not found');
                             }
                             
                             console.log('Clicking Join meeting button...');
@@ -224,28 +251,74 @@ export default class Webex {
             }
             if (!frame) {
                 // Try unified-webclient-iframe as fallback
-                const frameElement = await page.waitForSelector(this.iframe, { timeout: 15000 });
-                frame = (await frameElement?.contentFrame()) || null;
+                const frameElement = await page.waitForSelector(this.iframe, { timeout: 15000 }).catch(() => null);
+                if (frameElement) {
+                    frame = (await frameElement.contentFrame()) || null;
+                }
             }
             if (!frame) {
                 throw new Error('Failed to access Webex meeting frame after enterprise flow');
             }
+            
+            // For enterprise Webex, mute/stop video again in the actual meeting
+            // (the pre-join settings don't always persist)
+            console.log('Ensuring audio is muted in meeting...');
+            try {
+                const muteButton = await frame.waitForSelector('button[aria-label="Mute"]', { timeout: 5000 });
+                if (muteButton) {
+                    const buttonText = await muteButton.evaluate((el: Element) => el.textContent || '');
+                    if (buttonText.includes('Mute')) {
+                        console.log('Clicking Mute button in meeting...');
+                        await muteButton.click();
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
+            } catch (error) {
+                console.log('Could not mute audio in meeting:', error);
+            }
+            
+            console.log('Ensuring video is stopped in meeting...');
+            try {
+                const stopVideoButton = await frame.waitForSelector('button[aria-label="Stop video"]', { timeout: 5000 });
+                if (stopVideoButton) {
+                    console.log('Clicking Stop video button in meeting...');
+                    await stopVideoButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            } catch (error) {
+                console.log('Could not stop video in meeting:', error);
+            }
         }
 
         console.log("Opening chat panel.");
+        let chatPanelOpened = false;
         try {
-            await frame.waitForSelector('mdc-button[data-test="in-meeting-chat-toggle-button"]', {
-                timeout: details.waitingTimeout,
-            });
-            await frame.click('mdc-button[data-test="in-meeting-chat-toggle-button"]');
-            console.log("Chat panel button clicked successfully");
+            // Try standard selector first
+            let chatButton = await frame.waitForSelector('mdc-button[data-test="in-meeting-chat-toggle-button"]', {
+                timeout: 5000,
+            }).catch(() => null);
+            
+            // If not found, try enterprise Webex selector
+            if (!chatButton) {
+                console.log('Standard chat button not found, trying enterprise selector...');
+                chatButton = await frame.waitForSelector('button[aria-label="Chat panel"]', {
+                    timeout: 5000,
+                }).catch(() => null);
+            }
+            
+            if (chatButton) {
+                await chatButton.click();
+                console.log("Chat panel button clicked successfully");
+                chatPanelOpened = true;
+                
+                // Wait for chat panel to fully open and input field to be ready
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            } else {
+                console.log("Chat panel button not found with any selector");
+            }
         } catch(error: any) {
-            console.log("Chat panel button error:", error.message);
-            console.log("Your scribe was not admitted into the meeting.");
-            return;
+            console.log(`Chat panel error: ${error.message}`);
         }
-
-        await new Promise(resolve => setTimeout(resolve, 1000));
 
         if (details.invite.virtualParticipantId) {
             const statusManager = createStatusManager(details.invite.virtualParticipantId);
@@ -253,8 +326,17 @@ export default class Webex {
         }
         console.log('Successfully joined Webex meeting');
 
-        console.log('Sending introduction messages.');
-        await this.sendMessages(frame, details.introMessages);
+        // Send introduction messages only if chat panel is available
+        if (chatPanelOpened) {
+            console.log('Sending introduction messages.');
+            try {
+                await this.sendMessages(frame, details.introMessages);
+            } catch (error) {
+                console.log('Failed to send introduction messages:', error);
+            }
+        } else {
+            console.log('Skipping introduction messages (chat panel not available)');
+        }
 
         // Set up speaker change monitoring
         await page.exposeFunction('speakerChange', async (speaker: string) => {
