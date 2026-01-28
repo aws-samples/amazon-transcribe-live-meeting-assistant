@@ -685,7 +685,7 @@ const VirtualParticipantList = () => {
               <Input
                 value={createForm.meetingId}
                 onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, meetingId: detail.value }))}
-                placeholder="Enter meeting ID or URL"
+                placeholder="Enter meeting ID"
               />
             </FormField>
 
@@ -694,7 +694,6 @@ const VirtualParticipantList = () => {
                 value={createForm.meetingPassword}
                 onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, meetingPassword: detail.value }))}
                 placeholder="Enter meeting password if required"
-                type="password"
               />
             </FormField>
 

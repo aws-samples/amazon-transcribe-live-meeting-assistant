@@ -2249,6 +2249,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
@@ -2280,6 +2281,8 @@ Resources:
       Runtime: python3.12
       Timeout: 60
       Role: !GetAtt GetEventApiDnsRole.Arn
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: |
           import boto3
@@ -4391,6 +4394,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
@@ -4422,6 +4426,8 @@ Resources:
       Runtime: python3.12
       Timeout: 60
       Role: !GetAtt GetCloudFrontPrefixListRole.Arn
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: |
           import boto3

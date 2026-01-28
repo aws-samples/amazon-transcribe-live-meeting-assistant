@@ -24,17 +24,27 @@ export default class Webex {
         const meetingTextElement = await page.waitForSelector('#join-meeting-form');
         await meetingTextElement?.type(details.invite.meetingId);
         await meetingTextElement?.press('Enter');
-        const joinFromBrowserButton = await page.waitForSelector('#broadcom-center-right', { timeout: 10000 });
-        if (joinFromBrowserButton) {
-            console.log('Found "Join from this browser" button, clicking it.');
-            await Promise.all([
-                page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {
-                    console.log('Navigation wait timed out or not needed, continuing...');
-                }),
-                joinFromBrowserButton.click()
-            ]);
-            console.log('Navigation completed after button click.');
+        
+        // Wait a moment for the page to stabilize after entering meeting ID
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Try to click "Join from this browser" button if it appears
+        // Sometimes Webex skips this step and goes directly to the meeting join page
+        console.log('Checking for "Join from this browser" button...');
+        try {
+            const joinFromBrowserButton = await page.waitForSelector('#broadcom-center-right', { timeout: 5000 });
+            if (joinFromBrowserButton) {
+                console.log('Found "Join from this browser" button, clicking it.');
+                await joinFromBrowserButton.click();
+                // Wait for the page to load after clicking
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+        } catch (error) {
+            console.log('"Join from this browser" button not found - Webex may have auto-detected browser mode. Continuing...');
         }
+        
+        // Wait for the page to stabilize
+        await new Promise(resolve => setTimeout(resolve, 2000));
         console.log('Launching app.');
         const frameElement = await page.waitForSelector(this.iframe, { timeout: 15000 });
         const frame = await frameElement?.contentFrame();

@@ -260,7 +260,7 @@ async def execute_create_call_mutation(
     CUSTOMER_PHONE_NUMBER = message.get("CustomerPhoneNumber", "")
     CALL_ID = message.get("CallId", "")
 
-    owner = get_owner_from_jwt(message.get("AccessToken"), False)
+    owner = get_owner_from_jwt(message.get("AccessToken"))
     # If JWT decode fails (returns None), use AgentId as owner (for VP service calls)
     if owner is None:
         owner = message.get("AgentId", "system@lma.aws")
