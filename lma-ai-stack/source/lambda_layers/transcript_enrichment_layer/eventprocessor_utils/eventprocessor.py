@@ -57,21 +57,32 @@ def get_meeting_ttl():
 def get_transcription_ttl():
     return get_ttl(TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS)
 
-def get_owner_from_jwt(jwt_token, verifySignature):
+def get_owner_from_jwt(jwt_token):
+    """
+    Extract owner from JWT token with proper signature verification.
     
+    Args:
+        jwt_token: JWT access token from Cognito
+        
+    Returns:
+        username from token if valid, None if token is empty/invalid
+        
+    Note:
+        Always verifies JWT signature for security. Empty tokens return None
+        so caller can fall back to AgentId (for Virtual Participant service calls).
+    """
     # Handle empty tokens by using AgentId as fallback (for VP service calls)
     if not jwt_token or jwt_token == '':
         print("Empty JWT token, using AgentId as owner")
         return None  # Will be handled by caller to use AgentId
     
     try:
-        if (verifySignature == False):
-            decoded_jwt = jwt.decode(jwt_token, options={"verify_signature": False})
-            print("DECODED JWT", decoded_jwt)
-        else:
-            decoded_jwt = verify_cognito_token(jwt_token)
-            
-        return decoded_jwt['username']
+        # ALWAYS verify the token signature for security
+        decoded_jwt = verify_cognito_token(jwt_token)
+        
+        if decoded_jwt:
+            return decoded_jwt['username']
+        return None
     except Exception as e:
         print(f"JWT decode failed: {e}, using AgentId as owner")
         return None  # Will be handled by caller to use AgentId
@@ -409,7 +420,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
             sentiment = message["Sentiment"]
         
         if message.get("AccessToken", None):
-            owner = get_owner_from_jwt(message.get("AccessToken"), False)
+            owner = get_owner_from_jwt(message.get("AccessToken"), True)
             
         segments.append(
             dict(
