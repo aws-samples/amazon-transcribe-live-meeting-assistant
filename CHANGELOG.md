@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Amazon Quick Suite MCP integration documentation with step-by-step setup guide
+- MCP server configuration outputs exposed in main CloudFormation stack (MCPServerEndpoint, MCPServerClientId, etc.)
+
 ## [0.2.24] - 01/07/26
 
 ### Added
