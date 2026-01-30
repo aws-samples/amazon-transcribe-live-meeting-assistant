@@ -1,4 +1,4 @@
-# Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Bedrock, and Amazon Q Business or Knowledge Bases for Amazon Bedrock
+# Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Bedrock, Amazon Quick Suite, and Strands Agents
 
 _Companion AWS blog post: [Live Meeting Assistant with Amazon Transcribe, Amazon Bedrock, and Amazon Q Business or Knowledge Bases for Amazon Bedrock](http://www.amazon.com/live-meeting-assistant)_
 
