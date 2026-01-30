@@ -33,7 +33,7 @@ Parameters:
 
   MeetingAssistServiceBedrockModelID:
     Type: String
-    Default: "anthropic.claude-3-haiku-20240307-v1:0"
+    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     AllowedValues:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
@@ -422,7 +422,7 @@ Parameters:
       ARN below.
 
   BedrockModelId:
-    Default: "anthropic.claude-3-haiku-20240307-v1:0"
+    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     Type: String
     AllowedValues:
       - "anthropic.claude-3-haiku-20240307-v1:0"
@@ -449,8 +449,8 @@ Parameters:
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models. Includes Nova models (cost-effective), Claude 3.5/3.7 (advanced), 
-      and Claude 4 (cutting-edge). Some models require inference profiles. 
-      Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
+      and Claude 4 (cutting-edge). Some models require inference profiles.
+      Defaults to 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""
@@ -674,14 +674,14 @@ Parameters:
   # Virtual Participant Startup Optimization Parameters
   VPLaunchType:
     Type: String
-    Default: FARGATE
+    Default: EC2
     AllowedValues:
       - FARGATE
       - EC2
     Description: >-
       Launch type for Virtual Participant containers.
-      FARGATE (default): Serverless with SOCI for 40-60% faster startup (~$2/month).
-      EC2: Warm instances with cached images for 85-90% faster startup (~$33/month).
+      FARGATE: Serverless with SOCI for 40-60% faster startup (~$2/month).
+      EC2 (default): Warm instances with cached images for 85-90% faster startup (~$33/month).
 
   VPInstanceType:
     Type: String
