@@ -2494,3 +2494,43 @@ Outputs:
     Description: OAuth callback URL for MCP server authorization (use this in your OAuth provider configuration)
     Value: !GetAtt AISTACK.Outputs.OAuthCallbackUrl
 
+  MCPServerEndpoint:
+    Condition: ShouldEnableMCP
+    Description: >-
+      MCP Server endpoint for external applications to connect and access LMA meeting data.
+      Use this URL with Amazon Quick Suite, Claude Desktop, or custom MCP clients.
+    Value: !GetAtt AISTACK.Outputs.MCPServerEndpoint
+
+  MCPServerClientId:
+    Condition: ShouldEnableMCP
+    Description: >-
+      Cognito Client ID for external applications to authenticate with LMA's MCP Server.
+      Use with MCPServerClientSecret to obtain OAuth tokens.
+    Value: !GetAtt AISTACK.Outputs.MCPServerClientId
+
+  MCPServerClientSecret:
+    Condition: ShouldEnableMCP
+    Description: >-
+      Cognito Client Secret for external applications. STORE SECURELY!
+      Use with MCPServerClientId to obtain OAuth tokens for MCP Server access.
+    Value: !GetAtt AISTACK.Outputs.MCPServerClientSecret
+
+  MCPServerUserPoolId:
+    Condition: ShouldEnableMCP
+    Description: Cognito User Pool ID for MCP Server authentication
+    Value: !GetAtt AISTACK.Outputs.MCPServerUserPoolId
+
+  MCPServerTokenURL:
+    Condition: ShouldEnableMCP
+    Description: >-
+      OAuth token endpoint for obtaining access tokens to LMA's MCP Server.
+      Use this URL to exchange authorization codes for access tokens.
+    Value: !GetAtt AISTACK.Outputs.MCPServerTokenURL
+
+  MCPServerAuthorizationURL:
+    Condition: ShouldEnableMCP
+    Description: >-
+      OAuth authorization endpoint for authorization code flow (browser-based authentication).
+      Users will be redirected here to log in with their LMA credentials.
+    Value: !GetAtt AISTACK.Outputs.MCPServerAuthorizationURL
+
