@@ -284,7 +284,7 @@ Parameters:
   # Startup Optimization Parameters
   VPLaunchType:
     Type: String
-    Default: FARGATE
+    Default: EC2
     AllowedValues:
       - FARGATE
       - EC2
