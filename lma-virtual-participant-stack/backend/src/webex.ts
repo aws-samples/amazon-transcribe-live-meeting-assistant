@@ -9,23 +9,10 @@ export default class Webex {
         frame: Frame,
         messages: string[]
     ): Promise<void> {
-        // Try normal Webex chat input (Quill editor)
-        let messageElement = await frame.$('.ql-editor[contenteditable="true"]');
-        
-        // If not found, try enterprise Webex chat input (textarea)
-        if (!messageElement) {
-            console.log('Standard chat input not found, trying enterprise selector...');
-            messageElement = await frame.$('textarea[placeholder="Type your message here"]');
-        }
-        
-        if (!messageElement) {
-            throw new Error('Chat input field not found with any selector');
-        }
-        
+        const messageElement = await frame.waitForSelector('.ql-editor[contenteditable="true"]');
         for (const message of messages) {
-            await messageElement.type(message);
-            await messageElement.press('Enter');
-            await new Promise(resolve => setTimeout(resolve, 500)); // Small delay between messages
+            await messageElement?.type(message);
+            await messageElement?.press('Enter');
         }
         console.log('Sent messages:', messages);
     }
@@ -38,10 +25,8 @@ export default class Webex {
         await meetingTextElement?.type(details.invite.meetingId);
         await meetingTextElement?.press('Enter');
         
-        // Wait for page to stabilize and load after entering meeting ID
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        
-        console.log(`Current URL after entering meeting ID: ${page.url()}`);
+        // Wait a moment for the page to stabilize after entering meeting ID
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         // Try to click "Join from this browser" button if it appears
         // Sometimes Webex skips this step and goes directly to the meeting join page
@@ -52,273 +37,91 @@ export default class Webex {
                 console.log('Found "Join from this browser" button, clicking it.');
                 await joinFromBrowserButton.click();
                 // Wait for the page to load after clicking
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                console.log(`URL after clicking "Join from browser": ${page.url()}`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
             }
         } catch (error) {
             console.log('"Join from this browser" button not found - Webex may have auto-detected browser mode. Continuing...');
         }
         
-        // Handle enterprise Webex guest form (name/email) if present
-        // The form is inside iframe[name="thinIframe"]
-        let usedEnterpriseFlow = false;
-        console.log('Checking for enterprise Webex guest form in thinIframe...');
+        // Wait for the page to stabilize
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        console.log('Launching app.');
+        const frameElement = await page.waitForSelector(this.iframe, { timeout: 15000 });
+        const frame = await frameElement?.contentFrame();
+        if (!frame) {
+            throw new Error('Failed to access Webex meeting frame');
+        }
+        await page.evaluate(() => {
+            const checkAndClosePopup = () => {
+                const dialog = document.querySelector('.el-dialog__wrapper');
+                if (dialog && dialog.textContent?.includes('Problem joining from browser?')) {
+                    const closeButton = dialog.querySelector('.el-dialog__close');
+                    if (closeButton) {
+                        console.log('Auto-closing "Problem joining from browser?" popup');
+                        (closeButton as HTMLElement).click();
+                        return true;
+                    }
+                }
+                return false;
+            };
+
+            // Check immediately
+            if (!checkAndClosePopup()) {
+                const observer = new MutationObserver(() => {
+                    if (checkAndClosePopup()) {
+                        observer.disconnect();
+                    }
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+            }
+        });
+        console.log('Entering name in the new interface.');
+        console.log(frame.evaluate(()=> document.querySelector('input[data-test="Name (required)"]')));
+        const nameInputElement = await frame.waitForSelector('input[data-test="Name (required)"]',{ timeout: 10000 });
+        await nameInputElement?.type(details.scribeIdentity);
+
+        // Wait for the meeting interface to load
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        // need to change frame for this.
+        console.log('Handling cookie banner.');
         try {
-            const thinIframeElement = await page.waitForSelector('iframe[name="thinIframe"]', { timeout: 10000 });
-            if (thinIframeElement) {
-                console.log('Found thinIframe, checking for guest form...');
-                const thinIframe = await thinIframeElement.contentFrame();
-                
-                if (thinIframe) {
-                    // Wait a moment for iframe content to load
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                    
-                    // Check for guest form (name/email)
-                    const nameInput = await thinIframe.$('input[aria-labelledby="nameLabel"]');
-                    console.log(`Guest form name input found: ${nameInput !== null}`);
-                    
-                    if (nameInput) {
-                        usedEnterpriseFlow = true;
-                        console.log('Enterprise Webex guest form detected, auto-filling name and email...');
-                        const emailInput = await thinIframe.$('input[aria-labelledby="emailLabel"]');
-                        
-                        await nameInput.type(details.scribeIdentity);
-                        
-                        // Create a valid email from lmaUser
-                        let userEmail: string;
-                        if (details.lmaUser.includes('@')) {
-                            // Already has @, use as-is
-                            userEmail = details.lmaUser;
-                        } else {
-                            // Sanitize username: keep only alphanumeric, dots, hyphens, underscores
-                            const sanitizedUser = details.lmaUser.replace(/[^a-zA-Z0-9._-]/g, '-');
-                            userEmail = `${sanitizedUser}@example.com`;
-                        }
-                        
-                        await emailInput?.type(userEmail);
-                        console.log(`Filled name: "${details.scribeIdentity}", email: "${userEmail}"`);
-                        
-                        // Wait for form validation to complete
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                        
-                        console.log('Clicking Next button...');
-                        const nextButton = await thinIframe.$('#guest_next-btn');
-                        await nextButton?.click();
-                        
-                        // Wait for password page to load
-                        await new Promise(resolve => setTimeout(resolve, 5000));
-                        
-                        // Handle meeting password if present
-                        console.log('Checking for meeting password field...');
-                        const passwordInput = await thinIframe.$('input[type="password"]');
-                        if (passwordInput && details.invite.meetingPassword) {
-                            console.log('Password field detected, auto-filling meeting password...');
-                            await passwordInput.type(details.invite.meetingPassword);
-                            
-                            console.log('Clicking Next button after password...');
-                            const passwordNextButton = await thinIframe.$('#password_validate_btn');
-                            await passwordNextButton?.click();
-                            
-                            // Wait for video settings page to load
-                            console.log('Waiting for video settings page...');
-                            await new Promise(resolve => setTimeout(resolve, 5000));
-                            
-                            // Handle video settings page (mute audio, stop video, join meeting)
-                            console.log('Looking for audio control button...');
-                            const audioButton = await thinIframe.$('#audioControlButton');
-                            if (audioButton) {
-                                const audioButtonText = await audioButton.evaluate((el: Element) => el.textContent || '');
-                                console.log(`Audio button text: "${audioButtonText}"`);
-                                if (audioButtonText.includes('Mute')) {
-                                    console.log('Clicking Mute button...');
-                                    await audioButton.click();
-                                    await new Promise(resolve => setTimeout(resolve, 1000));
-                                } else {
-                                    console.log('Audio already muted');
-                                }
-                            } else {
-                                console.log('Audio control button not found');
-                            }
-                            
-                            console.log('Looking for video control button...');
-                            const videoButton = await thinIframe.$('button[data-doi="VIDEO:STOP_VIDEO:MEETSIMPLE_INTERSTITIAL"]');
-                            if (videoButton) {
-                                const videoButtonText = await videoButton.evaluate((el: Element) => el.textContent || '');
-                                console.log(`Video button text: "${videoButtonText}"`);
-                                if (videoButtonText.includes('Stop video')) {
-                                    console.log('Clicking Stop video button...');
-                                    await videoButton.click();
-                                    await new Promise(resolve => setTimeout(resolve, 1000));
-                                } else {
-                                    console.log('Video already stopped');
-                                }
-                            } else {
-                                console.log('Video control button not found');
-                            }
-                            
-                            console.log('Clicking Join meeting button...');
-                            const joinButton = await thinIframe.$('#interstitial_join_btn');
-                            await joinButton?.click();
-                            
-                            // Wait for meeting to load
-                            console.log('Waiting for meeting to load after enterprise flow...');
-                            await new Promise(resolve => setTimeout(resolve, 10000));
-                        }
-                    }
-                }
-            }
-        } catch (error) {
-            console.log(`No enterprise guest form detected in thinIframe, continuing with normal flow...`);
-        }
-        
-        // If we used enterprise flow, skip the normal unified-webclient-iframe flow
-        // and go directly to finding the meeting frame
-        let frame: Frame | null = null;
-        
-        if (!usedEnterpriseFlow) {
-            // Normal flow: wait for unified-webclient-iframe and enter name/mute/etc
-            console.log('Using normal Webex flow...');
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            console.log('Launching app.');
-            const frameElement = await page.waitForSelector(this.iframe, { timeout: 15000 });
-            frame = (await frameElement?.contentFrame()) || null;
-            if (!frame) {
-                throw new Error('Failed to access Webex meeting frame');
-            }
-            await page.evaluate(() => {
-                const checkAndClosePopup = () => {
-                    const dialog = document.querySelector('.el-dialog__wrapper');
-                    if (dialog && dialog.textContent?.includes('Problem joining from browser?')) {
-                        const closeButton = dialog.querySelector('.el-dialog__close');
-                        if (closeButton) {
-                            console.log('Auto-closing "Problem joining from browser?" popup');
-                            (closeButton as HTMLElement).click();
-                            return true;
-                        }
-                    }
-                    return false;
-                };
-
-                // Check immediately
-                if (!checkAndClosePopup()) {
-                    const observer = new MutationObserver(() => {
-                        if (checkAndClosePopup()) {
-                            observer.disconnect();
-                        }
-                    });
-                    observer.observe(document.body, { childList: true, subtree: true });
-                }
-            });
-            console.log('Entering name in the new interface.');
-            console.log(frame.evaluate(()=> document.querySelector('input[data-test="Name (required)"]')));
-            const nameInputElement = await frame.waitForSelector('input[data-test="Name (required)"]',{ timeout: 10000 });
-            await nameInputElement?.type(details.scribeIdentity);
-
-            // Wait for the meeting interface to load
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            // need to change frame for this.
-            console.log('Handling cookie banner.');
-            try {
-                const rejectButton = await page.waitForSelector(
-                    '.cookie-banner-body .a32ueaoVYHwRrsRMl0ci mdc-button:first-child',
-                    { timeout: 3000 }
-                );
-                await rejectButton?.click();
-                console.log('Successfully clicked Reject cookie button');
-            } catch (error) {
-                console.log('Cookie banner not found:', error);
-            }
-            console.log('Clicking mute button.');
-            const muteButtonElement = await frame.waitForSelector('mdc-button[data-test="microphone-button"]');
-            await muteButtonElement?.click();
-
-            console.log('Clicking video button.');
-            const videoButtonElement = await frame.waitForSelector(
-                'mdc-button[data-test="camera-button"]'
+            const rejectButton = await page.waitForSelector(
+                '.cookie-banner-body .a32ueaoVYHwRrsRMl0ci mdc-button:first-child',
+                { timeout: 3000 }
             );
-            await videoButtonElement?.click();
-
-            console.log('Clicking join button.');
-            const joinButtonElement = await frame.waitForSelector('mdc-button[data-test="join-button"]');
-            await joinButtonElement?.click();
-        } else {
-            // Enterprise flow: meeting should already be loading, find the meeting frame
-            console.log('Enterprise flow completed, looking for meeting frame...');
-            // The meeting frame might still be in thinIframe or might be unified-webclient-iframe
-            const thinIframeElement = await page.$('iframe[name="thinIframe"]');
-            if (thinIframeElement) {
-                frame = (await thinIframeElement.contentFrame()) || null;
-            }
-            if (!frame) {
-                // Try unified-webclient-iframe as fallback
-                const frameElement = await page.waitForSelector(this.iframe, { timeout: 15000 }).catch(() => null);
-                if (frameElement) {
-                    frame = (await frameElement.contentFrame()) || null;
-                }
-            }
-            if (!frame) {
-                throw new Error('Failed to access Webex meeting frame after enterprise flow');
-            }
-            
-            // For enterprise Webex, mute/stop video again in the actual meeting
-            // (the pre-join settings don't always persist)
-            console.log('Ensuring audio is muted in meeting...');
-            try {
-                const muteButton = await frame.waitForSelector('button[aria-label="Mute"]', { timeout: 5000 });
-                if (muteButton) {
-                    const buttonText = await muteButton.evaluate((el: Element) => el.textContent || '');
-                    if (buttonText.includes('Mute')) {
-                        console.log('Clicking Mute button in meeting...');
-                        await muteButton.click();
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                }
-            } catch (error) {
-                console.log('Could not mute audio in meeting:', error);
-            }
-            
-            console.log('Ensuring video is stopped in meeting...');
-            try {
-                const stopVideoButton = await frame.waitForSelector('button[aria-label="Stop video"]', { timeout: 5000 });
-                if (stopVideoButton) {
-                    console.log('Clicking Stop video button in meeting...');
-                    await stopVideoButton.click();
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-            } catch (error) {
-                console.log('Could not stop video in meeting:', error);
-            }
+            await rejectButton?.click();
+            console.log('Successfully clicked Reject cookie button');
+        } catch (error) {
+            console.log('Cookie banner not found:', error);
         }
+        console.log('Clicking mute button.');
+        const muteButtonElement = await frame.waitForSelector('mdc-button[data-test="microphone-button"]');
+        await muteButtonElement?.click();
+
+        console.log('Clicking video button.');
+        const videoButtonElement = await frame.waitForSelector(
+            'mdc-button[data-test="camera-button"]'
+        );
+        await videoButtonElement?.click();
+
+        console.log('Clicking join button.');
+        const joinButtonElement = await frame.waitForSelector('mdc-button[data-test="join-button"]');
+        await joinButtonElement?.click();
 
         console.log("Opening chat panel.");
-        let chatPanelOpened = false;
         try {
-            // Try standard selector first
-            let chatButton = await frame.waitForSelector('mdc-button[data-test="in-meeting-chat-toggle-button"]', {
-                timeout: 5000,
-            }).catch(() => null);
-            
-            // If not found, try enterprise Webex selector
-            if (!chatButton) {
-                console.log('Standard chat button not found, trying enterprise selector...');
-                chatButton = await frame.waitForSelector('button[aria-label="Chat panel"]', {
-                    timeout: 5000,
-                }).catch(() => null);
-            }
-            
-            if (chatButton) {
-                await chatButton.click();
-                console.log("Chat panel button clicked successfully");
-                chatPanelOpened = true;
-                
-                // Wait for chat panel to fully open and input field to be ready
-                await new Promise(resolve => setTimeout(resolve, 3000));
-            } else {
-                console.log("Chat panel button not found with any selector");
-            }
+            await frame.waitForSelector('mdc-button[data-test="in-meeting-chat-toggle-button"]', {
+                timeout: details.waitingTimeout,
+            });
+            await frame.click('mdc-button[data-test="in-meeting-chat-toggle-button"]');
+            console.log("Chat panel button clicked successfully");
         } catch(error: any) {
-            console.log(`Chat panel error: ${error.message}`);
+            console.log("Chat panel button error:", error.message);
+            console.log("Your scribe was not admitted into the meeting.");
+            return;
         }
+
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
         if (details.invite.virtualParticipantId) {
             const statusManager = createStatusManager(details.invite.virtualParticipantId);
@@ -326,17 +129,8 @@ export default class Webex {
         }
         console.log('Successfully joined Webex meeting');
 
-        // Send introduction messages only if chat panel is available
-        if (chatPanelOpened) {
-            console.log('Sending introduction messages.');
-            try {
-                await this.sendMessages(frame, details.introMessages);
-            } catch (error) {
-                console.log('Failed to send introduction messages:', error);
-            }
-        } else {
-            console.log('Skipping introduction messages (chat panel not available)');
-        }
+        console.log('Sending introduction messages.');
+        await this.sendMessages(frame, details.introMessages);
 
         // Set up speaker change monitoring
         await page.exposeFunction('speakerChange', async (speaker: string) => {

@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node --esm src/index.ts"
+    "dev": "ts-node --esm src/index.ts",
+    "dev:watch": "npx nodemon --watch src --ext ts --exec 'npm run build && npm run start'"
   },
   "dependencies": {
     "@aws-crypto/sha256-js": "^5.2.0",
@@ -28,6 +29,7 @@
     "graphql": "^16.8.1",
     "graphql-tag": "^2.12.6",
     "jsonwebtoken": "^9.0.2",
+    "nodemon": "^3.1.0",
     "puppeteer": "^24.22.1",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",

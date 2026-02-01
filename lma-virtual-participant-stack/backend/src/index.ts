@@ -15,7 +15,7 @@ import { MCPCommandHandler } from './mcp-command-handler.js';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
-const WINDOW_HEIGHT = 1080;
+const WINDOW_HEIGHT = 1000;
 
 // Shared Puppeteer configuration
 const getPuppeteerConfig = () => ({
@@ -25,7 +25,7 @@ const getPuppeteerConfig = () => ({
     protocolTimeout: details.meetingTimeout,
     timeout: details.meetingTimeout,
     args: [
-        `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT}`,
+        `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT+80}`,
         "--use-fake-ui-for-media-stream",
         "--use-fake-device-for-media-stream",
         "--disable-blink-features=AutomationControlled",

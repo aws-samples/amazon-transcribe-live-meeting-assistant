@@ -116,4 +116,13 @@ pactl list short sinks
 pactl list short sources
 
 echo "=== Starting Virtual Participant Application ==="
-node dist/index.js
+
+# Check if running in dev mode
+if [ "$DEV_MODE" = "true" ]; then
+    echo "🔧 DEV MODE: Running with nodemon for auto-reload on file changes"
+    echo "   Watching: src/**/*.ts"
+    echo "   To manually rebuild: docker exec -it lma-vp-local-test npm run build"
+    npm run dev:watch
+else
+    node dist/index.js
+fi
