@@ -169,7 +169,9 @@ export default class Webex {
                 let userEmail: string;
                 if (details.lmaUser.includes('@')) {
                     // Already has @, use as-is
-                    userEmail = details.lmaUser;
+                    // userEmail = details.lmaUser; // enterprise emails redirect to SSO requiring login
+                    const sanitizedUser = details.lmaUser.split('@')[0].replace(/[^a-zA-Z0-9._-]/g, '-');
+                    userEmail = `${sanitizedUser}@example.com`;
                 } else {
                     // Sanitize username: keep only alphanumeric, dots, hyphens, underscores
                     const sanitizedUser = details.lmaUser.replace(/[^a-zA-Z0-9._-]/g, '-');
@@ -272,6 +274,7 @@ export default class Webex {
               // Accept both Document and Element for flexibility
               const NAME_SELECTORS = [
                 '[data-test="participant-name"]',
+                '.videoitem-full-name-content-TzQC4', // Enterprise Webex
                 '[class*="full-name"]',
                 'mdc-text[type="body-large-regular"]',
                 'mdc-text',
@@ -280,12 +283,23 @@ export default class Webex {
               ];
 
               function getActiveSpeakerElement(root: Document | Element): Element | null {
-                // querySelector exists on both Document and Element
+                // Try enterprise Webex first (speaking indicator class)
+                const enterpriseSpeaker = root.querySelector?.('.videoitem-in-speaking-3a-w-');
+                if (enterpriseSpeaker) return enterpriseSpeaker;
+                
+                // Fall back to normal Webex (active speaker halo)
                 return root.querySelector?.('.active-speaker-halo') ?? null;
               }
 
               function getParticipantItem(node: Element | null): Element | null {
                 if (!node) return null;
+                
+                // For enterprise Webex, the node IS the video item container
+                if (node.classList?.contains?.('videoitem-in-speaking-3a-w-')) {
+                  return node;
+                }
+                
+                // For normal Webex, find the closest participant container
                 return (
                   node.closest?.(
                     'li,[role="listitem"],.participants-list-item,.participants-video-tile,.participants-video-panel-wrapper'
@@ -326,11 +340,14 @@ export default class Webex {
               const observer = new MutationObserver((mutations) => {
                 for (const m of mutations) {
                   if (m.type === 'childList') {
-                    // Added/removed/moved halo?
+                    // Added/removed/moved halo or enterprise speaking indicator?
                     for (const n of [...m.addedNodes, ...m.removedNodes]) {
                       if (
                         n instanceof Element &&
-                        (n.matches?.('.active-speaker-halo') || n.querySelector?.('.active-speaker-halo'))
+                        (n.matches?.('.active-speaker-halo') ||
+                         n.querySelector?.('.active-speaker-halo') ||
+                         n.matches?.('.videoitem-in-speaking-3a-w-') ||
+                         n.querySelector?.('.videoitem-in-speaking-3a-w-'))
                       ) {
                         announceIfChanged();
                         return;
@@ -341,7 +358,10 @@ export default class Webex {
                     if (
                       t.matches?.('.active-speaker-halo') ||
                       t.classList?.contains?.('active-speaker-halo') ||
-                      t.querySelector?.('.active-speaker-halo')
+                      t.querySelector?.('.active-speaker-halo') ||
+                      t.matches?.('.videoitem-in-speaking-3a-w-') ||
+                      t.classList?.contains?.('videoitem-in-speaking-3a-w-') ||
+                      t.querySelector?.('.videoitem-in-speaking-3a-w-')
                     ) {
                       announceIfChanged();
                       return;
