@@ -79,20 +79,19 @@ CRITICAL MEETING ID AND PASSWORD RULES:
 4. For Zoom, extract the numeric meeting ID, not the full URL. Remove any spaces from the meeting ID (e.g., "961 8750 1703" should become "96187501703")
 5. For Teams, extract the meeting URL or conference ID
 6. For Webex, extract ONLY the numeric meeting ID from URLs. Webex URLs look like https://meetXXXX.webex.com/meet/prYYYYYYYYYY where the meeting ID is ONLY the numeric part (YYYYYYYYYY) WITHOUT the "pr" prefix. For example, from https://meet1648.webex.com/meet/pr2552362251, the meetingId should be "2552362251" (not "pr2552362251")
-7. IMPORTANT: Always remove spaces from meeting IDs. Meeting IDs should be continuous strings without spaces (e.g., "96187501703" not "961 8750 1703")
-8. For Zoom passwords from URLs: Extract the COMPLETE password from the URL's pwd parameter. The password can contain letters, numbers, and special characters including periods (.). Extract everything after "pwd=" up to the next "&" or end of URL. Do NOT truncate the password at periods or other special characters.
+7. For Zoom passwords from URLs: Extract the COMPLETE password from the URL's pwd parameter. The password can contain letters, numbers, and special characters including periods (.). Extract everything after "pwd=" up to the next "&" or end of URL. Do NOT truncate the password at periods or other special characters.
 
 DATE AND TIME HANDLING:
-7. If NO specific date or time is mentioned in the invitation, set meetingDate and meetingTime to null
-8. If the meeting is recurring (contains words like "every", "weekly", "occurs", "recurring"), set isRecurring to true
-9. For recurring meetings, DO NOT use the start date from the invitation if it's in the past
-10. Instead, calculate the NEXT occurrence based on the recurrence pattern
-11. For "every Wednesday" meetings, find the next Wednesday from today
-12. For "weekly" meetings, find the next occurrence based on the day of the week mentioned
-13. ALWAYS ensure the final date is today or in the future
-14. If today matches the recurring day, use today's date only if the time is in the future
-15. If you cannot determine a specific date or time with confidence, leave those fields as null
-16. Do NOT guess or make up dates/times - only extract what is clearly stated
+8. If NO specific date or time is mentioned in the invitation, set meetingDate and meetingTime to null
+9. If the meeting is recurring (contains words like "every", "weekly", "occurs", "recurring"), set isRecurring to true
+10. For recurring meetings, DO NOT use the start date from the invitation if it's in the past
+11. Instead, calculate the NEXT occurrence based on the recurrence pattern
+12. For "every Wednesday" meetings, find the next Wednesday from today
+13. For "weekly" meetings, find the next occurrence based on the day of the week mentioned
+14. ALWAYS ensure the final date is today or in the future
+15. If today matches the recurring day, use today's date only if the time is in the future
+16. If you cannot determine a specific date or time with confidence, leave those fields as null
+17. Do NOT guess or make up dates/times - only extract what is clearly stated
 
 CURRENT CONTEXT:
 - Today's date: {current_date}

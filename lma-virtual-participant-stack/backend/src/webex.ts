@@ -169,7 +169,7 @@ export default class Webex {
                 let userEmail: string;
                 if (details.lmaUser.includes('@')) {
                     // Already has @, use as-is
-                    // userEmail = details.lmaUser; // enterprise emails redirect to SSO requiring login
+                    // userEmail = details.lmaUser; // enterprise emails might redirect to SSO login so use placeholder example
                     const sanitizedUser = details.lmaUser.split('@')[0].replace(/[^a-zA-Z0-9._-]/g, '-');
                     userEmail = `${sanitizedUser}@example.com`;
                 } else {
