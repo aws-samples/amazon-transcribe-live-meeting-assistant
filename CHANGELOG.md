@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Amazon Quick Suite MCP integration documentation with step-by-step setup guide
 - MCP server configuration outputs exposed in main CloudFormation stack (MCPServerEndpoint, MCPServerClientId, etc.)
+- Enterprise Webex Virtual Participant support with guest authentication, CAPTCHA handling, and speaker detection
 
 ### Changed
 - Updated default Bedrock model from Claude 3 Haiku to Claude Haiku 4.5 (global.anthropic.claude-haiku-4-5-20251001-v1:0)
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Virtual Participant transcription failure due to function signature mismatch in get_owner_from_jwt() call - all transcript segments were failing to write to DynamoDB
 - Enabled X-Ray tracing on GetEventApiDnsFunction, GetCloudFrontPrefixListFunction, and VirtualParticipantSchedulerFunction for improved observability
 - Triaged and suppressed 54 security scan false positives and acceptable design decisions
+- Webex Virtual Participant password-protected meeting support
 
 ## [0.2.24] - 01/07/26
 
