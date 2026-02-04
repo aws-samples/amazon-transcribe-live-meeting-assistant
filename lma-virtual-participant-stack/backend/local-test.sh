@@ -5,11 +5,14 @@
 # and runs the Virtual Participant container locally for debugging.
 #
 # Usage:
-#   ./local-test.sh <STACK_NAME> <MEETING_PLATFORM> <MEETING_ID> [MEETING_PASSWORD]
+#   ./local-test.sh [--dev] <STACK_NAME> <MEETING_PLATFORM> <MEETING_ID> [MEETING_PASSWORD]
+#
+# Options:
+#   --dev             Enable development mode with auto-reload on file changes
 #
 # Example:
 #   ./local-test.sh LMA-dev-stack-2 WEBEX 25523622514
-#   ./local-test.sh LMA-dev-stack-2 ZOOM 123456789 mypassword
+#   ./local-test.sh --dev LMA-dev-stack-2 ZOOM 123456789 mypassword
 
 set -e
 
@@ -17,11 +20,22 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+# Parse dev mode flag
+DEV_MODE=false
+if [ "$1" = "--dev" ]; then
+    DEV_MODE=true
+    shift
+fi
 
 # Check arguments
 if [ $# -lt 3 ]; then
-    echo -e "${RED}Usage: $0 <STACK_NAME> <MEETING_PLATFORM> <MEETING_ID> [MEETING_PASSWORD]${NC}"
+    echo -e "${RED}Usage: $0 [--dev] <STACK_NAME> <MEETING_PLATFORM> <MEETING_ID> [MEETING_PASSWORD]${NC}"
+    echo ""
+    echo "Options:"
+    echo "  --dev             Enable development mode with auto-reload on file changes"
     echo ""
     echo "Arguments:"
     echo "  STACK_NAME        - Your LMA CloudFormation stack name (e.g., LMA-dev-stack-2)"
@@ -31,6 +45,7 @@ if [ $# -lt 3 ]; then
     echo ""
     echo "Example:"
     echo "  $0 LMA-dev-stack-2 WEBEX 25523622514"
+    echo "  $0 --dev LMA-dev-stack-2 WEBEX 25523622514"
     exit 1
 fi
 
@@ -39,8 +54,16 @@ MEETING_PLATFORM=$2
 MEETING_ID=$3
 MEETING_PASSWORD=${4:-""}
 
+echo ""
 echo -e "${GREEN}=== LMA Virtual Participant Local Test Setup ===${NC}"
 echo ""
+if [ "$DEV_MODE" = true ]; then
+    echo -e "${BLUE}🔧 Development Mode: ENABLED${NC}"
+    echo "   - Source directory will be mounted as volume"
+    echo "   - Auto-reload on TypeScript file changes"
+    echo "   - Container will persist (use 'docker stop lma-vp-local-test' to stop)"
+    echo ""
+fi
 echo "Stack Name: $STACK_NAME"
 echo "Meeting Platform: $MEETING_PLATFORM"
 echo "Meeting ID: $MEETING_ID"
@@ -130,6 +153,9 @@ cat > "$ENV_FILE" << EOF
 # LOCAL TEST MODE - Skip ALB registration and AppSync updates
 LOCAL_TEST=true
 
+# Development Mode
+DEV_MODE=$DEV_MODE
+
 # Meeting Configuration
 MEETING_PLATFORM=$MEETING_PLATFORM
 MEETING_ID=$MEETING_ID
@@ -191,14 +217,53 @@ echo "VNC will be available at:"
 echo "  - VNC Client: localhost:5900"
 echo "  - Web Browser (noVNC): http://localhost:5901/vnc.html"
 echo ""
-echo "Press Ctrl+C to stop the container."
-echo ""
+
+if [ "$DEV_MODE" = true ]; then
+    echo -e "${BLUE}Development Mode Commands:${NC}"
+    echo "  - View logs:        docker logs -f lma-vp-local-test"
+    echo "  - Stop container:   docker stop lma-vp-local-test"
+    echo "  - Remove container: docker rm lma-vp-local-test"
+    echo "  - Exec into shell:  docker exec -it lma-vp-local-test /bin/bash"
+    echo ""
+    echo "TypeScript changes in ./src will automatically trigger rebuild and restart."
+    echo ""
+else
+    echo "Press Ctrl+C to stop the container."
+    echo ""
+fi
 
 # Run the container with AWS credentials mounted
-docker run -it --rm \
-    --name lma-vp-local-test \
-    --env-file "$ENV_FILE" \
-    -p 5900:5900 \
-    -p 5901:5901 \
-    -v ~/.aws:/home/appuser/.aws:ro \
-    lma-vp-local
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Check if container already exists
+if docker ps -a --format '{{.Names}}' | grep -q "^lma-vp-local-test$"; then
+    echo -e "${YELLOW}Container 'lma-vp-local-test' already exists.${NC}"
+    if [ "$DEV_MODE" = true ]; then
+        echo "Removing existing container..."
+        docker rm -f lma-vp-local-test
+    else
+        echo "Please remove it first with: docker rm -f lma-vp-local-test"
+        exit 1
+    fi
+fi
+
+if [ "$DEV_MODE" = true ]; then
+    # Development mode: mount source, keep container running
+    docker run -it \
+        --name lma-vp-local-test \
+        --env-file "$ENV_FILE" \
+        -p 5900:5900 \
+        -p 5901:5901 \
+        -v ~/.aws:/home/appuser/.aws:ro \
+        -v "$SCRIPT_DIR/src":/srv/src \
+        lma-vp-local
+else
+    # Production mode: no volume mounts, remove on exit
+    docker run -it --rm \
+        --name lma-vp-local-test \
+        --env-file "$ENV_FILE" \
+        -p 5900:5900 \
+        -p 5901:5901 \
+        -v ~/.aws:/home/appuser/.aws:ro \
+        lma-vp-local
+fi
