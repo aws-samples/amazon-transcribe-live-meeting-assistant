@@ -945,9 +945,161 @@ Resources:
             docker pull ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
             systemctl enable --now ecs
 
+  # Custom Resource to handle ASG deletion gracefully
+  ASGDeletionHandlerRole:
+    Type: AWS::IAM::Role
+    Condition: UseEC2LaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: ASGDeletionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribeAutoScalingInstances
+                  - autoscaling:SetInstanceProtection
+                  - autoscaling:UpdateAutoScalingGroup
+                  - autoscaling:TerminateInstanceInAutoScalingGroup
+                  - ec2:DescribeInstances
+                Resource: "*"
+
+  ASGDeletionHandlerFunction:
+    Type: AWS::Lambda::Function
+    Condition: UseEC2LaunchType
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt ASGDeletionHandlerRole.Arn
+      Timeout: 300
+      Runtime: python3.12
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+          import time
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          autoscaling = boto3.client('autoscaling')
+          
+          def handler(event, context):
+              logger.info(f"Event: {event}")
+              request_type = event['RequestType']
+              asg_name = event['ResourceProperties'].get('AutoScalingGroupName')
+              
+              try:
+                  if request_type == 'Delete':
+                      logger.info(f"Preparing ASG {asg_name} for deletion")
+                      
+                      # Get ASG details
+                      try:
+                          response = autoscaling.describe_auto_scaling_groups(
+                              AutoScalingGroupNames=[asg_name]
+                          )
+                          
+                          if not response['AutoScalingGroups']:
+                              logger.info(f"ASG {asg_name} not found, assuming already deleted")
+                              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                              return
+                          
+                          asg = response['AutoScalingGroups'][0]
+                          instances = asg.get('Instances', [])
+                          
+                          logger.info(f"Found {len(instances)} instances in ASG")
+                          
+                          # Remove scale-in protection from all instances
+                          if instances:
+                              instance_ids = [i['InstanceId'] for i in instances]
+                              logger.info(f"Removing scale-in protection from instances: {instance_ids}")
+                              
+                              autoscaling.set_instance_protection(
+                                  InstanceIds=instance_ids,
+                                  AutoScalingGroupName=asg_name,
+                                  ProtectedFromScaleIn=False
+                              )
+                              
+                              logger.info("Scale-in protection removed successfully")
+                              
+                              # Set desired capacity to 0 to trigger instance termination
+                              logger.info("Setting ASG desired capacity to 0")
+                              autoscaling.update_auto_scaling_group(
+                                  AutoScalingGroupName=asg_name,
+                                  MinSize=0,
+                                  DesiredCapacity=0
+                              )
+                              
+                              # Wait a bit for instances to start terminating
+                              time.sleep(5)
+                              
+                              # Force terminate any remaining instances
+                              for instance_id in instance_ids:
+                                  try:
+                                      logger.info(f"Force terminating instance {instance_id}")
+                                      autoscaling.terminate_instance_in_auto_scaling_group(
+                                          InstanceId=instance_id,
+                                          ShouldDecrementDesiredCapacity=False
+                                      )
+                                  except Exception as e:
+                                      logger.warning(f"Failed to terminate instance {instance_id}: {e}")
+                              
+                              logger.info("All instances terminated or terminating")
+                          else:
+                              logger.info("No instances to terminate")
+                          
+                      except autoscaling.exceptions.ClientError as e:
+                          if 'does not exist' in str(e):
+                              logger.info(f"ASG {asg_name} already deleted")
+                          else:
+                              raise
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  
+              except Exception as e:
+                  logger.error(f"Error handling ASG deletion: {e}", exc_info=True)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
+
+  ASGDeletionHandler:
+    Type: Custom::ASGDeletionHandler
+    Condition: UseEC2LaunchType
+    Properties:
+      ServiceToken: !GetAtt ASGDeletionHandlerFunction.Arn
+      AutoScalingGroupName: !Sub "${AWS::StackName}-VP-ASG"
+    DependsOn:
+      - VPAutoScalingGroup
+
   VPAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Condition: UseEC2LaunchType
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       AutoScalingGroupName: !Sub "${AWS::StackName}-VP-ASG"
       MinSize: !Ref VPMinInstances
