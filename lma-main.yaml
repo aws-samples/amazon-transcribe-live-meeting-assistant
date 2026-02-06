@@ -1063,6 +1063,7 @@ Rules:
 
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
+  ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
   IsHealthcareDomainSelected: !Equals [!Ref Domain, "Healthcare"]
   ShouldCreateRecordingBucket: !Equals [!Ref S3BucketName, ""]
   ShouldUseExistingBedrockKnowledgeBase:
@@ -1722,6 +1723,192 @@ Resources:
         - False
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
+
+  ##########################################################################
+  # Custom Resource to empty S3 buckets before deletion
+  ##########################################################################
+  S3BucketCleanupRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldDeleteDataOnDelete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: S3BucketCleanupPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - s3:GetBucketVersioning
+                Resource:
+                  - !Sub "arn:aws:s3:::${AWS::StackName}-*"
+              - Effect: Allow
+                Action:
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                Resource:
+                  - !Sub "arn:aws:s3:::${AWS::StackName}-*/*"
+
+  S3BucketCleanupFunction:
+    Type: AWS::Lambda::Function
+    Condition: ShouldDeleteDataOnDelete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt S3BucketCleanupRole.Arn
+      Timeout: 900
+      Runtime: python3.12
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          s3 = boto3.client('s3')
+          
+          def empty_bucket(bucket_name):
+              """Empty all objects and versions from an S3 bucket"""
+              try:
+                  logger.info(f"Emptying bucket: {bucket_name}")
+                  
+                  # Check if bucket exists
+                  try:
+                      s3.head_bucket(Bucket=bucket_name)
+                  except s3.exceptions.NoSuchBucket:
+                      logger.info(f"Bucket {bucket_name} does not exist, skipping")
+                      return
+                  except Exception as e:
+                      logger.warning(f"Error checking bucket {bucket_name}: {e}")
+                      return
+                  
+                  # Check if versioning is enabled
+                  try:
+                      versioning = s3.get_bucket_versioning(Bucket=bucket_name)
+                      is_versioned = versioning.get('Status') == 'Enabled'
+                  except Exception as e:
+                      logger.warning(f"Could not get versioning status: {e}")
+                      is_versioned = False
+                  
+                  # Delete all object versions
+                  if is_versioned:
+                      logger.info(f"Bucket {bucket_name} has versioning enabled, deleting all versions")
+                      paginator = s3.get_paginator('list_object_versions')
+                      
+                      for page in paginator.paginate(Bucket=bucket_name):
+                          # Delete versions
+                          versions = page.get('Versions', [])
+                          if versions:
+                              objects_to_delete = [{'Key': obj['Key'], 'VersionId': obj['VersionId']} 
+                                                 for obj in versions]
+                              if objects_to_delete:
+                                  logger.info(f"Deleting {len(objects_to_delete)} object versions")
+                                  s3.delete_objects(
+                                      Bucket=bucket_name,
+                                      Delete={'Objects': objects_to_delete, 'Quiet': True}
+                                  )
+                          
+                          # Delete delete markers
+                          delete_markers = page.get('DeleteMarkers', [])
+                          if delete_markers:
+                              markers_to_delete = [{'Key': obj['Key'], 'VersionId': obj['VersionId']} 
+                                                 for obj in delete_markers]
+                              if markers_to_delete:
+                                  logger.info(f"Deleting {len(markers_to_delete)} delete markers")
+                                  s3.delete_objects(
+                                      Bucket=bucket_name,
+                                      Delete={'Objects': markers_to_delete, 'Quiet': True}
+                                  )
+                  else:
+                      # Delete all objects (non-versioned bucket)
+                      logger.info(f"Bucket {bucket_name} is not versioned, deleting all objects")
+                      paginator = s3.get_paginator('list_objects_v2')
+                      
+                      for page in paginator.paginate(Bucket=bucket_name):
+                          objects = page.get('Contents', [])
+                          if objects:
+                              objects_to_delete = [{'Key': obj['Key']} for obj in objects]
+                              if objects_to_delete:
+                                  logger.info(f"Deleting {len(objects_to_delete)} objects")
+                                  s3.delete_objects(
+                                      Bucket=bucket_name,
+                                      Delete={'Objects': objects_to_delete, 'Quiet': True}
+                                  )
+                  
+                  logger.info(f"Successfully emptied bucket: {bucket_name}")
+                  
+              except Exception as e:
+                  logger.error(f"Error emptying bucket {bucket_name}: {e}", exc_info=True)
+                  raise
+          
+          def handler(event, context):
+              logger.info(f"Event: {event}")
+              request_type = event['RequestType']
+              
+              try:
+                  if request_type == 'Delete':
+                      # Get exact bucket names from properties
+                      logging_bucket = event['ResourceProperties'].get('LoggingBucketName', '')
+                      recordings_bucket = event['ResourceProperties'].get('RecordingsBucketName', '')
+                      
+                      bucket_names = [b for b in [logging_bucket, recordings_bucket] if b]
+                      logger.info(f"Emptying buckets before deletion: {bucket_names}")
+                      
+                      for bucket_name in bucket_names:
+                          empty_bucket(bucket_name)
+                      
+                      logger.info("All buckets emptied successfully")
+                  else:
+                      logger.info(f"Request type is {request_type}, no action needed")
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  
+              except Exception as e:
+                  logger.error(f"Error handling bucket cleanup: {e}", exc_info=True)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
+
+  # Note: This custom resource intentionally has NO dependencies on the buckets
+  # This ensures it is deleted LAST during stack deletion, after all other resources
+  # have stopped writing to the buckets
+  S3BucketCleanupHandler:
+    Type: Custom::S3BucketCleanup
+    Condition: ShouldDeleteDataOnDelete
+    DeletionPolicy: Delete
+    Properties:
+      ServiceToken: !GetAtt S3BucketCleanupFunction.Arn
+      # Pass bucket names as plain strings - Lambda will use exact match only
+      LoggingBucketName: !Sub "${LoggingBucket}"
+      RecordingsBucketName: !If
+        - ShouldCreateRecordingBucket
+        - !Sub "${RecordingsBucket}"
+        - ""
 
   ## LOGGING BUCKET FOR S3 ACCESS LOGS
   LoggingBucket:

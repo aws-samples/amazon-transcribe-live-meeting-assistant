@@ -4758,17 +4758,9 @@ Resources:
                 status = cfnresponse.FAILED
                 
             elif event['RequestType'] == 'Delete':
-              try:
-                s3 = boto3.client('s3')
-                bucket_name = event['ResourceProperties']['BucketName']
-                s3.delete_object(
-                  Bucket=bucket_name,
-                  Key='quicksight-recordingsbucket-manifest.json'
-                )
-                print(f"Deleted manifest from s3://{bucket_name}/quicksight-recordingsbucket-manifest.json")
-              except Exception as e:
-                print(e)
-                # Don't fail on delete errors
+              # Skip deletion - the S3BucketCleanupHandler in main stack will handle this
+              # Deleting here causes race condition where manifest is recreated after bucket cleanup
+              print("Skipping manifest deletion - will be cleaned up by S3BucketCleanupHandler")
                 
             cfnresponse.send(event, context, status, responseData, reason=reason)
       LoggingConfig:
