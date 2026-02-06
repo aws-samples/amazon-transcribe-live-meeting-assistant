@@ -27,7 +27,7 @@
     "block-stream2": "^2.1.0",
     "buffer-from": "^1.1.2",
     "dotenv": "^16.0.0",
-    "fastify": "^3.27.3",
+    "fastify": "^5.7.3",
     "pino-pretty": "^10.2.0",
     "uuid": "^8.3.2"
   },
