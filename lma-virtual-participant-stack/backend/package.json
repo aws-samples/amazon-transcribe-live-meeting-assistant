@@ -20,7 +20,7 @@
     "@aws-sdk/client-transcribe-streaming": "^3.726.1",
     "@aws-sdk/credential-provider-node": "^3.726.1",
     "@aws-sdk/util-dynamodb": "^3.726.1",
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@smithy/protocol-http": "^5.3.5",
     "@smithy/signature-v4": "^5.3.5",
     "aws-amplify": "^6.0.0",
