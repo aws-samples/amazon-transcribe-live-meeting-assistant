@@ -1,4 +1,5 @@
 import { KinesisClient, PutRecordCommand, PutRecordsCommand } from '@aws-sdk/client-kinesis';
+import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { details } from './details.js';
 
 export interface TranscriptSegment {
@@ -54,6 +55,9 @@ export interface KinesisRecord {
   timestamp: number;
 }
 
+// Local testing mode
+const isLocalTest = process.env.LOCAL_TEST === 'true';
+
 class KinesisStreamManager {
   private kinesisClient: KinesisClient;
   private callId: string;
@@ -65,9 +69,19 @@ class KinesisStreamManager {
   private startTimes: number[] = [];
 
   constructor() {
-    this.kinesisClient = new KinesisClient({
+    // In local test mode, explicitly use default provider which checks credentials file first
+    // Otherwise use default credential chain (EC2 instance role in production)
+    const clientConfig: any = {
       region: process.env.AWS_REGION || 'us-east-1',
-    });
+    };
+    
+    if (isLocalTest) {
+      console.log('Using AWS credentials from ~/.aws/credentials for Kinesis');
+      // Default provider checks credentials file, then environment variables, then instance metadata
+      clientConfig.credentials = defaultProvider();
+    }
+    
+    this.kinesisClient = new KinesisClient(clientConfig);
     
     // Use  CallId format: meeting_name_with_timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '-').replace('Z', '');

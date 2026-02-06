@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.25] - 02/06/26
+
+### Added
+- Amazon Quick Suite MCP integration documentation with step-by-step setup guide
+- MCP server configuration outputs exposed in main CloudFormation stack (MCPServerEndpoint, MCPServerClientId, etc.)
+- Enterprise Webex Virtual Participant support with guest authentication, CAPTCHA handling, and speaker detection
+
+### Changed
+- Updated default Bedrock model from Claude 3 Haiku to Claude Haiku 4.5 (global.anthropic.claude-haiku-4-5-20251001-v1:0)
+- Changed Virtual Participant default launch type from FARGATE to EC2
+
+### Fixed
+- Critical security vulnerability: JWT tokens now always verified with signature validation (prevents token forgery and user impersonation)
+- Virtual Participant transcription failure due to function signature mismatch in get_owner_from_jwt() call - all transcript segments were failing to write to DynamoDB
+- Enabled X-Ray tracing on GetEventApiDnsFunction, GetCloudFrontPrefixListFunction, and VirtualParticipantSchedulerFunction for improved observability
+- Triaged and suppressed 54 security scan false positives and acceptable design decisions
+- Webex Virtual Participant password-protected meeting support
+- CloudFormation stack deletion failure when using EC2 launch type for Virtual Participant
 
 ## [0.2.24] - 01/07/26
 

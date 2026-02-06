@@ -33,7 +33,7 @@ Parameters:
 
   MeetingAssistServiceBedrockModelID:
     Type: String
-    Default: "anthropic.claude-3-haiku-20240307-v1:0"
+    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     AllowedValues:
       - "anthropic.claude-3-haiku-20240307-v1:0"
       - "anthropic.claude-3-sonnet-20240229-v1:0"
@@ -422,7 +422,7 @@ Parameters:
       ARN below.
 
   BedrockModelId:
-    Default: "anthropic.claude-3-haiku-20240307-v1:0"
+    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     Type: String
     AllowedValues:
       - "anthropic.claude-3-haiku-20240307-v1:0"
@@ -449,8 +449,8 @@ Parameters:
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models. Includes Nova models (cost-effective), Claude 3.5/3.7 (advanced), 
-      and Claude 4 (cutting-edge). Some models require inference profiles. 
-      Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
+      and Claude 4 (cutting-edge). Some models require inference profiles.
+      Defaults to 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""
@@ -674,14 +674,14 @@ Parameters:
   # Virtual Participant Startup Optimization Parameters
   VPLaunchType:
     Type: String
-    Default: FARGATE
+    Default: EC2
     AllowedValues:
       - FARGATE
       - EC2
     Description: >-
       Launch type for Virtual Participant containers.
-      FARGATE (default): Serverless with SOCI for 40-60% faster startup (~$2/month).
-      EC2: Warm instances with cached images for 85-90% faster startup (~$33/month).
+      FARGATE: Serverless with SOCI for 40-60% faster startup (~$2/month).
+      EC2 (default): Warm instances with cached images for 85-90% faster startup (~$33/month).
 
   VPInstanceType:
     Type: String
@@ -1472,6 +1472,12 @@ Resources:
                   - "bedrock:GetInferenceProfile"
                 Resource:
                   - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "aws-marketplace:Subscribe"
+                  - "aws-marketplace:Unsubscribe"
+                  - "aws-marketplace:ViewSubscriptions"
+                Resource: "*"
           PolicyName: BedrockPolicy
 
   ValidateParametersFunction:
@@ -2493,4 +2499,44 @@ Outputs:
   OAuthCallbackUrl:
     Description: OAuth callback URL for MCP server authorization (use this in your OAuth provider configuration)
     Value: !GetAtt AISTACK.Outputs.OAuthCallbackUrl
+
+  MCPServerEndpoint:
+    Condition: ShouldEnableMCP
+    Description: >-
+      MCP Server endpoint for external applications to connect and access LMA meeting data.
+      Use this URL with Amazon Quick Suite, Claude Desktop, or custom MCP clients.
+    Value: !GetAtt AISTACK.Outputs.MCPServerEndpoint
+
+  MCPServerClientId:
+    Condition: ShouldEnableMCP
+    Description: >-
+      Cognito Client ID for external applications to authenticate with LMA's MCP Server.
+      Use with MCPServerClientSecret to obtain OAuth tokens.
+    Value: !GetAtt AISTACK.Outputs.MCPServerClientId
+
+  MCPServerClientSecret:
+    Condition: ShouldEnableMCP
+    Description: >-
+      Cognito Client Secret for external applications. STORE SECURELY!
+      Use with MCPServerClientId to obtain OAuth tokens for MCP Server access.
+    Value: !GetAtt AISTACK.Outputs.MCPServerClientSecret
+
+  MCPServerUserPoolId:
+    Condition: ShouldEnableMCP
+    Description: Cognito User Pool ID for MCP Server authentication
+    Value: !GetAtt AISTACK.Outputs.MCPServerUserPoolId
+
+  MCPServerTokenURL:
+    Condition: ShouldEnableMCP
+    Description: >-
+      OAuth token endpoint for obtaining access tokens to LMA's MCP Server.
+      Use this URL to exchange authorization codes for access tokens.
+    Value: !GetAtt AISTACK.Outputs.MCPServerTokenURL
+
+  MCPServerAuthorizationURL:
+    Condition: ShouldEnableMCP
+    Description: >-
+      OAuth authorization endpoint for authorization code flow (browser-based authentication).
+      Users will be redirected here to log in with their LMA credentials.
+    Value: !GetAtt AISTACK.Outputs.MCPServerAuthorizationURL
 

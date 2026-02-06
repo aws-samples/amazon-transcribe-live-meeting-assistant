@@ -284,7 +284,7 @@ Parameters:
   # Startup Optimization Parameters
   VPLaunchType:
     Type: String
-    Default: FARGATE
+    Default: EC2
     AllowedValues:
       - FARGATE
       - EC2
@@ -400,6 +400,33 @@ Resources:
                   - "ecr:GetAuthorizationToken"
                 Resource:
                   - "*"
+        - PolicyName: "ECSDeploymentPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "ecs:UpdateService"
+                  - "ecs:DescribeServices"
+                  - "ecs:ListServices"
+                  - "ecs:DescribeClusters"
+                  - "ecs:ListContainerInstances"
+                  - "ecs:DescribeContainerInstances"
+                Resource:
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "autoscaling:DescribeAutoScalingGroups"
+                  - "autoscaling:TerminateInstanceInAutoScalingGroup"
+                  - "autoscaling:SetDesiredCapacity"
+                Resource:
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "ec2:DescribeInstances"
+                  - "ec2:TerminateInstances"
+                Resource:
+                  - "*"
 
   VirtualParticipantBuildProject:
     Type: AWS::CodeBuild::Project
@@ -445,7 +472,63 @@ Resources:
                   - echo Pushing SOCI index to ECR...
                   - soci push --user AWS:$PASSWORD ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
                   - echo Build completed on `date`
-          - { ImageRepo: !Ref ImageRepo }
+                  - |
+                    echo "Deploying new image to ECS..."
+                    # Find the ECS service for this stack
+                    CLUSTER_ARN="${ClusterArn}"
+                    SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_ARN --region ${AWS::Region} --query 'serviceArns[0]' --output text)
+                    
+                    if [ "$SERVICE_NAME" != "None" ] && [ -n "$SERVICE_NAME" ]; then
+                      echo "Found ECS service: $SERVICE_NAME"
+                      
+                      # Get service details to determine launch type
+                      LAUNCH_TYPE=$(aws ecs describe-services --cluster $CLUSTER_ARN --services $SERVICE_NAME --region ${AWS::Region} --query 'services[0].launchType' --output text)
+                      echo "Launch type: $LAUNCH_TYPE"
+                      
+                      # Force new deployment to pull latest image
+                      echo "Forcing ECS service update to deploy new image..."
+                      aws ecs update-service --cluster $CLUSTER_ARN --service $SERVICE_NAME --force-new-deployment --region ${AWS::Region}
+                      
+                      # For EC2 launch type, terminate instances to force fresh pull
+                      if [ "$LAUNCH_TYPE" = "EC2" ]; then
+                        echo "EC2 launch type detected - terminating instances to force image refresh..."
+                        
+                        # Get container instances
+                        CONTAINER_INSTANCES=$(aws ecs list-container-instances --cluster $CLUSTER_ARN --region ${AWS::Region} --query 'containerInstanceArns' --output text)
+                        
+                        if [ -n "$CONTAINER_INSTANCES" ]; then
+                          # Get EC2 instance IDs from container instances
+                          for CONTAINER_INSTANCE in $CONTAINER_INSTANCES; do
+                            EC2_INSTANCE_ID=$(aws ecs describe-container-instances --cluster $CLUSTER_ARN --container-instances $CONTAINER_INSTANCE --region ${AWS::Region} --query 'containerInstances[0].ec2InstanceId' --output text)
+                            
+                            if [ -n "$EC2_INSTANCE_ID" ] && [ "$EC2_INSTANCE_ID" != "None" ]; then
+                              echo "Terminating EC2 instance: $EC2_INSTANCE_ID"
+                              
+                              # Check if instance is in an Auto Scaling Group
+                              ASG_NAME=$(aws autoscaling describe-auto-scaling-instances --instance-ids $EC2_INSTANCE_ID --region ${AWS::Region} --query 'AutoScalingInstances[0].AutoScalingGroupName' --output text 2>/dev/null || echo "")
+                              
+                              if [ -n "$ASG_NAME" ] && [ "$ASG_NAME" != "None" ]; then
+                                echo "Instance is in ASG: $ASG_NAME - terminating via ASG..."
+                                aws autoscaling terminate-instance-in-auto-scaling-group --instance-id $EC2_INSTANCE_ID --should-decrement-desired-capacity false --region ${AWS::Region}
+                              else
+                                echo "Instance not in ASG - terminating directly..."
+                                aws ec2 terminate-instances --instance-ids $EC2_INSTANCE_ID --region ${AWS::Region}
+                              fi
+                            fi
+                          done
+                          echo "EC2 instances terminated. Auto Scaling will launch new instances with fresh Docker image."
+                        else
+                          echo "No container instances found in cluster."
+                        fi
+                      else
+                        echo "FARGATE launch type - service update will automatically use new image."
+                      fi
+                      
+                      echo "Deployment initiated successfully!"
+                    else
+                      echo "No ECS service found in cluster - skipping deployment."
+                    fi
+          - { ImageRepo: !Ref ImageRepo, ClusterArn: !GetAtt Cluster.Arn }
       Environment:
         Type: LINUX_CONTAINER
         Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
@@ -862,9 +945,161 @@ Resources:
             docker pull ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
             systemctl enable --now ecs
 
+  # Custom Resource to handle ASG deletion gracefully
+  ASGDeletionHandlerRole:
+    Type: AWS::IAM::Role
+    Condition: UseEC2LaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: ASGDeletionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribeAutoScalingInstances
+                  - autoscaling:SetInstanceProtection
+                  - autoscaling:UpdateAutoScalingGroup
+                  - autoscaling:TerminateInstanceInAutoScalingGroup
+                  - ec2:DescribeInstances
+                Resource: "*"
+
+  ASGDeletionHandlerFunction:
+    Type: AWS::Lambda::Function
+    Condition: UseEC2LaunchType
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt ASGDeletionHandlerRole.Arn
+      Timeout: 300
+      Runtime: python3.12
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+          import time
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          autoscaling = boto3.client('autoscaling')
+          
+          def handler(event, context):
+              logger.info(f"Event: {event}")
+              request_type = event['RequestType']
+              asg_name = event['ResourceProperties'].get('AutoScalingGroupName')
+              
+              try:
+                  if request_type == 'Delete':
+                      logger.info(f"Preparing ASG {asg_name} for deletion")
+                      
+                      # Get ASG details
+                      try:
+                          response = autoscaling.describe_auto_scaling_groups(
+                              AutoScalingGroupNames=[asg_name]
+                          )
+                          
+                          if not response['AutoScalingGroups']:
+                              logger.info(f"ASG {asg_name} not found, assuming already deleted")
+                              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                              return
+                          
+                          asg = response['AutoScalingGroups'][0]
+                          instances = asg.get('Instances', [])
+                          
+                          logger.info(f"Found {len(instances)} instances in ASG")
+                          
+                          # Remove scale-in protection from all instances
+                          if instances:
+                              instance_ids = [i['InstanceId'] for i in instances]
+                              logger.info(f"Removing scale-in protection from instances: {instance_ids}")
+                              
+                              autoscaling.set_instance_protection(
+                                  InstanceIds=instance_ids,
+                                  AutoScalingGroupName=asg_name,
+                                  ProtectedFromScaleIn=False
+                              )
+                              
+                              logger.info("Scale-in protection removed successfully")
+                              
+                              # Set desired capacity to 0 to trigger instance termination
+                              logger.info("Setting ASG desired capacity to 0")
+                              autoscaling.update_auto_scaling_group(
+                                  AutoScalingGroupName=asg_name,
+                                  MinSize=0,
+                                  DesiredCapacity=0
+                              )
+                              
+                              # Wait a bit for instances to start terminating
+                              time.sleep(5)
+                              
+                              # Force terminate any remaining instances
+                              for instance_id in instance_ids:
+                                  try:
+                                      logger.info(f"Force terminating instance {instance_id}")
+                                      autoscaling.terminate_instance_in_auto_scaling_group(
+                                          InstanceId=instance_id,
+                                          ShouldDecrementDesiredCapacity=False
+                                      )
+                                  except Exception as e:
+                                      logger.warning(f"Failed to terminate instance {instance_id}: {e}")
+                              
+                              logger.info("All instances terminated or terminating")
+                          else:
+                              logger.info("No instances to terminate")
+                          
+                      except autoscaling.exceptions.ClientError as e:
+                          if 'does not exist' in str(e):
+                              logger.info(f"ASG {asg_name} already deleted")
+                          else:
+                              raise
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  
+              except Exception as e:
+                  logger.error(f"Error handling ASG deletion: {e}", exc_info=True)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
+
+  ASGDeletionHandler:
+    Type: Custom::ASGDeletionHandler
+    Condition: UseEC2LaunchType
+    Properties:
+      ServiceToken: !GetAtt ASGDeletionHandlerFunction.Arn
+      AutoScalingGroupName: !Sub "${AWS::StackName}-VP-ASG"
+    DependsOn:
+      - VPAutoScalingGroup
+
   VPAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Condition: UseEC2LaunchType
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       AutoScalingGroupName: !Sub "${AWS::StackName}-VP-ASG"
       MinSize: !Ref VPMinInstances
