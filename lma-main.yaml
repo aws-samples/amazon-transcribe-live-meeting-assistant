@@ -1473,6 +1473,12 @@ Resources:
                   - "bedrock:GetInferenceProfile"
                 Resource:
                   - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - "aws-marketplace:Subscribe"
+                  - "aws-marketplace:Unsubscribe"
+                  - "aws-marketplace:ViewSubscriptions"
+                Resource: "*"
           PolicyName: BedrockPolicy
 
   ValidateParametersFunction:
