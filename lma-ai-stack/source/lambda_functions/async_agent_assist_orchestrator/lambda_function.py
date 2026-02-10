@@ -247,6 +247,12 @@ def publish_lambda_agent_assist_transcript_segment(
     # Use "OriginalTranscript", if defined (optionally set by transcript lambda hook fn)"
     transcript: str = message.get("OriginalTranscript", message["Transcript"])
     created_at = datetime.utcnow().astimezone().isoformat()
+    
+    # Extract Owner (user email) for UBAC
+    owner = message.get("Owner", "")
+    
+    # Extract conversation history if provided (for chat messages)
+    conversation_history = message.get("ConversationHistory", [])
 
     # Determine response channel based on input channel
     response_channel = "CHAT_ASSISTANT" if channel == "CHAT_ASSISTANT" else "AGENT_ASSISTANT"
@@ -264,6 +270,8 @@ def publish_lambda_agent_assist_transcript_segment(
         SegmentId=str(uuid.uuid4()),
         StartTime=start_time,
         Status="TRANSCRIBING",
+        Owner=owner,  # Pass Owner for userEmail extraction
+        ConversationHistory=conversation_history,  # Pass conversation history
     )
     
     # Add MessageId if provided (for token streaming)
@@ -274,6 +282,11 @@ def publish_lambda_agent_assist_transcript_segment(
         content=transcript,
         transcript_segment_args=transcript_segment_args,
     )
+
+    # write initial message to indicate that wake word was detected and request submitted.
+    checking_segment = {**transcript_segment_args,
+                        "Transcript": "Checking...", "IsPartial": True}
+    write_agent_assist_to_kds(checking_segment)
 
     transcript_segment = get_lambda_agent_assist_transcript(
         **lambda_agent_assist_input,
@@ -291,13 +304,18 @@ def get_lambda_agent_assist_transcript(
 ):
     """Sends Lambda Agent Assist Requests"""
     call_id = transcript_segment_args["CallId"]
+    
+    # Extract Owner (user email) from transcript_segment_args if available
+    owner = transcript_segment_args.get("Owner", "")
 
     payload = {
         'text': content,
         'call_id': call_id,
+        'conversation_history': transcript_segment_args.get('ConversationHistory', []),  # Pass conversation history
         'transcript_segment_args': transcript_segment_args,
         'dynamodb_table_name': DYNAMODB_TABLE_NAME,
         'dynamodb_pk': f"c#{call_id}",
+        'userEmail': owner,  # Add userEmail for tools that require UBAC
     }
 
     LOGGER.info("Agent Assist Lambda Request: %s", content)
@@ -624,6 +642,11 @@ def publish_contact_lens_lambda_agent_assist_transcript_segment(
         )
 
     for agent_assist_args in send_lambda_agent_assist_args:
+        # write initial message to indicate that wake word was detected and request submitted.
+        checking_segment = {**agent_assist_args["transcript_segment_args"],
+                            "Transcript": "Checking...", "IsPartial": True}
+        write_agent_assist_to_kds(checking_segment)
+        
         transcript_segment = get_lambda_agent_assist_transcript(
             **agent_assist_args,
         )

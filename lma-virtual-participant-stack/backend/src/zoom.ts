@@ -3,6 +3,33 @@ import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
 
 export default class Zoom {
+    private async waitForButtonWithRetry(
+        page: Page,
+        selectors: string[],
+        maxRetries: number = 10,
+        delayMs: number = 500
+    ): Promise<{ element: any; selector: string } | null> {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            console.log(`Attempt ${attempt}/${maxRetries} to find button...`);
+            
+            for (const selector of selectors) {
+                const element = await page.$(selector);
+                if (element) {
+                    console.log(`Found button with selector: ${selector}`);
+                    return { element, selector };
+                }
+            }
+            
+            if (attempt < maxRetries) {
+                console.log(`Buttons not found, waiting ${delayMs}ms before retry...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+        
+        console.log(`Failed to find any button after ${maxRetries} attempts`);
+        return null;
+    }
+
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
         const messageElement = await page.waitForSelector(
             'p[data-placeholder="Type message here ..."]'
@@ -16,65 +43,139 @@ export default class Zoom {
 
     public async initialize(page: Page): Promise<void> {
 
-    page.on('console', (message: ConsoleMessage) => {
-        const type = message.type();
-        const text = message.text();
+        page.on('console', (message: ConsoleMessage) => {
+            const type = message.type();
+            const text = message.text();
 
-        switch (type) {
-            case 'log':
-                console.log(`Browser Log: ${text}`);
-                break; 
-            case 'error':
-                console.error(`Browser Error: ${text}`);
-                break;
-            case 'info':
-                console.info(`Browser Info: ${text}`);
-                break;
-            default:
-                console.log(`Browser ${type}: ${text}`);
-        }
-    });
+            switch (type) {
+                case 'log':
+                    console.log(`Browser Log: ${text}`);
+                    break; 
+                case 'error':
+                    console.error(`Browser Error: ${text}`);
+                    break;
+                case 'info':
+                    console.info(`Browser Info: ${text}`);
+                    break;
+                default:
+                    console.log(`Browser ${type}: ${text}`);
+            }
+        });
 
-    // Add error handlers
-    page.on('pageerror', (error: Error) => {
-        console.error('Page Error:', error);
-    });
+        // Add error handlers
+        page.on('pageerror', (error: unknown) => {
+            console.error('Page Error:', error);
+        });
 
-    page.on('error', (error: Error) => {
-        console.error('Browser Error:', error);
-    });
+        page.on('error', (error: unknown) => {
+            console.error('Browser Error:', error);
+        });
 
         console.log('Getting Zoom meeting link.');
         await page.goto(`https://zoom.us/wc/${details.invite.meetingId}/join`);
 
-        // Handle meeting password if provided
-        if (details.invite.meetingPassword) {
-            console.log('Typing meeting password.');
+        // Check for enterprise Zoom authentication requirement
+        let enterpriseLogin = false;
+        try {
+            const authPrompt = await page.waitForSelector('#prompt', { timeout: 5000 });
+            if (authPrompt) {
+                const promptText = await page.evaluate(() => {
+                    const promptDiv = document.querySelector('#prompt');
+                    return promptDiv ? promptDiv.textContent : '';
+                });
+                
+                if (promptText && promptText.includes('Sign in to join this meeting')) {
+                    console.error('ERROR: Enterprise Zoom authentication required!');
+                    console.error('The host requires authentication on the commercial Zoom platform.');
+                    console.error('This meeting requires signing in with a commercial Zoom account.');
+                    enterpriseLogin = true;
+                    
+                    // Notify frontend that manual action is required
+                    const { details } = await import('./details.js');
+                    if (details.invite.virtualParticipantId) {
+                        const { createStatusManager } = await import('./status-manager.js');
+                        const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                        await statusManager.setManualActionRequired(
+                            'LOGIN',
+                            'Enterprise Zoom authentication required. Please sign in using the VNC viewer.',
+                            120
+                        );
+                    }
+                    
+                    await page.waitForSelector('.video-avatar__avatar', { timeout: 120000 }); // Give 2 minutes to login
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                    
+                    // Clear manual action notification after successful login
+                    if (details.invite.virtualParticipantId) {
+                        const { createStatusManager } = await import('./status-manager.js');
+                        const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                        await statusManager.clearManualAction();
+                    }
+                }
+            }
+        } catch (error) {
+            // If selector times out, continue normally (no auth required)
+        }
+
+        // if they logged in with enterprise they won't need to put in name password etc so skip
+        if (enterpriseLogin === false) {
+            // Handle meeting password if provided
+            if (details.invite.meetingPassword) {
+                console.log('Typing meeting password.');
+                try {
+                    const passwordTextElement = await page.waitForSelector('#input-for-pwd');
+                    await passwordTextElement?.type(details.invite.meetingPassword);
+                } catch (error) {
+                    console.log('LMA Virtual Participant was unable to join the meeting.');
+                    throw new Error('Meeting not found or invalid meeting ID');
+                }
+            }
+
+            console.log('Checking audio button state with retry...');
+            // Wait for audio button to appear (handles loading state)
+            const audioResult = await this.waitForButtonWithRetry(
+                page,
+                ['svg.SvgAudioMute', 'svg.SvgAudioUnmute']
+            );
+            
+            if (audioResult) {
+                if (audioResult.selector === 'svg.SvgAudioMute') {
+                    console.log('Audio is unmuted, clicking to mute it.');
+                    await audioResult.element.click();
+                } else {
+                    console.log('Audio is already muted, skipping click.');
+                }
+            } else {
+                console.log('Warning: Could not find audio button in either state after retries.');
+            }
+
+            console.log('Checking video button state with retry...');
+            // Wait for video button to appear (handles loading state)
+            const videoResult = await this.waitForButtonWithRetry(
+                page,
+                ['svg.SvgVideoOn', 'svg.SvgVideoOff']
+            );
+            
+            if (videoResult) {
+                if (videoResult.selector === 'svg.SvgVideoOn') {
+                    console.log('Video is on, clicking to turn it off.');
+                    await videoResult.element.click();
+                } else {
+                    console.log('Video is already off, skipping click.');
+                }
+            } else {
+                console.log('Warning: Could not find video button in either state after retries.');
+            }
+
+            console.log('Entering name.');
             try {
-                const passwordTextElement = await page.waitForSelector('#input-for-pwd');
-                await passwordTextElement?.type(details.invite.meetingPassword);
+                const nameTextElement = await page.waitForSelector('#input-for-name');
+                await nameTextElement?.type(details.scribeIdentity);
+                await nameTextElement?.press('Enter');
             } catch (error) {
                 console.log('LMA Virtual Participant was unable to join the meeting.');
                 throw new Error('Meeting not found or invalid meeting ID');
             }
-        }
-
-        console.log('Clicking mute button.');
-        const muteButton = await page.waitForSelector('svg.SvgAudioMute');
-        await muteButton?.click();
-
-        console.log('Clicking video button.');
-        const stopVideoButton = await page.waitForSelector('svg.SvgVideoOn');
-        await stopVideoButton?.click();
-
-        console.log('Entering name.');
-        try {
-            const nameTextElement = await page.waitForSelector('#input-for-name');
-            await nameTextElement?.type(details.scribeIdentity);
-            await nameTextElement?.press('Enter');
-        } catch (error) {
-            console.log('LMA Virtual Participant was unable to join the meeting.');
-            throw new Error('Meeting not found or invalid meeting ID');
         }
 
         console.log('Waiting.');
@@ -128,49 +229,28 @@ export default class Zoom {
         console.log('Listening for speaker changes.');
         await page.evaluate(() => {
             let observer: MutationObserver | null = null;
-            let viewSwitchAttempted = false;
 
-            async function switchToSideBySideView() {
-                if (viewSwitchAttempted) {
-                    console.log('View switch already attempted, skipping');
-                    return false;
+            // Function to get current speaker from any view
+            function getCurrentSpeaker(): string | null {
+                const selectors = [
+                    // Screen sharing mode - suspension window (small video)
+                    '.single-suspension-container__video-frame .video-avatar__avatar-footer span',
+                    // Normal mode - main view
+                    '.single-main-container__video-frame .video-avatar__avatar-footer span',
+                    // Fallback - any avatar footer
+                    '.video-avatar__avatar-footer span[role="none"]'
+                ];
+                
+                for (const selector of selectors) {
+                    const element = document.querySelector(selector);
+                    if (element?.textContent?.trim()) {
+                        return element.textContent.trim();
+                    }
                 }
-                console.log('Switching to side-by-side view');
-                viewSwitchAttempted = true;
-                
-                // Wait longer for Zoom UI to be fully loaded
-                await new Promise(resolve => setTimeout(resolve, 2000));
-
-                console.log('Looking for view button...');
-                const viewButton = document.querySelector('#full-screen-dropdown button') as HTMLElement;
-                if (!viewButton) {
-                    console.log('View button not found with selector: #full-screen-dropdown button');
-                    return false;
-                }
-                
-                console.log('Found view button, clicking...');
-                viewButton.click();
-                console.log('Clicked view button, waiting for options to appear');
-                
-                // Wait longer for dropdown to appear
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                console.log('Looking for side-by-side option...');
-                const sideBySideOption = document.querySelector('a[aria-label="Side-by-side: Speaker"]') as HTMLElement;
-                if (!sideBySideOption) {
-                    console.log('Side-by-side option not found with selector: a[aria-label="Side-by-side: Speaker"]');
-                    return false;
-                }
-                
-                console.log('Found side-by-side option, clicking...');
-                sideBySideOption.click();
-                console.log('Clicked side-by-side option');
-                // Wait for view to change, then setup observer
-                setTimeout(setupObserver, 3000);
-                return true;
+                return null;
             }
 
-            async function setupObserver() {
+            function setupObserver() {
                 // Disconnect existing observer if any
                 if (observer) {
                     observer.disconnect();
@@ -184,38 +264,17 @@ export default class Zoom {
                     return;
                 }
 
-                // Check if speaker element exists
-                const speakerElement = document.querySelector(
-                    '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
-                );
-
-                if (!speakerElement) {
-                    console.log('Speaker element not found');
-                    if (!viewSwitchAttempted) {
-                        switchToSideBySideView();
-                    }
-                    return;
-                }
-
                 const config = { 
                     childList: true, 
-                    subtree: true 
+                    subtree: true,
+                    characterData: true
                 };
 
                 const callback = (mutationList: MutationRecord[]) => {
-                    const currentSpeakerElement = document.querySelector(
-                        '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
-                    );
-
-                    if (currentSpeakerElement) {
-                        const speakerName = currentSpeakerElement.textContent;
-                        if (speakerName) {
-                            console.log('Speaker detected:', speakerName);
-                            (window as any).speakerChange(speakerName);
-                        }
-                    } else if (!viewSwitchAttempted) {
-                        console.log('Speaker element lost, attempting to switch view');
-                        switchToSideBySideView();
+                    const speaker = getCurrentSpeaker();
+                    if (speaker) {
+                        console.log('Speaker detected:', speaker);
+                        (window as any).speakerChange(speaker);
                     }
                 };
 
@@ -223,22 +282,15 @@ export default class Zoom {
                 observer.observe(parentNode, config);
 
                 // Handle initial state
-                if (speakerElement.textContent) {
-                    (window as any).speakerChange(speakerElement.textContent);
+                const initialSpeaker = getCurrentSpeaker();
+                if (initialSpeaker) {
+                    console.log('Initial speaker:', initialSpeaker);
+                    (window as any).speakerChange(initialSpeaker);
                 }
             }
-            setTimeout(() => {
-                const initialSpeakerElement = document.querySelector(
-                    '.speaker-active-container__video-frame > .video-avatar__avatar > .video-avatar__avatar-footer'
-                );
 
-                if (!initialSpeakerElement) {
-                    console.log('Initial speaker element not found, attempting to switch view');
-                    switchToSideBySideView();
-                } else {
-                    setupObserver();
-                }
-            }, 2000);
+            // Wait for Zoom UI to be ready, then setup observer
+            setTimeout(setupObserver, 2000);
         });
 
         // Set up message monitoring with LMA features

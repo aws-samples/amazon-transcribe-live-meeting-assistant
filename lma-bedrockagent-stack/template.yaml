@@ -11,7 +11,7 @@ Parameters:
   
   BedrockModelID:
     Type: String
-    Default: "anthropic.claude-3-haiku-20240307-v1:0"
+    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     Description: >-
       Selected LLM Model to use for agent
 
@@ -61,6 +61,12 @@ Parameters:
   CustomerManagedEncryptionKeyArn:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
+  
+  LoggingBucketName:
+    Type: String
+    Description: >-
+      Name of the S3 bucket used for access logging across the LMA solution.
+      This bucket is used to store access logs from other S3 buckets and CloudFront distributions.
 
   PermissionsBoundaryArn:
     Type: String

@@ -7,9 +7,10 @@ export default class Webex {
     private readonly iframe = '#unified-webclient-iframe';
     private async sendMessages(
         frame: Frame,
-        messages: string[]
+        messages: string[],
+        isEnterprise: boolean | null = false
     ): Promise<void> {
-        const messageElement = await frame.waitForSelector('.ql-editor[contenteditable="true"]');
+        const messageElement = await frame.waitForSelector(isEnterprise ? '#chat-panel > div > textarea' : '.ql-editor[contenteditable="true"]');
         for (const message of messages) {
             await messageElement?.type(message);
             await messageElement?.press('Enter');
@@ -24,14 +25,34 @@ export default class Webex {
         const meetingTextElement = await page.waitForSelector('#join-meeting-form');
         await meetingTextElement?.type(details.invite.meetingId);
         await meetingTextElement?.press('Enter');
-        const joinFromBrowserButton = await page.waitForSelector('#broadcom-center-right', { timeout: 10000 });
-        if (joinFromBrowserButton) {
-            console.log('Found "Join from this browser" button, clicking it.');
-            await joinFromBrowserButton.click();
+        
+        // Wait a moment for the page to stabilize after entering meeting ID
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Try to click "Join from this browser" button if it appears
+        // Sometimes Webex skips this step and goes directly to the meeting join page
+        console.log('Checking for "Join from this browser" button...');
+        try {
+            const joinFromBrowserButton = await page.waitForSelector('#broadcom-center-right', { timeout: 5000 });
+            if (joinFromBrowserButton) {
+                console.log('Found "Join from this browser" button, clicking it.');
+                await joinFromBrowserButton.click();
+                // Wait for the page to load after clicking
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+        } catch (error) {
+            console.log('"Join from this browser" button not found - Webex may have auto-detected browser mode. Continuing...');
         }
+        
+        // Wait for the page to stabilize
+        await new Promise(resolve => setTimeout(resolve, 2000));
         console.log('Launching app.');
-        const frameElement = await page.waitForSelector(this.iframe, { timeout: 15000 });
-        const frame = await frameElement?.contentFrame();
+        const frameElement = await Promise.any([
+            page.waitForSelector(this.iframe, { timeout: 15000 }).then((el: any) => ({ source: 'default', el })).catch(() => null),
+            page.waitForSelector('iframe[name="thinIframe"]', { timeout: 15000 }).then((el: any) => ({ source: 'enterprise', el })).catch(() => null)
+        ]).catch(() => null);
+
+        const frame = await frameElement?.el?.contentFrame();
         if (!frame) {
             throw new Error('Failed to access Webex meeting frame');
         }
@@ -59,10 +80,133 @@ export default class Webex {
                 observer.observe(document.body, { childList: true, subtree: true });
             }
         });
-        console.log('Entering name in the new interface.');
-        console.log(frame.evaluate(()=> document.querySelector('input[data-test="Name (required)"]')));
-        const nameInputElement = await frame.waitForSelector('input[data-test="Name (required)"]',{ timeout: 10000 });
-        await nameInputElement?.type(details.scribeIdentity);
+
+        const passwordCheckEl = await Promise.any([
+            frame.waitForSelector('input[aria-label="Meeting password"]', { timeout: 30000 }).then((el: any) => ({ source: 'password', el })).catch(() => null),
+            frame.waitForSelector('input[data-test="Name (required)"]', { timeout: 30000 }).then((el: any) => ({ source: 'name', el })).catch(() => null),
+            frame.waitForSelector('input[aria-labelledby="nameLabel"]', { timeout: 30000 }).then((el: any) => ({ source: 'enterprise-name', el })).catch(() => null)
+        ]).catch(() => null);
+    
+        // Handle password page if detected
+        if (passwordCheckEl && passwordCheckEl.source === 'password') {
+            const passwordInput = passwordCheckEl.el;
+            
+            // Check if password is required and available
+            if (details.invite.meetingPassword) {
+                console.log('Auto-filling meeting password...');
+                if (passwordInput) {
+                    await passwordInput.type(details.invite.meetingPassword);
+                }
+            } else {
+                console.log('ERROR: Meeting requires password but none was provided.');
+                throw new Error('Meeting requires password but none was provided in invite details');
+            }
+            
+            // Check for CAPTCHA
+            const captchaImage = await frame.$('img[alt="Captcha image"]');
+            if (captchaImage) {
+                console.log('CAPTCHA detected! Triggering human-in-the-loop...');
+                
+                // Notify frontend that manual action is required
+                if (details.invite.virtualParticipantId) {
+                    const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                    await statusManager.setManualActionRequired(
+                        'CAPTCHA',
+                        'CAPTCHA detected on Webex password page. Please solve the CAPTCHA in the VNC viewer and click Next.',
+                        120
+                    );
+                }
+                
+                // Wait for CAPTCHA to be solved (Next button to be enabled and clicked, or name input to appear)
+                console.log('Waiting for CAPTCHA to be solved (up to 2 minutes)...');
+                await Promise.race([
+                    // Wait for name input to appear (successful CAPTCHA solve + Next click)
+                    frame.waitForSelector('input[data-test="Name (required)"]', {
+                        timeout: 120000,
+                        visible: true
+                    }),
+                    // Or wait for the Next button to be clicked (we'll detect by it disappearing)
+                    frame.waitForFunction(
+                        () => {
+                            const nextBtn = document.querySelector('mdc-button[type="submit"]');
+                            return !nextBtn || nextBtn.getAttribute('disabled') === null;
+                        },
+                        { timeout: 120000 }
+                    )
+                ]);
+                
+                console.log('CAPTCHA appears to be resolved, continuing...');
+                await new Promise((resolve) => setTimeout(resolve, 2000));
+                
+                // Clear manual action notification after CAPTCHA is resolved
+                if (details.invite.virtualParticipantId) {
+                    const statusManager = createStatusManager(details.invite.virtualParticipantId);
+                    await statusManager.clearManualAction();
+                }
+            } else {
+                // No CAPTCHA, just password - click Next button
+                console.log('No CAPTCHA detected, clicking Next button...');
+                const nextButton = await frame.waitForSelector('mdc-button[type="submit"]', { timeout: 5000 });
+                await nextButton?.click();
+                await new Promise((resolve) => setTimeout(resolve, 2000));
+            }
+        }
+
+        console.log('Entering name (and email on enterprise)');
+        // console.log(await frame.evaluate(()=> document.querySelector('input[data-test="Name (required)"]')));
+        if (frameElement && frameElement.source === 'enterprise' && passwordCheckEl.source === 'enterprise-name') {
+            // Check for guest form (name/email)
+            const nameInput = await frame.$('input[aria-labelledby="nameLabel"]');
+            console.log(`Guest form name input found: ${nameInput !== null}`);
+            
+            if (nameInput) {
+                console.log('Enterprise Webex guest form detected, auto-filling name and email...');
+                const emailInput = await frame.$('input[aria-labelledby="emailLabel"]');
+                
+                await nameInput.type(details.scribeIdentity);
+                
+                // Create a valid email from lmaUser
+                let userEmail: string;
+                if (details.lmaUser.includes('@')) {
+                    // Already has @, use as-is
+                    // userEmail = details.lmaUser; // enterprise emails might redirect to SSO login so use placeholder example
+                    const sanitizedUser = details.lmaUser.split('@')[0].replace(/[^a-zA-Z0-9._-]/g, '-');
+                    userEmail = `${sanitizedUser}@example.com`;
+                } else {
+                    // Sanitize username: keep only alphanumeric, dots, hyphens, underscores
+                    const sanitizedUser = details.lmaUser.replace(/[^a-zA-Z0-9._-]/g, '-');
+                    userEmail = `${sanitizedUser}@example.com`;
+                }
+                
+                await emailInput?.type(userEmail);
+                console.log(`Filled name: "${details.scribeIdentity}", email: "${userEmail}"`);
+                
+                // Wait for form validation to complete
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                console.log('Clicking Next button...');
+                const nextButton = await frame.$('#guest_next-btn');
+                await nextButton?.click();
+                
+                // Wait for password page to load
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                
+                // Handle meeting password if present
+                console.log('Checking for meeting password field...');
+                const passwordInput = await frame.$('input[type="password"]');
+                if (passwordInput && details.invite.meetingPassword) {
+                    console.log('Password field detected, auto-filling meeting password...');
+                    await passwordInput.type(details.invite.meetingPassword);
+                    
+                    console.log('Clicking Next button after password...');
+                    const passwordNextButton = await frame.$('#password_validate_btn');
+                    await passwordNextButton?.click();
+                }
+            }
+        } else {
+            const nameInputElement = (passwordCheckEl && passwordCheckEl.source === 'name') ? passwordCheckEl.el : await frame.waitForSelector('input[data-test="Name (required)"]',{ timeout: 30000 });
+            await nameInputElement?.type(details.scribeIdentity);
+        }
 
         // Wait for the meeting interface to load
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -70,7 +214,7 @@ export default class Webex {
         console.log('Handling cookie banner.');
         try {
             const rejectButton = await page.waitForSelector(
-                '.cookie-banner-body .a32ueaoVYHwRrsRMl0ci mdc-button:first-child',
+                (frameElement && frameElement.source === 'enterprise') ? '#cookie-banner-text > div.cookie-manage-option > div.cookie-banner-btnContainer > button:nth-child(1)' : '.cookie-banner-body .a32ueaoVYHwRrsRMl0ci mdc-button:first-child',
                 { timeout: 3000 }
             );
             await rejectButton?.click();
@@ -78,26 +222,28 @@ export default class Webex {
         } catch (error) {
             console.log('Cookie banner not found:', error);
         }
+
         console.log('Clicking mute button.');
-        const muteButtonElement = await frame.waitForSelector('mdc-button[data-test="microphone-button"]');
-        await muteButtonElement?.click();
+        const muteButtonElement = await frame.waitForSelector((frameElement && frameElement.source === 'enterprise') ? '#audioControlButton' : 'mdc-button[data-test="microphone-button"]');
+        await (frameElement && frameElement.source === 'enterprise') ? frame.evaluate((el: any) => el.click(), muteButtonElement) : muteButtonElement?.click();
 
         console.log('Clicking video button.');
         const videoButtonElement = await frame.waitForSelector(
-            'mdc-button[data-test="camera-button"]'
+            (frameElement && frameElement.source === 'enterprise') ? 'button[data-doi="VIDEO:STOP_VIDEO:MEETSIMPLE_INTERSTITIAL"]' : 'mdc-button[data-test="camera-button"]'
         );
-        await videoButtonElement?.click();
+        await (frameElement && frameElement.source === 'enterprise') ? frame.evaluate((el: any) => el.click(), videoButtonElement) : videoButtonElement?.click();
 
         console.log('Clicking join button.');
-        const joinButtonElement = await frame.waitForSelector('mdc-button[data-test="join-button"]');
+        const joinButtonElement = await frame.waitForSelector((frameElement && frameElement.source === 'enterprise') ? '#interstitial_join_btn' : 'mdc-button[data-test="join-button"]');
         await joinButtonElement?.click();
 
         console.log("Opening chat panel.");
         try {
-            await frame.waitForSelector('mdc-button[data-test="in-meeting-chat-toggle-button"]', {
+            const chatToggleButton = (frameElement && frameElement.source === 'enterprise') ? 'button[data-doi="CHAT:OPEN_CHAT_PANEL:MENU_CONTROL_BAR"]' : 'mdc-button[data-test="in-meeting-chat-toggle-button"]';
+            await frame.waitForSelector(chatToggleButton, {
                 timeout: details.waitingTimeout,
             });
-            await frame.click('mdc-button[data-test="in-meeting-chat-toggle-button"]');
+            await frame.click(chatToggleButton);
             console.log("Chat panel button clicked successfully");
         } catch(error: any) {
             console.log("Chat panel button error:", error.message);
@@ -114,7 +260,7 @@ export default class Webex {
         console.log('Successfully joined Webex meeting');
 
         console.log('Sending introduction messages.');
-        await this.sendMessages(frame, details.introMessages);
+        await this.sendMessages(frame, details.introMessages, frameElement && frameElement.source === 'enterprise');
 
         // Set up speaker change monitoring
         await page.exposeFunction('speakerChange', async (speaker: string) => {
@@ -128,6 +274,7 @@ export default class Webex {
               // Accept both Document and Element for flexibility
               const NAME_SELECTORS = [
                 '[data-test="participant-name"]',
+                '.videoitem-full-name-content-TzQC4', // Enterprise Webex
                 '[class*="full-name"]',
                 'mdc-text[type="body-large-regular"]',
                 'mdc-text',
@@ -136,12 +283,23 @@ export default class Webex {
               ];
 
               function getActiveSpeakerElement(root: Document | Element): Element | null {
-                // querySelector exists on both Document and Element
+                // Try enterprise Webex first (speaking indicator class)
+                const enterpriseSpeaker = root.querySelector?.('.videoitem-in-speaking-3a-w-');
+                if (enterpriseSpeaker) return enterpriseSpeaker;
+                
+                // Fall back to normal Webex (active speaker halo)
                 return root.querySelector?.('.active-speaker-halo') ?? null;
               }
 
               function getParticipantItem(node: Element | null): Element | null {
                 if (!node) return null;
+                
+                // For enterprise Webex, the node IS the video item container
+                if (node.classList?.contains?.('videoitem-in-speaking-3a-w-')) {
+                  return node;
+                }
+                
+                // For normal Webex, find the closest participant container
                 return (
                   node.closest?.(
                     'li,[role="listitem"],.participants-list-item,.participants-video-tile,.participants-video-panel-wrapper'
@@ -182,11 +340,14 @@ export default class Webex {
               const observer = new MutationObserver((mutations) => {
                 for (const m of mutations) {
                   if (m.type === 'childList') {
-                    // Added/removed/moved halo?
+                    // Added/removed/moved halo or enterprise speaking indicator?
                     for (const n of [...m.addedNodes, ...m.removedNodes]) {
                       if (
                         n instanceof Element &&
-                        (n.matches?.('.active-speaker-halo') || n.querySelector?.('.active-speaker-halo'))
+                        (n.matches?.('.active-speaker-halo') ||
+                         n.querySelector?.('.active-speaker-halo') ||
+                         n.matches?.('.videoitem-in-speaking-3a-w-') ||
+                         n.querySelector?.('.videoitem-in-speaking-3a-w-'))
                       ) {
                         announceIfChanged();
                         return;
@@ -197,7 +358,10 @@ export default class Webex {
                     if (
                       t.matches?.('.active-speaker-halo') ||
                       t.classList?.contains?.('active-speaker-halo') ||
-                      t.querySelector?.('.active-speaker-halo')
+                      t.querySelector?.('.active-speaker-halo') ||
+                      t.matches?.('.videoitem-in-speaking-3a-w-') ||
+                      t.classList?.contains?.('videoitem-in-speaking-3a-w-') ||
+                      t.querySelector?.('.videoitem-in-speaking-3a-w-')
                     ) {
                       announceIfChanged();
                       return;
@@ -287,7 +451,7 @@ export default class Webex {
         // Start transcription if enabled
         if (details.start) {
             console.log(details.startMessages[0]);
-            await this.sendMessages(frame, details.startMessages);
+            await this.sendMessages(frame, details.startMessages, frameElement && frameElement.source === 'enterprise');
             transcriptionService.startTranscription();
         }
 

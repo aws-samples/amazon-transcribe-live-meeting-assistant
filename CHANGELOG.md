@@ -5,7 +5,109 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.25] - 02/06/26
+
+### Added
+- Amazon Quick Suite MCP integration documentation with step-by-step setup guide
+- MCP server configuration outputs exposed in main CloudFormation stack (MCPServerEndpoint, MCPServerClientId, etc.)
+- Enterprise Webex Virtual Participant support with guest authentication, CAPTCHA handling, and speaker detection
+
+### Changed
+- Updated default Bedrock model from Claude 3 Haiku to Claude Haiku 4.5 (global.anthropic.claude-haiku-4-5-20251001-v1:0)
+- Changed Virtual Participant default launch type from FARGATE to EC2
+
+### Fixed
+- Critical security vulnerability: JWT tokens now always verified with signature validation (prevents token forgery and user impersonation)
+- Virtual Participant transcription failure due to function signature mismatch in get_owner_from_jwt() call - all transcript segments were failing to write to DynamoDB
+- Enabled X-Ray tracing on GetEventApiDnsFunction, GetCloudFrontPrefixListFunction, and VirtualParticipantSchedulerFunction for improved observability
+- Triaged and suppressed 54 security scan false positives and acceptable design decisions
+- Webex Virtual Participant password-protected meeting support
+- CloudFormation stack deletion failure when using EC2 launch type for Virtual Participant
+
+## [0.2.24] - 01/07/26
+
+### Added
+- S3 Vectors integration for Knowledge Base storage (40-60% cost reduction vs OpenSearch)
+- MCP (Model Context Protocol) server with OAuth 2.0 authentication
+- Six MCP tools: list_meetings, search_lma_meetings, get_meeting_summary, get_meeting_transcript, start_meeting_now, schedule_meeting
+- MCP server test suite with quickstart guide
+- EnableDataRetentionOnDelete parameter support for S3 Vectors and OpenSearch resources
+- Add Nova 2 Pro model
+
+### Changed
+- Replaced custom Lambda resources with native CloudFormation (AWS::S3Vectors::*, AWS::BedrockAgentCore::*)
+- Optimized meeting queries with date-sharded DynamoDB access
+
+### Fixed
+- Transcript retrieval filename conversion handling
+
+## [0.2.23] - 12/24/25
+
+### Added
+- MCP (Model Context Protocol) server support with public registry integration from modelcontextprotocol.io
+- OAuth 2.1 authentication with PKCE, OAuth 2.0 fallback, for secure MCP server connections
+- OAuth Client Credentials support for machine-to-machine authentication
+- Custom header, env variables, and bearer token authenticaiton options
+- Automatic OAuth token refresh before expiration
+- Salesforce MCP server integration with full CRUD operations
+- MCP Servers UI with dual installation modes (Custom and Registry tabs)
+- Lambda SnapStart for faster cold starts on agent functions
+- QuickSight S3 manifest CloudFormation output for analytics integration
+- Salesforce MCP setup documentation
+
+### Changed
+- MCP servers now support multiple authentication methods (Bearer, OAuth 2.1, OAuth Client Credentials, Custom Headers)
+- Build automation improved with automatic file change detection
+
+## [0.2.22] - 12/08/25
+
+### Added
+- Virtual Participant browser control via Strands agent
+- VNC preview control tool for programmatic show/hide
+- Meeting controls shortcut buttons with edit UI
+- Amazon Nova 2 Lite model support
+
+### Changed
+- VNC viewer resolution increased to 1920x1120 for full window visibility
+
+### Fixed
+- VNC viewer top cutoff - Chrome tabs and controls now fully visible
+- VP browser tab management - opens new tabs correctly
+
+
+## [0.2.21] - 11/17/25
+
+### Added
+- Strands-based Meeting Assistant Tools
+- noVNC Support for Real-Time Virtual Participant Viewing and Interaction
+- Claude Global Models
+- Tool for meeting chronology with DynamoDB query for finding last meeting
+
+### Changed
+- Update chime meeting ending functionality
+- Filters for virtual participant enhancements
+
+### Fixed
+- Fix zoom speaker detection
+- Zoom bugfix VNC wording
+- Fix: Virtual Participant VNC Routing for Multiple Concurrent Sessions
+- Remove ARN being detected in history for code defender
+- Teams captcha fix
+- Fixing logging bucket issue
+- Add detection and delay for Amazon Zoom to login with VNC viewer
+- Increase VNC connect delay for healthy for Zoom connect failure
+- Fix virtual participant issue
+- ECR vulnerabilities in VP stack
+
+## [0.2.20] - 2025-11-04
+### Fixed
+ - Github #199 issue: Fixed: Deployment issues due to a logging bucket name missing issue. 
+
+## [0.2.20] - 2025-10-24
+### Added
+- Virtual Participant filtering and table
+- User-based access control (UBAC) enhancements for Virtual Participants with improved security and permissions
+- Terminate/end scheduled Virtual Participant tasks functionality with automated cleanup
 
 ## [0.2.19] - 2025-10-17
 ### Added

@@ -462,7 +462,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       Handler: index.lambda_handler
-      Runtime: python3.9
+      Runtime: python3.12
       MemorySize: 128
       Timeout: 60
       Role: !GetAtt EcrImagesDeleteLambdaRole.Arn
@@ -732,7 +732,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt LambdaCodeBuildStartBuildExecutionRole.Arn
-      Runtime: python3.9
+      Runtime: python3.12
       Timeout: 60
       MemorySize: 128
       Handler: lambda_start_codebuild.handler

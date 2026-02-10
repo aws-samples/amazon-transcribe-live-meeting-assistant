@@ -53,6 +53,17 @@ Parameters:
     Type: String
     Default: "anthropic.claude-3-sonnet-20240229-v1:0"
 
+  TavilyApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional - STRANDS_BEDROCK only) API key for Tavily web search service to enable web search tool.
+      Get your API key from https://tavily.com. When provided, the Strands agent can search the web 
+      for current information during meetings. Leave blank to disable web search capability.
+    AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
+    ConstraintDescription: "Must be empty or a valid Tavily API key (20+ characters)"
+
   # Required when using QnABot, ignored for STRANDS_BEDROCK
   LexMeetingAssistBotId:
     Type: String
@@ -144,6 +155,16 @@ Parameters:
     Type: String
     Description: The AppSync GraphQL API URL
 
+  EventApiHttpUrl:
+    Type: String
+    Default: ""
+    Description: The AppSync Event API HTTP URL for MCP browser control
+
+  MCPServersTableName:
+    Type: String
+    Default: ""
+    Description: The DynamoDB table name for MCP server configurations
+
   FetchTranscriptFunctionArn:
     Type: String
     Description: ARN of Fetch Transcript function
@@ -207,7 +228,11 @@ Conditions:
   ShouldConfigureBedrockAgent: !Not [!Equals [!Ref BedrockAgentId, ""]]
   ShouldCreateQPlugin: !Not [!Equals [!Ref AmazonQAppId, ""]]
   ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
-  ShouldDeployStrandsFunction: !Condition ShouldUseStrandsBedrock
+  ShouldUseStrandsBedrockWithKB: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Create)"]
+  ShouldDeployStrandsFunction: !Or [
+    !Condition ShouldUseStrandsBedrock,
+    !Condition ShouldUseStrandsBedrockWithKB
+  ]
   ShouldConfigureBedrockLLM:
     !And [
       !Condition ShouldConfigureQnabot,
@@ -659,6 +684,8 @@ Resources:
           KB_ID: !Ref BedrockKnowledgeBaseId
           KB_REGION: !Ref AWS::Region
           KB_ACCOUNT_ID: !Ref AWS::AccountId
+          TRANSCRIPT_KB_ID: !Ref TranscriptBedrockKnowledgeBaseId
+          TAVILY_API_KEY: !Ref TavilyApiKey
           APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
           ENABLE_STREAMING: "true"
       Code: ./src
@@ -745,6 +772,16 @@ Resources:
                   - "dynamodb:GetItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:Query"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MCPServersTableName}"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:UpdateItem"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MCPServersTableName}"
           PolicyName: DynamoDBPolicy
         - PolicyDocument:
             Version: 2012-10-17
@@ -752,10 +789,11 @@ Resources:
               - Effect: Allow
                 Action:
                   - "kms:Decrypt"
+                  - "kms:Encrypt"
                   - "kms:DescribeKey"
                 Resource:
                   - !Ref CustomerManagedEncryptionKeyArn
-          PolicyName: KMSDecryptPolicy
+          PolicyName: KMSPolicy
         - PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -764,6 +802,15 @@ Resources:
                   - "appsync:GraphQL"
                 Resource:
                   - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/addChatToken"
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/toggleVNCPreview"
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/executeMCPCommand"
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/publishMCPResult"
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Query/fields/getMCPCommand"
+              - Effect: Allow
+                Action:
+                  - "appsync:EventPublish"
+                Resource:
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/channelNamespace/mcp-commands"
           PolicyName: AppSyncGraphQLPolicy
         - PolicyName: InlinePolicy
           PolicyDocument:
@@ -806,8 +853,14 @@ Resources:
           KB_ID: !Ref BedrockKnowledgeBaseId
           KB_REGION: !Ref AWS::Region
           KB_ACCOUNT_ID: !Ref AWS::AccountId
+          TRANSCRIPT_KB_ID: !Ref TranscriptBedrockKnowledgeBaseId
+          TAVILY_API_KEY: !Ref TavilyApiKey
           APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
+          EVENT_API_HTTP_URL: !Ref EventApiHttpUrl
           ENABLE_STREAMING: "true"
+          MCP_SERVERS_TABLE: !Ref MCPServersTableName
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
       Code: ./src
       LoggingConfig:
         LogGroup:
@@ -988,7 +1041,7 @@ Resources:
               - !Ref QNABedrockAgentFunction
               - !Ref QNABedrockLLMFunction
         - !If
-          - ShouldUseStrandsBedrock
+          - ShouldDeployStrandsFunction
           - !Ref StrandsMeetingAssistFunction
           - !Ref AWS::NoValue
       QnaBotSettings: !Ref QnaBotSettings
@@ -1388,4 +1441,4 @@ Outputs:
   
   StrandsMeetingAssistFunctionArn:
     Description: ARN of the Strands Meeting Assist Lambda function
-    Value: !If [ShouldUseStrandsBedrock, !GetAtt StrandsMeetingAssistFunction.Arn, "NA"]
+    Value: !If [ShouldDeployStrandsFunction, !GetAtt StrandsMeetingAssistFunction.Arn, "NA"]

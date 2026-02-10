@@ -48,14 +48,17 @@ def lambda_handler(event, context):
         arguments = event.get('arguments', {})
         input_data = arguments.get('input', {})
         identity = event.get('identity', {})
-        
+
         call_id = input_data.get('CallId', '')
         message = input_data.get('Message', '')
+        conversation_history = input_data.get('ConversationHistory', [])
         username = identity.get('username', 'ChatUser')
-        
+
         if not message or not call_id:
             logger.error("Missing required parameters: CallId and Message")
             raise ValueError('CallId and Message are required')
+        
+        logger.info(f"Conversation history length: {len(conversation_history)}")
         
         # Get AsyncAgentAssistOrchestrator ARN from environment
         orchestrator_arn = os.environ.get('ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN')
@@ -76,6 +79,7 @@ def lambda_handler(event, context):
             "StartTime": datetime.now().timestamp(),
             "EndTime": datetime.now().timestamp() + 1,
             "Transcript": message,
+            "ConversationHistory": conversation_history,  # Include conversation history
             "Speaker": username,
             "IsPartial": False,
             "Status": "TRANSCRIBING",

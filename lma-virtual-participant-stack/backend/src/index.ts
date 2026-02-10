@@ -1,6 +1,7 @@
 import puppeteer from 'puppeteer';
 import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { promises as fs } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
 import Teams from './teams.js';
@@ -10,22 +11,24 @@ import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
+import { MCPCommandHandler } from './mcp-command-handler.js';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
-const WINDOW_HEIGHT = 1080;
+const WINDOW_HEIGHT = 1000;
 
 // Shared Puppeteer configuration
 const getPuppeteerConfig = () => ({
-    headless: true,
+    headless: false, // Changed to false to show browser window in VNC
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    ignoreDefaultArgs: ['--mute-audio'],
+    ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
     protocolTimeout: details.meetingTimeout,
     timeout: details.meetingTimeout,
     args: [
-        `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT}`,
+        `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT+80}`,
         "--use-fake-ui-for-media-stream",
         "--use-fake-device-for-media-stream",
+        "--disable-blink-features=AutomationControlled",
         "--disable-notifications",
         "--disable-extensions",
         "--disable-crash-reporter",
@@ -35,6 +38,7 @@ const getPuppeteerConfig = () => ({
         "--v=1",
         "--enable-logging=stderr",
         "--log-level=0",
+        "--remote-debugging-port=9222", // Enable remote debugging for MCP
     ],
 });
 
@@ -42,9 +46,16 @@ const getPuppeteerConfig = () => ({
 let shutdownRequested = false;
 let statusManager: VirtualParticipantStatusManager | null = null;
 let vpId: string | null = null;
+let mcpHandler: MCPCommandHandler | null = null;
+
+// Local testing mode - skip ALB registration and AppSync updates
+const isLocalTest = process.env.LOCAL_TEST === 'true';
 
 const main = async (): Promise<void> => {
     console.log('LMA Virtual Participant starting...');
+    if (isLocalTest) {
+        console.log('*** LOCAL TEST MODE - Skipping ALB registration and AppSync updates ***');
+    }
     console.log(`Meeting Platform: ${details.invite.meetingPlatform}`);
     console.log(`Meeting ID: ${details.invite.meetingId}`);
     console.log(`Meeting Name: ${details.invite.meetingName}`);
@@ -52,9 +63,9 @@ const main = async (): Promise<void> => {
     
 
 
-    // Initialize status manager if VP_ID is provided
+    // Initialize status manager if VP_ID is provided (skip in local test mode)
     vpId = details.invite.virtualParticipantId || null;
-    if (vpId) {
+    if (vpId && !isLocalTest) {
         try {
             statusManager = new VirtualParticipantStatusManager(vpId);
             
@@ -70,6 +81,7 @@ const main = async (): Promise<void> => {
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
                 const callId = kinesisStreamManager.getCallId();
                 await statusManager.setCallId(callId);
+                process.env.VP_CALL_ID = callId;
                 console.log(`Generated and set new VP CallId: ${callId}`);
             }
             
@@ -86,6 +98,73 @@ const main = async (): Promise<void> => {
         } catch (error) {
             console.error(`Failed to initialize status manager: ${error}`);
         }
+    } else if (isLocalTest) {
+        console.log('✓ Skipping status manager initialization (local test mode)');
+        // Generate a local CallId for testing
+        const { kinesisStreamManager } = await import('./kinesis-stream.js');
+        const callId = kinesisStreamManager.getCallId();
+        process.env.VP_CALL_ID = callId;
+        console.log(`Generated local test CallId: ${callId}`);
+    }
+
+    // Wait for VNC server to be ready before proceeding
+    console.log('Waiting for VNC server to be ready...');
+    let vncReady = false;
+    let attempts = 0;
+    const maxAttempts = 30; // 30 seconds timeout
+    
+    while (!vncReady && attempts < maxAttempts) {
+        try {
+            await fs.access('/tmp/vnc_ready');
+            vncReady = true;
+            console.log('✓ VNC server is ready');
+            break;
+        } catch {
+            // File doesn't exist yet
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        attempts++;
+    }
+
+    if (!vncReady) {
+        console.error('VNC server failed to start within timeout');
+        if (statusManager) {
+            await statusManager.setFailed('VNC server initialization failed');
+        }
+        throw new Error('VNC server initialization failed');
+    }
+
+    // Register with ALB target group and wait for healthy (skip in local test mode)
+    if (statusManager && !isLocalTest) {
+        try {
+            console.log('Registering task with ALB target group...');
+            const registered = await statusManager.registerWithTargetGroup();
+            if (!registered) {
+                console.error('Failed to register with target group');
+                await statusManager.setFailed('ALB registration failed');
+                throw new Error('ALB registration failed');
+            }
+            console.log('✓ Task registered with ALB and healthy');
+        } catch (error) {
+            console.error('Error during ALB registration:', error);
+            await statusManager.setFailed('ALB registration error');
+            throw new Error('ALB registration failed');
+        }
+    } else if (isLocalTest) {
+        console.log('✓ Skipping ALB registration (local test mode)');
+    }
+
+    // Publish VNC endpoint via AppSync (only after ALB registration and health check)
+    if (statusManager && !isLocalTest) {
+        try {
+            await statusManager.setVncReady();
+            console.log('✓ VNC endpoint published via AppSync');
+        } catch (error) {
+            console.error('Failed to publish VNC endpoint:', error);
+            // Non-critical - continue with meeting join
+        }
+    } else if (isLocalTest) {
+        console.log('✓ Skipping AppSync VNC ready update (local test mode)');
     }
 
     // Calculate sleep time if meeting is scheduled for future
@@ -103,19 +182,30 @@ const main = async (): Promise<void> => {
         console.log(`VP ${vpId} status: CONNECTING`);
     }
 
-    // Launch Puppeteer browser
-    console.log('Launching browser...');
-    const isTeamsMeeting = details.invite.meetingPlatform === 'Teams' || details.invite.meetingPlatform === 'TEAMS';
-    let browser;
-    
-    if (isTeamsMeeting) {
-        console.log('DEBUG: Using puppeteer-extra with stealth plugin for Teams meeting');
-        // Configure puppeteer-extra with stealth plugin for Teams
-        puppeteerExtra.use(StealthPlugin());
-        browser = await puppeteerExtra.launch(getPuppeteerConfig());
-    } else {
-        console.log('DEBUG: Using standard puppeteer for non-Teams meeting');
-        browser = await puppeteer.launch(getPuppeteerConfig());
+    // Launch Puppeteer browser with stealth plugin for all platforms
+    console.log('Launching browser with stealth plugin...');
+    puppeteerExtra.use(StealthPlugin());
+    const browser = await puppeteerExtra.launch(getPuppeteerConfig());
+
+    // Wait for Chrome DevTools to be fully ready
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log('✓ Chrome launched with remote debugging on port 9222');
+
+    // Initialize MCP command handler AFTER browser is launched
+    if (statusManager && vpId) {
+        try {
+            const callId = process.env.VP_CALL_ID || '';
+            if (callId) {
+                mcpHandler = new MCPCommandHandler(vpId, callId);
+                await mcpHandler.start();
+                console.log('✓ MCP command handler started');
+            } else {
+                console.log('VP_CALL_ID not set - skipping MCP handler');
+            }
+        } catch (error) {
+            console.error('Failed to start MCP command handler:', error);
+            // Non-critical - continue with meeting join
+        }
     }
 
     const page = await browser.newPage();
@@ -140,7 +230,7 @@ const main = async (): Promise<void> => {
         // Initialize the appropriate meeting platform handler
         console.log(`Initializing ${details.invite.meetingPlatform} handler...`);
         console.log(`DEBUG: Meeting platform value: "${details.invite.meetingPlatform}" (type: ${typeof details.invite.meetingPlatform})`);
-        
+
         switch (details.invite.meetingPlatform) {
             case 'CHIME':
                 meeting = new Chime();
@@ -213,6 +303,26 @@ const main = async (): Promise<void> => {
             console.error('Error handling recording cleanup:', error);
         }
 
+        // Deregister from ALB target group
+        if (statusManager) {
+            try {
+                await statusManager.deregisterFromTargetGroup();
+                console.log('✓ Deregistered from ALB target group');
+            } catch (error) {
+                console.error('Error deregistering from ALB:', error);
+            }
+        }
+
+        // Stop MCP handler
+        if (mcpHandler) {
+            try {
+                await mcpHandler.stop();
+                console.log('✓ MCP handler stopped');
+            } catch (error) {
+                console.error('Error stopping MCP handler:', error);
+            }
+        }
+
         try {
             // Close browser
             await browser.close();
@@ -242,6 +352,16 @@ const signalHandler = async (signal: string) => {
     console.log(`Received ${signal}, initiating graceful shutdown...`);
     shutdownRequested = true;
     
+    // Deregister from ALB target group
+    if (statusManager) {
+        try {
+            await statusManager.deregisterFromTargetGroup();
+            console.log('✓ Deregistered from ALB target group');
+        } catch (error) {
+            console.error('Error deregistering from ALB:', error);
+        }
+    }
+    
     // Send END event to Kinesis when externally terminated
     try {
         console.log('Sending END meeting event due to external termination...');
@@ -258,6 +378,15 @@ const signalHandler = async (signal: string) => {
             console.log(`VP ${vpId} status updated to COMPLETED due to external termination`);
         } catch (error) {
             console.error(`Failed to update status during shutdown: ${error}`);
+        }
+    }
+    
+    // Stop MCP handler
+    if (mcpHandler) {
+        try {
+            await mcpHandler.stop();
+        } catch (error) {
+            console.error('Error stopping MCP handler:', error);
         }
     }
     

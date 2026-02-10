@@ -8,18 +8,20 @@ import { Route, Switch, useLocation } from 'react-router-dom';
 import { SideNavigation } from '@awsui/components-react';
 import { LMA_VERSION } from '../common/constants';
 import useSettingsContext from '../../contexts/settings';
+import useAppContext from '../../contexts/app';
 
 import {
   CALLS_PATH,
   MEETINGS_QUERY_PATH,
   STREAM_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
+  MCP_SERVERS_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
 
 export const callsNavHeader = { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` };
 
-const generateNavigationItems = (settings) => {
+const generateNavigationItems = (settings, isAdmin) => {
   const navigationItems = [
     { type: 'link', text: 'Meetings List', href: `#${CALLS_PATH}` },
     { type: 'link', text: 'Meetings Query Tool', href: `#${MEETINGS_QUERY_PATH}` },
@@ -47,6 +49,21 @@ const generateNavigationItems = (settings) => {
       ],
     },
   ];
+
+  // Add Configuration section (admin only)
+  if (isAdmin) {
+    navigationItems.push({
+      type: 'section',
+      text: 'Configuration',
+      items: [
+        {
+          type: 'link',
+          text: 'MCP Servers',
+          href: `#${MCP_SERVERS_PATH}`,
+        },
+      ],
+    });
+  }
 
   // Add Deployment Info section if settings are available
   if (settings?.StackName || settings?.Version || settings?.BuildDateTime) {
@@ -126,15 +143,22 @@ const defaultOnFollowHandler = (ev) => {
 /* eslint-disable react/prop-types */
 const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultOnFollowHandler }) => {
   const { settings } = useSettingsContext() || {};
+  const { user } = useAppContext();
   const location = useLocation();
   const path = location.pathname;
 
-  // Generate navigation items dynamically based on settings
-  const navigationItems = items || generateNavigationItems(settings);
+  // Check if user is admin
+  const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
+  const isAdmin = userGroups.includes('Admin');
+
+  // Generate navigation items dynamically based on settings and user role
+  const navigationItems = items || generateNavigationItems(settings, isAdmin);
 
   let activeHref = `#${DEFAULT_PATH}`;
   if (path.includes(MEETINGS_QUERY_PATH)) {
     activeHref = `#${MEETINGS_QUERY_PATH}`;
+  } else if (path.includes(MCP_SERVERS_PATH)) {
+    activeHref = `#${MCP_SERVERS_PATH}`;
   } else if (path.includes(CALLS_PATH)) {
     activeHref = `#${CALLS_PATH}`;
   } else if (path.includes(STREAM_AUDIO_PATH)) {
@@ -144,7 +168,7 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
   }
   return (
     <Switch>
-      <Route path={CALLS_PATH}>
+      <Route path={[CALLS_PATH, MCP_SERVERS_PATH]}>
         <SideNavigation
           items={navigationItems}
           header={header || callsNavHeader}

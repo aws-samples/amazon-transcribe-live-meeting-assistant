@@ -172,7 +172,7 @@ Parameters:
       ARN below.
 
   BedrockModelId:
-    Default: "anthropic.claude-3-haiku-20240307-v1:0"
+    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     Type: String
     AllowedValues:
       - "anthropic.claude-3-haiku-20240307-v1:0"
@@ -191,12 +191,17 @@ Parameters:
       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
       - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
+      - "global.anthropic.claude-sonnet-4-20250514-v1:0"
+      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      - "global.amazon.nova-2-lite-v1:0"
+      - "global.amazon.nova-2-pro-v1:0"
 
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models. Includes Nova models (cost-effective), Claude 3.5/3.7 (advanced), 
       and Claude 4 (cutting-edge). Some models require inference profiles.
-      Defaults to 'anthropic.claude-3-haiku-20240307-v1:0'
+      Defaults to 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""
@@ -355,6 +360,12 @@ Parameters:
       The DynamoDB table name where the default and custom summary prompt
       templates are stored.
 
+  ChatButtonConfigTableName:
+    Type: String
+    Description:
+      The DynamoDB table name where the default and custom STRANDS agent chat button
+      configurations are stored.
+
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
@@ -412,9 +423,41 @@ Parameters:
     Description: >
       Provide the *id* (not name) of an existing Bedrock Knowledge Base to be used for Agent Assist bot.
 
+  EnableMCPServer:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Enable MCP Server integration to allow external applications (Amazon Quick Suite,
+      Claude Desktop, custom agentic systems) to access LMA meeting data via MCP protocol.
+
+  MCPServerCallbackURLs:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Comma-separated list of additional OAuth callback URLs for custom MCP clients.
+
+  CognitoUserPoolDomain:
+    Type: String
+    Default: ""
+    Description: >-
+      Cognito User Pool domain prefix for OAuth URLs (passed from COGNITOSTACK)
+
   LoggingBucketName:
     Type: String
     Description: Name of the logging bucket for S3 access logs
+
+  VPC:
+    Type: String
+    Description: VPC ID for ALB deployment
+
+  PublicSubnet1:
+    Type: String
+    Description: Public subnet 1 for ALB
+
+  PublicSubnet2:
+    Type: String
+    Description: Public subnet 2 for ALB
 
   PermissionsBoundaryArn:
     Type: String
@@ -423,6 +466,23 @@ Parameters:
       (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
+
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable data retention on stack deletion for compliance requirements.
+      When true (default), DynamoDB tables will be retained. When false, all resources deleted.
+
+  VPScheduleGroupName:
+    Type: String
+    Default: "LMA-VIRTUALPARTICIPANTSTACK-1ICEYE8S4JXFV-vp-schedules"
+    Description: >-
+      Name of the EventBridge Schedule Group for Virtual Participants from the VP stack.
+      This should match the schedule group name created by the Virtual Participant stack.
 
 
 Metadata:
@@ -468,10 +528,13 @@ Metadata:
           Transcript Summary is processed (existing)
 
 Conditions:
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
+  ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
+  HasCustomMCPServerCallbackURLs: !Not [!Equals [!Ref MCPServerCallbackURLs, ""]]
   ShouldEnableLambdaAgentAssist:
     !Equals [!Ref IsLambdaAgentAssistEnabled, "true"]
   ShouldEnableTranscriptLambdaHookFunction:
@@ -493,6 +556,9 @@ Conditions:
   
 
 Outputs:
+  QuickSightManifestUrl:
+    Description: S3 URL for QuickSight manifest file to import recordings bucket data
+    Value: !Sub "https://${S3BucketName}.s3.${AWS::Region}.amazonaws.com/quicksight-recordingsbucket-manifest.json"
   CloudfrontEndpoint:
     Description: Endpoint for Cloudfront distribution
     Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
@@ -556,11 +622,84 @@ Outputs:
   AppSyncGraphQLUrl:
     Description: AppSync GraphQL endpoint URL
     Value: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+  AppSyncEventApiId:
+    Description: AppSync Event API ID
+    Value: !GetAtt AppSyncEventApi.ApiId
+  AppSyncEventApiUrl:
+    Description: AppSync Event API WebSocket URL for MCP commands
+    Value: !GetAtt EventApiDns.WebSocketUrl
+  AppSyncEventApiHttpUrl:
+    Description: AppSync Event API HTTP URL for publishing
+    Value: !GetAtt EventApiDns.HttpUrl
+  VNCTargetGroupArn:
+    Description: ARN of the VNC Target Group for Virtual Participant ECS tasks
+    Value: !Ref VNCTargetGroup
+  VNCALBSecurityGroupId:
+    Description: Security Group ID for VNC ALB
+    Value: !Ref ALBSecurityGroup
+  VPSecurityGroupId:
+    Description: Security Group ID for Virtual Participant ECS tasks
+    Value: !Ref VPSecurityGroup
+  VNCALBListenerArn:
+    Description: ARN of the VNC ALB Listener for dynamic routing rules
+    Value: !Ref VNCALBListener
+    Export:
+      Name: !Sub "${AWS::StackName}-VNCALBListenerArn"
+  MCPServersTableName:
+    Description: Name of the MCP Servers DynamoDB table
+    Value: !Ref MCPServersTable
+  MCPLayerBuildProjectName:
+    Description: Name of the CodeBuild project for MCP layer building
+    Value: !Ref MCPLayerBuildProject
+  OAuthCallbackUrl:
+    Description: OAuth callback URL for MCP server authorization (use this in your OAuth provider)
+    Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+  OAuthStateTableName:
+    Description: Name of the OAuth State DynamoDB table
+    Value: !Ref OAuthStateTable
+  
+  MCPServerEndpoint:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      MCP Server endpoint for external applications to connect and access LMA meeting data.
+      Use this URL with Amazon Quick Suite, Claude Desktop, or custom MCP clients.
+    Value: !GetAtt MCPServerGateway.GatewayUrl
+  
+  MCPServerClientId:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      Cognito Client ID for external applications to authenticate with LMA's MCP Server.
+      Use with MCPServerClientSecret to obtain OAuth tokens.
+    Value: !Ref MCPServerExternalAppClient
+  
+  MCPServerClientSecret:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      Cognito Client Secret for external applications. STORE SECURELY!
+      Use with MCPServerClientId to obtain OAuth tokens for MCP Server access.
+    Value: !GetAtt MCPServerExternalAppClient.ClientSecret
+  
+  MCPServerUserPoolId:
+    Condition: ShouldEnableMCPServer
+    Description: Cognito User Pool ID for MCP Server authentication
+    Value: !Ref UserPoolId
+  
+  MCPServerTokenURL:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      OAuth token endpoint for obtaining access tokens to LMA's MCP Server.
+      Example: curl -X POST <this-url> -d "grant_type=authorization_code&client_id=<MCPServerClientId>&client_secret=<MCPServerClientSecret>&code=<auth_code>&redirect_uri=<callback_url>"
+    Value: !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token"
+  
+  MCPServerAuthorizationURL:
+    Condition: ShouldEnableMCPServer
+    Description: OAuth authorization endpoint for authorization code flow (browser-based authentication)
+    Value: !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
 
 Resources:
   EventSourcingTable:
     Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
     UpdateReplacePolicy: Retain
     Properties:
       AttributeDefinitions:
@@ -783,7 +922,202 @@ Resources:
               - "LEX"
           - Name: REACT_APP_CLOUDFRONT_DOMAIN
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
-      TimeoutInMinutes: 10
+  # CodeBuild project for building MCP servers Lambda layer
+  MCPLayerBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-MCP-Layer-Builder"
+      Description: Builds Lambda layer with installed MCP servers
+      ServiceRole: !Ref MCPLayerBuildRole
+      EncryptionKey: alias/aws/s3
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - echo "MCP Layer Builder"
+                - yum install -y jq zip python3.12 python3.12-pip
+                - python3.12 --version
+                - python3.12 -m pip --version
+            build:
+              commands:
+                - echo "Querying DynamoDB for installed MCP servers"
+                - aws dynamodb query --table-name "$MCP_SERVERS_TABLE" --key-condition-expression "AccountId = :accountId" --expression-attribute-values '{":accountId":{"S":"'$AWS_ACCOUNT_ID'"}}' --output json > /tmp/servers.json
+                - SERVER_COUNT=$(jq '.Items | length' /tmp/servers.json)
+                - echo "Found $SERVER_COUNT MCP servers"
+                - echo "Building Lambda layer with Python dependencies"
+                - mkdir -p layer/python && cd layer/python
+                - echo "Step 1 - Installing base Python dependencies (required for Lambda function)"
+                - echo "strands-agents>=0.1.0" > requirements.txt
+                - echo "boto3>=1.28.0" >> requirements.txt
+                - echo "botocore>=1.31.0" >> requirements.txt
+                - echo "tavily-python>=0.3.0" >> requirements.txt
+                - echo "gql>=3.4.0" >> requirements.txt
+                - echo "requests>=2.31.0" >> requirements.txt
+                - echo "requests-toolbelt>=0.10.0" >> requirements.txt
+                - echo "mcp>=1.0.0" >> requirements.txt
+                - cat requirements.txt
+                - python3.12 -m pip install -r requirements.txt -t . --no-cache-dir --upgrade
+                - echo "Base dependencies installed successfully"
+                - |
+                  if [ "$SERVER_COUNT" -gt "0" ]; then
+                    echo "Step 2 - Installing MCP server packages from DynamoDB";
+                    
+                    # Filter out HTTP servers (they don't need package installation)
+                    jq -r '.Items[] | select(.PackageType.S != "streamable-http" and .PackageType.S != null) | .NpmPackage.S' /tmp/servers.json > mcp-servers.txt;
+                    
+                    # Also include servers without PackageType (backward compatibility - assume pypi)
+                    jq -r '.Items[] | select(.PackageType.S == null) | .NpmPackage.S' /tmp/servers.json >> mcp-servers.txt;
+                    
+                    PACKAGE_COUNT=$(wc -l < mcp-servers.txt | tr -d ' ')
+                    echo "Found $PACKAGE_COUNT package-based servers to install";
+                    
+                    if [ "$PACKAGE_COUNT" -gt "0" ]; then
+                      echo "MCP packages to install:";
+                      cat mcp-servers.txt;
+                      while IFS= read -r package; do
+                        if [ -n "$package" ]; then
+                          echo "Attempting to install: $package";
+                          if python3.12 -m pip install "$package" -t . --no-cache-dir 2>&1; then
+                            echo "Successfully installed $package";
+                          else
+                            echo "WARNING: Failed to install $package (package may not exist in PyPI)";
+                            echo "Continuing with build...";
+                          fi;
+                        fi;
+                      done < mcp-servers.txt;
+                    else
+                      echo "No package-based servers to install (all servers are HTTP-based)";
+                    fi;
+                  else
+                    echo "Step 2 - No MCP servers configured, skipping MCP package installation";
+                  fi
+                - cd ../..
+                - echo "Packaging Lambda layer"
+                - cd layer && zip -r ../mcp-layer.zip . -q && cd ..
+                - LAYER_SIZE_BYTES=$(stat -c%s mcp-layer.zip)
+                - LAYER_SIZE_MB=$((LAYER_SIZE_BYTES / 1024 / 1024))
+                - echo "Layer size is ${LAYER_SIZE_MB}MB"
+                - |
+                  if [ "$LAYER_SIZE_BYTES" -gt "50000000" ]; then
+                    echo "Layer exceeds 70MB limit - uploading to S3 first";
+                    echo "Using S3 bucket: $S3_BUCKET";
+                    S3_KEY="mcp-layers/$STACK_NAME-mcp-servers-$(date +%s).zip";
+                    echo "Uploading to s3://$S3_BUCKET/$S3_KEY";
+                    aws s3 cp mcp-layer.zip "s3://$S3_BUCKET/$S3_KEY";
+                    echo "Publishing layer from S3";
+                    if aws lambda publish-layer-version --layer-name "$STACK_NAME-mcp-servers" --description "MCP servers and dependencies" --content "S3Bucket=$S3_BUCKET,S3Key=$S3_KEY" --compatible-runtimes python3.12 --query 'Version' --output text > /tmp/version.txt 2>&1; then
+                      echo "Layer published successfully";
+                    else
+                      echo "ERROR: Layer unzipped size exceeds Lambda's 250MB limit";
+                      echo "This MCP server has too many dependencies for Lambda layers";
+                      echo "Marking server as FAILED in DynamoDB";
+                      if [ -n "$SERVER_ID" ]; then
+                        aws dynamodb update-item --table-name "$MCP_SERVERS_TABLE" --key "{\"AccountId\":{\"S\":\"$AWS_ACCOUNT_ID\"},\"ServerId\":{\"S\":\"$SERVER_ID\"}}" --update-expression "SET #status = :status, ErrorMessage = :error" --expression-attribute-names '{"#status":"Status"}' --expression-attribute-values "{\":status\":{\"S\":\"FAILED\"},\":error\":{\"S\":\"Layer too large: unzipped size exceeds 250MB limit\"}}";
+                      fi;
+                      exit 1;
+                    fi;
+                  else
+                    echo "Layer size OK - publishing directly";
+                    aws lambda publish-layer-version --layer-name "$STACK_NAME-mcp-servers" --description "MCP servers and dependencies" --zip-file fileb://mcp-layer.zip --compatible-runtimes python3.12 --query 'Version' --output text > /tmp/version.txt;
+                  fi
+                - echo "Published layer version $(cat /tmp/version.txt)"
+                - FUNCTION_NAME=$(aws lambda list-functions --query "Functions[?contains(FunctionName, 'MeetingAssist')].FunctionName" --output text)
+                - echo "Found Lambda function $FUNCTION_NAME"
+                - aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --query 'Layers[].LayerArn' --output json > /tmp/current.json
+                - jq -r --arg layer "arn:aws:lambda:$AWS_DEFAULT_REGION:$AWS_ACCOUNT_ID:layer:$STACK_NAME-mcp-servers:$(cat /tmp/version.txt)" 'map(select(. | contains("mcp-servers") | not)) + [$layer] | join(" ")' /tmp/current.json > /tmp/layers.txt
+                - aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --layers $(cat /tmp/layers.txt)
+                - echo "Lambda function updated with new layer"
+                - |
+                  if [ "$ACTION" = "INSTALL_MCP_SERVER" ] && [ -n "$SERVER_ID" ]; then
+                    echo "Updating DynamoDB server status to ACTIVE";
+                    aws dynamodb update-item --table-name "$MCP_SERVERS_TABLE" --key "{\"AccountId\":{\"S\":\"$AWS_ACCOUNT_ID\"},\"ServerId\":{\"S\":\"$SERVER_ID\"}}" --update-expression "SET #status = :status, UpdatedAt = :updated" --expression-attribute-names '{"#status":"Status"}' --expression-attribute-values "{\":status\":{\"S\":\"ACTIVE\"},\":updated\":{\"S\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}";
+                    echo "Server status updated to ACTIVE";
+                  fi
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: STACK_NAME
+            Value: !Ref AWS::StackName
+          - Name: MCP_SERVERS_TABLE
+            Value: !Ref MCPServersTable
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: S3_BUCKET
+            Value: !Sub "${BootstrapBucketBaseName}-${AWS::Region}"
+      TimeoutInMinutes: 15
+
+  MCPLayerBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: codebuild.amazonaws.com
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: MCPLayerBuild
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt MCPServersTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+              - Effect: Allow
+                Action:
+                  - lambda:ListFunctions
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - lambda:PublishLayerVersion
+                  - lambda:GetLayerVersion
+                  - lambda:GetFunctionConfiguration
+                  - lambda:UpdateFunctionConfiguration
+                Resource:
+                  - !Sub
+                    - "arn:aws:lambda:${Region}:${AccountId}:layer:${StackName}-mcp-servers"
+                    - Region: !Ref AWS::Region
+                      AccountId: !Ref AWS::AccountId
+                      StackName: !Ref AWS::StackName
+                  - !Sub
+                    - "arn:aws:lambda:${Region}:${AccountId}:layer:${StackName}-mcp-servers:*"
+                    - Region: !Ref AWS::Region
+                      AccountId: !Ref AWS::AccountId
+                      StackName: !Ref AWS::StackName
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${LMAStackName}-*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/mcp-layers/*"
 
   LambdaCodeBuildStartBuildExecutionRole:
     Type: AWS::IAM::Role
@@ -1086,6 +1420,7 @@ Resources:
           IS_LAMBDA_AGENT_ASSIST_ENABLED: !Ref IsLambdaAgentAssistEnabled
           LAMBDA_AGENT_ASSIST_FUNCTION_ARN: !Ref AgentAssistExistingLambdaFunctionArn
           DYNAMODB_TABLE_NAME: !Ref EventSourcingTable
+          EVENT_API_HTTP_URL: !GetAtt EventApiDns.HttpUrl
       Timeout: 60
       MemorySize: 128
       Handler: lambda_function.handler
@@ -1115,6 +1450,8 @@ Resources:
     Properties:
       Role: !GetAtt StrandsChatInterfaceFunctionExecutionRole.Arn
       Runtime: python3.12
+      SnapStart:
+        ApplyOn: PublishedVersions
       Environment:
         Variables:
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
@@ -1208,13 +1545,29 @@ Resources:
                 Action:
                   - lex:RecognizeText
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${AppSyncApiEncrypted.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - appsync:EventConnect
+                  - appsync:EventSubscribe
+                  - appsync:EventPublish
+                Resource:
+                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncEventApi.ApiId}/*"
               - !If
                 - ShouldEnableLambdaAgentAssist
                 - Effect: Allow
                   Action:
                     - lambda:InvokeFunction
                   Resource:
-                    - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${LMAStackName}-*"
+                    - !Sub
+                      - "arn:aws:lambda:${Region}:${AccountId}:function:STRANDS-${StackName}-*"
+                      - Region: !Ref AWS::Region
+                        AccountId: !Ref AWS::AccountId
+                        StackName: !Ref LMAStackName
                     - !Sub "${AgentAssistExistingLambdaFunctionArn}"
                 - Ref: AWS::NoValue
 
@@ -1543,7 +1896,7 @@ Resources:
     Properties:
       Handler: index.handler
       Role: !GetAtt QueryKnowledgeBaseResolverFunctionExecutionRole.Arn
-      Runtime: python3.9
+      Runtime: python3.12
       CodeUri: ../source/lambda_functions/query_knowledgebase_resolver
       Description: Lambda function to query the meeting transcript knowledge base
       MemorySize: 512
@@ -1861,6 +2214,130 @@ Resources:
                   - lambda:InvokeFunction
                 Resource: !GetAtt MeetingControlsResolverFunction.Arn
 
+  # AppSync Event API for MCP command delivery (separate from GraphQL API)
+  AppSyncEventApi:
+    Type: AWS::AppSync::Api
+    Properties:
+      Name: !Sub "MCPEvents-${AWS::StackName}"
+      EventConfig:
+        AuthProviders:
+          - AuthType: AWS_IAM
+        ConnectionAuthModes:
+          - AuthType: AWS_IAM
+        DefaultPublishAuthModes:
+          - AuthType: AWS_IAM
+        DefaultSubscribeAuthModes:
+          - AuthType: AWS_IAM
+
+  # Channel namespace for MCP commands
+  MCPChannelNamespace:
+    Type: AWS::AppSync::ChannelNamespace
+    Properties:
+      ApiId: !GetAtt AppSyncEventApi.ApiId
+      Name: mcp-commands
+
+  # Custom resource to get Event API DNS (not exposed by CloudFormation)
+  GetEventApiDnsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: AppSyncGetApi
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - appsync:GetApi
+                Resource: !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*"
+
+  GetEventApiDnsFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for custom resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      Role: !GetAtt GetEventApiDnsRole.Arn
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          appsync_client = boto3.client('appsync')
+          
+          def handler(event, context):
+              logger.info(f"Event: {event}")
+              
+              try:
+                  request_type = event['RequestType']
+                  
+                  if request_type == 'Delete':
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  
+                  api_id = event['ResourceProperties']['ApiId']
+                  logger.info(f"Getting DNS for Event API: {api_id}")
+                  
+                  response = appsync_client.get_api(apiId=api_id)
+                  dns = response['api']['dns']
+                  realtime_dns = dns['REALTIME']
+                  http_dns = dns['HTTP']
+                  
+                  logger.info(f"REALTIME DNS: {realtime_dns}")
+                  logger.info(f"HTTP DNS: {http_dns}")
+                  
+                  websocket_url = f"wss://{realtime_dns}/event"
+                  http_url = f"https://{http_dns}"
+                  
+                  response_data = {
+                      'RealtimeDns': realtime_dns,
+                      'HttpDns': http_dns,
+                      'WebSocketUrl': websocket_url,
+                      'HttpUrl': http_url
+                  }
+                  
+                  logger.info(f"Response data: {response_data}")
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                  
+              except Exception as e:
+                  logger.error(f"Error: {e}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
+
+  EventApiDns:
+    Type: Custom::EventApiDns
+    Properties:
+      ServiceToken: !GetAtt GetEventApiDnsFunction.Arn
+      ApiId: !GetAtt AppSyncEventApi.ApiId
+
   AppSyncApiEncrypted:
     Type: AWS::AppSync::GraphQLApi
     # checkov:skip=CKV2_AWS_33: "WAF protection is optional for AppSync API based on customer security requirements"
@@ -1952,6 +2429,39 @@ Resources:
       ServiceRoleArn: !GetAtt AppSyncLambdaRole.Arn
       LambdaConfig:
         LambdaFunctionArn: !GetAtt MeetingInvitationParserFunction.Arn
+
+  ChatButtonConfigDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ChatButtonConfigTable
+      Description: STRANDS Agent Chat Button Configuration DynamoDB Table
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt ChatButtonConfigDataSourceRole.Arn
+      DynamoDBConfig:
+        TableName: !Ref ChatButtonConfigTableName
+        AwsRegion: !Ref AWS::Region
+
+  ChatButtonConfigDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatButtonConfigTableName}"
 
   AppSyncStrandsChatLambdaRole:
     Type: AWS::IAM::Role
@@ -2475,6 +2985,54 @@ Resources:
         #end
         $util.toJson($ctx.result)
 
+  GetChatButtonConfigResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ChatButtonConfigDataSource.Name
+      TypeName: Query
+      FieldName: getChatButtonConfig
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({
+              ChatButtonConfigId: ctx.args.ChatButtonConfigId
+            })
+          };
+        }
+        
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          
+          // Return the full DynamoDB item as a JSON string in the ChatButtonConfigId field
+          // This allows us to bypass GraphQL's field filtering
+          return {
+            ChatButtonConfigId: JSON.stringify(ctx.result)
+          };
+        }
+
+  UpdateChatButtonConfigResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ChatButtonConfigDataSource.Name
+      TypeName: Mutation
+      FieldName: updateChatButtonConfig
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/updateChatButtonConfig.js
+
   SendChatMessageResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -2511,6 +3069,45 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/addChatToken.js
 
+  ToggleVNCPreviewResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: toggleVNCPreview
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/toggleVNCPreview.js
+
+  OnVNCPreviewToggleResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onVNCPreviewToggle
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/onVNCPreviewToggle.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  OnUpdateVirtualParticipantAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onUpdateVirtualParticipant
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
   ##########################################################################
   # Virtual Participant
   ##########################################################################
@@ -2529,6 +3126,187 @@ Resources:
         PointInTimeRecoveryEnabled: true
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
+  # MCP Servers Table - Account-level MCP server configurations
+  MCPServersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-MCPServers"
+      AttributeDefinitions:
+        - AttributeName: AccountId
+          AttributeType: S
+        - AttributeName: ServerId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: AccountId
+          KeyType: HASH
+        - AttributeName: ServerId
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # OAuth State Table - Temporary storage for OAuth flow state
+  OAuthStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-OAuthState"
+      AttributeDefinitions:
+        - AttributeName: State
+          AttributeType: S
+      KeySchema:
+        - AttributeName: State
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ExpiresAt
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # OAuth Manager Lambda Function
+  OAuthManagerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-OAuthManager"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/oauth_manager
+      Description: Manages OAuth 2.1 flow for MCP servers
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          OAUTH_STATE_TABLE: !Ref OAuthStateTable
+          MCP_SERVERS_TABLE: !Ref MCPServersTable
+          KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
+          OAUTH_CALLBACK_URL: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OAuthStateTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MCPServersTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:Encrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/OAuthManager"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for OAuth management function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - OAuthManagerLogGroup
+
+  OAuthManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/OAuthManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # AppSync data source for OAuth Manager
+  OAuthManagerDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: OAuthManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt OAuthManagerDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt OAuthManagerFunction.Arn
+
+  OAuthManagerDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt OAuthManagerFunction.Arn
+
+  # AppSync Resolvers for OAuth Flow
+  InitOAuthFlowResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: initOAuthFlow
+      DataSourceName: !GetAtt OAuthManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "initOAuthFlow"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  HandleOAuthCallbackResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: handleOAuthCallback
+      DataSourceName: !GetAtt OAuthManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "handleOAuthCallback"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
 
   # Data source for Virtual Participant table
   VirtualParticipantDataSource:
@@ -2653,6 +3431,49 @@ Resources:
             $util.qr( $expValues.put(":CallId", $util.dynamodb.toDynamoDB($ctx.args.input.CallId)) )
         #end
         
+        ## Add VNC fields if provided **
+        #if( !$util.isNullOrBlank($ctx.args.input.vncEndpoint) )
+            $util.qr( $expSet.put("#vncEndpoint", ":vncEndpoint") )
+            $util.qr( $expNames.put("#vncEndpoint", "vncEndpoint") )
+            $util.qr( $expValues.put(":vncEndpoint", $util.dynamodb.toDynamoDB($ctx.args.input.vncEndpoint)) )
+        #end
+        
+        #if( !$util.isNull($ctx.args.input.vncPort) )
+            $util.qr( $expSet.put("#vncPort", ":vncPort") )
+            $util.qr( $expNames.put("#vncPort", "vncPort") )
+            $util.qr( $expValues.put(":vncPort", $util.dynamodb.toDynamoDB($ctx.args.input.vncPort)) )
+        #end
+        
+        #if( !$util.isNull($ctx.args.input.vncReady) )
+            $util.qr( $expSet.put("#vncReady", ":vncReady") )
+            $util.qr( $expNames.put("#vncReady", "vncReady") )
+            $util.qr( $expValues.put(":vncReady", $util.dynamodb.toDynamoDB($ctx.args.input.vncReady)) )
+        #end
+        
+        ## Add manual action fields if provided **
+        #if( !$util.isNullOrBlank($ctx.args.input.manualActionType) )
+            $util.qr( $expSet.put("#manualActionType", ":manualActionType") )
+            $util.qr( $expNames.put("#manualActionType", "manualActionType") )
+            $util.qr( $expValues.put(":manualActionType", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionType)) )
+        #end
+        
+        #if( !$util.isNullOrBlank($ctx.args.input.manualActionMessage) )
+            $util.qr( $expSet.put("#manualActionMessage", ":manualActionMessage") )
+            $util.qr( $expNames.put("#manualActionMessage", "manualActionMessage") )
+            $util.qr( $expValues.put(":manualActionMessage", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionMessage)) )
+        #end
+        
+        #if( !$util.isNull($ctx.args.input.manualActionTimeoutSeconds) )
+            $util.qr( $expSet.put("#manualActionTimeoutSeconds", ":manualActionTimeoutSeconds") )
+            $util.qr( $expNames.put("#manualActionTimeoutSeconds", "manualActionTimeoutSeconds") )
+            $util.qr( $expValues.put(":manualActionTimeoutSeconds", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionTimeoutSeconds)) )
+        #end
+        
+        #if( !$util.isNullOrBlank($ctx.args.input.manualActionStartTime) )
+            $util.qr( $expSet.put("#manualActionStartTime", ":manualActionStartTime") )
+            $util.qr( $expNames.put("#manualActionStartTime", "manualActionStartTime") )
+            $util.qr( $expValues.put(":manualActionStartTime", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionStartTime)) )
+        #end
         
         ## Build the SET expression **
         #set( $expression = "SET" )
@@ -2694,8 +3515,7 @@ Resources:
           "version": "2018-05-29",
           "operation": "Scan"
         }
-      ResponseMappingTemplate: |
-        $util.toJson($ctx.result.items)
+      ResponseMappingTemplateS3Location: ../source/appsync/listVirtualParticipants.response.vtl
 
   GetVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
@@ -2713,11 +3533,7 @@ Resources:
             "id": $util.dynamodb.toDynamoDBJson($ctx.args.id)
           }
         }
-      ResponseMappingTemplate: |
-        #if($ctx.error)
-          $util.error($ctx.error.message, $ctx.error.type)
-        #end
-        $util.toJson($ctx.result)
+      ResponseMappingTemplateS3Location: ../source/appsync/getVirtualParticipant.response.vtl
 
 
   # Virtual Participant Manager Lambda Function
@@ -2736,6 +3552,8 @@ Resources:
           TABLE_NAME: !Ref VirtualParticipantTable
           KINESIS_STREAM_NAME: !Ref CallDataStream
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
+          VP_SCHEDULE_GROUP_NAME: !Ref VPScheduleGroupName
+          ALB_LISTENER_ARN: !Ref VNCALBListener
           LOG_LEVEL: DEBUG
       Policies:
         - DynamoDBCrudPolicy:
@@ -2768,6 +3586,22 @@ Resources:
             - Effect: Allow
               Action:
                 - dynamodb:ListTables
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - scheduler:DeleteSchedule
+                - scheduler:GetSchedule
+              Resource: 
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${VPScheduleGroupName}/*"
+            - Effect: Allow
+              Action:
+                - elasticloadbalancing:DescribeTargetGroups
+                - elasticloadbalancing:DeleteTargetGroup
+                - elasticloadbalancing:DescribeRules
+                - elasticloadbalancing:DeleteRule
+                - elasticloadbalancing:DeregisterTargets
+                - elasticloadbalancing:DescribeTargetHealth
+                - elasticloadbalancing:DescribeTags
               Resource: "*"
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
@@ -2815,6 +3649,530 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt VirtualParticipantManagerFunction.Arn
 
+  # MCP Server Manager Lambda Function
+  MCPServerManagerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-MCPServerManager"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/mcp_server_manager
+      Description: Manages MCP server installation and configuration
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          MCP_SERVERS_TABLE: !Ref MCPServersTable
+          CODEBUILD_PROJECT: !Ref MCPLayerBuildProject
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MCPServersTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - codebuild:StartBuild
+                - codebuild:BatchGetBuilds
+              Resource: !GetAtt MCPLayerBuildProject.Arn
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/MCPServerManager"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for management function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - MCPServerManagerLogGroup
+
+  MCPServerManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/MCPServerManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # AppSync data source for MCP Server Manager
+  MCPServerManagerDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MCPServerManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt MCPServerManagerDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MCPServerManagerFunction.Arn
+
+  MCPServerManagerDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt MCPServerManagerFunction.Arn
+
+  # AppSync Resolvers for MCP Server Management
+  InstallMCPServerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: installMCPServer
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "installMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  UninstallMCPServerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: uninstallMCPServer
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "uninstallMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+  
+  UpdateMCPServerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: updateMCPServer
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "updateMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+        $util.toJson($ctx.result)
+
+  ListInstalledMCPServersResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: listInstalledMCPServers
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "listInstalledMCPServers"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  GetMCPServerResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMCPServer
+      DataSourceName: !GetAtt MCPServerManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "getMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ##########################################################################
+  # MCP Server Resources - Allow external applications to access LMA data
+  # (Separate from existing MCP client functionality above)
+  ##########################################################################
+  
+  # External App Cognito Client for MCP Server authentication (Authorization Code flow)
+  MCPServerExternalAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: ShouldEnableMCPServer
+    Properties:
+      ClientName: "LMA-MCPServer-ExternalApp-Client"
+      UserPoolId: !Ref UserPoolId
+      GenerateSecret: true
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      CallbackURLs: !If
+        - HasCustomMCPServerCallbackURLs
+        - !Split [",", !Ref MCPServerCallbackURLs]
+        - - !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+      LogoutURLs:
+        - !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
+      SupportedIdentityProviders:
+        - COGNITO
+
+  # MCP Server Gateway Execution Role
+  MCPServerGatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableMCPServer
+    Properties:
+      RoleName: !Sub "${LMAStackName}-MCPServerGatewayRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"
+      Policies:
+        - PolicyName: InvokeLambdaPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt MCPServerAnalyticsFunction.Arn
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  # MCP Server Analytics Lambda
+  MCPServerAnalyticsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableMCPServer
+    Properties:
+      LogGroupName: !Sub "/${LMAStackName}/lambda/MCPServerAnalytics"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MCPServerAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldEnableMCPServer
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_116: "DLQ not required for MCP handler"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-MCPServerAnalytics"
+      CodeUri: ../source/lambda_functions/mcp_analytics/
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+          CALLS_TABLE: !Ref EventSourcingTable
+          RECORDINGS_BUCKET: !Ref S3BucketName
+          TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix
+          TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
+          MODEL_ARN: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+          APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+          LMA_SETTINGS_PARAMETER: !Ref LMASettingsParameterName
+      LoggingConfig:
+        LogGroup: !Ref MCPServerAnalyticsLogGroup
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventSourcingTable
+        - S3ReadPolicy:
+            BucketName: !Ref S3BucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:Retrieve
+                - bedrock:RetrieveAndGenerate
+              Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            - Effect: Allow
+              Action:
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            - Effect: Allow
+              Action:
+                - appsync:GraphQL
+              Resource:
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createVirtualParticipant"
+                - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource:
+                - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
+    DependsOn:
+      - MCPServerAnalyticsLogGroup
+
+  # MCP Server Gateway (Native CloudFormation)
+  MCPServerGateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Condition: ShouldEnableMCPServer
+    DependsOn:
+      - MCPServerAnalyticsFunction
+      - MCPServerExternalAppClient
+      - MCPServerGatewayExecutionRole
+    Properties:
+      Name: !Sub "${LMAStackName}-MCP-Gateway"
+      Description: "LMA MCP Server Gateway for external application access"
+      ProtocolType: MCP
+      AuthorizerType: CUSTOM_JWT
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPoolId}/.well-known/openid-configuration"
+          AllowedClients:
+            - !Ref MCPServerExternalAppClient
+      RoleArn: !GetAtt MCPServerGatewayExecutionRole.Arn
+      Tags:
+        Application: LMA
+        Component: MCPServer
+
+  # MCP Server Gateway Target (Lambda)
+  MCPServerGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Condition: ShouldEnableMCPServer
+    DependsOn: MCPServerGateway
+    Properties:
+      GatewayIdentifier: !Ref MCPServerGateway
+      Name: "LMAAnalyticsTarget"
+      Description: "LMA meeting analytics and transcript access tools"
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !GetAtt MCPServerAnalyticsFunction.Arn
+            ToolSchema:
+              InlinePayload:
+                - Name: search_lma_meetings
+                  Description: "Search across all meeting transcripts and summaries using natural language queries"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      query:
+                        Type: string
+                        Description: "Natural language search query"
+                      startDate:
+                        Type: string
+                        Description: "Optional ISO 8601 start date"
+                      endDate:
+                        Type: string
+                        Description: "Optional ISO 8601 end date"
+                      maxResults:
+                        Type: number
+                        Description: "Maximum results to return"
+                    Required:
+                      - query
+                - Name: get_meeting_transcript
+                  Description: "Retrieve the complete transcript for a specific meeting"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID (CallId)"
+                      format:
+                        Type: string
+                        Description: "Output format (json, text, or srt)"
+                    Required:
+                      - meetingId
+                - Name: get_meeting_summary
+                  Description: "Get AI-generated summary and action items for a meeting"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID (CallId)"
+                      includeActionItems:
+                        Type: boolean
+                        Description: "Include action items"
+                      includeTopics:
+                        Type: boolean
+                        Description: "Include key topics"
+                    Required:
+                      - meetingId
+                - Name: list_meetings
+                  Description: "List meetings with optional filters"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      startDate:
+                        Type: string
+                        Description: "ISO 8601 start date"
+                      endDate:
+                        Type: string
+                        Description: "ISO 8601 end date"
+                      participant:
+                        Type: string
+                        Description: "Filter by participant name"
+                      status:
+                        Type: string
+                        Description: "Meeting status filter"
+                      limit:
+                        Type: number
+                        Description: "Maximum number of meetings to return"
+                - Name: schedule_meeting
+                  Description: "Schedule a future meeting with virtual participant"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingName:
+                        Type: string
+                        Description: "Name/title of the meeting"
+                      meetingPlatform:
+                        Type: string
+                        Description: "Platform (Zoom, Teams, Chime, Webex)"
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID (numeric ID only)"
+                      scheduledTime:
+                        Type: string
+                        Description: "ISO 8601 datetime when meeting should start"
+                      meetingPassword:
+                        Type: string
+                        Description: "Optional meeting password"
+                    Required:
+                      - meetingName
+                      - meetingPlatform
+                      - meetingId
+                      - scheduledTime
+                - Name: start_meeting_now
+                  Description: "Start a meeting immediately with virtual participant"
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      meetingName:
+                        Type: string
+                        Description: "Name/title of the meeting"
+                      meetingPlatform:
+                        Type: string
+                        Description: "Platform (Zoom, Teams, Chime, Webex)"
+                      meetingId:
+                        Type: string
+                        Description: "Meeting ID (numeric ID only)"
+                      meetingPassword:
+                        Type: string
+                        Description: "Optional meeting password"
+                    Required:
+                      - meetingName
+                      - meetingPlatform
+                      - meetingId
+
   VirtualParticipantLambdaDataSourceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -2848,6 +4206,366 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/endVirtualParticipant.js
 
+  ShareVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: shareVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "UpdateItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+          },
+          "update": {
+            "expression": "SET SharedWith = :val",
+            "expressionValues": {
+              ":val": $util.dynamodb.toDynamoDBJson($util.str.join($ctx.args.input.SharedWith, ","))
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson({
+          "id": $ctx.args.input.id,
+          "Owner": $ctx.args.input.Owner,
+          "SharedWith": $util.str.join($ctx.args.input.SharedWith, ",")
+        })
+
+  UnshareVirtualParticipantResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: unshareVirtualParticipant
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "UpdateItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+          },
+          "update": {
+            "expression": "SET SharedWith = :val",
+            "expressionValues": {
+              ":val": $util.dynamodb.toDynamoDBJson("")
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson({
+          "id": $ctx.args.input.id,
+          "SharedWith": $ctx.args.input.SharedWith
+        })
+
+
+  ##########################################################################
+  # Lambda@Edge for VNC Authentication
+  ##########################################################################
+
+  # IAM Role for Lambda@Edge function (must be assumable by both lambda and edgelambda)
+  EdgeAuthFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  # Custom resource Lambda to deploy Lambda@Edge in us-east-1
+  EdgeAuthDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: ManageLambdaEdge
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:DeleteFunction
+                  - lambda:GetFunction
+                  - lambda:ListVersionsByFunction
+                  - lambda:PublishVersion
+                Resource: !Sub 'arn:aws:lambda:us-east-1:${AWS::AccountId}:function:${AWS::StackName}-VNCEdgeAuth*'
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt EdgeAuthFunctionRole.Arn
+
+  EdgeAuthDeployerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-EdgeAuthDeployer'
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 256
+      Role: !GetAtt EdgeAuthDeployerRole.Arn
+      CodeUri: ../source/lambda_functions/edge_auth_deployer
+      LoggingConfig:
+        LogGroup: !Sub '/${AWS::StackName}/lambda/EdgeAuthDeployer'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for custom resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    DependsOn:
+      - EdgeAuthDeployerLogGroup
+
+  EdgeAuthDeployerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/${AWS::StackName}/lambda/EdgeAuthDeployer'
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # Custom resource to create Lambda@Edge function in us-east-1
+  EdgeAuthFunction:
+    Type: Custom::EdgeAuthFunction
+    Properties:
+      ServiceToken: !GetAtt EdgeAuthDeployerFunction.Arn
+      FunctionName: !Sub '${AWS::StackName}-VNCEdgeAuth'
+      RoleArn: !GetAtt EdgeAuthFunctionRole.Arn
+      UserPoolId: !Ref UserPoolId
+      Region: !Ref AWS::Region
+      ClientId: !Ref CognitoClientId
+      # Hash of the Lambda@Edge code - changing this forces the custom resource to update
+      # This value is replaced during the build process by the Makefile
+      CodeHash: "EDGE_AUTH_CODE_HASH_PLACEHOLDER"
+
+  ##########################################################################
+  # VNC Application Load Balancer for VNC Viewer Remove FrameBuffer Stream
+  ##########################################################################
+
+  # Custom resource to get CloudFront prefix list ID dynamically
+  GetCloudFrontPrefixListRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: DescribePrefixLists
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeManagedPrefixLists
+                Resource: '*'
+
+  GetCloudFrontPrefixListFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      Role: !GetAtt GetCloudFrontPrefixListRole.Arn
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          
+          def handler(event, context):
+              try:
+                  if event['RequestType'] == 'Delete':
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  
+                  ec2 = boto3.client('ec2')
+                  response = ec2.describe_managed_prefix_lists(
+                      Filters=[
+                          {
+                              'Name': 'prefix-list-name',
+                              'Values': ['com.amazonaws.global.cloudfront.origin-facing']
+                          }
+                      ]
+                  )
+                  
+                  if response['PrefixLists']:
+                      prefix_list_id = response['PrefixLists'][0]['PrefixListId']
+                      print(f"Found CloudFront prefix list: {prefix_list_id}")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, 
+                                     {'PrefixListId': prefix_list_id})
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.FAILED, {},
+                                     reason='CloudFront prefix list not found')
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {},
+                                 reason=str(e))
+
+  CloudFrontPrefixList:
+    Type: Custom::CloudFrontPrefixList
+    Properties:
+      ServiceToken: !GetAtt GetCloudFrontPrefixListFunction.Arn
+
+  # ECS Security Group for Virtual Participant tasks
+  VPSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Virtual Participant ECS tasks
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+          IpProtocol: "-1"
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-vp-sg
+
+  # ALB Security Group - Allow traffic from CloudFront only
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for VNC Application Load Balancer
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId: !GetAtt CloudFrontPrefixList.PrefixListId
+          Description: Allow HTTP from CloudFront
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-alb-sg
+
+  # Security group rules between ALB and ECS
+  ALBToECSEgressRule:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5901
+      ToPort: 5901
+      DestinationSecurityGroupId: !Ref VPSecurityGroup
+      Description: Allow traffic to ECS tasks on websockify port
+
+  ECSFromALBIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref VPSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5901
+      ToPort: 5901
+      SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Description: Allow websockify traffic from ALB
+
+  # Application Load Balancer
+  VNCALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-vnc-alb
+
+  # Target Group for ECS tasks
+  VNCTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 5901
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: "30"
+      Tags:
+        - Key: Name
+          Value: !Sub ${LMAStackName}-vnc-tg
+
+  # HTTP Listener (port 80)
+  VNCALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref VNCALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref VNCTargetGroup
 
   ##########################################################################
   # Web Site
@@ -2943,6 +4661,137 @@ Resources:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # Lambda to upload QuickSight manifest file
+  UploadManifestLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:PutObject"
+                  - "s3:DeleteObject"
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}/quicksight-recordingsbucket-manifest.json"
+          PolicyName: uploadManifestS3Policy
+
+  UploadManifestLambda:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: "index.lambda_handler"
+      Runtime: python3.12
+      MemorySize: 128
+      Timeout: 60
+      Role: !GetAtt UploadManifestLambdaRole.Arn
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: !Sub |
+          import boto3
+          import json
+          import cfnresponse
+          
+          def lambda_handler(event, context):
+            print(event)
+            responseData = {}
+            status = cfnresponse.SUCCESS
+            reason = "Success"
+            
+            if event['RequestType'] in ['Create', 'Update']:
+              try:
+                s3 = boto3.client('s3')
+                bucket_name = event['ResourceProperties']['BucketName']
+                prefix = event['ResourceProperties']['Prefix']
+                
+                # Standard manifest for nested JSON
+                manifest = {
+                  "fileLocations": [
+                    {
+                      "URIPrefixes": [
+                        f"s3://{bucket_name}/{prefix}"
+                      ]
+                    }
+                  ],
+                  "globalUploadSettings": {
+                    "format": "JSON"
+                  }
+                }
+                
+                s3.put_object(
+                  Bucket=bucket_name,
+                  Key='quicksight-recordingsbucket-manifest.json',
+                  Body=json.dumps(manifest, indent=2),
+                  ContentType='application/json'
+                )
+                
+                print(f"Uploaded manifest to s3://{bucket_name}/quicksight-recordingsbucket-manifest.json")
+                
+              except Exception as e:
+                print(e)
+                reason = f"Exception thrown: {e}"
+                status = cfnresponse.FAILED
+                
+            elif event['RequestType'] == 'Delete':
+              try:
+                s3 = boto3.client('s3')
+                bucket_name = event['ResourceProperties']['BucketName']
+                s3.delete_object(
+                  Bucket=bucket_name,
+                  Key='quicksight-recordingsbucket-manifest.json'
+                )
+                print(f"Deleted manifest from s3://{bucket_name}/quicksight-recordingsbucket-manifest.json")
+              except Exception as e:
+                print(e)
+                # Don't fail on delete errors
+                
+            cfnresponse.send(event, context, status, responseData, reason=reason)
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UploadManifestLambda
+    DependsOn:
+      - UploadManifestLambdaLogGroup
+
+  UploadManifestLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UploadManifestLambda
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UploadQuickSightManifest:
+    Type: Custom::UploadQuickSightManifest
+    Properties:
+      ServiceToken: !GetAtt UploadManifestLambda.Arn
+      BucketName: !Ref S3BucketName
+      Prefix: !Ref TranscriptFilePrefix
 
   RemoveWebAppBucketOnDelete:
     Type: Custom::RemoveWebAppBucketOnDelete
@@ -3051,6 +4900,40 @@ Resources:
             DomainName: !GetAtt WebAppBucket.RegionalDomainName
             S3OriginConfig:
               OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+          - Id: vnc-alb
+            DomainName: !GetAtt VNCALB.DNSName
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: http-only
+        CacheBehaviors:
+          - PathPattern: /vnc/*
+            TargetOriginId: vnc-alb
+            ViewerProtocolPolicy: https-only
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+              - PUT
+              - POST
+              - PATCH
+              - DELETE
+            CachedMethods:
+              - GET
+              - HEAD
+            ForwardedValues:
+              QueryString: true
+              Headers:
+                - "*"
+              Cookies:
+                Forward: all
+            Compress: false
+            DefaultTTL: 0
+            MinTTL: 0
+            MaxTTL: 0
+            LambdaFunctionAssociations:
+              - EventType: viewer-request
+                LambdaFunctionARN: !GetAtt EdgeAuthFunction.FunctionArn
         PriceClass: !Ref CloudFrontPriceClass
         Restrictions: !If
           - ShouldEnableGeoRestriction

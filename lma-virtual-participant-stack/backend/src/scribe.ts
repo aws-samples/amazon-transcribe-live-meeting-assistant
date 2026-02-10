@@ -2,6 +2,7 @@ import {
     TranscribeStreamingClient,
     StartStreamTranscriptionCommand,
 } from '@aws-sdk/client-transcribe-streaming';
+import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { spawn, ChildProcess } from 'child_process';
 import { createWriteStream } from 'fs';
 import { details } from './details.js';
@@ -10,6 +11,9 @@ import { sendAddTranscriptSegment, sendStartMeeting, sendEndMeeting } from './ki
 // Global current speaker (matching Python)
 let currentSpeaker = "none";
 
+// Local testing mode - skip AWS services
+const isLocalTest = process.env.LOCAL_TEST === 'true';
+
 export class TranscriptionService {
     private process: ChildProcess | null = null;
     private startTime: number | null = null;
@@ -17,11 +21,22 @@ export class TranscriptionService {
     private readonly sampleRate = 16000; // in hertz
     private transcribeClient: TranscribeStreamingClient;
     private isTranscribing = false;
+    private mockTranscriptionInterval: NodeJS.Timeout | null = null;
 
     constructor() {
-        this.transcribeClient = new TranscribeStreamingClient({
+        // In local test mode, explicitly use default provider which checks credentials file first
+        // Otherwise use default credential chain (EC2 instance role in production)
+        const clientConfig: any = {
             region: process.env.AWS_REGION || 'us-east-1',
-        });
+        };
+        
+        if (isLocalTest) {
+            console.log('Using AWS credentials from ~/.aws/credentials for local testing');
+            // Default provider checks credentials file, then environment variables, then instance metadata
+            clientConfig.credentials = defaultProvider();
+        }
+        
+        this.transcribeClient = new TranscribeStreamingClient(clientConfig);
     }
 
     private async *audioStream() {
@@ -44,6 +59,23 @@ export class TranscriptionService {
             '-',
         ]);
 
+        // Add error handler for ffmpeg process
+        this.process.on('error', (error: any) => {
+            const msg = `FFmpeg process error: ${error.message}`;
+            if (isLocalTest) {
+                console.error(msg + ' (non-fatal in local test)');
+            } else {
+                console.error(msg + ' (fatal in production)');
+            }
+        });
+
+        this.process.stderr?.on('data', (data: any) => {
+            const msg = data.toString();
+            if (!msg.includes('size=') && !msg.includes('time=')) {
+                console.log('FFmpeg stderr:', msg.trim());
+            }
+        });
+
         try {
             for await (const chunk of this.process.stdout!) {
                 if (!details.start) {
@@ -57,8 +89,14 @@ export class TranscriptionService {
                     this.startTime = Date.now();
                 }
             }
-        } catch (error) {
-            console.log('Audio process error:', error);
+        } catch (error: any) {
+            const msg = `Audio stream error: ${error.message}`;
+            if (isLocalTest) {
+                console.log(msg + ' (non-fatal in local test)');
+            } else {
+                console.error(msg + ' (fatal in production)');
+                throw error;
+            }
         }
     }
 
@@ -89,6 +127,29 @@ export class TranscriptionService {
             } else {
                 console.error('Failed to send start meeting event:', error);
             }
+        }
+
+        // If in local test mode, skip AWS Transcribe entirely
+        if (isLocalTest) {
+            console.log('*** LOCAL TEST MODE - Skipping AWS Transcribe (no transcription) ***');
+            console.log('*** Meeting will continue without transcription ***');
+            
+            // Update status to ACTIVE even without transcription
+            const vpId = process.env.VIRTUAL_PARTICIPANT_ID;
+            if (vpId) {
+                try {
+                    const { VirtualParticipantStatusManager } = await import('./status-manager.js');
+                    const statusManager = new VirtualParticipantStatusManager(vpId);
+                    await statusManager.setActive();
+                    console.log(`VP ${vpId} status: ACTIVE (local test mode - no transcription)`);
+                } catch (error) {
+                    console.log(`Failed to update VP status to ACTIVE: ${error}`);
+                }
+            }
+            
+            // Keep the service marked as "transcribing" so the meeting continues
+            // but don't actually do any transcription
+            return;
         }
 
         const maxRetries = 5;
@@ -145,10 +206,30 @@ export class TranscriptionService {
 
                 const recordingStream = createWriteStream(details.tmpRecordingFilename);
                 
-                await Promise.all([
-                    this.writeAudio(response, recordingStream),
-                    this.handleTranscriptEvents(response)
-                ]);
+                // In local test mode, wrap with error handlers to prevent crashes
+                // In production, let errors propagate to crash the task
+                if (isLocalTest) {
+                    try {
+                        await Promise.all([
+                            this.writeAudio(response, recordingStream).catch(err => {
+                                console.error('Audio write error (non-fatal in local test):', err.message);
+                                return Promise.resolve();
+                            }),
+                            this.handleTranscriptEvents(response).catch(err => {
+                                console.error('Transcript event error (non-fatal in local test):', err.message);
+                                return Promise.resolve();
+                            })
+                        ]);
+                    } catch (streamError: any) {
+                        console.error('Stream processing error (non-fatal in local test):', streamError.message);
+                    }
+                } else {
+                    // Production mode - let errors crash the task
+                    await Promise.all([
+                        this.writeAudio(response, recordingStream),
+                        this.handleTranscriptEvents(response)
+                    ]);
+                }
 
                 console.log('Transcription completed successfully');
                 break;
@@ -288,15 +369,39 @@ export class TranscriptionService {
                 '-'
             ]);
 
+            // Add error handlers for the process
+            this.process.on('error', (error: any) => {
+                const msg = `FFmpeg process error: ${error.message}`;
+                if (isLocalTest) {
+                    console.error(msg + ' (non-fatal in local test)');
+                } else {
+                    console.error(msg + ' (fatal in production)');
+                    throw error;
+                }
+            });
+
+            this.process.stderr?.on('data', (data: any) => {
+                const msg = data.toString();
+                if (!msg.includes('size=') && !msg.includes('time=')) {
+                    console.log('FFmpeg:', msg.trim());
+                }
+            });
+
             // Process audio chunks
             this.process.stdout?.on('data', async (chunk: Buffer) => {
                 if (details.start && this.isTranscribing) {
                     try {
-                        // Send to Transcrib
+                        // Send to Transcribe
                         await transcribeResponse.input_stream?.send_audio_event?.({ audio_chunk: chunk });
                         recordingStream.write(chunk);
-                    } catch (error) {
-                        console.log('Audio processing error:', error);
+                    } catch (error: any) {
+                        const msg = `Audio chunk processing error: ${error.message}`;
+                        if (isLocalTest) {
+                            console.log(msg + ' (non-fatal in local test)');
+                        } else {
+                            console.error(msg);
+                            throw error;
+                        }
                     }
                 }
             });
@@ -307,11 +412,38 @@ export class TranscriptionService {
             }
 
             // End stream when done
-            await transcribeResponse.input_stream?.end_stream?.();
-            recordingStream.close();
+            try {
+                await transcribeResponse.input_stream?.end_stream?.();
+            } catch (error: any) {
+                const msg = `End stream error: ${error.message}`;
+                if (isLocalTest) {
+                    console.log(msg + ' (non-fatal in local test)');
+                } else {
+                    console.error(msg);
+                    throw error;
+                }
+            }
             
-        } catch (error) {
-            console.log('Write audio error:', error);
+            try {
+                recordingStream.close();
+            } catch (error: any) {
+                const msg = `Recording stream close error: ${error.message}`;
+                if (isLocalTest) {
+                    console.log(msg + ' (non-fatal in local test)');
+                } else {
+                    console.error(msg);
+                    throw error;
+                }
+            }
+            
+        } catch (error: any) {
+            const msg = `Write audio error: ${error.message || error}`;
+            if (isLocalTest) {
+                console.log(msg + ' (non-fatal in local test)');
+            } else {
+                console.error(msg + ' (fatal in production)');
+                throw error;
+            }
         }
     }
 
@@ -337,8 +469,22 @@ export class TranscriptionService {
                     }
                 }
             }
-        } catch (error) {
-            console.log('Handle transcript events error:', error);
+        } catch (error: any) {
+            // In local test mode, handle errors gracefully
+            // In production, let errors propagate to kill the task
+            if (isLocalTest) {
+                if (error.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+                    console.log('Transcribe stream closed prematurely (non-fatal in local test) - meeting will continue');
+                } else if (error.name === 'AccessDeniedException') {
+                    console.log('Transcribe permission denied (non-fatal in local test) - meeting will continue without transcription');
+                } else {
+                    console.log('Handle transcript events error (non-fatal in local test):', error.message || error);
+                }
+            } else {
+                // Production mode - rethrow to kill the task
+                console.error('Handle transcript events error (fatal in production):', error.message || error);
+                throw error;
+            }
         }
     }
 }

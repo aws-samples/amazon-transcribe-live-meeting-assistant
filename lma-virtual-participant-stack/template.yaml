@@ -51,6 +51,14 @@ Parameters:
     Description: Private subnet 2 for Fargate
     Type: String
 
+  PublicSubnet1:
+    Description: Public subnet 1 for ALB
+    Type: String
+
+  PublicSubnet2:
+    Description: Public subnet 2 for ALB
+    Type: String
+
   LMASettingsParameterName:
     Type: String
     Description: LCA settings SSM Parameter store
@@ -63,10 +71,30 @@ Parameters:
     Type: String
     Description: AppSync GraphQL endpoint URL for Virtual Participant status updates
 
+  AppSyncEventApiUrl:
+    Type: String
+    Description: AppSync Event API WebSocket URL for MCP command delivery
+
+  CloudFrontDomainName:
+    Type: String
+    Description: CloudFront domain name for VNC WebSocket URL construction
+
   VPTaskRegistryTableName:
     Type: String
     Description: Name of the VPTaskRegistry DynamoDB table from AI stack
 
+  VNCTargetGroupArn:
+    Type: String
+    Description: ARN of the VNC Target Group from AI stack
+
+  VNCALBListenerArn:
+    Type: String
+    Description: ARN of the VNC ALB Listener for creating dynamic routing rules
+
+  VPSecurityGroupId:
+    Type: String
+    Description: Security Group ID for Virtual Participant ECS tasks from AI stack
+  
   VirtualParticipantTableName:
     Type: String
     Description: Name of the VirtualParticipant DynamoDB table from AI stack
@@ -253,23 +281,49 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  # Startup Optimization Parameters
+  VPLaunchType:
+    Type: String
+    Default: EC2
+    AllowedValues:
+      - FARGATE
+      - EC2
+    Description: Launch type for Virtual Participant containers (FARGATE with SOCI or EC2 with caching)
+
+  VPInstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+    Description: EC2 instance type (only used if VPLaunchType=EC2)
+
+  VPMinInstances:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 10
+    Description: Minimum warm EC2 instances (only used if VPLaunchType=EC2)
+
+  VPMaxInstances:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 100
+    Description: Maximum EC2 instances (only used if VPLaunchType=EC2)
+
+
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
+  UseEC2LaunchType: !Equals [!Ref VPLaunchType, "EC2"]
+  UseFargateLaunchType: !Equals [!Ref VPLaunchType, "FARGATE"]
 
 Resources:
-  SecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Websocket-fargate/service/Service/SecurityGroup
-      SecurityGroupEgress:
-        - CidrIp: 0.0.0.0/0
-          Description: Allow all outbound traffic by default
-          IpProtocol: "-1"
-      VpcId: !Ref VPC
-
   LogsPolicy:
     Type: "AWS::IAM::ManagedPolicy"
     Metadata:
@@ -333,6 +387,8 @@ Resources:
               - Effect: "Allow"
                 Action:
                   - "ecr:BatchCheckLayerAvailability"
+                  - "ecr:BatchGetImage"
+                  - "ecr:GetDownloadUrlForLayer"
                   - "ecr:CompleteLayerUpload"
                   - "ecr:InitiateLayerUpload"
                   - "ecr:PutImage"
@@ -342,6 +398,33 @@ Resources:
               - Effect: "Allow"
                 Action:
                   - "ecr:GetAuthorizationToken"
+                Resource:
+                  - "*"
+        - PolicyName: "ECSDeploymentPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "ecs:UpdateService"
+                  - "ecs:DescribeServices"
+                  - "ecs:ListServices"
+                  - "ecs:DescribeClusters"
+                  - "ecs:ListContainerInstances"
+                  - "ecs:DescribeContainerInstances"
+                Resource:
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "autoscaling:DescribeAutoScalingGroups"
+                  - "autoscaling:TerminateInstanceInAutoScalingGroup"
+                  - "autoscaling:SetDesiredCapacity"
+                Resource:
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "ec2:DescribeInstances"
+                  - "ec2:TerminateInstances"
                 Resource:
                   - "*"
 
@@ -359,25 +442,103 @@ Resources:
                 commands:
                   - echo Logging in to Amazon ECR...
                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+                  - echo Installing SOCI CLI for image optimization...
+                  - wget --quiet https://github.com/awslabs/soci-snapshotter/releases/download/v0.12.1/soci-snapshotter-0.12.1-linux-amd64.tar.gz
+                  - tar xzf soci-snapshotter-0.12.1-linux-amd64.tar.gz soci
+                  - mv soci /usr/local/bin/soci
+                  - soci --version
+                  - echo SOCI CLI installed successfully
+                  - export PASSWORD=$(aws ecr get-login-password --region ${AWS::Region})
               build:
                 commands:
                   - echo Build started on `date`
                   - echo `pwd`
                   - echo `ls -altr`
+                  - echo Building container image...
                   - docker build -t ${ImageRepo} backend
                   - docker tag ${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                  - echo Pushing image to ECR...
+                  - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                  - echo Exporting image for SOCI indexing...
+                  - docker save ${ImageRepo}:latest -o ./image.tar
+                  - echo Importing image to containerd...
+                  - ctr image import ./image.tar
+                  - echo Tagging for SOCI...
+                  - ctr image tag docker.io/library/${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
               post_build:
                 commands:
-                  - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                  - echo Generating SOCI index for faster startup...
+                  - soci create ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+                  - echo Pushing SOCI index to ECR...
+                  - soci push --user AWS:$PASSWORD ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
                   - echo Build completed on `date`
-          - { ImageRepo: !Ref ImageRepo }
+                  - |
+                    echo "Deploying new image to ECS..."
+                    # Find the ECS service for this stack
+                    CLUSTER_ARN="${ClusterArn}"
+                    SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_ARN --region ${AWS::Region} --query 'serviceArns[0]' --output text)
+                    
+                    if [ "$SERVICE_NAME" != "None" ] && [ -n "$SERVICE_NAME" ]; then
+                      echo "Found ECS service: $SERVICE_NAME"
+                      
+                      # Get service details to determine launch type
+                      LAUNCH_TYPE=$(aws ecs describe-services --cluster $CLUSTER_ARN --services $SERVICE_NAME --region ${AWS::Region} --query 'services[0].launchType' --output text)
+                      echo "Launch type: $LAUNCH_TYPE"
+                      
+                      # Force new deployment to pull latest image
+                      echo "Forcing ECS service update to deploy new image..."
+                      aws ecs update-service --cluster $CLUSTER_ARN --service $SERVICE_NAME --force-new-deployment --region ${AWS::Region}
+                      
+                      # For EC2 launch type, terminate instances to force fresh pull
+                      if [ "$LAUNCH_TYPE" = "EC2" ]; then
+                        echo "EC2 launch type detected - terminating instances to force image refresh..."
+                        
+                        # Get container instances
+                        CONTAINER_INSTANCES=$(aws ecs list-container-instances --cluster $CLUSTER_ARN --region ${AWS::Region} --query 'containerInstanceArns' --output text)
+                        
+                        if [ -n "$CONTAINER_INSTANCES" ]; then
+                          # Get EC2 instance IDs from container instances
+                          for CONTAINER_INSTANCE in $CONTAINER_INSTANCES; do
+                            EC2_INSTANCE_ID=$(aws ecs describe-container-instances --cluster $CLUSTER_ARN --container-instances $CONTAINER_INSTANCE --region ${AWS::Region} --query 'containerInstances[0].ec2InstanceId' --output text)
+                            
+                            if [ -n "$EC2_INSTANCE_ID" ] && [ "$EC2_INSTANCE_ID" != "None" ]; then
+                              echo "Terminating EC2 instance: $EC2_INSTANCE_ID"
+                              
+                              # Check if instance is in an Auto Scaling Group
+                              ASG_NAME=$(aws autoscaling describe-auto-scaling-instances --instance-ids $EC2_INSTANCE_ID --region ${AWS::Region} --query 'AutoScalingInstances[0].AutoScalingGroupName' --output text 2>/dev/null || echo "")
+                              
+                              if [ -n "$ASG_NAME" ] && [ "$ASG_NAME" != "None" ]; then
+                                echo "Instance is in ASG: $ASG_NAME - terminating via ASG..."
+                                aws autoscaling terminate-instance-in-auto-scaling-group --instance-id $EC2_INSTANCE_ID --should-decrement-desired-capacity false --region ${AWS::Region}
+                              else
+                                echo "Instance not in ASG - terminating directly..."
+                                aws ec2 terminate-instances --instance-ids $EC2_INSTANCE_ID --region ${AWS::Region}
+                              fi
+                            fi
+                          done
+                          echo "EC2 instances terminated. Auto Scaling will launch new instances with fresh Docker image."
+                        else
+                          echo "No container instances found in cluster."
+                        fi
+                      else
+                        echo "FARGATE launch type - service update will automatically use new image."
+                      fi
+                      
+                      echo "Deployment initiated successfully!"
+                    else
+                      echo "No ECS service found in cluster - skipping deployment."
+                    fi
+          - { ImageRepo: !Ref ImageRepo, ClusterArn: !GetAtt Cluster.Arn }
       Environment:
         Type: LINUX_CONTAINER
         Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
         ComputeType: BUILD_GENERAL1_SMALL
+        PrivilegedMode: true
         EnvironmentVariables:
           - Name: SOURCE_CODE_LOCATION
             Value: !Sub "${SourceCodeLocation}"
+          - Name: CONTAINERD_ADDRESS
+            Value: "/var/run/docker/containerd/containerd.sock"
       ServiceRole: !GetAtt BuildRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
@@ -652,6 +813,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - "appsync:GraphQL"
+                  - "appsync:EventConnect"
+                  - "appsync:EventSubscribe"
+                  - "appsync:EventPublish"
                 Resource: "*"
         - PolicyName: VirtualParticipantTablePolicy
           PolicyDocument:
@@ -673,6 +837,25 @@ Resources:
                   - "dynamodb:UpdateItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+        - PolicyName: ALBDynamicRoutingPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "elasticloadbalancing:CreateTargetGroup"
+                  - "elasticloadbalancing:DeleteTargetGroup"
+                  - "elasticloadbalancing:DescribeTargetGroups"
+                  - "elasticloadbalancing:ModifyTargetGroupAttributes"
+                  - "elasticloadbalancing:RegisterTargets"
+                  - "elasticloadbalancing:DeregisterTargets"
+                  - "elasticloadbalancing:DescribeTargetHealth"
+                  - "elasticloadbalancing:CreateRule"
+                  - "elasticloadbalancing:DeleteRule"
+                  - "elasticloadbalancing:DescribeRules"
+                  - "elasticloadbalancing:ModifyRule"
+                  - "elasticloadbalancing:AddTags"
+                Resource: "*"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -706,13 +889,256 @@ Resources:
     DependsOn:
       - ECSRoleCustomResource
 
+  # EC2 Launch Type Resources (conditional)
+  
+  VPInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: UseEC2LaunchType
+    Properties:
+      Roles:
+        - !Ref VPInstanceRole
 
+  VPInstanceRole:
+    Type: AWS::IAM::Role
+    Condition: UseEC2LaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  VPLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Condition: UseEC2LaunchType
+    Properties:
+      LaunchTemplateName: !Sub "${AWS::StackName}-VP-LaunchTemplate"
+      LaunchTemplateData:
+        ImageId: !Sub '{{resolve:ssm:/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id}}'
+        InstanceType: !Ref VPInstanceType
+        IamInstanceProfile:
+          Arn: !GetAtt VPInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref VPSecurityGroupId
+        MetadataOptions:
+          HttpTokens: required
+          HttpPutResponseHopLimit: 1
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -e
+            echo "ECS_CLUSTER=${Cluster}" >> /etc/ecs/ecs.config
+            echo "ECS_IMAGE_PULL_BEHAVIOR=prefer-cached" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_CONTAINER_METADATA=true" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE=true" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true" >> /etc/ecs/ecs.config
+            aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+            docker pull ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
+            systemctl enable --now ecs
+
+  # Custom Resource to handle ASG deletion gracefully
+  ASGDeletionHandlerRole:
+    Type: AWS::IAM::Role
+    Condition: UseEC2LaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: ASGDeletionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribeAutoScalingInstances
+                  - autoscaling:SetInstanceProtection
+                  - autoscaling:UpdateAutoScalingGroup
+                  - autoscaling:TerminateInstanceInAutoScalingGroup
+                  - ec2:DescribeInstances
+                Resource: "*"
+
+  ASGDeletionHandlerFunction:
+    Type: AWS::Lambda::Function
+    Condition: UseEC2LaunchType
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt ASGDeletionHandlerRole.Arn
+      Timeout: 300
+      Runtime: python3.12
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+          import time
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          autoscaling = boto3.client('autoscaling')
+          
+          def handler(event, context):
+              logger.info(f"Event: {event}")
+              request_type = event['RequestType']
+              asg_name = event['ResourceProperties'].get('AutoScalingGroupName')
+              
+              try:
+                  if request_type == 'Delete':
+                      logger.info(f"Preparing ASG {asg_name} for deletion")
+                      
+                      # Get ASG details
+                      try:
+                          response = autoscaling.describe_auto_scaling_groups(
+                              AutoScalingGroupNames=[asg_name]
+                          )
+                          
+                          if not response['AutoScalingGroups']:
+                              logger.info(f"ASG {asg_name} not found, assuming already deleted")
+                              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                              return
+                          
+                          asg = response['AutoScalingGroups'][0]
+                          instances = asg.get('Instances', [])
+                          
+                          logger.info(f"Found {len(instances)} instances in ASG")
+                          
+                          # Remove scale-in protection from all instances
+                          if instances:
+                              instance_ids = [i['InstanceId'] for i in instances]
+                              logger.info(f"Removing scale-in protection from instances: {instance_ids}")
+                              
+                              autoscaling.set_instance_protection(
+                                  InstanceIds=instance_ids,
+                                  AutoScalingGroupName=asg_name,
+                                  ProtectedFromScaleIn=False
+                              )
+                              
+                              logger.info("Scale-in protection removed successfully")
+                              
+                              # Set desired capacity to 0 to trigger instance termination
+                              logger.info("Setting ASG desired capacity to 0")
+                              autoscaling.update_auto_scaling_group(
+                                  AutoScalingGroupName=asg_name,
+                                  MinSize=0,
+                                  DesiredCapacity=0
+                              )
+                              
+                              # Wait a bit for instances to start terminating
+                              time.sleep(5)
+                              
+                              # Force terminate any remaining instances
+                              for instance_id in instance_ids:
+                                  try:
+                                      logger.info(f"Force terminating instance {instance_id}")
+                                      autoscaling.terminate_instance_in_auto_scaling_group(
+                                          InstanceId=instance_id,
+                                          ShouldDecrementDesiredCapacity=False
+                                      )
+                                  except Exception as e:
+                                      logger.warning(f"Failed to terminate instance {instance_id}: {e}")
+                              
+                              logger.info("All instances terminated or terminating")
+                          else:
+                              logger.info("No instances to terminate")
+                          
+                      except autoscaling.exceptions.ClientError as e:
+                          if 'does not exist' in str(e):
+                              logger.info(f"ASG {asg_name} already deleted")
+                          else:
+                              raise
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  
+              except Exception as e:
+                  logger.error(f"Error handling ASG deletion: {e}", exc_info=True)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
+
+  ASGDeletionHandler:
+    Type: Custom::ASGDeletionHandler
+    Condition: UseEC2LaunchType
+    Properties:
+      ServiceToken: !GetAtt ASGDeletionHandlerFunction.Arn
+      AutoScalingGroupName: !Sub "${AWS::StackName}-VP-ASG"
+    DependsOn:
+      - VPAutoScalingGroup
+
+  VPAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Condition: UseEC2LaunchType
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AutoScalingGroupName: !Sub "${AWS::StackName}-VP-ASG"
+      MinSize: !Ref VPMinInstances
+      MaxSize: !Ref VPMaxInstances
+      DesiredCapacity: !Ref VPMinInstances
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      LaunchTemplate:
+        LaunchTemplateId: !Ref VPLaunchTemplate
+        Version: !GetAtt VPLaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      NewInstancesProtectedFromScaleIn: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-VP-Instance"
+          PropagateAtLaunch: true
+
+  VPCapacityProvider:
+    Type: AWS::ECS::CapacityProvider
+    Condition: UseEC2LaunchType
+    Properties:
+      Name: !Sub "${AWS::StackName}-VP-CapacityProvider"
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn: !Ref VPAutoScalingGroup
+        ManagedScaling:
+          Status: ENABLED
+          TargetCapacity: 100
+          MinimumScalingStepSize: 1
+          MaximumScalingStepSize: 10
+        ManagedTerminationProtection: ENABLED
 
   TaskDefinition:
     Type: "AWS::ECS::TaskDefinition"
     Properties:
       ContainerDefinitions:
-        - Environment:
+        - Memory: !If [UseEC2LaunchType, 3500, !Ref AWS::NoValue]
+          Environment:
             - Name: AWS_REGION
               Value: !Ref AWS::Region
             - Name: SHOULD_RECORD_CALL
@@ -777,12 +1203,26 @@ Resources:
               Value: !Ref ExitMessage
             - Name: GRAPHQL_ENDPOINT
               Value: !Ref GraphQLEndpoint
+            - Name: APPSYNC_EVENTS_URL
+              Value: !Ref AppSyncEventApiUrl
             - Name: VP_TASK_REGISTRY_TABLE_NAME
               Value: !Ref VPTaskRegistryTableName
             - Name: ENABLE_AUDIO_RECORDING
               Value: !Ref EnableAudioRecording
+            - Name: CLOUDFRONT_DOMAIN
+              Value: !Ref CloudFrontDomainName
+            - Name: VNC_TARGET_GROUP_ARN
+              Value: !Ref VNCTargetGroupArn
+            - Name: VPC_ID
+              Value: !Ref VPC
+            - Name: ALB_LISTENER_ARN
+              Value: !Ref VNCALBListenerArn
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
+          PortMappings:
+            - ContainerPort: 5901
+              Protocol: tcp
+              Name: vnc-websocket
           LogConfiguration:
             LogDriver: "awslogs"
             Options:
@@ -796,13 +1236,42 @@ Resources:
       TaskRoleArn: !Ref TaskRole
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       NetworkMode: "awsvpc"
-      RequiresCompatibilities:
-        - "FARGATE"
-      Cpu: "1 vCPU"
-      Memory: "4 GB"
+      RequiresCompatibilities: !If
+        - UseEC2LaunchType
+        - - EC2
+        - - FARGATE
+      Cpu: !If [UseFargateLaunchType, "1 vCPU", !Ref AWS::NoValue]
+      Memory: !If [UseFargateLaunchType, "4 GB", !Ref AWS::NoValue]
     DependsOn:
       - Cluster
       - BuildCustomResource
+
+  # ECS Service to register tasks with target group
+  VirtualParticipantService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub "${LMAStackName}-vp-service-${VPLaunchType}"
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 0
+      LaunchType: !Ref VPLaunchType
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref VPSecurityGroupId
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+      LoadBalancers:
+        - ContainerName: scribe
+          ContainerPort: 5901
+          TargetGroupArn: !Ref VNCTargetGroupArn
+      PlacementStrategies: !If
+        - UseEC2LaunchType
+        - - Type: spread
+            Field: instanceId
+        - !Ref AWS::NoValue
 
   VirtualParticipantTaskDefContainerLogGroup:
     Type: AWS::Logs::LogGroup
@@ -1040,12 +1509,12 @@ Resources:
                 "Parameters": {
                   "Cluster": "${ClusterArn}",
                   "TaskDefinition": "${TaskDefinition}",
-                  "LaunchType": "FARGATE",
+                  "LaunchType": "${VPLaunchType}",
                   "NetworkConfiguration": {
                     "AwsvpcConfiguration": {
                       "AssignPublicIp": "DISABLED",
                       "SecurityGroups": [
-                        "${SecurityGroup}"
+                        "${VPSecurityGroupId}"
                       ],
                       "Subnets": [
                         "${PrivateSubnet1}",
@@ -1123,12 +1592,12 @@ Resources:
                     "EcsParameters": {
                       "EnableECSManagedTags": false,
                       "EnableExecuteCommand": false,
-                      "LaunchType": "FARGATE",
+                      "LaunchType": "${VPLaunchType}",
                       "NetworkConfiguration": {
                         "AwsvpcConfiguration": {
                           "AssignPublicIp": "DISABLED",
                           "SecurityGroups": [
-                            "${SecurityGroup}"
+                            "${VPSecurityGroupId}"
                           ],
                           "Subnets": [
                             "${PrivateSubnet1}",
@@ -1229,6 +1698,8 @@ Resources:
         - {
             ClusterArn: !GetAtt [Cluster, Arn],
             TargetECSRoleArn: !GetAtt [TargetECSRole, Arn],
+            VPSecurityGroupId: !Ref VPSecurityGroupId,
+            VPLaunchType: !Ref VPLaunchType,
           }
 
   UpdateLMASettingsWithStateMachine:
@@ -1250,7 +1721,7 @@ Resources:
   VPScheduleGroup:
     Type: AWS::Scheduler::ScheduleGroup
     Properties:
-      Name: !Sub "${AWS::StackName}-vp-schedules"
+      Name: !Sub "${LMAStackName}-vp-schedules"
 
   # IAM Role for EventBridge Scheduler to execute ECS tasks
   VPSchedulerExecutionRole:
@@ -1304,6 +1775,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
@@ -1343,9 +1815,11 @@ Resources:
   VirtualParticipantSchedulerFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-VPScheduler"
+      FunctionName: !Sub "${LMAStackName}-VPScheduler"
       Handler: index.lambda_handler
       Runtime: python3.12
+      TracingConfig:
+        Mode: Active
       Code:
         ZipFile: |
           import os
@@ -1427,7 +1901,7 @@ Resources:
                               schedule_expression = f"at({scheduled_time.strftime('%Y-%m-%dT%H:%M:%S')})"
                               
                               response = scheduler_client.create_schedule(
-                                  ActionAfterCompletion='NONE',
+                                  ActionAfterCompletion='DELETE',
                                   FlexibleTimeWindow={'Mode': 'OFF'},
                                   GroupName=os.environ['SCHEDULE_GROUP_NAME'],
                                   Name=vp_id,
@@ -1470,7 +1944,7 @@ Resources:
         Variables:
           TASK_DEFINITION_ARN: !Ref TaskDefinition
           CLUSTER_ARN: !GetAtt Cluster.Arn
-          SECURITY_GROUPS: !Sub '["${SecurityGroup}"]'
+          SECURITY_GROUPS: !Sub '["${VPSecurityGroupId}"]'
           SUBNETS: !Sub '["${PrivateSubnet1}", "${PrivateSubnet2}"]'
           CONTAINER_NAME: "scribe"
           GRAPHQL_ENDPOINT: !Ref GraphQLEndpoint
@@ -1520,12 +1994,6 @@ Outputs:
     Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}"
     Export:
       Name: !Sub "${AWS::StackName}-ECRRepositoryUri"
-
-  SecurityGroupId:
-    Description: Security Group ID
-    Value: !Ref SecurityGroup
-    Export:
-      Name: !Sub "${AWS::StackName}-SecurityGroupId"
 
   VPScheduleGroupName:
     Description: Name of the EventBridge Schedule Group for Virtual Participants

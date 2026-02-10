@@ -170,8 +170,17 @@ type Mutation @aws_iam {
 	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	shareVirtualParticipant(input: ShareVirtualParticipantInput!): ShareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
+	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
 	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
+	updateChatButtonConfig(input: UpdateChatButtonConfigInput!): UpdateChatButtonConfigOutput @aws_cognito_user_pools
+	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
+	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools
+	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools
+	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools
+	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools
+	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -201,6 +210,9 @@ type Query @aws_cognito_user_pools
 	listVirtualParticipants: [VirtualParticipant] @aws_cognito_user_pools @aws_iam
 	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	parseMeetingInvitation(invitationText: String!): String @aws_cognito_user_pools @aws_iam
+	getChatButtonConfig(ChatButtonConfigId: ID!): ChatButtonConfig @aws_cognito_user_pools @aws_iam
+	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
+	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 }
 
 type VirtualParticipant @aws_cognito_user_pools @aws_iam {
@@ -220,6 +232,15 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
 	CallId: ID
+	vncEndpoint: String
+	vncPort: Int
+	vncReady: Boolean
+	taskPrivateIp: String
+	vncPassword: String
+	manualActionType: String
+	manualActionMessage: String
+	manualActionTimeoutSeconds: Int
+	manualActionStartTime: AWSDateTime
 }
 
 input CreateVirtualParticipantInput {
@@ -236,12 +257,43 @@ input UpdateVirtualParticipantInput {
 	id: ID!
 	status: String!
 	CallId: ID
+	vncEndpoint: String
+	vncPort: Int
+	vncReady: Boolean
+	taskPrivateIp: String
+	vncPassword: String
+	manualActionType: String
+	manualActionMessage: String
+	manualActionTimeoutSeconds: Int
+	manualActionStartTime: AWSDateTime
 }
 
 input EndVirtualParticipantInput {
 	id: ID!
 	endReason: String!
 	endedBy: String
+}
+
+input ShareVirtualParticipantInput {
+	id: ID!
+	SharedWith: [String!]!
+	Owner: String
+}
+
+type ShareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam {
+	id: ID!
+	Owner: String
+	SharedWith: String
+}
+
+input UnshareVirtualParticipantInput {
+	id: ID!
+	SharedWith: [String!]!
+}
+
+type UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam {
+	id: ID!
+	SharedWith: [String!]
 }
 
 enum Sentiment {
@@ -333,6 +385,8 @@ type Subscription {
 		@aws_subscribe(mutations: ["unshareCall"])
 	onUpdateVirtualParticipant: VirtualParticipant
 		@aws_subscribe(mutations: ["updateVirtualParticipant", "endVirtualParticipant"])
+	onVNCPreviewToggle(CallId: ID!): VNCPreviewControl
+		@aws_subscribe(mutations: ["toggleVNCPreview"])
 }
 
 type TranscriptSegment implements DynamoDbBase @aws_cognito_user_pools
@@ -493,9 +547,16 @@ type UnshareCallOutput @aws_iam {
 	SharedWith: [String!]
 }
 
+input ChatMessageInput {
+	role: String!
+	content: String!
+	timestamp: String
+}
+
 input SendChatMessageInput {
 	CallId: ID!
 	Message: String!
+	ConversationHistory: [ChatMessageInput]
 }
 
 type SendChatMessageOutput @aws_cognito_user_pools @aws_iam {
@@ -511,6 +572,16 @@ input AddChatTokenInput {
 	Token: String!
 	IsComplete: Boolean!
 	Sequence: Int!
+	ThinkingStep: ThinkingStepDataInput
+}
+
+input ThinkingStepDataInput {
+	Type: String!
+	Content: String
+	ToolName: String
+	ToolInput: AWSJSON
+	ToolResult: String
+	Success: Boolean
 }
 
 type ChatToken @aws_cognito_user_pools @aws_iam {
@@ -520,8 +591,132 @@ type ChatToken @aws_cognito_user_pools @aws_iam {
 	IsComplete: Boolean!
 	Sequence: Int!
 	Timestamp: AWSDateTime!
+	ThinkingStep: ThinkingStepData
 }
 
+type ThinkingStepData @aws_cognito_user_pools @aws_iam {
+	Type: String!
+	Content: String
+	ToolName: String
+	ToolInput: AWSJSON
+	ToolResult: String
+	Success: Boolean
+}
+
+type ChatButtonConfig @aws_cognito_user_pools @aws_iam {
+	ChatButtonConfigId: ID!
+}
+
+input UpdateChatButtonConfigInput {
+	ChatButtonConfigId: ID!
+	ButtonConfig: String!
+}
+
+type UpdateChatButtonConfigOutput @aws_cognito_user_pools @aws_iam {
+	ChatButtonConfigId: ID!
+	Success: Boolean!
+}
+
+# VNC Preview Control
+type VNCPreviewControl @aws_cognito_user_pools @aws_iam {
+	CallId: ID!
+	Action: String!
+	Timestamp: AWSDateTime!
+	Success: Boolean!
+	RequestedBy: String
+}
+
+input ToggleVNCPreviewInput {
+	CallId: ID!
+	Show: Boolean!
+}
+# MCP Server Management (Account-Level)
+type MCPServer @aws_cognito_user_pools @aws_iam {
+	ServerId: ID!
+	AccountId: String!
+	Name: String!
+	NpmPackage: String!
+	PackageType: String
+	Version: String
+	Transport: [String]
+	RequiresAuth: Boolean
+	AuthConfig: AWSJSON
+	Status: String
+	InstalledAt: AWSDateTime
+	UpdatedAt: AWSDateTime
+	BuildId: String
+	ErrorMessage: String
+	ServerUrl: String
+}
+
+input InstallMCPServerInput {
+	ServerId: ID!
+	Name: String!
+	NpmPackage: String!
+	PackageType: String
+	Version: String
+	Transport: [String]
+	RequiresAuth: Boolean
+	AuthConfig: AWSJSON
+	ServerUrl: String
+}
+
+type InstallMCPServerOutput @aws_cognito_user_pools @aws_iam {
+	ServerId: ID!
+	Success: Boolean!
+	Message: String
+	BuildId: String
+}
+
+type UninstallMCPServerOutput @aws_cognito_user_pools @aws_iam {
+	ServerId: ID!
+	Success: Boolean!
+	Message: String
+}
+
+input UpdateMCPServerInput {
+	ServerId: ID!
+	Version: String!
+}
+
+type UpdateMCPServerOutput @aws_cognito_user_pools @aws_iam {
+	ServerId: ID!
+	Success: Boolean!
+	Message: String
+	BuildId: String
+}
+
+# OAuth 2.1 Flow Types
+input InitOAuthFlowInput {
+	serverId: ID!
+	provider: String!
+	clientId: String!
+	authorizationUrl: String!
+	tokenUrl: String!
+	scopes: [String!]
+	codeChallenge: String!
+	serverUrl: String
+	serverName: String
+}
+
+type InitOAuthFlowOutput @aws_cognito_user_pools @aws_iam {
+	authorizationUrl: String!
+	state: String!
+	success: Boolean
+	error: String
+}
+
+input OAuthCallbackInput {
+	code: String!
+	state: String!
+	codeVerifier: String
+}
+
+type OAuthCallbackOutput @aws_cognito_user_pools @aws_iam {
+	success: Boolean!
+	serverId: String
+	error: String
+}
 
 schema {
 	query: Query

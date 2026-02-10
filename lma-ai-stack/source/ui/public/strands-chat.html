@@ -51,6 +51,99 @@
             color: white;
             align-self: flex-start;
         }
+        /* Markdown formatting styles */
+        .message.assistant h1,
+        .message.assistant h2,
+        .message.assistant h3,
+        .message.assistant h4,
+        .message.assistant h5,
+        .message.assistant h6 {
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+        }
+        .message.assistant p {
+            margin: 0.5em 0;
+        }
+        .message.assistant ul,
+        .message.assistant ol {
+            margin: 0.5em 0;
+            padding-left: 1.5em;
+        }
+        .message.assistant li {
+            margin: 0.25em 0;
+        }
+        .message.assistant code {
+            background-color: rgba(0, 0, 0, 0.05);
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .message.assistant pre {
+            background-color: rgba(0, 0, 0, 0.05);
+            padding: 8px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .message.assistant pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .message.assistant blockquote {
+            border-left: 3px solid #007bff;
+            padding-left: 1em;
+            margin: 0.5em 0;
+            color: #666;
+        }
+        .message.assistant strong {
+            font-weight: 600;
+        }
+        .message.assistant em {
+            font-style: italic;
+        }
+        .message.assistant a {
+            color: #007bff;
+            text-decoration: underline;
+        }
+        /* Suggestion buttons styling */
+        .suggestions-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 10px 0;
+            justify-content: flex-start;
+        }
+        .suggestion-button {
+            padding: 10px 20px;
+            background-color: #8ab4f8;
+            color: #1a1a1a;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .suggestion-button:hover {
+            background-color: #6fa0f6;
+        }
+        .suggestion-button:active {
+            transform: translateY(1px);
+        }
+        .more-button {
+            background: none;
+            border: none;
+            color: #007bff;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 300;
+            padding: 5px;
+            text-decoration: none;
+        }
+        .more-button:hover {
+            color: #0056b3;
+        }
         .input-container {
             padding: 20px;
             border-top: 1px solid #dee2e6;
@@ -101,13 +194,151 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        
+        /* Thinking process container styles */
+        .thinking-container {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 12px;
+            margin: 10px 0;
+            max-width: 80%;
+            align-self: flex-start;
+            overflow: clip;
+        }
+        
+        .thinking-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background-color: #e9ecef;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s;
+        }
+        
+        .thinking-header:hover {
+            background-color: #dee2e6;
+        }
+        
+        .thinking-current-step {
+            font-size: 14px;
+            color: #495057;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+        }
+        
+        .thinking-toggle {
+            font-size: 12px;
+            color: #6c757d;
+            font-weight: 500;
+        }
+        
+        .thinking-details {
+            padding: 16px;
+            display: none;
+            max-height: 400px;
+            overflow-y: auto;
+            background-color: white;
+        }
+        
+        .thinking-details.expanded {
+            display: block;
+        }
+        
+        .thinking-step {
+            padding: 12px;
+            margin-bottom: 8px;
+            border-left: 3px solid #007bff;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        
+        .thinking-step.reasoning {
+            border-left-color: #007bff;
+            background-color: #e7f3ff;
+        }
+        
+        .thinking-step.tool-use {
+            border-left-color: #28a745;
+            background-color: #e8f5e9;
+        }
+        
+        .thinking-step.tool-result {
+            border-left-color: #17a2b8;
+            background-color: #e0f7fa;
+        }
+        
+        .thinking-step.tool-result.error {
+            border-left-color: #dc3545;
+            background-color: #ffebee;
+        }
+        
+        .thinking-step.status {
+            border-left-color: #ffc107;
+            background-color: #fff8e1;
+        }
+        
+        .thinking-step-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            color: #212529;
+        }
+        
+        .thinking-step-content {
+            font-size: 12px;
+            color: #495057;
+            margin-left: 24px;
+            line-height: 1.5;
+        }
+        
+        .thinking-step-timestamp {
+            font-size: 11px;
+            color: #6c757d;
+            margin-left: 24px;
+            margin-top: 4px;
+        }
+        
+        .tool-params {
+            background-color: #e9ecef;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            margin-top: 4px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .thinking-spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
     </style>
+    <!-- Include marked.js for markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
 </head>
 <body>
     <div class="chat-container">
         <div class="chat-messages" id="chatMessages">
             <div class="message assistant">
-                Hello! I'm your STRANDS meeting assistant. I can help answer questions about the meeting or provide information. How can I assist you?
+                <p><em>LMA Meeting Assistant is ready. Ask knowledge base questions or request a summary of the current meeting.</em></p>
+                <div class="suggestions-container" id="suggestionsContainer">
+                    <!-- Buttons will be loaded dynamically -->
+                </div>
             </div>
         </div>
         <div class="input-container">
@@ -123,13 +354,276 @@
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
+        
+        // Conversation history tracking
+        const conversationHistory = [];
+        const MAX_HISTORY_MESSAGES = 10; // 5 pairs (user + assistant)
+        
+        // Thinking steps tracking
+        const thinkingSteps = new Map();
+        
+        // Load button configuration on page load
+        let buttonConfig = null;
+        loadButtonConfiguration();
+
+        // Listen for reload message from parent
+        window.addEventListener('message', (event) => {
+            if (event.data?.type === 'STRANDS_RELOAD_BUTTONS') {
+                // Reload button configuration when admin saves changes
+                loadButtonConfiguration();
+            }
+        });
+        
+        // Thinking process functions
+        function createThinkingContainer(messageId) {
+            const container = document.createElement('div');
+            container.className = 'thinking-container';
+            container.id = `thinking-${messageId}`;
+            
+            const header = document.createElement('div');
+            header.className = 'thinking-header';
+            
+            const currentStep = document.createElement('div');
+            currentStep.className = 'thinking-current-step';
+            currentStep.innerHTML = '<div style="width: 12px;"><span class="thinking-spinner"></span></div> <span id="current-step-text-' + messageId + '">Analyzing request...</span>';
+            
+            const toggle = document.createElement('div');
+            toggle.className = 'thinking-toggle';
+            toggle.textContent = '▼';
+            
+            header.appendChild(currentStep);
+            header.appendChild(toggle);
+            
+            const details = document.createElement('div');
+            details.className = 'thinking-details';
+            details.id = `thinking-details-${messageId}`;
+            
+            container.appendChild(header);
+            container.appendChild(details);
+            
+            // Toggle expand/collapse
+            header.addEventListener('click', () => {
+                details.classList.toggle('expanded');
+                toggle.textContent = details.classList.contains('expanded')
+                    ? '▲'
+                    : '▼';
+            });
+            
+            chatMessages.appendChild(container);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return container;
+        }
+        
+        function addThinkingStep(messageId, step) {
+            if (!thinkingSteps.has(messageId)) {
+                thinkingSteps.set(messageId, []);
+            }
+            
+            const steps = thinkingSteps.get(messageId);
+            steps.push(step);
+            
+            // Update current step display
+            updateCurrentStepDisplay(messageId, step);
+            
+            // Add to detailed view
+            addStepToDetailedView(messageId, step);
+        }
+        
+        function updateCurrentStepDisplay(messageId, step) {
+            const currentStepText = document.getElementById(`current-step-text-${messageId}`);
+            if (!currentStepText) {
+                console.warn('[STRANDS] current-step-text element not found for:', messageId);
+                return;
+            }
+            
+            let displayText = '';
+            let icon = '';
+            
+            switch(step.Type) {
+                case 'reasoning':
+                    icon = '🧠';
+                    displayText = step.Content || 'Thinking...';
+                    if (displayText.length > 60) {
+                        displayText = displayText.substring(0, 60) + '...';
+                    }
+                    break;
+                case 'tool_use':
+                    icon = '🔧';
+                    displayText = `Using ${formatToolName(step.ToolName)}...`;
+                    break;
+                case 'tool_result':
+                    icon = step.Success ? '✅' : '❌';
+                    displayText = step.Success
+                        ? `Completed ${formatToolName(step.ToolName)}`
+                        : `Error in ${formatToolName(step.ToolName)}`;
+                    break;
+                case 'status':
+                    icon = '⚙️';
+                    displayText = step.Content || 'Processing...';
+                    break;
+            }
+            
+            currentStepText.innerHTML = `${icon} ${displayText}`;
+        }
+        
+        function addStepToDetailedView(messageId, step) {
+            const details = document.getElementById(`thinking-details-${messageId}`);
+            if (!details) {
+                console.warn('[STRANDS] thinking-details element not found for:', messageId);
+                return;
+            }
+            
+            const stepDiv = document.createElement('div');
+            let stepClass = 'thinking-step ' + step.Type.replace('_', '-');
+            if (step.Type === 'tool_result' && !step.Success) {
+                stepClass += ' error';
+            }
+            stepDiv.className = stepClass;
+            
+            const header = document.createElement('div');
+            header.className = 'thinking-step-header';
+            
+            let icon = '';
+            let title = '';
+            
+            switch(step.Type) {
+                case 'reasoning':
+                    icon = '🧠';
+                    title = 'Reasoning';
+                    break;
+                case 'tool_use':
+                    icon = '🔧';
+                    title = `Tool: ${formatToolName(step.ToolName)}`;
+                    break;
+                case 'tool_result':
+                    icon = step.Success ? '✅' : '❌';
+                    title = step.Success ? 'Result' : 'Error';
+                    break;
+                case 'status':
+                    icon = '⚙️';
+                    title = 'Status';
+                    break;
+            }
+            
+            header.innerHTML = `<span>${icon}</span><span>${title}</span>`;
+            stepDiv.appendChild(header);
+            
+            if (step.Content) {
+                const content = document.createElement('div');
+                content.className = 'thinking-step-content';
+                content.textContent = step.Content;
+                stepDiv.appendChild(content);
+            }
+            
+            if (step.ToolInput) {
+                const params = document.createElement('div');
+                params.className = 'tool-params';
+                try {
+                    const parsed = JSON.parse(step.ToolInput);
+                    params.textContent = `Parameters: ${JSON.stringify(parsed, null, 2)}`;
+                } catch (e) {
+                    params.textContent = `Parameters: ${step.ToolInput}`;
+                }
+                stepDiv.appendChild(params);
+            }
+            
+            if (step.ToolResult) {
+                const result = document.createElement('div');
+                result.className = 'thinking-step-content';
+                result.textContent = truncateText(step.ToolResult, 200);
+                stepDiv.appendChild(result);
+            }
+            
+            const timestamp = document.createElement('div');
+            timestamp.className = 'thinking-step-timestamp';
+            timestamp.textContent = formatTimestamp(step.Timestamp);
+            stepDiv.appendChild(timestamp);
+            
+            details.appendChild(stepDiv);
+            
+            if (details.classList.contains('expanded')) {
+                details.scrollTop = details.scrollHeight;
+            }
+        }
+        
+        function formatToolName(toolName) {
+            if (!toolName) return 'tool';
+            return toolName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+        
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '';
+            
+            try {
+                // Handle ISO 8601 format timestamps
+                const date = new Date(timestamp);
+                
+                // Check if date is valid
+                if (isNaN(date.getTime())) {
+                    return '';
+                }
+                
+                // Format as HH:MM:SS
+                return date.toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                });
+            } catch (e) {
+                console.error('Error formatting timestamp:', e);
+                return '';
+            }
+        }
+        
+        function truncateText(text, maxLength) {
+            if (!text) return '';
+            if (text.length <= maxLength) return text;
+            return text.substring(0, maxLength) + '...';
+        }
+        
+        function finalizeThinkingContainer(messageId) {
+            const currentStepText = document.getElementById(`current-step-text-${messageId}`);
+            if (currentStepText) {
+                currentStepText.innerHTML = '✓ Complete';
+            }
+            
+            const container = document.getElementById(`thinking-${messageId}`);
+            if (container) {
+                const spinner = container.querySelector('.thinking-spinner');
+                if (spinner) {
+                    spinner.remove();
+                }
+            }
+        }
 
         function addMessage(text, type = 'assistant') {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}`;
-            messageDiv.textContent = text;
+            
+            // Use markdown rendering for assistant messages, plain text for user/error
+            if (type === 'assistant' && typeof marked !== 'undefined') {
+                messageDiv.innerHTML = marked.parse(text);
+            } else {
+                messageDiv.textContent = text;
+            }
+            
             chatMessages.appendChild(messageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            // Store in conversation history (skip error messages)
+            if (type !== 'error') {
+                conversationHistory.push({
+                    role: type === 'user' ? 'user' : 'assistant',
+                    content: text,
+                    timestamp: new Date().toISOString()
+                });
+                
+                // Keep only last N messages
+                if (conversationHistory.length > MAX_HISTORY_MESSAGES) {
+                    conversationHistory.shift(); // Remove oldest
+                }
+            }
         }
 
         function addLoadingMessage() {
@@ -156,26 +650,28 @@
             addMessage(message, 'user');
             messageInput.value = '';
             sendButton.disabled = true;
-            addLoadingMessage();
 
             try {
                 const response = await callSendChatMessageAPI(message, callId);
                 
                 if (response?.data?.sendChatMessage) {
                     const messageId = response.data.sendChatMessage.MessageId;
+                    
+                    // Create thinking container (replaces old loading message)
+                    createThinkingContainer(messageId);
+                    
+                    // Subscribe to token stream (thinking steps come through here too)
                     subscribeToTokenStream(messageId);
                     
                     // Fallback for non-streaming responses
                     if (response.data.sendChatMessage.Response) {
-                        removeLoadingMessage();
+                        finalizeThinkingContainer(messageId);
                         addMessage(response.data.sendChatMessage.Response, 'assistant');
                     }
                 } else {
-                    removeLoadingMessage();
                     addMessage('Unexpected response format', 'error');
                 }
             } catch (error) {
-                removeLoadingMessage();
                 addMessage(`Error: ${error.message}`, 'error');
             }
 
@@ -200,7 +696,8 @@
                         type: 'STRANDS_CHAT_REQUEST',
                         messageId,
                         callId,
-                        message
+                        message,
+                        conversationHistory: conversationHistory
                     }, '*');
                     
                     setTimeout(() => {
@@ -221,6 +718,9 @@
             chatMessages.appendChild(streamingMessageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
             
+            // Track accumulated text for markdown rendering
+            let accumulatedText = '';
+            
             window.parent.postMessage({
                 type: 'STRANDS_SETUP_TOKEN_SUBSCRIPTION',
                 callId,
@@ -232,11 +732,45 @@
                     const token = event.data.token;
                     
                     if (token.MessageId === messageId) {
+                        // Check if this token contains a thinking step
+                        if (token.ThinkingStep) {
+                            addThinkingStep(messageId, token.ThinkingStep);
+                        }
+                        
                         if (token.IsComplete) {
-                            removeLoadingMessage();
+                            finalizeThinkingContainer(messageId);
+                            
+                            // Final render with markdown
+                            if (typeof marked !== 'undefined' && accumulatedText) {
+                                streamingMessageDiv.innerHTML = marked.parse(accumulatedText);
+                            }
+                            
+                            // Add completed response to conversation history
+                            if (accumulatedText) {
+                                conversationHistory.push({
+                                    role: 'assistant',
+                                    content: accumulatedText,
+                                    timestamp: new Date().toISOString()
+                                });
+                                
+                                // Keep only last N messages
+                                if (conversationHistory.length > MAX_HISTORY_MESSAGES) {
+                                    conversationHistory.shift(); // Remove oldest
+                                }
+                            }
+                            
                             window.removeEventListener('message', tokenHandler);
-                        } else {
-                            streamingMessageDiv.textContent += token.Token;
+                        } else if (token.Token) {
+                            // Only accumulate if there's actual token text (not just thinking steps)
+                            accumulatedText += token.Token;
+                            
+                            // Render markdown incrementally during streaming
+                            if (typeof marked !== 'undefined') {
+                                streamingMessageDiv.innerHTML = marked.parse(accumulatedText);
+                            } else {
+                                streamingMessageDiv.textContent = accumulatedText;
+                            }
+                            
                             chatMessages.scrollTop = chatMessages.scrollHeight;
                         }
                     }
@@ -246,11 +780,178 @@
             window.addEventListener('message', tokenHandler);
         }
 
+        // Load button configuration from DynamoDB
+        async function loadButtonConfiguration() {
+            try {
+                const config = await fetchButtonConfiguration();
+                if (config) {
+                    buttonConfig = config;
+                    renderSuggestionButtons(config);
+                } else {
+                    // Fallback to default hardcoded buttons if config fetch fails
+                    renderDefaultButtons();
+                }
+            } catch (error) {
+                console.error('Error loading button configuration:', error);
+                renderDefaultButtons();
+            }
+        }
+        
+        async function fetchButtonConfiguration() {
+            return new Promise((resolve, reject) => {
+                const requestId = `button-config-${Date.now()}`;
+                
+                const configHandler = (event) => {
+                    if (event.data?.type === 'STRANDS_BUTTON_CONFIG_RESPONSE' && event.data.requestId === requestId) {
+                        window.removeEventListener('message', configHandler);
+                        event.data.success ? resolve(event.data.config) : reject(new Error(event.data.error));
+                    }
+                };
+                
+                window.addEventListener('message', configHandler);
+                
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'STRANDS_BUTTON_CONFIG_REQUEST',
+                        requestId
+                    }, '*');
+                    
+                    setTimeout(() => {
+                        window.removeEventListener('message', configHandler);
+                        reject(new Error('Button config request timeout'));
+                    }, 5000);
+                } else {
+                    reject(new Error('No parent window available'));
+                }
+            });
+        }
+        
+        function renderSuggestionButtons(config) {
+            const container = document.getElementById('suggestionsContainer');
+            container.innerHTML = '';
+            
+            if (!config || Object.keys(config).length === 0) {
+                renderDefaultButtons();
+                return;
+            }
+            
+            // Sort buttons by sequence number (N# prefix)
+            const sortedButtons = Object.entries(config)
+                .sort((a, b) => {
+                    const getSequence = (key) => {
+                        const match = key.match(/^(\d+)#/);
+                        return match ? parseInt(match[1]) : 999;
+                    };
+                    return getSequence(a[0]) - getSequence(b[0]);
+                });
+            
+            // Show first 4 buttons, hide rest initially
+            const visibleCount = 4;
+            let hasHiddenButtons = false;
+            
+            sortedButtons.forEach(([key, prompt], index) => {
+                // Skip if prompt is empty or "NONE"
+                if (!prompt || prompt.trim() === '' || prompt.toUpperCase() === 'NONE') {
+                    return;
+                }
+                
+                // Extract label from key (remove N# prefix)
+                const label = key.replace(/^\d+#/, '');
+                
+                const button = document.createElement('button');
+                button.className = 'suggestion-button';
+                button.setAttribute('data-prompt', prompt);
+                button.textContent = label;
+                
+                if (index >= visibleCount) {
+                    button.classList.add('extra-suggestion');
+                    button.style.display = 'none';
+                    hasHiddenButtons = true;
+                }
+                
+                button.addEventListener('click', () => {
+                    messageInput.value = prompt;
+                    messageInput.focus();
+                    sendMessage();
+                });
+                
+                container.appendChild(button);
+            });
+            
+            // Add MORE button if there are hidden buttons
+            if (hasHiddenButtons) {
+                const moreButton = document.createElement('button');
+                moreButton.className = 'more-button';
+                moreButton.id = 'moreButton';
+                moreButton.textContent = 'MORE';
+                moreButton.addEventListener('click', () => {
+                    const extraButtons = document.querySelectorAll('.extra-suggestion');
+                    extraButtons.forEach(btn => {
+                        btn.style.display = 'inline-block';
+                    });
+                    moreButton.style.display = 'none';
+                });
+                container.appendChild(moreButton);
+            }
+        }
+        
+        function renderDefaultButtons() {
+            // Fallback to hardcoded default buttons (commented out, no defaults for now)
+            const defaultButtons = [
+                // { label: 'SUMMARIZE', prompt: 'Summarize this meeting' },
+                // { label: 'ACTIONS', prompt: 'What were the action items?' },
+                // { label: 'TOPICS', prompt: 'What topics were discussed?' },
+                // { label: 'ASK ASSISTANT!', prompt: 'Please respond to the last question or instruction in this meeting.' },
+                // { label: 'FACT CHECK', prompt: 'Can you fact-check the recent statements made in this meeting?', hidden: true },
+                // { label: 'DISCUSSED BEFORE?', prompt: 'Based on what we\'re discussing in this meeting, have we talked about this topic in previous meetings?', hidden: true },
+                // { label: 'FIND DOCS', prompt: 'Based on the current meeting discussion, are there any relevant company documents or policies?', hidden: true }
+            ];
+            
+            const container = document.getElementById('suggestionsContainer');
+            container.innerHTML = '';
+            
+            let hasHiddenButtons = false;
+            
+            defaultButtons.forEach(({ label, prompt, hidden }) => {
+                const button = document.createElement('button');
+                button.className = 'suggestion-button';
+                button.setAttribute('data-prompt', prompt);
+                button.textContent = label;
+                
+                if (hidden) {
+                    button.classList.add('extra-suggestion');
+                    button.style.display = 'none';
+                    hasHiddenButtons = true;
+                }
+                
+                button.addEventListener('click', () => {
+                    messageInput.value = prompt;
+                    messageInput.focus();
+                    sendMessage();
+                });
+                
+                container.appendChild(button);
+            });
+            
+            if (hasHiddenButtons) {
+                const moreButton = document.createElement('button');
+                moreButton.className = 'more-button';
+                moreButton.id = 'moreButton';
+                moreButton.textContent = 'MORE';
+                moreButton.addEventListener('click', () => {
+                    const extraButtons = document.querySelectorAll('.extra-suggestion');
+                    extraButtons.forEach(btn => {
+                        btn.style.display = 'inline-block';
+                    });
+                    moreButton.style.display = 'none';
+                });
+                container.appendChild(moreButton);
+            }
+        }
+
         sendButton.addEventListener('click', sendMessage);
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
-        messageInput.focus();
     </script>
 </body>
-</html>
