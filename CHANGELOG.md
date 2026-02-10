@@ -27,8 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enabled X-Ray tracing on GetEventApiDnsFunction, GetCloudFrontPrefixListFunction, and VirtualParticipantSchedulerFunction for improved observability
 - Triaged and suppressed 54 security scan false positives and acceptable design decisions
 - Webex Virtual Participant password-protected meeting support
-- CloudFormation stack deletion failure when using EC2 launch type for Virtual Participant - AutoScaling Group with scale-in protection now properly removes protection and terminates instances before deletion
-- CloudFormation stack deletion failure when EnableDataRetentionOnDelete=false - S3 buckets (LoggingBucket and RecordingsBucket) are now automatically emptied before deletion
 
 ## [0.2.24] - 01/07/26
 
