@@ -1760,14 +1760,24 @@ Resources:
                   - s3:ListBucket
                   - s3:ListBucketVersions
                   - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                  - s3:DeleteBucket
                 Resource:
-                  - !Sub "arn:aws:s3:::${AWS::StackName}-*"
+                  - !GetAtt LoggingBucket.Arn
+                  - !If
+                    - ShouldCreateRecordingBucket
+                    - !GetAtt RecordingsBucket.Arn
+                    - !Ref AWS::NoValue
               - Effect: Allow
                 Action:
                   - s3:DeleteObject
                   - s3:DeleteObjectVersion
                 Resource:
-                  - !Sub "arn:aws:s3:::${AWS::StackName}-*/*"
+                  - !Sub "${LoggingBucket.Arn}/*"
+                  - !If
+                    - ShouldCreateRecordingBucket
+                    - !Sub "${RecordingsBucket.Arn}/*"
+                    - !Ref AWS::NoValue
 
   S3BucketCleanupFunction:
     Type: AWS::Lambda::Function
@@ -1789,6 +1799,13 @@ Resources:
       Runtime: python3.12
       TracingConfig:
         Mode: Active
+      Environment:
+        Variables:
+          LOGGING_BUCKET_NAME: !Ref LoggingBucket
+          RECORDINGS_BUCKET_NAME: !If
+            - ShouldCreateRecordingBucket
+            - !Ref RecordingsBucket
+            - ""
       Code:
         ZipFile: |
           import boto3
@@ -1874,23 +1891,61 @@ Resources:
                   logger.error(f"Error emptying bucket {bucket_name}: {e}", exc_info=True)
                   raise
           
+          def delete_bucket_with_retry(bucket_name, max_retries=5):
+              """Delete bucket with retry logic to handle async writes"""
+              for attempt in range(max_retries):
+                  try:
+                      logger.info(f"Attempt {attempt + 1}/{max_retries}: Emptying and deleting bucket {bucket_name}")
+                      
+                      # Empty the bucket
+                      empty_bucket(bucket_name)
+                      
+                      # Immediately try to delete the bucket
+                      logger.info(f"Deleting bucket: {bucket_name}")
+                      s3.delete_bucket(Bucket=bucket_name)
+                      logger.info(f"Successfully deleted bucket: {bucket_name}")
+                      return True
+                      
+                  except s3.exceptions.NoSuchBucket:
+                      logger.info(f"Bucket {bucket_name} already deleted")
+                      return True
+                      
+                  except Exception as e:
+                      error_msg = str(e)
+                      if 'BucketNotEmpty' in error_msg or 'not empty' in error_msg.lower():
+                          logger.warning(f"Bucket {bucket_name} not empty after cleanup (attempt {attempt + 1}/{max_retries})")
+                          if attempt < max_retries - 1:
+                              logger.info("Waiting 3 seconds before retry...")
+                              import time
+                              time.sleep(3)
+                          else:
+                              logger.error(f"Failed to delete bucket {bucket_name} after {max_retries} attempts")
+                              raise
+                      else:
+                          logger.error(f"Error deleting bucket {bucket_name}: {e}")
+                          raise
+              
+              return False
+          
           def handler(event, context):
               logger.info(f"Event: {event}")
               request_type = event['RequestType']
               
               try:
                   if request_type == 'Delete':
-                      # Get exact bucket names from properties
-                      logging_bucket = event['ResourceProperties'].get('LoggingBucketName', '')
-                      recordings_bucket = event['ResourceProperties'].get('RecordingsBucketName', '')
+                      # Get exact bucket names from environment variables
+                      import os
+                      logging_bucket = os.environ.get('LOGGING_BUCKET_NAME', '')
+                      recordings_bucket = os.environ.get('RECORDINGS_BUCKET_NAME', '')
                       
                       bucket_names = [b for b in [logging_bucket, recordings_bucket] if b]
-                      logger.info(f"Emptying buckets before deletion: {bucket_names}")
+                      logger.info(f"Deleting buckets: {bucket_names}")
                       
+                      # Delete each bucket with retry logic
                       for bucket_name in bucket_names:
-                          empty_bucket(bucket_name)
+                          delete_bucket_with_retry(bucket_name)
                       
-                      logger.info("All buckets emptied successfully")
+                      logger.info("All buckets deleted successfully")
                   else:
                       logger.info(f"Request type is {request_type}, no action needed")
                   
@@ -1901,20 +1956,16 @@ Resources:
                   cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
 
   # Note: This custom resource intentionally has NO dependencies on the buckets
-  # This ensures it is deleted LAST during stack deletion, after all other resources
-  # have stopped writing to the buckets
+  # Bucket names are passed via Lambda environment variables to avoid implicit dependencies
+  # This ensures the handler is deleted LAST during stack deletion
   S3BucketCleanupHandler:
     Type: Custom::S3BucketCleanup
     Condition: ShouldDeleteDataOnDelete
     DeletionPolicy: Delete
     Properties:
       ServiceToken: !GetAtt S3BucketCleanupFunction.Arn
-      # Pass bucket names as plain strings - Lambda will use exact match only
-      LoggingBucketName: !Sub "${LoggingBucket}"
-      RecordingsBucketName: !If
-        - ShouldCreateRecordingBucket
-        - !Sub "${RecordingsBucket}"
-        - ""
+      # Dummy property to trigger updates if needed
+      StackName: !Ref AWS::StackName
 
   ## LOGGING BUCKET FOR S3 ACCESS LOGS
   LoggingBucket:
