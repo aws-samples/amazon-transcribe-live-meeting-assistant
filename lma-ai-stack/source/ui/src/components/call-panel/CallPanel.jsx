@@ -3,7 +3,7 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -499,15 +499,6 @@ const CallInProgressTranscript = ({
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
   const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
 
-  const scrollTranscriptToBottom = useCallback(() => {
-    if (containerRef.current) {
-      containerRef.current.scrollTo({
-        top: containerRef.current.scrollHeight,
-        behavior: 'smooth',
-      });
-    }
-  }, []);
-
   const getSegments = () => {
     const currentTurnByTurnSegments = transcriptChannels
       .map((c) => {
@@ -719,9 +710,9 @@ const CallInProgressTranscript = ({
       item.recordingStatusLabel === IN_PROGRESS_STATUS
       && autoScroll
       && !userHasScrolled
-      && containerRef.current
+      && bottomRef.current?.scrollIntoView
     ) {
-      scrollTranscriptToBottom();
+      bottomRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [
     turnByTurnSegments,
@@ -731,7 +722,6 @@ const CallInProgressTranscript = ({
     targetLanguage,
     agentTranscript,
     translateOn,
-    scrollTranscriptToBottom,
   ]);
 
   return (
@@ -740,7 +730,6 @@ const CallInProgressTranscript = ({
       onScroll={handleScroll}
       style={{
         overflowY: 'auto',
-        height: collapseSentiment ? '34vh' : '68vh',
         maxHeight: collapseSentiment ? '34vh' : '68vh',
         paddingLeft: '10px',
         paddingTop: '5px',
@@ -767,7 +756,7 @@ const CallInProgressTranscript = ({
           <Button
             onClick={() => {
               setUserHasScrolled(false);
-              scrollTranscriptToBottom();
+              bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
             }}
             variant="inline-link"
             iconName="angle-down"
