@@ -3,7 +3,7 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -700,6 +700,15 @@ const CallInProgressTranscript = ({
     }
   };
 
+  const scrollTranscriptToBottom = useCallback(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTo({
+        top: containerRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+    }
+  }, []);
+
   useEffect(() => {
     setTurnByTurnSegments(getTurnByTurnSegments);
   }, [callTranscriptPerCallId, item.recordingStatusLabel, targetLanguage, agentTranscript, translateOn, updateFlag]);
@@ -710,9 +719,9 @@ const CallInProgressTranscript = ({
       item.recordingStatusLabel === IN_PROGRESS_STATUS
       && autoScroll
       && !userHasScrolled
-      && bottomRef.current?.scrollIntoView
+      && containerRef.current
     ) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      scrollTranscriptToBottom();
     }
   }, [
     turnByTurnSegments,
@@ -722,6 +731,7 @@ const CallInProgressTranscript = ({
     targetLanguage,
     agentTranscript,
     translateOn,
+    scrollTranscriptToBottom,
   ]);
 
   return (
@@ -730,6 +740,7 @@ const CallInProgressTranscript = ({
       onScroll={handleScroll}
       style={{
         overflowY: 'auto',
+        height: collapseSentiment ? '34vh' : '68vh',
         maxHeight: collapseSentiment ? '34vh' : '68vh',
         paddingLeft: '10px',
         paddingTop: '5px',
@@ -756,7 +767,7 @@ const CallInProgressTranscript = ({
           <Button
             onClick={() => {
               setUserHasScrolled(false);
-              bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+              scrollTranscriptToBottom();
             }}
             variant="inline-link"
             iconName="angle-down"
