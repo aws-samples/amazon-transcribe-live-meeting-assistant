@@ -7,6 +7,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { createWriteStream } from 'fs';
 import { details } from './details.js';
 import { sendAddTranscriptSegment, sendStartMeeting, sendEndMeeting } from './kinesis-stream.js';
+import { elevenLabsAgent } from './elevenlabs-agent.js';
 
 // Global current speaker (matching Python)
 let currentSpeaker = "none";
@@ -31,8 +32,9 @@ export class TranscriptionService {
         };
         
         if (isLocalTest) {
-            console.log('Using AWS credentials from ~/.aws/credentials for local testing');
-            // Default provider checks credentials file, then environment variables, then instance metadata
+            console.log('Using AWS credentials from environment/file for local testing');
+            // Disable EC2 metadata to force credentials from environment or file
+            process.env.AWS_EC2_METADATA_DISABLED = 'true';
             clientConfig.credentials = defaultProvider();
         }
         
@@ -117,6 +119,17 @@ export class TranscriptionService {
 
         console.log('Starting transcription service');
         this.isTranscribing = true;
+        
+        // Start ElevenLabs agent if enabled
+        if (elevenLabsAgent.isEnabled()) {
+            try {
+                await elevenLabsAgent.start();
+                console.log('✓ ElevenLabs agent started alongside transcription');
+            } catch (error) {
+                console.error('Failed to start ElevenLabs agent:', error);
+                // Non-critical - continue with transcription
+            }
+        }
 
         // Send start meeting event to Kinesis
         try {
@@ -129,28 +142,8 @@ export class TranscriptionService {
             }
         }
 
-        // If in local test mode, skip AWS Transcribe entirely
-        if (isLocalTest) {
-            console.log('*** LOCAL TEST MODE - Skipping AWS Transcribe (no transcription) ***');
-            console.log('*** Meeting will continue without transcription ***');
-            
-            // Update status to ACTIVE even without transcription
-            const vpId = process.env.VIRTUAL_PARTICIPANT_ID;
-            if (vpId) {
-                try {
-                    const { VirtualParticipantStatusManager } = await import('./status-manager.js');
-                    const statusManager = new VirtualParticipantStatusManager(vpId);
-                    await statusManager.setActive();
-                    console.log(`VP ${vpId} status: ACTIVE (local test mode - no transcription)`);
-                } catch (error) {
-                    console.log(`Failed to update VP status to ACTIVE: ${error}`);
-                }
-            }
-            
-            // Keep the service marked as "transcribing" so the meeting continues
-            // but don't actually do any transcription
-            return;
-        }
+        // In local test mode, skip Kinesis/AppSync but still run transcription if agent is enabled
+        // (Transcription provides audio stream for ElevenLabs agent)
 
         const maxRetries = 5;
         const retryDelay = 5000; // 5 seconds
@@ -251,6 +244,11 @@ export class TranscriptionService {
     }
 
     private processTranscriptResult(result: any): void {
+        const transcript = result.Alternatives?.[0]?.Transcript || '';
+        if (transcript) {
+            console.log(`📝 Transcribed: "${transcript}" (IsPartial: ${result.IsPartial})`);
+        }
+        
         for (const item of result.Alternatives?.[0]?.Items ?? []) {
             const word = item.Content;
             const wordType = item.Type;
@@ -305,6 +303,16 @@ export class TranscriptionService {
         if (this.process) {
             this.process.kill();
             this.process = null;
+        }
+        
+        // Stop ElevenLabs agent if running
+        if (elevenLabsAgent.isEnabled()) {
+            try {
+                await elevenLabsAgent.stop();
+                console.log('✓ ElevenLabs agent stopped');
+            } catch (error) {
+                console.error('Error stopping ElevenLabs agent:', error);
+            }
         }
 
         // Send end meeting event to Kinesis
@@ -394,6 +402,11 @@ export class TranscriptionService {
                         // Send to Transcribe
                         await transcribeResponse.input_stream?.send_audio_event?.({ audio_chunk: chunk });
                         recordingStream.write(chunk);
+                        
+                        // Also send to ElevenLabs agent if enabled
+                        if (elevenLabsAgent.isEnabled() && elevenLabsAgent.isActive()) {
+                            elevenLabsAgent.sendAudioChunk(chunk);
+                        }
                     } catch (error: any) {
                         const msg = `Audio chunk processing error: ${error.message}`;
                         if (isLocalTest) {

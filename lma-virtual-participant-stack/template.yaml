@@ -122,6 +122,21 @@ Parameters:
       meeting will not be recorded.
       If set to true, the meeting will be recorded.
 
+  ElevenLabsApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional) API key for ElevenLabs text-to-speech and conversational AI.
+      When provided, enables voice interaction capabilities in Virtual Participant.
+
+  ElevenLabsAgentId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ElevenLabs Conversational AI Agent ID for custom personality.
+      Leave blank to use default conversational agent.
+
   S3BucketName:
     Type: String
     Description: >
@@ -1217,6 +1232,10 @@ Resources:
               Value: !Ref VPC
             - Name: ALB_LISTENER_ARN
               Value: !Ref VNCALBListenerArn
+            - Name: ELEVENLABS_API_KEY
+              Value: !Ref ElevenLabsApiKey
+            - Name: ELEVENLABS_AGENT_ID
+              Value: !Ref ElevenLabsAgentId
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:

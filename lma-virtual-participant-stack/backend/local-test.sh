@@ -182,6 +182,15 @@ TRANSCRIBE_LANGUAGE_CODE=en-US
 ENABLE_CONTENT_REDACTION=false
 ENABLE_AUDIO_RECORDING=true
 
+# ElevenLabs Configuration (Optional - for TTS/Voice Agent)
+# Set via environment variable before running this script:
+#   export ELEVENLABS_API_KEY="your-key"
+#   export ELEVENLABS_AGENT_ID="your-agent-id"
+# Your ElevenLabs API key is used to enable voice interaction
+# Get your API key from: https://elevenlabs.io
+ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+ELEVENLABS_AGENT_ID=${ELEVENLABS_AGENT_ID:-}
+
 # Display Configuration (for local testing)
 DISPLAY=:99
 PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
@@ -252,9 +261,10 @@ if [ "$DEV_MODE" = true ]; then
     docker run -it \
         --name lma-vp-local-test \
         --env-file "$ENV_FILE" \
+        --user root \
         -p 5900:5900 \
         -p 5901:5901 \
-        -v ~/.aws:/home/appuser/.aws:ro \
+        -v ~/.aws:/root/.aws:ro \
         -v "$SCRIPT_DIR/src":/srv/src \
         lma-vp-local
 else
@@ -262,8 +272,9 @@ else
     docker run -it --rm \
         --name lma-vp-local-test \
         --env-file "$ENV_FILE" \
+        --user root \
         -p 5900:5900 \
         -p 5901:5901 \
-        -v ~/.aws:/home/appuser/.aws:ro \
+        -v ~/.aws:/root/.aws:ro \
         lma-vp-local
 fi

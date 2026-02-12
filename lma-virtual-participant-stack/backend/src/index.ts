@@ -12,6 +12,7 @@ import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
+import { elevenLabsAgent } from './elevenlabs-agent.js';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
@@ -27,7 +28,9 @@ const getPuppeteerConfig = () => ({
     args: [
         `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT+80}`,
         "--use-fake-ui-for-media-stream",
-        "--use-fake-device-for-media-stream",
+        // Use real PulseAudio device (agent_mic) instead of fake device
+        // This allows Chromium to use the virtual microphone we created
+        "--autoplay-policy=no-user-gesture-required",
         "--disable-blink-features=AutomationControlled",
         "--disable-notifications",
         "--disable-extensions",
