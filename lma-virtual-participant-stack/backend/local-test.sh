@@ -182,12 +182,14 @@ TRANSCRIBE_LANGUAGE_CODE=en-US
 ENABLE_CONTENT_REDACTION=false
 ENABLE_AUDIO_RECORDING=true
 
-# ElevenLabs Configuration (Optional - for TTS/Voice Agent)
+# Voice Assistant Configuration (Optional)
 # Set via environment variable before running this script:
+#   export VOICE_ASSISTANT_PROVIDER="elevenlabs"  # or "aws_nova" or "none" (default)
+#   export VOICE_ASSISTANT_ACTIVATION_MODE="always_active"  # or "wake_phrase" or "strands_tool"
 #   export ELEVENLABS_API_KEY="your-key"
 #   export ELEVENLABS_AGENT_ID="your-agent-id"
-# Your ElevenLabs API key is used to enable voice interaction
-# Get your API key from: https://elevenlabs.io
+VOICE_ASSISTANT_PROVIDER=${VOICE_ASSISTANT_PROVIDER:-none}
+VOICE_ASSISTANT_ACTIVATION_MODE=${VOICE_ASSISTANT_ACTIVATION_MODE:-always_active}
 ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
 ELEVENLABS_AGENT_ID=${ELEVENLABS_AGENT_ID:-}
 

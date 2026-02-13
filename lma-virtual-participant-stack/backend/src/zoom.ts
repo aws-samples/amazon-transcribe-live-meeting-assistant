@@ -1,6 +1,7 @@
 import { Page,ConsoleMessage } from 'puppeteer';
 import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
+import { voiceAssistant } from './voice-assistant.js';
 
 export default class Zoom {
     private async waitForButtonWithRetry(
@@ -138,12 +139,18 @@ export default class Zoom {
                 ['svg.SvgAudioMute', 'svg.SvgAudioUnmute']
             );
             
-            if (audioResult) {
+            if (audioResult && !voiceAssistant.isEnabled()) {
                 if (audioResult.selector === 'svg.SvgAudioMute') {
                     console.log('Audio is unmuted, clicking to mute it.');
                     await audioResult.element.click();
                 } else {
                     console.log('Audio is already muted, skipping click.');
+                }
+            } else if (voiceAssistant.isEnabled()) {
+                console.log('Voice assistant enabled - keeping microphone unmuted for agent audio');
+                if (audioResult && audioResult.selector === 'svg.SvgAudioUnmute') {
+                    console.log('Audio is muted, clicking to unmute it for voice assistant.');
+                    await audioResult.element.click();
                 }
             } else {
                 console.log('Warning: Could not find audio button in either state after retries.');

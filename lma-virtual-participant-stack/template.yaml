@@ -137,6 +137,24 @@ Parameters:
       (Optional) ElevenLabs Conversational AI Agent ID for custom personality.
       Leave blank to use default conversational agent.
 
+  VoiceAssistantProvider:
+    Type: String
+    Default: "none"
+    AllowedValues:
+      - "none"
+      - "elevenlabs"
+      - "aws_nova"
+    Description: Voice AI assistant provider (none, elevenlabs, aws_nova)
+
+  VoiceAssistantActivationMode:
+    Type: String
+    Default: "always_active"
+    AllowedValues:
+      - "always_active"
+      - "wake_phrase"
+      - "strands_tool"
+    Description: Voice assistant activation mode
+
   S3BucketName:
     Type: String
     Description: >
@@ -1236,6 +1254,10 @@ Resources:
               Value: !Ref ElevenLabsApiKey
             - Name: ELEVENLABS_AGENT_ID
               Value: !Ref ElevenLabsAgentId
+            - Name: VOICE_ASSISTANT_PROVIDER
+              Value: !Ref VoiceAssistantProvider
+            - Name: VOICE_ASSISTANT_ACTIVATION_MODE
+              Value: !Ref VoiceAssistantActivationMode
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:

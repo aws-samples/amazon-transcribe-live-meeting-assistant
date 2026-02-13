@@ -4,6 +4,7 @@ import { Page } from "puppeteer";
 import { details } from "./details.js";
 import { transcriptionService } from "./scribe.js";
 import { createStatusManager } from "./status-manager.js";
+import { voiceAssistant } from './voice-assistant.js';
 
 // const bedrockClient = new BedrockRuntimeClient();
 
@@ -36,10 +37,15 @@ export default class Teams {
         await nameTextElement?.type(details.scribeIdentity, { delay: 100 });
         await nameTextElement?.press("Enter");
 
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        console.log("Clicking mute button.");
-        const muteButtonElement = await page.waitForSelector('[data-tid="toggle-mute"]');
-        await muteButtonElement?.click();
+        // Only click mute button if voice assistant is NOT enabled
+        if (!voiceAssistant.isEnabled()) {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            console.log("Clicking mute button.");
+            const muteButtonElement = await page.waitForSelector('[data-tid="toggle-mute"]');
+            await muteButtonElement?.click();
+        } else {
+            console.log('Voice assistant enabled - skipping mute button for agent audio');
+        }
 
         await new Promise((resolve) => setTimeout(resolve, 250));
         console.log("Clicking video button.");

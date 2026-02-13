@@ -1,29 +1,42 @@
 import { spawn, ChildProcess } from 'child_process';
 import WebSocket from 'ws';
+import { VoiceAssistantProvider } from './voice-assistant-interface.js';
 
 export interface ElevenLabsAgentConfig {
   apiKey: string;
   agentId?: string;
+  activationMode?: string;
+  activationDuration?: number;
 }
 
-export class ElevenLabsAgent {
+export class ElevenLabsAgent implements VoiceAssistantProvider {
   private apiKey: string;
   private agentId: string | null;
   private ws: WebSocket | null = null;
   private audioProcess: ChildProcess | null = null;
   private enabled: boolean;
   private isConnected: boolean = false;
-  private isSpeaking: boolean = false; // Track when agent is playing audio
+  private _isSpeaking: boolean = false; // Track when agent is playing audio
   private audioQueue: Buffer[] = []; // Queue for audio chunks
   private isPlayingQueue: boolean = false; // Track if queue is being processed
+  private activationMode: string;
+  private _isActivated: boolean = false;
+  private activationTimeout: NodeJS.Timeout | null = null;
+  private defaultActivationDuration: number;
 
   constructor(config: ElevenLabsAgentConfig) {
     this.apiKey = config.apiKey || '';
     this.agentId = config.agentId || null;
     this.enabled = !!this.apiKey;
+    this.activationMode = config.activationMode || 'always_active';
+    this.defaultActivationDuration = config.activationDuration || 30;
+    
+    // Set initial activation state based on mode
+    this._isActivated = (this.activationMode === 'always_active');
 
     if (this.enabled) {
       console.log('✓ ElevenLabs Conversational AI agent enabled');
+      console.log(`  Activation mode: ${this.activationMode}`);
     } else {
       console.log('ElevenLabs agent disabled - no API key provided');
     }
@@ -163,8 +176,13 @@ export class ElevenLabsAgent {
   private audioChunkCount = 0;
   
   sendAudioChunk(audioChunk: Buffer): void {
+    // Check activation mode - don't send if not activated
+    if (this.activationMode !== 'always_active' && !this._isActivated) {
+      return;
+    }
+    
     // Don't send audio to agent when agent is speaking (prevent feedback loop)
-    if (this.isSpeaking) {
+    if (this._isSpeaking) {
       return;
     }
     
@@ -206,7 +224,7 @@ export class ElevenLabsAgent {
     }
 
     this.isPlayingQueue = true;
-    this.isSpeaking = true;
+    this._isSpeaking = true;
 
     while (this.audioQueue.length > 0) {
       const audioBuffer = this.audioQueue.shift()!;
@@ -257,7 +275,7 @@ export class ElevenLabsAgent {
 
     // Clear speaking flag after all audio is played
     setTimeout(() => {
-      this.isSpeaking = false;
+      this._isSpeaking = false;
       this.isPlayingQueue = false;
       console.log('✅ All audio chunks played to virtual microphone');
     }, 500); // Short delay after last chunk
@@ -265,6 +283,12 @@ export class ElevenLabsAgent {
 
   async stop(): Promise<void> {
     console.log('Stopping ElevenLabs agent...');
+
+    // Clear activation timeout
+    if (this.activationTimeout) {
+      clearTimeout(this.activationTimeout);
+      this.activationTimeout = null;
+    }
 
     if (this.audioProcess) {
       this.audioProcess.kill();
@@ -280,6 +304,45 @@ export class ElevenLabsAgent {
     console.log('✓ ElevenLabs agent stopped');
   }
 
+  // Activation control methods
+  activate(duration?: number): void {
+    if (this.activationMode === 'always_active') {
+      // Already always active, no need to activate
+      return;
+    }
+
+    const activationDuration = duration || this.defaultActivationDuration;
+    console.log(`🎤 Voice assistant activated for ${activationDuration} seconds`);
+    
+    this._isActivated = true;
+
+    // Clear any existing timeout
+    if (this.activationTimeout) {
+      clearTimeout(this.activationTimeout);
+    }
+
+    // Set timeout to deactivate
+    this.activationTimeout = setTimeout(() => {
+      this.deactivate();
+    }, activationDuration * 1000);
+  }
+
+  deactivate(): void {
+    if (this.activationMode === 'always_active') {
+      // Can't deactivate always_active mode
+      return;
+    }
+
+    console.log('🔇 Voice assistant deactivated');
+    this._isActivated = false;
+
+    // Clear timeout
+    if (this.activationTimeout) {
+      clearTimeout(this.activationTimeout);
+      this.activationTimeout = null;
+    }
+  }
+
   isEnabled(): boolean {
     return this.enabled;
   }
@@ -287,10 +350,12 @@ export class ElevenLabsAgent {
   isActive(): boolean {
     return this.isConnected;
   }
-}
 
-// Export singleton instance
-export const elevenLabsAgent = new ElevenLabsAgent({
-  apiKey: process.env.ELEVENLABS_API_KEY || '',
-  agentId: process.env.ELEVENLABS_AGENT_ID,
-});
+  isActivated(): boolean {
+    return this._isActivated;
+  }
+
+  isSpeaking(): boolean {
+    return this._isSpeaking;
+  }
+}

@@ -12,7 +12,6 @@ import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
-import { elevenLabsAgent } from './elevenlabs-agent.js';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
