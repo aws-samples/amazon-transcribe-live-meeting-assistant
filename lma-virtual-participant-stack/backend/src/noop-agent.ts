@@ -19,7 +19,11 @@ export class NoOpAgent implements VoiceAssistantProvider {
     // No-op - don't send audio anywhere
   }
 
-  activate(duration?: number): void {
+  sendUserMessage(text: string): void {
+    // No-op
+  }
+
+  async activate(duration?: number, initialContext?: string): Promise<void> {
     // No-op
   }
 

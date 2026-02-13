@@ -55,10 +55,18 @@ export interface VoiceAssistantProvider {
   sendAudioChunk(chunk: Buffer): void;
 
   /**
+   * Send a text message to the voice assistant (agent will respond with voice)
+   * Used for wake phrase activation with initial context
+   * @param text The text message to send
+   */
+  sendUserMessage(text: string): void;
+
+  /**
    * Activate the voice assistant for a duration
    * @param duration Optional duration in seconds (uses default if not provided)
+   * @param initialContext Optional transcript context from wake phrase detection
    */
-  activate(duration?: number): void;
+  activate(duration?: number, initialContext?: string): Promise<void>;
 
   /**
    * Deactivate the voice assistant

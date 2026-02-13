@@ -53,8 +53,16 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     try {
       console.log('Starting ElevenLabs Conversational AI agent...');
       console.log(`Agent ID: ${this.agentId || '(using default agent)'}`);
+      console.log(`Activation mode: ${this.activationMode}`);
 
-      // Connect to ElevenLabs Conversational AI WebSocket
+      // In wake_phrase mode, defer WebSocket connection until activation
+      if (this.activationMode === 'wake_phrase') {
+        console.log('⏸️  Wake phrase mode - WebSocket will connect on first activation');
+        console.log('   This saves costs by not keeping connection open when not in use');
+        return;
+      }
+
+      // For always_active mode, connect immediately
       await this.connectWebSocket();
 
       console.log('✓ ElevenLabs agent started successfully');
@@ -201,6 +209,27 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     }
   }
 
+  /**
+   * Send a text message to the agent (agent will respond with voice)
+   * This is used for wake phrase activation with initial context
+   */
+  public sendUserMessage(text: string): void {
+    if (!this.ws || !this.isConnected) {
+      console.error('Cannot send message: WebSocket is not connected');
+      return;
+    }
+
+    console.log('📤 Sending text message to agent:', text);
+    
+    // Correct format per ElevenLabs API docs
+    const message = {
+      type: 'user_message',
+      text: text  // Use 'text' not 'user_message'
+    };
+
+    this.ws.send(JSON.stringify(message));
+  }
+
   private startAudioCapture(): void {
     console.log('Audio capture will be provided by transcription service');
     // Audio chunks will be sent via sendAudioChunk() method
@@ -305,7 +334,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   }
 
   // Activation control methods
-  activate(duration?: number): void {
+  async activate(duration?: number, initialContext?: string): Promise<void> {
     if (this.activationMode === 'always_active') {
       // Already always active, no need to activate
       return;
@@ -314,17 +343,71 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     const activationDuration = duration || this.defaultActivationDuration;
     console.log(`🎤 Voice assistant activated for ${activationDuration} seconds`);
     
+    // Connect WebSocket if not already connected (for wake_phrase mode)
+    if (!this.isConnected) {
+      console.log('🔌 Connecting to ElevenLabs WebSocket...');
+      try {
+        await this.connectWebSocket();
+        console.log('✓ WebSocket connected');
+      } catch (error) {
+        console.error('❌ Failed to connect WebSocket:', error);
+        return; // Don't activate if connection fails
+      }
+    }
+    
     this._isActivated = true;
+
+    // Handle initial context by sending as text message
+    if (initialContext) {
+      const question = this.extractQuestion(initialContext);
+      if (question && question.length > 5) {
+        console.log('📝 Sending initial question to agent:', question);
+        // Send as text message - agent will respond with voice
+        this.sendUserMessage(question);
+      }
+    }
 
     // Clear any existing timeout
     if (this.activationTimeout) {
       clearTimeout(this.activationTimeout);
     }
 
-    // Set timeout to deactivate
+    // Set timeout to deactivate (with speaking check)
     this.activationTimeout = setTimeout(() => {
-      this.deactivate();
+      this.deactivateWithSpeakingCheck();
     }, activationDuration * 1000);
+  }
+
+  private extractQuestion(context: string): string {
+    // Remove all punctuation first, then remove wake phrases
+    let cleaned = context.toLowerCase()
+      .replace(/[,.\?!;:]/g, ' ')  // Replace punctuation with spaces
+      .replace(/\s+/g, ' ')         // Normalize multiple spaces
+      .trim();
+    
+    // Remove wake phrases
+    const wakePhrases = ['hey alex', 'ok alex', 'hi alex', 'hello alex'];
+    for (const phrase of wakePhrases) {
+      cleaned = cleaned.replace(phrase, '').trim();
+    }
+    
+    // Clean up any remaining leading/trailing spaces
+    cleaned = cleaned.trim();
+    
+    return cleaned;
+  }
+
+  private deactivateWithSpeakingCheck(): void {
+    // If agent is speaking, wait for it to finish
+    if (this._isSpeaking) {
+      console.log('🔊 Agent is speaking, delaying deactivation...');
+      setTimeout(() => {
+        this.deactivateWithSpeakingCheck();
+      }, 1000);
+      return;
+    }
+    
+    this.deactivate();
   }
 
   deactivate(): void {
@@ -340,6 +423,14 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     if (this.activationTimeout) {
       clearTimeout(this.activationTimeout);
       this.activationTimeout = null;
+    }
+
+    // In wake_phrase mode, disconnect WebSocket to save costs
+    if (this.activationMode === 'wake_phrase' && this.ws) {
+      console.log('💰 Disconnecting WebSocket to save costs (wake_phrase mode)');
+      this.ws.close();
+      this.ws = null;
+      this.isConnected = false;
     }
   }
 

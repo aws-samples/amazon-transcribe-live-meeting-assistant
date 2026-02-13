@@ -54,16 +54,51 @@ export class NovaAgent implements VoiceAssistantProvider {
     // - Send to Bedrock WebSocket in correct format
   }
 
-  activate(duration?: number): void {
+  sendUserMessage(text: string): void {
+    console.log('Nova agent sendUserMessage (placeholder):', text);
+    // TODO: Implement text message sending to Bedrock
+    // - Send as text input to conversation
+    // - Agent will respond with voice
+    // Similar to ElevenLabs, send as:
+    // {
+    //   "contentBlock": {
+    //     "text": text
+    //   }
+    // }
+  }
+
+  async activate(duration?: number, initialContext?: string): Promise<void> {
     console.log('Nova agent activated (placeholder)');
+    
+    // Handle initial context
+    if (initialContext) {
+      const question = this.extractQuestion(initialContext);
+      if (question && question.length > 5) {
+        console.log('Initial question:', question);
+        this.sendUserMessage(question);
+      }
+    }
+    
     this._isActivated = true;
     
-    // TODO: Implement activation timeout
+    // TODO: Implement activation timeout with speaking check
     if (duration && this.activationMode !== 'always_active') {
       setTimeout(() => {
         this.deactivate();
       }, duration * 1000);
     }
+  }
+
+  private extractQuestion(context: string): string {
+    const wakePhrases = ['hey alex', 'ok alex', 'hi alex', 'hello alex'];
+    let cleaned = context.toLowerCase();
+    
+    for (const phrase of wakePhrases) {
+      cleaned = cleaned.replace(phrase, '').trim();
+    }
+    
+    cleaned = cleaned.replace(/^[,.\s]+/, '');
+    return cleaned;
   }
 
   deactivate(): void {

@@ -23,6 +23,17 @@ export class TranscriptionService {
     private transcribeClient: TranscribeStreamingClient;
     private isTranscribing = false;
     private mockTranscriptionInterval: NodeJS.Timeout | null = null;
+    
+    // Wake phrase detection and transcript buffering
+    private transcriptBuffer: Array<{
+        text: string;
+        timestamp: number;
+        isPartial: boolean;
+    }> = [];
+    private bufferWindowMs = 10000; // Keep last 10 seconds
+    private captureDelayMs = 3000; // Wait 3 seconds after wake phrase to capture full question
+    private wakePhrases = ['hey alex', 'ok alex', 'hi alex', 'hello alex'];
+    private isCapturingContext = false;
 
     constructor() {
         // In local test mode, explicitly use default provider which checks credentials file first
@@ -245,8 +256,25 @@ export class TranscriptionService {
 
     private processTranscriptResult(result: any): void {
         const transcript = result.Alternatives?.[0]?.Transcript || '';
+        const isPartial = result.IsPartial;
+        const timestamp = Date.now();
+        
         if (transcript) {
-            console.log(`📝 Transcribed: "${transcript}" (IsPartial: ${result.IsPartial})`);
+            console.log(`📝 Transcribed: "${transcript}" (IsPartial: ${isPartial})`);
+        }
+        
+        // Add to transcript buffer (only non-partial for accuracy)
+        if (!isPartial && transcript) {
+            this.transcriptBuffer.push({ text: transcript, timestamp, isPartial });
+            
+            // Trim old entries
+            const cutoff = timestamp - this.bufferWindowMs;
+            this.transcriptBuffer = this.transcriptBuffer.filter(t => t.timestamp > cutoff);
+            
+            // Check for wake phrase
+            if (this.detectWakePhrase(transcript)) {
+                this.handleWakePhraseDetected(timestamp);
+            }
         }
         
         for (const item of result.Alternatives?.[0]?.Items ?? []) {
@@ -336,6 +364,48 @@ export class TranscriptionService {
         
         const formattedTime = this.formatTimestamp(timestamp);
         console.log(`[${formattedTime}] Speaker changed to: ${speaker}`);
+    }
+
+    // Wake phrase detection methods
+    private detectWakePhrase(text: string): boolean {
+        // Remove all punctuation and normalize whitespace
+        const normalized = text.toLowerCase()
+            .replace(/[,.\?!;:]/g, ' ')  // Replace punctuation with spaces
+            .replace(/\s+/g, ' ')         // Normalize multiple spaces
+            .trim();
+        
+        return this.wakePhrases.some(phrase => normalized.includes(phrase));
+    }
+
+    private async handleWakePhraseDetected(detectionTime: number): Promise<void> {
+        // Don't activate if already activated or if voice assistant not enabled
+        if (!voiceAssistant.isEnabled() || voiceAssistant.isActivated()) {
+            return;
+        }
+
+        // Don't activate if we're already capturing context
+        if (this.isCapturingContext) {
+            return;
+        }
+
+        console.log('🎤 Wake phrase detected, capturing context...');
+        this.isCapturingContext = true;
+        
+        // Wait to capture additional context after wake phrase
+        await new Promise(resolve => setTimeout(resolve, this.captureDelayMs));
+        
+        // Get transcript from detection time onwards
+        const contextTranscript = this.transcriptBuffer
+            .filter(t => t.timestamp >= detectionTime - 2000) // Include 2s before wake phrase
+            .map(t => t.text)
+            .join(' ');
+        
+        console.log('📝 Captured context:', contextTranscript);
+        
+        // Activate voice assistant with context
+        voiceAssistant.activate(30, contextTranscript);
+        
+        this.isCapturingContext = false;
     }
 
     // Utility methods for status
