@@ -155,6 +155,20 @@ Parameters:
       - "strands_tool"
     Description: Voice assistant activation mode
 
+  NovaModelId:
+    Type: String
+    Default: "amazon.nova-2-sonic-v1:0"
+    Description: >-
+      (Optional) AWS Bedrock Nova model ID for voice assistant.
+      Used when VoiceAssistantProvider is set to 'aws_nova'.
+
+  NovaSystemPrompt:
+    Type: String
+    Default: "You are Alex, an AI meeting assistant. Be concise and helpful."
+    Description: >-
+      (Optional) System prompt for Nova voice assistant.
+      Defines the personality and behavior of the AI assistant.
+
   S3BucketName:
     Type: String
     Description: >
@@ -889,6 +903,16 @@ Resources:
                   - "elasticloadbalancing:ModifyRule"
                   - "elasticloadbalancing:AddTags"
                 Resource: "*"
+        - PolicyName: BedrockPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                  - "bedrock:InvokeModelWithResponseStream"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-*"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -1258,6 +1282,10 @@ Resources:
               Value: !Ref VoiceAssistantProvider
             - Name: VOICE_ASSISTANT_ACTIVATION_MODE
               Value: !Ref VoiceAssistantActivationMode
+            - Name: NOVA_MODEL_ID
+              Value: !Ref NovaModelId
+            - Name: NOVA_SYSTEM_PROMPT
+              Value: !Ref NovaSystemPrompt
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aws-crypto/sha256-js": "^5.2.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.967.0",
     "@aws-sdk/client-comprehend": "^3.726.1",
     "@aws-sdk/client-dynamodb": "^3.726.1",
     "@aws-sdk/client-elastic-load-balancing-v2": "^3.726.1",

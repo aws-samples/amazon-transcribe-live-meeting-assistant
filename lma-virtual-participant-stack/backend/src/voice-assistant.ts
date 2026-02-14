@@ -66,9 +66,9 @@ export function createVoiceAssistantFromEnv(): VoiceAssistantProvider {
     return createVoiceAssistant({
       ...baseConfig,
       provider: 'aws_nova',
-      modelId: process.env.NOVA_MODEL_ID || 'amazon.nova-sonic-2',
+      modelId: process.env.NOVA_MODEL_ID || 'amazon.nova-2-sonic-v1:0',
       systemPrompt: process.env.NOVA_SYSTEM_PROMPT || 'You are Alex, an AI meeting assistant. Be concise and helpful.',
-      knowledgeBaseId: process.env.NOVA_KNOWLEDGE_BASE_ID,
+      knowledgeBaseId: process.env.NOVA_KNOWLEDGE_BASE_ID, // Optional - for future enhancement
     });
   }
 
