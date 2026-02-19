@@ -114,6 +114,22 @@ Parameters:
       How the voice assistant is activated. 'always_active' for interviewer/meeting leader use cases (agent leads conversation),
       'wake_phrase' to activate only when wake phrase is detected, or 'strands_tool' for intelligent activation by Strands agent.
 
+  VoiceAssistantWakePhrases:
+    Type: String
+    Default: "hey alex,ok alex,hi alex,hello alex"
+    Description: >-
+      Comma-separated list of wake phrases for voice assistant activation (case-insensitive).
+      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Example: "hey alex,ok alex,hi alex"
+
+  VoiceAssistantActivationDuration:
+    Type: Number
+    Default: 30
+    MinValue: 5
+    MaxValue: 300
+    Description: >-
+      How long the voice assistant stays active after wake phrase detection (in seconds).
+      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Default is 30 seconds.
+
   BedrockGuardrailId:
     Type: String
     Default: ""
@@ -785,6 +801,8 @@ Metadata:
           - ElevenLabsAgentId
           - VoiceAssistantProvider
           - VoiceAssistantActivationMode
+          - VoiceAssistantWakePhrases
+          - VoiceAssistantActivationDuration
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
@@ -932,6 +950,10 @@ Metadata:
         default: Voice Assistant Provider (none, elevenlabs, aws_nova)
       VoiceAssistantActivationMode:
         default: Voice Assistant Activation Mode
+      VoiceAssistantWakePhrases:
+        default: Voice Assistant Wake Phrases (comma-separated)
+      VoiceAssistantActivationDuration:
+        default: Voice Assistant Activation Duration (seconds)
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
       MeetingAssistQnABotOpenSearchNodeCount:
@@ -2630,6 +2652,8 @@ Resources:
         ElevenLabsAgentId: !Ref ElevenLabsAgentId
         VoiceAssistantProvider: !Ref VoiceAssistantProvider
         VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
+        VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
+        VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket

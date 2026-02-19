@@ -166,6 +166,18 @@ Parameters:
       - "strands_tool"
     Description: Voice assistant activation mode
 
+  VoiceAssistantWakePhrases:
+    Type: String
+    Default: "hey alex,ok alex,hi alex,hello alex"
+    Description: Comma-separated list of wake phrases (case-insensitive)
+
+  VoiceAssistantActivationDuration:
+    Type: Number
+    Default: 30
+    MinValue: 5
+    MaxValue: 300
+    Description: How long voice assistant stays active after wake phrase (seconds)
+
   NovaModelId:
     Type: String
     Default: "amazon.nova-2-sonic-v1:0"
@@ -1309,6 +1321,10 @@ Resources:
               Value: !Ref VoiceAssistantProvider
             - Name: VOICE_ASSISTANT_ACTIVATION_MODE
               Value: !Ref VoiceAssistantActivationMode
+            - Name: VOICE_ASSISTANT_WAKE_PHRASES
+              Value: !Ref VoiceAssistantWakePhrases
+            - Name: VOICE_ASSISTANT_ACTIVATION_DURATION
+              Value: !Ref VoiceAssistantActivationDuration
             - Name: NOVA_MODEL_ID
               Value: !Ref NovaModelId
             - Name: NOVA_SYSTEM_PROMPT
