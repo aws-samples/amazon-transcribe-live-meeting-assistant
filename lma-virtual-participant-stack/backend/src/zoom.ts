@@ -234,8 +234,13 @@ export default class Zoom {
         });
 
         console.log('Listening for speaker changes.');
-        await page.evaluate(() => {
+        await page.evaluate((vpIdentity: string) => {
             let observer: MutationObserver | null = null;
+            let lastSpeaker: string | null = null;
+            let micActivityTimeout: any = null;
+            let isVPSpeaking = false;
+            const MIC_ACTIVITY_THRESHOLD = 5; // px
+            const MIC_SILENCE_DELAY = 2000; // ms - increased to 2 seconds to handle pauses in speech
 
             // Function to get current speaker from any view
             function getCurrentSpeaker(): string | null {
@@ -257,6 +262,14 @@ export default class Zoom {
                 return null;
             }
 
+            function notifySpeakerChange(speaker: string) {
+                if (speaker && speaker !== lastSpeaker) {
+                    console.log('Speaker changed from', lastSpeaker, 'to', speaker);
+                    lastSpeaker = speaker;
+                    (window as any).speakerChange(speaker);
+                }
+            }
+
             function setupObserver() {
                 // Disconnect existing observer if any
                 if (observer) {
@@ -274,14 +287,48 @@ export default class Zoom {
                 const config = { 
                     childList: true, 
                     subtree: true,
-                    characterData: true
+                    characterData: true,
+                    attributes: true,
+                    attributeFilter: ['style']
                 };
 
                 const callback = (mutationList: MutationRecord[]) => {
-                    const speaker = getCurrentSpeaker();
-                    if (speaker) {
-                        console.log('Speaker detected:', speaker);
-                        (window as any).speakerChange(speaker);
+                    // Check for microphone activity (VP speaking)
+                    const micIndicator = document.querySelector('.audio-level-indicator') as HTMLElement;
+                    if (micIndicator) {
+                        const height = parseFloat(micIndicator.style.height || '0');
+                        
+                        if (height > MIC_ACTIVITY_THRESHOLD) {
+                            // VP is speaking
+                            if (!isVPSpeaking) {
+                                isVPSpeaking = true;
+                                notifySpeakerChange(vpIdentity);
+                            }
+                            
+                            // Reset silence timer - but don't trigger speaker change yet
+                            if (micActivityTimeout) {
+                                clearTimeout(micActivityTimeout);
+                            }
+                            micActivityTimeout = setTimeout(() => {
+                                // VP stopped speaking - revert to screen speaker
+                                if (isVPSpeaking) {
+                                    isVPSpeaking = false;
+                                    const screenSpeaker = getCurrentSpeaker();
+                                    if (screenSpeaker) {
+                                        notifySpeakerChange(screenSpeaker);
+                                    }
+                                }
+                            }, MIC_SILENCE_DELAY);
+                        }
+                    }
+                    
+                    // Also check for speaker changes from other participants
+                    // Only update if VP is not currently speaking
+                    if (!isVPSpeaking) {
+                        const speaker = getCurrentSpeaker();
+                        if (speaker) {
+                            notifySpeakerChange(speaker);
+                        }
                     }
                 };
 
@@ -292,13 +339,14 @@ export default class Zoom {
                 const initialSpeaker = getCurrentSpeaker();
                 if (initialSpeaker) {
                     console.log('Initial speaker:', initialSpeaker);
+                    lastSpeaker = initialSpeaker;
                     (window as any).speakerChange(initialSpeaker);
                 }
             }
 
             // Wait for Zoom UI to be ready, then setup observer
             setTimeout(setupObserver, 2000);
-        });
+        }, details.scribeIdentity);
 
         // Set up message monitoring with LMA features
         await page.exposeFunction('messageChange', async (message: string) => {
