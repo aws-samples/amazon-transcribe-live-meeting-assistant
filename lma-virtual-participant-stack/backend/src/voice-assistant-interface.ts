@@ -12,6 +12,8 @@ export interface VoiceAssistantConfig {
   activationMode: ActivationMode;
   wakePhrase?: string;
   activationDuration?: number;
+  region?: string;
+  strandsLambdaArn?: string;
 }
 
 export interface ElevenLabsConfig extends VoiceAssistantConfig {

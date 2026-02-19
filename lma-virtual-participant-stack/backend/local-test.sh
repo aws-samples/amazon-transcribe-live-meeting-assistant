@@ -106,7 +106,7 @@ if [ "$REUSE_ENV" = true ]; then
     sed -i.bak "s/^MEETING_PLATFORM=.*/MEETING_PLATFORM=$MEETING_PLATFORM/" "$ENV_FILE"
     sed -i.bak "s/^MEETING_ID=.*/MEETING_ID=$MEETING_ID/" "$ENV_FILE"
     sed -i.bak "s/^MEETING_PASSWORD=.*/MEETING_PASSWORD=$MEETING_PASSWORD/" "$ENV_FILE"
-    sed -i.bak "s/^MEETING_NAME=.*/MEETING_NAME=LocalTest-$(date +%m%d%y_%H%M)/" "$ENV_FILE"
+    # sed -i.bak "s/^MEETING_NAME=.*/MEETING_NAME=LocalTest-$(date +%m%d%y_%H%M)/" "$ENV_FILE"  # Useful to set this to a real meeting id so sonic/elevenlabs tool calls work
     sed -i.bak "s/^MEETING_TIME=.*/MEETING_TIME=$(date +%s)/" "$ENV_FILE"
     sed -i.bak "s/^DEV_MODE=.*/DEV_MODE=$DEV_MODE/" "$ENV_FILE"
     rm -f "$ENV_FILE.bak"
@@ -170,6 +170,11 @@ if [ -n "$VP_STACK" ]; then
         --query "Stacks[0].Parameters[?ParameterKey=='NovaSystemPrompt'].ParameterValue" \
         --output text 2>/dev/null || echo "You are Alex, an AI meeting assistant. Be concise and helpful.")
     
+    STRANDS_LAMBDA_ARN=$(aws cloudformation describe-stacks \
+        --stack-name "$VP_STACK" \
+        --query "Stacks[0].Parameters[?ParameterKey=='StrandsLambdaArn'].ParameterValue" \
+        --output text 2>/dev/null || echo "")
+    
     echo "Voice Assistant Provider: $VOICE_ASSISTANT_PROVIDER"
     echo "Voice Assistant Activation Mode: $VOICE_ASSISTANT_ACTIVATION_MODE"
     if [ "$VOICE_ASSISTANT_PROVIDER" = "elevenlabs" ]; then
@@ -177,6 +182,9 @@ if [ -n "$VP_STACK" ]; then
     elif [ "$VOICE_ASSISTANT_PROVIDER" = "aws_nova" ]; then
         echo "Nova Model ID: $NOVA_MODEL_ID"
         echo "Nova System Prompt: ${NOVA_SYSTEM_PROMPT:0:50}..."
+        if [ -n "$STRANDS_LAMBDA_ARN" ]; then
+            echo "Strands Lambda ARN: ${STRANDS_LAMBDA_ARN:0:80}..."
+        fi
     fi
 fi
 
@@ -207,6 +215,13 @@ if [ -n "$AI_STACK" ]; then
         --query "StackResourceSummaries[?LogicalResourceId=='VPTaskRegistry'].PhysicalResourceId" \
         --output text 2>/dev/null)
     echo "VP Task Registry Table: $VP_TASK_REGISTRY_TABLE_NAME"
+    
+    # Get the Event Sourcing table (CallEventTable) from AI stack
+    EVENT_SOURCING_TABLE_NAME=$(aws cloudformation describe-stacks \
+        --stack-name "$AI_STACK" \
+        --query "Stacks[0].Outputs[?OutputKey=='EventSourcingTableName'].OutputValue" \
+        --output text 2>/dev/null)
+    echo "Event Sourcing Table: $EVENT_SOURCING_TABLE_NAME"
     
     # Get AppSync API ID from AI stack
     APPSYNC_API_ARN=$(aws cloudformation list-stack-resources \
@@ -275,6 +290,7 @@ RECORDINGS_BUCKET_NAME=$RECORDINGS_BUCKET_NAME
 RECORDINGS_KEY_PREFIX=lma-audio-recordings/
 GRAPHQL_ENDPOINT=$GRAPHQL_ENDPOINT
 VP_TASK_REGISTRY_TABLE_NAME=$VP_TASK_REGISTRY_TABLE_NAME
+DYNAMODB_TABLE_NAME=$EVENT_SOURCING_TABLE_NAME
 EVENTS_API_ENDPOINT=$EVENTS_API_ENDPOINT
 
 # AWS Configuration
@@ -296,6 +312,7 @@ ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
 ELEVENLABS_AGENT_ID=${ELEVENLABS_AGENT_ID:-}
 NOVA_MODEL_ID=${NOVA_MODEL_ID:-amazon.nova-2-sonic-v1:0}
 NOVA_SYSTEM_PROMPT=${NOVA_SYSTEM_PROMPT:-You are Alex, an AI meeting assistant. Be concise and helpful.}
+STRANDS_LAMBDA_ARN=${STRANDS_LAMBDA_ARN:-}
 
 # Display Configuration (for local testing)
 DISPLAY=:99

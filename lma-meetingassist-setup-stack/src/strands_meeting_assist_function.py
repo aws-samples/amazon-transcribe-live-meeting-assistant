@@ -417,12 +417,19 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
             
             logger.info(f"Meeting history tool executing: {query} for user: {user_email}")
+            logger.info(f"🔍 DEBUG: KB Configuration:")
+            logger.info(f"   transcript_kb_id: {transcript_kb_id}")
+            logger.info(f"   kb_region: {kb_region}")
+            logger.info(f"   model_id: {model_id}")
+            logger.info(f"   user_email (filter): {user_email}")
             
             # Determine model ARN based on model type
             if model_id.startswith("anthropic"):
                 model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
             else:
                 model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
+            
+            logger.info(f"   model_arn: {model_arn}")
             
             # Query with user-based access control filter
             kb_input = {
@@ -446,8 +453,20 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
                 }
             }
             
+            logger.info(f"🔍 DEBUG: KB Input: {json.dumps(kb_input, indent=2)}")
+            
             response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
+            
+            logger.info(f"🔍 DEBUG: KB Response (full): {json.dumps(response, indent=2, default=str)}")
+            
             result = response.get("output", {}).get("text", "No past meetings found matching your query")
+            
+            # Check if this is a guardrail response
+            if "Sorry, I am unable to assist you with this request" in result:
+                logger.error(f"❌ GUARDRAIL TRIGGERED! Response: {result}")
+                logger.error(f"   This indicates the Knowledge Base has guardrails blocking the query")
+                logger.error(f"   Query: {query}")
+                logger.error(f"   User email filter: {user_email}")
             
             # Send tool result thinking step
             if call_id and message_id and APPSYNC_GRAPHQL_URL:

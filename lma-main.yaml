@@ -2614,12 +2614,17 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn:
       - AISTACK
+      - MEETINGASSISTSETUP
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-virtual-participant-stack/template.yaml
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
+        StrandsLambdaArn: !If
+          - ShouldUseAnyStrandsBedrock
+          - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
+          - ""
         EnableAudioRecording: !Ref EnableAudioRecording
         ElevenLabsApiKey: !Ref ElevenLabsApiKey
         ElevenLabsAgentId: !Ref ElevenLabsAgentId
@@ -2648,6 +2653,7 @@ Resources:
         AppSyncEventApiUrl: !GetAtt AISTACK.Outputs.AppSyncEventApiUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         VPTaskRegistryTableName: !GetAtt AISTACK.Outputs.VPTaskRegistryTableName
+        EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
         VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
         VNCALBListenerArn: !GetAtt AISTACK.Outputs.VNCALBListenerArn
         VPSecurityGroupId: !GetAtt AISTACK.Outputs.VPSecurityGroupId
