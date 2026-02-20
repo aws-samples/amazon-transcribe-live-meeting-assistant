@@ -7,8 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Voice assistant integration for Virtual Participant with ElevenLabs Conversational AI and AWS Nova Sonic 2 support
+- Multi-provider voice assistant architecture with factory pattern (elevenlabs, aws_nova, none)
+- Wake phrase activation mode with configurable phrases and duration for voice assistant
+- Strands agent tool integration for both voice providers (meeting history, document search, web search)
+- Voice assistant CloudFormation parameters (VoiceAssistantProvider, VoiceAssistantActivationMode, VoiceAssistantWakePhrases, VoiceAssistantActivationDuration)
+- PulseAudio virtual microphone for agent audio routing in Virtual Participant
+- Microphone activity monitoring for Zoom speaker detection when VP is speaking
+- ElevenLabs Voice Assistant setup documentation
+
+### Changed
+- Virtual Participant microphone now stays unmuted when voice assistant is enabled (Zoom, Teams, Chime, WebEx)
+- Zoom speaker detection enhanced with previous speaker tracking and microphone activity monitoring
+- Local test script now supports --reuse-env flag for faster iteration
+
 ### Fixed
 - CloudFormation stack deletion failure when EnableDataRetentionOnDelete=false - S3 buckets (LoggingBucket and RecordingsBucket) are now automatically emptied and deleted by custom resource with retry logic to handle async CloudFront log writes
+- Zoom speaker detection not updating when VP voice assistant is speaking
+- Local test script syntax error (missing proper indentation in SKIP_ENV_GENERATION block)
 
 ## [0.2.25] - 02/06/26
 
