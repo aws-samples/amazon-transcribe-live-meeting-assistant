@@ -47,7 +47,7 @@ export function createVoiceAssistant(config: ProviderConfig): VoiceAssistantProv
  */
 export function createVoiceAssistantFromEnv(): VoiceAssistantProvider {
   const provider = (process.env.VOICE_ASSISTANT_PROVIDER || 'none') as 'none' | 'elevenlabs' | 'aws_nova';
-  const activationMode = (process.env.VOICE_ASSISTANT_ACTIVATION_MODE || 'always_active') as 'always_active' | 'wake_phrase' | 'strands_tool';
+  const activationMode = (process.env.VOICE_ASSISTANT_ACTIVATION_MODE || 'wake_phrase') as 'always_active' | 'wake_phrase' | 'strands_tool';
   const activationDuration = parseInt(process.env.VOICE_ASSISTANT_ACTIVATION_DURATION || '30');
   
   console.log(`Voice Assistant Configuration:`);

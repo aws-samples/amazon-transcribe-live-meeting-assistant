@@ -38,7 +38,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     this.apiKey = config.apiKey || '';
     this.agentId = config.agentId || null;
     this.enabled = !!this.apiKey;
-    this.activationMode = config.activationMode || 'always_active';
+    this.activationMode = config.activationMode || 'wake_phrase';
     this.defaultActivationDuration = config.activationDuration || 30;
     this.region = config.region || process.env.AWS_REGION || 'us-east-1';
     this.strandsLambdaArn = config.strandsLambdaArn || process.env.STRANDS_LAMBDA_ARN;

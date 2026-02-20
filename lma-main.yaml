@@ -105,11 +105,11 @@ Parameters:
 
   VoiceAssistantActivationMode:
     Type: String
-    Default: "always_active"
+    Default: "wake_phrase"
     AllowedValues:
       - "always_active"
       - "wake_phrase"
-      - "strands_tool"
+      - "strands_tool (coming soon)"
     Description: >-
       How the voice assistant is activated. 'always_active' for interviewer/meeting leader use cases (agent leads conversation),
       'wake_phrase' to activate only when wake phrase is detected, or 'strands_tool' for intelligent activation by Strands agent.

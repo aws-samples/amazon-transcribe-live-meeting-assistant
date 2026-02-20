@@ -68,7 +68,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.modelId = config.modelId;
     this.systemPrompt = config.systemPrompt;
     this.knowledgeBaseId = config.knowledgeBaseId;
-    this.activationMode = config.activationMode || 'always_active';
+    this.activationMode = config.activationMode || 'wake_phrase';
     this.defaultActivationDuration = config.activationDuration || 30;
     this.region = config.region || process.env.AWS_REGION || 'us-east-1';
     this.strandsLambdaArn = config.strandsLambdaArn || process.env.STRANDS_LAMBDA_ARN;
