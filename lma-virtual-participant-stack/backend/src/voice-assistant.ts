@@ -22,6 +22,8 @@ export function createVoiceAssistant(config: ProviderConfig): VoiceAssistantProv
         agentId: config.agentId,
         activationMode: config.activationMode,
         activationDuration: config.activationDuration,
+        region: config.region,
+        strandsLambdaArn: config.strandsLambdaArn,
       });
 
     case 'aws_nova':
@@ -30,6 +32,8 @@ export function createVoiceAssistant(config: ProviderConfig): VoiceAssistantProv
         systemPrompt: config.systemPrompt,
         knowledgeBaseId: config.knowledgeBaseId,
         activationMode: config.activationMode,
+        region: config.region,
+        strandsLambdaArn: config.strandsLambdaArn,
       });
 
     case 'none':
@@ -43,8 +47,13 @@ export function createVoiceAssistant(config: ProviderConfig): VoiceAssistantProv
  */
 export function createVoiceAssistantFromEnv(): VoiceAssistantProvider {
   const provider = (process.env.VOICE_ASSISTANT_PROVIDER || 'none') as 'none' | 'elevenlabs' | 'aws_nova';
-  const activationMode = (process.env.VOICE_ASSISTANT_ACTIVATION_MODE || 'always_active') as 'always_active' | 'wake_phrase' | 'strands_tool';
+  const activationMode = (process.env.VOICE_ASSISTANT_ACTIVATION_MODE || 'wake_phrase') as 'always_active' | 'wake_phrase' | 'strands_tool';
   const activationDuration = parseInt(process.env.VOICE_ASSISTANT_ACTIVATION_DURATION || '30');
+  
+  console.log(`Voice Assistant Configuration:`);
+  console.log(`  Provider: ${provider}`);
+  console.log(`  Activation Mode: ${activationMode}`);
+  console.log(`  Activation Duration: ${activationDuration}s`);
 
   // Build provider-specific config
   const baseConfig = {

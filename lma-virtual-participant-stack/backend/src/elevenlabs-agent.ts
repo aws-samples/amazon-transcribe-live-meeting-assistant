@@ -1,12 +1,16 @@
 import { spawn, ChildProcess } from 'child_process';
 import WebSocket from 'ws';
 import { VoiceAssistantProvider } from './voice-assistant-interface.js';
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { defaultProvider } from '@aws-sdk/credential-provider-node';
 
 export interface ElevenLabsAgentConfig {
   apiKey: string;
   agentId?: string;
   activationMode?: string;
   activationDuration?: number;
+  region?: string;
+  strandsLambdaArn?: string;
 }
 
 export class ElevenLabsAgent implements VoiceAssistantProvider {
@@ -17,19 +21,27 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   private enabled: boolean;
   private isConnected: boolean = false;
   private _isSpeaking: boolean = false; // Track when agent is playing audio
+  private _isProcessingTool: boolean = false; // Track when processing tool calls
   private audioQueue: Buffer[] = []; // Queue for audio chunks
   private isPlayingQueue: boolean = false; // Track if queue is being processed
   private activationMode: string;
   private _isActivated: boolean = false;
   private activationTimeout: NodeJS.Timeout | null = null;
   private defaultActivationDuration: number;
+  private region: string;
+  
+  // Lambda client and Strands agent configuration
+  private lambdaClient: LambdaClient | null = null;
+  private strandsLambdaArn?: string;
 
   constructor(config: ElevenLabsAgentConfig) {
     this.apiKey = config.apiKey || '';
     this.agentId = config.agentId || null;
     this.enabled = !!this.apiKey;
-    this.activationMode = config.activationMode || 'always_active';
+    this.activationMode = config.activationMode || 'wake_phrase';
     this.defaultActivationDuration = config.activationDuration || 30;
+    this.region = config.region || process.env.AWS_REGION || 'us-east-1';
+    this.strandsLambdaArn = config.strandsLambdaArn || process.env.STRANDS_LAMBDA_ARN;
     
     // Set initial activation state based on mode
     this._isActivated = (this.activationMode === 'always_active');
@@ -37,6 +49,9 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     if (this.enabled) {
       console.log('✓ ElevenLabs Conversational AI agent enabled');
       console.log(`  Activation mode: ${this.activationMode}`);
+      if (this.strandsLambdaArn) {
+        console.log(`  Strands agent tool: enabled`);
+      }
     } else {
       console.log('ElevenLabs agent disabled - no API key provided');
     }
@@ -54,6 +69,15 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       console.log('Starting ElevenLabs Conversational AI agent...');
       console.log(`Agent ID: ${this.agentId || '(using default agent)'}`);
       console.log(`Activation mode: ${this.activationMode}`);
+
+      // Initialize Lambda client if Strands Lambda ARN is configured
+      if (this.strandsLambdaArn) {
+        this.lambdaClient = new LambdaClient({
+          region: this.region,
+          credentials: defaultProvider(),
+        });
+        console.log('✓ Lambda client initialized for Strands agent tool');
+      }
 
       // In wake_phrase mode, defer WebSocket connection until activation
       if (this.activationMode === 'wake_phrase') {
@@ -139,6 +163,11 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
 
   private async handleWebSocketMessage(message: any): Promise<void> {
     console.log('Received message:', message.type);
+    
+    // Log full message for debugging tool calls
+    if (message.type && (message.type.includes('tool') || message.type === 'client_tool_call')) {
+      console.log('📋 Full tool message:', JSON.stringify(message));
+    }
 
     switch (message.type) {
       case 'conversation_initiation_metadata':
@@ -175,9 +204,136 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         this.ws?.send(JSON.stringify({ type: 'pong', event_id: message.ping_event?.event_id }));
         break;
 
+      case 'client_tool_call':
+        // Handle client tool calls (ElevenLabs client-side tools)
+        console.log('🔧 Client tool call received:', message.tool_name);
+        await this.handleClientToolCall(message);
+        break;
+
       default:
         console.log('📨 Unknown message type:', message.type, JSON.stringify(message).substring(0, 200));
     }
+  }
+
+  /**
+   * Handle client tool calls from ElevenLabs agent
+   */
+  private async handleClientToolCall(message: any): Promise<void> {
+    // Extract tool call details from the message structure
+    const toolCall = message.client_tool_call;
+    const toolName = toolCall.tool_name;
+    const toolCallId = toolCall.tool_call_id;
+    const parameters = toolCall.parameters || {};
+
+    console.log(`Processing client tool: ${toolName}`);
+    console.log(`Tool call ID: ${toolCallId}`);
+    console.log(`Parameters:`, JSON.stringify(parameters));
+
+    try {
+      // Set flag to prevent deactivation while tool is processing
+      this._isProcessingTool = true;
+
+      let result: any;
+
+      // Route to appropriate tool handler
+      if (toolName === 'strands_agent') {
+        result = await this.invokeStrandsAgent(parameters);
+      } else {
+        throw new Error(`Unknown tool: ${toolName}`);
+      }
+
+      // Send tool result back to ElevenLabs
+      await this.sendClientToolResult(toolCallId, result);
+      console.log('✓ Tool result sent to ElevenLabs');
+
+    } catch (error) {
+      console.error('Error processing client tool call:', error);
+      // Send error result back to ElevenLabs
+      await this.sendClientToolResult(toolCallId, {
+        error: 'Failed to process tool request',
+        details: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      // Clear flag after tool processing completes
+      this._isProcessingTool = false;
+    }
+  }
+
+  /**
+   * Invoke the Strands Lambda agent (similar to Nova agent implementation)
+   */
+  private async invokeStrandsAgent(parameters: any): Promise<any> {
+    if (!this.lambdaClient || !this.strandsLambdaArn) {
+      throw new Error('Strands Lambda not configured');
+    }
+
+    console.log('Invoking Strands agent Lambda...');
+    
+    const query = parameters.query;
+    if (!query) {
+      throw new Error('Missing required parameter: query');
+    }
+    
+    console.log(`Query for Strands agent: ${query}`);
+
+    // Build payload for Strands agent invocation
+    const callId = process.env.VP_CALL_ID || process.env.MEETING_NAME || 'elevenlabs-voice-agent';
+    const username = process.env.LMA_USER || 'ElevenLabsAgent';
+    
+    const payload = {
+      text: query,
+      call_id: callId,
+      conversation_history: [],
+      userEmail: username,
+      dynamodb_table_name: process.env.DYNAMODB_TABLE_NAME || '',
+      dynamodb_pk: `c#${callId}`,
+    };
+
+    console.log('Strands agent payload:', JSON.stringify(payload));
+
+    // Invoke the Strands Lambda function synchronously
+    const command = new InvokeCommand({
+      FunctionName: this.strandsLambdaArn,
+      InvocationType: 'RequestResponse',
+      Payload: JSON.stringify(payload),
+    });
+
+    const response = await this.lambdaClient.send(command);
+    
+    // Parse the Lambda response
+    const responsePayload = JSON.parse(new TextDecoder().decode(response.Payload));
+    
+    console.log('Strands agent response received:', JSON.stringify(responsePayload).substring(0, 200));
+    
+    // Extract the message from the response
+    const message = responsePayload.message || JSON.stringify(responsePayload);
+    
+    // Return as string for ElevenLabs
+    return typeof message === 'string' ? message : JSON.stringify(message);
+  }
+
+  /**
+   * Send client tool result back to ElevenLabs
+   */
+  private async sendClientToolResult(toolCallId: string, result: any): Promise<void> {
+    if (!this.ws || !this.isConnected) {
+      throw new Error('WebSocket not connected');
+    }
+
+    console.log(`Sending client tool result for tool call ID: ${toolCallId}`);
+
+    // Format result as string if needed
+    const resultString = typeof result === 'string' ? result : JSON.stringify(result);
+
+    // Send tool result to ElevenLabs
+    this.ws.send(JSON.stringify({
+      type: 'client_tool_result',
+      tool_call_id: toolCallId,
+      result: resultString,
+      is_error: false
+    }));
+
+    console.log('Client tool result sent');
   }
 
   // Method to receive audio chunks from transcription service
@@ -398,9 +554,17 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   }
 
   private deactivateWithSpeakingCheck(): void {
-    // If agent is speaking, wait for it to finish
+    // If agent is speaking or processing a tool, wait for it to finish
     if (this._isSpeaking) {
       console.log('🔊 Agent is speaking, delaying deactivation...');
+      setTimeout(() => {
+        this.deactivateWithSpeakingCheck();
+      }, 1000);
+      return;
+    }
+    
+    if (this._isProcessingTool) {
+      console.log('🔧 Agent is processing tool call, delaying deactivation...');
       setTimeout(() => {
         this.deactivateWithSpeakingCheck();
       }, 1000);

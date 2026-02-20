@@ -10,6 +10,13 @@ Parameters:
     Type: String
     Description: LMA Stack Name
 
+  StrandsLambdaArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of the Strands agent Lambda function (ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN).
+      When provided, enables Nova voice agent to delegate complex queries to the Strands agent.
+
   # {LMA_USER} token is replaced by user's name at runtime.
 
   LMAIdentity:
@@ -83,6 +90,10 @@ Parameters:
     Type: String
     Description: Name of the VPTaskRegistry DynamoDB table from AI stack
 
+  EventSourcingTableName:
+    Type: String
+    Description: Name of the EventSourcingTable (CallEventTable) DynamoDB table from AI stack
+
   VNCTargetGroupArn:
     Type: String
     Description: ARN of the VNC Target Group from AI stack
@@ -148,12 +159,24 @@ Parameters:
 
   VoiceAssistantActivationMode:
     Type: String
-    Default: "always_active"
+    Default: "wake_phrase"
     AllowedValues:
       - "always_active"
       - "wake_phrase"
-      - "strands_tool"
+      - "strands_tool (coming soon)"
     Description: Voice assistant activation mode
+
+  VoiceAssistantWakePhrases:
+    Type: String
+    Default: "hey alex,ok alex,hi alex,hello alex"
+    Description: Comma-separated list of wake phrases (case-insensitive)
+
+  VoiceAssistantActivationDuration:
+    Type: Number
+    Default: 30
+    MinValue: 5
+    MaxValue: 300
+    Description: How long voice assistant stays active after wake phrase (seconds)
 
   NovaModelId:
     Type: String
@@ -364,6 +387,7 @@ Parameters:
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasStrandsLambdaArn: !Not [!Equals [!Ref StrandsLambdaArn, ""]]
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
@@ -911,8 +935,21 @@ Resources:
                 Action:
                   - "bedrock:InvokeModel"
                   - "bedrock:InvokeModelWithResponseStream"
+                  - "bedrock:InvokeModelWithBidirectionalStream"
                 Resource:
                   - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-*"
+        - PolicyName: StrandsLambdaPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "lambda:InvokeFunction"
+                Resource:
+                  - !If
+                    - HasStrandsLambdaArn
+                    - !Ref StrandsLambdaArn
+                    - !Ref AWS::NoValue
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -1264,6 +1301,8 @@ Resources:
               Value: !Ref AppSyncEventApiUrl
             - Name: VP_TASK_REGISTRY_TABLE_NAME
               Value: !Ref VPTaskRegistryTableName
+            - Name: DYNAMODB_TABLE_NAME
+              Value: !Ref EventSourcingTableName
             - Name: ENABLE_AUDIO_RECORDING
               Value: !Ref EnableAudioRecording
             - Name: CLOUDFRONT_DOMAIN
@@ -1282,10 +1321,16 @@ Resources:
               Value: !Ref VoiceAssistantProvider
             - Name: VOICE_ASSISTANT_ACTIVATION_MODE
               Value: !Ref VoiceAssistantActivationMode
+            - Name: VOICE_ASSISTANT_WAKE_PHRASES
+              Value: !Ref VoiceAssistantWakePhrases
+            - Name: VOICE_ASSISTANT_ACTIVATION_DURATION
+              Value: !Ref VoiceAssistantActivationDuration
             - Name: NOVA_MODEL_ID
               Value: !Ref NovaModelId
             - Name: NOVA_SYSTEM_PROMPT
               Value: !Ref NovaSystemPrompt
+            - Name: STRANDS_LAMBDA_ARN
+              Value: !Ref StrandsLambdaArn
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:

@@ -17,6 +17,7 @@
     "@aws-sdk/client-dynamodb": "^3.726.1",
     "@aws-sdk/client-elastic-load-balancing-v2": "^3.726.1",
     "@aws-sdk/client-kinesis": "^3.726.1",
+    "@aws-sdk/client-lambda": "^3.726.1",
     "@aws-sdk/client-s3": "^3.726.1",
     "@aws-sdk/client-transcribe-streaming": "^3.726.1",
     "@aws-sdk/credential-provider-node": "^3.726.1",

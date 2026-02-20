@@ -12,6 +12,7 @@ import {
   InvokeModelWithBidirectionalStreamCommand,
   InvokeModelWithBidirectionalStreamInput,
 } from '@aws-sdk/client-bedrock-runtime';
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { NodeHttp2Handler } from '@smithy/node-http-handler';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { randomUUID } from 'crypto';
@@ -23,6 +24,7 @@ export interface NovaAgentConfig {
   activationMode?: string;
   activationDuration?: number;
   region?: string;
+  strandsLambdaArn?: string;
 }
 
 interface SessionData {
@@ -42,6 +44,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   private _isActivated: boolean = false;
   private _isActive: boolean = false;
   private _isSpeaking: boolean = false;
+  private _isProcessingTool: boolean = false;
   private audioQueue: Buffer[] = [];
   private isPlayingQueue: boolean = false;
   private activationTimeout: NodeJS.Timeout | null = null;
@@ -56,14 +59,19 @@ export class NovaAgent implements VoiceAssistantProvider {
   private streamingActive: boolean = false;
   private queueSignal: (() => void) | null = null;
   private closeSignal: (() => void) | null = null;
+  
+  // Lambda client and Strands agent configuration
+  private lambdaClient: LambdaClient | null = null;
+  private strandsLambdaArn?: string;
 
   constructor(config: NovaAgentConfig) {
     this.modelId = config.modelId;
     this.systemPrompt = config.systemPrompt;
     this.knowledgeBaseId = config.knowledgeBaseId;
-    this.activationMode = config.activationMode || 'always_active';
+    this.activationMode = config.activationMode || 'wake_phrase';
     this.defaultActivationDuration = config.activationDuration || 30;
     this.region = config.region || process.env.AWS_REGION || 'us-east-1';
+    this.strandsLambdaArn = config.strandsLambdaArn || process.env.STRANDS_LAMBDA_ARN;
     
     // Set initial activation state based on mode
     this._isActivated = (this.activationMode === 'always_active');
@@ -72,6 +80,9 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log(`  Model: ${this.modelId}`);
     console.log(`  Region: ${this.region}`);
     console.log(`  Activation mode: ${this.activationMode}`);
+    if (this.strandsLambdaArn) {
+      console.log(`  Strands agent tool: enabled`);
+    }
   }
 
   async start(): Promise<void> {
@@ -91,6 +102,15 @@ export class NovaAgent implements VoiceAssistantProvider {
         credentials: defaultProvider(),
         requestHandler: nodeHttp2Handler,
       });
+
+      // Initialize Lambda client if Strands Lambda ARN is configured
+      if (this.strandsLambdaArn) {
+        this.lambdaClient = new LambdaClient({
+          region: this.region,
+          credentials: defaultProvider(),
+        });
+        console.log('✓ Lambda client initialized for Strands agent tool');
+      }
 
       // In wake_phrase mode, defer session creation until activation
       if (this.activationMode === 'wake_phrase') {
@@ -162,8 +182,8 @@ export class NovaAgent implements VoiceAssistantProvider {
       },
     });
 
-    // Prompt start
-    this.addEventToQueue({
+    // Prompt start with tool configuration if Strands tool is available
+    const promptStartEvent: any = {
       event: {
         promptStart: {
           promptName: this.session.promptName,
@@ -181,10 +201,45 @@ export class NovaAgent implements VoiceAssistantProvider {
           },
         },
       },
-    });
+    };
+
+    // Add tool configuration if Strands Lambda ARN is configured
+    if (this.strandsLambdaArn) {
+      promptStartEvent.event.promptStart.toolUseOutputConfiguration = {
+        mediaType: 'application/json',
+      };
+      promptStartEvent.event.promptStart.toolConfiguration = {
+        tools: [
+          {
+            toolSpec: {
+              name: 'strands_agent',
+              description: 'Delegate complex queries to the Strands agent, which has access to document search, meeting history, web search, and other specialized tools. Use this for questions about documents, past meetings, current information from the web, or any query requiring specialized knowledge or data access.',
+              inputSchema: {
+                json: JSON.stringify({
+                  type: 'object',
+                  properties: {
+                    query: {
+                      type: 'string',
+                      description: 'The user\'s question or request to be processed by the Strands agent',
+                    },
+                  },
+                  required: ['query'],
+                }),
+              },
+            },
+          },
+        ],
+        toolChoice: {
+          auto: {},
+        },
+      };
+      console.log('✓ Strands agent tool configured in promptStart');
+    }
+
+    this.addEventToQueue(promptStartEvent);
     this.session.isPromptStartSent = true;
 
-    // System prompt
+    // System prompt with tool usage instructions if Strands tool is configured
     const textPromptID = randomUUID();
     this.addEventToQueue({
       event: {
@@ -201,12 +256,25 @@ export class NovaAgent implements VoiceAssistantProvider {
       },
     });
 
+    // Append tool usage instructions if Strands tool is available
+    let systemPromptContent = this.systemPrompt;
+    if (this.strandsLambdaArn) {
+      systemPromptContent += '\n\nIMPORTANT: You have access to the strands_agent tool. Use it when users ask about:\n' +
+        '- Meeting summaries or transcripts\n' +
+        '- Past meetings or meeting history\n' +
+        '- Documents or knowledge base content\n' +
+        '- Web search or current information\n' +
+        '- Any query requiring specialized knowledge or data access\n' +
+        'When you use the tool, first acknowledge the request (e.g., "Let me search for that"), then invoke the tool. ' +
+        'Pass the user\'s query in the "query" parameter.';
+    }
+
     this.addEventToQueue({
       event: {
         textInput: {
           promptName: this.session.promptName,
           contentName: textPromptID,
-          content: this.systemPrompt,
+          content: systemPromptContent,
         },
       },
     });
@@ -315,6 +383,9 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   private async processResponseStream(response: any): Promise<void> {
     const textDecoder = new TextDecoder();
+    let toolUseContent: any = null;
+    let toolUseId: string = '';
+    let toolName: string = '';
 
     try {
       for await (const event of response.body) {
@@ -334,6 +405,45 @@ export class NovaAgent implements VoiceAssistantProvider {
               // Received audio from Nova
               const audioBuffer = Buffer.from(jsonResponse.event.audioOutput.content, 'base64');
               await this.playAudio(audioBuffer);
+            } else if (jsonResponse.event?.toolUse) {
+              // Store tool use information
+              console.log('Tool use requested:', jsonResponse.event.toolUse.toolName);
+              toolUseContent = jsonResponse.event.toolUse;
+              toolUseId = jsonResponse.event.toolUse.toolUseId;
+              toolName = jsonResponse.event.toolUse.toolName;
+            } else if (jsonResponse.event?.contentEnd && jsonResponse.event?.contentEnd?.type === 'TOOL') {
+              // Process tool use when content ends
+              console.log(`Processing tool use: ${toolName}`);
+              
+              if (toolName === 'strands_agent' && toolUseContent) {
+                try {
+                  // Set flag to prevent deactivation while tool is processing
+                  this._isProcessingTool = true;
+                  
+                  // Invoke Strands Lambda
+                  const toolResult = await this.invokeStrandsAgent(toolUseContent);
+                  
+                  // Send tool result back to Nova (only if session is still active)
+                  if (this.session && this.session.isActive) {
+                    await this.sendToolResult(toolUseId, toolResult);
+                    console.log('✓ Tool result sent to Nova');
+                  } else {
+                    console.log('⚠️  Session closed before tool result could be sent');
+                  }
+                } catch (error) {
+                  console.error('Error processing tool use:', error);
+                  // Send error result back to Nova (only if session is still active)
+                  if (this.session && this.session.isActive) {
+                    await this.sendToolResult(toolUseId, {
+                      error: 'Failed to process tool request',
+                      details: error instanceof Error ? error.message : String(error)
+                    });
+                  }
+                } finally {
+                  // Clear flag after tool processing completes
+                  this._isProcessingTool = false;
+                }
+              }
             } else if (jsonResponse.event?.contentEnd) {
               console.log('Content end:', jsonResponse.event.contentEnd.type);
             }
@@ -352,6 +462,117 @@ export class NovaAgent implements VoiceAssistantProvider {
     } catch (error) {
       console.error('Error processing response stream:', error);
     }
+  }
+
+  private async invokeStrandsAgent(toolUseContent: any): Promise<any> {
+    if (!this.lambdaClient || !this.strandsLambdaArn) {
+      throw new Error('Strands Lambda not configured');
+    }
+
+    console.log('Invoking Strands agent Lambda directly...');
+    
+    // Parse the tool use content to get the query
+    const contentObject = JSON.parse(toolUseContent.content);
+    const query = contentObject.query;
+    
+    console.log(`Query for Strands agent: ${query}`);
+
+    // Build payload for direct Strands agent invocation
+    // The Strands agent Lambda expects: text, call_id, conversation_history, etc.
+    const callId = process.env.VP_CALL_ID || process.env.MEETING_NAME || 'nova-voice-agent';
+    const username = process.env.LMA_USER || 'NovaAgent';
+    
+    const payload = {
+      text: query,  // Strands agent expects 'text' field
+      call_id: callId,
+      conversation_history: [],
+      userEmail: username,
+      dynamodb_table_name: process.env.DYNAMODB_TABLE_NAME || '',  // Use main CallEventTable, not VPTaskRegistry
+      dynamodb_pk: `c#${callId}`,  // Use callId for dynamodb_pk (matches database schema)
+    };
+
+    console.log('Strands agent payload:', JSON.stringify(payload));
+
+    // Invoke the Strands Lambda function with RequestResponse for synchronous result
+    const command = new InvokeCommand({
+      FunctionName: this.strandsLambdaArn,
+      InvocationType: 'RequestResponse',
+      Payload: JSON.stringify(payload),
+    });
+
+    const response = await this.lambdaClient.send(command);
+    
+    // Parse the Lambda response
+    const responsePayload = JSON.parse(new TextDecoder().decode(response.Payload));
+    
+    console.log('Strands agent response received:', JSON.stringify(responsePayload).substring(0, 200));
+    
+    // Extract the message from the response and ensure it's a string
+    const message = responsePayload.message || JSON.stringify(responsePayload);
+    
+    // Return as plain text string for Nova
+    return typeof message === 'string' ? message : JSON.stringify(message);
+  }
+
+  private async sendToolResult(toolUseId: string, result: any): Promise<void> {
+    if (!this.session || !this.session.isActive) {
+      throw new Error('No active session to send tool result');
+    }
+
+    console.log(`Sending tool result for tool use ID: ${toolUseId}`);
+    const contentId = randomUUID();
+
+    // Tool content start
+    this.addEventToQueue({
+      event: {
+        contentStart: {
+          promptName: this.session.promptName,
+          contentName: contentId,
+          interactive: false,
+          type: 'TOOL',
+          role: 'TOOL',
+          toolResultInputConfiguration: {
+            toolUseId: toolUseId,
+            type: 'TEXT',
+            textInputConfiguration: {
+              mediaType: 'text/plain'
+            }
+          }
+        }
+      }
+    });
+
+    // Tool content input - wrap result in JSON format as required by Nova
+    // Nova expects tool results to be JSON, not plain strings
+    let resultContent: string;
+    if (typeof result === 'string') {
+      // Wrap string result in JSON object
+      resultContent = JSON.stringify({ result: result });
+    } else {
+      resultContent = JSON.stringify(result);
+    }
+    
+    this.addEventToQueue({
+      event: {
+        toolResult: {
+          promptName: this.session.promptName,
+          contentName: contentId,
+          content: resultContent
+        }
+      }
+    });
+
+    // Tool content end
+    this.addEventToQueue({
+      event: {
+        contentEnd: {
+          promptName: this.session.promptName,
+          contentName: contentId
+        }
+      }
+    });
+
+    console.log('Tool result sent to Nova');
   }
 
   sendAudioChunk(chunk: Buffer): void {

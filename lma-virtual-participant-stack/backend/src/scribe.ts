@@ -32,7 +32,7 @@ export class TranscriptionService {
     }> = [];
     private bufferWindowMs = 10000; // Keep last 10 seconds
     private captureDelayMs = 3000; // Wait 3 seconds after wake phrase to capture full question
-    private wakePhrases = ['hey alex', 'ok alex', 'hi alex', 'hello alex'];
+    private wakePhrases: string[];
     private isCapturingContext = false;
 
     constructor() {
@@ -50,6 +50,11 @@ export class TranscriptionService {
         }
         
         this.transcribeClient = new TranscribeStreamingClient(clientConfig);
+        
+        // Initialize voice assistant wake phrases from environment variable
+        const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
+        this.wakePhrases = wakePhraseEnv.split(',').map(p => p.trim().toLowerCase());
+        console.log('Wake phrases configured:', this.wakePhrases);
     }
 
     private async *audioStream() {
