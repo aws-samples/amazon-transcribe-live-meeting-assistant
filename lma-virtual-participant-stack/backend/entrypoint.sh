@@ -108,12 +108,42 @@ fi
 touch /tmp/vnc_ready
 echo "✓ VNC ready signal created"
 
+# Named pipe no longer needed - Chromium uses real PulseAudio device
+echo "✓ Skipping named pipe creation (using real PulseAudio device)"
+
 echo "Starting PulseAudio..."
 pulseaudio --start --daemon --exit-idle-time=-1 --log-target=syslog
 
-echo "PulseAudio Info:"
+echo "Waiting for PulseAudio to be ready..."
+sleep 2
+
+echo "Creating PulseAudio virtual microphone for agent audio..."
+# Create a null sink for agent audio output
+pactl load-module module-null-sink sink_name=agent_output sink_properties=device.description="Agent_Audio_Output"
+
+# Create a virtual microphone source from the null sink's monitor
+pactl load-module module-remap-source source_name=agent_mic master=agent_output.monitor source_properties=device.description="Agent_Virtual_Microphone"
+
+echo "✓ Virtual microphone 'agent_mic' created"
+
+echo "PulseAudio Devices:"
+echo "--- Sinks ---"
 pactl list short sinks
+echo "--- Sources ---"
 pactl list short sources
+
+echo ""
+echo "🎤 Virtual microphone available as: agent_mic"
+echo "   Chromium reads from /tmp/mic_pipe"
+echo "   Agent audio is played to 'agent_output' sink"
+echo "   agent_mic monitors agent_output and streams to pipe"
+
+echo "✓ Audio devices ready (Chromium will use agent_mic as microphone)"
+echo ""
+echo "🎧 Audio Routing:"
+echo "   Meeting audio → 'default' source → FFmpeg → Transcribe + ElevenLabs"
+echo "   Agent audio → agent_output sink → agent_mic source → Chromium → Meeting"
+echo "   Feedback prevention: Agent audio blocked when isSpeaking=true"
 
 echo "=== Starting Virtual Participant Application ==="
 

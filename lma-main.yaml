@@ -66,10 +66,69 @@ Parameters:
     Default: ""
     Description: >-
       (Optional - STRANDS_BEDROCK only) API key for Tavily web search service to enable web search tool.
-      Get your API key from https://tavily.com. When provided, the Strands agent can search the web 
+      Get your API key from https://tavily.com. When provided, the Strands agent can search the web
       for current information during meetings. Leave blank to disable web search capability.
     AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
     ConstraintDescription: "Must be empty or a valid Tavily API key (20+ characters)"
+
+  ElevenLabsApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional) API key for ElevenLabs text-to-speech service to enable Virtual Participant voice responses.
+      Get your API key from https://elevenlabs.io. When provided, the Virtual Participant can speak
+      agent responses in meetings using natural-sounding voices. Leave blank to disable TTS capability.
+    AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
+    ConstraintDescription: "Must be empty or a valid ElevenLabs API key (20+ characters)"
+
+  ElevenLabsAgentId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ElevenLabs Conversational AI Agent ID for customized voice assistant behavior.
+      Create an agent at https://elevenlabs.io/app/conversational-ai and copy its ID here.
+      Leave blank to use default conversational AI without custom personality.
+    AllowedPattern: "^(|[a-zA-Z0-9_-]{10,})$"
+    ConstraintDescription: "Must be empty or a valid ElevenLabs Agent ID"
+
+  VoiceAssistantProvider:
+    Type: String
+    Default: "none"
+    AllowedValues:
+      - "none"
+      - "elevenlabs"
+      - "aws_nova"
+    Description: >-
+      Voice AI assistant provider for Virtual Participant. Choose 'none' to disable voice responses (default),
+      'elevenlabs' for ElevenLabs Conversational AI (requires API key above), or 'aws_nova' for AWS Nova Sonic 2 (placeholder - not yet implemented).
+
+  VoiceAssistantActivationMode:
+    Type: String
+    Default: "wake_phrase"
+    AllowedValues:
+      - "always_active"
+      - "wake_phrase"
+      - "strands_tool (coming soon)"
+    Description: >-
+      How the voice assistant is activated. 'always_active' for interviewer/meeting leader use cases (agent leads conversation),
+      'wake_phrase' to activate only when wake phrase is detected, or 'strands_tool' for intelligent activation by Strands agent.
+
+  VoiceAssistantWakePhrases:
+    Type: String
+    Default: "hey alex,ok alex,hi alex,hello alex"
+    Description: >-
+      Comma-separated list of wake phrases for voice assistant activation (case-insensitive).
+      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Example: "hey alex,ok alex,hi alex"
+
+  VoiceAssistantActivationDuration:
+    Type: Number
+    Default: 30
+    MinValue: 5
+    MaxValue: 300
+    Description: >-
+      How long the voice assistant stays active after wake phrase detection (in seconds).
+      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Default is 30 seconds.
 
   BedrockGuardrailId:
     Type: String
@@ -738,6 +797,12 @@ Metadata:
           - MeetingAssistService
           - MeetingAssistServiceBedrockModelID
           - TavilyApiKey
+          - ElevenLabsApiKey
+          - ElevenLabsAgentId
+          - VoiceAssistantProvider
+          - VoiceAssistantActivationMode
+          - VoiceAssistantWakePhrases
+          - VoiceAssistantActivationDuration
           - AssistantWakePhraseRegEx
           - MeetingAssistQnABotOpenSearchNodeCount
       - Label:
@@ -877,6 +942,18 @@ Metadata:
         default: Meeting Assist Service Bedrock Model ID
       TavilyApiKey:
         default: Tavily API Key for Web Search (STRANDS_BEDROCK only)
+      ElevenLabsApiKey:
+        default: ElevenLabs API Key for Virtual Participant Voice (Optional)
+      ElevenLabsAgentId:
+        default: ElevenLabs Agent ID for Custom Personality (Optional)
+      VoiceAssistantProvider:
+        default: Voice Assistant Provider (none, elevenlabs, aws_nova)
+      VoiceAssistantActivationMode:
+        default: Voice Assistant Activation Mode
+      VoiceAssistantWakePhrases:
+        default: Voice Assistant Wake Phrases (comma-separated)
+      VoiceAssistantActivationDuration:
+        default: Voice Assistant Activation Duration (seconds)
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
       MeetingAssistQnABotOpenSearchNodeCount:
@@ -2559,13 +2636,24 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn:
       - AISTACK
+      - MEETINGASSISTSETUP
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-virtual-participant-stack/template.yaml
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
+        StrandsLambdaArn: !If
+          - ShouldUseAnyStrandsBedrock
+          - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
+          - ""
         EnableAudioRecording: !Ref EnableAudioRecording
+        ElevenLabsApiKey: !Ref ElevenLabsApiKey
+        ElevenLabsAgentId: !Ref ElevenLabsAgentId
+        VoiceAssistantProvider: !Ref VoiceAssistantProvider
+        VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
+        VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
+        VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
@@ -2589,6 +2677,7 @@ Resources:
         AppSyncEventApiUrl: !GetAtt AISTACK.Outputs.AppSyncEventApiUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         VPTaskRegistryTableName: !GetAtt AISTACK.Outputs.VPTaskRegistryTableName
+        EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
         VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
         VNCALBListenerArn: !GetAtt AISTACK.Outputs.VNCALBListenerArn
         VPSecurityGroupId: !GetAtt AISTACK.Outputs.VPSecurityGroupId

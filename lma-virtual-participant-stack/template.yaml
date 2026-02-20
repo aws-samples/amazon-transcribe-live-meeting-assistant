@@ -10,6 +10,13 @@ Parameters:
     Type: String
     Description: LMA Stack Name
 
+  StrandsLambdaArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of the Strands agent Lambda function (ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN).
+      When provided, enables Nova voice agent to delegate complex queries to the Strands agent.
+
   # {LMA_USER} token is replaced by user's name at runtime.
 
   LMAIdentity:
@@ -83,6 +90,10 @@ Parameters:
     Type: String
     Description: Name of the VPTaskRegistry DynamoDB table from AI stack
 
+  EventSourcingTableName:
+    Type: String
+    Description: Name of the EventSourcingTable (CallEventTable) DynamoDB table from AI stack
+
   VNCTargetGroupArn:
     Type: String
     Description: ARN of the VNC Target Group from AI stack
@@ -121,6 +132,65 @@ Parameters:
       Enable or disable recording of audio during a meeting. If set to false, the
       meeting will not be recorded.
       If set to true, the meeting will be recorded.
+
+  ElevenLabsApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional) API key for ElevenLabs text-to-speech and conversational AI.
+      When provided, enables voice interaction capabilities in Virtual Participant.
+
+  ElevenLabsAgentId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ElevenLabs Conversational AI Agent ID for custom personality.
+      Leave blank to use default conversational agent.
+
+  VoiceAssistantProvider:
+    Type: String
+    Default: "none"
+    AllowedValues:
+      - "none"
+      - "elevenlabs"
+      - "aws_nova"
+    Description: Voice AI assistant provider (none, elevenlabs, aws_nova)
+
+  VoiceAssistantActivationMode:
+    Type: String
+    Default: "wake_phrase"
+    AllowedValues:
+      - "always_active"
+      - "wake_phrase"
+      - "strands_tool (coming soon)"
+    Description: Voice assistant activation mode
+
+  VoiceAssistantWakePhrases:
+    Type: String
+    Default: "hey alex,ok alex,hi alex,hello alex"
+    Description: Comma-separated list of wake phrases (case-insensitive)
+
+  VoiceAssistantActivationDuration:
+    Type: Number
+    Default: 30
+    MinValue: 5
+    MaxValue: 300
+    Description: How long voice assistant stays active after wake phrase (seconds)
+
+  NovaModelId:
+    Type: String
+    Default: "amazon.nova-2-sonic-v1:0"
+    Description: >-
+      (Optional) AWS Bedrock Nova model ID for voice assistant.
+      Used when VoiceAssistantProvider is set to 'aws_nova'.
+
+  NovaSystemPrompt:
+    Type: String
+    Default: "You are Alex, an AI meeting assistant. Be concise and helpful."
+    Description: >-
+      (Optional) System prompt for Nova voice assistant.
+      Defines the personality and behavior of the AI assistant.
 
   S3BucketName:
     Type: String
@@ -317,6 +387,7 @@ Parameters:
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasStrandsLambdaArn: !Not [!Equals [!Ref StrandsLambdaArn, ""]]
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
@@ -856,6 +927,29 @@ Resources:
                   - "elasticloadbalancing:ModifyRule"
                   - "elasticloadbalancing:AddTags"
                 Resource: "*"
+        - PolicyName: BedrockPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                  - "bedrock:InvokeModelWithResponseStream"
+                  - "bedrock:InvokeModelWithBidirectionalStream"
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-*"
+        - PolicyName: StrandsLambdaPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "lambda:InvokeFunction"
+                Resource:
+                  - !If
+                    - HasStrandsLambdaArn
+                    - !Ref StrandsLambdaArn
+                    - !Ref AWS::NoValue
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -1207,6 +1301,8 @@ Resources:
               Value: !Ref AppSyncEventApiUrl
             - Name: VP_TASK_REGISTRY_TABLE_NAME
               Value: !Ref VPTaskRegistryTableName
+            - Name: DYNAMODB_TABLE_NAME
+              Value: !Ref EventSourcingTableName
             - Name: ENABLE_AUDIO_RECORDING
               Value: !Ref EnableAudioRecording
             - Name: CLOUDFRONT_DOMAIN
@@ -1217,6 +1313,24 @@ Resources:
               Value: !Ref VPC
             - Name: ALB_LISTENER_ARN
               Value: !Ref VNCALBListenerArn
+            - Name: ELEVENLABS_API_KEY
+              Value: !Ref ElevenLabsApiKey
+            - Name: ELEVENLABS_AGENT_ID
+              Value: !Ref ElevenLabsAgentId
+            - Name: VOICE_ASSISTANT_PROVIDER
+              Value: !Ref VoiceAssistantProvider
+            - Name: VOICE_ASSISTANT_ACTIVATION_MODE
+              Value: !Ref VoiceAssistantActivationMode
+            - Name: VOICE_ASSISTANT_WAKE_PHRASES
+              Value: !Ref VoiceAssistantWakePhrases
+            - Name: VOICE_ASSISTANT_ACTIVATION_DURATION
+              Value: !Ref VoiceAssistantActivationDuration
+            - Name: NOVA_MODEL_ID
+              Value: !Ref NovaModelId
+            - Name: NOVA_SYSTEM_PROMPT
+              Value: !Ref NovaSystemPrompt
+            - Name: STRANDS_LAMBDA_ARN
+              Value: !Ref StrandsLambdaArn
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:

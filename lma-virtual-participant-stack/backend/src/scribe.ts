@@ -7,6 +7,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { createWriteStream } from 'fs';
 import { details } from './details.js';
 import { sendAddTranscriptSegment, sendStartMeeting, sendEndMeeting } from './kinesis-stream.js';
+import { voiceAssistant } from './voice-assistant.js';
 
 // Global current speaker (matching Python)
 let currentSpeaker = "none";
@@ -22,6 +23,17 @@ export class TranscriptionService {
     private transcribeClient: TranscribeStreamingClient;
     private isTranscribing = false;
     private mockTranscriptionInterval: NodeJS.Timeout | null = null;
+    
+    // Wake phrase detection and transcript buffering
+    private transcriptBuffer: Array<{
+        text: string;
+        timestamp: number;
+        isPartial: boolean;
+    }> = [];
+    private bufferWindowMs = 10000; // Keep last 10 seconds
+    private captureDelayMs = 3000; // Wait 3 seconds after wake phrase to capture full question
+    private wakePhrases: string[];
+    private isCapturingContext = false;
 
     constructor() {
         // In local test mode, explicitly use default provider which checks credentials file first
@@ -31,12 +43,18 @@ export class TranscriptionService {
         };
         
         if (isLocalTest) {
-            console.log('Using AWS credentials from ~/.aws/credentials for local testing');
-            // Default provider checks credentials file, then environment variables, then instance metadata
+            console.log('Using AWS credentials from environment/file for local testing');
+            // Disable EC2 metadata to force credentials from environment or file
+            process.env.AWS_EC2_METADATA_DISABLED = 'true';
             clientConfig.credentials = defaultProvider();
         }
         
         this.transcribeClient = new TranscribeStreamingClient(clientConfig);
+        
+        // Initialize voice assistant wake phrases from environment variable
+        const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
+        this.wakePhrases = wakePhraseEnv.split(',').map(p => p.trim().toLowerCase());
+        console.log('Wake phrases configured:', this.wakePhrases);
     }
 
     private async *audioStream() {
@@ -117,6 +135,17 @@ export class TranscriptionService {
 
         console.log('Starting transcription service');
         this.isTranscribing = true;
+        
+        // Start voice assistant if enabled
+        if (voiceAssistant.isEnabled()) {
+            try {
+                await voiceAssistant.start();
+                console.log('✓ Voice assistant started alongside transcription');
+            } catch (error) {
+                console.error('Failed to start voice assistant:', error);
+                // Non-critical - continue with transcription
+            }
+        }
 
         // Send start meeting event to Kinesis
         try {
@@ -129,28 +158,8 @@ export class TranscriptionService {
             }
         }
 
-        // If in local test mode, skip AWS Transcribe entirely
-        if (isLocalTest) {
-            console.log('*** LOCAL TEST MODE - Skipping AWS Transcribe (no transcription) ***');
-            console.log('*** Meeting will continue without transcription ***');
-            
-            // Update status to ACTIVE even without transcription
-            const vpId = process.env.VIRTUAL_PARTICIPANT_ID;
-            if (vpId) {
-                try {
-                    const { VirtualParticipantStatusManager } = await import('./status-manager.js');
-                    const statusManager = new VirtualParticipantStatusManager(vpId);
-                    await statusManager.setActive();
-                    console.log(`VP ${vpId} status: ACTIVE (local test mode - no transcription)`);
-                } catch (error) {
-                    console.log(`Failed to update VP status to ACTIVE: ${error}`);
-                }
-            }
-            
-            // Keep the service marked as "transcribing" so the meeting continues
-            // but don't actually do any transcription
-            return;
-        }
+        // In local test mode, skip Kinesis/AppSync but still run transcription if agent is enabled
+        // (Transcription provides audio stream for ElevenLabs agent)
 
         const maxRetries = 5;
         const retryDelay = 5000; // 5 seconds
@@ -251,6 +260,28 @@ export class TranscriptionService {
     }
 
     private processTranscriptResult(result: any): void {
+        const transcript = result.Alternatives?.[0]?.Transcript || '';
+        const isPartial = result.IsPartial;
+        const timestamp = Date.now();
+        
+        if (transcript) {
+            console.log(`📝 Transcribed: "${transcript}" (IsPartial: ${isPartial})`);
+        }
+        
+        // Add to transcript buffer (only non-partial for accuracy)
+        if (!isPartial && transcript) {
+            this.transcriptBuffer.push({ text: transcript, timestamp, isPartial });
+            
+            // Trim old entries
+            const cutoff = timestamp - this.bufferWindowMs;
+            this.transcriptBuffer = this.transcriptBuffer.filter(t => t.timestamp > cutoff);
+            
+            // Check for wake phrase
+            if (this.detectWakePhrase(transcript)) {
+                this.handleWakePhraseDetected(timestamp);
+            }
+        }
+        
         for (const item of result.Alternatives?.[0]?.Items ?? []) {
             const word = item.Content;
             const wordType = item.Type;
@@ -306,6 +337,16 @@ export class TranscriptionService {
             this.process.kill();
             this.process = null;
         }
+        
+        // Stop voice assistant if running
+        if (voiceAssistant.isEnabled()) {
+            try {
+                await voiceAssistant.stop();
+                console.log('✓ Voice assistant stopped');
+            } catch (error) {
+                console.error('Error stopping voice assistant:', error);
+            }
+        }
 
         // Send end meeting event to Kinesis
         try {
@@ -328,6 +369,48 @@ export class TranscriptionService {
         
         const formattedTime = this.formatTimestamp(timestamp);
         console.log(`[${formattedTime}] Speaker changed to: ${speaker}`);
+    }
+
+    // Wake phrase detection methods
+    private detectWakePhrase(text: string): boolean {
+        // Remove all punctuation and normalize whitespace
+        const normalized = text.toLowerCase()
+            .replace(/[,.\?!;:]/g, ' ')  // Replace punctuation with spaces
+            .replace(/\s+/g, ' ')         // Normalize multiple spaces
+            .trim();
+        
+        return this.wakePhrases.some(phrase => normalized.includes(phrase));
+    }
+
+    private async handleWakePhraseDetected(detectionTime: number): Promise<void> {
+        // Don't activate if already activated or if voice assistant not enabled
+        if (!voiceAssistant.isEnabled() || voiceAssistant.isActivated()) {
+            return;
+        }
+
+        // Don't activate if we're already capturing context
+        if (this.isCapturingContext) {
+            return;
+        }
+
+        console.log('🎤 Wake phrase detected, capturing context...');
+        this.isCapturingContext = true;
+        
+        // Wait to capture additional context after wake phrase
+        await new Promise(resolve => setTimeout(resolve, this.captureDelayMs));
+        
+        // Get transcript from detection time onwards
+        const contextTranscript = this.transcriptBuffer
+            .filter(t => t.timestamp >= detectionTime - 2000) // Include 2s before wake phrase
+            .map(t => t.text)
+            .join(' ');
+        
+        console.log('📝 Captured context:', contextTranscript);
+        
+        // Activate voice assistant with context
+        voiceAssistant.activate(30, contextTranscript);
+        
+        this.isCapturingContext = false;
     }
 
     // Utility methods for status
@@ -394,6 +477,11 @@ export class TranscriptionService {
                         // Send to Transcribe
                         await transcribeResponse.input_stream?.send_audio_event?.({ audio_chunk: chunk });
                         recordingStream.write(chunk);
+                        
+                        // Also send to voice assistant if enabled and activated
+                        if (voiceAssistant.isEnabled() && voiceAssistant.isActive() && voiceAssistant.isActivated()) {
+                            voiceAssistant.sendAudioChunk(chunk);
+                        }
                     } catch (error: any) {
                         const msg = `Audio chunk processing error: ${error.message}`;
                         if (isLocalTest) {

@@ -27,7 +27,9 @@ const getPuppeteerConfig = () => ({
     args: [
         `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT+80}`,
         "--use-fake-ui-for-media-stream",
-        "--use-fake-device-for-media-stream",
+        // Use real PulseAudio device (agent_mic) instead of fake device
+        // This allows Chromium to use the virtual microphone we created
+        "--autoplay-policy=no-user-gesture-required",
         "--disable-blink-features=AutomationControlled",
         "--disable-notifications",
         "--disable-extensions",
