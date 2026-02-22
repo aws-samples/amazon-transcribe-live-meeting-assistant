@@ -14,9 +14,15 @@ And after the call is over, you usually want to capture a summary for your recor
 
 All of this, and more, is now possible with our newest sample solution, Live Meeting Assistant (LMA).
 
-Check out the following demo to see how it works.
+Check out our original demo to see how it works with the browser extension, and/or the updated demo to see the latest features including Virtual Participant, MCP based AI Agentic assistant - powered by Strands, and the new all voice assistant (think: Alexa or Siri in your meetings) - powered by Nova Sonic2, with optional Quick Suite integration.  
 
+***Original demo:***
 https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/assets/10953374/d5979569-c99c-4141-be56-9f436b48b0ec
+
+***Latest demo:***
+
+https://github.com/user-attachments/assets/b7c286a7-eb53-43d9-a28d-4f9b1e8abdcf
+
 
 ## Solution overview
 
