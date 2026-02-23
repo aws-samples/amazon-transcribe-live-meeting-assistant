@@ -14,6 +14,8 @@ RUN apk update && \
     chromium-chromedriver \
     ffmpeg \
     pulseaudio \
+    pulseaudio-utils \
+    sox \
     dbus-x11 \
     xvfb \
     x11vnc \

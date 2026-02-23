@@ -2,6 +2,7 @@ import { Page, Frame } from 'puppeteer';
 import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { createStatusManager } from "./status-manager.js";
+import { voiceAssistant } from './voice-assistant.js';
 
 export default class Webex {
     private readonly iframe = '#unified-webclient-iframe';
@@ -223,9 +224,14 @@ export default class Webex {
             console.log('Cookie banner not found:', error);
         }
 
-        console.log('Clicking mute button.');
-        const muteButtonElement = await frame.waitForSelector((frameElement && frameElement.source === 'enterprise') ? '#audioControlButton' : 'mdc-button[data-test="microphone-button"]');
-        await (frameElement && frameElement.source === 'enterprise') ? frame.evaluate((el: any) => el.click(), muteButtonElement) : muteButtonElement?.click();
+        // Only click mute button if voice assistant is NOT enabled
+        if (!voiceAssistant.isEnabled()) {
+            console.log('Clicking mute button.');
+            const muteButtonElement = await frame.waitForSelector((frameElement && frameElement.source === 'enterprise') ? '#audioControlButton' : 'mdc-button[data-test="microphone-button"]');
+            await (frameElement && frameElement.source === 'enterprise') ? frame.evaluate((el: any) => el.click(), muteButtonElement) : muteButtonElement?.click();
+        } else {
+            console.log('Voice assistant enabled - skipping mute button for agent audio');
+        }
 
         console.log('Clicking video button.');
         const videoButtonElement = await frame.waitForSelector(

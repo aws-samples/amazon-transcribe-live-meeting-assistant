@@ -1,6 +1,7 @@
 import { Page } from 'puppeteer';
 import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
+import { voiceAssistant } from './voice-assistant.js';
 
 export default class Chime {
     private prevSender: string = '';
@@ -32,9 +33,14 @@ export default class Chime {
             throw new Error('Meeting not found or invalid meeting ID');
         }
 
-        console.log('Clicking mute button.');
-        const muteCheckboxElement = await page.waitForSelector('text/Join muted');
-        await muteCheckboxElement?.click();
+        // Only click mute button if voice assistant is NOT enabled
+        if (!voiceAssistant.isEnabled()) {
+            console.log('Clicking mute button.');
+            const muteCheckboxElement = await page.waitForSelector('text/Join muted');
+            await muteCheckboxElement?.click();
+        } else {
+            console.log('Voice assistant enabled - skipping mute button for agent audio');
+        }
 
         console.log('Clicking join button.');
         const joinButtonElement = await page.waitForSelector(
