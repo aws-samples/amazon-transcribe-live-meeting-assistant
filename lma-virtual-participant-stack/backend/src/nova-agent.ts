@@ -411,7 +411,6 @@ export class NovaAgent implements VoiceAssistantProvider {
             } else if (jsonResponse.event?.audioOutput) {
               // Received audio from Nova - play it immediately (non-blocking)
               const audioBuffer = Buffer.from(jsonResponse.event.audioOutput.content, 'base64');
-              // Don't await - let audio play in background
               this.playAudio(audioBuffer).catch(err => {
                 console.error('Error playing audio:', err);
               });
@@ -424,9 +423,7 @@ export class NovaAgent implements VoiceAssistantProvider {
             } else if (jsonResponse.event?.contentEnd && jsonResponse.event?.contentEnd?.type === 'TOOL') {
               // Process tool use asynchronously when content ends
               console.log(`Processing tool use: ${toolName}`);
-              
               if (toolName === 'strands_agent' && toolUseContent) {
-                // Process tool in background - don't block the response stream
                 this.processToolUseAsync(toolUseId, toolName, toolUseContent).catch(error => {
                   console.error('Error in async tool processing:', error);
                 });
