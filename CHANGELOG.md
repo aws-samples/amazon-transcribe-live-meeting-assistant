@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- AWS Nova Sonic 2 voice assistant session management during tool use - session now stays open while tools process and audio plays
+- AWS Nova Sonic 2 async tool processing - tools now execute in background without blocking response stream, allowing Nova to remain responsive during tool execution
+- AWS Nova Sonic 2 pre-tool acknowledgment - implemented confirmation-based prompting strategy where Nova announces "Let me search for that information. This may take a moment." before calling tools, setting proper user expectations for sub-agent processing time
+
 ## [0.2.26] - 02/23/26
 
 ### Added
