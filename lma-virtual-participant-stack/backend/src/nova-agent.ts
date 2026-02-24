@@ -259,14 +259,21 @@ export class NovaAgent implements VoiceAssistantProvider {
     // Append tool usage instructions if Strands tool is available
     let systemPromptContent = this.systemPrompt;
     if (this.strandsLambdaArn) {
-      systemPromptContent += '\n\nIMPORTANT: You have access to the strands_agent tool. Use it when users ask about:\n' +
+      systemPromptContent += '\n\nIMPORTANT: You have access to the strands_agent tool for handling information requests.\n\n' +
+        'CRITICAL WORKFLOW: When a user asks a question that requires the strands_agent tool:\n' +
+        '1. FIRST, speak to the user: "Let me search for that information. This may take a moment."\n' +
+        '2. WAIT for the user to acknowledge (e.g., "okay", "sure", "go ahead") OR proceed after 2 seconds if no response\n' +
+        '3. THEN call the strands_agent tool with the user\'s query\n' +
+        '4. After receiving the result, provide a natural response with the information\n\n' +
+        'Use strands_agent when users ask about:\n' +
         '- Meeting summaries or transcripts\n' +
         '- Past meetings or meeting history\n' +
         '- Documents or knowledge base content\n' +
         '- Web search or current information\n' +
-        '- Any query requiring specialized knowledge or data access\n' +
-        'When you use the tool, first acknowledge the request (e.g., "Let me search for that"), then invoke the tool. ' +
-        'Pass the user\'s query in the "query" parameter.';
+        '- Any query requiring specialized knowledge or data access\n\n' +
+        'IMPORTANT: The strands_agent is a sub-agent that may take 5-10 seconds to respond. ' +
+        'Always let the user know it may take a moment before calling the tool. ' +
+        'This sets proper expectations and prevents awkward silence.';
     }
 
     this.addEventToQueue({
@@ -402,9 +409,12 @@ export class NovaAgent implements VoiceAssistantProvider {
             } else if (jsonResponse.event?.textOutput) {
               console.log('Text output:', jsonResponse.event.textOutput.content);
             } else if (jsonResponse.event?.audioOutput) {
-              // Received audio from Nova
+              // Received audio from Nova - play it immediately (non-blocking)
               const audioBuffer = Buffer.from(jsonResponse.event.audioOutput.content, 'base64');
-              await this.playAudio(audioBuffer);
+              // Don't await - let audio play in background
+              this.playAudio(audioBuffer).catch(err => {
+                console.error('Error playing audio:', err);
+              });
             } else if (jsonResponse.event?.toolUse) {
               // Store tool use information
               console.log('Tool use requested:', jsonResponse.event.toolUse.toolName);
@@ -412,37 +422,14 @@ export class NovaAgent implements VoiceAssistantProvider {
               toolUseId = jsonResponse.event.toolUse.toolUseId;
               toolName = jsonResponse.event.toolUse.toolName;
             } else if (jsonResponse.event?.contentEnd && jsonResponse.event?.contentEnd?.type === 'TOOL') {
-              // Process tool use when content ends
+              // Process tool use asynchronously when content ends
               console.log(`Processing tool use: ${toolName}`);
               
               if (toolName === 'strands_agent' && toolUseContent) {
-                try {
-                  // Set flag to prevent deactivation while tool is processing
-                  this._isProcessingTool = true;
-                  
-                  // Invoke Strands Lambda
-                  const toolResult = await this.invokeStrandsAgent(toolUseContent);
-                  
-                  // Send tool result back to Nova (only if session is still active)
-                  if (this.session && this.session.isActive) {
-                    await this.sendToolResult(toolUseId, toolResult);
-                    console.log('✓ Tool result sent to Nova');
-                  } else {
-                    console.log('⚠️  Session closed before tool result could be sent');
-                  }
-                } catch (error) {
-                  console.error('Error processing tool use:', error);
-                  // Send error result back to Nova (only if session is still active)
-                  if (this.session && this.session.isActive) {
-                    await this.sendToolResult(toolUseId, {
-                      error: 'Failed to process tool request',
-                      details: error instanceof Error ? error.message : String(error)
-                    });
-                  }
-                } finally {
-                  // Clear flag after tool processing completes
-                  this._isProcessingTool = false;
-                }
+                // Process tool in background - don't block the response stream
+                this.processToolUseAsync(toolUseId, toolName, toolUseContent).catch(error => {
+                  console.error('Error in async tool processing:', error);
+                });
               }
             } else if (jsonResponse.event?.contentEnd) {
               console.log('Content end:', jsonResponse.event.contentEnd.type);
@@ -461,6 +448,41 @@ export class NovaAgent implements VoiceAssistantProvider {
       console.log('Response stream processing complete');
     } catch (error) {
       console.error('Error processing response stream:', error);
+    }
+  }
+
+  private async processToolUseAsync(toolUseId: string, toolName: string, toolUseContent: any): Promise<void> {
+    try {
+      // Set flag to prevent deactivation while tool is processing
+      this._isProcessingTool = true;
+      console.log(`🔧 Starting async tool processing: ${toolName}`);
+      
+      // Invoke Strands Lambda
+      const toolResult = await this.invokeStrandsAgent(toolUseContent);
+      
+      // Send tool result back to Nova immediately (only if session is still active)
+      if (this.session && this.session.isActive) {
+        await this.sendToolResult(toolUseId, toolResult);
+        console.log('✓ Tool result sent to Nova - Nova will now process and generate audio response');
+      } else {
+        console.log('⚠️  Session closed before tool result could be sent');
+      }
+    } catch (error) {
+      console.error('Error processing tool use:', error);
+      // Send error result back to Nova (only if session is still active)
+      if (this.session && this.session.isActive) {
+        await this.sendToolResult(toolUseId, {
+          error: 'Failed to process tool request',
+          details: error instanceof Error ? error.message : String(error)
+        });
+      }
+    } finally {
+      // Clear flag after tool processing completes
+      // The _isSpeaking flag will keep the session open while Nova generates and plays audio
+      setTimeout(() => {
+        this._isProcessingTool = false;
+      }, 2000);
+      console.log(`✓ Async tool processing complete: ${toolName}`);
     }
   }
 
@@ -795,9 +817,17 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private deactivateWithSpeakingCheck(): void {
-    // If agent is speaking, wait for it to finish
+    // If agent is speaking or processing a tool, wait for it to finish
     if (this._isSpeaking) {
       console.log('🔊 Nova is speaking, delaying deactivation...');
+      setTimeout(() => {
+        this.deactivateWithSpeakingCheck();
+      }, 1000);
+      return;
+    }
+    
+    if (this._isProcessingTool) {
+      console.log('🔧 Nova is processing a tool, delaying deactivation...');
       setTimeout(() => {
         this.deactivateWithSpeakingCheck();
       }, 1000);
