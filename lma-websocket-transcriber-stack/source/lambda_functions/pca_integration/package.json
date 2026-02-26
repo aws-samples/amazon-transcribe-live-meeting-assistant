@@ -6,9 +6,9 @@
   "author": "Bob Strahan",
   "license": "Apache-2.0",
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.623.0",
-    "@aws-sdk/client-eventbridge": "^3.623.0",
-    "@aws-sdk/client-kinesis": "^3.623.0",
-    "@aws-sdk/client-s3": "^3.623.0"
+    "@aws-sdk/client-dynamodb": "^3.995.0",
+    "@aws-sdk/client-eventbridge": "^3.995.0",
+    "@aws-sdk/client-kinesis": "^3.995.0",
+    "@aws-sdk/client-s3": "^3.995.0"
   }
 }
