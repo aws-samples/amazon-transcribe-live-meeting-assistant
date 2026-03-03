@@ -316,31 +316,6 @@ Set longer activation for complex queries:
 VoiceAssistantActivationDuration=60  # 60 seconds
 ```
 
-### Custom System Prompt (Coming Soon)
-
-Future releases will support custom system prompts for Nova Sonic 2:
-
-```bash
-VoiceAssistantSystemPrompt="You are Alex, a specialized assistant for..."
-```
-
-### Voice Selection (Coming Soon)
-
-Future releases will support voice selection:
-
-```bash
-VoiceAssistantVoice="Matthew"  # Male voice
-VoiceAssistantVoice="Ruth"     # Female voice
-```
-
-### Tool Prompt Customization (Coming Soon)
-
-Future releases will support custom tool prompts:
-
-```bash
-VoiceAssistantToolPrompt="When searching for information, always..."
-```
-
 ## What's New in v0.2.27
 
 ### Enhanced Session Management
