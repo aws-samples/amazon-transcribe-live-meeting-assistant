@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Virtual Participant stack deployment failure when StrandsLambdaArn parameter is not provided - IAM policy now conditionally includes entire StrandsLambdaPolicy instead of creating empty Resource array
+
 ## [0.2.27] - 03/03/26
 
 ### Fixed
