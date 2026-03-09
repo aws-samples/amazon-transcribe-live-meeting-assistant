@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- AWS Nova Sonic 2 session refresh for continuous conversation beyond 8-minute timeout in `always_active` mode
+- Keep-alive mechanism (30-second silence chunks) to prevent 55-second inactivity timeout
+- Conversation history capture from Nova's ASR transcripts (both USER and ASSISTANT turns)
+- Conversation history passing during session refresh to maintain context across sessions
+- Queued refresh execution that waits for agent to be idle (not speaking or processing tools)
+
+### Changed
+- AWS Nova Sonic 2 now supports unlimited conversation duration in `always_active` mode with automatic session refresh every 5 minutes
+- CloudFormation VoiceAssistantActivationMode parameter description updated to clarify 8-minute limitation for `wake_phrase` mode
+
+### Fixed
+- AWS Nova Sonic 2 8-minute session timeout - sessions now automatically refresh before timeout
+- AWS Nova Sonic 2 55-second inactivity timeout during long agent responses or silence periods
+- AWS Nova Sonic 2 context loss after session refresh - conversation history now maintained
+- AWS Nova Sonic 2 model confusion after session refresh - proper context prevents tool usage issues
+
 ## [0.2.27] - 03/03/26
 
 ### Fixed
