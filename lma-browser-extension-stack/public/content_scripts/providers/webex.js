@@ -23,7 +23,10 @@ const sendChatMessage = function (message) {
   if (composerDiv) {
     const chatInput = composerDiv.querySelector('div#quill-composer div.ql-editor');
     if (chatInput) {
-      chatInput.innerHTML = `<p>${message}</p>`;
+      chatInput.textContent = '';
+      const p = document.createElement('p');
+      p.textContent = message;
+      chatInput.appendChild(p);
       var inputEvent = new Event('input', { bubbles: true, cancelable: true });
       chatInput.dispatchEvent(inputEvent);
       setTimeout(() => {

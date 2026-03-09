@@ -890,11 +890,12 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
       // Notify iframe to reload button configuration
       const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
       if (iframe && iframe.contentWindow) {
+        const iframeOrigin = new URL(iframe.src).origin;
         iframe.contentWindow.postMessage(
           {
             type: 'STRANDS_RELOAD_BUTTONS',
           },
-          '*',
+          iframeOrigin,
         );
       }
 
@@ -946,11 +947,12 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
       // Notify iframe to reload button configuration
       const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
       if (iframe && iframe.contentWindow) {
+        const iframeOrigin = new URL(iframe.src).origin;
         iframe.contentWindow.postMessage(
           {
             type: 'STRANDS_RELOAD_BUTTONS',
           },
-          '*',
+          iframeOrigin,
         );
       }
 
@@ -1485,6 +1487,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
         const isAdmin = userGroups.includes('Admin');
 
+        const iframeOrigin = new URL(iframe.src).origin;
         iframe.contentWindow.postMessage(
           {
             type: 'STRANDS_USER_CONTEXT',
@@ -1492,7 +1495,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
             isAdmin,
             email: user?.attributes?.email || '',
           },
-          '*',
+          iframeOrigin,
         );
       }
     };
@@ -1506,6 +1509,9 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   // Add message handler for STRANDS iframe requests
   useEffect(() => {
     const handleMessage = async (event) => {
+      // Validate message origin for security
+      if (event.origin !== window.location.origin) return;
+      
       // Handle user context request from iframe
       if (event.data && event.data.type === 'STRANDS_REQUEST_USER_CONTEXT') {
         const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
@@ -1513,6 +1519,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
         const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
         if (iframe && iframe.contentWindow) {
+          const iframeOrigin = new URL(iframe.src).origin;
           iframe.contentWindow.postMessage(
             {
               type: 'STRANDS_USER_CONTEXT',
@@ -1520,7 +1527,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
               isAdmin,
               email: user?.attributes?.email || '',
             },
-            '*',
+            iframeOrigin,
           );
         }
       }
@@ -1576,6 +1583,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           // Send success response back to iframe
           const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
           if (iframe && iframe.contentWindow) {
+            const iframeOrigin = new URL(iframe.src).origin;
             iframe.contentWindow.postMessage(
               {
                 type: 'STRANDS_BUTTON_CONFIG_RESPONSE',
@@ -1583,7 +1591,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
                 success: true,
                 config: mergedConfig,
               },
-              '*',
+              iframeOrigin,
             );
           }
         } catch (error) {
@@ -1593,6 +1601,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           // Send error response back to iframe
           const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
           if (iframe && iframe.contentWindow) {
+            const iframeOrigin = new URL(iframe.src).origin;
             iframe.contentWindow.postMessage(
               {
                 type: 'STRANDS_BUTTON_CONFIG_RESPONSE',
@@ -1600,7 +1609,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
                 success: false,
                 error: error.message || error.errors?.[0]?.message || 'getChatButtonConfig call failed',
               },
-              '*',
+              iframeOrigin,
             );
           }
         }
@@ -1630,6 +1639,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           // Send success response back to iframe
           const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
           if (iframe && iframe.contentWindow) {
+            const iframeOrigin = new URL(iframe.src).origin;
             iframe.contentWindow.postMessage(
               {
                 type: 'STRANDS_UPDATE_BUTTON_CONFIG_RESPONSE',
@@ -1637,7 +1647,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
                 success: true,
                 result,
               },
-              '*',
+              iframeOrigin,
             );
           }
         } catch (error) {
@@ -1646,6 +1656,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           // Send error response back to iframe
           const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
           if (iframe && iframe.contentWindow) {
+            const iframeOrigin = new URL(iframe.src).origin;
             iframe.contentWindow.postMessage(
               {
                 type: 'STRANDS_UPDATE_BUTTON_CONFIG_RESPONSE',
@@ -1653,7 +1664,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
                 success: false,
                 error: error.message || error.errors?.[0]?.message || 'updateChatButtonConfig call failed',
               },
-              '*',
+              iframeOrigin,
             );
           }
         }
@@ -1686,6 +1697,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           // Send success response back to iframe
           const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
           if (iframe && iframe.contentWindow) {
+            const iframeOrigin = new URL(iframe.src).origin;
             iframe.contentWindow.postMessage(
               {
                 type: 'STRANDS_CHAT_RESPONSE',
@@ -1693,7 +1705,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
                 success: true,
                 result,
               },
-              '*',
+              iframeOrigin,
             );
           }
         } catch (error) {
@@ -1702,6 +1714,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           // Send error response back to iframe
           const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
           if (iframe && iframe.contentWindow) {
+            const iframeOrigin = new URL(iframe.src).origin;
             iframe.contentWindow.postMessage(
               {
                 type: 'STRANDS_CHAT_RESPONSE',
@@ -1709,7 +1722,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
                 success: false,
                 error: error.message || error.errors?.[0]?.message || 'sendChatMessage call failed',
               },
-              '*',
+              iframeOrigin,
             );
           }
         }
@@ -1755,7 +1768,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
                     type: 'STRANDS_TOKEN_MESSAGE',
                     token,
                   },
-                  '*',
+                  event.origin,
                 );
               }
             },

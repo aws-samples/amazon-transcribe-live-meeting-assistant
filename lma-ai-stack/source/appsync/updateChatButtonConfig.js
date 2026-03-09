@@ -17,8 +17,19 @@ export function request(ctx) {
   // Parse the ButtonConfig JSON string
   const configObject = JSON.parse(ButtonConfig);
   
-  // Build the item to store in DynamoDB - merge config fields with ID
-  const item = Object.assign({ ChatButtonConfigId }, configObject);
+  // Security: Allowlist only button configuration fields (format: N#LABEL for buttons)
+  // This prevents mass assignment of unexpected DynamoDB attributes
+  const allowedFields = {};
+  const buttonPattern = /^\d+#/; // Matches button fields like "1#Action Items", "2#Summary", etc.
+  
+  Object.keys(configObject).forEach((key) => {
+    if (buttonPattern.test(key)) {
+      allowedFields[key] = configObject[key];
+    }
+  });
+  
+  // Build the item to store in DynamoDB - merge sanitized config fields with ID
+  const item = Object.assign({ ChatButtonConfigId }, allowedFields);
   
   return {
     operation: 'PutItem',
