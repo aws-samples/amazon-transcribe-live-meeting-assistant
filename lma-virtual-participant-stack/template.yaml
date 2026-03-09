@@ -938,18 +938,18 @@ Resources:
                   - "bedrock:InvokeModelWithBidirectionalStream"
                 Resource:
                   - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-*"
-        - PolicyName: StrandsLambdaPolicy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "lambda:InvokeFunction"
-                Resource:
-                  - !If
-                    - HasStrandsLambdaArn
+        - !If
+          - HasStrandsLambdaArn
+          - PolicyName: StrandsLambdaPolicy
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - "lambda:InvokeFunction"
+                  Resource:
                     - !Ref StrandsLambdaArn
-                    - !Ref AWS::NoValue
+          - !Ref AWS::NoValue
 
   TaskExecutionRole:
     Type: AWS::IAM::Role

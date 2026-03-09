@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CloudFormation VoiceAssistantActivationMode parameter description updated to clarify 8-minute limitation for `wake_phrase` mode
 
 ### Fixed
+- Virtual Participant stack deployment failure when StrandsLambdaArn parameter is not provided - IAM policy now conditionally includes entire StrandsLambdaPolicy instead of creating empty Resource array
 - AWS Nova Sonic 2 8-minute session timeout - sessions now automatically refresh before timeout
 - AWS Nova Sonic 2 55-second inactivity timeout during long agent responses or silence periods
 - AWS Nova Sonic 2 context loss after session refresh - conversation history now maintained
