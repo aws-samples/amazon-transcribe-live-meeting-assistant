@@ -14,8 +14,8 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
   const { ChatButtonConfigId, ButtonConfig } = ctx.args.input;
   
-  // Parse the ButtonConfig JSON string
-  const configObject = JSON.parse(ButtonConfig);
+  // Parse the ButtonConfig JSON string (JSON.parse is not available in APPSYNC_JS runtime)
+  const configObject = util.parseJson(ButtonConfig);
   
   // Security: Allowlist only button configuration fields (format: N#LABEL for buttons)
   // This prevents mass assignment of unexpected DynamoDB attributes
