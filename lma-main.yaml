@@ -112,7 +112,7 @@ Parameters:
       - "strands_tool (coming soon)"
     Description: >-
       How the voice assistant is activated. 'always_active' for interviewer/meeting leader use cases (agent leads conversation),
-      'wake_phrase' to activate only when wake phrase is detected, or 'strands_tool' for intelligent activation by Strands agent.
+      'wake_phrase' to activate only when wake phrase is detected (max 300 seconds), or 'strands_tool' for intelligent activation by Strands agent.
 
   VoiceAssistantWakePhrases:
     Type: String
@@ -128,7 +128,7 @@ Parameters:
     MaxValue: 300
     Description: >-
       How long the voice assistant stays active after wake phrase detection (in seconds).
-      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Default is 30 seconds.
+      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Default is 30 seconds. Maximum is 300 seconds.
 
   BedrockGuardrailId:
     Type: String
