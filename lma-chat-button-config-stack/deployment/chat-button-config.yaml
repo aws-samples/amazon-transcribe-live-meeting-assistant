@@ -31,8 +31,8 @@ Resources:
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+        # SSEType: KMS
+        # KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
