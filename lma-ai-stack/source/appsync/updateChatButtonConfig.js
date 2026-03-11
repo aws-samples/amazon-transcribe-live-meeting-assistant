@@ -12,7 +12,7 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-  const { ChatButtonConfigId, ButtonConfig } = ctx.args.input;
+  const { ChatButtonConfigId, ButtonConfig } = ctx.arguments.input;
   
   // Parse the ButtonConfig JSON string (JSON.parse is not available in APPSYNC_JS runtime)
   const configObject = util.parseJson(ButtonConfig);
@@ -46,7 +46,7 @@ export function response(ctx) {
   }
   
   return {
-    ChatButtonConfigId: ctx.args.input.ChatButtonConfigId,
+    ChatButtonConfigId: ctx.arguments.input.ChatButtonConfigId,
     Success: true
   };
 }
