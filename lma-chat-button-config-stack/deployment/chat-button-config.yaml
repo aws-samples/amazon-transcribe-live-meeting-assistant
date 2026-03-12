@@ -58,6 +58,15 @@ Resources:
               Action:
                 - "dynamodb:PutItem"
                 - "dynamodb:UpdateItem"
+        - PolicyName: KMSAccessPolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
 
   ChatButtonUploadFunction:
     Type: "AWS::Lambda::Function"
