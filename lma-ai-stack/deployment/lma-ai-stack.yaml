@@ -2214,6 +2214,102 @@ Resources:
                   - lambda:InvokeFunction
                 Resource: !GetAtt MeetingControlsResolverFunction.Arn
 
+  UpdateChatButtonConfigResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt UpdateChatButtonConfigResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/update_chat_button_config_resolver
+      Description: Lambda resolver for updateChatButtonConfig with AF-12 Mass Assignment security fix
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          CHAT_BUTTON_CONFIG_TABLE_NAME: !Ref ChatButtonConfigTableName
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UpdateChatButtonConfigResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - UpdateChatButtonConfigResolverFunctionLogGroup
+
+  UpdateChatButtonConfigResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UpdateChatButtonConfigResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UpdateChatButtonConfigResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: UpdateChatButtonConfigResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UpdateChatButtonConfig
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatButtonConfigTableName}"
+
+  AppSyncUpdateChatButtonConfigLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt UpdateChatButtonConfigResolverFunction.Arn
+
+  UpdateChatButtonConfigLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UpdateChatButtonConfigLambda
+      Description: Lambda function for updateChatButtonConfig with AF-12 security fix
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncUpdateChatButtonConfigLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt UpdateChatButtonConfigResolverFunction.Arn
+
   # AppSync Event API for MCP command delivery (separate from GraphQL API)
   AppSyncEventApi:
     Type: AWS::AppSync::Api
@@ -3025,13 +3121,13 @@ Resources:
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ChatButtonConfigDataSource.Name
+      DataSourceName: !GetAtt UpdateChatButtonConfigLambdaDataSource.Name
       TypeName: Mutation
       FieldName: updateChatButtonConfig
       Runtime:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
-      CodeS3Location: ../source/appsync/updateChatButtonConfig.js
+      CodeS3Location: ../source/appsync/updateChatButtonConfigLambda.js
 
   SendChatMessageResolver:
     Type: AWS::AppSync::Resolver
