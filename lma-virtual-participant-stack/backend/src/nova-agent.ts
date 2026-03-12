@@ -13,9 +13,11 @@ import {
   InvokeModelWithBidirectionalStreamInput,
 } from '@aws-sdk/client-bedrock-runtime';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { NodeHttp2Handler } from '@smithy/node-http-handler';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { randomUUID } from 'crypto';
+import { loadNovaSonicConfig } from './nova-sonic-config-loader.js';
 
 export interface NovaAgentConfig {
   modelId: string;
@@ -109,6 +111,29 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log('Starting AWS Nova Sonic 2 agent...');
     
     try {
+      // Load configuration from DynamoDB if table name is provided
+      const tableName = process.env.NOVA_SONIC_CONFIG_TABLE_NAME;
+      if (tableName) {
+        try {
+          const dynamoDbClient = new DynamoDBClient({
+            region: this.region,
+            credentials: defaultProvider(),
+          });
+          
+          const config = await loadNovaSonicConfig(dynamoDbClient, tableName);
+          console.log('✓ Loaded Nova Sonic config from DynamoDB');
+          
+          // Update system prompt and model ID from config
+          this.systemPrompt = config.systemPrompt;
+          this.modelId = config.modelId;
+          console.log(`  Updated system prompt (${config.systemPrompt.length} chars)`);
+          console.log(`  Updated model ID: ${config.modelId}`);
+        } catch (error) {
+          console.error('Failed to load Nova Sonic config from DynamoDB:', error);
+          console.log('Using environment variable configuration as fallback');
+        }
+      }
+      
       // Initialize Bedrock client
       const nodeHttp2Handler = new NodeHttp2Handler({
         requestTimeout: 300000,
