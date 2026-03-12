@@ -1,0 +1,143 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >-
+  Amazon Nova Sonic Voice Assistant Configuration Stack.
+  This stack creates a DynamoDB table to store customizable configuration
+  for the Nova Sonic voice assistant, including system prompts and model settings.
+
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs.
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
+Resources:
+  # DynamoDB Table for Nova Sonic Configuration
+  NovaSonicConfigTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      KeySchema:
+        - AttributeName: NovaSonicConfigId
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: NovaSonicConfigId
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # IAM Role for Lambda Function
+  NovaSonicConfigUploadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: allow-dynamodb-access
+          PolicyDocument:
+            Statement:
+              Effect: Allow
+              Resource:
+                - !GetAtt NovaSonicConfigTable.Arn
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+        - PolicyName: KMSAccessPolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+
+  # CloudWatch Logs Group for Lambda Function
+  NovaSonicConfigUploadFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/NovaSonicConfigUploadFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # Lambda Function to Populate Default Configuration
+  NovaSonicConfigUploadFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Properties:
+      Code: ../source/lambda_functions
+      Handler: nova_sonic_config_upload.lambda_handler
+      Role: !GetAtt NovaSonicConfigUploadRole.Arn
+      Runtime: python3.12
+      MemorySize: 128
+      Timeout: 60
+      TracingConfig:
+        Mode: Active
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/NovaSonicConfigUploadFunction
+    DependsOn:
+      - NovaSonicConfigUploadFunctionLogGroup
+
+  # Custom Resource to Trigger Lambda
+  NovaSonicStoreConfig:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt NovaSonicConfigUploadFunction.Arn
+      NovaSonicConfigTableName: !Ref NovaSonicConfigTable
+      # hash below is updated by publish.sh script - used to force template updates when source has changed.
+      source_hash: 0000000000000000
+
+Outputs:
+  NovaSonicConfigTableName:
+    Description: Name of the DynamoDB table storing Nova Sonic configuration
+    Value: !Ref NovaSonicConfigTable
+
+  NovaSonicConfigTableArn:
+    Description: ARN of the DynamoDB table storing Nova Sonic configuration
+    Value: !GetAtt NovaSonicConfigTable.Arn
+
+  DefaultNovaSonicConfig:
+    Description: >-
+      View the *default* Nova Sonic voice assistant configuration. Do not edit - 
+      changes will be overwritten on stack updates. To customize, edit the custom config item.
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=DefaultNovaSonicConfig&route=ROUTE_ITEM_EXPLORER&table=${NovaSonicConfigTable}'
+
+  CustomNovaSonicConfig:
+    Description: >-
+      Edit the *custom* Nova Sonic voice assistant configuration. Attribute values 
+      here override the default config and are preserved during stack updates.
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomNovaSonicConfig&route=ROUTE_ITEM_EXPLORER&table=${NovaSonicConfigTable}'

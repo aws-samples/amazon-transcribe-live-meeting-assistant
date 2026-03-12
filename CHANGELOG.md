@@ -13,11 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Conversation history capture from Nova's ASR transcripts (both USER and ASSISTANT turns)
 - Conversation history passing during session refresh to maintain context across sessions
 - Queued refresh execution that waits for agent to be idle (not speaking or processing tools)
+- Customizable prompt support for Amazon Nova Sonic voice assistant via DynamoDB configuration with three modes (base, inject, replace)
 
 ### Changed
 - AWS Nova Sonic 2 now supports unlimited conversation duration in `always_active` mode with automatic session refresh every 5 minutes
 - CloudFormation VoiceAssistantActivationMode parameter description updated to clarify 8-minute limitation for `wake_phrase` mode
 - Enhanced security posture with comprehensive DSR review fixes including KMS permissions for custom resource Lambda functions, CloudWatch Logs encryption, and DynamoDB encryption
+- Renamed "aws_nova" to "amazon_nova_sonic" throughout codebase for better clarity and AWS naming consistency
 
 ### Removed
 - Amazon Nova 2 Pro model support
@@ -41,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Voice assistant integration for Virtual Participant with ElevenLabs Conversational AI and AWS Nova Sonic 2 support
-- Multi-provider voice assistant architecture with factory pattern (elevenlabs, aws_nova, none)
+- Multi-provider voice assistant architecture with factory pattern (elevenlabs, amazon_nova_sonic, none)
 - Wake phrase activation mode with configurable phrases and duration for voice assistant
 - Strands agent tool integration for both voice providers (meeting history, document search, web search)
 - Voice assistant CloudFormation parameters (VoiceAssistantProvider, VoiceAssistantActivationMode, VoiceAssistantWakePhrases, VoiceAssistantActivationDuration)
