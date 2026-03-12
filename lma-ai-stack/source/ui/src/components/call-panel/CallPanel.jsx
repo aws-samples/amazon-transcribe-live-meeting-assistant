@@ -1511,7 +1511,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     const handleMessage = async (event) => {
       // Validate message origin for security
       if (event.origin !== window.location.origin) return;
-      
+
       // Handle user context request from iframe
       if (event.data && event.data.type === 'STRANDS_REQUEST_USER_CONTEXT') {
         const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
