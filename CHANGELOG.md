@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - AWS Nova Sonic 2 now supports unlimited conversation duration in `always_active` mode with automatic session refresh every 5 minutes
 - CloudFormation VoiceAssistantActivationMode parameter description updated to clarify 8-minute limitation for `wake_phrase` mode
+- Enhanced security posture with comprehensive DSR review fixes including KMS permissions for custom resource Lambda functions, CloudWatch Logs encryption, and DynamoDB encryption
+
+### Removed
+- Amazon Nova 2 Pro model support
 
 ### Fixed
 - Virtual Participant stack deployment failure when StrandsLambdaArn parameter is not provided - IAM policy now conditionally includes entire StrandsLambdaPolicy instead of creating empty Resource array
@@ -24,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AWS Nova Sonic 2 55-second inactivity timeout during long agent responses or silence periods
 - AWS Nova Sonic 2 context loss after session refresh - conversation history now maintained
 - AWS Nova Sonic 2 model confusion after session refresh - proper context prevents tool usage issues
+- Fresh CloudFormation stack deployment failures for LLMStorePromptTemplates and ChatButtonStoreConfig custom resources - added missing KMS permissions (kms:Decrypt, kms:GenerateDataKey, kms:DescribeKey) to Lambda execution roles for accessing KMS-encrypted CloudWatch Logs and DynamoDB tables
 
 ## [0.2.27] - 03/03/26
 
