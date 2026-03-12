@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Conversation history capture from Nova's ASR transcripts (both USER and ASSISTANT turns)
 - Conversation history passing during session refresh to maintain context across sessions
 - Queued refresh execution that waits for agent to be idle (not speaking or processing tools)
-- Customizable prompt support for Amazon Nova Sonic voice assistant via DynamoDB configuration with three modes (base, inject, replace)
+- Customizable prompt support for Amazon Nova Sonic voice assistant via DynamoDB configuration with three modes (base, inject, replace) and voice ID selection
 
 ### Changed
 - AWS Nova Sonic 2 now supports unlimited conversation duration in `always_active` mode with automatic session refresh every 5 minutes

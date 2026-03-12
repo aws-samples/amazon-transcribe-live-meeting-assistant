@@ -19,6 +19,7 @@ Changes are preserved during stack updates. Available attributes:
 - systemPrompt (String): The system prompt text for the voice assistant
 - promptMode (String): How to apply custom prompt - 'base' (use as-is), 'inject' (append to default), or 'replace' (fully replace default)
 - modelId (String): Override the Nova model ID (optional)
+- voiceId (String): Voice ID for speech output - Options: tiffany (US feminine, polyglot), matthew (US masculine, polyglot), amy (UK feminine), olivia (AU feminine), kiara (IN feminine), arjun (IN masculine), ambre (FR feminine), florian (FR masculine), beatrice (IT feminine), lorenzo (IT masculine), tina (DE feminine), lennart (DE masculine), lupe (US Spanish feminine), carlos (US Spanish masculine), carolina (BR Portuguese feminine), leo (BR Portuguese masculine)
 """
 
 def get_default_config():
@@ -29,6 +30,7 @@ def get_default_config():
         'systemPrompt': 'You are Alex, an AI meeting assistant. Be concise and helpful.',
         'promptMode': 'base',
         'modelId': 'amazon.nova-2-sonic-v1:0',
+        'voiceId': 'tiffany',
         'description': 'Default Nova Sonic configuration. Do not edit - changes will be overwritten on stack updates.'
     }
 

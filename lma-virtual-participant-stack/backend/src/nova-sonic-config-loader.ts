@@ -21,6 +21,7 @@ export interface NovaSonicConfig {
   systemPrompt: string;
   promptMode: 'base' | 'inject' | 'replace';
   modelId: string;
+  voiceId?: string;
 }
 
 /**
@@ -31,6 +32,7 @@ interface DynamoDBConfigItem {
   systemPrompt?: string;
   promptMode?: string;
   modelId?: string;
+  voiceId?: string;
   description?: string;
   '*Information*'?: string;
 }
@@ -42,6 +44,7 @@ const DEFAULT_CONFIG: NovaSonicConfig = {
   systemPrompt: 'You are Alex, an AI meeting assistant. Be concise and helpful.',
   promptMode: 'base',
   modelId: 'amazon.nova-2-sonic-v1:0',
+  voiceId: 'tiffany', // Default polyglot voice (English US, feminine)
 };
 
 /**
@@ -143,6 +146,9 @@ function mergeConfigs(
     if (defaultConfig.modelId) {
       baseConfig.modelId = defaultConfig.modelId;
     }
+    if (defaultConfig.voiceId) {
+      baseConfig.voiceId = defaultConfig.voiceId;
+    }
     if (defaultConfig.promptMode === 'base' || defaultConfig.promptMode === 'inject' || defaultConfig.promptMode === 'replace') {
       baseConfig.promptMode = defaultConfig.promptMode;
     }
@@ -172,6 +178,7 @@ function mergeConfigs(
     systemPrompt: finalPrompt,
     promptMode: promptMode,
     modelId: customConfig.modelId || baseConfig.modelId,
+    voiceId: customConfig.voiceId || baseConfig.voiceId,
   };
 }
 

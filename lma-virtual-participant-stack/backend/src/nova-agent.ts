@@ -27,6 +27,7 @@ export interface NovaAgentConfig {
   activationDuration?: number;
   region?: string;
   strandsLambdaArn?: string;
+  voiceId?: string;
 }
 
 interface SessionData {
@@ -49,6 +50,7 @@ interface ConversationTurn {
 export class NovaAgent implements VoiceAssistantProvider {
   private modelId: string;
   private systemPrompt: string;
+  private voiceId: string;
   private knowledgeBaseId?: string;
   private activationMode: string;
   private _isActivated: boolean = false;
@@ -89,6 +91,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   constructor(config: NovaAgentConfig) {
     this.modelId = config.modelId;
     this.systemPrompt = config.systemPrompt;
+    this.voiceId = config.voiceId || 'tiffany'; // Default to tiffany (polyglot voice)
     this.knowledgeBaseId = config.knowledgeBaseId;
     this.activationMode = config.activationMode || 'wake_phrase';
     this.defaultActivationDuration = config.activationDuration || 30;
@@ -100,6 +103,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     console.log('✓ AWS Nova Sonic 2 agent initialized');
     console.log(`  Model: ${this.modelId}`);
+    console.log(`  Voice: ${this.voiceId}`);
     console.log(`  Region: ${this.region}`);
     console.log(`  Activation mode: ${this.activationMode}`);
     if (this.strandsLambdaArn) {
@@ -123,11 +127,15 @@ export class NovaAgent implements VoiceAssistantProvider {
           const config = await loadNovaSonicConfig(dynamoDbClient, tableName);
           console.log('✓ Loaded Nova Sonic config from DynamoDB');
           
-          // Update system prompt and model ID from config
+          // Update system prompt, model ID, and voice ID from config
           this.systemPrompt = config.systemPrompt;
           this.modelId = config.modelId;
+          if (config.voiceId) {
+            this.voiceId = config.voiceId;
+          }
           console.log(`  Updated system prompt (${config.systemPrompt.length} chars)`);
           console.log(`  Updated model ID: ${config.modelId}`);
+          console.log(`  Updated voice ID: ${this.voiceId}`);
         } catch (error) {
           console.error('Failed to load Nova Sonic config from DynamoDB:', error);
           console.log('Using environment variable configuration as fallback');
@@ -295,7 +303,7 @@ export class NovaAgent implements VoiceAssistantProvider {
             sampleRateHertz: 16000,
             sampleSizeBits: 16,
             channelCount: 1,
-            voiceId: 'tiffany',
+            voiceId: this.voiceId, // Use configured voice ID
           },
         },
       },
