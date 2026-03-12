@@ -3443,6 +3443,11 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
                 Resource: !GetAtt VirtualParticipantTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
 
   CreateVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
