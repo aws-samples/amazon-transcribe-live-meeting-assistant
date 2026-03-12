@@ -3126,8 +3126,8 @@ Resources:
         PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
-        # SSEType: KMS
-        # KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
   # MCP Servers Table - Account-level MCP server configurations
@@ -3640,8 +3640,8 @@ Resources:
         PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
-        # SSEType: KMS
-        # KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       TimeToLiveSpecification:
         AttributeName: expiresAt
         Enabled: true
