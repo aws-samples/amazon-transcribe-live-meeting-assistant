@@ -21,6 +21,7 @@
     "@aws-sdk/client-s3": "^3.726.1",
     "@aws-sdk/client-transcribe-streaming": "^3.726.1",
     "@aws-sdk/credential-provider-node": "^3.726.1",
+    "@aws-sdk/lib-dynamodb": "^3.726.1",
     "@aws-sdk/util-dynamodb": "^3.726.1",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "@smithy/protocol-http": "^5.3.5",

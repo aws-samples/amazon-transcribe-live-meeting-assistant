@@ -179,7 +179,7 @@ if [ "$SKIP_ENV_GENERATION" = false ]; then
         echo "Voice Assistant Activation Mode: $VOICE_ASSISTANT_ACTIVATION_MODE"
         if [ "$VOICE_ASSISTANT_PROVIDER" = "elevenlabs" ]; then
             echo "ElevenLabs Agent ID: $ELEVENLABS_AGENT_ID"
-        elif [ "$VOICE_ASSISTANT_PROVIDER" = "aws_nova" ]; then
+        elif [ "$VOICE_ASSISTANT_PROVIDER" = "amazon_nova_sonic" ]; then
             echo "Nova Model ID: $NOVA_MODEL_ID"
             echo "Nova System Prompt: ${NOVA_SYSTEM_PROMPT:0:50}..."
             if [ -n "$STRANDS_LAMBDA_ARN" ]; then

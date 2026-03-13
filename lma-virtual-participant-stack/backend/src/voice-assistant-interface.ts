@@ -4,7 +4,7 @@
  * Generic interface for voice AI assistants (ElevenLabs, AWS Nova, etc.)
  */
 
-export type VoiceAssistantProviderType = 'none' | 'elevenlabs' | 'aws_nova';
+export type VoiceAssistantProviderType = 'none' | 'elevenlabs' | 'amazon_nova_sonic';
 export type ActivationMode = 'always_active' | 'wake_phrase' | 'strands_tool';
 
 export interface VoiceAssistantConfig {
@@ -23,7 +23,7 @@ export interface ElevenLabsConfig extends VoiceAssistantConfig {
 }
 
 export interface NovaConfig extends VoiceAssistantConfig {
-  provider: 'aws_nova';
+  provider: 'amazon_nova_sonic';
   modelId: string;
   systemPrompt: string;
   knowledgeBaseId?: string;

@@ -26,7 +26,7 @@ export function createVoiceAssistant(config: ProviderConfig): VoiceAssistantProv
         strandsLambdaArn: config.strandsLambdaArn,
       });
 
-    case 'aws_nova':
+    case 'amazon_nova_sonic':
       return new NovaAgent({
         modelId: config.modelId,
         systemPrompt: config.systemPrompt,
@@ -46,7 +46,7 @@ export function createVoiceAssistant(config: ProviderConfig): VoiceAssistantProv
  * Create voice assistant from environment variables
  */
 export function createVoiceAssistantFromEnv(): VoiceAssistantProvider {
-  const provider = (process.env.VOICE_ASSISTANT_PROVIDER || 'none') as 'none' | 'elevenlabs' | 'aws_nova';
+  const provider = (process.env.VOICE_ASSISTANT_PROVIDER || 'none') as 'none' | 'elevenlabs' | 'amazon_nova_sonic';
   const activationMode = (process.env.VOICE_ASSISTANT_ACTIVATION_MODE || 'wake_phrase') as 'always_active' | 'wake_phrase' | 'strands_tool';
   const activationDuration = parseInt(process.env.VOICE_ASSISTANT_ACTIVATION_DURATION || '30');
   
@@ -71,10 +71,12 @@ export function createVoiceAssistantFromEnv(): VoiceAssistantProvider {
     });
   }
 
-  if (provider === 'aws_nova') {
+  if (provider === 'amazon_nova_sonic') {
+    // Note: DynamoDB config loading will be implemented in NovaAgent constructor
+    // to avoid breaking the synchronous initialization pattern
     return createVoiceAssistant({
       ...baseConfig,
-      provider: 'aws_nova',
+      provider: 'amazon_nova_sonic',
       modelId: process.env.NOVA_MODEL_ID || 'amazon.nova-2-sonic-v1:0',
       systemPrompt: process.env.NOVA_SYSTEM_PROMPT || 'You are Alex, an AI meeting assistant. Be concise and helpful.',
       knowledgeBaseId: process.env.NOVA_KNOWLEDGE_BASE_ID, // Optional - for future enhancement

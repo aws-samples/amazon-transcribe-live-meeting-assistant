@@ -154,8 +154,8 @@ Parameters:
     AllowedValues:
       - "none"
       - "elevenlabs"
-      - "aws_nova"
-    Description: Voice AI assistant provider (none, elevenlabs, aws_nova)
+      - "amazon_nova_sonic"
+    Description: Voice AI assistant provider (none, elevenlabs, amazon_nova_sonic)
 
   VoiceAssistantActivationMode:
     Type: String
@@ -178,12 +178,19 @@ Parameters:
     MaxValue: 300
     Description: How long voice assistant stays active after wake phrase (seconds)
 
+  NovaSonicConfigTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) DynamoDB table name for Nova Sonic configuration.
+      When provided, enables customizable prompts for Nova voice assistant.
+
   NovaModelId:
     Type: String
     Default: "amazon.nova-2-sonic-v1:0"
     Description: >-
       (Optional) AWS Bedrock Nova model ID for voice assistant.
-      Used when VoiceAssistantProvider is set to 'aws_nova'.
+      Used when VoiceAssistantProvider is set to 'amazon_nova_sonic'.
 
   NovaSystemPrompt:
     Type: String
@@ -908,6 +915,14 @@ Resources:
                   - "dynamodb:UpdateItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                  - "kms:DescribeKey"
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
         - PolicyName: ALBDynamicRoutingPolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -938,6 +953,23 @@ Resources:
                   - "bedrock:InvokeModelWithBidirectionalStream"
                 Resource:
                   - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-*"
+        - PolicyName: NovaSonicConfigAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:Query"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*NovaSonicConfig*"
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                  - "kms:DescribeKey"
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
         - !If
           - HasStrandsLambdaArn
           - PolicyName: StrandsLambdaPolicy
@@ -1329,6 +1361,8 @@ Resources:
               Value: !Ref NovaModelId
             - Name: NOVA_SYSTEM_PROMPT
               Value: !Ref NovaSystemPrompt
+            - Name: NOVA_SONIC_CONFIG_TABLE_NAME
+              Value: !Ref NovaSonicConfigTableName
             - Name: STRANDS_LAMBDA_ARN
               Value: !Ref StrandsLambdaArn
           Essential: true

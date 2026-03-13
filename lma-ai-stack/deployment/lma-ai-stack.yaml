@@ -1375,6 +1375,14 @@ Resources:
                   - "dynamodb:GetItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
         - PolicyName: !Sub ${AWS::StackName}-BedrockSummary
           PolicyDocument:
             Version: 2012-10-17
@@ -2154,6 +2162,9 @@ Resources:
                   - kms:Decrypt
                   - kms:DescribeKey
                 Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
               - Effect: Allow
                 Action:
                   - appsync:GraphQL
@@ -2275,6 +2286,14 @@ Resources:
                 Action:
                   - dynamodb:PutItem
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatButtonConfigTableName}"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
   AppSyncUpdateChatButtonConfigLambdaRole:
     Type: AWS::IAM::Role
@@ -2557,6 +2576,14 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatButtonConfigTableName}"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
   AppSyncStrandsChatLambdaRole:
     Type: AWS::IAM::Role
@@ -3448,6 +3475,9 @@ Resources:
                   - kms:Decrypt
                   - kms:DescribeKey
                 Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
   CreateVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
@@ -3685,8 +3715,16 @@ Resources:
               Action:
                 - dynamodb:GetItem
                 - dynamodb:DeleteItem
-              Resource: 
+              Resource:
                 - !GetAtt VPTaskRegistry.Arn
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+              Condition:
+                StringEquals:
+                  "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
             - Effect: Allow
               Action:
                 - dynamodb:ListTables
