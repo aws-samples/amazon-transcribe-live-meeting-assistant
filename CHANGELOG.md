@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.28] - 2026-03-13
+
+### Added
+- AWS Nova Sonic 2 session refresh for continuous conversation beyond 8-minute timeout in `always_active` mode
+- Keep-alive mechanism (30-second silence chunks) to prevent 55-second inactivity timeout
+- Conversation history capture from Nova's ASR transcripts (both USER and ASSISTANT turns)
+- Conversation history passing during session refresh to maintain context across sessions
+- Queued refresh execution that waits for agent to be idle (not speaking or processing tools)
+- Customizable prompt support for Amazon Nova Sonic voice assistant via DynamoDB configuration with three modes (base, inject, replace) and voice ID selection
+
+### Changed
+- AWS Nova Sonic 2 now supports unlimited conversation duration in `always_active` mode with automatic session refresh every 5 minutes
+- CloudFormation VoiceAssistantActivationMode parameter description updated to clarify 8-minute limitation for `wake_phrase` mode
+- Enhanced security posture with comprehensive DSR review fixes including KMS permissions for custom resource Lambda functions, CloudWatch Logs encryption, and DynamoDB encryption
+- Renamed "aws_nova" to "amazon_nova_sonic" throughout codebase for better clarity and AWS naming consistency
+- Updated AWS Nova Sonic 2 documentation with customization guide including prompt modes, voice ID selection, and DynamoDB configuration examples
+
+### Removed
+- Amazon Nova 2 Pro model support
+
+### Fixed
+- Virtual Participant stack deployment failure when StrandsLambdaArn parameter is not provided - IAM policy now conditionally includes entire StrandsLambdaPolicy instead of creating empty Resource array
+- AWS Nova Sonic 2 8-minute session timeout - sessions now automatically refresh before timeout
+- AWS Nova Sonic 2 55-second inactivity timeout during long agent responses or silence periods
+- AWS Nova Sonic 2 context loss after session refresh - conversation history now maintained
+- AWS Nova Sonic 2 model confusion after session refresh - proper context prevents tool usage issues
+- Fresh CloudFormation stack deployment failures for LLMStorePromptTemplates and ChatButtonStoreConfig custom resources - added missing KMS permissions (kms:Decrypt, kms:GenerateDataKey, kms:DescribeKey) to Lambda execution roles for accessing KMS-encrypted CloudWatch Logs and DynamoDB tables
+
 ## [0.2.27] - 03/03/26
 
 ### Fixed
@@ -16,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Voice assistant integration for Virtual Participant with ElevenLabs Conversational AI and AWS Nova Sonic 2 support
-- Multi-provider voice assistant architecture with factory pattern (elevenlabs, aws_nova, none)
+- Multi-provider voice assistant architecture with factory pattern (elevenlabs, amazon_nova_sonic, none)
 - Wake phrase activation mode with configurable phrases and duration for voice assistant
 - Strands agent tool integration for both voice providers (meeting history, document search, web search)
 - Voice assistant CloudFormation parameters (VoiceAssistantProvider, VoiceAssistantActivationMode, VoiceAssistantWakePhrases, VoiceAssistantActivationDuration)

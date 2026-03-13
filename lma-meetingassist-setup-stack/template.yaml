@@ -793,7 +793,21 @@ Resources:
                   - "kms:DescribeKey"
                 Resource:
                   - !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
           PolicyName: KMSPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                  - "kms:Encrypt"
+                  - "kms:GenerateDataKey"
+                Resource:
+                  - !Ref CustomerManagedEncryptionKeyArn
+          PolicyName: KMSDecryptPolicy
         - PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -1349,6 +1363,9 @@ Resources:
                   - "kms:Encrypt"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${KMSKey}"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
           PolicyName: KmsPolicy
         - PolicyDocument:
             Version: 2012-10-17

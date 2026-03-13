@@ -13,9 +13,11 @@ import {
   InvokeModelWithBidirectionalStreamInput,
 } from '@aws-sdk/client-bedrock-runtime';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { NodeHttp2Handler } from '@smithy/node-http-handler';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { randomUUID } from 'crypto';
+import { loadNovaSonicConfig } from './nova-sonic-config-loader.js';
 
 export interface NovaAgentConfig {
   modelId: string;
@@ -25,6 +27,7 @@ export interface NovaAgentConfig {
   activationDuration?: number;
   region?: string;
   strandsLambdaArn?: string;
+  voiceId?: string;
 }
 
 interface SessionData {
@@ -34,11 +37,20 @@ interface SessionData {
   audioContentId: string;
   isPromptStartSent: boolean;
   isAudioContentStartSent: boolean;
+  sessionStartTime: number;
+  lastRefreshTime: number;
+}
+
+interface ConversationTurn {
+  role: 'USER' | 'ASSISTANT';
+  content: string;
+  timestamp: number;
 }
 
 export class NovaAgent implements VoiceAssistantProvider {
   private modelId: string;
   private systemPrompt: string;
+  private voiceId: string;
   private knowledgeBaseId?: string;
   private activationMode: string;
   private _isActivated: boolean = false;
@@ -51,6 +63,18 @@ export class NovaAgent implements VoiceAssistantProvider {
   private defaultActivationDuration: number;
   private region: string;
   private audioChunkCount: number = 0;
+  
+  // Session refresh configuration
+  private readonly SESSION_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes (3 min buffer before 8 min timeout)
+  private sessionRefreshTimer: NodeJS.Timeout | null = null;
+  private isRefreshing: boolean = false;
+  private refreshQueued: boolean = false;
+  private keepAliveTimer: NodeJS.Timeout | null = null;
+  private readonly KEEP_ALIVE_INTERVAL = 30 * 1000; // Send keep-alive every 30 seconds
+  
+  // Conversation history for session refresh
+  private conversationHistory: ConversationTurn[] = [];
+  private readonly MAX_HISTORY_TURNS = 10; // Keep last 10 turns for context
   
   // Bedrock client and session management
   private bedrockClient: BedrockRuntimeClient | null = null;
@@ -67,6 +91,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   constructor(config: NovaAgentConfig) {
     this.modelId = config.modelId;
     this.systemPrompt = config.systemPrompt;
+    this.voiceId = config.voiceId || 'tiffany'; // Default to tiffany (polyglot voice)
     this.knowledgeBaseId = config.knowledgeBaseId;
     this.activationMode = config.activationMode || 'wake_phrase';
     this.defaultActivationDuration = config.activationDuration || 30;
@@ -78,6 +103,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     console.log('✓ AWS Nova Sonic 2 agent initialized');
     console.log(`  Model: ${this.modelId}`);
+    console.log(`  Voice: ${this.voiceId}`);
     console.log(`  Region: ${this.region}`);
     console.log(`  Activation mode: ${this.activationMode}`);
     if (this.strandsLambdaArn) {
@@ -89,6 +115,33 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log('Starting AWS Nova Sonic 2 agent...');
     
     try {
+      // Load configuration from DynamoDB if table name is provided
+      const tableName = process.env.NOVA_SONIC_CONFIG_TABLE_NAME;
+      if (tableName) {
+        try {
+          const dynamoDbClient = new DynamoDBClient({
+            region: this.region,
+            credentials: defaultProvider(),
+          });
+          
+          const config = await loadNovaSonicConfig(dynamoDbClient, tableName);
+          console.log('✓ Loaded Nova Sonic config from DynamoDB');
+          
+          // Update system prompt, model ID, and voice ID from config
+          this.systemPrompt = config.systemPrompt;
+          this.modelId = config.modelId;
+          if (config.voiceId) {
+            this.voiceId = config.voiceId;
+          }
+          console.log(`  Updated system prompt (${config.systemPrompt.length} chars)`);
+          console.log(`  Updated model ID: ${config.modelId}`);
+          console.log(`  Updated voice ID: ${this.voiceId}`);
+        } catch (error) {
+          console.error('Failed to load Nova Sonic config from DynamoDB:', error);
+          console.log('Using environment variable configuration as fallback');
+        }
+      }
+      
       // Initialize Bedrock client
       const nodeHttp2Handler = new NodeHttp2Handler({
         requestTimeout: 300000,
@@ -128,13 +181,14 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
   }
 
-  private async createSession(): Promise<void> {
+  private async createSession(isRefresh: boolean = false): Promise<void> {
     if (this.streamingActive) {
       console.log('Session already active');
       return;
     }
 
     this.sessionId = randomUUID();
+    const now = Date.now();
     this.session = {
       queue: [],
       isActive: true,
@@ -142,9 +196,11 @@ export class NovaAgent implements VoiceAssistantProvider {
       audioContentId: randomUUID(),
       isPromptStartSent: false,
       isAudioContentStartSent: false,
+      sessionStartTime: now,
+      lastRefreshTime: now,
     };
 
-    console.log(`Creating Nova session: ${this.sessionId}`);
+    console.log(`Creating Nova session: ${this.sessionId}${isRefresh ? ' (refresh)' : ''}`);
 
     // Start the bidirectional stream
     this.streamingActive = true;
@@ -161,13 +217,63 @@ export class NovaAgent implements VoiceAssistantProvider {
     await new Promise(resolve => setTimeout(resolve, 100));
 
     // Send initial events
-    await this.setupInitialEvents();
+    await this.setupInitialEvents(isRefresh);
+
+    // Start session refresh timer for always_active mode
+    if (this.activationMode === 'always_active') {
+      this.startSessionRefreshTimer();
+      // Delay keep-alive start to ensure session is fully initialized
+      setTimeout(() => {
+        this.startKeepAliveTimer();
+      }, 2000);
+    }
   }
 
-  private async setupInitialEvents(): Promise<void> {
+  private startKeepAliveTimer(): void {
+    // Clear any existing timer
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+    }
+
+    console.log(`💓 Keep-alive timer started - sending silence every ${this.KEEP_ALIVE_INTERVAL / 1000} seconds`);
+    
+    // Send silence chunks periodically to prevent 55-second timeout
+    this.keepAliveTimer = setInterval(() => {
+      // Only send keep-alive if session is active and not refreshing
+      if (this.session && this.session.isActive && !this.isRefreshing) {
+        // Create a small silence audio chunk (100ms of silence at 16kHz, 16-bit PCM)
+        const silenceDuration = 0.1; // 100ms
+        const sampleRate = 16000;
+        const bytesPerSample = 2; // 16-bit = 2 bytes
+        const silenceBytes = Math.floor(silenceDuration * sampleRate * bytesPerSample);
+        const silenceChunk = Buffer.alloc(silenceBytes, 0); // All zeros = silence
+        
+        // Send silence chunk directly to queue (bypass sendAudioChunk checks)
+        this.addEventToQueue({
+          event: {
+            audioInput: {
+              promptName: this.session.promptName,
+              contentName: this.session.audioContentId,
+              content: silenceChunk.toString('base64'),
+            },
+          },
+        });
+      }
+    }, this.KEEP_ALIVE_INTERVAL);
+  }
+
+  private stopKeepAliveTimer(): void {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+      console.log('✓ Keep-alive timer stopped');
+    }
+  }
+
+  private async setupInitialEvents(isRefresh: boolean = false): Promise<void> {
     if (!this.session) return;
 
-    console.log('Setting up initial events...');
+    console.log(`Setting up initial events${isRefresh ? ' (with conversation history)' : ''}...`);
 
     // Session start
     this.addEventToQueue({
@@ -197,7 +303,7 @@ export class NovaAgent implements VoiceAssistantProvider {
             sampleRateHertz: 16000,
             sampleSizeBits: 16,
             channelCount: 1,
-            voiceId: 'tiffany',
+            voiceId: this.voiceId, // Use configured voice ID
           },
         },
       },
@@ -256,32 +362,19 @@ export class NovaAgent implements VoiceAssistantProvider {
       },
     });
 
-    // Append tool usage instructions if Strands tool is available
-    let systemPromptContent = this.systemPrompt;
-    if (this.strandsLambdaArn) {
-      systemPromptContent += '\n\nIMPORTANT: You have access to the strands_agent tool for handling information requests.\n\n' +
-        'CRITICAL WORKFLOW: When a user asks a question that requires the strands_agent tool:\n' +
-        '1. FIRST, speak to the user: "Let me search for that information. This may take a moment."\n' +
-        '2. WAIT for the user to acknowledge (e.g., "okay", "sure", "go ahead") OR proceed after 2 seconds if no response\n' +
-        '3. THEN call the strands_agent tool with the user\'s query\n' +
-        '4. After receiving the result, provide a natural response with the information\n\n' +
-        'Use strands_agent when users ask about:\n' +
-        '- Meeting summaries or transcripts\n' +
-        '- Past meetings or meeting history\n' +
-        '- Documents or knowledge base content\n' +
-        '- Web search or current information\n' +
-        '- Any query requiring specialized knowledge or data access\n\n' +
-        'IMPORTANT: The strands_agent is a sub-agent that may take 5-10 seconds to respond. ' +
-        'Always let the user know it may take a moment before calling the tool. ' +
-        'This sets proper expectations and prevents awkward silence.';
-    }
-
+    const finalSystemPrompt = this.buildSystemPromptContent();
+    console.log('📋 Final system prompt being sent to Nova:');
+    console.log('─'.repeat(80));
+    console.log(finalSystemPrompt);
+    console.log('─'.repeat(80));
+    console.log(`   Total length: ${finalSystemPrompt.length} characters`);
+    
     this.addEventToQueue({
       event: {
         textInput: {
           promptName: this.session.promptName,
           contentName: textPromptID,
-          content: systemPromptContent,
+          content: finalSystemPrompt,
         },
       },
     });
@@ -294,6 +387,11 @@ export class NovaAgent implements VoiceAssistantProvider {
         },
       },
     });
+
+    // If this is a refresh, add conversation history
+    if (isRefresh) {
+      await this.setupConversationHistory();
+    }
 
     // Audio content start
     this.addEventToQueue({
@@ -318,6 +416,247 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.session.isAudioContentStartSent = true;
 
     console.log('Initial events setup complete');
+  }
+
+  private buildSystemPromptContent(): string {
+    let systemPromptContent = this.systemPrompt;
+    if (this.strandsLambdaArn) {
+      systemPromptContent += '\n\nIMPORTANT: You have access to the strands_agent tool for handling information requests.\n\n' +
+        'CRITICAL WORKFLOW: When a user asks a question that requires the strands_agent tool:\n' +
+        '1. FIRST, speak to the user: "Let me search for that information. This may take a moment."\n' +
+        '2. WAIT for the user to acknowledge (e.g., "okay", "sure", "go ahead") OR proceed after 2 seconds if no response\n' +
+        '3. THEN call the strands_agent tool with the user\'s query\n' +
+        '4. After receiving the result, provide a natural response with the information\n\n' +
+        'Use strands_agent when users ask about:\n' +
+        '- Meeting summaries or transcripts\n' +
+        '- Past meetings or meeting history\n' +
+        '- Documents or knowledge base content\n' +
+        '- Web search or current information\n' +
+        '- Any query requiring specialized knowledge or data access\n\n' +
+        'IMPORTANT: The strands_agent is a sub-agent that may take 5-10 seconds to respond. ' +
+        'Always let the user know it may take a moment before calling the tool. ' +
+        'This sets proper expectations and prevents awkward silence.';
+    }
+    return systemPromptContent;
+  }
+
+  private addToConversationHistory(role: 'USER' | 'ASSISTANT', content: string): void {
+    // Add to history
+    this.conversationHistory.push({
+      role,
+      content,
+      timestamp: Date.now(),
+    });
+
+    // Keep only last N turns
+    if (this.conversationHistory.length > this.MAX_HISTORY_TURNS) {
+      this.conversationHistory = this.conversationHistory.slice(-this.MAX_HISTORY_TURNS);
+    }
+  }
+
+  private async setupConversationHistory(): Promise<void> {
+    if (!this.session || this.conversationHistory.length === 0) return;
+
+    // Find the first USER turn - history must start with USER
+    let startIndex = this.conversationHistory.findIndex(turn => turn.role === 'USER');
+    
+    if (startIndex === -1) {
+      // No USER turns found - manufacture one to satisfy Nova's requirement
+      console.log('📜 No USER turns in history - manufacturing initial USER turn');
+      const historyToSend: ConversationTurn[] = [
+        { role: 'USER', content: 'Continue our conversation', timestamp: Date.now() },
+        ...this.conversationHistory
+      ];
+      
+      console.log(`📜 Setting up conversation history (${historyToSend.length} turns, starting with manufactured USER)...`);
+      await this.sendHistoryTurns(historyToSend);
+    } else {
+      // Get history starting from first USER turn
+      const historyToSend = this.conversationHistory.slice(startIndex);
+      console.log(`📜 Setting up conversation history (${historyToSend.length} turns, starting with USER)...`);
+      await this.sendHistoryTurns(historyToSend);
+    }
+
+    console.log('✓ Conversation history setup complete');
+  }
+
+  private async sendHistoryTurns(turns: ConversationTurn[]): Promise<void> {
+    if (!this.session) return;
+
+    // Send each turn as a text content block
+    for (const turn of turns) {
+      const textContentId = randomUUID();
+      
+      this.addEventToQueue({
+        event: {
+          contentStart: {
+            promptName: this.session.promptName,
+            contentName: textContentId,
+            type: 'TEXT',
+            interactive: false,
+            role: turn.role,
+            textInputConfiguration: {
+              mediaType: 'text/plain',
+            },
+          },
+        },
+      });
+
+      this.addEventToQueue({
+        event: {
+          textInput: {
+            promptName: this.session.promptName,
+            contentName: textContentId,
+            content: turn.content,
+            role: turn.role,
+          },
+        },
+      });
+
+      this.addEventToQueue({
+        event: {
+          contentEnd: {
+            promptName: this.session.promptName,
+            contentName: textContentId,
+          },
+        },
+      });
+    }
+  }
+
+  private startSessionRefreshTimer(): void {
+    // Clear any existing timer
+    if (this.sessionRefreshTimer) {
+      clearTimeout(this.sessionRefreshTimer);
+    }
+
+    console.log(`🔄 Session refresh timer started - will queue refresh in ${this.SESSION_REFRESH_INTERVAL / 60000} minutes`);
+    
+    this.sessionRefreshTimer = setTimeout(() => {
+      // Queue the refresh - it will execute when agent is idle
+      this.refreshQueued = true;
+      console.log('⏰ Session refresh queued - waiting for agent to be idle');
+      this.checkAndExecuteQueuedRefresh();
+    }, this.SESSION_REFRESH_INTERVAL);
+  }
+
+  private checkAndExecuteQueuedRefresh(): void {
+    if (!this.refreshQueued) return;
+
+    // Check if agent is busy
+    if (this._isSpeaking || this._isProcessingTool) {
+      console.log('🔊 Agent busy - will retry refresh check in 2 seconds');
+      setTimeout(() => this.checkAndExecuteQueuedRefresh(), 2000);
+      return;
+    }
+
+    // Agent is idle - execute refresh
+    this.refreshQueued = false;
+    this.refreshSession().catch(error => {
+      console.error('Error executing queued refresh:', error);
+    });
+  }
+
+  private async refreshSession(): Promise<void> {
+    if (!this.session || !this.session.isActive) {
+      console.log('⚠️  Cannot refresh - session not active');
+      return;
+    }
+
+    // Don't refresh if already refreshing
+    if (this.isRefreshing) {
+      console.log('⚠️  Session refresh already in progress');
+      return;
+    }
+
+    console.log('🔄 Refreshing Nova session - closing old session and creating new one...');
+    
+    try {
+      // Set refreshing flag
+      this.isRefreshing = true;
+
+      // Stop keep-alive timer during refresh
+      this.stopKeepAliveTimer();
+
+      // Close the old session gracefully (like stopAudio in the example)
+      if (this.session) {
+        try {
+          // End audio content
+          if (this.session.isAudioContentStartSent) {
+            this.addEventToQueue({
+              event: {
+                contentEnd: {
+                  promptName: this.session.promptName,
+                  contentName: this.session.audioContentId,
+                },
+              },
+            });
+          }
+
+          // End prompt
+          if (this.session.isPromptStartSent) {
+            this.addEventToQueue({
+              event: {
+                promptEnd: {
+                  promptName: this.session.promptName,
+                },
+              },
+            });
+          }
+
+          // End session
+          this.addEventToQueue({
+            event: {
+              sessionEnd: {},
+            },
+          });
+
+          // Wait for events to be sent
+          await new Promise(resolve => setTimeout(resolve, 300));
+
+          // Mark session as inactive
+          this.session.isActive = false;
+          if (this.closeSignal) {
+            this.closeSignal();
+          }
+        } catch (error) {
+          console.error('Error closing old session during refresh:', error);
+        }
+      }
+
+      // Reset session state
+      this.session = null;
+      this.sessionId = null;
+      this._isActive = false;
+      this.streamingActive = false;
+
+      // Small delay before creating new session
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Create new session (like startNewChat in the example)
+      // This will also restart the keep-alive timer
+      await this.createSession(true); // Pass true to indicate this is a refresh
+
+      console.log('✅ Session refreshed successfully - new session created and ready');
+
+      // Clear refreshing flag
+      this.isRefreshing = false;
+
+    } catch (error) {
+      console.error('❌ Error during session refresh:', error);
+      // Clear refreshing flag on error
+      this.isRefreshing = false;
+      this._isActive = false;
+      this.streamingActive = false;
+      
+      // Try to recover by creating a new session
+      setTimeout(() => {
+        console.log('🔄 Attempting recovery - creating new session');
+        this.createSession().catch(err => {
+          console.error('Error in recovery session creation:', err);
+        });
+      }, 1000);
+    }
   }
 
   private addEventToQueue(event: any): void {
@@ -393,6 +732,13 @@ export class NovaAgent implements VoiceAssistantProvider {
     let toolUseContent: any = null;
     let toolUseId: string = '';
     let toolName: string = '';
+    
+    // Track current conversation turn for history
+    let currentTurn: { role: 'USER' | 'ASSISTANT' | null; content: string; isFinal: boolean } = {
+      role: null,
+      content: '',
+      isFinal: false,
+    };
 
     try {
       for await (const event of response.body) {
@@ -406,8 +752,28 @@ export class NovaAgent implements VoiceAssistantProvider {
 
             if (jsonResponse.event?.contentStart) {
               console.log('Content start:', jsonResponse.event.contentStart.type);
+              
+              // Check if this is a FINAL transcript (for conversation history)
+              const additionalFields = jsonResponse.event.contentStart.additionalModelFields;
+              if (additionalFields) {
+                try {
+                  const fields = JSON.parse(additionalFields);
+                  if (fields.generationStage === 'FINAL') {
+                    currentTurn.role = jsonResponse.event.contentStart.role;
+                    currentTurn.content = '';
+                    currentTurn.isFinal = true;
+                  }
+                } catch (e) {
+                  // additionalModelFields might not be JSON
+                }
+              }
             } else if (jsonResponse.event?.textOutput) {
               console.log('Text output:', jsonResponse.event.textOutput.content);
+              
+              // Accumulate text for current turn if it's a FINAL transcript
+              if (currentTurn.role && currentTurn.isFinal) {
+                currentTurn.content += jsonResponse.event.textOutput.content;
+              }
             } else if (jsonResponse.event?.audioOutput) {
               // Received audio from Nova - play it immediately (non-blocking)
               const audioBuffer = Buffer.from(jsonResponse.event.audioOutput.content, 'base64');
@@ -430,6 +796,15 @@ export class NovaAgent implements VoiceAssistantProvider {
               }
             } else if (jsonResponse.event?.contentEnd) {
               console.log('Content end:', jsonResponse.event.contentEnd.type);
+              
+              // Save completed turn to conversation history
+              if (currentTurn.role && currentTurn.isFinal && currentTurn.content.trim()) {
+                this.addToConversationHistory(currentTurn.role, currentTurn.content.trim());
+                console.log(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
+              }
+              
+              // Reset current turn
+              currentTurn = { role: null, content: '', isFinal: false };
             }
           } catch (e) {
             // Not JSON, might be raw data
@@ -478,6 +853,11 @@ export class NovaAgent implements VoiceAssistantProvider {
       // The _isSpeaking flag will keep the session open while Nova generates and plays audio
       setTimeout(() => {
         this._isProcessingTool = false;
+        
+        // Check if there's a queued refresh waiting for agent to be idle
+        if (this.refreshQueued) {
+          this.checkAndExecuteQueuedRefresh();
+        }
       }, 2000);
       console.log(`✓ Async tool processing complete: ${toolName}`);
     }
@@ -605,6 +985,11 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
     
+    // Don't send audio during session refresh
+    if (this.isRefreshing) {
+      return;
+    }
+    
     if (!this._isActive || !this.session || !this.session.isActive) {
       return;
     }
@@ -633,6 +1018,9 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
 
     console.log('📤 Sending text message to Nova:', text);
+    
+    // Track user message in conversation history
+    this.addToConversationHistory('USER', text);
     
     // Create a text content block
     const textContentId = randomUUID();
@@ -748,6 +1136,11 @@ export class NovaAgent implements VoiceAssistantProvider {
       this._isSpeaking = false;
       this.isPlayingQueue = false;
       console.log('✅ All audio chunks played to virtual microphone');
+      
+      // Check if there's a queued refresh waiting for agent to be idle
+      if (this.refreshQueued) {
+        this.checkAndExecuteQueuedRefresh();
+      }
     }, 500); // Short delay after last chunk
   }
 
@@ -861,6 +1254,16 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     console.log('Closing Nova session...');
 
+    // Stop keep-alive timer
+    this.stopKeepAliveTimer();
+
+    // Clear session refresh timer
+    if (this.sessionRefreshTimer) {
+      clearTimeout(this.sessionRefreshTimer);
+      this.sessionRefreshTimer = null;
+      console.log('✓ Session refresh timer cleared');
+    }
+
     try {
       // End audio content
       if (this.session.isAudioContentStartSent) {
@@ -919,6 +1322,15 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   async stop(): Promise<void> {
     console.log('Stopping Nova agent...');
+
+    // Stop keep-alive timer
+    this.stopKeepAliveTimer();
+
+    // Clear session refresh timer
+    if (this.sessionRefreshTimer) {
+      clearTimeout(this.sessionRefreshTimer);
+      this.sessionRefreshTimer = null;
+    }
 
     // Clear activation timeout
     if (this.activationTimeout) {

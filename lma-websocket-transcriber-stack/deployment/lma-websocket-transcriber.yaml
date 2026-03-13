@@ -1011,6 +1011,14 @@ Resources:
             Resource:
               - !GetAtt TranscriberCallEventTable.Arn
           - Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Effect: Allow
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+          - Action:
               - logs:CreateLogStream
               - logs:PutLogEvents
             Effect: Allow
@@ -1522,6 +1530,14 @@ Resources:
                   - dynamodb:GetItem
                 Resource:
                   - !GetAtt TranscriberCallEventTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
               - Action:
                   - kinesis:PutRecord
                 Effect: Allow

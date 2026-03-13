@@ -55,7 +55,6 @@ Parameters:
       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "global.amazon.nova-2-lite-v1:0"
-      - "global.amazon.nova-2-pro-v1:0"
     Description: >-
       Select a Bedrock LLM model from the list. Includes Nova models (cost-effective), 
       Claude 3.5/3.7 (advanced), and Claude 4 (cutting-edge). Some models require inference profiles.
@@ -98,10 +97,10 @@ Parameters:
     AllowedValues:
       - "none"
       - "elevenlabs"
-      - "aws_nova"
+      - "amazon_nova_sonic"
     Description: >-
       Voice AI assistant provider for Virtual Participant. Choose 'none' to disable voice responses (default),
-      'elevenlabs' for ElevenLabs Conversational AI (requires API key above), or 'aws_nova' for AWS Nova Sonic 2 (placeholder - not yet implemented).
+      'elevenlabs' for ElevenLabs Conversational AI (requires API key above), or 'amazon_nova_sonic' for AWS Nova Sonic 2 (placeholder - not yet implemented).
 
   VoiceAssistantActivationMode:
     Type: String
@@ -112,7 +111,7 @@ Parameters:
       - "strands_tool (coming soon)"
     Description: >-
       How the voice assistant is activated. 'always_active' for interviewer/meeting leader use cases (agent leads conversation),
-      'wake_phrase' to activate only when wake phrase is detected, or 'strands_tool' for intelligent activation by Strands agent.
+      'wake_phrase' to activate only when wake phrase is detected (max 300 seconds), or 'strands_tool' for intelligent activation by Strands agent.
 
   VoiceAssistantWakePhrases:
     Type: String
@@ -128,7 +127,7 @@ Parameters:
     MaxValue: 300
     Description: >-
       How long the voice assistant stays active after wake phrase detection (in seconds).
-      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Default is 30 seconds.
+      Only used when VoiceAssistantActivationMode is 'wake_phrase'. Default is 30 seconds. Maximum is 300 seconds.
 
   BedrockGuardrailId:
     Type: String
@@ -504,7 +503,6 @@ Parameters:
       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "global.amazon.nova-2-lite-v1:0"
-      - "global.amazon.nova-2-pro-v1:0"
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models. Includes Nova models (cost-effective), Claude 3.5/3.7 (advanced), 
@@ -947,7 +945,7 @@ Metadata:
       ElevenLabsAgentId:
         default: ElevenLabs Agent ID for Custom Personality (Optional)
       VoiceAssistantProvider:
-        default: Voice Assistant Provider (none, elevenlabs, aws_nova)
+        default: Voice Assistant Provider (none, elevenlabs, amazon_nova_sonic)
       VoiceAssistantActivationMode:
         default: Voice Assistant Activation Mode
       VoiceAssistantWakePhrases:
@@ -2261,6 +2259,17 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
+  NOVASONICONFIGSTACK:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-nova-sonic-config-stack/deployment/nova-sonic-config.yaml
+      Parameters:
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+
   COGNITOSTACK:
     Type: AWS::CloudFormation::Stack
     DependsOn:
@@ -2654,6 +2663,7 @@ Resources:
         VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
         VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
         VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration
+        NovaSonicConfigTableName: !GetAtt NOVASONICONFIGSTACK.Outputs.NovaSonicConfigTableName
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
@@ -2789,6 +2799,14 @@ Outputs:
   CustomChatButtonConfig:
     Description: Edit the *custom* STRANDS agent chat button configuration. Attribute values here override the default button config, and are preserved during stack updates.
     Value: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.CustomChatButtonConfig
+
+  DefaultNovaSonicConfig:
+    Description: View the *default* Nova Sonic voice assistant configuration. Do not edit - changes will be overwritten on stack updates. To customize, edit the custom config item.
+    Value: !GetAtt NOVASONICONFIGSTACK.Outputs.DefaultNovaSonicConfig
+
+  CustomNovaSonicConfig:
+    Description: Edit the *custom* Nova Sonic voice assistant configuration. Attribute values here override the default config and are preserved during stack updates.
+    Value: !GetAtt NOVASONICONFIGSTACK.Outputs.CustomNovaSonicConfig
 
   CallDataStreamName:
     Description: >-

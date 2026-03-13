@@ -393,6 +393,36 @@ else
 echo "SKIPPING $dir (unchanged)"
 fi
 
+dir=lma-nova-sonic-config-stack
+if haschanged $dir; then
+echo "PACKAGING $dir/deployment"
+pushd $dir/deployment
+# by hashing the contents of the source folder, we can force the custom resource lambda to re-run
+# when the code or config contents change.
+echo "Computing hash of src folder contents"
+HASH=$(calculate_hash "../source")
+template=nova-sonic-config.yaml
+echo "Replace hash in template"
+# Detection of differences. sed varies betwen GNU sed and BSD sed
+if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
+  sed -i 's/source_hash: .*/source_hash: '"$HASH"'/' ${template}
+else # BSD like sed
+  sed -i '' 's/source_hash: .*/source_hash: '"$HASH"'/' ${template}
+fi
+s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/lma-nova-sonic-config-stack/deployment/nova-sonic-config.yaml"
+aws cloudformation package \
+--template-file ${template} \
+--output-template-file ${tmpdir}/${template} \
+--s3-bucket $BUCKET --s3-prefix ${PREFIX_AND_VERSION}/lma-nova-sonic-config-stack \
+--region ${REGION} || exit 1
+echo "Uploading template file to: ${s3_template}"
+aws s3 cp ${tmpdir}/${template} ${s3_template}
+popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
+
 # START QnABot Build Section - Advanced users can comment out this entire section to disable QnABot at build time
 dir=submodule-aws-qnabot
 echo "UPDATING $dir"

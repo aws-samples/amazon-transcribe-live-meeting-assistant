@@ -159,6 +159,7 @@ injectScript('content_scripts/providers/zoom-injection.js');
 
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
+  if (event.origin !== window.location.origin) return;
   
   if (event.data.type && (event.data.type == "MeetingConfig")) {
     console.log("received value from page: ", event.data.value);
