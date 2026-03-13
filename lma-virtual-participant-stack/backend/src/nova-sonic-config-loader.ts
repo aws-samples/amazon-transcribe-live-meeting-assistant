@@ -167,11 +167,18 @@ function mergeConfigs(
     : baseConfig.promptMode;
   
   // Apply prompt mode logic
+  console.log('🔧 Applying prompt mode logic:');
+  console.log(`   Prompt mode: ${promptMode}`);
+  console.log(`   Default prompt length: ${baseConfig.systemPrompt.length} chars`);
+  console.log(`   Custom prompt length: ${customConfig.systemPrompt?.length || 0} chars`);
+  
   const finalPrompt = applyPromptMode(
     baseConfig.systemPrompt,
     customConfig.systemPrompt,
     promptMode
   );
+  
+  console.log(`   Final merged prompt length: ${finalPrompt.length} chars`);
   
   // Return merged configuration
   return {
@@ -197,21 +204,36 @@ function applyPromptMode(
 ): string {
   // If no custom prompt, always use default
   if (!customPrompt || customPrompt.trim() === '') {
+    console.log('   ⚠️  No custom prompt provided, using default only');
     return defaultPrompt;
   }
   
+  console.log('   Custom prompt content:');
+  console.log('   ┌' + '─'.repeat(78));
+  console.log('   │ ' + customPrompt.substring(0, 200) + (customPrompt.length > 200 ? '...' : ''));
+  console.log('   └' + '─'.repeat(78));
+  
+  let result: string;
   switch (mode) {
     case 'inject':
       // Append custom prompt to default prompt
-      return `${defaultPrompt}\n\n${customPrompt}`;
+      console.log('   ✓ Mode: INJECT - Appending custom prompt to default');
+      result = `${defaultPrompt}\n\n${customPrompt}`;
+      break;
     
     case 'replace':
       // Replace entirely with custom prompt
-      return customPrompt;
+      console.log('   ✓ Mode: REPLACE - Using custom prompt only');
+      result = customPrompt;
+      break;
     
     case 'base':
     default:
       // Use custom prompt as-is (replaces default)
-      return customPrompt;
+      console.log('   ✓ Mode: BASE - Using custom prompt only');
+      result = customPrompt;
+      break;
   }
+  
+  return result;
 }
