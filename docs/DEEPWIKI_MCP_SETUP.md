@@ -257,6 +257,19 @@ LMA presents result (voice or text)
 2. Test with chat or voice
 3. Start querying documentation in meetings
 
+✅ **Nova Sonic Config Change (Optional):**
+For questions about LMA to work with Deepwiki, nova needs to format the query to the strans_agent tool correctly. Refer to docs/AWS_NOVA_SONIC_VOICE_ASSISTANT_SETUP.md for adding a custom Nova Sonic config. For the `promptMode` use inject and for the `systemPrompt` this something like this:
+
+```
+
+IMPORTANT: When users ask about LMA (Live Meeting Assistant) or this app, call strands_agent with this exact format:
+"[user's question]. Search for information about Live Meeting Assistant using the deepwiki tool with GitHub URL: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant"
+
+For example, if user asks "what vendors does LMA support?", call strands_agent with:
+"what vendors does LMA support? Search for information about Live Meeting Assistant using the deepwiki tool with GitHub URL: https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant"
+
+```
+
 ✅ **Example Queries:**
 - "What are the main features of the kubernetes/kubernetes repository?"
 - "How do I create a Lambda function with AWS CDK?"
