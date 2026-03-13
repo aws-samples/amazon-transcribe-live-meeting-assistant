@@ -803,6 +803,8 @@ Resources:
               - Effect: Allow
                 Action:
                   - "kms:Decrypt"
+                  - "kms:Encrypt"
+                  - "kms:GenerateDataKey"
                 Resource:
                   - !Ref CustomerManagedEncryptionKeyArn
           PolicyName: KMSDecryptPolicy
