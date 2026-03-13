@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.28] - 2026-03-13
 
 ### Added
 - AWS Nova Sonic 2 session refresh for continuous conversation beyond 8-minute timeout in `always_active` mode
@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CloudFormation VoiceAssistantActivationMode parameter description updated to clarify 8-minute limitation for `wake_phrase` mode
 - Enhanced security posture with comprehensive DSR review fixes including KMS permissions for custom resource Lambda functions, CloudWatch Logs encryption, and DynamoDB encryption
 - Renamed "aws_nova" to "amazon_nova_sonic" throughout codebase for better clarity and AWS naming consistency
+- Updated AWS Nova Sonic 2 documentation with customization guide including prompt modes, voice ID selection, and DynamoDB configuration examples
 
 ### Removed
 - Amazon Nova 2 Pro model support
