@@ -915,6 +915,14 @@ Resources:
                   - "dynamodb:UpdateItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                  - "kms:DescribeKey"
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
         - PolicyName: ALBDynamicRoutingPolicy
           PolicyDocument:
             Version: 2012-10-17
