@@ -802,6 +802,15 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
+                  - "kms:Decrypt"
+                Resource:
+                  - !Ref CustomerManagedEncryptionKeyArn
+          PolicyName: KMSDecryptPolicy
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
                   - "appsync:GraphQL"
                 Resource:
                   - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/addChatToken"
