@@ -954,6 +954,14 @@ Resources:
                   - "dynamodb:GetItem"
                   - "dynamodb:Query"
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*NovaSonicConfig*"
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                  - "kms:DescribeKey"
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
         - !If
           - HasStrandsLambdaArn
           - PolicyName: StrandsLambdaPolicy
