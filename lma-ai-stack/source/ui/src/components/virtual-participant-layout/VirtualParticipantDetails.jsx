@@ -175,7 +175,7 @@ StatusBadge.propTypes = {
   status: PropTypes.string.isRequired,
 };
 
-const StatusDetails = ({ status, updatedAt }) => {
+const StatusDetails = ({ status, updatedAt, scheduledFor }) => {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.FAILED;
   const isInProgress = ['INITIALIZING', 'CONNECTING', 'JOINING'].includes(status);
 
@@ -193,6 +193,11 @@ const StatusDetails = ({ status, updatedAt }) => {
           </Box>
         </div>
         <Box color="text-body-secondary">{config.description}</Box>
+        {status === 'SCHEDULED' && scheduledFor && (
+          <Box color="text-status-info" fontSize="body-m" fontWeight="bold">
+            Scheduled for: {new Date(scheduledFor).toLocaleString()}
+          </Box>
+        )}
         <Box color="text-body-secondary" fontSize="body-s">
           Last updated: {new Date(updatedAt).toLocaleString()}
         </Box>
@@ -204,6 +209,11 @@ const StatusDetails = ({ status, updatedAt }) => {
 StatusDetails.propTypes = {
   status: PropTypes.string.isRequired,
   updatedAt: PropTypes.string.isRequired,
+  scheduledFor: PropTypes.string,
+};
+
+StatusDetails.defaultProps = {
+  scheduledFor: null,
 };
 
 const ConnectionDetails = ({ vpDetails }) => {
@@ -653,7 +663,7 @@ const VirtualParticipantDetails = () => {
       </Container>
 
       {/* Current Status */}
-      <StatusDetails status={vpDetails.status} updatedAt={vpDetails.updatedAt} />
+      <StatusDetails status={vpDetails.status} updatedAt={vpDetails.updatedAt} scheduledFor={vpDetails.scheduledFor} />
 
       {/* Status Timeline - Only show if enhanced data available */}
       {vpDetails.statusHistory && (
