@@ -20,6 +20,7 @@ Changes are preserved during stack updates. Available attributes:
 - promptMode (String): How to apply custom prompt - 'base' (use as-is), 'inject' (append to default), or 'replace' (fully replace default)
 - modelId (String): Override the Nova model ID (optional)
 - voiceId (String): Voice ID for speech output - Options: tiffany (US feminine, polyglot), matthew (US masculine, polyglot), amy (UK feminine), olivia (AU feminine), kiara (IN feminine), arjun (IN masculine), ambre (FR feminine), florian (FR masculine), beatrice (IT feminine), lorenzo (IT masculine), tina (DE feminine), lennart (DE masculine), lupe (US Spanish feminine), carlos (US Spanish masculine), carolina (BR Portuguese feminine), leo (BR Portuguese masculine)
+- endpointingSensitivity (String): Turn-taking sensitivity - 'HIGH' (1.5s pause, fastest), 'MEDIUM' (1.75s pause, balanced), or 'LOW' (2.0s pause, most patient)
 """
 
 def get_default_config():
@@ -31,6 +32,7 @@ def get_default_config():
         'promptMode': 'base',
         'modelId': 'amazon.nova-2-sonic-v1:0',
         'voiceId': 'tiffany',
+        'endpointingSensitivity': 'MEDIUM',
         'description': 'Default Nova Sonic configuration. Do not edit - changes will be overwritten on stack updates.'
     }
 

@@ -118,6 +118,7 @@ You can customize these settings in the `CustomNovaSonicConfig` item:
 | `promptMode` | String | How to apply custom prompt: `base`, `inject`, or `replace` | `inject` |
 | `voiceId` | String | Nova Sonic voice ID (see available voices below) | `tiffany` |
 | `modelId` | String | Bedrock model ID | `amazon.nova-sonic-v1:0` |
+| `endpointingSensitivity` | String | Turn-taking sensitivity: `HIGH`, `MEDIUM`, or `LOW` | `MEDIUM` |
 
 ### 4.3 Prompt Modes Explained
 
@@ -136,7 +137,29 @@ You can customize these settings in the `CustomNovaSonicConfig` item:
 - Ignores default prompt entirely
 - **Use when**: You need fundamentally different assistant behavior
 
-### 4.4 Available Voice IDs
+### 4.4 Turn-Taking Sensitivity (Endpointing)
+
+The `endpointingSensitivity` parameter controls how quickly Nova Sonic detects the end of a user's turn and begins responding. This affects both response latency and the likelihood of interrupting users who are still speaking.
+
+**Available Values:**
+
+| Sensitivity | Pause Duration | Best For |
+|-------------|----------------|----------|
+| `HIGH` | 1.5 seconds | Quick Q&A, command-and-control, time-sensitive interactions |
+| `MEDIUM` (default) | 1.75 seconds | General conversations, customer service, multi-turn discussions |
+| `LOW` | 2.0 seconds | Thoughtful conversations, elderly or speech-impaired users, complex problem-solving |
+
+**How It Works:**
+- Nova Sonic waits for the specified pause duration after detecting the end of speech before responding
+- **Higher sensitivity** = faster responses but more risk of interrupting users who pause while thinking
+- **Lower sensitivity** = more patient waiting but slightly slower responses
+
+**When to Adjust:**
+- Use `HIGH` for fast-paced interactions where users expect immediate responses
+- Use `MEDIUM` (default) for balanced, natural conversations
+- Use `LOW` when users need more time to formulate thoughts or have speech patterns with longer pauses
+
+### 4.5 Available Voice IDs
 
 Amazon Nova Sonic supports 16 different voices:
 
@@ -162,15 +185,16 @@ Amazon Nova Sonic supports 16 different voices:
 - `carolina` - Portuguese (Brazil)
 - `leo` - Portuguese (Portugal)
 
-### 4.5 Example Customizations
+### 4.6 Example Customizations
 
-**Example 1: Professional Assistant**
+**Example 1: Professional Assistant (Fast Response)**
 ```json
 {
   "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a professional executive assistant. Provide concise, actionable responses. Always confirm understanding before taking action.",
   "promptMode": "replace",
-  "voiceId": "matthew"
+  "voiceId": "matthew",
+  "endpointingSensitivity": "HIGH"
 }
 ```
 
@@ -180,21 +204,34 @@ Amazon Nova Sonic supports 16 different voices:
   "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "Always end responses with 'Anything else I can help with?' to encourage engagement.",
   "promptMode": "inject",
-  "voiceId": "olivia"
+  "voiceId": "olivia",
+  "endpointingSensitivity": "MEDIUM"
 }
 ```
 
-**Example 3: Technical Support**
+**Example 3: Technical Support (Patient Listening)**
 ```json
 {
   "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a technical support specialist for AWS services. Provide detailed, accurate information. Use technical terminology when appropriate.",
   "promptMode": "replace",
-  "voiceId": "tiffany"
+  "voiceId": "tiffany",
+  "endpointingSensitivity": "LOW"
 }
 ```
 
-### 4.6 Apply Configuration Changes
+**Example 4: Accessibility-Focused (Maximum Patience)**
+```json
+{
+  "NovaSonicConfigId": "CustomNovaSonicConfig",
+  "systemPrompt": "You are a patient, supportive assistant. Speak slowly and clearly. Wait for users to finish their thoughts completely.",
+  "promptMode": "replace",
+  "voiceId": "amy",
+  "endpointingSensitivity": "LOW"
+}
+```
+
+### 4.7 Apply Configuration Changes
 
 1. Edit the `CustomNovaSonicConfig` item in DynamoDB
 2. Save your changes
@@ -491,6 +528,7 @@ For issues specific to:
 ✅ **Customization:**
 - 3 prompt modes (base, inject, replace)
 - 16 voice IDs to choose from
+- 3 turn-taking sensitivity levels (HIGH, MEDIUM, LOW)
 - Edit via DynamoDB console
 - Changes apply immediately (no redeployment)
 

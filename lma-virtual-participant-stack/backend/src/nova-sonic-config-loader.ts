@@ -22,6 +22,7 @@ export interface NovaSonicConfig {
   promptMode: 'base' | 'inject' | 'replace';
   modelId: string;
   voiceId?: string;
+  endpointingSensitivity?: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
 /**
@@ -33,6 +34,7 @@ interface DynamoDBConfigItem {
   promptMode?: string;
   modelId?: string;
   voiceId?: string;
+  endpointingSensitivity?: string;
   description?: string;
   '*Information*'?: string;
 }
@@ -45,6 +47,7 @@ const DEFAULT_CONFIG: NovaSonicConfig = {
   promptMode: 'base',
   modelId: 'amazon.nova-2-sonic-v1:0',
   voiceId: 'tiffany', // Default polyglot voice (English US, feminine)
+  endpointingSensitivity: 'MEDIUM', // Default turn-taking sensitivity
 };
 
 /**
@@ -152,6 +155,9 @@ function mergeConfigs(
     if (defaultConfig.promptMode === 'base' || defaultConfig.promptMode === 'inject' || defaultConfig.promptMode === 'replace') {
       baseConfig.promptMode = defaultConfig.promptMode;
     }
+    if (defaultConfig.endpointingSensitivity === 'HIGH' || defaultConfig.endpointingSensitivity === 'MEDIUM' || defaultConfig.endpointingSensitivity === 'LOW') {
+      baseConfig.endpointingSensitivity = defaultConfig.endpointingSensitivity;
+    }
   }
   
   // If no custom config, return base config
@@ -160,11 +166,18 @@ function mergeConfigs(
   }
   
   // Determine prompt mode (custom overrides default)
-  const promptMode = (customConfig.promptMode === 'base' || 
-                      customConfig.promptMode === 'inject' || 
+  const promptMode = (customConfig.promptMode === 'base' ||
+                      customConfig.promptMode === 'inject' ||
                       customConfig.promptMode === 'replace')
     ? customConfig.promptMode
     : baseConfig.promptMode;
+  
+  // Determine endpointing sensitivity (custom overrides default)
+  const endpointingSensitivity = (customConfig.endpointingSensitivity === 'HIGH' ||
+                                  customConfig.endpointingSensitivity === 'MEDIUM' ||
+                                  customConfig.endpointingSensitivity === 'LOW')
+    ? customConfig.endpointingSensitivity
+    : baseConfig.endpointingSensitivity;
   
   // Apply prompt mode logic
   console.log('🔧 Applying prompt mode logic:');
@@ -186,6 +199,7 @@ function mergeConfigs(
     promptMode: promptMode,
     modelId: customConfig.modelId || baseConfig.modelId,
     voiceId: customConfig.voiceId || baseConfig.voiceId,
+    endpointingSensitivity: endpointingSensitivity,
   };
 }
 

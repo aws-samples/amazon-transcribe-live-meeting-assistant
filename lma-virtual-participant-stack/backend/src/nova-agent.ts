@@ -28,6 +28,7 @@ export interface NovaAgentConfig {
   region?: string;
   strandsLambdaArn?: string;
   voiceId?: string;
+  endpointingSensitivity?: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
 interface SessionData {
@@ -51,6 +52,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   private modelId: string;
   private systemPrompt: string;
   private voiceId: string;
+  private endpointingSensitivity: 'HIGH' | 'MEDIUM' | 'LOW';
   private knowledgeBaseId?: string;
   private activationMode: string;
   private _isActivated: boolean = false;
@@ -92,6 +94,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.modelId = config.modelId;
     this.systemPrompt = config.systemPrompt;
     this.voiceId = config.voiceId || 'tiffany'; // Default to tiffany (polyglot voice)
+    this.endpointingSensitivity = config.endpointingSensitivity || 'MEDIUM'; // Default to MEDIUM
     this.knowledgeBaseId = config.knowledgeBaseId;
     this.activationMode = config.activationMode || 'wake_phrase';
     this.defaultActivationDuration = config.activationDuration || 30;
@@ -104,6 +107,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log('✓ AWS Nova Sonic 2 agent initialized');
     console.log(`  Model: ${this.modelId}`);
     console.log(`  Voice: ${this.voiceId}`);
+    console.log(`  Endpointing sensitivity: ${this.endpointingSensitivity}`);
     console.log(`  Region: ${this.region}`);
     console.log(`  Activation mode: ${this.activationMode}`);
     if (this.strandsLambdaArn) {
@@ -127,15 +131,19 @@ export class NovaAgent implements VoiceAssistantProvider {
           const config = await loadNovaSonicConfig(dynamoDbClient, tableName);
           console.log('✓ Loaded Nova Sonic config from DynamoDB');
           
-          // Update system prompt, model ID, and voice ID from config
+          // Update system prompt, model ID, voice ID, and endpointing sensitivity from config
           this.systemPrompt = config.systemPrompt;
           this.modelId = config.modelId;
           if (config.voiceId) {
             this.voiceId = config.voiceId;
           }
+          if (config.endpointingSensitivity) {
+            this.endpointingSensitivity = config.endpointingSensitivity;
+          }
           console.log(`  Updated system prompt (${config.systemPrompt.length} chars)`);
           console.log(`  Updated model ID: ${config.modelId}`);
           console.log(`  Updated voice ID: ${this.voiceId}`);
+          console.log(`  Updated endpointing sensitivity: ${this.endpointingSensitivity}`);
         } catch (error) {
           console.error('Failed to load Nova Sonic config from DynamoDB:', error);
           console.log('Using environment variable configuration as fallback');
@@ -283,6 +291,9 @@ export class NovaAgent implements VoiceAssistantProvider {
             maxTokens: 1024,
             topP: 0.9,
             temperature: 0.7,
+          },
+          turnDetectionConfiguration: {
+            endpointingSensitivity: this.endpointingSensitivity,
           },
         },
       },
