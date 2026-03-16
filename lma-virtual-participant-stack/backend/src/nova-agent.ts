@@ -362,12 +362,19 @@ export class NovaAgent implements VoiceAssistantProvider {
       },
     });
 
+    const finalSystemPrompt = this.buildSystemPromptContent();
+    console.log('📋 Final system prompt being sent to Nova:');
+    console.log('─'.repeat(80));
+    console.log(finalSystemPrompt);
+    console.log('─'.repeat(80));
+    console.log(`   Total length: ${finalSystemPrompt.length} characters`);
+    
     this.addEventToQueue({
       event: {
         textInput: {
           promptName: this.session.promptName,
           contentName: textPromptID,
-          content: this.buildSystemPromptContent(),
+          content: finalSystemPrompt,
         },
       },
     });
