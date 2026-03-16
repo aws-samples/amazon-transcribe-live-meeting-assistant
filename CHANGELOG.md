@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Configurable turn-taking sensitivity (endpointingSensitivity) for AWS Nova Sonic 2 voice assistant. Supports HIGH (1.5s), MEDIUM (1.75s, default), and LOW (2.0s) pause detection for controlling response timing
+
 ## [0.2.28] - 2026-03-13
 
 ### Added
