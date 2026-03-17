@@ -59,11 +59,12 @@ export class TranscriptionService {
 
     private async *audioStream() {
 
+        // Capture from combined_audio.monitor to get both meeting and agent audio for transcription
         this.process = spawn('ffmpeg', [
             '-f',
             'pulse',
             '-i',
-            'default',
+            'combined_audio.monitor',  // Combined audio (meeting + agent) for transcription
             '-ac',
             String(this.channels),
             '-ar',
@@ -441,9 +442,10 @@ export class TranscriptionService {
             // Create audio input queue (matching Python asyncio.Queue)
             const audioQueue: Buffer[] = [];
             // Start FFmpeg process for audio capture
+            // Capture from meeting_audio.monitor (meeting only, no agent audio) for Nova
             this.process = spawn('ffmpeg', [
                 '-f', 'pulse',
-                '-i', 'default',
+                '-i', 'meeting_audio.monitor',  // Meeting audio only (no agent feedback)
                 '-ac', '1',
                 '-ar', '16000',
                 '-acodec', 'pcm_s16le',

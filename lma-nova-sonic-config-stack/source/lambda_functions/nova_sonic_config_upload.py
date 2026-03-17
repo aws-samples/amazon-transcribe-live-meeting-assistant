@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Amazon.com
+v# Copyright (c) 2025 Amazon.com
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
 
@@ -21,6 +21,7 @@ Changes are preserved during stack updates. Available attributes:
 - modelId (String): Override the Nova model ID (optional)
 - voiceId (String): Voice ID for speech output - Options: tiffany (US feminine, polyglot), matthew (US masculine, polyglot), amy (UK feminine), olivia (AU feminine), kiara (IN feminine), arjun (IN masculine), ambre (FR feminine), florian (FR masculine), beatrice (IT feminine), lorenzo (IT masculine), tina (DE feminine), lennart (DE masculine), lupe (US Spanish feminine), carlos (US Spanish masculine), carolina (BR Portuguese feminine), leo (BR Portuguese masculine)
 - endpointingSensitivity (String): Turn-taking sensitivity - 'HIGH' (1.5s pause, fastest), 'MEDIUM' (1.75s pause, balanced), or 'LOW' (2.0s pause, most patient)
+- groupMeetingMode (Boolean): Enable group meeting mode - Nova starts muted and only speaks when directly addressed via unmute tool (default: false)
 """
 
 def get_default_config():
@@ -33,6 +34,7 @@ def get_default_config():
         'modelId': 'amazon.nova-2-sonic-v1:0',
         'voiceId': 'tiffany',
         'endpointingSensitivity': 'MEDIUM',
+        'groupMeetingMode': False,
         'description': 'Default Nova Sonic configuration. Do not edit - changes will be overwritten on stack updates.'
     }
 

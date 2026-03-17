@@ -23,6 +23,7 @@ export interface NovaSonicConfig {
   modelId: string;
   voiceId?: string;
   endpointingSensitivity?: 'HIGH' | 'MEDIUM' | 'LOW';
+  groupMeetingMode?: boolean;
 }
 
 /**
@@ -35,6 +36,7 @@ interface DynamoDBConfigItem {
   modelId?: string;
   voiceId?: string;
   endpointingSensitivity?: string;
+  groupMeetingMode?: boolean;
   description?: string;
   '*Information*'?: string;
 }
@@ -48,6 +50,7 @@ const DEFAULT_CONFIG: NovaSonicConfig = {
   modelId: 'amazon.nova-2-sonic-v1:0',
   voiceId: 'tiffany', // Default polyglot voice (English US, feminine)
   endpointingSensitivity: 'MEDIUM', // Default turn-taking sensitivity
+  groupMeetingMode: false, // Default to normal mode
 };
 
 /**
@@ -158,6 +161,9 @@ function mergeConfigs(
     if (defaultConfig.endpointingSensitivity === 'HIGH' || defaultConfig.endpointingSensitivity === 'MEDIUM' || defaultConfig.endpointingSensitivity === 'LOW') {
       baseConfig.endpointingSensitivity = defaultConfig.endpointingSensitivity;
     }
+    if (typeof defaultConfig.groupMeetingMode === 'boolean') {
+      baseConfig.groupMeetingMode = defaultConfig.groupMeetingMode;
+    }
   }
   
   // If no custom config, return base config
@@ -200,6 +206,9 @@ function mergeConfigs(
     modelId: customConfig.modelId || baseConfig.modelId,
     voiceId: customConfig.voiceId || baseConfig.voiceId,
     endpointingSensitivity: endpointingSensitivity,
+    groupMeetingMode: typeof customConfig.groupMeetingMode === 'boolean'
+      ? customConfig.groupMeetingMode
+      : baseConfig.groupMeetingMode,
   };
 }
 
