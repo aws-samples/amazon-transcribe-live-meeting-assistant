@@ -507,13 +507,14 @@ export class NovaAgent implements VoiceAssistantProvider {
         'MANDATORY WORKFLOW FOR EVERY USER MESSAGE:\n' +
         '1. FIRST: Call the check_if_addressed tool with the user\'s message\n' +
         '2. Wait for the tool result:\n' +
-        '   - If result is "not_addressed": STOP. Generate NO text, NO audio. Stay SILENT.\n' +
+        '   - If result is "not_addressed": STOP IMMEDIATELY. Generate NO text, NO audio, and do NOT call any other tools (including mute). Just stop and wait.\n' +
         '   - If result is "addressed": Proceed with your response\n\n' +
         'CRITICAL RULES:\n' +
         '- You MUST call check_if_addressed BEFORE every response\n' +
         '- Do NOT try to determine if you were addressed - let the tool decide\n' +
-        '- If the tool says "not_addressed", you MUST remain completely silent\n' +
-        '- The tool will automatically unmute you when needed\n\n' +
+        '- If the tool says "not_addressed", you MUST stop completely: no text, no audio, no tool calls, nothing. Do NOT call the mute tool.\n' +
+        '- The tool will automatically unmute you when needed\n' +
+        '- The mute tool is ONLY for when a user explicitly asks you to be quiet or mute yourself\n\n' +
         'After responding, you will be automatically muted again after 30 seconds of inactivity.\n\n' +
         '=== END CRITICAL RULES ===\n\n';
     }
@@ -586,7 +587,21 @@ export class NovaAgent implements VoiceAssistantProvider {
     } else {
       // Get history starting from first USER turn
       const historyToSend = this.conversationHistory.slice(startIndex);
-      console.log(`📜 Setting up conversation history (${historyToSend.length} turns, starting with USER)...`);
+      
+      // In group meeting mode, add a reminder ASSISTANT turn at the end of history
+      // to reinforce that Nova must call check_if_addressed before every response.
+      // After session refresh, Nova sometimes skips the tool call and responds directly.
+      if (this.groupMeetingMode) {
+        historyToSend.push({
+          role: 'ASSISTANT',
+          content: '[Reminder to self: I am in group meeting mode. I MUST call check_if_addressed before every response. I must not respond to any message without first checking if I was addressed.]',
+          timestamp: Date.now(),
+        });
+        console.log(`📜 Setting up conversation history (${historyToSend.length} turns, with group meeting mode reminder)...`);
+      } else {
+        console.log(`📜 Setting up conversation history (${historyToSend.length} turns, starting with USER)...`);
+      }
+      
       await this.sendHistoryTurns(historyToSend);
     }
 
@@ -1051,8 +1066,21 @@ export class NovaAgent implements VoiceAssistantProvider {
                 this.addToConversationHistory(currentTurn.role, currentTurn.content.trim());
                 console.log(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
                 
-                // If this is a USER turn containing a wake phrase, reset conversation timeout
-                if (currentTurn.role === 'USER' && this.containsWakePhrase(currentTurn.content)) {
+                // If this is a USER turn containing a wake phrase in group meeting mode:
+                // 1. Proactively unmute the agent (in case Nova skips check_if_addressed after refresh)
+                // 2. Reset conversation timeout
+                if (currentTurn.role === 'USER' && this.groupMeetingMode && this.containsWakePhrase(currentTurn.content)) {
+                  if (this._isMuted) {
+                    console.log('🔓 Wake phrase detected in user speech - proactively unmuting agent');
+                    this._isMuted = false;
+                    // Start conversation session if not already active
+                    if (!this.conversationActive) {
+                      this.startConversationSession();
+                    }
+                  }
+                  this.resetConversationTimeout();
+                } else if (currentTurn.role === 'USER' && !this.groupMeetingMode && this.containsWakePhrase(currentTurn.content)) {
+                  // Non-group meeting mode: just reset timeout
                   this.resetConversationTimeout();
                 }
               }
@@ -1283,10 +1311,12 @@ export class NovaAgent implements VoiceAssistantProvider {
         this._isMuted = true;
         
         // Send tool result indicating the agent was NOT addressed
+        // IMPORTANT: The message explicitly tells Nova to stop completely and not call any tools
+        // This prevents the infinite mute tool loop where Nova keeps calling mute after not_addressed
         if (this.session && this.session.isActive) {
           await this.sendToolResult(toolUseId, {
             status: 'not_addressed',
-            message: 'You were not addressed. Remain silent.'
+            message: 'You were NOT addressed. STOP. Do not respond. Do not generate any text or audio. Do not call any tools including mute. Simply wait for the next user message.'
           });
           console.log('✓ Agent staying muted - will not respond');
         }

@@ -17,6 +17,8 @@ const isLocalTest = process.env.LOCAL_TEST === 'true';
 
 export class TranscriptionService {
     private process: ChildProcess | null = null;
+    private novaAudioProcess: ChildProcess | null = null;
+    private meetingToCombinedPipe: ChildProcess | null = null;
     private startTime: number | null = null;
     private readonly channels = 1;
     private readonly sampleRate = 16000; // in hertz
@@ -334,9 +336,25 @@ export class TranscriptionService {
         console.log('Stopping transcription service');
         this.isTranscribing = false;
 
+        // Kill the transcription FFmpeg process (combined_audio.monitor → Transcribe)
         if (this.process) {
             this.process.kill();
             this.process = null;
+        }
+
+        // Kill the Nova audio FFmpeg process (meeting_audio.monitor → Nova/recording)
+        if (this.novaAudioProcess) {
+            this.novaAudioProcess.kill();
+            this.novaAudioProcess = null;
+        }
+
+        // Kill the pacat pipe (meeting audio → combined_audio sink)
+        if (this.meetingToCombinedPipe) {
+            if (this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                this.meetingToCombinedPipe.stdin.end();
+            }
+            this.meetingToCombinedPipe.kill();
+            this.meetingToCombinedPipe = null;
         }
         
         // Stop voice assistant if running
@@ -437,13 +455,45 @@ export class TranscriptionService {
     }
 
     // Parallel audio processing (matching Python write_audio function)
+    // This creates a SEPARATE FFmpeg process (novaAudioProcess) that captures from
+    // meeting_audio.monitor (meeting only, no agent audio) to feed Nova and the recording.
+    // This is distinct from the transcription FFmpeg process (this.process) in audioStream()
+    // which captures from combined_audio.monitor (meeting + agent) for AWS Transcribe.
+    // The channel separation prevents Nova from hearing its own voice (feedback loop).
+    //
+    // Additionally, this method pipes meeting audio into the combined_audio sink to ensure
+    // meeting participant speech reaches Transcribe. While PulseAudio loopback modules are
+    // configured in entrypoint.sh, this direct pipe provides a reliable backup path.
     private async writeAudio(transcribeResponse: any, recordingStream: any): Promise<void> {
         try {
+            // Start pacat to pipe meeting audio into combined_audio sink
+            // This is a reliable way to ensure meeting audio reaches the combined sink
+            // even if the PulseAudio module-loopback has issues
+            this.meetingToCombinedPipe = spawn('pacat', [
+                '--playback',
+                '--device=combined_audio',
+                '--format=s16le',
+                '--rate=16000',
+                '--channels=1',
+                '--raw',
+                '--latency-msec=20'
+            ]);
+            
+            this.meetingToCombinedPipe.on('error', (error: any) => {
+                console.error(`pacat (meeting→combined) error: ${error.message}`);
+            });
+            
+            this.meetingToCombinedPipe.stderr?.on('data', (data: any) => {
+                const msg = data.toString().trim();
+                if (msg) console.log(`pacat (meeting→combined): ${msg}`);
+            });
+            
             // Create audio input queue (matching Python asyncio.Queue)
             const audioQueue: Buffer[] = [];
-            // Start FFmpeg process for audio capture
+            // Start FFmpeg process for audio capture - uses SEPARATE variable to avoid
+            // overwriting this.process (which is the transcription FFmpeg from audioStream())
             // Capture from meeting_audio.monitor (meeting only, no agent audio) for Nova
-            this.process = spawn('ffmpeg', [
+            this.novaAudioProcess = spawn('ffmpeg', [
                 '-f', 'pulse',
                 '-i', 'meeting_audio.monitor',  // Meeting audio only (no agent feedback)
                 '-ac', '1',
@@ -455,8 +505,8 @@ export class TranscriptionService {
             ]);
 
             // Add error handlers for the process
-            this.process.on('error', (error: any) => {
-                const msg = `FFmpeg process error: ${error.message}`;
+            this.novaAudioProcess.on('error', (error: any) => {
+                const msg = `FFmpeg (Nova audio) process error: ${error.message}`;
                 if (isLocalTest) {
                     console.error(msg + ' (non-fatal in local test)');
                 } else {
@@ -465,22 +515,27 @@ export class TranscriptionService {
                 }
             });
 
-            this.process.stderr?.on('data', (data: any) => {
+            this.novaAudioProcess.stderr?.on('data', (data: any) => {
                 const msg = data.toString();
                 if (!msg.includes('size=') && !msg.includes('time=')) {
                     console.log('FFmpeg:', msg.trim());
                 }
             });
 
-            // Process audio chunks
-            this.process.stdout?.on('data', async (chunk: Buffer) => {
+            // Process audio chunks from meeting_audio.monitor
+            this.novaAudioProcess.stdout?.on('data', async (chunk: Buffer) => {
                 if (details.start && this.isTranscribing) {
                     try {
-                        // Send to Transcribe
-                        await transcribeResponse.input_stream?.send_audio_event?.({ audio_chunk: chunk });
+                        // Write to recording stream (meeting-only audio for the recording file)
                         recordingStream.write(chunk);
                         
-                        // Also send to voice assistant if enabled and activated
+                        // Pipe meeting audio into combined_audio sink for Transcribe
+                        // This ensures meeting participant speech is transcribed alongside agent speech
+                        if (this.meetingToCombinedPipe && this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                            this.meetingToCombinedPipe.stdin.write(chunk);
+                        }
+                        
+                        // Send to voice assistant if enabled and activated
                         if (voiceAssistant.isEnabled() && voiceAssistant.isActive() && voiceAssistant.isActivated()) {
                             voiceAssistant.sendAudioChunk(chunk);
                         }
