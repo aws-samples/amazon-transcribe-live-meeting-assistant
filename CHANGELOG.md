@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Group meeting mode (groupMeetingMode) for AWS Nova Sonic 2 - enables passive listening with mute/unmute tools, allowing Nova to only respond when directly addressed (mentions "Alex"), ideal for multi-participant meetings
 - Barge-in support for AWS Nova Sonic 2 - separate audio routing prevents feedback loops and enables interrupting Nova mid-sentence
 - Display scheduled execution time on Virtual Participant details page when status is SCHEDULED
+- DeepWiki auto-indexing badge in README for automatic weekly documentation refresh and AI-powered repository Q&A
 
 ### Changed
 - AWS Nova Sonic 2 audio routing architecture - separate sinks for meeting audio and agent output with combined monitoring for transcription, enabling barge-in without feedback loops
