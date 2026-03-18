@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - AWS Nova Sonic 2 stream error recovery - session now automatically refreshes on unexpected stream errors instead of waiting for next scheduled refresh, preventing prolonged connection loss
+- Scheduled Virtual Participants failing to start due to missing KMS permissions on VPScheduler Lambda role
 
 ## [0.2.28] - 2026-03-13
 
