@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Display scheduled execution time on Virtual Participant details page when status is SCHEDULED
+- DeepWiki auto-indexing badge in README for automatic weekly documentation refresh and AI-powered repository Q&A
 
 ## [0.2.28] - 2026-03-13
 
