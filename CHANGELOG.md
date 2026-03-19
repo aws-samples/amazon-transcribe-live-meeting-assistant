@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - AWS Nova Sonic 2 audio routing architecture - separate sinks for meeting audio and agent output with combined monitoring for transcription, enabling barge-in without feedback loops
+- Chat shortcut buttons made more compact with smaller padding and font size for better space efficiency
 
 ### Fixed
 - AWS Nova Sonic 2 stream error recovery - session now automatically refreshes on unexpected stream errors instead of waiting for next scheduled refresh, preventing prolonged connection loss
