@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Configurable turn-taking sensitivity (endpointingSensitivity) for AWS Nova Sonic 2 voice assistant - supports HIGH (1.5s), MEDIUM (1.75s, default), and LOW (2.0s) pause detection for controlling response timing
 - Chat shortcut buttons now re-appear inline after each assistant response completes, so users no longer need to scroll back to the top to access them
+- Add and delete buttons in Edit Chat Buttons modal - admins can now add new shortcut buttons and remove existing ones, not just edit placeholders
 - Group meeting mode (groupMeetingMode) for AWS Nova Sonic 2 - enables passive listening with mute/unmute tools, allowing Nova to only respond when directly addressed (mentions "Alex"), ideal for multi-participant meetings
 - Barge-in support for AWS Nova Sonic 2 - separate audio routing prevents feedback loops and enables interrupting Nova mid-sentence
 - Display scheduled execution time on Virtual Participant details page when status is SCHEDULED
@@ -22,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - AWS Nova Sonic 2 stream error recovery - session now automatically refreshes on unexpected stream errors instead of waiting for next scheduled refresh, preventing prolonged connection loss
 - Scheduled Virtual Participants failing to start due to missing KMS permissions on VPScheduler Lambda role
+- Edit Chat Buttons modal label input losing focus after each keystroke - fixed by using stable sequence number as React key instead of the changing button key
 
 ## [0.2.28] - 2026-03-13
 
