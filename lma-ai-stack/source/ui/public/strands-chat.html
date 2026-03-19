@@ -109,21 +109,24 @@
         .suggestions-container {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 8px;
             padding: 10px 0;
             justify-content: flex-start;
         }
+        .suggestions-container:empty {
+            display: none;
+        }
         .suggestion-button {
-            padding: 10px 20px;
+            padding: 6px 14px;
             background-color: #8ab4f8;
             color: #1a1a1a;
             border: none;
-            border-radius: 20px;
+            border-radius: 16px;
             cursor: pointer;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 500;
             transition: background-color 0.2s;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
         .suggestion-button:hover {
             background-color: #6fa0f6;
@@ -649,6 +652,10 @@
             const message = messageInput.value.trim();
             if (!message) return;
             
+            // Remove inline suggestion buttons while processing
+            const previousInline = chatMessages.querySelectorAll('.inline-suggestions');
+            previousInline.forEach(el => el.remove());
+            
             addMessage(message, 'user');
             messageInput.value = '';
             sendButton.disabled = true;
@@ -669,6 +676,8 @@
                     if (response.data.sendChatMessage.Response) {
                         finalizeThinkingContainer(messageId);
                         addMessage(response.data.sendChatMessage.Response, 'assistant');
+                        // Append shortcut buttons after fallback response
+                        appendInlineSuggestionButtons();
                     }
                 } else {
                     addMessage('Unexpected response format', 'error');
@@ -761,6 +770,9 @@
                                 }
                             }
                             
+                            // Append shortcut buttons after response completes
+                            appendInlineSuggestionButtons();
+                            
                             window.removeEventListener('message', tokenHandler);
                         } else if (token.Token) {
                             // Only accumulate if there's actual token text (not just thinking steps)
@@ -780,6 +792,76 @@
             };
             
             window.addEventListener('message', tokenHandler);
+        }
+
+        // Append shortcut buttons inline in the chat after a response completes
+        function appendInlineSuggestionButtons() {
+            if (!buttonConfig || Object.keys(buttonConfig).length === 0) return;
+            
+            // Remove any previous inline suggestion buttons (keep only the original in welcome message)
+            const previousInline = chatMessages.querySelectorAll('.inline-suggestions');
+            previousInline.forEach(el => el.remove());
+            
+            // Create a new inline suggestions container
+            const container = document.createElement('div');
+            container.className = 'suggestions-container inline-suggestions';
+            
+            // Sort buttons by sequence number
+            const sortedButtons = Object.entries(buttonConfig)
+                .sort((a, b) => {
+                    const getSequence = (key) => {
+                        const match = key.match(/^(\d+)#/);
+                        return match ? parseInt(match[1]) : 999;
+                    };
+                    return getSequence(a[0]) - getSequence(b[0]);
+                });
+            
+            const visibleCount = 4;
+            let hasHiddenButtons = false;
+            
+            sortedButtons.forEach(([key, prompt], index) => {
+                if (!prompt || prompt.trim() === '' || prompt.toUpperCase() === 'NONE') return;
+                
+                const label = key.replace(/^\d+#/, '');
+                const button = document.createElement('button');
+                button.className = 'suggestion-button';
+                button.setAttribute('data-prompt', prompt);
+                button.textContent = label;
+                
+                if (index >= visibleCount) {
+                    button.classList.add('extra-suggestion-inline');
+                    button.style.display = 'none';
+                    hasHiddenButtons = true;
+                }
+                
+                button.addEventListener('click', () => {
+                    messageInput.value = prompt;
+                    messageInput.focus();
+                    sendMessage();
+                });
+                
+                container.appendChild(button);
+            });
+            
+            if (hasHiddenButtons) {
+                const moreButton = document.createElement('button');
+                moreButton.className = 'more-button';
+                moreButton.textContent = 'MORE';
+                moreButton.addEventListener('click', () => {
+                    const extraButtons = container.querySelectorAll('.extra-suggestion-inline');
+                    extraButtons.forEach(btn => {
+                        btn.style.display = 'inline-block';
+                    });
+                    moreButton.style.display = 'none';
+                });
+                container.appendChild(moreButton);
+            }
+            
+            // Only append if we actually added buttons
+            if (container.children.length > 0) {
+                chatMessages.appendChild(container);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
         }
 
         // Load button configuration from DynamoDB
