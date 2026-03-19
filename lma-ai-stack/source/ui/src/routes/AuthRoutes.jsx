@@ -19,6 +19,7 @@ import StreamAudioRoutes from './StreamAudioRoutes';
 import VirtualParticipantRoutes from './VirtualParticipantRoutes';
 import MeetingsQueryRoutes from './MeetingsQueryRoutes';
 import MCPServersRoutes from './MCPServersRoutes';
+import EmbedRoutes from './EmbedRoutes';
 
 import {
   CALLS_PATH,
@@ -29,6 +30,7 @@ import {
   VIRTUAL_PARTICIPANT_PATH,
   MEETINGS_QUERY_PATH,
   MCP_SERVERS_PATH,
+  EMBED_PATH,
 } from './constants';
 
 const logger = new Logger('AuthRoutes');
@@ -66,6 +68,9 @@ const AuthRoutes = ({ redirectParam }) => {
         </Route>
         <Route path={MCP_SERVERS_PATH}>
           <MCPServersRoutes />
+        </Route>
+        <Route path={EMBED_PATH}>
+          <EmbedRoutes />
         </Route>
         <Route>
           <Redirect to={DEFAULT_PATH} />
