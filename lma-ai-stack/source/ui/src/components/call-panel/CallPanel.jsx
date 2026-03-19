@@ -991,6 +991,42 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
     }
   };
 
+  const handleDeleteButton = (key) => {
+    const newConfig = { ...buttonConfig };
+    delete newConfig[key];
+
+    // Re-sequence remaining buttons to keep numbering contiguous
+    const sortedEntries = Object.entries(newConfig).sort((a, b) => {
+      const getSeq = (k) => {
+        const m = k.match(/^(\d+)#/);
+        return m ? parseInt(m[1], 10) : 999;
+      };
+      return getSeq(a[0]) - getSeq(b[0]);
+    });
+
+    const resequenced = {};
+    sortedEntries.forEach(([k, v], idx) => {
+      const label = k.replace(/^\d+#/, '');
+      resequenced[`${idx + 1}#${label}`] = v;
+    });
+
+    setButtonConfig(resequenced);
+  };
+
+  const handleAddButton = () => {
+    // Find the next sequence number
+    const existingSequences = Object.keys(buttonConfig || {}).map((k) => {
+      const m = k.match(/^(\d+)#/);
+      return m ? parseInt(m[1], 10) : 0;
+    });
+    const nextSequence = existingSequences.length > 0 ? Math.max(...existingSequences) + 1 : 1;
+    const newKey = `${nextSequence}#NEW BUTTON`;
+    setButtonConfig({
+      ...buttonConfig,
+      [newKey]: 'Enter prompt here',
+    });
+  };
+
   const renderButtonEditors = () => {
     if (!buttonConfig) return null;
 
@@ -1004,15 +1040,23 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
     });
 
     return sortedEntries.map(([key, prompt]) => {
-      const match = key.match(/^(\d+)#(.+)$/);
+      const match = key.match(/^(\d+)#(.*)$/);
       if (!match) return null;
 
       const [, sequence, label] = match;
 
       return (
-        <Box key={key} padding={{ vertical: 's' }}>
+        <Box key={`button-${sequence}`} padding={{ vertical: 's' }}>
           <SpaceBetween size="s">
-            <Box variant="h4">Button {sequence}</Box>
+            <SpaceBetween direction="horizontal" size="xs">
+              <Box variant="h4">Button {sequence}</Box>
+              <Button
+                variant="icon"
+                iconName="remove"
+                onClick={() => handleDeleteButton(key)}
+                ariaLabel={`Delete button ${sequence}`}
+              />
+            </SpaceBetween>
             <FormField label="Label">
               <Input value={label} onChange={(e) => handleButtonChange(key, 'label', e.detail.value)} />
             </FormField>
@@ -1124,7 +1168,12 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
             {isLoading ? (
               <Box textAlign="center">Loading...</Box>
             ) : (
-              <SpaceBetween size="m">{renderButtonEditors()}</SpaceBetween>
+              <SpaceBetween size="m">
+                {renderButtonEditors()}
+                <Button variant="normal" iconName="add-plus" onClick={handleAddButton}>
+                  Add Button
+                </Button>
+              </SpaceBetween>
             )}
           </SpaceBetween>
         </Modal>
