@@ -28,6 +28,8 @@ export interface NovaAgentConfig {
   region?: string;
   strandsLambdaArn?: string;
   voiceId?: string;
+  endpointingSensitivity?: 'HIGH' | 'MEDIUM' | 'LOW';
+  groupMeetingMode?: boolean;
 }
 
 interface SessionData {
@@ -51,12 +53,15 @@ export class NovaAgent implements VoiceAssistantProvider {
   private modelId: string;
   private systemPrompt: string;
   private voiceId: string;
+  private endpointingSensitivity: 'HIGH' | 'MEDIUM' | 'LOW';
   private knowledgeBaseId?: string;
   private activationMode: string;
+  private groupMeetingMode: boolean;
   private _isActivated: boolean = false;
   private _isActive: boolean = false;
   private _isSpeaking: boolean = false;
   private _isProcessingTool: boolean = false;
+  private _isMuted: boolean = false;
   private audioQueue: Buffer[] = [];
   private isPlayingQueue: boolean = false;
   private activationTimeout: NodeJS.Timeout | null = null;
@@ -71,6 +76,11 @@ export class NovaAgent implements VoiceAssistantProvider {
   private refreshQueued: boolean = false;
   private keepAliveTimer: NodeJS.Timeout | null = null;
   private readonly KEEP_ALIVE_INTERVAL = 30 * 1000; // Send keep-alive every 30 seconds
+  
+  // Conversation session tracking for group meeting mode
+  private conversationActive: boolean = false;
+  private conversationTimeout: NodeJS.Timeout | null = null;
+  private autoMuteQueued: boolean = false;
   
   // Conversation history for session refresh
   private conversationHistory: ConversationTurn[] = [];
@@ -92,20 +102,27 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.modelId = config.modelId;
     this.systemPrompt = config.systemPrompt;
     this.voiceId = config.voiceId || 'tiffany'; // Default to tiffany (polyglot voice)
+    this.endpointingSensitivity = config.endpointingSensitivity || 'MEDIUM'; // Default to MEDIUM
     this.knowledgeBaseId = config.knowledgeBaseId;
     this.activationMode = config.activationMode || 'wake_phrase';
+    this.groupMeetingMode = config.groupMeetingMode || false;
     this.defaultActivationDuration = config.activationDuration || 30;
     this.region = config.region || process.env.AWS_REGION || 'us-east-1';
     this.strandsLambdaArn = config.strandsLambdaArn || process.env.STRANDS_LAMBDA_ARN;
     
     // Set initial activation state based on mode
     this._isActivated = (this.activationMode === 'always_active');
+    
+    // Set initial mute state based on group meeting mode
+    this._isMuted = this.groupMeetingMode;
 
     console.log('✓ AWS Nova Sonic 2 agent initialized');
     console.log(`  Model: ${this.modelId}`);
     console.log(`  Voice: ${this.voiceId}`);
+    console.log(`  Endpointing sensitivity: ${this.endpointingSensitivity}`);
     console.log(`  Region: ${this.region}`);
     console.log(`  Activation mode: ${this.activationMode}`);
+    console.log(`  Group meeting mode: ${this.groupMeetingMode ? 'enabled (starts muted)' : 'disabled'}`);
     if (this.strandsLambdaArn) {
       console.log(`  Strands agent tool: enabled`);
     }
@@ -127,15 +144,24 @@ export class NovaAgent implements VoiceAssistantProvider {
           const config = await loadNovaSonicConfig(dynamoDbClient, tableName);
           console.log('✓ Loaded Nova Sonic config from DynamoDB');
           
-          // Update system prompt, model ID, and voice ID from config
+          // Update system prompt, model ID, voice ID, endpointing sensitivity, and group meeting mode from config
           this.systemPrompt = config.systemPrompt;
           this.modelId = config.modelId;
           if (config.voiceId) {
             this.voiceId = config.voiceId;
           }
+          if (config.endpointingSensitivity) {
+            this.endpointingSensitivity = config.endpointingSensitivity;
+          }
+          if (typeof config.groupMeetingMode === 'boolean') {
+            this.groupMeetingMode = config.groupMeetingMode;
+            this._isMuted = config.groupMeetingMode; // Update mute state based on group meeting mode
+          }
           console.log(`  Updated system prompt (${config.systemPrompt.length} chars)`);
           console.log(`  Updated model ID: ${config.modelId}`);
           console.log(`  Updated voice ID: ${this.voiceId}`);
+          console.log(`  Updated endpointing sensitivity: ${this.endpointingSensitivity}`);
+          console.log(`  Updated group meeting mode: ${this.groupMeetingMode ? 'enabled (starts muted)' : 'disabled'}`);
         } catch (error) {
           console.error('Failed to load Nova Sonic config from DynamoDB:', error);
           console.log('Using environment variable configuration as fallback');
@@ -284,6 +310,9 @@ export class NovaAgent implements VoiceAssistantProvider {
             topP: 0.9,
             temperature: 0.7,
           },
+          turnDetectionConfiguration: {
+            endpointingSensitivity: this.endpointingSensitivity,
+          },
         },
       },
     });
@@ -309,37 +338,83 @@ export class NovaAgent implements VoiceAssistantProvider {
       },
     };
 
-    // Add tool configuration if Strands Lambda ARN is configured
-    if (this.strandsLambdaArn) {
+    // Add tool configuration if Strands Lambda ARN is configured or group meeting mode is enabled
+    if (this.strandsLambdaArn || this.groupMeetingMode) {
       promptStartEvent.event.promptStart.toolUseOutputConfiguration = {
         mediaType: 'application/json',
       };
-      promptStartEvent.event.promptStart.toolConfiguration = {
-        tools: [
-          {
-            toolSpec: {
-              name: 'strands_agent',
-              description: 'Delegate complex queries to the Strands agent, which has access to document search, meeting history, web search, and other specialized tools. Use this for questions about documents, past meetings, current information from the web, or any query requiring specialized knowledge or data access.',
-              inputSchema: {
-                json: JSON.stringify({
-                  type: 'object',
-                  properties: {
-                    query: {
-                      type: 'string',
-                      description: 'The user\'s question or request to be processed by the Strands agent',
-                    },
+      
+      const tools: any[] = [];
+      
+      // Add Strands agent tool if configured
+      if (this.strandsLambdaArn) {
+        tools.push({
+          toolSpec: {
+            name: 'strands_agent',
+            description: 'Delegate complex queries to the Strands agent, which has access to document search, meeting history, web search, and other specialized tools. Use this for questions about documents, past meetings, current information from the web, or any query requiring specialized knowledge or data access.',
+            inputSchema: {
+              json: JSON.stringify({
+                type: 'object',
+                properties: {
+                  query: {
+                    type: 'string',
+                    description: 'The user\'s question or request to be processed by the Strands agent',
                   },
-                  required: ['query'],
-                }),
-              },
+                },
+                required: ['query'],
+              }),
             },
           },
-        ],
+        });
+      }
+      
+      // Add mute/unmute tools if group meeting mode is enabled
+      if (this.groupMeetingMode) {
+        tools.push({
+          toolSpec: {
+            name: 'check_if_addressed',
+            description: 'MANDATORY: You MUST call this tool FIRST before every response. Pass the user\'s message text to this tool. The tool will check if the message contains your wake phrases and automatically unmute you if needed. If the tool returns "not_addressed", you MUST remain silent and generate NO text or audio. If the tool returns "addressed", you may proceed with your response.',
+            inputSchema: {
+              json: JSON.stringify({
+                type: 'object',
+                properties: {
+                  user_message: {
+                    type: 'string',
+                    description: 'The exact text of the user\'s message that you received',
+                  },
+                },
+                required: ['user_message'],
+              }),
+            },
+          },
+        });
+        tools.push({
+          toolSpec: {
+            name: 'mute',
+            description: 'Mute yourself immediately. ONLY call this when explicitly asked to be quiet, stop talking, or mute yourself. Do NOT call this after normal responses - you will be automatically muted.',
+            inputSchema: {
+              json: JSON.stringify({
+                type: 'object',
+                properties: {},
+              }),
+            },
+          },
+        });
+      }
+      
+      promptStartEvent.event.promptStart.toolConfiguration = {
+        tools: tools,
         toolChoice: {
           auto: {},
         },
       };
-      console.log('✓ Strands agent tool configured in promptStart');
+      
+      if (this.strandsLambdaArn) {
+        console.log('✓ Strands agent tool configured in promptStart');
+      }
+      if (this.groupMeetingMode) {
+        console.log('✓ Mute/unmute tools configured in promptStart');
+      }
     }
 
     this.addEventToQueue(promptStartEvent);
@@ -419,7 +494,45 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private buildSystemPromptContent(): string {
-    let systemPromptContent = this.systemPrompt;
+    let systemPromptContent = '';
+    
+    // Add group meeting mode instructions FIRST (highest priority)
+    if (this.groupMeetingMode) {
+      // Get wake phrases from environment
+      const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
+      const wakePhrases = wakePhraseEnv.split(',').map(p => p.trim());
+      
+      systemPromptContent += '=== CRITICAL: GROUP MEETING MODE - READ THIS FIRST ===\n\n' +
+        '🔴 YOU ARE IN A GROUP MEETING - PEOPLE ARE NOT ALWAYS TALKING TO YOU 🔴\n\n' +
+        'MANDATORY WORKFLOW FOR EVERY USER MESSAGE:\n' +
+        '1. FIRST: Call the check_if_addressed tool with the user\'s message\n' +
+        '2. Wait for the tool result:\n' +
+        '   - If result is "not_addressed": STOP IMMEDIATELY. Generate NO text, NO audio, and do NOT call any other tools (including mute). Just stop and wait.\n' +
+        '   - If result is "addressed": Proceed with your response\n\n' +
+        'CRITICAL RULES:\n' +
+        '- You MUST call check_if_addressed BEFORE every response\n' +
+        '- Do NOT try to determine if you were addressed - let the tool decide\n' +
+        '- If the tool says "not_addressed", you MUST stop completely: no text, no audio, no tool calls, nothing. Do NOT call the mute tool.\n' +
+        '- The tool will automatically unmute you when needed\n' +
+        '- The mute tool is ONLY for when a user explicitly asks you to be quiet or mute yourself\n\n' +
+        'After responding, you will be automatically muted again after 30 seconds of inactivity.\n\n' +
+        '=== END CRITICAL RULES ===\n\n';
+    }
+    
+    // Add base system prompt
+    systemPromptContent += this.systemPrompt;
+    
+    // Add interruption handling instructions (applies to all modes)
+    systemPromptContent += '\n\nINTERRUPTION HANDLING:\n' +
+      'When a user interrupts you mid-response (you will see { "interrupted" : true }):\n' +
+      '1. IMMEDIATELY acknowledge the interruption with a brief phrase like:\n' +
+      '   - "Got it" or "Sure" or "Okay" (if they\'re correcting you)\n' +
+      '   - "Of course" or "Absolutely" (if they\'re asking something new)\n' +
+      '   - Keep it to 1-2 words for minimal interruption\n' +
+      '2. THEN proceed with their new request\n' +
+      'This provides instant feedback and shows you\'re responsive.\n';
+    
+    // Add Strands agent tool instructions
     if (this.strandsLambdaArn) {
       systemPromptContent += '\n\nIMPORTANT: You have access to the strands_agent tool for handling information requests.\n\n' +
         'CRITICAL WORKFLOW: When a user asks a question that requires the strands_agent tool:\n' +
@@ -437,6 +550,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         'Always let the user know it may take a moment before calling the tool. ' +
         'This sets proper expectations and prevents awkward silence.';
     }
+    
     return systemPromptContent;
   }
 
@@ -473,7 +587,21 @@ export class NovaAgent implements VoiceAssistantProvider {
     } else {
       // Get history starting from first USER turn
       const historyToSend = this.conversationHistory.slice(startIndex);
-      console.log(`📜 Setting up conversation history (${historyToSend.length} turns, starting with USER)...`);
+      
+      // In group meeting mode, add a reminder ASSISTANT turn at the end of history
+      // to reinforce that Nova must call check_if_addressed before every response.
+      // After session refresh, Nova sometimes skips the tool call and responds directly.
+      if (this.groupMeetingMode) {
+        historyToSend.push({
+          role: 'ASSISTANT',
+          content: '[Reminder to self: I am in group meeting mode. I MUST call check_if_addressed before every response. I must not respond to any message without first checking if I was addressed.]',
+          timestamp: Date.now(),
+        });
+        console.log(`📜 Setting up conversation history (${historyToSend.length} turns, with group meeting mode reminder)...`);
+      } else {
+        console.log(`📜 Setting up conversation history (${historyToSend.length} turns, starting with USER)...`);
+      }
+      
       await this.sendHistoryTurns(historyToSend);
     }
 
@@ -555,6 +683,103 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.refreshSession().catch(error => {
       console.error('Error executing queued refresh:', error);
     });
+  }
+
+  private checkAndExecuteQueuedAutoMute(): void {
+    if (!this.autoMuteQueued) return;
+
+    // Check if agent is busy
+    if (this._isSpeaking || this._isProcessingTool) {
+      console.log('🔊 Agent busy - will retry auto-mute check in 1 second');
+      setTimeout(() => this.checkAndExecuteQueuedAutoMute(), 1000);
+      return;
+    }
+
+    // Agent is idle - execute auto-mute
+    this.autoMuteQueued = false;
+    this.executeAutoMute();
+  }
+
+  private executeAutoMute(): void {
+    if (!this.groupMeetingMode || this._isMuted) return;
+    
+    console.log('🔇 Auto-muting agent after conversation end (group meeting mode)');
+    this._isMuted = true;
+    this.conversationActive = false;
+    this.clearConversationTimeout();
+  }
+
+  private startConversationSession(): void {
+    if (!this.groupMeetingMode) return;
+    
+    console.log('💬 Starting conversation session');
+    this.conversationActive = true;
+    this.clearConversationTimeout();
+    
+    // Set timeout to auto-mute after defaultActivationDuration seconds of no "Alex" mentions
+    const timeoutMs = this.defaultActivationDuration * 1000;
+    this.conversationTimeout = setTimeout(() => {
+      console.log(`⏰ Conversation timeout reached (${this.defaultActivationDuration}s) - queueing auto-mute`);
+      this.autoMuteQueued = true;
+      this.checkAndExecuteQueuedAutoMute();
+    }, timeoutMs);
+    
+    console.log(`⏱️  Conversation timeout set for ${this.defaultActivationDuration} seconds`);
+  }
+
+  private containsWakePhrase(text: string): boolean {
+    const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
+    const wakePhrases = wakePhraseEnv.split(',').map((p: string) => p.trim().toLowerCase());
+    const normalized = text.toLowerCase();
+    
+    // DEBUG: Log the wake phrases being checked
+    console.log('🔍 DEBUG containsWakePhrase():');
+    console.log(`   Input text: "${text}"`);
+    console.log(`   Normalized: "${normalized}"`);
+    console.log(`   Wake phrases from env: "${wakePhraseEnv}"`);
+    console.log(`   Parsed wake phrases: [${wakePhrases.map(p => `"${p}"`).join(', ')}]`);
+    
+    // Use word boundary matching to avoid false positives
+    // "okay" should NOT match "ok alex"
+    const matchResult = wakePhrases.some((phrase: string) => {
+      // Escape all regex special characters, not just spaces
+      const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+      
+      // Create regex with word boundaries
+      // \b ensures we match complete words, not partial matches
+      const regex = new RegExp(`\\b${escapedPhrase}\\b`, 'i');
+      const matches = regex.test(normalized);
+      
+      // DEBUG: Log each phrase test
+      console.log(`   Testing phrase "${phrase}" (regex: /\\b${escapedPhrase}\\b/i): ${matches ? '✓ MATCH' : '✗ no match'}`);
+      
+      return matches;
+    });
+    
+    console.log(`   Final result: ${matchResult ? '✓ WAKE PHRASE DETECTED' : '✗ No wake phrase'}`);
+    return matchResult;
+  }
+
+  private resetConversationTimeout(): void {
+    if (!this.groupMeetingMode || !this.conversationActive) return;
+    
+    console.log('🔄 Resetting conversation timeout - user mentioned wake phrase');
+    this.clearConversationTimeout();
+    
+    // Restart timeout
+    const timeoutMs = this.defaultActivationDuration * 1000;
+    this.conversationTimeout = setTimeout(() => {
+      console.log(`⏰ Conversation timeout reached (${this.defaultActivationDuration}s) - queueing auto-mute`);
+      this.autoMuteQueued = true;
+      this.checkAndExecuteQueuedAutoMute();
+    }, timeoutMs);
+  }
+
+  private clearConversationTimeout(): void {
+    if (this.conversationTimeout) {
+      clearTimeout(this.conversationTimeout);
+      this.conversationTimeout = null;
+    }
   }
 
   private async refreshSession(): Promise<void> {
@@ -720,10 +945,30 @@ export class NovaAgent implements VoiceAssistantProvider {
       // Process response stream
       await this.processResponseStream(response);
 
+      // If we get here, the stream closed normally or with an error
+      // Check if session is still supposed to be active (always_active mode)
+      if (this.activationMode === 'always_active' && !this.isRefreshing) {
+        console.log('⚠️  Stream closed unexpectedly - triggering automatic refresh');
+        // Trigger immediate refresh to recover
+        this.refreshSession().catch(error => {
+          console.error('Error in automatic refresh after stream close:', error);
+        });
+      }
+
     } catch (error) {
       console.error('Error in bidirectional streaming:', error);
       this._isActive = false;
       this.streamingActive = false;
+      
+      // Trigger automatic refresh if in always_active mode
+      if (this.activationMode === 'always_active' && !this.isRefreshing) {
+        console.log('⚠️  Stream error detected - triggering automatic refresh');
+        setTimeout(() => {
+          this.refreshSession().catch(err => {
+            console.error('Error in automatic refresh after stream error:', err);
+          });
+        }, 1000);
+      }
     }
   }
 
@@ -768,11 +1013,20 @@ export class NovaAgent implements VoiceAssistantProvider {
                 }
               }
             } else if (jsonResponse.event?.textOutput) {
-              console.log('Text output:', jsonResponse.event.textOutput.content);
+              const textContent = jsonResponse.event.textOutput.content;
+              console.log('Text output:', textContent);
+              
+              // Check for interruption signal
+              if (textContent.includes('"interrupted"') && textContent.includes('true')) {
+                console.log('⚠️  Interruption detected - clearing audio queue');
+                // Clear audio queue immediately to stop playback
+                this.audioQueue = [];
+                // Note: isPlayingQueue will be cleared when current batch finishes
+              }
               
               // Accumulate text for current turn if it's a FINAL transcript
               if (currentTurn.role && currentTurn.isFinal) {
-                currentTurn.content += jsonResponse.event.textOutput.content;
+                currentTurn.content += textContent;
               }
             } else if (jsonResponse.event?.audioOutput) {
               // Received audio from Nova - play it immediately (non-blocking)
@@ -793,6 +1047,16 @@ export class NovaAgent implements VoiceAssistantProvider {
                 this.processToolUseAsync(toolUseId, toolName, toolUseContent).catch(error => {
                   console.error('Error in async tool processing:', error);
                 });
+              } else if (toolName === 'check_if_addressed') {
+                // Handle check_if_addressed tool call
+                this.handleCheckIfAddressedTool(toolUseId, toolUseContent).catch(error => {
+                  console.error('Error handling check_if_addressed tool:', error);
+                });
+              } else if (toolName === 'mute') {
+                // Handle mute tool call
+                this.handleMuteTool(toolUseId).catch(error => {
+                  console.error('Error handling mute tool:', error);
+                });
               }
             } else if (jsonResponse.event?.contentEnd) {
               console.log('Content end:', jsonResponse.event.contentEnd.type);
@@ -801,6 +1065,24 @@ export class NovaAgent implements VoiceAssistantProvider {
               if (currentTurn.role && currentTurn.isFinal && currentTurn.content.trim()) {
                 this.addToConversationHistory(currentTurn.role, currentTurn.content.trim());
                 console.log(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
+                
+                // If this is a USER turn containing a wake phrase in group meeting mode:
+                // 1. Proactively unmute the agent (in case Nova skips check_if_addressed after refresh)
+                // 2. Reset conversation timeout
+                if (currentTurn.role === 'USER' && this.groupMeetingMode && this.containsWakePhrase(currentTurn.content)) {
+                  if (this._isMuted) {
+                    console.log('🔓 Wake phrase detected in user speech - proactively unmuting agent');
+                    this._isMuted = false;
+                    // Start conversation session if not already active
+                    if (!this.conversationActive) {
+                      this.startConversationSession();
+                    }
+                  }
+                  this.resetConversationTimeout();
+                } else if (currentTurn.role === 'USER' && !this.groupMeetingMode && this.containsWakePhrase(currentTurn.content)) {
+                  // Non-group meeting mode: just reset timeout
+                  this.resetConversationTimeout();
+                }
               }
               
               // Reset current turn
@@ -829,6 +1111,10 @@ export class NovaAgent implements VoiceAssistantProvider {
       this._isProcessingTool = true;
       console.log(`🔧 Starting async tool processing: ${toolName}`);
       
+      // Clear conversation timeout during tool execution to prevent premature auto-mute
+      // The timeout will be restarted after tool completes
+      this.clearConversationTimeout();
+      
       // Invoke Strands Lambda
       const toolResult = await this.invokeStrandsAgent(toolUseContent);
       
@@ -853,6 +1139,17 @@ export class NovaAgent implements VoiceAssistantProvider {
       // The _isSpeaking flag will keep the session open while Nova generates and plays audio
       setTimeout(() => {
         this._isProcessingTool = false;
+        
+        // Add 2-second padding before restarting conversation timeout
+        // This gives Nova time to start speaking before the countdown begins
+        setTimeout(() => {
+          // Restart conversation timeout after tool completes (fresh 30 seconds)
+          // This ensures Nova has time to deliver the tool result
+          if (this.groupMeetingMode && this.conversationActive) {
+            console.log('🔄 Restarting conversation timeout after tool completion (with 2s padding)');
+            this.startConversationSession();
+          }
+        }, 2000);
         
         // Check if there's a queued refresh waiting for agent to be idle
         if (this.refreshQueued) {
@@ -974,16 +1271,97 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log('Tool result sent to Nova');
   }
 
+  private async handleCheckIfAddressedTool(toolUseId: string, toolUseContent: any): Promise<void> {
+    console.log('🔍 check_if_addressed tool called');
+    
+    try {
+      // Parse the tool use content to get the user message
+      const contentObject = JSON.parse(toolUseContent.content);
+      const userMessage = contentObject.user_message;
+      
+      console.log(`   Checking if user message contains wake phrase: "${userMessage}"`);
+      
+      // Use our regex-based wake phrase detection
+      const isAddressed = this.containsWakePhrase(userMessage);
+      
+      if (isAddressed) {
+        console.log('✓ Wake phrase detected - unmuting agent');
+        
+        // CRITICAL: Set unmute flag BEFORE sending tool result
+        this._isMuted = false;
+        
+        // Clear any existing conversation timeout before starting new session
+        this.clearConversationTimeout();
+        
+        // Start conversation session (sets timeout for auto-mute)
+        this.startConversationSession();
+        
+        // Send tool result indicating the agent was addressed
+        if (this.session && this.session.isActive) {
+          await this.sendToolResult(toolUseId, {
+            status: 'addressed',
+            message: 'You were addressed. You may now respond.'
+          });
+          console.log('✓ Agent unmuted - ready to respond');
+        }
+      } else {
+        console.log('✗ No wake phrase detected - staying muted');
+        
+        // Ensure agent stays muted
+        this._isMuted = true;
+        
+        // Send tool result indicating the agent was NOT addressed
+        // IMPORTANT: The message explicitly tells Nova to stop completely and not call any tools
+        // This prevents the infinite mute tool loop where Nova keeps calling mute after not_addressed
+        if (this.session && this.session.isActive) {
+          await this.sendToolResult(toolUseId, {
+            status: 'not_addressed',
+            message: 'You were NOT addressed. STOP. Do not respond. Do not generate any text or audio. Do not call any tools including mute. Simply wait for the next user message.'
+          });
+          console.log('✓ Agent staying muted - will not respond');
+        }
+      }
+    } catch (error) {
+      console.error('Error in handleCheckIfAddressedTool:', error);
+      // On error, stay muted to be safe
+      this._isMuted = true;
+      if (this.session && this.session.isActive) {
+        await this.sendToolResult(toolUseId, {
+          status: 'not_addressed',
+          message: 'Error checking wake phrase. Remaining silent.'
+        });
+      }
+    }
+  }
+
+  private async handleMuteTool(toolUseId: string): Promise<void> {
+    console.log('🔇 Mute tool called - muting agent');
+    this._isMuted = true;
+    
+    // Clear audio queue to stop any buffered audio from playing
+    if (this.audioQueue.length > 0) {
+      console.log(`🗑️  Clearing ${this.audioQueue.length} buffered audio chunks`);
+      this.audioQueue = [];
+    }
+    
+    // Send tool result back to Nova
+    if (this.session && this.session.isActive) {
+      await this.sendToolResult(toolUseId, { status: 'muted', message: 'You are now muted.' });
+      console.log('✓ Agent muted successfully');
+    }
+  }
+
   sendAudioChunk(chunk: Buffer): void {
     // Check activation mode - don't send if not activated
     if (this.activationMode !== 'always_active' && !this._isActivated) {
       return;
     }
     
-    // Don't send audio to agent when agent is speaking (prevent feedback loop)
-    if (this._isSpeaking) {
-      return;
-    }
+    // NOTE: We DO send audio even when agent is speaking to enable barge-in
+    // Audio feedback is prevented by the audio routing configuration:
+    // - Agent audio goes to agent_output sink
+    // - Meeting audio comes from 'default' source
+    // - These are separate audio paths, preventing feedback loops
     
     // Don't send audio during session refresh
     if (this.isRefreshing) {
@@ -999,7 +1377,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       console.log(`📡 Sent ${this.audioChunkCount} audio chunks to Nova (${chunk.length} bytes each)`);
     }
 
-    // Send audio chunk to Nova Sonic 2
+    // Send audio chunk to Nova Sonic 2 (even when speaking, to enable barge-in)
     this.addEventToQueue({
       event: {
         audioInput: {
@@ -1061,6 +1439,13 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private async playAudio(audioBuffer: Buffer): Promise<void> {
+    // CRITICAL: Enforce mute state in group meeting mode
+    // This prevents Nova from speaking when muted (no wake phrase detected)
+    if (this._isMuted) {
+      console.log('🔇 Audio dropped - agent is muted (group meeting mode)');
+      return;
+    }
+    
     // Add audio to queue
     this.audioQueue.push(audioBuffer);
     
@@ -1141,6 +1526,11 @@ export class NovaAgent implements VoiceAssistantProvider {
       if (this.refreshQueued) {
         this.checkAndExecuteQueuedRefresh();
       }
+      
+      // Check if there's a queued auto-mute waiting for agent to finish speaking
+      if (this.autoMuteQueued) {
+        this.checkAndExecuteQueuedAutoMute();
+      }
     }, 500); // Short delay after last chunk
   }
 
@@ -1194,8 +1584,9 @@ export class NovaAgent implements VoiceAssistantProvider {
       .replace(/\s+/g, ' ')         // Normalize multiple spaces
       .trim();
     
-    // Remove wake phrases
-    const wakePhrases = ['hey alex', 'ok alex', 'hi alex', 'hello alex'];
+    // Remove wake phrases dynamically from environment
+    const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
+    const wakePhrases = wakePhraseEnv.split(',').map((p: string) => p.trim().toLowerCase());
     for (const phrase of wakePhrases) {
       cleaned = cleaned.replace(phrase, '').trim();
     }
@@ -1263,6 +1654,9 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.sessionRefreshTimer = null;
       console.log('✓ Session refresh timer cleared');
     }
+    
+    // Clear conversation timeout
+    this.clearConversationTimeout();
 
     try {
       // End audio content
@@ -1337,6 +1731,9 @@ export class NovaAgent implements VoiceAssistantProvider {
       clearTimeout(this.activationTimeout);
       this.activationTimeout = null;
     }
+    
+    // Clear conversation timeout
+    this.clearConversationTimeout();
 
     // Close session if active
     if (this.session) {

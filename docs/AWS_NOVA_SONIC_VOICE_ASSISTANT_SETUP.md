@@ -118,6 +118,8 @@ You can customize these settings in the `CustomNovaSonicConfig` item:
 | `promptMode` | String | How to apply custom prompt: `base`, `inject`, or `replace` | `inject` |
 | `voiceId` | String | Nova Sonic voice ID (see available voices below) | `tiffany` |
 | `modelId` | String | Bedrock model ID | `amazon.nova-sonic-v1:0` |
+| `endpointingSensitivity` | String | Turn-taking sensitivity: `HIGH`, `MEDIUM`, or `LOW` | `MEDIUM` |
+| `groupMeetingMode` | Boolean | Enable passive mode for group meetings (default: `false`) | `true` |
 
 ### 4.3 Prompt Modes Explained
 
@@ -136,7 +138,72 @@ You can customize these settings in the `CustomNovaSonicConfig` item:
 - Ignores default prompt entirely
 - **Use when**: You need fundamentally different assistant behavior
 
-### 4.4 Available Voice IDs
+### 4.4 Turn-Taking Sensitivity (Endpointing)
+
+The `endpointingSensitivity` parameter controls how quickly Nova Sonic detects the end of a user's turn and begins responding. This affects both response latency and the likelihood of interrupting users who are still speaking.
+
+**Available Values:**
+
+| Sensitivity | Pause Duration | Best For |
+|-------------|----------------|----------|
+| `HIGH` | 1.5 seconds | Quick Q&A, command-and-control, time-sensitive interactions |
+| `MEDIUM` (default) | 1.75 seconds | General conversations, customer service, multi-turn discussions |
+| `LOW` | 2.0 seconds | Thoughtful conversations, elderly or speech-impaired users, complex problem-solving |
+
+**How It Works:**
+- Nova Sonic waits for the specified pause duration after detecting the end of speech before responding
+- **Higher sensitivity** = faster responses but more risk of interrupting users who pause while thinking
+- **Lower sensitivity** = more patient waiting but slightly slower responses
+
+**When to Adjust:**
+- Use `HIGH` for fast-paced interactions where users expect immediate responses
+- Use `MEDIUM` (default) for balanced, natural conversations
+- Use `LOW` when users need more time to formulate thoughts or have speech patterns with longer pauses
+
+### 4.5 Group Meeting Mode (Passive Listening)
+
+The `groupMeetingMode` parameter enables Nova to listen passively in group meetings and only respond when directly addressed. This is ideal for multi-participant meetings where you want the assistant available but not interrupting conversations between other participants.
+
+**How It Works:**
+- Nova starts **muted** (audio output disabled)
+- Listens to all conversation silently
+- Only responds when someone mentions "Alex" in their speech
+- Automatically calls `unmute` tool before speaking
+- Auto-mutes after finishing response
+
+**Configuration:**
+```json
+{
+  "groupMeetingMode": true,
+  "endpointingSensitivity": "LOW"
+}
+```
+
+**Benefits:**
+- ✅ **Non-intrusive** - Won't interrupt conversations between participants
+- ✅ **Always available** - Listening and ready when needed
+- ✅ **Natural interaction** - Just say "Alex" to get attention
+- ✅ **Barge-in support** - Can interrupt Nova mid-sentence if needed
+- ✅ **No feedback loops** - Separate audio routing prevents echo
+
+**When to Use:**
+- Multi-participant meetings (3+ people)
+- Team discussions where assistant is optional
+- Meetings where you want assistant available but not active
+- Scenarios where interruptions would be disruptive
+
+**Comparison with Wake Phrase Mode:**
+
+| Feature | Group Meeting Mode | Wake Phrase Mode |
+|---------|-------------------|------------------|
+| **Session** | Always connected | Connects on wake phrase |
+| **Listening** | Continuous | Only when activated |
+| **Response** | When "Alex" mentioned | After wake phrase + timeout |
+| **Cost** | Higher (always connected) | Lower (connects on demand) |
+| **Use Case** | Group meetings | 1-on-1 or cost-sensitive |
+| **Barge-in** | Supported | Not applicable |
+
+### 4.6 Available Voice IDs
 
 Amazon Nova Sonic supports 16 different voices:
 
@@ -162,15 +229,16 @@ Amazon Nova Sonic supports 16 different voices:
 - `carolina` - Portuguese (Brazil)
 - `leo` - Portuguese (Portugal)
 
-### 4.5 Example Customizations
+### 4.7 Example Customizations
 
-**Example 1: Professional Assistant**
+**Example 1: Professional Assistant (Fast Response)**
 ```json
 {
   "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a professional executive assistant. Provide concise, actionable responses. Always confirm understanding before taking action.",
   "promptMode": "replace",
-  "voiceId": "matthew"
+  "voiceId": "matthew",
+  "endpointingSensitivity": "HIGH"
 }
 ```
 
@@ -180,21 +248,46 @@ Amazon Nova Sonic supports 16 different voices:
   "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "Always end responses with 'Anything else I can help with?' to encourage engagement.",
   "promptMode": "inject",
-  "voiceId": "olivia"
+  "voiceId": "olivia",
+  "endpointingSensitivity": "MEDIUM"
 }
 ```
 
-**Example 3: Technical Support**
+**Example 3: Technical Support (Patient Listening)**
 ```json
 {
   "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a technical support specialist for AWS services. Provide detailed, accurate information. Use technical terminology when appropriate.",
   "promptMode": "replace",
-  "voiceId": "tiffany"
+  "voiceId": "tiffany",
+  "endpointingSensitivity": "LOW"
 }
 ```
 
-### 4.6 Apply Configuration Changes
+**Example 4: Group Meeting Assistant (Passive Mode)**
+```json
+{
+  "NovaSonicConfigId": "CustomNovaSonicConfig",
+  "systemPrompt": "You are a helpful meeting assistant. Provide concise, relevant information when asked.",
+  "promptMode": "base",
+  "voiceId": "tiffany",
+  "endpointingSensitivity": "LOW",
+  "groupMeetingMode": true
+}
+```
+
+**Example 5: Accessibility-Focused (Maximum Patience)**
+```json
+{
+  "NovaSonicConfigId": "CustomNovaSonicConfig",
+  "systemPrompt": "You are a patient, supportive assistant. Speak slowly and clearly. Wait for users to finish their thoughts completely.",
+  "promptMode": "replace",
+  "voiceId": "amy",
+  "endpointingSensitivity": "LOW"
+}
+```
+
+### 4.8 Apply Configuration Changes
 
 1. Edit the `CustomNovaSonicConfig` item in DynamoDB
 2. Save your changes
@@ -491,7 +584,10 @@ For issues specific to:
 ✅ **Customization:**
 - 3 prompt modes (base, inject, replace)
 - 16 voice IDs to choose from
+- 3 turn-taking sensitivity levels (HIGH, MEDIUM, LOW)
+- Group meeting mode for passive listening
+- Barge-in support (interrupt Nova mid-sentence)
 - Edit via DynamoDB console
 - Changes apply immediately (no redeployment)
 
-That's it! Your meetings now have an AI voice assistant powered by AWS Nova Sonic 2 with access to your organization's knowledge and systems, fully customizable to match your needs!
+That's it! Your meetings now have an AI voice assistant powered by AWS Nova Sonic 2 with access to your organization's knowledge and systems, fully customizable to match your needs - from active 1-on-1 conversations to passive group meeting support!
