@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Admin UI pages for Nova Sonic voice assistant configuration (`/#/configuration/nova-sonic`) and Transcript Summary prompt templates (`/#/configuration/transcript-summary`) - admins can now view defaults and edit custom overrides directly from the web UI instead of navigating to the DynamoDB console
+- Full-stack AppSync GraphQL API for Nova Sonic config and LLM prompt template CRUD operations with Lambda resolvers implementing input validation and security filtering (allowlisted fields only)
+- Embeddable component page (`/#/embed`) for iframe integration - third-party apps can embed individual LMA components (stream audio, transcript, summary, chat, VNC, virtual participant) in their own UI via URL query parameters
+- PostMessage API for cross-origin iframe auth token passing and meeting lifecycle control (start/stop/events)
+- Embed integration documentation (`docs/EMBED_COMPONENTS_SETUP.md`) with examples, auth options, and API reference
 - Configurable turn-taking sensitivity (endpointingSensitivity) for AWS Nova Sonic 2 voice assistant - supports HIGH (1.5s), MEDIUM (1.75s, default), and LOW (2.0s) pause detection for controlling response timing
 - Chat shortcut buttons now re-appear inline after each assistant response completes, so users no longer need to scroll back to the top to access them
 - Add and delete buttons in Edit Chat Buttons modal - admins can now add new shortcut buttons and remove existing ones, not just edit placeholders
