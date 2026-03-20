@@ -19,6 +19,8 @@ import StreamAudioRoutes from './StreamAudioRoutes';
 import VirtualParticipantRoutes from './VirtualParticipantRoutes';
 import MeetingsQueryRoutes from './MeetingsQueryRoutes';
 import MCPServersRoutes from './MCPServersRoutes';
+import NovaSonicConfigRoutes from './NovaSonicConfigRoutes';
+import TranscriptSummaryRoutes from './TranscriptSummaryRoutes';
 import EmbedRoutes from './EmbedRoutes';
 
 import {
@@ -30,6 +32,8 @@ import {
   VIRTUAL_PARTICIPANT_PATH,
   MEETINGS_QUERY_PATH,
   MCP_SERVERS_PATH,
+  NOVA_SONIC_CONFIG_PATH,
+  TRANSCRIPT_SUMMARY_PATH,
   EMBED_PATH,
 } from './constants';
 
@@ -68,6 +72,12 @@ const AuthRoutes = ({ redirectParam }) => {
         </Route>
         <Route path={MCP_SERVERS_PATH}>
           <MCPServersRoutes />
+        </Route>
+        <Route path={NOVA_SONIC_CONFIG_PATH}>
+          <NovaSonicConfigRoutes />
+        </Route>
+        <Route path={TRANSCRIPT_SUMMARY_PATH}>
+          <TranscriptSummaryRoutes />
         </Route>
         <Route path={EMBED_PATH}>
           <EmbedRoutes />

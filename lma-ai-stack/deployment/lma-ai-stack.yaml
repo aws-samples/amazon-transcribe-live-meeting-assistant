@@ -365,6 +365,12 @@ Parameters:
       The DynamoDB table name where the default and custom STRANDS agent chat button
       configurations are stored.
 
+  NovaSonicConfigTableName:
+    Type: String
+    Description:
+      The DynamoDB table name where the default and custom Nova Sonic voice assistant
+      configurations are stored.
+
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
@@ -2328,6 +2334,302 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt UpdateChatButtonConfigResolverFunction.Arn
 
+  ##########################################################################
+  # Nova Sonic Config - Lambda, IAM, DataSources
+  ##########################################################################
+
+  UpdateNovaSonicConfigResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt UpdateNovaSonicConfigResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/update_nova_sonic_config_resolver
+      Description: Lambda resolver for updateNovaSonicConfig with input validation
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          NOVA_SONIC_CONFIG_TABLE_NAME: !Ref NovaSonicConfigTableName
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UpdateNovaSonicConfigResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - UpdateNovaSonicConfigResolverFunctionLogGroup
+
+  UpdateNovaSonicConfigResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UpdateNovaSonicConfigResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UpdateNovaSonicConfigResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: UpdateNovaSonicConfigResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UpdateNovaSonicConfig
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NovaSonicConfigTableName}"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+
+  AppSyncUpdateNovaSonicConfigLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt UpdateNovaSonicConfigResolverFunction.Arn
+
+  UpdateNovaSonicConfigLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UpdateNovaSonicConfigLambda
+      Description: Lambda function for updateNovaSonicConfig with input validation
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncUpdateNovaSonicConfigLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt UpdateNovaSonicConfigResolverFunction.Arn
+
+  NovaSonicConfigDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: NovaSonicConfigTable
+      Description: Nova Sonic Voice Assistant Configuration DynamoDB Table
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt NovaSonicConfigDataSourceRole.Arn
+      DynamoDBConfig:
+        TableName: !Ref NovaSonicConfigTableName
+        AwsRegion: !Ref AWS::Region
+
+  NovaSonicConfigDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NovaSonicConfigTableName}"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+
+  ##########################################################################
+  # LLM Prompt Template Config - Lambda, IAM, DataSources
+  ##########################################################################
+
+  UpdateLLMPromptTemplateResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt UpdateLLMPromptTemplateResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/update_llm_prompt_template_resolver
+      Description: Lambda resolver for updateLLMPromptTemplate with input validation
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          LLM_PROMPT_TEMPLATE_TABLE_NAME: !Ref LLMPromptTemplateTableName
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UpdateLLMPromptTemplateResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - UpdateLLMPromptTemplateResolverFunctionLogGroup
+
+  UpdateLLMPromptTemplateResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UpdateLLMPromptTemplateResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UpdateLLMPromptTemplateResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: UpdateLLMPromptTemplateResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UpdateLLMPromptTemplate
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+
+  AppSyncUpdateLLMPromptTemplateLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt UpdateLLMPromptTemplateResolverFunction.Arn
+
+  UpdateLLMPromptTemplateLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UpdateLLMPromptTemplateLambda
+      Description: Lambda function for updateLLMPromptTemplate with input validation
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncUpdateLLMPromptTemplateLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt UpdateLLMPromptTemplateResolverFunction.Arn
+
+  LLMPromptTemplateDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: LLMPromptTemplateTable
+      Description: LLM Prompt Summary Template Configuration DynamoDB Table
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt LLMPromptTemplateDataSourceRole.Arn
+      DynamoDBConfig:
+        TableName: !Ref LLMPromptTemplateTableName
+        AwsRegion: !Ref AWS::Region
+
+  LLMPromptTemplateDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+
   # AppSync Event API for MCP command delivery (separate from GraphQL API)
   AppSyncEventApi:
     Type: AWS::AppSync::Api
@@ -3154,6 +3456,98 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/updateChatButtonConfigLambda.js
+
+  # Nova Sonic Config Resolvers
+  GetNovaSonicConfigResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt NovaSonicConfigDataSource.Name
+      TypeName: Query
+      FieldName: getNovaSonicConfig
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+
+        export function request(ctx) {
+          return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({
+              NovaSonicConfigId: ctx.args.NovaSonicConfigId
+            })
+          };
+        }
+
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return {
+            NovaSonicConfigId: JSON.stringify(ctx.result)
+          };
+        }
+
+  UpdateNovaSonicConfigResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt UpdateNovaSonicConfigLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: updateNovaSonicConfig
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/updateNovaSonicConfigLambda.js
+
+  # LLM Prompt Template Resolvers
+  GetLLMPromptTemplateResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LLMPromptTemplateDataSource.Name
+      TypeName: Query
+      FieldName: getLLMPromptTemplate
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+
+        export function request(ctx) {
+          return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({
+              LLMPromptTemplateId: ctx.args.LLMPromptTemplateId
+            })
+          };
+        }
+
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return {
+            LLMPromptTemplateId: JSON.stringify(ctx.result)
+          };
+        }
+
+  UpdateLLMPromptTemplateResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt UpdateLLMPromptTemplateLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: updateLLMPromptTemplate
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/updateLLMPromptTemplateLambda.js
 
   SendChatMessageResolver:
     Type: AWS::AppSync::Resolver

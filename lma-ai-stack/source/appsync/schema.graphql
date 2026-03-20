@@ -175,6 +175,8 @@ type Mutation @aws_iam {
 	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
 	updateChatButtonConfig(input: UpdateChatButtonConfigInput!): UpdateChatButtonConfigOutput @aws_cognito_user_pools
+	updateNovaSonicConfig(input: UpdateNovaSonicConfigInput!): UpdateNovaSonicConfigOutput @aws_cognito_user_pools
+	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools
 	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools
@@ -211,6 +213,8 @@ type Query @aws_cognito_user_pools
 	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	parseMeetingInvitation(invitationText: String!): String @aws_cognito_user_pools @aws_iam
 	getChatButtonConfig(ChatButtonConfigId: ID!): ChatButtonConfig @aws_cognito_user_pools @aws_iam
+	getNovaSonicConfig(NovaSonicConfigId: ID!): NovaSonicConfig @aws_cognito_user_pools @aws_iam
+	getLLMPromptTemplate(LLMPromptTemplateId: ID!): LLMPromptTemplate @aws_cognito_user_pools @aws_iam
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 }
@@ -614,6 +618,36 @@ input UpdateChatButtonConfigInput {
 
 type UpdateChatButtonConfigOutput @aws_cognito_user_pools @aws_iam {
 	ChatButtonConfigId: ID!
+	Success: Boolean!
+}
+
+# Nova Sonic Voice Assistant Configuration
+type NovaSonicConfig @aws_cognito_user_pools @aws_iam {
+	NovaSonicConfigId: ID!
+}
+
+input UpdateNovaSonicConfigInput {
+	NovaSonicConfigId: ID!
+	ConfigData: String!
+}
+
+type UpdateNovaSonicConfigOutput @aws_cognito_user_pools @aws_iam {
+	NovaSonicConfigId: ID!
+	Success: Boolean!
+}
+
+# LLM Prompt Summary Templates
+type LLMPromptTemplate @aws_cognito_user_pools @aws_iam {
+	LLMPromptTemplateId: ID!
+}
+
+input UpdateLLMPromptTemplateInput {
+	LLMPromptTemplateId: ID!
+	TemplateConfig: String!
+}
+
+type UpdateLLMPromptTemplateOutput @aws_cognito_user_pools @aws_iam {
+	LLMPromptTemplateId: ID!
 	Success: Boolean!
 }
 
