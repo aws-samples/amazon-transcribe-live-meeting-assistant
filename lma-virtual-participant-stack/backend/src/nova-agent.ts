@@ -368,30 +368,14 @@ export class NovaAgent implements VoiceAssistantProvider {
         });
       }
       
-      // Add mute/unmute tools if group meeting mode is enabled
+      // Add mute tool if group meeting mode is enabled
+      // Wake phrase detection is handled by our code watching Nova's USER FINAL transcripts
+      // (no check_if_addressed tool needed - eliminates infinite tool-call loops)
       if (this.groupMeetingMode) {
         tools.push({
           toolSpec: {
-            name: 'check_if_addressed',
-            description: 'MANDATORY: You MUST call this tool FIRST before every response. Pass the user\'s message text to this tool. The tool will check if the message contains your wake phrases and automatically unmute you if needed. If the tool returns "not_addressed", you MUST remain silent and generate NO text or audio. If the tool returns "addressed", you may proceed with your response.',
-            inputSchema: {
-              json: JSON.stringify({
-                type: 'object',
-                properties: {
-                  user_message: {
-                    type: 'string',
-                    description: 'The exact text of the user\'s message that you received',
-                  },
-                },
-                required: ['user_message'],
-              }),
-            },
-          },
-        });
-        tools.push({
-          toolSpec: {
             name: 'mute',
-            description: 'Mute yourself immediately. ONLY call this when explicitly asked to be quiet, stop talking, or mute yourself. Do NOT call this after normal responses - you will be automatically muted.',
+            description: 'Mute yourself immediately. Call this ONLY when a user explicitly asks you to stop, stop talking, be quiet, shut up, mute yourself, etc.',
             inputSchema: {
               json: JSON.stringify({
                 type: 'object',
@@ -496,27 +480,14 @@ export class NovaAgent implements VoiceAssistantProvider {
   private buildSystemPromptContent(): string {
     let systemPromptContent = '';
     
-    // Add group meeting mode instructions FIRST (highest priority)
+    // Add group meeting mode instructions (simplified - wake phrase detection handled by our code)
     if (this.groupMeetingMode) {
-      // Get wake phrases from environment
-      const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
-      const wakePhrases = wakePhraseEnv.split(',').map(p => p.trim());
-      
-      systemPromptContent += '=== CRITICAL: GROUP MEETING MODE - READ THIS FIRST ===\n\n' +
-        '🔴 YOU ARE IN A GROUP MEETING - PEOPLE ARE NOT ALWAYS TALKING TO YOU 🔴\n\n' +
-        'MANDATORY WORKFLOW FOR EVERY USER MESSAGE:\n' +
-        '1. FIRST: Call the check_if_addressed tool with the user\'s message\n' +
-        '2. Wait for the tool result:\n' +
-        '   - If result is "not_addressed": STOP IMMEDIATELY. Generate NO text, NO audio, and do NOT call any other tools (including mute). Just stop and wait.\n' +
-        '   - If result is "addressed": Proceed with your response\n\n' +
-        'CRITICAL RULES:\n' +
-        '- You MUST call check_if_addressed BEFORE every response\n' +
-        '- Do NOT try to determine if you were addressed - let the tool decide\n' +
-        '- If the tool says "not_addressed", you MUST stop completely: no text, no audio, no tool calls, nothing. Do NOT call the mute tool.\n' +
-        '- The tool will automatically unmute you when needed\n' +
-        '- The mute tool is ONLY for when a user explicitly asks you to be quiet or mute yourself\n\n' +
-        'After responding, you will be automatically muted again after 30 seconds of inactivity.\n\n' +
-        '=== END CRITICAL RULES ===\n\n';
+      systemPromptContent += 'GROUP MEETING MODE:\n' +
+        'You are in a group meeting where multiple people are talking. ' +
+        'You will hear all conversation, but your audio output is managed externally - ' +
+        'you will only be heard when someone addresses you by name.\n' +
+        'Just respond naturally to whatever you hear. Keep responses concise.\n' +
+        'If someone explicitly asks you to stop talking, be quiet, or mute yourself, call the mute tool.\n\n';
     }
     
     // Add base system prompt
@@ -588,19 +559,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       // Get history starting from first USER turn
       const historyToSend = this.conversationHistory.slice(startIndex);
       
-      // In group meeting mode, add a reminder ASSISTANT turn at the end of history
-      // to reinforce that Nova must call check_if_addressed before every response.
-      // After session refresh, Nova sometimes skips the tool call and responds directly.
-      if (this.groupMeetingMode) {
-        historyToSend.push({
-          role: 'ASSISTANT',
-          content: '[Reminder to self: I am in group meeting mode. I MUST call check_if_addressed before every response. I must not respond to any message without first checking if I was addressed.]',
-          timestamp: Date.now(),
-        });
-        console.log(`📜 Setting up conversation history (${historyToSend.length} turns, with group meeting mode reminder)...`);
-      } else {
-        console.log(`📜 Setting up conversation history (${historyToSend.length} turns, starting with USER)...`);
-      }
+      console.log(`📜 Setting up conversation history (${historyToSend.length} turns, starting with USER)...`);
       
       await this.sendHistoryTurns(historyToSend);
     }
@@ -730,19 +689,25 @@ export class NovaAgent implements VoiceAssistantProvider {
   private containsWakePhrase(text: string): boolean {
     const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
     const wakePhrases = wakePhraseEnv.split(',').map((p: string) => p.trim().toLowerCase());
-    const normalized = text.toLowerCase();
+    
+    // Normalize input: strip punctuation and collapse whitespace
+    // This handles transcription artifacts like "hey, alex" or "ok. alex"
+    const normalized = text.toLowerCase()
+      .replace(/[,.\?!;:'"]/g, ' ')  // Replace punctuation with spaces
+      .replace(/\s+/g, ' ')           // Collapse multiple spaces
+      .trim();
     
     // DEBUG: Log the wake phrases being checked
     console.log('🔍 DEBUG containsWakePhrase():');
     console.log(`   Input text: "${text}"`);
-    console.log(`   Normalized: "${normalized}"`);
+    console.log(`   Normalized (punctuation stripped): "${normalized}"`);
     console.log(`   Wake phrases from env: "${wakePhraseEnv}"`);
     console.log(`   Parsed wake phrases: [${wakePhrases.map(p => `"${p}"`).join(', ')}]`);
     
     // Use word boundary matching to avoid false positives
     // "okay" should NOT match "ok alex"
     const matchResult = wakePhrases.some((phrase: string) => {
-      // Escape all regex special characters, not just spaces
+      // Escape all regex special characters, then allow flexible whitespace between words
       const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
       
       // Create regex with word boundaries
@@ -1047,11 +1012,6 @@ export class NovaAgent implements VoiceAssistantProvider {
                 this.processToolUseAsync(toolUseId, toolName, toolUseContent).catch(error => {
                   console.error('Error in async tool processing:', error);
                 });
-              } else if (toolName === 'check_if_addressed') {
-                // Handle check_if_addressed tool call
-                this.handleCheckIfAddressedTool(toolUseId, toolUseContent).catch(error => {
-                  console.error('Error handling check_if_addressed tool:', error);
-                });
               } else if (toolName === 'mute') {
                 // Handle mute tool call
                 this.handleMuteTool(toolUseId).catch(error => {
@@ -1066,9 +1026,10 @@ export class NovaAgent implements VoiceAssistantProvider {
                 this.addToConversationHistory(currentTurn.role, currentTurn.content.trim());
                 console.log(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
                 
-                // If this is a USER turn containing a wake phrase in group meeting mode:
-                // 1. Proactively unmute the agent (in case Nova skips check_if_addressed after refresh)
-                // 2. Reset conversation timeout
+                // GROUP MEETING MODE: Transcript-based wake phrase detection
+                // This is the PRIMARY mechanism for unmuting in group meeting mode.
+                // We watch Nova's FINAL USER transcripts for wake phrases and unmute/mute
+                // entirely from our code - no tool calls needed (eliminates infinite loops).
                 if (currentTurn.role === 'USER' && this.groupMeetingMode && this.containsWakePhrase(currentTurn.content)) {
                   if (this._isMuted) {
                     console.log('🔓 Wake phrase detected in user speech - proactively unmuting agent');
@@ -1271,71 +1232,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log('Tool result sent to Nova');
   }
 
-  private async handleCheckIfAddressedTool(toolUseId: string, toolUseContent: any): Promise<void> {
-    console.log('🔍 check_if_addressed tool called');
-    
-    try {
-      // Parse the tool use content to get the user message
-      const contentObject = JSON.parse(toolUseContent.content);
-      const userMessage = contentObject.user_message;
-      
-      console.log(`   Checking if user message contains wake phrase: "${userMessage}"`);
-      
-      // Use our regex-based wake phrase detection
-      const isAddressed = this.containsWakePhrase(userMessage);
-      
-      if (isAddressed) {
-        console.log('✓ Wake phrase detected - unmuting agent');
-        
-        // CRITICAL: Set unmute flag BEFORE sending tool result
-        this._isMuted = false;
-        
-        // Clear any existing conversation timeout before starting new session
-        this.clearConversationTimeout();
-        
-        // Start conversation session (sets timeout for auto-mute)
-        this.startConversationSession();
-        
-        // Send tool result indicating the agent was addressed
-        if (this.session && this.session.isActive) {
-          await this.sendToolResult(toolUseId, {
-            status: 'addressed',
-            message: 'You were addressed. You may now respond.'
-          });
-          console.log('✓ Agent unmuted - ready to respond');
-        }
-      } else {
-        console.log('✗ No wake phrase detected - staying muted');
-        
-        // Ensure agent stays muted
-        this._isMuted = true;
-        
-        // Send tool result indicating the agent was NOT addressed
-        // IMPORTANT: The message explicitly tells Nova to stop completely and not call any tools
-        // This prevents the infinite mute tool loop where Nova keeps calling mute after not_addressed
-        if (this.session && this.session.isActive) {
-          await this.sendToolResult(toolUseId, {
-            status: 'not_addressed',
-            message: 'You were NOT addressed. STOP. Do not respond. Do not generate any text or audio. Do not call any tools including mute. Simply wait for the next user message.'
-          });
-          console.log('✓ Agent staying muted - will not respond');
-        }
-      }
-    } catch (error) {
-      console.error('Error in handleCheckIfAddressedTool:', error);
-      // On error, stay muted to be safe
-      this._isMuted = true;
-      if (this.session && this.session.isActive) {
-        await this.sendToolResult(toolUseId, {
-          status: 'not_addressed',
-          message: 'Error checking wake phrase. Remaining silent.'
-        });
-      }
-    }
-  }
-
   private async handleMuteTool(toolUseId: string): Promise<void> {
-    console.log('🔇 Mute tool called - muting agent');
+    console.log(' Mute tool called - muting agent');
     this._isMuted = true;
     
     // Clear audio queue to stop any buffered audio from playing
