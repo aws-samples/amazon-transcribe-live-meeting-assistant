@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.29] - 2026-03-20
 
 ### Added
 - Admin UI pages for Nova Sonic voice assistant configuration (`/#/configuration/nova-sonic`) and Transcript Summary prompt templates (`/#/configuration/transcript-summary`) - admins can now view defaults and edit custom overrides directly from the web UI instead of navigating to the DynamoDB console
