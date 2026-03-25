@@ -9,12 +9,20 @@ Dynamically loads MCP server tools from installed PyPI packages using Strands MC
 
 This module connects to installed MCP servers via stdio transport and retrieves their tools
 for use with Strands agents. Each MCP server runs as a subprocess during tool loading.
+
+Caching Strategy:
+- Module-level variables persist across warm Lambda invocations
+- DynamoDB server configs are cached with a TTL to avoid re-querying every invocation
+- MCPClient objects (with their background threads and connections) are cached and reused
+- A config fingerprint detects when servers have been added/removed/changed, triggering rebuild
+- MCPClient health is checked before reuse; unhealthy clients are recreated
 """
 
 import os
 import boto3
+import hashlib
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Tuple
 import sys
 import importlib.metadata
 import importlib.util
@@ -33,6 +41,137 @@ kms = boto3.client('kms')
 MCP_SERVERS_TABLE = os.environ.get('MCP_SERVERS_TABLE', '')
 AWS_ACCOUNT_ID = os.environ.get('AWS_ACCOUNT_ID', '')
 KMS_KEY_ID = os.environ.get('KMS_KEY_ID', '')
+
+# ============================================================================
+# Module-level cache (persists across warm Lambda invocations)
+# ============================================================================
+# Maps server_id -> MCPClient object for reuse
+_cached_mcp_clients: Dict[str, Any] = {}
+# The fingerprint of the last server config set (detects adds/removes/changes)
+_cached_config_fingerprint: str = ''
+# When the DynamoDB config was last fetched
+_config_cache_timestamp: float = 0
+# Cached server configs from DynamoDB
+_cached_server_configs: List[Dict] = []
+# How often to re-check DynamoDB for config changes (seconds)
+_CONFIG_CACHE_TTL_SECONDS = 300  # 5 minutes
+# Sentinel consumer ID to keep MCP clients alive across Agent lifecycles
+# When added as a consumer, prevents Agent.__del__ -> remove_consumer -> stop()
+_PERSISTENT_CONSUMER_ID = '__mcp_loader_persistent__'
+
+
+def _compute_config_fingerprint(servers: List[Dict]) -> str:
+    """
+    Compute a fingerprint of the server configurations to detect changes.
+    
+    This allows us to detect when servers have been added, removed, or their
+    configuration has changed (e.g., auth tokens rotated, URLs changed).
+    
+    Args:
+        servers: List of server config dicts from DynamoDB
+        
+    Returns:
+        SHA256 hex digest of the sorted server configs
+    """
+    # Build a stable representation: sort by ServerId, include key fields
+    config_parts = []
+    for server in sorted(servers, key=lambda s: s.get('ServerId', '')):
+        parts = [
+            server.get('ServerId', ''),
+            server.get('NpmPackage', ''),
+            server.get('PackageType', ''),
+            server.get('ServerUrl', ''),
+            server.get('Status', ''),
+            # Include auth config hash (not the full config, for efficiency)
+            str(server.get('AuthConfig', '')),
+        ]
+        config_parts.append('|'.join(parts))
+    
+    fingerprint_input = '\n'.join(config_parts)
+    return hashlib.sha256(fingerprint_input.encode()).hexdigest()[:16]
+
+
+def _is_mcp_client_healthy(mcp_client) -> bool:
+    """
+    Check if a cached MCPClient is still healthy and has an active session.
+    
+    MCPClient runs a background thread with an asyncio event loop.
+    We need the session to be active (background thread alive, session initialized)
+    for the client to be truly reusable without restart overhead.
+    
+    Args:
+        mcp_client: An MCPClient instance
+        
+    Returns:
+        True if the client has an active session, False if it needs restart
+    """
+    try:
+        # Check if session is active (background thread alive + session initialized)
+        if hasattr(mcp_client, '_is_session_active') and mcp_client._is_session_active():
+            return True
+        
+        # Session not active - client was stopped or never started
+        logger.debug("MCPClient session not active")
+        return False
+        
+    except Exception as e:
+        logger.warning(f"Error checking MCPClient health: {e}")
+        return False
+
+
+def _ensure_client_started(mcp_client, server_id: str) -> bool:
+    """
+    Ensure an MCPClient is started and has an active session.
+    
+    If the client was stopped (e.g., by Agent.__del__ -> remove_consumer -> stop()),
+    this will restart it. Also adds the persistent consumer to prevent future stops.
+    
+    Args:
+        mcp_client: An MCPClient instance
+        server_id: Server identifier for logging
+        
+    Returns:
+        True if client is now active, False if start failed
+    """
+    try:
+        # Add persistent consumer first (prevents Agent.__del__ from stopping it)
+        if hasattr(mcp_client, 'add_consumer'):
+            mcp_client.add_consumer(_PERSISTENT_CONSUMER_ID)
+        
+        # Check if already active
+        if hasattr(mcp_client, '_is_session_active') and mcp_client._is_session_active():
+            logger.debug(f"MCPClient {server_id} already active")
+            return True
+        
+        # Need to start it
+        logger.info(f"Starting MCPClient {server_id}...")
+        start_time = time.time()
+        mcp_client.start()
+        elapsed = time.time() - start_time
+        logger.info(f"MCPClient {server_id} started in {elapsed:.2f}s")
+        
+        # Mark as started for the ToolProvider interface
+        if hasattr(mcp_client, '_tool_provider_started'):
+            mcp_client._tool_provider_started = True
+        
+        return True
+        
+    except Exception as e:
+        logger.warning(f"Failed to start MCPClient {server_id}: {e}")
+        return False
+
+
+def _cleanup_cached_clients():
+    """Stop and clean up all cached MCP clients."""
+    global _cached_mcp_clients
+    for server_id, client in _cached_mcp_clients.items():
+        try:
+            if hasattr(client, '_is_session_active') and client._is_session_active():
+                client.stop(None, None, None)
+                logger.info(f"Stopped cached MCP client: {server_id}")
+        except Exception as e:
+            logger.warning(f"Error stopping cached MCP client {server_id}: {e}")
+    _cached_mcp_clients = {}
 
 
 def decrypt_token(encrypted_token: str) -> str:
@@ -337,29 +476,279 @@ def discover_console_script_path(package_name: str) -> Optional[tuple]:
         return None
 
 
-def load_account_mcp_servers() -> List:
+def _prepare_auth_for_http_server(server_id: str, auth_config) -> Tuple[Dict, bool]:
     """
-    Load MCP server clients for the current AWS account using Strands MCPClient
+    Parse auth config and prepare HTTP headers for an HTTP MCP server.
     
-    This function:
-    1. Queries DynamoDB for ACTIVE MCP servers
-    2. Dynamically discovers each server's Python module entry point
-    3. Spawns each server as subprocess with stdio transport
-    4. Creates Strands MCPClient instances
-    5. Returns list of MCPClient objects for managed integration with Agent
+    Args:
+        server_id: Server identifier
+        auth_config: Raw auth config from DynamoDB
+        
+    Returns:
+        Tuple of (http_auth_config dict, should_skip bool)
+        should_skip is True if auth setup failed and server should be skipped
+    """
+    http_auth_config = {'headers': {}}
+    
+    if not auth_config:
+        logger.info(f"No auth config found for HTTP server {server_id}")
+        return http_auth_config, False
+    
+    try:
+        auth_data = json.loads(auth_config) if isinstance(auth_config, str) else auth_config
+        auth_type = auth_data.get('authType', 'bearer')
+        
+        logger.info(f"Auth config for {server_id}: authType={auth_type}")
+        
+        if auth_type == 'bearer':
+            token = auth_data.get('token', '')
+            if token:
+                http_auth_config['headers']['Authorization'] = f"Bearer {token}"
+                logger.info(f"Applied Bearer token authentication for {server_id}")
+            else:
+                logger.warning(f"Bearer auth configured but no token found for {server_id}")
+        
+        elif auth_type == 'custom_headers':
+            custom_headers = auth_data.get('headers', {})
+            if custom_headers and isinstance(custom_headers, dict):
+                http_auth_config['headers'].update(custom_headers)
+                logger.info(f"Applied custom headers for {server_id}: {list(custom_headers.keys())}")
+            else:
+                logger.warning(f"Custom headers auth configured but no valid headers found for {server_id}")
+        
+        elif auth_type == 'oauth2':
+            oauth_data = auth_data.get('oauth', {})
+            try:
+                access_token = get_valid_oauth_token(server_id, AWS_ACCOUNT_ID, oauth_data)
+                http_auth_config['headers']['Authorization'] = f"Bearer {access_token}"
+                logger.info(f"Applied OAuth 2.1 access token for {server_id}")
+            except Exception as e:
+                logger.error(f"Failed to get OAuth token for {server_id}: {e}")
+                return http_auth_config, True  # Skip this server
+        
+        elif auth_type == 'oauth_client_credentials':
+            oauth_data = auth_data.get('oauth', {})
+            try:
+                access_token = get_valid_oauth_token(server_id, AWS_ACCOUNT_ID, oauth_data)
+                http_auth_config['headers']['Authorization'] = f"Bearer {access_token}"
+                logger.info(f"Applied OAuth Client Credentials token for {server_id}")
+            except Exception as e:
+                logger.error(f"Failed to get OAuth Client Credentials token for {server_id}: {e}")
+                return http_auth_config, True  # Skip this server
+        
+        else:
+            logger.warning(f"Unknown auth type '{auth_type}' for {server_id}")
+    
+    except Exception as e:
+        logger.warning(f"Could not parse auth config for {server_id}: {e}")
+        import traceback
+        logger.debug(f"Traceback: {traceback.format_exc()}")
+    
+    return http_auth_config, False
+
+
+def _create_pypi_mcp_client(server_id: str, package_name: str, auth_config):
+    """
+    Create an MCPClient for a PyPI package-based MCP server.
+    
+    Args:
+        server_id: Server identifier
+        package_name: PyPI package name
+        auth_config: Raw auth config from DynamoDB
+        
+    Returns:
+        MCPClient object or None if creation failed
+    """
+    try:
+        from strands.tools.mcp import MCPClient
+        from mcp import stdio_client, StdioServerParameters
+        
+        logger.info(f"Loading PyPI MCP server: {server_id} ({package_name})")
+        
+        # Set PYTHONPATH to include /opt/python so the modules can be found
+        env = os.environ.copy()
+        python_path = env.get('PYTHONPATH', '')
+        if python_path:
+            env['PYTHONPATH'] = f"/opt/python:{python_path}"
+        else:
+            env['PYTHONPATH'] = "/opt/python"
+        
+        # Add environment variables from auth config for PyPI servers
+        if auth_config:
+            try:
+                auth_data = json.loads(auth_config) if isinstance(auth_config, str) else auth_config
+                auth_type = auth_data.get('authType', 'bearer')
+                
+                if auth_type == 'bearer':
+                    token = auth_data.get('token', '')
+                    if token:
+                        env['MCP_API_KEY'] = token
+                        logger.info(f"Set MCP_API_KEY environment variable for {server_id}")
+                
+                elif auth_type == 'env_vars':
+                    env_vars = auth_data.get('env', {})
+                    if env_vars and isinstance(env_vars, dict):
+                        env.update(env_vars)
+                        logger.info(f"Set environment variables for {server_id}: {list(env_vars.keys())}")
+                    else:
+                        logger.warning(f"env_vars auth configured but no 'env' field found for {server_id}")
+                
+                elif auth_type == 'custom_headers':
+                    env_vars = auth_data.get('env', {}) or auth_data.get('headers', {})
+                    if env_vars and isinstance(env_vars, dict):
+                        env.update(env_vars)
+                        logger.info(f"Set environment variables for {server_id} (legacy custom_headers): {list(env_vars.keys())}")
+                    else:
+                        logger.warning(f"custom_headers auth configured but no env vars found for {server_id}")
+            
+            except Exception as e:
+                logger.warning(f"Could not parse auth config for PyPI server {server_id}: {e}")
+        
+        # Try to find the console script entry point
+        entry_point = discover_console_script_path(package_name)
+        
+        if entry_point:
+            module_path, func_name = entry_point
+            logger.info(f"Using console script entry point: {module_path}:{func_name}")
+            
+            # Check if console script file exists in /opt/python/bin/
+            script_name = None
+            try:
+                dist = importlib.metadata.distribution(package_name)
+                for ep in dist.entry_points:
+                    if ep.group == 'console_scripts':
+                        script_name = ep.name
+                        break
+            except:
+                pass
+            
+            if script_name:
+                script_path = f"/opt/python/bin/{script_name}"
+                if os.path.exists(script_path):
+                    logger.info(f"Using console script: {script_path}")
+                    mcp_client = MCPClient(
+                        lambda script=script_path, environment=env: stdio_client(
+                            StdioServerParameters(
+                                command=sys.executable,
+                                args=[script],
+                                env=environment
+                            )
+                        ),
+                        prefix=package_name.replace('-', '_')
+                    )
+                else:
+                    logger.info(f"Console script {script_path} not found, using module execution")
+                    mcp_client = MCPClient(
+                        lambda mod=module_path, fn=func_name, environment=env: stdio_client(
+                            StdioServerParameters(
+                                command=sys.executable,
+                                args=["-c", f"from {mod} import {fn}; import asyncio; asyncio.run({fn}())"],
+                                env=environment
+                            )
+                        ),
+                        prefix=package_name.replace('-', '_')
+                    )
+            else:
+                logger.info(f"No console script name found, using module execution: {module_path}:{func_name}")
+                mcp_client = MCPClient(
+                    lambda mod=module_path, fn=func_name, environment=env: stdio_client(
+                        StdioServerParameters(
+                            command=sys.executable,
+                            args=["-c", f"from {mod} import {fn}; import asyncio; asyncio.run({fn}())"],
+                            env=environment
+                        )
+                    ),
+                    prefix=package_name.replace('-', '_')
+                )
+        else:
+            logger.info(f"No entry point found, trying python -m {package_name.replace('-', '_')}")
+            mcp_client = MCPClient(
+                lambda pkg=package_name.replace('-', '_'), environment=env: stdio_client(
+                    StdioServerParameters(
+                        command=sys.executable,
+                        args=["-m", pkg],
+                        env=environment
+                    )
+                ),
+                prefix=package_name.replace('-', '_')
+            )
+        
+        logger.info(f"Created MCP client for {server_id}")
+        return mcp_client
+        
+    except Exception as e:
+        logger.warning(f"Failed to create MCP client for {server_id}: {e}")
+        import traceback
+        logger.debug(f"Traceback: {traceback.format_exc()}")
+        return None
+
+
+def _fetch_server_configs() -> List[Dict]:
+    """
+    Fetch active MCP server configurations from DynamoDB.
+    Uses module-level cache with TTL to avoid querying on every invocation.
     
     Returns:
-        List of MCPClient objects (not tools) for use with Agent's managed integration
+        List of server config dicts from DynamoDB
     """
-    mcp_clients = []
+    global _cached_server_configs, _config_cache_timestamp
+    
+    now = time.time()
+    cache_age = now - _config_cache_timestamp
+    
+    if _cached_server_configs and cache_age < _CONFIG_CACHE_TTL_SECONDS:
+        logger.info(f"Using cached server configs (age: {int(cache_age)}s, TTL: {_CONFIG_CACHE_TTL_SECONDS}s)")
+        return _cached_server_configs
+    
+    logger.info(f"Fetching server configs from DynamoDB (cache {'expired' if _cached_server_configs else 'empty'})")
+    
+    table = dynamodb.Table(MCP_SERVERS_TABLE)
+    
+    response = table.query(
+        KeyConditionExpression='AccountId = :accountId',
+        FilterExpression='#status = :status',
+        ExpressionAttributeNames={'#status': 'Status'},
+        ExpressionAttributeValues={
+            ':accountId': AWS_ACCOUNT_ID,
+            ':status': 'ACTIVE'
+        }
+    )
+    
+    servers = response.get('Items', [])
+    logger.info(f"Found {len(servers)} active MCP servers for account {AWS_ACCOUNT_ID}")
+    
+    _cached_server_configs = servers
+    _config_cache_timestamp = now
+    
+    return servers
+
+
+def load_account_mcp_servers() -> Tuple[List, bool]:
+    """
+    Load MCP server clients for the current AWS account using Strands MCPClient.
+    
+    Uses module-level caching to avoid recreating MCP clients on every Lambda invocation.
+    On warm starts with unchanged configs, returns cached clients almost instantly.
+    
+    Caching behavior:
+    - DynamoDB configs are cached with a 5-minute TTL
+    - MCPClient objects are cached by server_id and reused across invocations
+    - Config fingerprint detects adds/removes/changes, triggering selective rebuild
+    - Unhealthy clients are automatically recreated
+    
+    Returns:
+        Tuple of (List of MCPClient objects, bool indicating if cache was used)
+        The bool is True if cached clients were returned (warm start), False if freshly created
+    """
+    global _cached_mcp_clients, _cached_config_fingerprint
     
     if not MCP_SERVERS_TABLE:
         logger.warning("MCP_SERVERS_TABLE not configured")
-        return tools
+        return [], False
     
     if not AWS_ACCOUNT_ID:
         logger.warning("AWS_ACCOUNT_ID not configured")
-        return tools
+        return [], False
     
     try:
         # Check if required dependencies are available
@@ -368,251 +757,127 @@ def load_account_mcp_servers() -> List:
             from mcp import stdio_client, StdioServerParameters
         except ImportError as e:
             logger.warning(f"Strands MCP support not available: {e}")
-            return tools
+            return [], False
         
-        table = dynamodb.Table(MCP_SERVERS_TABLE)
+        # Fetch server configs (uses cache with TTL)
+        servers = _fetch_server_configs()
         
-        # Query for all active servers for this account
-        response = table.query(
-            KeyConditionExpression='AccountId = :accountId',
-            FilterExpression='#status = :status',
-            ExpressionAttributeNames={'#status': 'Status'},
-            ExpressionAttributeValues={
-                ':accountId': AWS_ACCOUNT_ID,
-                ':status': 'ACTIVE'
-            }
-        )
+        if not servers:
+            logger.info("No active MCP servers found")
+            if _cached_mcp_clients:
+                _cleanup_cached_clients()
+            return [], False
         
-        servers = response.get('Items', [])
-        logger.info(f"Found {len(servers)} active MCP servers for account {AWS_ACCOUNT_ID}")
+        # Check if config has changed since last time
+        new_fingerprint = _compute_config_fingerprint(servers)
+        config_changed = (new_fingerprint != _cached_config_fingerprint)
         
-        # Load each server's tools
+        if not config_changed and _cached_mcp_clients:
+            # Config unchanged - check which clients are still alive
+            # Clients may have been stopped by Agent.__del__ -> remove_consumer -> stop()
+            # but the persistent consumer should prevent that. If they're still healthy,
+            # return immediately (near-zero latency).
+            healthy_clients = {}
+            needs_restart = {}
+            dead_ids = []
+            
+            for server_id, client in _cached_mcp_clients.items():
+                if _is_mcp_client_healthy(client):
+                    healthy_clients[server_id] = client
+                else:
+                    # Client exists but session is not active - try to restart it
+                    needs_restart[server_id] = client
+            
+            # Restart clients that were stopped (e.g., persistent consumer wasn't set)
+            for server_id, client in needs_restart.items():
+                if _ensure_client_started(client, server_id):
+                    healthy_clients[server_id] = client
+                else:
+                    dead_ids.append(server_id)
+                    logger.warning(f"Cached MCP client {server_id} could not be restarted, will recreate")
+            
+            # Recreate any truly dead clients
+            if dead_ids:
+                for server in servers:
+                    sid = server.get('ServerId', 'unknown')
+                    if sid in dead_ids:
+                        client = _create_mcp_client_for_server(server)
+                        if client and _ensure_client_started(client, sid):
+                            healthy_clients[sid] = client
+            
+            _cached_mcp_clients = healthy_clients
+            _cached_config_fingerprint = new_fingerprint
+            
+            restarted = len(needs_restart) - len(dead_ids)
+            if restarted > 0 or dead_ids:
+                logger.info(f"Returning {len(healthy_clients)} MCP clients ({restarted} restarted, {len(dead_ids)} recreated)")
+            else:
+                logger.info(f"Returning {len(healthy_clients)} cached MCP clients (all active, zero restart needed)")
+            return list(healthy_clients.values()), True
+        
+        # Config changed or no cache - rebuild all clients
+        if config_changed and _cached_mcp_clients:
+            logger.info(f"MCP server config changed (fingerprint: {_cached_config_fingerprint} -> {new_fingerprint}), rebuilding clients")
+            _cleanup_cached_clients()
+        
+        # Create new clients for all servers and pre-start them
+        new_clients = {}
+        total_start_time = time.time()
         for server in servers:
             server_id = server.get('ServerId', 'unknown')
-            package_name = server.get('NpmPackage', '')  # PyPI package name or HTTP URL
-            package_type = server.get('PackageType', 'pypi')  # Default to pypi for backward compatibility
-            server_url = server.get('ServerUrl')
-            auth_config = server.get('AuthConfig')
-            
-            # Handle HTTP servers separately
-            if package_type == 'streamable-http':
-                logger.info(f"Loading HTTP MCP server: {server_id}")
-                
-                # Parse auth config and apply headers generically (MCP spec compliant)
-                http_auth_config = {'headers': {}}
-                
-                if auth_config:
-                    try:
-                        import json
-                        auth_data = json.loads(auth_config) if isinstance(auth_config, str) else auth_config
-                        auth_type = auth_data.get('authType', 'bearer')  # Default to bearer
-                        
-                        logger.info(f"Auth config for {server_id}: authType={auth_type}")
-                        
-                        # Generic auth handling per MCP spec - no hardcoded server names
-                        if auth_type == 'bearer':
-                            # Bearer token authentication (RFC 6750)
-                            token = auth_data.get('token', '')
-                            if token:
-                                http_auth_config['headers']['Authorization'] = f"Bearer {token}"
-                                logger.info(f"Applied Bearer token authentication for {server_id}")
-                            else:
-                                logger.warning(f"Bearer auth configured but no token found for {server_id}")
-                        
-                        elif auth_type == 'custom_headers':
-                            # Custom headers - user provides complete header dict
-                            custom_headers = auth_data.get('headers', {})
-                            if custom_headers and isinstance(custom_headers, dict):
-                                http_auth_config['headers'].update(custom_headers)
-                                logger.info(f"Applied custom headers for {server_id}: {list(custom_headers.keys())}")
-                            else:
-                                logger.warning(f"Custom headers auth configured but no valid headers found for {server_id}")
-                        
-                        elif auth_type == 'oauth2':
-                            # OAuth 2.1 - get valid access token with just-in-time refresh
-                            oauth_data = auth_data.get('oauth', {})
-                            try:
-                                # This handles token expiration check and refresh automatically
-                                access_token = get_valid_oauth_token(server_id, AWS_ACCOUNT_ID, oauth_data)
-                                http_auth_config['headers']['Authorization'] = f"Bearer {access_token}"
-                                logger.info(f"Applied OAuth 2.1 access token for {server_id}")
-                            except Exception as e:
-                                logger.error(f"Failed to get OAuth token for {server_id}: {e}")
-                                # Skip this server but continue loading others
-                                continue
-                        
-                        elif auth_type == 'oauth_client_credentials':
-                            # OAuth Client Credentials - get token with client_id + client_secret
-                            oauth_data = auth_data.get('oauth', {})
-                            try:
-                                access_token = get_valid_oauth_token(server_id, AWS_ACCOUNT_ID, oauth_data)
-                                http_auth_config['headers']['Authorization'] = f"Bearer {access_token}"
-                                logger.info(f"Applied OAuth Client Credentials token for {server_id}")
-                            except Exception as e:
-                                logger.error(f"Failed to get OAuth Client Credentials token for {server_id}: {e}")
-                                # Skip this server but continue loading others
-                                continue
-                        
-                        else:
-                            logger.warning(f"Unknown auth type '{auth_type}' for {server_id}")
-                    
-                    except Exception as e:
-                        logger.warning(f"Could not parse auth config for {server_id}: {e}")
-                        import traceback
-                        logger.debug(f"Traceback: {traceback.format_exc()}")
+            client = _create_mcp_client_for_server(server)
+            if client:
+                # Pre-start the client and add persistent consumer
+                # This spawns the subprocess/HTTP connection NOW so the Agent
+                # constructor doesn't have to wait for it later
+                if _ensure_client_started(client, server_id):
+                    new_clients[server_id] = client
                 else:
-                    logger.info(f"No auth config found for HTTP server {server_id}")
-                
-                # Load HTTP server - returns MCPClient object
-                http_client = load_http_mcp_server(server_id, server_url, http_auth_config)
-                if http_client:
-                    mcp_clients.append(http_client)
-                continue
-            
-            # Handle PyPI package-based servers
-            try:
-                logger.info(f"Loading PyPI MCP server: {server_id} ({package_name})")
-                
-                # In Lambda layers, console scripts are installed in /opt/python/bin/
-                # We need to add /opt/python to PYTHONPATH so imports work
-                # Then execute the entry point function
-                
-                # Create MCP client with stdio transport
-                # Set PYTHONPATH to include /opt/python so the modules can be found
-                import os
-                env = os.environ.copy()
-                python_path = env.get('PYTHONPATH', '')
-                if python_path:
-                    env['PYTHONPATH'] = f"/opt/python:{python_path}"
-                else:
-                    env['PYTHONPATH'] = "/opt/python"
-                
-                # Add environment variables from auth config for PyPI servers
-                # PyPI servers use env vars, not HTTP headers
-                if auth_config:
-                    try:
-                        import json
-                        auth_data = json.loads(auth_config) if isinstance(auth_config, str) else auth_config
-                        auth_type = auth_data.get('authType', 'bearer')
-                        
-                        # For PyPI servers, environment variables are used instead of headers
-                        if auth_type == 'bearer':
-                            # Single token - use common env var name
-                            token = auth_data.get('token', '')
-                            if token:
-                                env['MCP_API_KEY'] = token
-                                logger.info(f"Set MCP_API_KEY environment variable for {server_id}")
-                        
-                        elif auth_type == 'env_vars':
-                            # Environment variables for PyPI servers (new standard)
-                            env_vars = auth_data.get('env', {})
-                            if env_vars and isinstance(env_vars, dict):
-                                env.update(env_vars)
-                                logger.info(f"Set environment variables for {server_id}: {list(env_vars.keys())}")
-                            else:
-                                logger.warning(f"env_vars auth configured but no 'env' field found for {server_id}")
-                        
-                        elif auth_type == 'custom_headers':
-                            # Backward compatibility: check both 'env' and 'headers' fields
-                            # This handles old installations that used 'custom_headers' for PyPI servers
-                            env_vars = auth_data.get('env', {}) or auth_data.get('headers', {})
-                            if env_vars and isinstance(env_vars, dict):
-                                env.update(env_vars)
-                                logger.info(f"Set environment variables for {server_id} (legacy custom_headers): {list(env_vars.keys())}")
-                            else:
-                                logger.warning(f"custom_headers auth configured but no env vars found for {server_id}")
-                    
-                    except Exception as e:
-                        logger.warning(f"Could not parse auth config for PyPI server {server_id}: {e}")
-                
-                # Try to find the console script entry point
-                entry_point = discover_console_script_path(package_name)
-                
-                if entry_point:
-                    module_path, func_name = entry_point
-                    logger.info(f"Using console script entry point: {module_path}:{func_name}")
-                    
-                    # Check if console script file exists in /opt/python/bin/
-                    script_name = None
-                    try:
-                        dist = importlib.metadata.distribution(package_name)
-                        for ep in dist.entry_points:
-                            if ep.group == 'console_scripts':
-                                script_name = ep.name
-                                break
-                    except:
-                        pass
-                    
-                    if script_name:
-                        script_path = f"/opt/python/bin/{script_name}"
-                        # Check if script actually exists
-                        if os.path.exists(script_path):
-                            logger.info(f"Using console script: {script_path}")
-                            mcp_client = MCPClient(
-                                lambda script=script_path, environment=env: stdio_client(
-                                    StdioServerParameters(
-                                        command=sys.executable,
-                                        args=[script],
-                                        env=environment
-                                    )
-                                ),
-                                prefix=package_name.replace('-', '_')
-                            )
-                        else:
-                            # Script doesn't exist, use module execution
-                            logger.info(f"Console script {script_path} not found, using module execution")
-                            mcp_client = MCPClient(
-                                lambda mod=module_path, fn=func_name, environment=env: stdio_client(
-                                    StdioServerParameters(
-                                        command=sys.executable,
-                                        args=["-c", f"from {mod} import {fn}; import asyncio; asyncio.run({fn}())"],
-                                        env=environment
-                                    )
-                                ),
-                                prefix=package_name.replace('-', '_')
-                            )
-                    else:
-                        # No script name, use module execution
-                        logger.info(f"No console script name found, using module execution: {module_path}:{func_name}")
-                        mcp_client = MCPClient(
-                            lambda mod=module_path, fn=func_name, environment=env: stdio_client(
-                                StdioServerParameters(
-                                    command=sys.executable,
-                                    args=["-c", f"from {mod} import {fn}; import asyncio; asyncio.run({fn}())"],
-                                    env=environment
-                                )
-                            ),
-                            prefix=package_name.replace('-', '_')
-                        )
-                else:
-                    # No entry point found, try running as module with __main__
-                    logger.info(f"No entry point found, trying python -m {package_name.replace('-', '_')}")
-                    mcp_client = MCPClient(
-                        lambda pkg=package_name.replace('-', '_'), environment=env: stdio_client(
-                            StdioServerParameters(
-                                command=sys.executable,
-                                args=["-m", pkg],
-                                env=environment
-                            )
-                        ),
-                        prefix=package_name.replace('-', '_')
-                    )
-                
-                # Store client for managed integration (don't extract tools here)
-                mcp_clients.append(mcp_client)
-                logger.info(f"Created MCP client for {server_id}")
-                
-            except Exception as e:
-                logger.warning(f"Failed to create MCP client for {server_id}: {e}")
-                import traceback
-                logger.debug(f"Traceback: {traceback.format_exc()}")
-                continue
+                    logger.warning(f"Failed to pre-start MCP client {server_id}, skipping")
         
-        logger.info(f"Created {len(mcp_clients)} MCP clients from {len(servers)} MCP servers")
+        total_elapsed = time.time() - total_start_time
+        _cached_mcp_clients = new_clients
+        _cached_config_fingerprint = new_fingerprint
+        
+        logger.info(f"Created and pre-started {len(new_clients)} MCP clients from {len(servers)} servers in {total_elapsed:.2f}s")
+        return list(new_clients.values()), False
         
     except Exception as e:
-        logger.error(f"Error creating MCP clients: {e}")
+        logger.error(f"Error loading MCP clients: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # If we have cached clients, return them as fallback
+        if _cached_mcp_clients:
+            logger.info(f"Returning {len(_cached_mcp_clients)} cached MCP clients as fallback after error")
+            return list(_cached_mcp_clients.values()), True
+        
+        return [], False
+
+
+def _create_mcp_client_for_server(server: Dict) -> Optional[Any]:
+    """
+    Create an MCPClient for a single server configuration.
     
-    return mcp_clients
+    Args:
+        server: Server config dict from DynamoDB
+        
+    Returns:
+        MCPClient object or None if creation failed
+    """
+    server_id = server.get('ServerId', 'unknown')
+    package_name = server.get('NpmPackage', '')
+    package_type = server.get('PackageType', 'pypi')
+    server_url = server.get('ServerUrl')
+    auth_config = server.get('AuthConfig')
+    
+    # Handle HTTP servers
+    if package_type == 'streamable-http':
+        logger.info(f"Loading HTTP MCP server: {server_id}")
+        http_auth_config, should_skip = _prepare_auth_for_http_server(server_id, auth_config)
+        if should_skip:
+            return None
+        return load_http_mcp_server(server_id, server_url, http_auth_config)
+    
+    # Handle PyPI package-based servers
+    return _create_pypi_mcp_client(server_id, package_name, auth_config)

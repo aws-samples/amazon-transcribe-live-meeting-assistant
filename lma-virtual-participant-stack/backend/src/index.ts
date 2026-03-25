@@ -12,6 +12,7 @@ import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
@@ -46,9 +47,11 @@ const getPuppeteerConfig = () => ({
 
 // Global variables for graceful shutdown
 let shutdownRequested = false;
+let cleanupInProgress = false;
 let statusManager: VirtualParticipantStatusManager | null = null;
 let vpId: string | null = null;
 let mcpHandler: MCPCommandHandler | null = null;
+let strandsWarmupTimer: NodeJS.Timeout | null = null;
 
 // Local testing mode - skip ALB registration and AppSync updates
 const isLocalTest = process.env.LOCAL_TEST === 'true';
@@ -210,6 +213,42 @@ const main = async (): Promise<void> => {
         }
     }
 
+    // Start Strands Lambda warmup timer to keep MCP connections alive during meeting
+    // Sends a lightweight {action: 'warmup'} ping every 3 minutes
+    const strandsLambdaArn = process.env.STRANDS_LAMBDA_ARN;
+    if (strandsLambdaArn) {
+        try {
+            const lambdaClient = new LambdaClient({
+                region: process.env.AWS_REGION || 'us-east-1',
+            });
+            const WARMUP_INTERVAL = 3 * 60 * 1000; // 3 minutes
+
+            const sendWarmupPing = async () => {
+                try {
+                    const command = new InvokeCommand({
+                        FunctionName: strandsLambdaArn,
+                        InvocationType: 'RequestResponse',
+                        Payload: JSON.stringify({ action: 'warmup' }),
+                    });
+                    const response = await lambdaClient.send(command);
+                    const payload = JSON.parse(new TextDecoder().decode(response.Payload));
+                    console.log(`🔥 Strands warmup ping: ${payload.mcp_clients} MCP clients, from_cache=${payload.from_cache}, ${payload.warmup_time_ms}ms`);
+                } catch (err) {
+                    console.warn('Strands warmup ping failed (non-critical):', err);
+                }
+            };
+
+            // Send initial warmup immediately to pre-warm before first user message
+            sendWarmupPing();
+
+            // Then send every 3 minutes to keep Lambda container and MCP connections alive
+            strandsWarmupTimer = setInterval(sendWarmupPing, WARMUP_INTERVAL);
+            console.log(`✓ Strands Lambda warmup timer started (every ${WARMUP_INTERVAL / 1000}s)`);
+        } catch (error) {
+            console.warn('Failed to start Strands warmup timer (non-critical):', error);
+        }
+    }
+
     const page = await browser.newPage();
     await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
     page.setDefaultTimeout(20000);
@@ -254,10 +293,10 @@ const main = async (): Promise<void> => {
         // Start recording service
         recordingService.startRecording();
 
-        // Join the meeting
+        // Join the meeting and wait for it to end
         await meeting.initialize(page);
         
-        console.log('Meeting joined successfully');
+        console.log('Meeting session completed successfully');
         success = true;
 
 
@@ -280,7 +319,8 @@ const main = async (): Promise<void> => {
         }
         
     } finally {
-        // Cleanup
+        // Cleanup - set flag to prevent uncaughtException from killing process mid-cleanup
+        cleanupInProgress = true;
         console.log('Cleaning up...');
         
         try {
@@ -313,6 +353,13 @@ const main = async (): Promise<void> => {
             } catch (error) {
                 console.error('Error deregistering from ALB:', error);
             }
+        }
+
+        // Stop Strands warmup timer
+        if (strandsWarmupTimer) {
+            clearInterval(strandsWarmupTimer);
+            strandsWarmupTimer = null;
+            console.log('✓ Strands warmup timer stopped');
         }
 
         // Stop MCP handler
@@ -383,6 +430,12 @@ const signalHandler = async (signal: string) => {
         }
     }
     
+    // Stop Strands warmup timer
+    if (strandsWarmupTimer) {
+        clearInterval(strandsWarmupTimer);
+        strandsWarmupTimer = null;
+    }
+
     // Stop MCP handler
     if (mcpHandler) {
         try {
@@ -410,15 +463,25 @@ const signalHandler = async (signal: string) => {
 process.on('SIGINT', () => signalHandler('SIGINT'));
 process.on('SIGTERM', () => signalHandler('SIGTERM'));
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-    console.error('Uncaught Exception:', error);
-    process.exit(1);
+// Handle uncaught exceptions - don't exit during cleanup to allow status update
+process.on('uncaughtException', (error: any) => {
+    if (cleanupInProgress) {
+        // During cleanup, log but don't exit - let the finally block complete
+        console.error('Uncaught Exception during cleanup (non-fatal):', error.message || error);
+    } else {
+        console.error('Uncaught Exception:', error);
+        process.exit(1);
+    }
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-    process.exit(1);
+process.on('unhandledRejection', (reason: any, promise: any) => {
+    if (cleanupInProgress) {
+        // During cleanup, log but don't exit - let the finally block complete
+        console.error('Unhandled Rejection during cleanup (non-fatal):', reason);
+    } else {
+        console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+        process.exit(1);
+    }
 });
 
 // Start the application

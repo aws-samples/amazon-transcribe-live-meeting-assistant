@@ -1,5 +1,5 @@
 
-FROM public.ecr.aws/docker/library/node:20-alpine3.19
+FROM public.ecr.aws/docker/library/node:20-alpine
 USER root
 WORKDIR /srv
 COPY . /srv
