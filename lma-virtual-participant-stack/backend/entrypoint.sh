@@ -117,14 +117,37 @@ pulseaudio --start --daemon --exit-idle-time=-1 --log-target=syslog
 echo "Waiting for PulseAudio to be ready..."
 sleep 2
 
-echo "Creating PulseAudio virtual microphone for agent audio..."
-# Create a null sink for agent audio output
-pactl load-module module-null-sink sink_name=agent_output sink_properties=device.description="Agent_Audio_Output"
+echo "Creating PulseAudio audio routing for meeting and agent..."
 
-# Create a virtual microphone source from the null sink's monitor
+# Create a null sink for meeting audio (Chromium output)
+MEETING_SINK=$(pactl load-module module-null-sink sink_name=meeting_audio sink_properties=device.description="Meeting_Audio")
+echo "Created meeting_audio sink (module $MEETING_SINK)"
+
+# Create a null sink for agent audio output (Nova/ElevenLabs)
+AGENT_SINK=$(pactl load-module module-null-sink sink_name=agent_output sink_properties=device.description="Agent_Audio_Output")
+echo "Created agent_output sink (module $AGENT_SINK)"
+
+# Create a combined sink that mixes meeting + agent audio for transcription
+COMBINED_SINK=$(pactl load-module module-null-sink sink_name=combined_audio sink_properties=device.description="Combined_Audio_For_Transcription")
+echo "Created combined_audio sink (module $COMBINED_SINK)"
+
+# Route meeting_audio.monitor to combined_audio sink
+pactl load-module module-loopback source=meeting_audio.monitor sink=combined_audio latency_msec=1
+echo "Routed meeting audio to combined sink"
+
+# Route agent_output.monitor to combined_audio sink
+pactl load-module module-loopback source=agent_output.monitor sink=combined_audio latency_msec=1
+echo "Routed agent audio to combined sink"
+
+# Create a virtual microphone source from agent_output for Chromium
 pactl load-module module-remap-source source_name=agent_mic master=agent_output.monitor source_properties=device.description="Agent_Virtual_Microphone"
+echo "Created agent_mic source for Chromium"
 
-echo "✓ Virtual microphone 'agent_mic' created"
+# Set meeting_audio as the default sink (Chromium will output here)
+pactl set-default-sink meeting_audio
+echo "Set meeting_audio as default sink"
+
+echo "✓ Audio routing configured"
 
 echo "PulseAudio Devices:"
 echo "--- Sinks ---"
@@ -133,17 +156,14 @@ echo "--- Sources ---"
 pactl list short sources
 
 echo ""
-echo "🎤 Virtual microphone available as: agent_mic"
-echo "   Chromium reads from /tmp/mic_pipe"
-echo "   Agent audio is played to 'agent_output' sink"
-echo "   agent_mic monitors agent_output and streams to pipe"
-
-echo "✓ Audio devices ready (Chromium will use agent_mic as microphone)"
+echo "🎤 Audio Routing Configuration:"
+echo "   Chromium audio output → meeting_audio sink"
+echo "   Nova audio output → agent_output sink"
+echo "   Combined (meeting + agent) → combined_audio sink → Transcribe"
+echo "   Meeting only → meeting_audio.monitor → Nova (no feedback!)"
+echo "   Agent mic → agent_output.monitor → Chromium microphone"
 echo ""
-echo "🎧 Audio Routing:"
-echo "   Meeting audio → 'default' source → FFmpeg → Transcribe + ElevenLabs"
-echo "   Agent audio → agent_output sink → agent_mic source → Chromium → Meeting"
-echo "   Feedback prevention: Agent audio blocked when isSpeaking=true"
+echo "✓ Barge-in enabled: Nova hears meeting audio only, not her own voice"
 
 echo "=== Starting Virtual Participant Application ==="
 

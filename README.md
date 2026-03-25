@@ -4,6 +4,8 @@ _Companion AWS blog post: [Live Meeting Assistant with Amazon Transcribe, Amazon
 
 _See [CHANGELOG](./CHANGELOG.md) for latest features and fixes._
 
+**Questions?** [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/aws-samples/amazon-transcribe-live-meeting-assistant)
+
 ## Introduction
 
 You’ve likely experienced the challenge of taking notes during a meeting while trying to pay attention to the conversation. You’ve probably also experienced the need to quickly fact-check something that’s been said, or look up information to answer a question that’s just been asked in the call. Or maybe you have a team member that always joins meetings late, and expects you to send them a quick summary over chat to catch them up.

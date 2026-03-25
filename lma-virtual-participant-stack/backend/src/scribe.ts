@@ -16,7 +16,9 @@ let currentSpeaker = "none";
 const isLocalTest = process.env.LOCAL_TEST === 'true';
 
 export class TranscriptionService {
-    private process: ChildProcess | null = null;
+    private process: ChildProcess | null = null;           // FFmpeg: combined_audio.monitor → Transcribe
+    private novaAudioProcess: ChildProcess | null = null;  // FFmpeg: meeting_audio.monitor → Nova/recording
+    private meetingToCombinedPipe: ChildProcess | null = null; // pacat: meeting audio → combined_audio sink
     private startTime: number | null = null;
     private readonly channels = 1;
     private readonly sampleRate = 16000; // in hertz
@@ -59,11 +61,12 @@ export class TranscriptionService {
 
     private async *audioStream() {
 
+        // Capture from combined_audio.monitor to get both meeting and agent audio for transcription
         this.process = spawn('ffmpeg', [
             '-f',
             'pulse',
             '-i',
-            'default',
+            'combined_audio.monitor',  // Combined audio (meeting + agent) for transcription
             '-ac',
             String(this.channels),
             '-ar',
@@ -337,6 +340,17 @@ export class TranscriptionService {
             this.process.kill();
             this.process = null;
         }
+        if (this.novaAudioProcess) {
+            this.novaAudioProcess.kill();
+            this.novaAudioProcess = null;
+        }
+        if (this.meetingToCombinedPipe) {
+            if (this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                this.meetingToCombinedPipe.stdin.end();
+            }
+            this.meetingToCombinedPipe.kill();
+            this.meetingToCombinedPipe = null;
+        }
         
         // Stop voice assistant if running
         if (voiceAssistant.isEnabled()) {
@@ -435,15 +449,36 @@ export class TranscriptionService {
         await this.startTranscription();
     }
 
-    // Parallel audio processing (matching Python write_audio function)
+    // Captures meeting-only audio (meeting_audio.monitor) via a separate FFmpeg process.
+    // Feeds audio to: (1) recording file, (2) combined_audio sink for Transcribe, (3) voice assistant.
+    // Uses separate process variables to avoid overwriting the transcription FFmpeg in audioStream().
+    // Channel separation (meeting vs combined) prevents Nova from hearing its own voice.
     private async writeAudio(transcribeResponse: any, recordingStream: any): Promise<void> {
         try {
-            // Create audio input queue (matching Python asyncio.Queue)
-            const audioQueue: Buffer[] = [];
-            // Start FFmpeg process for audio capture
-            this.process = spawn('ffmpeg', [
+            // Pipe meeting audio into combined_audio sink for Transcribe
+            this.meetingToCombinedPipe = spawn('pacat', [
+                '--playback',
+                '--device=combined_audio',
+                '--format=s16le',
+                '--rate=16000',
+                '--channels=1',
+                '--raw',
+                '--latency-msec=20'
+            ]);
+            
+            this.meetingToCombinedPipe.on('error', (error: any) => {
+                console.error(`pacat (meeting→combined) error: ${error.message}`);
+            });
+            
+            this.meetingToCombinedPipe.stderr?.on('data', (data: any) => {
+                const msg = data.toString().trim();
+                if (msg) console.log(`pacat (meeting→combined): ${msg}`);
+            });
+            
+            // Capture meeting-only audio for Nova and recording
+            this.novaAudioProcess = spawn('ffmpeg', [
                 '-f', 'pulse',
-                '-i', 'default',
+                '-i', 'meeting_audio.monitor',  // Meeting audio only (no agent feedback)
                 '-ac', '1',
                 '-ar', '16000',
                 '-acodec', 'pcm_s16le',
@@ -453,8 +488,8 @@ export class TranscriptionService {
             ]);
 
             // Add error handlers for the process
-            this.process.on('error', (error: any) => {
-                const msg = `FFmpeg process error: ${error.message}`;
+            this.novaAudioProcess.on('error', (error: any) => {
+                const msg = `FFmpeg (Nova audio) process error: ${error.message}`;
                 if (isLocalTest) {
                     console.error(msg + ' (non-fatal in local test)');
                 } else {
@@ -463,22 +498,24 @@ export class TranscriptionService {
                 }
             });
 
-            this.process.stderr?.on('data', (data: any) => {
+            this.novaAudioProcess.stderr?.on('data', (data: any) => {
                 const msg = data.toString();
                 if (!msg.includes('size=') && !msg.includes('time=')) {
                     console.log('FFmpeg:', msg.trim());
                 }
             });
 
-            // Process audio chunks
-            this.process.stdout?.on('data', async (chunk: Buffer) => {
+            // Process audio chunks from meeting_audio.monitor
+            this.novaAudioProcess.stdout?.on('data', async (chunk: Buffer) => {
                 if (details.start && this.isTranscribing) {
                     try {
-                        // Send to Transcribe
-                        await transcribeResponse.input_stream?.send_audio_event?.({ audio_chunk: chunk });
                         recordingStream.write(chunk);
                         
-                        // Also send to voice assistant if enabled and activated
+                        // Forward meeting audio to combined_audio sink for Transcribe
+                        if (this.meetingToCombinedPipe && this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                            this.meetingToCombinedPipe.stdin.write(chunk);
+                        }
+                        
                         if (voiceAssistant.isEnabled() && voiceAssistant.isActive() && voiceAssistant.isActivated()) {
                             voiceAssistant.sendAudioChunk(chunk);
                         }

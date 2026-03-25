@@ -16,6 +16,8 @@ import {
   STREAM_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
   MCP_SERVERS_PATH,
+  NOVA_SONIC_CONFIG_PATH,
+  TRANSCRIPT_SUMMARY_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
 
@@ -60,6 +62,16 @@ const generateNavigationItems = (settings, isAdmin) => {
           type: 'link',
           text: 'MCP Servers',
           href: `#${MCP_SERVERS_PATH}`,
+        },
+        {
+          type: 'link',
+          text: 'Nova Sonic Config',
+          href: `#${NOVA_SONIC_CONFIG_PATH}`,
+        },
+        {
+          type: 'link',
+          text: 'Transcript Summary',
+          href: `#${TRANSCRIPT_SUMMARY_PATH}`,
         },
       ],
     });
@@ -159,6 +171,10 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
     activeHref = `#${MEETINGS_QUERY_PATH}`;
   } else if (path.includes(MCP_SERVERS_PATH)) {
     activeHref = `#${MCP_SERVERS_PATH}`;
+  } else if (path.includes(NOVA_SONIC_CONFIG_PATH)) {
+    activeHref = `#${NOVA_SONIC_CONFIG_PATH}`;
+  } else if (path.includes(TRANSCRIPT_SUMMARY_PATH)) {
+    activeHref = `#${TRANSCRIPT_SUMMARY_PATH}`;
   } else if (path.includes(CALLS_PATH)) {
     activeHref = `#${CALLS_PATH}`;
   } else if (path.includes(STREAM_AUDIO_PATH)) {
@@ -168,7 +184,7 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
   }
   return (
     <Switch>
-      <Route path={[CALLS_PATH, MCP_SERVERS_PATH]}>
+      <Route path={[CALLS_PATH, MCP_SERVERS_PATH, NOVA_SONIC_CONFIG_PATH, TRANSCRIPT_SUMMARY_PATH]}>
         <SideNavigation
           items={navigationItems}
           header={header || callsNavHeader}

@@ -46,6 +46,31 @@ APPSYNC_GRAPHQL_URL = os.environ.get('APPSYNC_GRAPHQL_URL', '')
 EVENT_API_HTTP_URL = os.environ.get('EVENT_API_HTTP_URL', '')
 ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
 
+# Module-level reusable AppSync client (avoids recreating SigV4 auth on every call)
+_appsync_client = None
+
+def _get_appsync_client():
+    """Get or create a reusable AppSync GraphQL client."""
+    global _appsync_client
+    if _appsync_client is None and APPSYNC_GRAPHQL_URL:
+        from asst_gql_client import AppsyncRequestsGqlClient
+        _appsync_client = AppsyncRequestsGqlClient(
+            url=APPSYNC_GRAPHQL_URL,
+            fetch_schema_from_transport=False
+        )
+    return _appsync_client
+
+
+def send_thinking_step_async(call_id: str, message_id: str, thinking_step: Dict[str, Any], sequence: int):
+    """Fire-and-forget: send a thinking step in a background thread to avoid blocking."""
+    import threading
+    t = threading.Thread(
+        target=send_thinking_step_to_appsync,
+        args=(call_id, message_id, thinking_step, sequence),
+        daemon=True
+    )
+    t.start()
+
 
 class ThinkingStepHookProvider:
     """Hook provider to track tool usage and send thinking steps to AppSync"""
@@ -1303,8 +1328,55 @@ def handler(event, context):
     }
     """
     try:
+        # ============================================================
+        # Warmup handler: short-circuit for keep-alive pings
+        # The orchestrator/ECS sends periodic warmup events to keep
+        # the Lambda container warm and MCP connections alive.
+        # This runs load_account_mcp_servers() which ensures all
+        # MCP clients are started and healthy, then returns immediately
+        # without calling Bedrock or doing any real work.
+        # ============================================================
+        if event.get('action') == 'warmup':
+            import time
+            warmup_start = time.time()
+            logger.info("Warmup ping received - ensuring MCP clients are alive and tools are cached")
+            mcp_count = 0
+            tools_count = 0
+            from_cache = False
+            if MCP_LOADER_AVAILABLE:
+                try:
+                    mcp_clients, from_cache = load_account_mcp_servers()
+                    mcp_count = len(mcp_clients)
+                    # Pre-load tool lists from each MCP server so the Agent constructor
+                    # doesn't have to wait for list_tools_sync() on the first real request.
+                    # This is fast (~0ms) if tools are already cached, or ~200ms per server if not.
+                    for client in mcp_clients:
+                        try:
+                            if hasattr(client, '_loaded_tools') and client._loaded_tools is None:
+                                from strands._async import run_async
+                                async def _load():
+                                    return await client.load_tools()
+                                tools = run_async(_load)
+                                tools_count += len(tools)
+                                logger.info(f"Pre-loaded {len(tools)} tools from MCP client")
+                            elif hasattr(client, '_loaded_tools') and client._loaded_tools is not None:
+                                tools_count += len(client._loaded_tools)
+                        except Exception as e:
+                            logger.warning(f"Warmup: Failed to pre-load tools: {e}")
+                except Exception as e:
+                    logger.warning(f"Warmup: MCP loading failed: {e}")
+            warmup_elapsed = time.time() - warmup_start
+            logger.info(f"Warmup complete in {warmup_elapsed:.2f}s - {mcp_count} MCP clients, {tools_count} tools, from_cache={from_cache}")
+            return {
+                'status': 'warm',
+                'mcp_clients': mcp_count,
+                'tools_count': tools_count,
+                'from_cache': from_cache,
+                'warmup_time_ms': int(warmup_elapsed * 1000)
+            }
+
         logger.info(f"Strands Meeting Assist - Processing event: {json.dumps(event)}")
-        
+
         # Extract parameters from event - handle both 'text' and 'userInput' for compatibility
         user_input = event.get('userInput', '') or event.get('text', '')
         call_id = event.get('callId', '') or event.get('call_id', '')
@@ -1339,44 +1411,42 @@ def handler(event, context):
         tools = []
         
         # Load installed MCP servers (account-level) - returns MCPClient objects
+        # Uses module-level caching: on warm Lambda starts with unchanged config,
+        # cached clients are returned almost instantly (no DynamoDB query, no subprocess spawn)
         if MCP_LOADER_AVAILABLE:
             try:
-                # Send status update: Loading MCP servers
-                if APPSYNC_GRAPHQL_URL:
-                    from datetime import datetime
-                    thinking_step = {
-                        'type': 'status',
-                        'content': 'Loading MCP servers...',
-                        'timestamp': datetime.utcnow().isoformat()
-                    }
-                    send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
-                
                 logger.info("Loading installed MCP servers...")
-                mcp_clients = load_account_mcp_servers()
+                mcp_clients, from_cache = load_account_mcp_servers()
                 tools.extend(mcp_clients)
-                logger.info(f"Loaded {len(mcp_clients)} MCP clients from installed MCP servers")
-                logger.info("Using Strands Managed Integration (experimental) - MCP clients will manage their own lifecycle")
                 
-                # Send status update: MCP servers loaded
-                if APPSYNC_GRAPHQL_URL:
-                    from datetime import datetime
-                    thinking_step = {
-                        'type': 'status',
-                        'content': f'Loaded {len(mcp_clients)} MCP servers',
-                        'timestamp': datetime.utcnow().isoformat()
-                    }
-                    send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+                if from_cache:
+                    logger.info(f"Using {len(mcp_clients)} cached MCP clients (warm start)")
+                    # Fire-and-forget status update - don't block the main path
+                    if APPSYNC_GRAPHQL_URL and mcp_clients:
+                        send_thinking_step_async(call_id, message_id, {
+                            'type': 'status',
+                            'content': f'Using {len(mcp_clients)} cached MCP servers',
+                            'timestamp': datetime.utcnow().isoformat()
+                        }, 0)
+                else:
+                    logger.info(f"Loaded {len(mcp_clients)} MCP clients from installed MCP servers (fresh)")
+                    logger.info("Using Strands Managed Integration (experimental) - MCP clients will manage their own lifecycle")
+                    # Fire-and-forget status update
+                    if APPSYNC_GRAPHQL_URL:
+                        send_thinking_step_async(call_id, message_id, {
+                            'type': 'status',
+                            'content': f'Loaded {len(mcp_clients)} MCP servers',
+                            'timestamp': datetime.utcnow().isoformat()
+                        }, 0)
             except Exception as e:
                 logger.warning(f"Failed to load MCP servers: {e}")
-                # Send error status
+                # Fire-and-forget error status
                 if APPSYNC_GRAPHQL_URL:
-                    from datetime import datetime
-                    thinking_step = {
+                    send_thinking_step_async(call_id, message_id, {
                         'type': 'status',
                         'content': f'Failed to load MCP servers: {str(e)}',
                         'timestamp': datetime.utcnow().isoformat()
-                    }
-                    send_thinking_step_to_appsync(call_id, message_id, thinking_step, 1)
+                    }, 0)
         
         # Add web search tool if API key provided (auto-enable)
         if tavily_api_key:
@@ -1549,16 +1619,6 @@ def handler(event, context):
             logger.info(f"Using MessageId for streaming: {message_id}")
             logger.info(f"Tools enabled: {len(tools)}")
             
-            # Send status update: Initializing agent
-            if APPSYNC_GRAPHQL_URL:
-                from datetime import datetime
-                thinking_step = {
-                    'type': 'status',
-                    'content': 'Initializing agent...',
-                    'timestamp': datetime.utcnow().isoformat()
-                }
-                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 2)
-            
             # Configure Bedrock model with streaming
             # Note: Extended thinking mode not supported by all models
             bedrock_model = BedrockModel(
@@ -1575,6 +1635,8 @@ def handler(event, context):
             # Create agent with tools (includes MCPClient objects for managed integration)
             # Per Strands docs: "The MCPClient implements the experimental ToolProvider interface,
             # enabling direct usage in the Agent constructor with automatic lifecycle management"
+            # Note: Agent.__del__ calls remove_consumer on MCPClients, which stops them.
+            # Cached MCPClients will be restarted on next invocation via load_tools() -> start().
             agent = Agent(
                 model=bedrock_model,
                 system_prompt=get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt(),
@@ -1585,15 +1647,13 @@ def handler(event, context):
             logger.info(f"Agent created with {len(tools)} tools/clients and hook provider (managed integration)")
             logger.info(f"Hook provider registered: {thinking_hook}")
             
-            # Send status update: Agent ready
+            # Fire-and-forget status update - don't block before Bedrock call
             if APPSYNC_GRAPHQL_URL:
-                from datetime import datetime
-                thinking_step = {
+                send_thinking_step_async(call_id, message_id, {
                     'type': 'status',
                     'content': f'Agent ready with {len(tools)} tools',
                     'timestamp': datetime.utcnow().isoformat()
-                }
-                send_thinking_step_to_appsync(call_id, message_id, thinking_step, 3)
+                }, 1)
             
             # Prepare context for the agent with conversation history
             if conversation_history:

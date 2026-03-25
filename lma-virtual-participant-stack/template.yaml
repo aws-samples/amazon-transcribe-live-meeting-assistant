@@ -1958,6 +1958,11 @@ Resources:
                   - dynamodb:GetShardIterator
                   - dynamodb:ListStreams
                 Resource: !Ref VirtualParticipantTableStreamArn
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                  - "kms:DescribeKey"
+                Resource: !Ref CustomerManagedEncryptionKeyArn
 
   # Virtual Participant Scheduler Lambda Function
   VirtualParticipantSchedulerFunction:
@@ -2017,7 +2022,7 @@ Resources:
                                   'ClientToken': vp_id,
                                   'TaskDefinition': os.environ['TASK_DEFINITION_ARN'],
                                   'Cluster': os.environ['CLUSTER_ARN'],
-                                  'LaunchType': 'FARGATE',
+                                  'LaunchType': os.environ.get('VP_LAUNCH_TYPE', 'FARGATE'),
                                   'NetworkConfiguration': {
                                       'AwsvpcConfiguration': {
                                           'AssignPublicIp': 'DISABLED',
@@ -2101,6 +2106,7 @@ Resources:
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistryTableName
           SCHEDULE_GROUP_NAME: !Ref VPScheduleGroup
           SCHEDULER_ROLE_ARN: !GetAtt VPSchedulerExecutionRole.Arn
+          VP_LAUNCH_TYPE: !Ref VPLaunchType
   # DynamoDB Event Source Mapping for Scheduler Lambda
   VirtualParticipantSchedulerEventSourceMapping:
     Type: AWS::Lambda::EventSourceMapping

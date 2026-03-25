@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.29] - 2026-03-20
+
+### Added
+- Admin UI pages for Nova Sonic voice assistant configuration (`/#/configuration/nova-sonic`) and Transcript Summary prompt templates (`/#/configuration/transcript-summary`) - admins can now view defaults and edit custom overrides directly from the web UI instead of navigating to the DynamoDB console
+- Full-stack AppSync GraphQL API for Nova Sonic config and LLM prompt template CRUD operations with Lambda resolvers implementing input validation and security filtering (allowlisted fields only)
+- Embeddable component page (`/#/embed`) for iframe integration - third-party apps can embed individual LMA components (stream audio, transcript, summary, chat, VNC, virtual participant) in their own UI via URL query parameters
+- PostMessage API for cross-origin iframe auth token passing and meeting lifecycle control (start/stop/events)
+- Embed integration documentation (`docs/EMBED_COMPONENTS_SETUP.md`) with examples, auth options, and API reference
+- Configurable turn-taking sensitivity (endpointingSensitivity) for AWS Nova Sonic 2 voice assistant - supports HIGH (1.5s), MEDIUM (1.75s, default), and LOW (2.0s) pause detection for controlling response timing
+- Chat shortcut buttons now re-appear inline after each assistant response completes, so users no longer need to scroll back to the top to access them
+- Add and delete buttons in Edit Chat Buttons modal - admins can now add new shortcut buttons and remove existing ones, not just edit placeholders
+- Group meeting mode (groupMeetingMode) for AWS Nova Sonic 2 - enables passive listening with mute/unmute tools, allowing Nova to only respond when directly addressed (mentions "Alex"), ideal for multi-participant meetings
+- Barge-in support for AWS Nova Sonic 2 - separate audio routing prevents feedback loops and enables interrupting Nova mid-sentence
+- Display scheduled execution time on Virtual Participant details page when status is SCHEDULED
+- DeepWiki auto-indexing badge in README for automatic weekly documentation refresh and AI-powered repository Q&A
+
+### Changed
+- AWS Nova Sonic 2 audio routing architecture - separate sinks for meeting audio and agent output with combined monitoring for transcription, enabling barge-in without feedback loops
+- Chat shortcut buttons made more compact with smaller padding and font size for better space efficiency
+
+### Fixed
+- AWS Nova Sonic 2 stream error recovery - session now automatically refreshes on unexpected stream errors instead of waiting for next scheduled refresh, preventing prolonged connection loss
+- Scheduled Virtual Participants failing to start due to missing KMS permissions on VPScheduler Lambda role
+- Edit Chat Buttons modal label input losing focus after each keystroke - fixed by using stable sequence number as React key instead of the changing button key
+
 ## [0.2.28] - 2026-03-13
 
 ### Added

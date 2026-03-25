@@ -175,6 +175,22 @@ if [ "$SKIP_ENV_GENERATION" = false ]; then
             --query "Stacks[0].Parameters[?ParameterKey=='StrandsLambdaArn'].ParameterValue" \
             --output text 2>/dev/null || echo "")
         
+        # Get Nova Sonic Config Stack (nested in main stack, not VP stack)
+        NOVA_SONIC_CONFIG_STACK=$(aws cloudformation list-stack-resources \
+            --stack-name "$STACK_NAME" \
+            --query "StackResourceSummaries[?LogicalResourceId=='NOVASONICONFIGSTACK'].PhysicalResourceId" \
+            --output text 2>/dev/null)
+        
+        # Get Nova Sonic Config Table Name from nested stack
+        if [ -n "$NOVA_SONIC_CONFIG_STACK" ]; then
+            NOVA_SONIC_CONFIG_TABLE_NAME=$(aws cloudformation describe-stacks \
+                --stack-name "$NOVA_SONIC_CONFIG_STACK" \
+                --query "Stacks[0].Outputs[?OutputKey=='NovaSonicConfigTableName'].OutputValue" \
+                --output text 2>/dev/null || echo "")
+        else
+            NOVA_SONIC_CONFIG_TABLE_NAME=""
+        fi
+        
         echo "Voice Assistant Provider: $VOICE_ASSISTANT_PROVIDER"
         echo "Voice Assistant Activation Mode: $VOICE_ASSISTANT_ACTIVATION_MODE"
         if [ "$VOICE_ASSISTANT_PROVIDER" = "elevenlabs" ]; then
@@ -184,6 +200,9 @@ if [ "$SKIP_ENV_GENERATION" = false ]; then
             echo "Nova System Prompt: ${NOVA_SYSTEM_PROMPT:0:50}..."
             if [ -n "$STRANDS_LAMBDA_ARN" ]; then
                 echo "Strands Lambda ARN: ${STRANDS_LAMBDA_ARN:0:80}..."
+            fi
+            if [ -n "$NOVA_SONIC_CONFIG_TABLE_NAME" ]; then
+                echo "Nova Sonic Config Table: $NOVA_SONIC_CONFIG_TABLE_NAME"
             fi
         fi
     fi
@@ -313,6 +332,7 @@ ELEVENLABS_AGENT_ID=${ELEVENLABS_AGENT_ID:-}
 NOVA_MODEL_ID=${NOVA_MODEL_ID:-amazon.nova-2-sonic-v1:0}
 NOVA_SYSTEM_PROMPT=${NOVA_SYSTEM_PROMPT:-You are Alex, an AI meeting assistant. Be concise and helpful.}
 STRANDS_LAMBDA_ARN=${STRANDS_LAMBDA_ARN:-}
+NOVA_SONIC_CONFIG_TABLE_NAME=${NOVA_SONIC_CONFIG_TABLE_NAME:-}
 
 # Display Configuration (for local testing)
 DISPLAY=:99
