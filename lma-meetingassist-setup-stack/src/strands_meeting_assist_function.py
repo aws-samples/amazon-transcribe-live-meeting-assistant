@@ -1328,8 +1328,55 @@ def handler(event, context):
     }
     """
     try:
+        # ============================================================
+        # Warmup handler: short-circuit for keep-alive pings
+        # The orchestrator/ECS sends periodic warmup events to keep
+        # the Lambda container warm and MCP connections alive.
+        # This runs load_account_mcp_servers() which ensures all
+        # MCP clients are started and healthy, then returns immediately
+        # without calling Bedrock or doing any real work.
+        # ============================================================
+        if event.get('action') == 'warmup':
+            import time
+            warmup_start = time.time()
+            logger.info("Warmup ping received - ensuring MCP clients are alive and tools are cached")
+            mcp_count = 0
+            tools_count = 0
+            from_cache = False
+            if MCP_LOADER_AVAILABLE:
+                try:
+                    mcp_clients, from_cache = load_account_mcp_servers()
+                    mcp_count = len(mcp_clients)
+                    # Pre-load tool lists from each MCP server so the Agent constructor
+                    # doesn't have to wait for list_tools_sync() on the first real request.
+                    # This is fast (~0ms) if tools are already cached, or ~200ms per server if not.
+                    for client in mcp_clients:
+                        try:
+                            if hasattr(client, '_loaded_tools') and client._loaded_tools is None:
+                                from strands._async import run_async
+                                async def _load():
+                                    return await client.load_tools()
+                                tools = run_async(_load)
+                                tools_count += len(tools)
+                                logger.info(f"Pre-loaded {len(tools)} tools from MCP client")
+                            elif hasattr(client, '_loaded_tools') and client._loaded_tools is not None:
+                                tools_count += len(client._loaded_tools)
+                        except Exception as e:
+                            logger.warning(f"Warmup: Failed to pre-load tools: {e}")
+                except Exception as e:
+                    logger.warning(f"Warmup: MCP loading failed: {e}")
+            warmup_elapsed = time.time() - warmup_start
+            logger.info(f"Warmup complete in {warmup_elapsed:.2f}s - {mcp_count} MCP clients, {tools_count} tools, from_cache={from_cache}")
+            return {
+                'status': 'warm',
+                'mcp_clients': mcp_count,
+                'tools_count': tools_count,
+                'from_cache': from_cache,
+                'warmup_time_ms': int(warmup_elapsed * 1000)
+            }
+
         logger.info(f"Strands Meeting Assist - Processing event: {json.dumps(event)}")
-        
+
         # Extract parameters from event - handle both 'text' and 'userInput' for compatibility
         user_input = event.get('userInput', '') or event.get('text', '')
         call_id = event.get('callId', '') or event.get('call_id', '')

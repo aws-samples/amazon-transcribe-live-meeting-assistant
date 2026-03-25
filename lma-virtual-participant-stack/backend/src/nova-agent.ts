@@ -1386,6 +1386,17 @@ export class NovaAgent implements VoiceAssistantProvider {
           '--raw'
         ]);
 
+        // Handle stdin errors (EPIPE when paplay exits before write completes)
+        paplay.stdin.on('error', (error: any) => {
+          if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') {
+            // Expected during cleanup - paplay exited before we finished writing
+            resolve();
+          } else {
+            console.error('❌ paplay stdin error:', error);
+            reject(error);
+          }
+        });
+
         // Send audio to paplay
         paplay.stdin.write(combinedBuffer);
         paplay.stdin.end();
@@ -1395,8 +1406,8 @@ export class NovaAgent implements VoiceAssistantProvider {
           if (code === 0) {
             resolve();
           } else {
-            console.error(`❌ paplay failed with code ${code}`);
-            reject(new Error(`paplay failed with code ${code}`));
+            // During cleanup, non-zero exit is expected
+            resolve();
           }
         });
 
