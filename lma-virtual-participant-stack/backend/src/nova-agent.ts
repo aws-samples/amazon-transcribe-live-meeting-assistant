@@ -7,6 +7,7 @@
 
 import { spawn, ChildProcess } from 'child_process';
 import { VoiceAssistantProvider } from './voice-assistant-interface.js';
+import { simliAvatar } from './simli-avatar.js';
 import {
   BedrockRuntimeClient,
   InvokeModelWithBidirectionalStreamCommand,
@@ -1346,6 +1347,14 @@ export class NovaAgent implements VoiceAssistantProvider {
     
     // Add audio to queue
     this.audioQueue.push(audioBuffer);
+    
+    // Forward audio to Simli avatar for lip-sync animation
+    // This runs in parallel with PulseAudio playback - Simli only uses it for video
+    if (simliAvatar.isConnected()) {
+      simliAvatar.sendAudioData(audioBuffer).catch(err => {
+        // Non-critical - avatar lip-sync failure shouldn't affect audio
+      });
+    }
     
     // Start processing queue if not already processing
     if (!this.isPlayingQueue) {

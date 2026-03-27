@@ -3,6 +3,7 @@ import WebSocket from 'ws';
 import { VoiceAssistantProvider } from './voice-assistant-interface.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
+import { simliAvatar } from './simli-avatar.js';
 
 export interface ElevenLabsAgentConfig {
   apiKey: string;
@@ -396,6 +397,14 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     // Add audio to queue
     this.audioQueue.push(audioBuffer);
     console.log(`🎵 Audio chunk queued (${audioBuffer.length} bytes) - Queue size: ${this.audioQueue.length}`);
+    
+    // Forward audio to Simli avatar for lip-sync animation
+    // This runs in parallel with PulseAudio playback - Simli only uses it for video
+    if (simliAvatar.isConnected()) {
+      simliAvatar.sendAudioData(audioBuffer).catch(err => {
+        // Non-critical - avatar lip-sync failure shouldn't affect audio
+      });
+    }
     
     // Start processing queue if not already processing
     if (!this.isPlayingQueue) {
