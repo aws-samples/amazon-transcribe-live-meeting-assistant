@@ -463,29 +463,86 @@ const signalHandler = async (signal: string) => {
 process.on('SIGINT', () => signalHandler('SIGINT'));
 process.on('SIGTERM', () => signalHandler('SIGTERM'));
 
-// Handle uncaught exceptions - don't exit during cleanup to allow status update
-process.on('uncaughtException', (error: any) => {
+/**
+ * Emergency cleanup for uncaught exceptions and unhandled rejections.
+ * Ensures the meeting doesn't stay stuck as "in progress" in LMA when the
+ * ECS task crashes unexpectedly (e.g., ERR_STREAM_PREMATURE_CLOSE from
+ * transcription pipeline failures, expired Transcribe sessions, etc.).
+ * 
+ * This sends the END event to Kinesis (so the call_event_processor marks
+ * the meeting as ended) and updates the VP status to FAILED in DynamoDB.
+ */
+const emergencyCleanup = async (errorMessage: string): Promise<void> => {
+    // Set flag to prevent recursive cleanup if another exception fires during this
+    cleanupInProgress = true;
+    console.log('Performing emergency cleanup before exit...');
+
+    // Send END event to Kinesis so the meeting is marked as ended
+    try {
+        console.log('Emergency: Sending END meeting event to Kinesis...');
+        await sendEndMeeting();
+        console.log('Emergency: END meeting event sent successfully');
+    } catch (endError) {
+        console.error('Emergency: Failed to send END meeting event:', endError);
+    }
+
+    // Update VP status to FAILED so it doesn't show as in-progress
+    if (statusManager) {
+        try {
+            console.log('Emergency: Updating VP status to FAILED...');
+            await statusManager.setFailed(errorMessage);
+            console.log('Emergency: VP status updated to FAILED');
+        } catch (statusError) {
+            console.error('Emergency: Failed to update VP status:', statusError);
+        }
+
+        // Deregister from ALB target group
+        try {
+            await statusManager.deregisterFromTargetGroup();
+            console.log('Emergency: Deregistered from ALB target group');
+        } catch (albError) {
+            console.error('Emergency: Failed to deregister from ALB:', albError);
+        }
+    }
+
+    // Stop Strands warmup timer
+    if (strandsWarmupTimer) {
+        clearInterval(strandsWarmupTimer);
+        strandsWarmupTimer = null;
+    }
+
+    console.log('Emergency cleanup complete');
+};
+
+// Handle uncaught exceptions - always attempt cleanup before exiting
+process.on('uncaughtException', async (error: any) => {
     if (cleanupInProgress) {
         // During cleanup, log but don't exit - let the finally block complete
         console.error('Uncaught Exception during cleanup (non-fatal):', error.message || error);
     } else {
         console.error('Uncaught Exception:', error);
+        // Perform emergency cleanup before exiting to ensure meeting status is updated
+        // and the meeting doesn't stay stuck as "in progress" in LMA
+        await emergencyCleanup('Uncaught exception: ' + (error.message || error));
         process.exit(1);
     }
 });
 
-process.on('unhandledRejection', (reason: any, promise: any) => {
+process.on('unhandledRejection', async (reason: any, promise: any) => {
     if (cleanupInProgress) {
         // During cleanup, log but don't exit - let the finally block complete
         console.error('Unhandled Rejection during cleanup (non-fatal):', reason);
     } else {
         console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+        // Perform emergency cleanup before exiting to ensure meeting status is updated
+        await emergencyCleanup('Unhandled rejection: ' + (reason?.message || reason));
         process.exit(1);
     }
 });
 
 // Start the application
-main().catch((error) => {
+main().catch(async (error) => {
     console.error('Application failed to start:', error);
+    await emergencyCleanup('Application startup failed: ' + (error.message || error));
     process.exit(1);
 });
