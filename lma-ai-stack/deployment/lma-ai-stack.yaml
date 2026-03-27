@@ -1031,12 +1031,18 @@ Resources:
                     aws lambda publish-layer-version --layer-name "$STACK_NAME-mcp-servers" --description "MCP servers and dependencies" --zip-file fileb://mcp-layer.zip --compatible-runtimes python3.12 --query 'Version' --output text > /tmp/version.txt;
                   fi
                 - echo "Published layer version $(cat /tmp/version.txt)"
-                - FUNCTION_NAME=$(aws lambda list-functions --query "Functions[?contains(FunctionName, 'MeetingAssist')].FunctionName" --output text)
-                - echo "Found Lambda function $FUNCTION_NAME"
-                - aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --query 'Layers[].LayerArn' --output json > /tmp/current.json
-                - jq -r --arg layer "arn:aws:lambda:$AWS_DEFAULT_REGION:$AWS_ACCOUNT_ID:layer:$STACK_NAME-mcp-servers:$(cat /tmp/version.txt)" 'map(select(. | contains("mcp-servers") | not)) + [$layer] | join(" ")' /tmp/current.json > /tmp/layers.txt
-                - aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --layers $(cat /tmp/layers.txt)
-                - echo "Lambda function updated with new layer"
+                - FUNCTION_NAME="STRANDS-${LMA_STACK_NAME}-MeetingAssist"
+                - echo "Target Lambda function $FUNCTION_NAME"
+                - |
+                  if aws lambda get-function --function-name "$FUNCTION_NAME" > /dev/null 2>&1; then
+                    echo "Function exists - updating layers";
+                    aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --query 'Layers[].LayerArn' --output json > /tmp/current.json;
+                    jq -r --arg layer "arn:aws:lambda:$AWS_DEFAULT_REGION:$AWS_ACCOUNT_ID:layer:$STACK_NAME-mcp-servers:$(cat /tmp/version.txt)" 'map(select(. | contains("mcp-servers") | not)) + [$layer] | join(" ")' /tmp/current.json > /tmp/layers.txt;
+                    aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --layers $(cat /tmp/layers.txt);
+                    echo "Lambda function updated with new layer";
+                  else
+                    echo "Function $FUNCTION_NAME not found yet (may be created by a parallel nested stack) - layer published and ready for use";
+                  fi
                 - |
                   if [ "$ACTION" = "INSTALL_MCP_SERVER" ] && [ -n "$SERVER_ID" ]; then
                     echo "Updating DynamoDB server status to ACTIVE";
@@ -1050,6 +1056,8 @@ Resources:
         EnvironmentVariables:
           - Name: STACK_NAME
             Value: !Ref AWS::StackName
+          - Name: LMA_STACK_NAME
+            Value: !Ref LMAStackName
           - Name: MCP_SERVERS_TABLE
             Value: !Ref MCPServersTable
           - Name: AWS_ACCOUNT_ID
@@ -1103,6 +1111,7 @@ Resources:
                 Action:
                   - lambda:PublishLayerVersion
                   - lambda:GetLayerVersion
+                  - lambda:GetFunction
                   - lambda:GetFunctionConfiguration
                   - lambda:UpdateFunctionConfiguration
                 Resource:
@@ -1152,7 +1161,9 @@ Resources:
                 Action:
                   - codebuild:StartBuild
                   - codebuild:BatchGetBuilds
-                Resource: !GetAtt LMAUICodeBuildProject.Arn
+                Resource:
+                  - !GetAtt LMAUICodeBuildProject.Arn
+                  - !GetAtt MCPLayerBuildProject.Arn
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
@@ -1193,6 +1204,19 @@ Resources:
       # to force codebuild to rerun when source code changes, and to correctly roll back to
       # previous version if build fails.
       CodeLocation: !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/src-hash.zip"
+
+  # Trigger MCP Layer CodeBuild on every stack create/update
+  MCPLayerCodeBuildRun:
+    Type: Custom::CodeBuildRun
+    DependsOn:
+      - MCPLayerBuildProject
+      - MCPServersTable
+      - CodeBuildRun
+    Properties:
+      ServiceToken: !GetAtt LambdaCodeBuildStartBuild.Arn
+      BuildProjectName: !Ref MCPLayerBuildProject
+      # Include BootstrapVersion to force re-run on every stack update
+      BootstrapVersion: !Ref BootstrapVersion
 
   LambdaCodeBuildStartBuild:
     Type: AWS::Serverless::Function

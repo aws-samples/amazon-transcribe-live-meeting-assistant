@@ -63,7 +63,8 @@ pip3 install --requirement ./requirements.txt --target=./python
 popd
 echo "Packaging strands_layer"
 pushd strands_layer
-pip3 install --requirement ./requirements.txt --target=./python
+rm -rf ./python
+pip3 install --requirement ./requirements.txt --target=./python --platform manylinux2014_x86_64 --only-binary=:all: --python-version 3.12
 popd
 aws cloudformation package \
 --template-file ${template} \
