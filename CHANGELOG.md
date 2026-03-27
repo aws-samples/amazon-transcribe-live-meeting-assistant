@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.30] - 2026-03-27
+
+### Fixed
+- Strands Meeting Assist Lambda failing with `No module named 'pydantic_core._pydantic_core'` on new stack deployments due to cross-platform pip install in publish.sh
+- MCP Layer CodeBuild matching Lambda functions from other stacks in the same account
+
+### Added
+- Automatic MCP layer rebuild on stack create/update via CloudFormation Custom Resource, ensuring correct native binaries and preserving installed MCP servers across updates
+
 ## [0.2.29] - 2026-03-20
 
 ### Added
