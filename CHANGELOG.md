@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP Layer CodeBuild matching Lambda functions from other stacks in the same account
 
 ### Added
+- WebSocket Audio Streaming API specification (`docs/WEBSOCKET_STREAMING_API.md`)
 - Automatic MCP layer rebuild on stack create/update via CloudFormation Custom Resource, ensuring correct native binaries and preserving installed MCP servers across updates
 
 ## [0.2.29] - 2026-03-20
