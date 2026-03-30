@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Simli avatar integration for Virtual Participant animated lip-synced avatar as the VP's camera feed in meetings, driven by voice assistant audio output (Nova Sonic or ElevenLabs). Configure with Simli API Key and Face ID in CloudFormation parameters.
+
 ### Fixed
 - Virtual Participant ECS task crash leaving meeting permanently stuck as "in progress" due to missing cleanup on uncaught transcription pipeline errors
 
