@@ -2,6 +2,7 @@ import { Page,ConsoleMessage } from 'puppeteer';
 import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { simliAvatar } from './simli-avatar.js';
 
 export default class Zoom {
     private async waitForButtonWithRetry(
@@ -163,7 +164,15 @@ export default class Zoom {
                 ['svg.SvgVideoOn', 'svg.SvgVideoOff']
             );
             
-            if (videoResult) {
+            if (videoResult && simliAvatar.isConnected()) {
+                // Simli avatar active - keep video ON so avatar shows as camera
+                if (videoResult.selector === 'svg.SvgVideoOff') {
+                    console.log('Simli avatar active - clicking to turn video ON for avatar camera.');
+                    await videoResult.element.click();
+                } else {
+                    console.log('Simli avatar active - video is already on, good.');
+                }
+            } else if (videoResult) {
                 if (videoResult.selector === 'svg.SvgVideoOn') {
                     console.log('Video is on, clicking to turn it off.');
                     await videoResult.element.click();

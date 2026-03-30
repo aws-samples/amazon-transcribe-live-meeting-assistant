@@ -271,18 +271,61 @@ const main = async (): Promise<void> => {
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
 
-    // Inject Simli Avatar getUserMedia override into the meeting page
+    // Simli Avatar: Inject getUserMedia override and set up stream connection
     // This must happen BEFORE the page navigates to the meeting URL
     if (simliAvatar.isConnected()) {
         try {
+            // 1. Grant camera+mic permissions at browser level for all meeting domains
+            const context = page.browser().defaultBrowserContext();
+            for (const domain of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com']) {
+                await context.overridePermissions(domain, ['camera', 'microphone']).catch(() => {});
+            }
+            console.log('✓ Camera and microphone permissions granted for meeting platforms');
+            
+            // 2. Inject getUserMedia/enumerateDevices/permissions overrides (evaluateOnNewDocument)
             await simliAvatar.injectGetUserMediaOverride(page);
             console.log('✓ Simli getUserMedia override injected into meeting page');
             
-            // Connect the Simli video stream to the meeting page
-            await simliAvatar.connectStreamToMeetingPage(page);
-            console.log('✓ Simli video stream connected to meeting page');
+            // 3. Start background stream connection + polling (runs concurrently with meeting)
+            let isReconnecting = false;
+            const connectSimliStream = async () => {
+                try {
+                    await simliAvatar.connectStreamToMeetingPage(page);
+                    console.log('✓ Simli video stream connected to meeting page');
+                } catch (error) {
+                    console.error('Failed to connect Simli stream (non-critical):', error);
+                }
+            };
+            
+            // Poll for dead video track and re-connect when needed
+            const simliPollInterval = setInterval(async () => {
+                if (isReconnecting) return;
+                try {
+                    const needsReconnect = await page.evaluate(() => {
+                        // @ts-ignore
+                        if (!window.__simliOverrideInstalled) return true;
+                        // @ts-ignore
+                        const track = window.__simliCurrentTrack;
+                        if (!track) return true;
+                        return track.readyState !== 'live';
+                    }).catch(() => true);
+                    
+                    if (needsReconnect) {
+                        isReconnecting = true;
+                        console.log('Simli video track needs re-connection...');
+                        await connectSimliStream();
+                        isReconnecting = false;
+                    }
+                } catch (e) {
+                    isReconnecting = false;
+                }
+            }, 5000);
+            
+            // Initial connection (will be re-established by poll after page navigates)
+            await connectSimliStream();
+            
         } catch (error) {
-            console.error('Failed to set up Simli video for meeting page (non-critical):', error);
+            console.error('Failed to set up Simli avatar for meeting (non-critical):', error);
         }
     }
 

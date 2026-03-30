@@ -5,6 +5,7 @@ import { details } from "./details.js";
 import { transcriptionService } from "./scribe.js";
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
+import { simliAvatar } from './simli-avatar.js';
 
 // const bedrockClient = new BedrockRuntimeClient();
 
@@ -48,9 +49,14 @@ export default class Teams {
         }
 
         await new Promise((resolve) => setTimeout(resolve, 250));
-        console.log("Clicking video button.");
-        const videoButtonElement = await page.waitForSelector('[data-tid="toggle-video"]');
-        await videoButtonElement?.click();
+        if (simliAvatar.isConnected()) {
+            console.log("Simli avatar active - keeping video ON for avatar camera.");
+            // Don't click the video toggle - leave it on so Simli avatar shows
+        } else {
+            console.log("Clicking video button to turn off.");
+            const videoButtonElement = await page.waitForSelector('[data-tid="toggle-video"]');
+            await videoButtonElement?.click();
+        }
 
         await new Promise((resolve) => setTimeout(resolve, 250));
         console.log("Clicking join button.");
