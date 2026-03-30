@@ -249,6 +249,32 @@ export class TranscriptionService {
             } catch (error: any) {
                 console.error(`Transcription error (attempt ${attempt + 1}/${maxRetries}):`, error.message);
                 
+                // If the session has expired, clear the session ID so next retry starts fresh
+                if (error.message?.includes('has expired')) {
+                    console.log('Transcribe session expired - will start a new session on retry');
+                    sessionId = undefined;
+                }
+                
+                // Kill any lingering FFmpeg processes from the failed attempt to prevent
+                // ERR_STREAM_PREMATURE_CLOSE from bubbling up as an uncaught exception
+                if (this.process) {
+                    try { this.process.kill(); } catch (_) { /* ignore */ }
+                    this.process = null;
+                }
+                if (this.novaAudioProcess) {
+                    try { this.novaAudioProcess.kill(); } catch (_) { /* ignore */ }
+                    this.novaAudioProcess = null;
+                }
+                if (this.meetingToCombinedPipe) {
+                    try {
+                        if (this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                            this.meetingToCombinedPipe.stdin.end();
+                        }
+                        this.meetingToCombinedPipe.kill();
+                    } catch (_) { /* ignore */ }
+                    this.meetingToCombinedPipe = null;
+                }
+                
                 if (attempt < maxRetries - 1) {
                     console.log(`Retrying in ${retryDelay / 1000} seconds...`);
                     await new Promise(resolve => setTimeout(resolve, retryDelay));
@@ -595,8 +621,14 @@ export class TranscriptionService {
                 }
             }
         } catch (error: any) {
-            // In local test mode, handle errors gracefully
-            // In production, let errors propagate to kill the task
+            // Classify errors as retryable (transient) vs fatal
+            const isRetryableError = 
+                error.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+                error.message?.includes('stream is too big') ||
+                error.message?.includes('has expired') ||
+                error.message?.includes('http2 request did not get a response') ||
+                error.message?.includes('non-retryable streaming request');
+
             if (isLocalTest) {
                 if (error.code === 'ERR_STREAM_PREMATURE_CLOSE') {
                     console.log('Transcribe stream closed prematurely (non-fatal in local test) - meeting will continue');
@@ -605,8 +637,13 @@ export class TranscriptionService {
                 } else {
                     console.log('Handle transcript events error (non-fatal in local test):', error.message || error);
                 }
+            } else if (isRetryableError) {
+                // Retryable errors - throw to trigger retry loop in startTranscription()
+                // but don't let them become uncaught exceptions
+                console.error(`Handle transcript events error (retryable): ${error.message || error}`);
+                throw error;
             } else {
-                // Production mode - rethrow to kill the task
+                // Non-retryable errors - throw to trigger retry/exit
                 console.error('Handle transcript events error (fatal in production):', error.message || error);
                 throw error;
             }
