@@ -79,7 +79,7 @@ export class SimliAvatar {
       // Tested and confirmed working in standalone browser test.
       await this.simliPage.evaluateOnNewDocument(() => {
         const origConnect = AudioNode.prototype.connect;
-        AudioNode.prototype.connect = function(...args: any[]) {
+        AudioNode.prototype.connect = function(this: AudioNode, ...args: any[]) {
           const dest = args[0];
           if (dest instanceof AudioDestinationNode) {
             console.log('[Simli-AudioBlock] Blocked AudioNode connection to speakers');
