@@ -254,21 +254,29 @@ export default class Zoom {
             // Function to get current speaker from any view
             function getCurrentSpeaker(): string | null {
                 const selectors = [
+                    // Normal mode - main view (prioritized: shows active speaker)
+                    '.single-main-container__video-frame .video-avatar__avatar-footer span',
                     // Screen sharing mode - suspension window (small video)
                     '.single-suspension-container__video-frame .video-avatar__avatar-footer span',
-                    // Normal mode - main view
-                    '.single-main-container__video-frame .video-avatar__avatar-footer span',
                     // Fallback - any avatar footer
                     '.video-avatar__avatar-footer span[role="none"]'
                 ];
                 
+                let vpName: string | null = null;
                 for (const selector of selectors) {
                     const element = document.querySelector(selector);
-                    if (element?.textContent?.trim()) {
-                        return element.textContent.trim();
+                    const name = element?.textContent?.trim();
+                    if (name) {
+                        // Skip the VP's own name - we want the OTHER participant
+                        if (name === vpIdentity) {
+                            vpName = name;
+                            continue;
+                        }
+                        return name;
                     }
                 }
-                return null;
+                // If only the VP name was found (VP is the only/active speaker), return it
+                return vpName;
             }
 
             function notifySpeakerChange(speaker: string) {
