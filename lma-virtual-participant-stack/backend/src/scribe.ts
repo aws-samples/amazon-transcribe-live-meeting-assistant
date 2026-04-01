@@ -33,9 +33,9 @@ export class TranscriptionService {
         isPartial: boolean;
     }> = [];
     private bufferWindowMs = 10000; // Keep last 10 seconds
-    private captureDelayMs = 3000; // Wait 3 seconds after wake phrase to capture full question
     private wakePhrases: string[];
-    private isCapturingContext = false;
+    private preConnectTriggered = false;
+    private wakeDetectionTimestamp: number | null = null;
 
     constructor() {
         // In local test mode, explicitly use default provider which checks credentials file first
@@ -297,7 +297,19 @@ export class TranscriptionService {
             console.log(`📝 Transcribed: "${transcript}" (IsPartial: ${isPartial})`);
         }
         
-        // Add to transcript buffer (only non-partial for accuracy)
+        // Detect wake phrase in partials to pre-warm the voice agent connection
+        if (isPartial && transcript && !this.preConnectTriggered) {
+            if (this.detectWakePhrase(transcript)) {
+                console.log('⚡ Wake phrase detected in PARTIAL transcript — pre-connecting voice agent');
+                this.preConnectTriggered = true;
+                this.wakeDetectionTimestamp = timestamp;
+                voiceAssistant.preConnect().catch(err => {
+                    console.error('Pre-connect error (non-fatal):', err);
+                });
+            }
+        }
+        
+        // On completed segments, activate with full context if wake phrase was detected
         if (!isPartial && transcript) {
             this.transcriptBuffer.push({ text: transcript, timestamp, isPartial });
             
@@ -305,9 +317,14 @@ export class TranscriptionService {
             const cutoff = timestamp - this.bufferWindowMs;
             this.transcriptBuffer = this.transcriptBuffer.filter(t => t.timestamp > cutoff);
             
-            // Check for wake phrase
-            if (this.detectWakePhrase(transcript)) {
-                this.handleWakePhraseDetected(timestamp);
+            // Check for wake phrase in the completed segment
+            if (this.detectWakePhrase(transcript) || this.preConnectTriggered) {
+                const detectionTime = this.wakeDetectionTimestamp || timestamp;
+                // Reset pre-connect state for next wake phrase
+                this.preConnectTriggered = false;
+                this.wakeDetectionTimestamp = null;
+                
+                this.handleWakePhraseDetected(detectionTime);
             }
         }
         
@@ -428,29 +445,16 @@ export class TranscriptionService {
             return;
         }
 
-        // Don't activate if we're already capturing context
-        if (this.isCapturingContext) {
-            return;
-        }
-
-        console.log('🎤 Wake phrase detected, capturing context...');
-        this.isCapturingContext = true;
-        
-        // Wait to capture additional context after wake phrase
-        await new Promise(resolve => setTimeout(resolve, this.captureDelayMs));
-        
-        // Get transcript from detection time onwards
+        // Build context from recent transcript buffer
         const contextTranscript = this.transcriptBuffer
             .filter(t => t.timestamp >= detectionTime - 2000) // Include 2s before wake phrase
             .map(t => t.text)
             .join(' ');
         
-        console.log('📝 Captured context:', contextTranscript);
+        console.log('🎤 Wake phrase detected — activating immediately with context:', contextTranscript);
         
-        // Activate voice assistant with context
+        // Activate voice assistant with context (connection already pre-warmed)
         voiceAssistant.activate(30, contextTranscript);
-        
-        this.isCapturingContext = false;
     }
 
     // Utility methods for status
@@ -614,10 +618,8 @@ export class TranscriptionService {
                         console.error('Failed to send transcript to Kinesis:', error);
                     }
 
-                    // Process for local captions only for non-partial results
-                    if (result.IsPartial === false) {
-                        this.processTranscriptResult(result);
-                    }
+                    // Process all results (partial + final) for wake phrase pre-connect and activation
+                    this.processTranscriptResult(result);
                 }
             }
         } catch (error: any) {

@@ -509,6 +509,34 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     console.log('✓ ElevenLabs agent stopped');
   }
 
+  private _preConnecting: boolean = false;
+  private _preConnectPromise: Promise<void> | null = null;
+
+  async preConnect(): Promise<void> {
+    if (this.activationMode === 'always_active') return; // already connected
+    if (this.isConnected) return; // already connected
+    if (this._preConnecting) {
+      if (this._preConnectPromise) await this._preConnectPromise;
+      return;
+    }
+
+    console.log('🔌 Pre-connecting ElevenLabs WebSocket (wake phrase detected in partial)...');
+    this._preConnecting = true;
+    this._preConnectPromise = this.connectWebSocket()
+      .then(() => {
+        console.log('✓ ElevenLabs WebSocket pre-connected — ready for activation');
+      })
+      .catch((error) => {
+        console.error('❌ ElevenLabs pre-connect failed:', error);
+      })
+      .finally(() => {
+        this._preConnecting = false;
+        this._preConnectPromise = null;
+      });
+
+    await this._preConnectPromise;
+  }
+
   // Activation control methods
   async activate(duration?: number, initialContext?: string): Promise<void> {
     if (this.activationMode === 'always_active') {
@@ -519,16 +547,24 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     const activationDuration = duration || this.defaultActivationDuration;
     console.log(`🎤 Voice assistant activated for ${activationDuration} seconds`);
     
-    // Connect WebSocket if not already connected (for wake_phrase mode)
+    // Connect WebSocket if not already connected (may already be pre-connected)
     if (!this.isConnected) {
-      console.log('🔌 Connecting to ElevenLabs WebSocket...');
-      try {
-        await this.connectWebSocket();
-        console.log('✓ WebSocket connected');
-      } catch (error) {
-        console.error('❌ Failed to connect WebSocket:', error);
-        return; // Don't activate if connection fails
+      if (this._preConnecting && this._preConnectPromise) {
+        console.log('⏳ Waiting for in-flight pre-connect to complete...');
+        await this._preConnectPromise;
       }
+      if (!this.isConnected) {
+        console.log('🔌 Connecting to ElevenLabs WebSocket...');
+        try {
+          await this.connectWebSocket();
+          console.log('✓ WebSocket connected');
+        } catch (error) {
+          console.error('❌ Failed to connect WebSocket:', error);
+          return; // Don't activate if connection fails
+        }
+      }
+    } else {
+      console.log('✓ WebSocket already connected (pre-connected)');
     }
     
     this._isActivated = true;
