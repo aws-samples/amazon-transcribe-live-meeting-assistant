@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Simli avatar integration for Virtual Participant animated lip-synced avatar as the VP's camera feed in meetings, driven by voice assistant audio output (Nova Sonic or ElevenLabs). Configure with Simli API Key and Face ID in CloudFormation parameters.
+- Wake phrase pre-connect optimization for voice assistant — detects wake phrase in partial (streaming) transcripts and pre-warms the voice agent connection (WebSocket for ElevenLabs, Bedrock session for Nova Sonic) in the background while the user is still speaking, eliminating 1-2 seconds of connection latency. Activation now triggers immediately when the Transcribe segment completes instead of waiting a fixed 3-second capture delay.
 
 ### Fixed
 - Virtual Participant ECS task crash leaving meeting permanently stuck as "in progress" due to missing cleanup on uncaught transcription pipeline errors

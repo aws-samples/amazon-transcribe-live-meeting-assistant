@@ -64,6 +64,14 @@ export interface VoiceAssistantProvider {
   sendUserMessage(text: string): void;
 
   /**
+   * Pre-warm the connection (start WebSocket/session without activating audio).
+   * Called when a wake phrase is detected in a partial transcript so the
+   * connection is ready by the time the full segment arrives.
+   * Safe to call multiple times — subsequent calls are no-ops if already connecting/connected.
+   */
+  preConnect(): Promise<void>;
+
+  /**
    * Activate the voice assistant for a duration
    * @param duration Optional duration in seconds (uses default if not provided)
    * @param initialContext Optional transcript context from wake phrase detection
