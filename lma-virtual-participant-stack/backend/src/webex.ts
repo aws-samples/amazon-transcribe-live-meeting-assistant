@@ -3,6 +3,7 @@ import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
+import { simliAvatar } from './simli-avatar.js';
 
 export default class Webex {
     private readonly iframe = '#unified-webclient-iframe';
@@ -233,11 +234,16 @@ export default class Webex {
             console.log('Voice assistant enabled - skipping mute button for agent audio');
         }
 
-        console.log('Clicking video button.');
-        const videoButtonElement = await frame.waitForSelector(
-            (frameElement && frameElement.source === 'enterprise') ? 'button[data-doi="VIDEO:STOP_VIDEO:MEETSIMPLE_INTERSTITIAL"]' : 'mdc-button[data-test="camera-button"]'
-        );
-        await (frameElement && frameElement.source === 'enterprise') ? frame.evaluate((el: any) => el.click(), videoButtonElement) : videoButtonElement?.click();
+        if (simliAvatar.isConnected()) {
+            console.log('Simli avatar active - keeping video ON for avatar camera.');
+            // Don't click the video button - leave camera on so Simli avatar shows
+        } else {
+            console.log('Clicking video button to turn off.');
+            const videoButtonElement = await frame.waitForSelector(
+                (frameElement && frameElement.source === 'enterprise') ? 'button[data-doi="VIDEO:STOP_VIDEO:MEETSIMPLE_INTERSTITIAL"]' : 'mdc-button[data-test="camera-button"]'
+            );
+            await (frameElement && frameElement.source === 'enterprise') ? frame.evaluate((el: any) => el.click(), videoButtonElement) : videoButtonElement?.click();
+        }
 
         console.log('Clicking join button.');
         const joinButtonElement = await frame.waitForSelector((frameElement && frameElement.source === 'enterprise') ? '#interstitial_join_btn' : 'mdc-button[data-test="join-button"]');

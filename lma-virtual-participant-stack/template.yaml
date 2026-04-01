@@ -148,6 +148,32 @@ Parameters:
       (Optional) ElevenLabs Conversational AI Agent ID for custom personality.
       Leave blank to use default conversational agent.
 
+  SimliApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional) API key for Simli avatar. When provided with a Face ID,
+      enables animated avatar video for the Virtual Participant's camera feed.
+      The avatar lip-syncs with the voice assistant's audio output.
+
+  SimliFaceId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Simli Face ID for the avatar appearance.
+      Get this from your Simli dashboard at simli.com.
+
+  SimliTransportMode:
+    Type: String
+    Default: "livekit"
+    AllowedValues:
+      - "livekit"
+      - "p2p"
+    Description: >-
+      Simli transport mode. 'livekit' is more firewall-friendly,
+      'p2p' offers slightly lower latency.
+
   VoiceAssistantProvider:
     Type: String
     Default: "none"
@@ -1349,6 +1375,12 @@ Resources:
               Value: !Ref ElevenLabsApiKey
             - Name: ELEVENLABS_AGENT_ID
               Value: !Ref ElevenLabsAgentId
+            - Name: SIMLI_API_KEY
+              Value: !Ref SimliApiKey
+            - Name: SIMLI_FACE_ID
+              Value: !Ref SimliFaceId
+            - Name: SIMLI_TRANSPORT_MODE
+              Value: !Ref SimliTransportMode
             - Name: VOICE_ASSISTANT_PROVIDER
               Value: !Ref VoiceAssistantProvider
             - Name: VOICE_ASSISTANT_ACTIVATION_MODE

@@ -91,6 +91,22 @@ Parameters:
     AllowedPattern: "^(|[a-zA-Z0-9_-]{10,})$"
     ConstraintDescription: "Must be empty or a valid ElevenLabs Agent ID"
 
+  SimliApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional) API key for Simli avatar. When provided with a Face ID,
+      enables an animated lip-synced avatar as the Virtual Participant's camera feed.
+      Get your API key from https://simli.com. Leave blank to disable avatar.
+
+  SimliFaceId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Simli Face ID for the avatar appearance.
+      Get this from your Simli dashboard at https://simli.com.
+
   VoiceAssistantProvider:
     Type: String
     Default: "none"
@@ -797,6 +813,8 @@ Metadata:
           - TavilyApiKey
           - ElevenLabsApiKey
           - ElevenLabsAgentId
+          - SimliApiKey
+          - SimliFaceId
           - VoiceAssistantProvider
           - VoiceAssistantActivationMode
           - VoiceAssistantWakePhrases
@@ -944,6 +962,10 @@ Metadata:
         default: ElevenLabs API Key for Virtual Participant Voice (Optional)
       ElevenLabsAgentId:
         default: ElevenLabs Agent ID for Custom Personality (Optional)
+      SimliApiKey:
+        default: Simli API Key for Avatar (Optional)
+      SimliFaceId:
+        default: Simli Face ID for Avatar Appearance (Optional)
       VoiceAssistantProvider:
         default: Voice Assistant Provider (none, elevenlabs, amazon_nova_sonic)
       VoiceAssistantActivationMode:
@@ -2660,6 +2682,8 @@ Resources:
         EnableAudioRecording: !Ref EnableAudioRecording
         ElevenLabsApiKey: !Ref ElevenLabsApiKey
         ElevenLabsAgentId: !Ref ElevenLabsAgentId
+        SimliApiKey: !Ref SimliApiKey
+        SimliFaceId: !Ref SimliFaceId
         VoiceAssistantProvider: !Ref VoiceAssistantProvider
         VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
         VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases

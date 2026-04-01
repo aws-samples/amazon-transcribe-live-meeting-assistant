@@ -2,6 +2,7 @@ import { Page,ConsoleMessage } from 'puppeteer';
 import { details } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { simliAvatar } from './simli-avatar.js';
 
 export default class Zoom {
     private async waitForButtonWithRetry(
@@ -163,7 +164,15 @@ export default class Zoom {
                 ['svg.SvgVideoOn', 'svg.SvgVideoOff']
             );
             
-            if (videoResult) {
+            if (videoResult && simliAvatar.isConnected()) {
+                // Simli avatar active - keep video ON so avatar shows as camera
+                if (videoResult.selector === 'svg.SvgVideoOff') {
+                    console.log('Simli avatar active - clicking to turn video ON for avatar camera.');
+                    await videoResult.element.click();
+                } else {
+                    console.log('Simli avatar active - video is already on, good.');
+                }
+            } else if (videoResult) {
                 if (videoResult.selector === 'svg.SvgVideoOn') {
                     console.log('Video is on, clicking to turn it off.');
                     await videoResult.element.click();
@@ -245,21 +254,29 @@ export default class Zoom {
             // Function to get current speaker from any view
             function getCurrentSpeaker(): string | null {
                 const selectors = [
+                    // Normal mode - main view (prioritized: shows active speaker)
+                    '.single-main-container__video-frame .video-avatar__avatar-footer span',
                     // Screen sharing mode - suspension window (small video)
                     '.single-suspension-container__video-frame .video-avatar__avatar-footer span',
-                    // Normal mode - main view
-                    '.single-main-container__video-frame .video-avatar__avatar-footer span',
                     // Fallback - any avatar footer
                     '.video-avatar__avatar-footer span[role="none"]'
                 ];
                 
+                let vpName: string | null = null;
                 for (const selector of selectors) {
                     const element = document.querySelector(selector);
-                    if (element?.textContent?.trim()) {
-                        return element.textContent.trim();
+                    const name = element?.textContent?.trim();
+                    if (name) {
+                        // Skip the VP's own name - we want the OTHER participant
+                        if (name === vpIdentity) {
+                            vpName = name;
+                            continue;
+                        }
+                        return name;
                     }
                 }
-                return null;
+                // If only the VP name was found (VP is the only/active speaker), return it
+                return vpName;
             }
 
             function notifySpeakerChange(speaker: string) {

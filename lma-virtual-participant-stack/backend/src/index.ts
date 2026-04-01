@@ -13,6 +13,7 @@ import { recordingService } from './recording.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { simliAvatar } from './simli-avatar.js';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
@@ -196,6 +197,18 @@ const main = async (): Promise<void> => {
     await new Promise(resolve => setTimeout(resolve, 2000));
     console.log('✓ Chrome launched with remote debugging on port 9222');
 
+    // Initialize Simli Avatar AFTER browser is launched (background page for avatar rendering)
+    if (simliAvatar.isSimliEnabled()) {
+        try {
+            console.log('Initializing Simli Avatar...');
+            await simliAvatar.initialize(browser);
+            console.log('✓ Simli Avatar initialized');
+        } catch (error) {
+            console.error('Failed to initialize Simli Avatar (non-critical):', error);
+            // Non-fatal - meeting can proceed without avatar
+        }
+    }
+
     // Initialize MCP command handler AFTER browser is launched
     if (statusManager && vpId) {
         try {
@@ -257,6 +270,64 @@ const main = async (): Promise<void> => {
     await page.setUserAgent(
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
+
+    // Simli Avatar: Inject getUserMedia override and set up stream connection
+    // This must happen BEFORE the page navigates to the meeting URL
+    if (simliAvatar.isConnected()) {
+        try {
+            // 1. Grant camera+mic permissions at browser level for all meeting domains
+            const context = page.browser().defaultBrowserContext();
+            for (const domain of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com']) {
+                await context.overridePermissions(domain, ['camera', 'microphone']).catch(() => {});
+            }
+            console.log('✓ Camera and microphone permissions granted for meeting platforms');
+            
+            // 2. Inject getUserMedia/enumerateDevices/permissions overrides (evaluateOnNewDocument)
+            await simliAvatar.injectGetUserMediaOverride(page);
+            console.log('✓ Simli getUserMedia override injected into meeting page');
+            
+            // 3. Start background stream connection + polling (runs concurrently with meeting)
+            let isReconnecting = false;
+            const connectSimliStream = async () => {
+                try {
+                    await simliAvatar.connectStreamToMeetingPage(page);
+                    console.log('✓ Simli video stream connected to meeting page');
+                } catch (error) {
+                    console.error('Failed to connect Simli stream (non-critical):', error);
+                }
+            };
+            
+            // Poll for dead video track and re-connect when needed
+            const simliPollInterval = setInterval(async () => {
+                if (isReconnecting) return;
+                try {
+                    const needsReconnect = await page.evaluate(() => {
+                        // @ts-ignore
+                        if (!window.__simliOverrideInstalled) return true;
+                        // @ts-ignore
+                        const track = window.__simliCurrentTrack;
+                        if (!track) return true;
+                        return track.readyState !== 'live';
+                    }).catch(() => true);
+                    
+                    if (needsReconnect) {
+                        isReconnecting = true;
+                        console.log('Simli video track needs re-connection...');
+                        await connectSimliStream();
+                        isReconnecting = false;
+                    }
+                } catch (e) {
+                    isReconnecting = false;
+                }
+            }, 5000);
+            
+            // Initial connection (will be re-established by poll after page navigates)
+            await connectSimliStream();
+            
+        } catch (error) {
+            console.error('Failed to set up Simli avatar for meeting (non-critical):', error);
+        }
+    }
 
     let meeting: Chime | Zoom | Teams | Webex;
     let success = false;
@@ -372,6 +443,14 @@ const main = async (): Promise<void> => {
             }
         }
 
+        // Stop Simli Avatar
+        try {
+            await simliAvatar.stop();
+            console.log('✓ Simli Avatar stopped');
+        } catch (error) {
+            console.error('Error stopping Simli Avatar:', error);
+        }
+
         try {
             // Close browser
             await browser.close();
@@ -445,6 +524,13 @@ const signalHandler = async (signal: string) => {
         }
     }
     
+    // Stop Simli Avatar
+    try {
+        await simliAvatar.stop();
+    } catch (error) {
+        console.error('Error stopping Simli Avatar:', error);
+    }
+
     // Stop services
     try {
         await transcriptionService.stopTranscription();
