@@ -199,24 +199,6 @@ Parameters:
       - "BEDROCK_KNOWLEDGE_BASE (Create)"
     Description: Use meeting transcripts as knowledge base content
 
-  TranscriptKnowledgeBaseVectorStore:
-    Type: String
-    Default: "S3_VECTORS"
-    AllowedValues:
-      - "S3_VECTORS"
-    Description: >-
-      Vector store for transcript knowledge base. S3 Vectors provides cost-effective
-      storage with sub-second latency.
-
-  MeetingAssistKnowledgeBaseVectorStore:
-    Type: String
-    Default: "S3_VECTORS"
-    AllowedValues:
-      - "S3_VECTORS"
-    Description: >-
-      Vector store for meeting assist knowledge base (STRANDS_BEDROCK_WITH_KB Create option).
-      S3 Vectors provides cost-effective storage with sub-second latency.
-
   EnableMCP:
     Type: String
     Default: "true"
@@ -233,29 +215,6 @@ Parameters:
       Default includes Quick Suite (us-east-1, us-west-2) and localhost for testing.
       Add your custom MCP client callback URLs here.
       Example: https://my-app.com/callback,https://another-app.com/oauth/callback
-
-  S3BucketName:
-    Type: String
-    Description: >
-      (Optional) Existing bucket where call recording files will be stored.
-      Leave blank to automatically create new bucket.
-    # yamllint disable rule:line-length
-    AllowedPattern: '( *|(?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$))'
-    # yamllint enable rule:line-length
-
-  AudioFilePrefix:
-    Type: String
-    Default: lma-audio-recordings/
-    Description: >-
-      The Amazon S3 prefix where the audio files will be saved (must end
-      in "/")
-
-  TranscriptFilePrefix:
-    Type: String
-    Default: lma-transcripts/
-    Description: >-
-      The Amazon S3 prefix where the transript files will be saved (must end
-      in "/")
 
   IsPartialTranscriptEnabled:
     Type: String
@@ -837,12 +796,6 @@ Metadata:
         default: Call Audio Processor
       ChimeVoiceToneAnalysis:
         default: Chime Voice Tone Analysis
-      S3BucketName:
-        default: Call Audio Recordings Bucket Name
-      AudioFilePrefix:
-        default: Audio File Prefix
-      TranscriptFilePrefix:
-        default: Transcript File Prefix
       CustomVoiceConnectorId:
         default: Amazon Chime SDK Voice Connector ID (existing)
       AdminEmail:
@@ -873,18 +826,12 @@ Metadata:
         default: Voice Assistant Activation Duration (seconds)
       AssistantWakePhraseRegEx:
         default: Meeting Assist Wake Phrase Regular Expression
-      MeetingAssistQnABotOpenSearchNodeCount:
-        default: Meeting Assist QnABot OpenSearch Node Count
       BedrockGuardrailId:
         default: Bedrock Guardrail Id (optional)
       BedrockGuardrailVersion:
         default: Bedrock Guardrail Version (optional)
       BedrockKnowledgeBaseId:
         default: Bedrock Knowledge Base Id (existing)
-      BedrockAgentId:
-        default: Bedrock Agent Id (existing)
-      BedrockAgentAliasId:
-        default: Bedrock Agent Alias Id (existing)
       BedrockKnowledgeBaseS3BucketName:
         default: S3 bucket with knowledge base source documents (optional).
       BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
@@ -893,16 +840,8 @@ Metadata:
         default: Publicly accessible URLs for web crawling (optional)
       BedrockKnowledgeBaseWebCrawlerScope:
         default: Web crawling sync scope
-      AmazonQAppId:
-        default: Amazon Q Application ID (existing)
-      IDCApplicationARN:
-        default: IDC Application ARN (existing)
       TranscriptKnowledgeBase:
         default: Transcript Knowledge Base
-      TranscriptKnowledgeBaseVectorStore:
-        default: Transcript Knowledge Base Vector Store
-      MeetingAssistKnowledgeBaseVectorStore:
-        default: Meeting Assist Knowledge Base Vector Store
       EnableMCP:
         default: Enable MCP Server Integration
       MCPServerCallbackURLs:
@@ -1036,7 +975,7 @@ Rules:
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
-  ShouldCreateRecordingBucket: !Equals [!Ref S3BucketName, ""]
+  ShouldCreateRecordingBucket: !Equals ["", ""]
   ShouldUseStrandsBedrock:
     !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
   ShouldUseStrandsBedrockWithKBCreate:
@@ -1058,8 +997,8 @@ Conditions:
   ShouldCreateTranscriptKnowledgeBase:
     !Equals [!Ref TranscriptKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)"]
   ShouldUseTranscriptKnowledgeBase: !Condition ShouldCreateTranscriptKnowledgeBase
-  IsS3VectorsForTranscript: !Equals [!Ref TranscriptKnowledgeBaseVectorStore, "S3_VECTORS"]
-  IsS3VectorsForMeetingAssist: !Equals [!Ref MeetingAssistKnowledgeBaseVectorStore, "S3_VECTORS"]
+  IsS3VectorsForTranscript: !Equals ["S3_VECTORS", "S3_VECTORS"]
+  IsS3VectorsForMeetingAssist: !Equals ["S3_VECTORS", "S3_VECTORS"]
   ShouldEnableMCP: !Equals [!Ref EnableMCP, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
@@ -2001,11 +1940,11 @@ Resources:
         Rules:
           - Id: AudioRetention
             Status: Enabled
-            Prefix: !Ref AudioFilePrefix
+            Prefix: "lma-audio-recordings/"
             ExpirationInDays: !Ref AudioRecordingExpirationInDays
           - Id: TranscriptRetention
             Status: Enabled
-            Prefix: !Ref TranscriptFilePrefix
+            Prefix: "lma-transcripts/"
             ExpirationInDays: !Ref TranscriptionExpirationInDays
 
   RecordingsBucketPolicy:
@@ -2122,7 +2061,7 @@ Resources:
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
-          - !Ref S3BucketName
+          - ""
         AdminEmail: !Ref AdminEmail
         AllowedSignUpEmailDomain: !Ref AllowedSignUpEmailDomain
         LMASettingsParameterName: !Ref LMASettingsParameter
@@ -2148,9 +2087,9 @@ Resources:
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
-          - !Ref S3BucketName
-        AudioFilePrefix: !Ref AudioFilePrefix  
-        TranscriptFilePrefix: !Ref TranscriptFilePrefix
+          - ""
+        AudioFilePrefix: "lma-audio-recordings/"
+        TranscriptFilePrefix: "lma-transcripts/"
         IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
@@ -2212,7 +2151,7 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
       Parameters:
-        pVectorStoreType: !Ref MeetingAssistKnowledgeBaseVectorStore
+        pVectorStoreType: "S3_VECTORS"
         pKnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
         pInputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
         pS3SyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
@@ -2231,9 +2170,9 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
       Parameters:
-        pVectorStoreType: !Ref TranscriptKnowledgeBaseVectorStore
+        pVectorStoreType: "S3_VECTORS"
         pKnowledgeBaseBucketName: !Ref RecordingsBucket
-        pInputDocumentUploadFolderPrefix: !Ref TranscriptFilePrefix
+        pInputDocumentUploadFolderPrefix: "lma-transcripts/"
         pS3SyncScheduleExpression: "cron(0/15 * ? * * *)"  # default is to sync transcripts every 15 minutes
         EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
@@ -2331,8 +2270,8 @@ Resources:
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
-          - !Ref S3BucketName
-        AudioFilePrefix: !Ref AudioFilePrefix
+          - ""
+        AudioFilePrefix: "lma-audio-recordings/"
         UserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
         CallDataStreamName: !Ref CallDataStream
         CallDataStreamArn: !GetAtt CallDataStream.Arn
@@ -2407,8 +2346,8 @@ Resources:
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
-          - !Ref S3BucketName
-        AudioFilePrefix: !Ref AudioFilePrefix
+          - ""
+        AudioFilePrefix: "lma-audio-recordings/"
         CallDataStreamName: !Ref CallDataStream
         TranscribeApiMode: "standard"
         IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
@@ -2501,7 +2440,7 @@ Outputs:
     Value: !If
       - ShouldCreateRecordingBucket
       - !Ref RecordingsBucket
-      - !Ref S3BucketName
+      - ""
 
   SNSCategoryTopicName:
     Description: The name of the SNS Topic for matched category and alert notifications
