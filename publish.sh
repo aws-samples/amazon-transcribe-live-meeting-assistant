@@ -295,18 +295,6 @@ else
 echo "SKIPPING $dir (unchanged)"
 fi
 
-dir=lma-bedrockagent-stack
-if haschanged $dir; then
-echo "PACKAGING $dir"
-pushd $dir
-chmod +x ./publish.sh
-./publish.sh $BUCKET $PREFIX_AND_VERSION $REGION || exit 1
-popd
-update_checksum $dir
-else
-echo "SKIPPING $dir (unchanged)"
-fi
-
 dir=lma-websocket-transcriber-stack
 if haschanged $dir; then
 echo "PACKAGING $dir"
@@ -422,71 +410,6 @@ update_checksum $dir
 else
 echo "SKIPPING $dir (unchanged)"
 fi
-
-# START QnABot Build Section - Advanced users can comment out this entire section to disable QnABot at build time
-dir=submodule-aws-qnabot
-echo "UPDATING $dir"
-# NOTE FOR ADVANCED USERS: To disable QnABot at build time for custom deployments,
-# you can comment out this entire QnABot build section (from START to END markers). 
-# However, most users should use the CloudFormation parameter 'MeetingAssistService=STRANDS_BEDROCK' 
-# instead, which allows runtime selection without modifying the build process.
-git submodule init
-echo "Removing any QnAbot changes from previous builds"
-pushd $dir && git checkout . && popd
-git submodule update
-# lma customizations
-echo "Applying patch files to remove unused KMS keys from QnABot and customize designer settings page"
-cp -v ./patches/qnabot/templates_examples_examples_index.js $dir/source/templates/examples/examples/index.js
-cp -v ./patches/qnabot/templates_examples_extensions_index.js $dir/source/templates/examples/extensions/index.js
-cp -v ./patches/qnabot/website_js_lib_store_api_actions_settings.js $dir/source/website/js/lib/store/api/actions/settings.js
-echo "Applying patch to fix Cognito permissions for OpenSearch domain"
-cp -v ./patches/qnabot/templates_util.js $dir/source/templates/util.js
-echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lma'"
-# Detection of differences. sed varies betwen GNU sed and BSD sed
-if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
-  sed -i 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/source/package.json
-else # BSD like sed
-  sed -i '' 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/source/package.json
-fi
-echo "update QnABot lambdaRuntime from nodejs18.x to nodejs22.x"
-# Detection of differences. sed varies betwen GNU sed and BSD sed
-if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
-  sed -i 's/"lambdaRuntime": *"nodejs18\.x"/"lambdaRuntime": "nodejs22.x"/' $dir/source/package.json
-else # BSD like sed
-  sed -i '' 's/"lambdaRuntime": *"nodejs18\.x"/"lambdaRuntime": "nodejs22.x"/' $dir/source/package.json
-fi
-echo "Creating config.json"
-cat > $dir/source/config.json <<_EOF
-{
-  "profile": "${AWS_PROFILE:-default}",
-  "region": "${REGION}",
-  "buildType": "Custom",
-  "skipCheckTemplate":true,
-  "noStackOutput": true
-}
-_EOF
-
-# only re-build QnABot if patch files or submodule version has changed
-if haschanged ./patches/qnabot || hassubmodulechanged $dir; then
-
-echo "PACKAGING $dir"
-
-pushd $dir/source
-mkdir -p build/templates/dev
-npm install
-npm run build || exit 1
-# Rename OpensearchDomain resource in template to force resource replacement during upgrade/downgrade
-# If the resource name is not changed, then CloudFomration does an inline upgrade from OpenSearch 1.3 to 2.1, but this upgrade cannot be reversed
-# which can create a problem with ROLLBACK if there is a stack failure during the upgrade.
-cat ./build/templates/master.json | sed -e "s%OpensearchDomain%LMAQnaBotOpensearchDomain%g" > ./build/templates/qnabot-main.json
-aws s3 sync ./build/ s3://${BUCKET}/${PREFIX_AND_VERSION}/aws-qnabot/ --delete 
-popd
-update_checksum ./patches/qnabot
-update_submodule_hash $dir
-else
-echo "SKIPPING $dir (unchanged)"
-fi
-# END QnABot Build Section
 
 echo "PACKAGING Main Stack Cfn artifacts"
 MAIN_TEMPLATE=lma-main.yaml

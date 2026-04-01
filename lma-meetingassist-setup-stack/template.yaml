@@ -214,6 +214,16 @@ Parameters:
     Type: String
     Description: ARN of the Identity Center customer managed application created for QBusiness
 
+  BedrockGuardrailId:
+    Type: String
+    Default: ""
+    Description: Bedrock Guardrail ID for the Strands agent
+
+  BedrockGuardrailVersion:
+    Type: String
+    Default: "DRAFT"
+    Description: Bedrock Guardrail Version for the Strands agent
+
   PermissionsBoundaryArn:
     Type: String
     Default: ""
@@ -228,7 +238,12 @@ Conditions:
   ShouldConfigureBedrockAgent: !Not [!Equals [!Ref BedrockAgentId, ""]]
   ShouldCreateQPlugin: !Not [!Equals [!Ref AmazonQAppId, ""]]
   ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
-  ShouldUseStrandsBedrockWithKB: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Create)"]
+  ShouldUseStrandsBedrockWithKBCreate: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Create)"]
+  ShouldUseStrandsBedrockWithKBExisting: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Use Existing)"]
+  ShouldUseStrandsBedrockWithKB: !Or [
+    !Condition ShouldUseStrandsBedrockWithKBCreate,
+    !Condition ShouldUseStrandsBedrockWithKBExisting
+  ]
   ShouldDeployStrandsFunction: !Or [
     !Condition ShouldUseStrandsBedrock,
     !Condition ShouldUseStrandsBedrockWithKB
@@ -875,6 +890,8 @@ Resources:
           MCP_SERVERS_TABLE: !Ref MCPServersTableName
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
           KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
+          BEDROCK_GUARDRAIL_ID: !Ref BedrockGuardrailId
+          BEDROCK_GUARDRAIL_VERSION: !Ref BedrockGuardrailVersion
       Code: ./src
       LoggingConfig:
         LogGroup:

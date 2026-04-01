@@ -33,8 +33,9 @@ const generateNavigationItems = (settings, isAdmin) => {
       items: [
         {
           type: 'link',
-          text: 'Download Chrome Extension',
-          href: `/lma-chrome-extension-${LMA_VERSION}.zip`,
+          text: 'Virtual Participant (Preview)',
+          href: `#${VIRTUAL_PARTICIPANT_PATH}`,
+          external: true,
         },
         {
           type: 'link',
@@ -44,9 +45,8 @@ const generateNavigationItems = (settings, isAdmin) => {
         },
         {
           type: 'link',
-          text: 'Virtual Participant (Preview)',
-          href: `#${VIRTUAL_PARTICIPANT_PATH}`,
-          external: true,
+          text: 'Download Chrome Extension',
+          href: `/lma-chrome-extension-${LMA_VERSION}.zip`,
         },
       ],
     },

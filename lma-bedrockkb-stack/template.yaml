@@ -12,11 +12,9 @@ Parameters:
     Type: String
     Default: "S3_VECTORS"
     AllowedValues:
-      - "OPENSEARCH_SERVERLESS"
       - "S3_VECTORS"
     Description: >-
-      Choose vector store type. S3 Vectors (default) provides 40-60% cost savings
-      with sub-second latency. OpenSearch Serverless for sub-millisecond queries.
+      Vector store type. S3 Vectors provides cost-effective storage with sub-second latency.
 
   pS3VectorBucketName:
     Type: String
