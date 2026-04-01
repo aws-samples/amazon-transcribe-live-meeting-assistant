@@ -34,8 +34,6 @@ export class TranscriptionService {
     }> = [];
     private bufferWindowMs = 10000; // Keep last 10 seconds
     private wakePhrases: string[];
-    // Pre-connect tracking: detect wake phrase in partials to pre-warm the voice agent
-    // connection before the segment completes, eliminating 1-2s of connection latency.
     private preConnectTriggered = false;
     private wakeDetectionTimestamp: number | null = null;
 
