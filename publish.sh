@@ -53,8 +53,8 @@ if ! [ -x "$(command -v npm)" ]; then
   echo 'Error: npm is not installed and required.' >&2
   exit 1
 fi
-if ! node -v | grep -qF "v18."; then
-    echo 'Error: Node.js version 18.x is not installed and required.' >&2
+if ! node -v | grep -qE "v(18|20|22)\."; then
+    echo 'Error: Node.js version 18.x, 20.x, or 22.x is required.' >&2
     exit 1
 fi
 
@@ -148,37 +148,6 @@ update_checksum() {
   current_checksum=$(echo -n "$combined_string" | sha256sum | awk '{ print $1 }')
   # Save the current checksum
   echo "$current_checksum" > "$checksum_file"
-}
-
-# Function to check if the submodule commit hash has changed
-hassubmodulechanged() {
-    local dir=$1
-    local hash_file="${dir}/.commit-hash"
-    # Get the current commit hash of the submodule
-    cd "$dir" || exit 1
-    current_hash=$(git rev-parse HEAD)
-    cd - > /dev/null || exit 1
-    # Check if the hash file exists and read the previous hash
-    if [ -f "$hash_file" ]; then
-        previous_hash=$(cat "$hash_file")
-    else
-        previous_hash=""
-    fi
-    if [ "$current_hash" != "$previous_hash" ]; then
-        return 0  # True, the submodule has changed
-    else
-        return 1  # False, the submodule has not changed
-    fi
-}
-update_submodule_hash() {
-    local dir=$1
-    local hash_file="${dir}/.commit-hash"
-    # Get the current commit hash of the submodule
-    cd "$dir" || exit 1
-    current_hash=$(git rev-parse HEAD)
-    cd - > /dev/null || exit 1
-    # Save the current hash
-    echo "$current_hash" > "$hash_file"
 }
 
 dir=lma-browser-extension-stack
@@ -454,6 +423,6 @@ fi
 echo "OUTPUTS"
 echo Template URL: $template
 echo CF Launch URL: https://${REGION}.console.aws.amazon.com/cloudformation/home?region=${REGION}#/stacks/create/review?templateURL=${template}\&stackName=LMA
-echo CLI Deploy: aws cloudformation deploy --region $REGION --template-file $tmpdir/$MAIN_TEMPLATE --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --stack-name LMA --parameter-overrides S3BucketName=\"\" AdminEmail='jdoe+admin@example.com' BedrockKnowledgeBaseId='xxxxxxxxxx'
+echo CLI Deploy: aws cloudformation deploy --region $REGION --template-file $tmpdir/$MAIN_TEMPLATE --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --stack-name LMA --parameter-overrides AdminEmail='jdoe+admin@example.com'
 echo Done
 exit 0
