@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OptionalServices",
+      "Effect": "Allow",
+      "Action": [
+        "aoss:*",
+        "lex:*",
+        "qbusiness:GetApplication",
+        "qbusiness:ChatSync",
+        "qbusiness:Chat",
+        "qbusiness:ListMessages",
+        "qbusiness:ListConversations",
+        "sso:CreateApplication",
+        "sso:DeleteApplication",
+        "sso:DescribeApplication",
+        "sso:PutApplicationGrant",
+        "sso:PutApplicationAuthenticationMethod",
+        "sso:PutApplicationAccessScope",
+        "sso-oauth:CreateTokenWithIAM"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

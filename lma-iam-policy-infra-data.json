@@ -1,0 +1,37 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InfraAndData",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:*",
+        "serverlessrepo:CreateCloudFormationChangeSet",
+        "serverlessrepo:GetApplication",
+        "codebuild:*",
+        "ssm:PutParameter",
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+        "ssm:DeleteParameter",
+        "ssm:DescribeParameters",
+        "ssm:AddTagsToResource",
+        "ssm:RemoveTagsFromResource",
+        "ssm:ListTagsForResource",
+        "events:*",
+        "scheduler:*",
+        "lambda:*",
+        "dynamodb:*",
+        "states:*",
+        "s3:*",
+        "s3vectors:*",
+        "kinesis:*",
+        "kms:*",
+        "secretsmanager:*",
+        "sns:*",
+        "ses:SendEmail",
+        "ses:SendRawEmail"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

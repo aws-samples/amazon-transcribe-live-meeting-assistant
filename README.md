@@ -4,8 +4,6 @@ _Companion AWS blog post: [Live Meeting Assistant with Amazon Transcribe, Amazon
 
 _See [CHANGELOG](./CHANGELOG.md) for latest features and fixes._
 
-**Questions?** [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/aws-samples/amazon-transcribe-live-meeting-assistant)
-
 ## Introduction
 
 You’ve likely experienced the challenge of taking notes during a meeting while trying to pay attention to the conversation. You’ve probably also experienced the need to quickly fact-check something that’s been said, or look up information to answer a question that’s just been asked in the call. Or maybe you have a team member that always joins meetings late, and expects you to send them a quick summary over chat to catch them up.
@@ -75,6 +73,81 @@ Finally, LMA uses Amazon Bedrock LLM models for its live meeting assistant and m
 - Amazon: Titan Text Embeddings V2
 - Anthropic: Claude 3.x models
 
+## IAM deployment role and policy files
+
+In an enterprise AWS account you will typically want to isolate the permissions and spending for LMA from other workloads. The recommended approach is to create a dedicated IAM *role* with least-privilege policies, then pass that role to CloudFormation so every resource it creates is traceable back to LMA.
+
+The repository root contains four JSON policy files (split to stay within the AWS managed-policy size limit of 6,144 characters each). A single reference copy of the combined policy is kept in `full-lma-deployment-iam-policy.json`. Where possible, wildcard actions (e.g., `cloudformation:*`) are used for brevity; IAM actions are kept granular since they are security-sensitive.
+
+| File | Services |
+|------|----------|
+| `lma-iam-policy-iam.json` | IAM roles, policies, instance profiles, service-linked roles, PassRole (granular) |
+| `lma-iam-policy-infra-data.json` | CloudFormation, CodeBuild, SSM, EventBridge, Lambda, DynamoDB, Step Functions, S3, Kinesis, KMS, Secrets Manager, SNS, SES |
+| `lma-iam-policy-frontend-compute.json` | AppSync, Cognito, CloudFront, CloudWatch Logs, X-Ray, Bedrock, AWS Marketplace (model subscriptions), Transcribe, Translate, Comprehend, ECS, ECR, EC2/VPC, ELB, Auto Scaling |
+| `lma-iam-policy-optional-services.json` | OpenSearch Serverless, Lex, Q Business (read/chat only), SSO/Identity Center |
+
+### Create the deployment role (CLI)
+
+Replace `ACCOUNT_ID` with your AWS account ID.
+
+```bash
+# 1. Create four managed policies
+for f in lma-iam-policy-iam lma-iam-policy-infra-data \
+         lma-iam-policy-frontend-compute lma-iam-policy-optional-services; do
+  aws iam create-policy --policy-name "$f" --policy-document "file://${f}.json"
+done
+
+# 2. Create the deployment role (allows CloudFormation to assume it)
+aws iam create-role --role-name LMADeploymentRole \
+  --assume-role-policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "cloudformation.amazonaws.com",
+        "AWS": "arn:aws:iam::ACCOUNT_ID:root"
+      },
+      "Action": "sts:AssumeRole"
+    }]
+  }'
+
+# 3. Attach all four policies to the role
+for f in lma-iam-policy-iam lma-iam-policy-infra-data \
+         lma-iam-policy-frontend-compute lma-iam-policy-optional-services; do
+  aws iam attach-role-policy --role-name LMADeploymentRole \
+    --policy-arn "arn:aws:iam::ACCOUNT_ID:policy/${f}"
+done
+```
+
+### Console alternative
+
+To do this through the AWS Console GUI instead of the CLI, create a role and choose "Custom trust policy".
+
+This is because the LMA deployment role needs to be assumed by both CloudFormation (an AWS service) and your own account (an AWS account principal). The pre-built options only let you pick one trusted entity type, but the trust policy in the README specifies both:
+
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "Service": "cloudformation.amazonaws.com",
+      "AWS": "arn:aws:iam::ACCOUNT_ID:root"
+    },
+    "Action": "sts:AssumeRole"
+  }]
+}
+Paste that JSON into the custom trust policy editor (replacing ACCOUNT_ID with your actual AWS account ID), then on the next screen attach the four managed policies from the split policy files:
+
+1. Open the IAM console and create four managed policies, pasting the contents of each JSON file.
+2. Create a role named `LMADeploymentRole` with a trust policy that allows both `cloudformation.amazonaws.com` and your account root to assume it.
+3. Attach all four managed policies to the role.
+
+### Why a role instead of a user?
+
+- Managed policies on a role avoid the 2,048-character total inline-policy limit that applies to IAM users.
+- Passing the role to CloudFormation via `--role-arn` means all resource operations appear under one identity in CloudTrail, making audits straightforward.
+- Adding a cost-allocation tag (e.g., `Project: LMA`) to the stack lets you filter LMA spending in Cost Explorer.
+
 ## Deploy the CloudFormation stack
 
 We’ve provided pre-built [AWS CloudFormation](http://aws.amazon.com/cloudformation) templates that deploy everything you need in your AWS account.
@@ -85,7 +158,7 @@ If you're an administrator or a developer, and you want to understand the new Us
 Complete the following steps to launch the CloudFormation stack:
 
 1. Log in to the [AWS Management Console](https://console.aws.amazon.com/).
-1. 2. Choose Launch Stack for your desired AWS Region to open the AWS CloudFormation console and create a new stack.
+1. Choose Launch Stack for your desired AWS Region to open the AWS CloudFormation console and create a new stack.
 
    | Region                | Easy Deploy Button                                                                                                                                                                                                                                                                                                                     |
    | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -93,7 +166,9 @@ Complete the following steps to launch the CloudFormation stack:
    | US West (Oregon)      | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://us-west-2.console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/create/review?templateURL=https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml&stackName=LMA) |
    | AP Southeast (Sydney)      | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://ap-southeast-2.console.aws.amazon.com/cloudformation/home?region=ap-southeast-2#/stacks/create/review?templateURL=https://s3.ap-southeast-2.amazonaws.com/aws-bigdata-blog-replica-ap-southeast-2/artifacts/lma/lma-main.yaml&stackName=LMA) |
 
+1. Under **Permissions**, select the `LMADeploymentRole` you created above (or the ARN of an equivalent role). This tells CloudFormation to assume that role for all resource operations, keeping LMA activity isolated and auditable.
 1. For **Stack name**, use the default value, `LMA`.
+1. (Optional) Under **Tags**, add `Project` = `LMA` to enable cost-allocation filtering in Cost Explorer.
 1. For **Admin Email Address**, use a valid email address—your temporary password is emailed to this address during the deployment. Refer to [New LMA stack deployment](./lma-ai-stack/README_UBAC.md#new-lma-stack-deployment) for recommendations on choosing an email address.
    )
 1. For **Authorized Account Email Domain**, use the domain name part of your corporate email address to allow users with email addresses in the same domain to create their own new, non-admin, UI accounts, or leave blank to prevent users from directly creating their own accounts. You can enter multiple domains as a comma separated list. Each non-admin user will be able to see their own meetings in LMA, but not other users' meetings - see [User Based Access Control (Preview)](./lma-ai-stack/README_UBAC.md).

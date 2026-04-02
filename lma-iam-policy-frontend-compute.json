@@ -1,0 +1,35 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "FrontendComputeAI",
+      "Effect": "Allow",
+      "Action": [
+        "appsync:*",
+        "cognito-idp:*",
+        "cognito-identity:*",
+        "cloudfront:*",
+        "logs:*",
+        "xray:PutTraceSegments",
+        "xray:PutTelemetryRecords",
+        "xray:GetSamplingRules",
+        "xray:GetSamplingTargets",
+        "bedrock:*",
+        "bedrock-agentcore:*",
+        "aws-marketplace:Subscribe",
+        "aws-marketplace:Unsubscribe",
+        "aws-marketplace:ViewSubscriptions",
+        "transcribe:*",
+        "translate:TranslateText",
+        "comprehend:DetectSentiment",
+        "comprehend:DetectDominantLanguage",
+        "ecs:*",
+        "ecr:*",
+        "ec2:*",
+        "elasticloadbalancing:*",
+        "autoscaling:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
