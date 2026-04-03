@@ -24,6 +24,10 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.venv
+
+# Node
+node_modules
 
 # VP testing generated .env.local
 lma-virtual-participant-stack/backend/.env.local

@@ -31,38 +31,41 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     logger.info(f"Event keys: {list(event.keys())}")
     
     try:
-        # Extract user context from JWT claims (provided by AgentCore Gateway)
-        # Try multiple possible event structures
-        request_context = event.get('requestContext', {})
-        authorizer = request_context.get('authorizer', {})
-        claims = authorizer.get('claims', {})
-        
-        # Log what we're finding
-        logger.info(f"requestContext keys: {list(request_context.keys())}")
-        logger.info(f"authorizer keys: {list(authorizer.keys())}")
-        logger.info(f"claims: {claims}")
-        
-        # Get user ID from JWT sub claim
-        user_id = claims.get('sub')
-        username = claims.get('cognito:username', claims.get('email', user_id))
-        
-        # Check if user is admin (member of Admin group)
-        groups = claims.get('cognito:groups', '')
-        is_admin = 'Admin' in groups if isinstance(groups, str) else 'Admin' in groups
-        
-        # WORKAROUND: AgentCore Gateway doesn't pass user context
-        # Treat all authenticated requests as admin until we can get user context
-        if not user_id:
-            logger.warning("No user context from AgentCore Gateway - treating as admin")
-            user_id = "mcp-server-user"
-            username = "MCP Server User"
-            is_admin = True
+        # Detect API Gateway proxy integration (API key auth path)
+        if 'httpMethod' in event and 'body' in event:
+            body = event.get('body', '{}')
+            tool_input = json.loads(body) if isinstance(body, str) else (body or {})
+            authorizer = event.get('requestContext', {}).get('authorizer', {})
+            user_id = authorizer.get('userId', 'api-key-user')
+            username = authorizer.get('username', 'API Key User')
+            is_admin = authorizer.get('isAdmin', 'false') == 'true'
+            logger.info(f"API Gateway path - User: {username}, Admin: {is_admin}")
+        else:
+            # BedrockAgentCore Gateway path
+            request_context = event.get('requestContext', {})
+            authorizer = request_context.get('authorizer', {})
+            claims = authorizer.get('claims', {})
+            
+            logger.info(f"requestContext keys: {list(request_context.keys())}")
+            logger.info(f"authorizer keys: {list(authorizer.keys())}")
+            logger.info(f"claims: {claims}")
+            
+            user_id = claims.get('sub')
+            username = claims.get('cognito:username', claims.get('email', user_id))
+            
+            groups = claims.get('cognito:groups', '')
+            is_admin = 'Admin' in groups if isinstance(groups, str) else 'Admin' in groups
+            
+            # WORKAROUND: AgentCore Gateway doesn't pass user context
+            if not user_id:
+                logger.warning("No user context from AgentCore Gateway - treating as admin")
+                user_id = "mcp-server-user"
+                username = "MCP Server User"
+                is_admin = True
+            
+            tool_input = event
         
         logger.info(f"User: {username}, ID: {user_id}, Admin: {is_admin}")
-        
-        # AgentCore Gateway passes only the input parameters (not tool name)
-        # Infer tool from input parameters
-        tool_input = event
         
         # Determine which tool based on input parameters
         if 'query' in tool_input and 'maxResults' in tool_input:

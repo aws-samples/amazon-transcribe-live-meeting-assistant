@@ -2886,3 +2886,10 @@ Outputs:
       Users will be redirected here to log in with their LMA credentials.
     Value: !GetAtt AISTACK.Outputs.MCPServerAuthorizationURL
 
+  MCPServerApiKeyEndpoint:
+    Condition: ShouldEnableMCP
+    Description: >-
+      REST API Gateway endpoint for API key-authenticated MCP access.
+      Users generate personal API keys in the LMA UI settings and pass them via x-api-key header.
+    Value: !GetAtt AISTACK.Outputs.MCPServerApiKeyEndpoint
+
