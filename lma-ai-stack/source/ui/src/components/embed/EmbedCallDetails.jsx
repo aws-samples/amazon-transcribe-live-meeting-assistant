@@ -72,9 +72,7 @@ EmbedSummaryPanel.propTypes = {
  */
 const EmbedChatPanel = ({ item }) => {
   const iframeSrc =
-    process.env.REACT_APP_AGENT_ASSIST_MODE === 'LAMBDA'
-      ? `/strands-chat.html?callId=${item.callId}`
-      : `/index-lexwebui.html?callId=${item.callId}`;
+      `/strands-chat.html?callId=${item.callId}`;
 
   if (process.env.REACT_APP_ENABLE_AGENT_ASSIST !== 'true') {
     return (
