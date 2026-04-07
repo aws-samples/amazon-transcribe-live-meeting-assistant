@@ -6,64 +6,19 @@
 import React from 'react';
 import { Route, Switch } from 'react-router-dom';
 import { SideNavigation } from '@awsui/components-react';
-import { LMA_VERSION } from '../common/constants';
+import useSettingsContext from '../../contexts/settings';
+import useAppContext from '../../contexts/app';
+import { NAV_HEADER, generateNavigationItems } from '../common/navigation-items';
+import { STREAM_AUDIO_PATH } from '../../routes/constants';
 
-import {
-  CALLS_PATH,
-  MEETINGS_QUERY_PATH,
-  DEFAULT_PATH,
-  STREAM_AUDIO_PATH,
-  VIRTUAL_PARTICIPANT_PATH,
-} from '../../routes/constants';
-
-export const callsNavHeader = { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` };
-export const callsNavItems = [
-  { type: 'link', text: 'Meetings', href: `#${CALLS_PATH}` },
-  { type: 'link', text: 'Meetings Query Tool', href: `#${MEETINGS_QUERY_PATH}` },
-  {
-    type: 'section',
-    text: 'Sources',
-    items: [
-      {
-        type: 'link',
-        text: 'Download Chrome Extension',
-        href: `/lma-chrome-extension-${LMA_VERSION}.zip`,
-      },
-      {
-        type: 'link',
-        text: 'Stream Audio (no extension)',
-        href: `#${STREAM_AUDIO_PATH}`,
-        external: true,
-      },
-      {
-        type: 'link',
-        text: 'Virtual Participant (Preview)',
-        href: `#${VIRTUAL_PARTICIPANT_PATH}`,
-        external: true,
-      },
-    ],
-  },
-  {
-    type: 'section',
-    text: 'Resources',
-    items: [
-      {
-        type: 'link',
-        text: 'Blog Post',
-        href: 'https://www.amazon.com/live-meeting-assistant',
-        external: true,
-      },
-      {
-        type: 'link',
-        text: 'Source Code',
-        href: 'https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant',
-        external: true,
-      },
-    ],
-  },
-];
+export const callsNavHeader = NAV_HEADER;
 
 const defaultOnFollowHandler = (ev) => {
+  // Prevent navigation for Deployment Info items
+  if (ev.detail.href === '#') {
+    ev.preventDefault();
+    return;
+  }
   // XXX keep the locked href for our demo pages
   // ev.preventDefault();
   console.log(ev);
@@ -73,19 +28,30 @@ const defaultOnFollowHandler = (ev) => {
 const Navigation = ({
   activeHref = `#${STREAM_AUDIO_PATH}`,
   header = callsNavHeader,
-  items = callsNavItems,
+  items,
   onFollowHandler = defaultOnFollowHandler,
-}) => (
-  <Switch>
-    <Route path={STREAM_AUDIO_PATH}>
-      <SideNavigation
-        items={items || callsNavItems}
-        header={header || callsNavHeader}
-        activeHref={activeHref || `#${STREAM_AUDIO_PATH}`}
-        onFollow={onFollowHandler}
-      />
-    </Route>
-  </Switch>
-);
+}) => {
+  const { settings } = useSettingsContext() || {};
+  const { user } = useAppContext();
+
+  // Check if user is admin
+  const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
+  const isAdmin = userGroups.includes('Admin');
+
+  const navigationItems = items || generateNavigationItems(settings, isAdmin);
+
+  return (
+    <Switch>
+      <Route path={STREAM_AUDIO_PATH}>
+        <SideNavigation
+          items={navigationItems}
+          header={header || callsNavHeader}
+          activeHref={activeHref}
+          onFollow={onFollowHandler}
+        />
+      </Route>
+    </Switch>
+  );
+};
 
 export default Navigation;
