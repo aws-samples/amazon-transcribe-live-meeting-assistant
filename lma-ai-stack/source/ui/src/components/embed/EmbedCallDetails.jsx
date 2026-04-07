@@ -71,8 +71,7 @@ EmbedSummaryPanel.propTypes = {
  * Standalone chat panel - renders just the Meeting Assist Bot iframe.
  */
 const EmbedChatPanel = ({ item }) => {
-  const iframeSrc =
-      `/strands-chat.html?callId=${item.callId}`;
+  const iframeSrc = `/strands-chat.html?callId=${item.callId}`;
 
   if (process.env.REACT_APP_ENABLE_AGENT_ASSIST !== 'true') {
     return (

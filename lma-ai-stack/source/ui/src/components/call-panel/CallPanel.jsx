@@ -1071,8 +1071,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
 
   if (process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true') {
     // Use STRANDS chat UI
-    const iframeSrc =
-      `/strands-chat.html?callId=${item.callId}`;
+    const iframeSrc = `/strands-chat.html?callId=${item.callId}`;
 
     console.log(`DEBUG: Agent Assist Mode: ${process.env.REACT_APP_AGENT_ASSIST_MODE}, Using iframe: ${iframeSrc}`);
 
