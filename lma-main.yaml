@@ -344,7 +344,7 @@ Parameters:
       - "true"
       - "false"
     Description: >-
-      Specifies if Amazon Bedrock model access is validated and sample package uploaded to QnABot.
+      Specifies if Amazon Bedrock model access is validated during deployment.
       Setting this parameter to "false" is useful for automated deployments (e.g. AWS Workshop
       Studio) where Amazon Bedrock model access permissions may not be set up yet.
 
@@ -923,41 +923,6 @@ Metadata:
       EnableDataRetentionOnDelete:
         default: Enable Data Retention On Stack Deletion
 
-Mappings:
-  TranscribeToLexLocaleId:
-    identify-language:
-      Value: en_US
-    identify-multiple-languages:
-      Value: en_US
-    en-US:
-      Value: en_US
-    es-US:
-      Value: es_US
-    en-GB:
-      Value: en_GB
-    fr-CA:
-      Value: fr_CA
-    fr-FR:
-      Value: fr_FR
-    en-AU:
-      Value: en_AU
-    it-IT:
-      Value: it_IT
-    de-DE:
-      Value: de_DE
-    pt-BR:
-      Value: pt_BR
-    ja-JP:
-      Value: ja_JP
-    ko-KR:
-      Value: ko_KR
-    zh-CN:
-      Value: zh_CH
-    hi-IN:
-      Value: hi_IN
-    th-TH:
-      Value: th_TH
-
 Rules:
   # check required parameters
   StrandsBedrockKBUseExisting:
@@ -1479,7 +1444,7 @@ Resources:
       ModelValidation: !Ref ModelValidation
       BedrockModelIds:
         - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
-        - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB & QnABot
+        - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB embeddings
         - !Ref BedrockModelId # Meeting summarization
 
   ##########################################################################
@@ -2093,7 +2058,6 @@ Resources:
         IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
-        IsLexAgentAssistEnabled: "false"
         IsLambdaAgentAssistEnabled: "true"
         AgentAssistExistingLambdaFunctionArn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
@@ -2177,14 +2141,6 @@ Resources:
         EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
 
-  # Settings for meeting assist configuration
-  SettingsJSON:
-    Type: Custom::ToJSON
-    Properties:
-      ServiceToken: !GetAtt ToJSONFunction.Arn
-      ASSISTANT_BEDROCK_GUARDRAIL_ID: !Ref BedrockGuardrailId
-      ASSISTANT_BEDROCK_GUARDRAIL_VERSION: !Ref BedrockGuardrailVersion
-
   MEETINGASSISTSETUP:
     Type: AWS::CloudFormation::Stack
     Properties:
@@ -2194,7 +2150,6 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AISTACK: !Ref AISTACK
-        QNABOTSTACK: ""
         COGNITOSTACK: !Ref COGNITOSTACK
         MeetingAssistService: !Ref MeetingAssistService
         BedrockKnowledgeBaseId: !If
@@ -2204,27 +2159,18 @@ Resources:
             - ShouldCreateBedrockKnowledgeBase
             - !GetAtt BEDROCKKB.Outputs.KnowledgeBaseID
             - ""
-        BedrockAgentId: ""
-        BedrockAgentAliasId: ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
-        AmazonQAppId: ""
-        IDCApplicationARN: ""
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
         TavilyApiKey: !Ref TavilyApiKey
-        LexMeetingAssistBotId: ""
-        LexMeetingAssistAliasId: ""
-        LexMeetingAssistLocaleId: "en_US"
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         CloudFrontDistributionId: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
-        QnaMeetingAssistDemoJson: <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
         TranscriptBedrockKnowledgeBaseId: !If
           - ShouldUseTranscriptKnowledgeBase
           - !GetAtt TRANSCRIPTBEDROCKKB.Outputs.KnowledgeBaseID
           - ""
-        ModelValidation: !Ref ModelValidation
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
-        # Changes to Params below force AgentAssist Setup to update.
+        # Changes to Params below force MeetingAssist Setup to update.
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
@@ -2232,17 +2178,12 @@ Resources:
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
-        LexMeetingAssistIdentityPoolId: !GetAtt COGNITOSTACK.Outputs.LexAgentAssistIdentityPoolId
-        LexMeetingAssistUserPoolClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
-        LexMeetingAssistUserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
-        LexMeetingAssistDomainName: !GetAtt COGNITOSTACK.Outputs.CognitoLoginUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         AppSyncGraphQLUrl: !GetAtt AISTACK.Outputs.AppSyncGraphQLUrl
         EventApiHttpUrl: !GetAtt AISTACK.Outputs.AppSyncEventApiHttpUrl
         MCPServersTableName: !GetAtt AISTACK.Outputs.MCPServersTableName
         FetchTranscriptFunctionArn: !GetAtt AISTACK.Outputs.FetchTranscriptArn
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
-        QnaBotSettings: !GetAtt SettingsJSON.Output
         BedrockGuardrailId: !Ref BedrockGuardrailId
         BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
         Version: v0.8.8

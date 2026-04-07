@@ -53,7 +53,7 @@ the "Transcript" field modified to redact the personal identifier using custom b
 
 The modified value of "Transcript" is subsequently displayed in the LMA UI, and stored in the LMA DynamoDB event sourcing table.   
   
-The modified version is also used by default as input to the Agent Assist Lex bot or Lambda function, if Agent Assist is enabled. To use the original, unmodified transcript for Agent Assist, your function must add an additional field, `OriginalTranscript`, to the returned message. When the returned messsage contains the `OriginalTranscript` field, this value is used as input to Agent Assist. Example:
+The modified version is also used by default as input to the Agent Assist Lambda function, if Agent Assist is enabled. To use the original, unmodified transcript for Agent Assist, your function must add an additional field, `OriginalTranscript`, to the returned message. When the returned messsage contains the `OriginalTranscript` field, this value is used as input to Agent Assist. Example:
 
 ```
 {

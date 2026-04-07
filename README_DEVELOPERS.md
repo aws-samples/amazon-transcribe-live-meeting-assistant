@@ -1,6 +1,6 @@
 # Developer README
 
-The main README is here: [Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Q Business Expert, and Amazon Bedrock](./README.md)
+The main README is here: [Live Meeting Assistant (LMA) with Amazon Transcribe, Amazon Bedrock, and Strands Agents](./README.md)
 
 This Developer README describes how to build the project from the source code - for developer types - so you can deploy to additional regions, or build and deploy customized source code.
 
@@ -9,7 +9,7 @@ This Developer README describes how to build the project from the source code - 
 To deploy or to publish, you need to have the following packages installed on your computer:
 
 1. bash shell (Linux, MacOS, Windows-WSL)
-2. node v18 and npm 
+2. node v18/v20/v22 and npm 
 3. docker
 4. zip
 5. python3, pip3, virtualenv
@@ -47,85 +47,21 @@ Done
 
 Follow the deployment directions in the main [README](./README.md), but use your own CF Launch URL instead of our pre-built templates (Launch Stack buttons). 
 
-## Domain expansion
-You can follow the steps below to extend the LMA solution to any particular business domain.
+## Customizing the Meeting Assistant
 
-1. Open lma-main.yaml file and add the name under Domain parameter - 
-``` 
-     Domain:
-        Default: ''
-        Type: String
-        AllowedValues:
-            - ''
-            - 'Healthcare'
-```
-2. Add a condition in the lma-main.yaml file to check if the domain you are adding is selected - 
-```
-IsYOURDomainSelected: !Equals [ !Ref Domain, 'DOMAIN_NAME' ]
+The LMA meeting assistant is powered by the Strands Agents SDK with Amazon Bedrock. You can customize it in several ways:
 
-```
-3. If your domain is selected you can either deploy your own custom stacks or edit exiting ones. In this example we are showing how you can edit the existing stacks to add your own Prompts
-In the lma-main.yaml file there is a MEETINGASSISTSETUP stack information. Go to the section and add the custom jsonl for your domain. 
-The custom .jsonl should be added under lma-meetingassist-setup-stack if you want to have your own custom prompts for the meeting assist feature. 
-For the healthcare domain we have added qna-ma-healthcare-demo.jsonl with custom prompts aligned with Healthcare domain.
+1. **Custom LLM Prompts** - Edit the summary prompt templates in the `lma-llm-template-setup-stack` DynamoDB table. Default prompts are provided, and you can override them with custom prompts that are preserved across stack updates.
 
-```
-        QnaMeetingAssistDemoJson: !If
-          - IsHealthcareDomainSelected
-          - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-healthcare-demo.jsonl
-          - <ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-meetingassist-setup-stack/qna-ma-demo.jsonl
-          
-```
-In this example above, the QnaMeetingAssistDemoJson property will be set to:
-- qna-ma-healthcare-demo.jsonl if Healthcare Domain is selected(IsHealthcareDomainSelected)
-- qna-ma-demo.jsonl if Healthcare domain is not selected. 
-- You can add an else section with your domain name selected like - 
-    ```
-  Type: AWS::SomeService::SomeResource
-    Properties:
-      Name: !If
-        - IsInsuranceDomainSelected
-        - insurance-resource
-        - !If
-          - IsFinanceDomainSelected
-          - finance-resource
-          - !If
-            - IsOther
-            - other-resource
-            - !Ref 'AWS::NoValue'
-  ```
-In this example, the Name property of MyResource will be set to:
-- insurance-resource if the EnvironmentName parameter is Insurance (IsInsuranceDomainSelected condition is true)
-- finance-resource if the EnvironmentName parameter is Finance (IsFinanceDomainSelected condition is true)
-- other-resource if the EnvironmentName parameter is neither prod nor test (IsOther condition is true)
-The property will be removed if none of the conditions are true (using AWS::NoValue)
+2. **Chat Button Configuration** - Customize the suggestion buttons in the meeting assistant chat UI through the DynamoDB-based button configuration. Admin users can edit buttons directly from the LMA UI settings.
 
-4. The lma-llm-template-setup-stack contains the prompts for the summary, details, SOAP, BIRP notes for Healthcare domain. You may want to add your own *.json file with the prompts you need for your business domain
-To do that add your own template.json file and go to llm_prompt_upload.py file
-5. Edit the file and update the logic to add the domain under the function def lambda_handler(event, context)
-```
-# Load the appropriate template.json file based on the user input "Domain" value
-if domain.lower() == 'healthcare':
-    llm_prompt_summary_template_file = os.environ[
-                                           'LAMBDA_TASK_ROOT'] + "/LLMPromptHealthcareSummaryTemplate.json"
+3. **MCP Server Integration** - Add external tools and capabilities to the Strands agent by configuring MCP (Model Context Protocol) servers through the LMA UI.
 
-if domain.lower() == 'YOURDOMAIN':
-    llm_prompt_summary_template_file = os.environ[
-                                           'LAMBDA_TASK_ROOT'] + "/LLMPromptYOURDOMAINTemplate.json"
+4. **Bedrock Knowledge Base** - Deploy with `STRANDS_BEDROCK_WITH_KB (Create)` to automatically create a knowledge base from your documents, or use `STRANDS_BEDROCK_WITH_KB (Use Existing)` to connect to an existing one.
 
+5. **Bedrock Guardrails** - Configure Bedrock Guardrails to control and filter the meeting assistant's responses.
 
-else:
-    llm_prompt_summary_template_file = os.environ['LAMBDA_TASK_ROOT'] + "/LLMPromptSummaryTemplate.json"
-
-
-```
-
-6. Finally ensure the qna-ma-yourdomain-demo.jsonl file is copied from local to the s3 bucket with the appropriate permission by adding it to the `publish.sh` in the `lma-meetingassist-setup-stack` directory.
-Open the `lma-meetingassist-setup-stack/publish.sh` file and search for qna-ma-demo.jsonl. Add your domain file - qna-ma-yourdomain.jsonl
-```
-aws s3 cp ./qna-ma-yourdomain-demo.jsonl s3://${BUCKET}/${PREFIX}/${NAME}/qna-ma-yourdomain-demo.jsonl
-```
-That's it. Now you can build the package and deploy the new LMA-YOURDOMAIN Solution and test it out. 
+For more details, see the [Meeting Assist README](./lma-meetingassist-setup-stack/README.md).
 
 ## Contributing, and reporting issues
 

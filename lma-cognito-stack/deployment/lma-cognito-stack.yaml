@@ -478,7 +478,7 @@ Resources:
       SourceArn: !GetAtt UserPool.Arn
 
   ##########################################################################
-  # LexWebUI / Agent Assist Bot
+  # Agent Assist Bot (Cognito Identity Pool)
   ##########################################################################
 
   AgentAssistBotIdentityPool:
@@ -543,5 +543,5 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - lex:RecognizeText
-                Resource: !Sub "arn:${AWS::Partition}:lex:${AWS::Region}:${AWS::AccountId}:bot-alias/PLCHLDR/PLCHLDR"
+                  - sts:GetCallerIdentity
+                Resource: !Sub "*"

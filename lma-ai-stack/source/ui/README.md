@@ -12,7 +12,7 @@ Example contents of `.env` file:
   REACT_APP_APPSYNC_GRAPHQL_URL=https://XXXXXXXXXX.appsync-api.us-west-2.amazonaws.com/graphql
   REACT_APP_AWS_REGION=us-west-2
   REACT_APP_SETTINGS_PARAMETER=CFN-LMASettingsParameter-XXXXXXXXXXXX
-  REACT_APP_ENABLE_LEX_AGENT_ASSIST=true
+  REACT_APP_ENABLE_AGENT_ASSIST=true
 ```
 
 
