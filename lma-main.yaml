@@ -645,9 +645,15 @@ Parameters:
       - t3.medium
       - t3.large
       - t3.xlarge
+      - c5.large
+      - c5.xlarge
+      - c5.2xlarge
+      - m5.large
+      - m5.xlarge
     Description: >-
       EC2 instance type for Virtual Participant (only used if VPLaunchType=EC2).
-      t3.medium recommended for 1-2 concurrent VPs.
+      t3.medium recommended for basic transcription. For voice assistant + Simli avatar
+      workloads, use c5.xlarge or larger for sustained CPU performance (no burstable throttling).
 
   VPMinInstances:
     Type: Number
