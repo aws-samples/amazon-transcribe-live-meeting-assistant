@@ -101,6 +101,27 @@ echo "Make temp dir: $tmpdir"
 mkdir -p $tmpdir
 
 
+# Cross-platform sha256sum (GNU coreutils vs macOS shasum)
+if ! command -v sha256sum >/dev/null 2>&1; then
+  # Create a wrapper script so sha256sum works in subshells/xargs
+  SHA256SUM_WRAPPER=$(mktemp)
+  printf '#!/bin/sh\nshasum -a 256 "$@"\n' > "$SHA256SUM_WRAPPER"
+  chmod +x "$SHA256SUM_WRAPPER"
+  export PATH="$(dirname "$SHA256SUM_WRAPPER"):$PATH"
+  ln -sf "$SHA256SUM_WRAPPER" "$(dirname "$SHA256SUM_WRAPPER")/sha256sum"
+fi
+
+# Cross-platform file modification time (GNU stat vs BSD/macOS stat)
+# Detect once at startup
+if stat --version >/dev/null 2>&1; then
+  STAT_MTIME_CMD="stat --format=%Y"
+else
+  STAT_MTIME_CMD="stat -f %m"
+fi
+portable_stat_mtime() {
+  $STAT_MTIME_CMD "$1"
+}
+
 function calculate_hash() {
 local directory_path=$1
 local HASH=$(
@@ -123,7 +144,7 @@ haschanged() {
   # 2. File modification times (detects file changes)
   # 3. Publish target S3 location
   file_count=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -print | wc -l)
-  dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -exec stat --format='%Y' {} \; | sha256sum | awk '{ print $1 }')
+  dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -print | xargs $STAT_MTIME_CMD | sha256sum | awk '{ print $1 }')
   combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $file_count $dir_checksum"
   current_checksum=$(echo -n "$combined_string" | sha256sum | awk '{ print $1 }')
   # Check if the checksum file exists and read the previous checksum
@@ -143,7 +164,7 @@ update_checksum() {
   local checksum_file="${dir}/.checksum"
   # Compute current checksum including file count and modification times
   file_count=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -print | wc -l)
-  dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -exec stat --format='%Y' {} \; | sha256sum | awk '{ print $1 }')
+  dir_checksum=$(find "$dir" -type d \( -name "python" -o -name "node_modules" -o -name "build" \) -prune -o -type f ! -name ".checksum" -print | xargs $STAT_MTIME_CMD | sha256sum | awk '{ print $1 }')
   combined_string="$BUCKET $PREFIX_AND_VERSION $REGION $file_count $dir_checksum"
   current_checksum=$(echo -n "$combined_string" | sha256sum | awk '{ print $1 }')
   # Save the current checksum

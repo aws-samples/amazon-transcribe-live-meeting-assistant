@@ -110,7 +110,7 @@ Resources:
       ServiceToken: !GetAtt ChatButtonUploadFunction.Arn
       ChatButtonConfigTableName: !Ref ChatButtonConfigTable
       # hash below is updated by publish.sh script- used to force template updates when source has changed.
-      source_hash: fd817f1e6b137804
+      source_hash: 0c62cceab74859c4
 
 Outputs:
   ChatButtonConfigTableName:
