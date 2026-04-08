@@ -3,8 +3,6 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import { LMA_VERSION } from './constants';
-
 import {
   CALLS_PATH,
   MEETINGS_QUERY_PATH,
@@ -40,14 +38,9 @@ export const generateNavigationItems = (settings, isAdmin) => {
         },
         {
           type: 'link',
-          text: 'Stream Audio (no extension)',
+          text: 'Stream Audio',
           href: `#${STREAM_AUDIO_PATH}`,
           external: true,
-        },
-        {
-          type: 'link',
-          text: 'Download Chrome Extension',
-          href: `/lma-chrome-extension-${LMA_VERSION}.zip`,
         },
       ],
     },

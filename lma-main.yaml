@@ -2347,24 +2347,6 @@ Resources:
         ShowSpeakerLabel: "false"
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
-  BROWSEREXTENSIONSTACK:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-browser-extension-stack/template.yaml
-      # yamllint enable rule:line-length
-      Parameters:
-        LMAStackName: !Ref AWS::StackName
-        WebSocketEndpoint: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
-        CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
-        CognitoLoginUrl: !GetAtt COGNITOSTACK.Outputs.CognitoLoginUrl
-        CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
-        WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
-        WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
-        SourceCodeLocation: <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>
-        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
-        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
-
 Outputs:
   QuickSightManifestUrl:
     Description: S3 URL for QuickSight manifest file to import recordings bucket data
@@ -2373,10 +2355,6 @@ Outputs:
   ApplicationCloudfrontEndpoint:
     Description: LMA User Interface URL
     Value: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
-
-  ChromeExtensionDownloadUrl:
-    Description: LMA Chrome Browser extension download link
-    Value: !GetAtt BROWSEREXTENSIONSTACK.Outputs.ExtensionDownloadLocation
 
   LMAWebsocketEndpoint:
     Description: Websocket endpoint for websocket integration
