@@ -33,9 +33,9 @@ export class TranscriptionService {
         isPartial: boolean;
     }> = [];
     private bufferWindowMs = 10000; // Keep last 10 seconds
-    private captureDelayMs = 3000; // Wait 3 seconds after wake phrase to capture full question
     private wakePhrases: string[];
-    private isCapturingContext = false;
+    private preConnectTriggered = false;
+    private wakeDetectionTimestamp: number | null = null;
 
     constructor() {
         // In local test mode, explicitly use default provider which checks credentials file first
@@ -249,6 +249,32 @@ export class TranscriptionService {
             } catch (error: any) {
                 console.error(`Transcription error (attempt ${attempt + 1}/${maxRetries}):`, error.message);
                 
+                // If the session has expired, clear the session ID so next retry starts fresh
+                if (error.message?.includes('has expired')) {
+                    console.log('Transcribe session expired - will start a new session on retry');
+                    sessionId = undefined;
+                }
+                
+                // Kill any lingering FFmpeg processes from the failed attempt to prevent
+                // ERR_STREAM_PREMATURE_CLOSE from bubbling up as an uncaught exception
+                if (this.process) {
+                    try { this.process.kill(); } catch (_) { /* ignore */ }
+                    this.process = null;
+                }
+                if (this.novaAudioProcess) {
+                    try { this.novaAudioProcess.kill(); } catch (_) { /* ignore */ }
+                    this.novaAudioProcess = null;
+                }
+                if (this.meetingToCombinedPipe) {
+                    try {
+                        if (this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                            this.meetingToCombinedPipe.stdin.end();
+                        }
+                        this.meetingToCombinedPipe.kill();
+                    } catch (_) { /* ignore */ }
+                    this.meetingToCombinedPipe = null;
+                }
+                
                 if (attempt < maxRetries - 1) {
                     console.log(`Retrying in ${retryDelay / 1000} seconds...`);
                     await new Promise(resolve => setTimeout(resolve, retryDelay));
@@ -271,7 +297,19 @@ export class TranscriptionService {
             console.log(`📝 Transcribed: "${transcript}" (IsPartial: ${isPartial})`);
         }
         
-        // Add to transcript buffer (only non-partial for accuracy)
+        // Detect wake phrase in partials to pre-warm the voice agent connection
+        if (isPartial && transcript && !this.preConnectTriggered) {
+            if (this.detectWakePhrase(transcript)) {
+                console.log('⚡ Wake phrase detected in PARTIAL transcript — pre-connecting voice agent');
+                this.preConnectTriggered = true;
+                this.wakeDetectionTimestamp = timestamp;
+                voiceAssistant.preConnect().catch(err => {
+                    console.error('Pre-connect error (non-fatal):', err);
+                });
+            }
+        }
+        
+        // On completed segments, activate with full context if wake phrase was detected
         if (!isPartial && transcript) {
             this.transcriptBuffer.push({ text: transcript, timestamp, isPartial });
             
@@ -279,9 +317,14 @@ export class TranscriptionService {
             const cutoff = timestamp - this.bufferWindowMs;
             this.transcriptBuffer = this.transcriptBuffer.filter(t => t.timestamp > cutoff);
             
-            // Check for wake phrase
-            if (this.detectWakePhrase(transcript)) {
-                this.handleWakePhraseDetected(timestamp);
+            // Check for wake phrase in the completed segment
+            if (this.detectWakePhrase(transcript) || this.preConnectTriggered) {
+                const detectionTime = this.wakeDetectionTimestamp || timestamp;
+                // Reset pre-connect state for next wake phrase
+                this.preConnectTriggered = false;
+                this.wakeDetectionTimestamp = null;
+                
+                this.handleWakePhraseDetected(detectionTime);
             }
         }
         
@@ -402,29 +445,16 @@ export class TranscriptionService {
             return;
         }
 
-        // Don't activate if we're already capturing context
-        if (this.isCapturingContext) {
-            return;
-        }
-
-        console.log('🎤 Wake phrase detected, capturing context...');
-        this.isCapturingContext = true;
-        
-        // Wait to capture additional context after wake phrase
-        await new Promise(resolve => setTimeout(resolve, this.captureDelayMs));
-        
-        // Get transcript from detection time onwards
+        // Build context from recent transcript buffer
         const contextTranscript = this.transcriptBuffer
             .filter(t => t.timestamp >= detectionTime - 2000) // Include 2s before wake phrase
             .map(t => t.text)
             .join(' ');
         
-        console.log('📝 Captured context:', contextTranscript);
+        console.log('🎤 Wake phrase detected — activating immediately with context:', contextTranscript);
         
-        // Activate voice assistant with context
+        // Activate voice assistant with context (connection already pre-warmed)
         voiceAssistant.activate(30, contextTranscript);
-        
-        this.isCapturingContext = false;
     }
 
     // Utility methods for status
@@ -588,15 +618,19 @@ export class TranscriptionService {
                         console.error('Failed to send transcript to Kinesis:', error);
                     }
 
-                    // Process for local captions only for non-partial results
-                    if (result.IsPartial === false) {
-                        this.processTranscriptResult(result);
-                    }
+                    // Process all results (partial + final) for wake phrase pre-connect and activation
+                    this.processTranscriptResult(result);
                 }
             }
         } catch (error: any) {
-            // In local test mode, handle errors gracefully
-            // In production, let errors propagate to kill the task
+            // Classify errors as retryable (transient) vs fatal
+            const isRetryableError = 
+                error.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+                error.message?.includes('stream is too big') ||
+                error.message?.includes('has expired') ||
+                error.message?.includes('http2 request did not get a response') ||
+                error.message?.includes('non-retryable streaming request');
+
             if (isLocalTest) {
                 if (error.code === 'ERR_STREAM_PREMATURE_CLOSE') {
                     console.log('Transcribe stream closed prematurely (non-fatal in local test) - meeting will continue');
@@ -605,8 +639,13 @@ export class TranscriptionService {
                 } else {
                     console.log('Handle transcript events error (non-fatal in local test):', error.message || error);
                 }
+            } else if (isRetryableError) {
+                // Retryable errors - throw to trigger retry loop in startTranscription()
+                // but don't let them become uncaught exceptions
+                console.error(`Handle transcript events error (retryable): ${error.message || error}`);
+                throw error;
             } else {
-                // Production mode - rethrow to kill the task
+                // Non-retryable errors - throw to trigger retry/exit
                 console.error('Handle transcript events error (fatal in production):', error.message || error);
                 throw error;
             }

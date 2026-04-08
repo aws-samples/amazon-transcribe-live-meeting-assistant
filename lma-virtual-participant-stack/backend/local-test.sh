@@ -191,6 +191,17 @@ if [ "$SKIP_ENV_GENERATION" = false ]; then
             NOVA_SONIC_CONFIG_TABLE_NAME=""
         fi
         
+        # Get Simli Avatar parameters
+        SIMLI_FACE_ID=$(aws cloudformation describe-stacks \
+            --stack-name "$VP_STACK" \
+            --query "Stacks[0].Parameters[?ParameterKey=='SimliFaceId'].ParameterValue" \
+            --output text 2>/dev/null || echo "")
+        
+        SIMLI_TRANSPORT_MODE=$(aws cloudformation describe-stacks \
+            --stack-name "$VP_STACK" \
+            --query "Stacks[0].Parameters[?ParameterKey=='SimliTransportMode'].ParameterValue" \
+            --output text 2>/dev/null || echo "livekit")
+        
         echo "Voice Assistant Provider: $VOICE_ASSISTANT_PROVIDER"
         echo "Voice Assistant Activation Mode: $VOICE_ASSISTANT_ACTIVATION_MODE"
         if [ "$VOICE_ASSISTANT_PROVIDER" = "elevenlabs" ]; then
@@ -333,6 +344,14 @@ NOVA_MODEL_ID=${NOVA_MODEL_ID:-amazon.nova-2-sonic-v1:0}
 NOVA_SYSTEM_PROMPT=${NOVA_SYSTEM_PROMPT:-You are Alex, an AI meeting assistant. Be concise and helpful.}
 STRANDS_LAMBDA_ARN=${STRANDS_LAMBDA_ARN:-}
 NOVA_SONIC_CONFIG_TABLE_NAME=${NOVA_SONIC_CONFIG_TABLE_NAME:-}
+
+# Simli Avatar Configuration
+# Provides an animated lip-synced avatar as the VP's camera feed
+# For Simli, set API key as environment variable:
+#   export SIMLI_API_KEY="your-key"
+SIMLI_API_KEY=${SIMLI_API_KEY:-}
+SIMLI_FACE_ID=${SIMLI_FACE_ID:-}
+SIMLI_TRANSPORT_MODE=${SIMLI_TRANSPORT_MODE:-livekit}
 
 # Display Configuration (for local testing)
 DISPLAY=:99

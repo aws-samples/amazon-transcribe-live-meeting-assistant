@@ -5,7 +5,7 @@
 
 """
 Strands-based Meeting Assistant Lambda Function
-Provides a lightweight alternative to QnABot using AWS Strands SDK
+Provides meeting assistance using AWS Strands SDK
 Supports dynamic MCP server loading from Public Registry
 """
 

@@ -266,14 +266,6 @@ Parameters:
     ConstraintDescription: >-
       Comma separated list of uppercase two letter country codes or empty
 
-  IsLexAgentAssistEnabled:
-    Type: String
-    Default: "false"
-    Description: >-
-      Enables the Lex Agent Assist feature.
-    AllowedValues:
-      - "true"
-      - "false"
   IsLambdaAgentAssistEnabled:
     Type: String
     Default: "false"
@@ -614,7 +606,6 @@ Outputs:
       REACT_APP_APPSYNC_GRAPHQL_URL=${AppSyncApiEncrypted.GraphQLUrl}
       REACT_APP_AWS_REGION=${AWS::Region}
       REACT_APP_SETTINGS_PARAMETER=${LMASettingsParameterName}
-      REACT_APP_ENABLE_LEX_AGENT_ASSIST=true
   VPTaskRegistryTableName:
     Description: Name of the VPTaskRegistry DynamoDB table
     Value: !Ref VPTaskRegistry
@@ -926,12 +917,12 @@ Resources:
             Value: !If
               - ShouldEnableLambdaAgentAssist
               - "true"
-              - !Ref IsLexAgentAssistEnabled
+              - "false"
           - Name: REACT_APP_AGENT_ASSIST_MODE
             Value: !If
               - ShouldEnableLambdaAgentAssist
               - "LAMBDA"
-              - "LEX"
+              - "DISABLED"
           - Name: REACT_APP_CLOUDFRONT_DOMAIN
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
   # CodeBuild project for building MCP servers Lambda layer
@@ -1203,7 +1194,6 @@ Resources:
     Properties:
       ServiceToken: !GetAtt LambdaCodeBuildStartBuild.Arn
       BuildProjectName: !Ref LMAUICodeBuildProject
-      IsLexAgentAssistEnabled: !Ref IsLexAgentAssistEnabled
       EnableVoiceToneAnalysis: !Ref EnableVoiceToneAnalysis
       IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
       LMASettingsParameterName: !Ref LMASettingsParameterName
@@ -1455,11 +1445,6 @@ Resources:
       Environment:
         Variables:
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
-          LEX_BOT_ID: "Pending AgentAssistSetup"
-          LEX_BOT_ALIAS_ID: "Pending AgentAssistSetup"
-          LEX_BOT_LOCALE_ID: "Pending AgentAssistSetup"
-          # Lex Agent Assist
-          IS_LEX_AGENT_ASSIST_ENABLED: !Ref IsLexAgentAssistEnabled
           # Lambda Agent Assist
           IS_LAMBDA_AGENT_ASSIST_ENABLED: !Ref IsLambdaAgentAssistEnabled
           LAMBDA_AGENT_ASSIST_FUNCTION_ARN: !Ref AgentAssistExistingLambdaFunctionArn
@@ -1585,10 +1570,6 @@ Resources:
               - Effect: Allow
                 Action: kinesis:PutRecord
                 Resource: !Ref CallDataStreamArn
-              - Effect: Allow
-                Action:
-                  - lex:RecognizeText
-                Resource: "*"
               - Effect: Allow
                 Action:
                   - appsync:GraphQL
@@ -1836,8 +1817,6 @@ Resources:
           SENTIMENT_NEGATIVE_THRESHOLD: !Ref SentimentNegativeScoreThreshold
           SENTIMENT_POSITIVE_THRESHOLD: !Ref SentimentPositiveScoreThreshold
           CALL_AUDIO_SOURCE: !Ref CallAudioSource
-          # Lex Agent Assist
-          IS_LEX_AGENT_ASSIST_ENABLED: !Ref IsLexAgentAssistEnabled
           # Lambda Agent Assist
           IS_LAMBDA_AGENT_ASSIST_ENABLED: !Ref IsLambdaAgentAssistEnabled
           MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays

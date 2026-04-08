@@ -7,6 +7,7 @@
 
 import { spawn, ChildProcess } from 'child_process';
 import { VoiceAssistantProvider } from './voice-assistant-interface.js';
+import { simliAvatar } from './simli-avatar.js';
 import {
   BedrockRuntimeClient,
   InvokeModelWithBidirectionalStreamCommand,
@@ -1347,6 +1348,14 @@ export class NovaAgent implements VoiceAssistantProvider {
     // Add audio to queue
     this.audioQueue.push(audioBuffer);
     
+    // Forward audio to Simli avatar for lip-sync animation
+    // This runs in parallel with PulseAudio playback - Simli only uses it for video
+    if (simliAvatar.isConnected()) {
+      simliAvatar.sendAudioData(audioBuffer).catch(err => {
+        // Non-critical - avatar lip-sync failure shouldn't affect audio
+      });
+    }
+    
     // Start processing queue if not already processing
     if (!this.isPlayingQueue) {
       this.processAudioQueue();
@@ -1443,6 +1452,34 @@ export class NovaAgent implements VoiceAssistantProvider {
     }, 500); // Short delay after last chunk
   }
 
+  private _preConnecting: boolean = false;
+  private _preConnectPromise: Promise<void> | null = null;
+
+  async preConnect(): Promise<void> {
+    if (this.activationMode === 'always_active') return; // already connected
+    if (this._isActive) return; // already has a session
+    if (this._preConnecting) {
+      if (this._preConnectPromise) await this._preConnectPromise;
+      return;
+    }
+
+    console.log('🔌 Pre-connecting Nova session (wake phrase detected in partial)...');
+    this._preConnecting = true;
+    this._preConnectPromise = this.createSession()
+      .then(() => {
+        console.log('✓ Nova session pre-connected — ready for activation');
+      })
+      .catch((error) => {
+        console.error('❌ Nova pre-connect failed:', error);
+      })
+      .finally(() => {
+        this._preConnecting = false;
+        this._preConnectPromise = null;
+      });
+
+    await this._preConnectPromise;
+  }
+
   async activate(duration?: number, initialContext?: string): Promise<void> {
     if (this.activationMode === 'always_active') {
       // Already always active, no need to activate
@@ -1452,16 +1489,24 @@ export class NovaAgent implements VoiceAssistantProvider {
     const activationDuration = duration || this.defaultActivationDuration;
     console.log(`🎤 Nova agent activated for ${activationDuration} seconds`);
     
-    // Create session if not already active (for wake_phrase mode)
+    // Create session if not already active (may already be pre-connected)
     if (!this._isActive) {
-      console.log('🔌 Creating Nova session...');
-      try {
-        await this.createSession();
-        console.log('✓ Session created');
-      } catch (error) {
-        console.error('❌ Failed to create session:', error);
-        return; // Don't activate if session creation fails
+      if (this._preConnecting && this._preConnectPromise) {
+        console.log('⏳ Waiting for in-flight pre-connect to complete...');
+        await this._preConnectPromise;
       }
+      if (!this._isActive) {
+        console.log('🔌 Creating Nova session...');
+        try {
+          await this.createSession();
+          console.log('✓ Session created');
+        } catch (error) {
+          console.error('❌ Failed to create session:', error);
+          return; // Don't activate if session creation fails
+        }
+      }
+    } else {
+      console.log('✓ Session already active (pre-connected)');
     }
     
     this._isActivated = true;

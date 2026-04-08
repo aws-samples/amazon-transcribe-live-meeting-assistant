@@ -18,11 +18,6 @@ Parameters:
     Type: String
     Description: AISTACK Stack ARN
 
-  QNABOTSTACK:
-    Default: ""
-    Type: String
-    Description: QNABOT Stack ARN
-
   COGNITOSTACK:
     Type: String
     Description: COGNITOSTACK Stack ARN
@@ -34,16 +29,6 @@ Parameters:
   BedrockKnowledgeBaseId:
     Type: String
     Default: ""
-    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
-
-  BedrockAgentId:
-    Type: String
-    Default: ""
-    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
-
-  BedrockAgentAliasId:
-    Type: String
-    Default: "TSTALIASID"
     AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
 
   BedrockKnowledgeBaseS3BucketName:
@@ -64,60 +49,6 @@ Parameters:
     AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
     ConstraintDescription: "Must be empty or a valid Tavily API key (20+ characters)"
 
-  # Required when using QnABot, ignored for STRANDS_BEDROCK
-  LexMeetingAssistBotId:
-    Type: String
-    Default: ""
-    Description: >-
-      Lex Bot Id used for Meeting Assist. Only required when MeetingAssistService uses QnABot (not STRANDS_BEDROCK).
-    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
-
-  # Required when using QnABot, ignored for STRANDS_BEDROCK
-  LexMeetingAssistAliasId:
-    Type: String
-    Default: ""
-    Description: >-
-      Lex Bot Alias ID used for Meeting Assist. Only required when MeetingAssistService uses QnABot (not STRANDS_BEDROCK).
-    AllowedPattern: "^(|[0-9a-zA-Z]{10})$"
-
-  # Required when using QnABot, ignored for STRANDS_BEDROCK
-  LexMeetingAssistLocaleId:
-    Type: String
-    Default: "en_US"
-    Description: >-
-      Lex Bot Locale ID used for Meeting Assist. Only required when MeetingAssistService uses QnABot (not STRANDS_BEDROCK).
-    AllowedValues:
-      - ca_ES
-      - de_AT
-      - de_DE
-      - en_AU
-      - en_GB
-      - en_IN
-      - en_US
-      - en_ZA
-      - es_419
-      - es_ES
-      - es_US
-      - fr_CA
-      - fr_FR
-      - it_IT
-      - ja_JP
-      - ko_KR
-      - pt_BR
-      - pt_PT
-      - zh_CN
-
-  # Required
-  QnaMeetingAssistDemoJson:
-    Type: String
-    Description: >-
-      Location of QnABot meeting assist sample/demo file (in JSON lines format)
-  QnaBotSettings:
-    Type: String
-    Description:
-      JSON string specifying key/value pairs to configure new defaults
-      for QnAbot Settings
-
   TranscriptBedrockKnowledgeBaseId:
     Type: String
     Default: ""
@@ -130,22 +61,6 @@ Parameters:
   CloudFrontDistributionId:
     Type: String
     Description: The LMA web app CloudFront distribution id
-
-  LexMeetingAssistIdentityPoolId:
-    Type: String
-    Description: The LMA Meeting Assist Identity Pool ID
-
-  LexMeetingAssistUserPoolClientId:
-    Type: String
-    Description: The LMA Meeting Assist User Pool Client ID
-
-  LexMeetingAssistUserPoolId:
-    Type: String
-    Description: The LMA Meeting Assist User Pool ID
-
-  LexMeetingAssistDomainName:
-    Type: String
-    Description: The LMA Meeting Assist Domain Url
 
   CloudFrontDomainName:
     Type: String
@@ -172,12 +87,6 @@ Parameters:
   TranscriptSummaryFunctionArn:
     Type: String
     Description: ARN of Transcript Summary function (if defined)
-
-  ModelValidation:
-    Type: String
-    Default: "true"
-    Description: >-
-      Specifies if Amazon Bedrock model access is validated and sample package uploaded to QnABot.
 
   # Changes to Params below force MeetingAssist Setup to update.
   TranscribeLanguageCode:
@@ -206,13 +115,15 @@ Parameters:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
 
-  AmazonQAppId:
+  BedrockGuardrailId:
     Type: String
-    Description: Amazon Q Application ID
+    Default: ""
+    Description: Bedrock Guardrail ID for the Strands agent
 
-  IDCApplicationARN:
+  BedrockGuardrailVersion:
     Type: String
-    Description: ARN of the Identity Center customer managed application created for QBusiness
+    Default: "DRAFT"
+    Description: Bedrock Guardrail Version for the Strands agent
 
   PermissionsBoundaryArn:
     Type: String
@@ -223,23 +134,17 @@ Parameters:
       in this stack, providing an additional layer of security.
 
 Conditions:
-  ShouldConfigureQnabot: !Not [!Equals [!Ref QNABOTSTACK, ""]]
-  ShouldConfigureBedrockKB: !Not [!Equals [!Ref BedrockKnowledgeBaseId, ""]]
-  ShouldConfigureBedrockAgent: !Not [!Equals [!Ref BedrockAgentId, ""]]
-  ShouldCreateQPlugin: !Not [!Equals [!Ref AmazonQAppId, ""]]
   ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
-  ShouldUseStrandsBedrockWithKB: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Create)"]
+  ShouldUseStrandsBedrockWithKBCreate: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Create)"]
+  ShouldUseStrandsBedrockWithKBExisting: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Use Existing)"]
+  ShouldUseStrandsBedrockWithKB: !Or [
+    !Condition ShouldUseStrandsBedrockWithKBCreate,
+    !Condition ShouldUseStrandsBedrockWithKBExisting
+  ]
   ShouldDeployStrandsFunction: !Or [
     !Condition ShouldUseStrandsBedrock,
     !Condition ShouldUseStrandsBedrockWithKB
   ]
-  ShouldConfigureBedrockLLM:
-    !And [
-      !Condition ShouldConfigureQnabot,
-      !Not [!Condition ShouldConfigureBedrockKB],
-      !Not [!Condition ShouldConfigureBedrockAgent],
-      !Not [!Condition ShouldCreateQPlugin],
-    ]
   HasSummaryLambdaFunction:
     !Not [!Equals [!Ref TranscriptSummaryFunctionArn, ""]]
   IsBedrockKnowledgeBaseS3BucketName:
@@ -252,458 +157,12 @@ Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
 Resources:
-  # Custom resource to transform input to lowercase.
-  GetLowercaseFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    Properties:
-      Handler: index.handler
-      Runtime: python3.12
-      Timeout: 30
-      InlineCode: |
-        import cfnresponse
-        import time
-        def handler(event, context):                                                    
-            output = event['ResourceProperties'].get('InputString', '').lower()
-            responseData = {'OutputString': output}                                            
-            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/GetLowercaseFunction
-    DependsOn:
-      - GetLowercaseFunctionLogGroup
-
-  GetLowercaseFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/GetLowercaseFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  LowercaseStackName:
-    Type: Custom::GetLowercase
-    Properties:
-      ServiceToken: !GetAtt GetLowercaseFunction.Arn
-      InputString: !Ref LMAStackName
-
-  LambdaHookSummarizeCallRole:
-    Type: "AWS::IAM::Role"
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Action: "sts:AssumeRole"
-            Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-        Version: 2012-10-17
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      Policies:
-        - Fn::If:
-            - HasSummaryLambdaFunction
-            - PolicyName: InlinePolicy
-              PolicyDocument:
-                Version: "2012-10-17"
-                Statement:
-                  - Action: lambda:InvokeFunction
-                    Effect: Allow
-                    Resource: !Ref TranscriptSummaryFunctionArn
-            - Ref: AWS::NoValue
-
-  QNASummarizeCallFunction:
-    Type: "AWS::Lambda::Function"
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-          - id: W58
-            reason: Managed policy already provides access to CloudWatch logs.
-    # checkov:skip=CKV_AWS_116: "DLQ not required for QnABot integration function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    Properties:
-      # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
-      FunctionName: !Sub "QNA-SummarizeCall-${LMAStackName}"
-      Role: !GetAtt LambdaHookSummarizeCallRole.Arn
-      Handler: qna_summarize_call_function.handler
-      Runtime: python3.12
-      Timeout: 900
-      TracingConfig:
-        Mode: Active
-      Environment:
-        Variables:
-          TRANSCRIPT_SUMMARY_FUNCTION_ARN: !Ref TranscriptSummaryFunctionArn
-      Code: ./src
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/QNASummarizeCallFunction
-    DependsOn:
-      - QNASummarizeCallFunctionLogGroup
-
-  QNASummarizeCallFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/QNASummarizeCallFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
   Boto3Layer:
     Type: "AWS::Lambda::LayerVersion"
     Properties:
       Content: ./boto3_layer
       CompatibleRuntimes:
         - python3.12
-
-  QNABedrockKnowledgeBaseFunctionRole:
-    Condition: ShouldConfigureBedrockKB
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      Policies:
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "bedrock:Retrieve"
-                  - "bedrock:RetrieveAndGenerate"
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseId}"
-              - Effect: Allow
-                Action:
-                  - "bedrock:InvokeModel"
-                  - "bedrock:InvokeModelWithResponseStream"
-                Resource: 
-                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:GetInferenceProfile"
-                Resource:
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:ApplyGuardrail"
-                Resource: "*"
-          PolicyName: BedrockPolicy
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource:
-                  - "arn:aws:s3:::*-importbucket-*/*"
-                  - !If
-                    - IsBedrockKnowledgeBaseS3BucketName
-                    - !Sub "arn:aws:s3:::${BedrockKnowledgeBaseS3BucketName}/*"
-                    - !Ref AWS::NoValue
-          PolicyName: S3BucketPolicy
-        - PolicyName: InlinePolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Action: lambda:InvokeFunction
-                Effect: Allow
-                Resource: !Ref FetchTranscriptFunctionArn
-
-  QNABedrockKnowledgeBaseFunction:
-    Condition: ShouldConfigureBedrockKB
-    Type: "AWS::Lambda::Function"
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_116: "DLQ not required for QnABot integration function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    Properties:
-      # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
-      FunctionName: !Sub "QNA-${LMAStackName}-BedrockKB-LambdaHook"
-      Role: !GetAtt QNABedrockKnowledgeBaseFunctionRole.Arn
-      Handler: qna_bedrockkb_lambdahook_function.handler
-      Runtime: python3.12
-      Layers:
-        - !Ref Boto3Layer
-      Timeout: 900
-      TracingConfig:
-        Mode: Active
-      Environment:
-        Variables:
-          FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
-          KB_ID: !Ref BedrockKnowledgeBaseId
-          KB_ACCOUNT_ID: !Ref AWS::AccountId
-          KB_REGION: !Ref AWS::Region
-          MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
-      Code: ./src
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/QNABedrockKnowledgeBaseFunction
-    DependsOn:
-      - QNABedrockKnowledgeBaseFunctionLogGroup
-
-  QNABedrockKnowledgeBaseFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: ShouldConfigureBedrockKB
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/QNABedrockKnowledgeBaseFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  QNABedrockAgentFunctionRole:
-    Condition: ShouldConfigureBedrockAgent
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      Policies:
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "bedrock:InvokeAgent"
-                Resource: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent-alias/${BedrockAgentId}/${BedrockAgentAliasId}"
-              - Effect: Allow
-                Action:
-                  - "bedrock:InvokeModel"
-                Resource: 
-                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:GetInferenceProfile"
-                Resource:
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:ApplyGuardrail"
-                Resource: "*"
-          PolicyName: BedrockPolicy
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource:
-                  - "arn:aws:s3:::*-importbucket-*/*"
-                  - !If
-                    - IsBedrockKnowledgeBaseS3BucketName
-                    - !Sub "arn:aws:s3:::${BedrockKnowledgeBaseS3BucketName}/*"
-                    - !Ref AWS::NoValue
-          PolicyName: S3BucketPolicy
-        - PolicyName: InlinePolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Action: lambda:InvokeFunction
-                Effect: Allow
-                Resource: !Ref FetchTranscriptFunctionArn
-
-  QNABedrockAgentFunction:
-    Condition: ShouldConfigureBedrockAgent
-    Type: "AWS::Lambda::Function"
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_116: "DLQ not required for QnABot integration function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    Properties:
-      # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
-      FunctionName: !Sub "QNA-${LMAStackName}-BedrockAgent-LambdaHook"
-      Role: !GetAtt QNABedrockAgentFunctionRole.Arn
-      Handler: qna_bedrockagent_lambdahook_function.handler
-      Runtime: python3.12
-      Layers:
-        - !Ref Boto3Layer
-      Timeout: 900
-      TracingConfig:
-        Mode: Active
-      Environment:
-        Variables:
-          FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
-          AGENT_ID: !Ref BedrockAgentId
-          AGENT_ALIAS_ID: !Ref BedrockAgentAliasId
-          MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
-      Code: ./src
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/QNABedrockAgentFunction
-    DependsOn:
-      - QNABedrockAgentFunctionLogGroup
-
-  QNABedrockAgentFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: ShouldConfigureBedrockAgent
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/QNABedrockAgentFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  QNABedrockLLMFunctionRole:
-    Condition: ShouldConfigureBedrockLLM
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      Policies:
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "bedrock:InvokeModel"
-                  - "bedrock:InvokeModelWithResponseStream"
-                Resource: 
-                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:GetInferenceProfile"
-                Resource:
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:ApplyGuardrail"
-                Resource: "*"
-          PolicyName: BedrockPolicy
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: "arn:aws:s3:::*-importbucket-*/*"
-          PolicyName: S3ImportBucketPolicy
-        - PolicyName: InlinePolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Action: lambda:InvokeFunction
-                Effect: Allow
-                Resource: !Ref FetchTranscriptFunctionArn
-
-  QNABedrockLLMFunction:
-    Condition: ShouldConfigureBedrockLLM
-    Type: "AWS::Lambda::Function"
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_116: "DLQ not required for QnABot integration function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    Properties:
-      # FunctionName must start with 'QNA-' to match QnABot fulfillment role permissions
-      FunctionName: !Sub "QNA-${LMAStackName}-BedrockLLM-LambdaHook"
-      Role: !GetAtt QNABedrockLLMFunctionRole.Arn
-      Handler: qna_bedrockllm_lambdahook_function.handler
-      Runtime: python3.12
-      Layers:
-        - !Ref Boto3Layer
-      Timeout: 900
-      TracingConfig:
-        Mode: Active
-      Environment:
-        Variables:
-          FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
-          MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
-          KB_ID: !Ref BedrockKnowledgeBaseId
-          KB_REGION: !Ref AWS::Region
-          KB_ACCOUNT_ID: !Ref AWS::AccountId
-          TRANSCRIPT_KB_ID: !Ref TranscriptBedrockKnowledgeBaseId
-          TAVILY_API_KEY: !Ref TavilyApiKey
-          APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
-          ENABLE_STREAMING: "true"
-      Code: ./src
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/QNABedrockLLMFunction
-    DependsOn:
-      - QNABedrockLLMFunctionLogGroup
-
-  QNABedrockLLMFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: ShouldConfigureBedrockLLM
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/QNABedrockLLMFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   # Strands Lambda Layer for Strands SDK
   StrandsLayer:
@@ -875,6 +334,8 @@ Resources:
           MCP_SERVERS_TABLE: !Ref MCPServersTableName
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
           KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
+          BEDROCK_GUARDRAIL_ID: !Ref BedrockGuardrailId
+          BEDROCK_GUARDRAIL_VERSION: !Ref BedrockGuardrailVersion
       Code: ./src
       LoggingConfig:
         LogGroup:
@@ -951,43 +412,7 @@ Resources:
                 Effect: Allow
                 Resource:
                   - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}"
-              - !If
-                - ShouldConfigureQnabot
-                - Action:
-                    - cloudformation:DescribeStacks
-                    - cloudformation:DescribeStackResource
-                  Effect: Allow
-                  Resource:
-                    - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LMAStackName}-QNABOT*"
-                - !Ref AWS::NoValue
-              - !If
-                - ShouldConfigureQnabot
-                - Action:
-                    - ssm:GetParameter
-                    - ssm:PutParameter
-                  Effect: Allow
-                  Resource:
-                    - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/CFN-DefaultQnABotSettings*"
-                - !Ref AWS::NoValue
-              - !If
-                - ShouldConfigureQnabot
-                - Action:
-                    - s3:GetObject
-                    - s3:PutObject
-                  Effect: Allow
-                  Resource:
-                    - !Sub "arn:aws:s3:::${LowercaseStackName.OutputString}*"
-                    - !Sub "arn:aws:s3:::${QnaMeetingAssistDemoJson}"
-                - !Ref AWS::NoValue
-              - !If
-                - ShouldConfigureQnabot
-                - Action:
-                    - lambda:InvokeFunction
-                  Effect: Allow
-                  Resource:
-                    - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LMAStackName}*"
-                    - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${LMAStackName}*"
-                - !Ref AWS::NoValue
+
   SetupFunction:
     Type: "AWS::Lambda::Function"
     Metadata:
@@ -1030,40 +455,17 @@ Resources:
     Properties:
       ServiceToken: !GetAtt SetupFunction.Arn
       AISTACK: !Ref AISTACK
-      QNABOTSTACK: !Ref QNABOTSTACK
       COGNITOSTACK: !Ref COGNITOSTACK
       MeetingAssistService: !Ref MeetingAssistService
-      LexMeetingAssistBotId: !Ref LexMeetingAssistBotId
-      LexMeetingAssistAliasId: !Ref LexMeetingAssistAliasId
-      LexMeetingAssistLocaleId: !Ref LexMeetingAssistLocaleId
-      LexMeetingAssistIdentityPoolId: !Ref LexMeetingAssistIdentityPoolId
-      LexMeetingAssistUserPoolClientId: !Ref LexMeetingAssistUserPoolClientId
-      LexMeetingAssistUserPoolId: !Ref LexMeetingAssistUserPoolId
-      LexMeetingAssistDomainName: !Ref LexMeetingAssistDomainName
-      QnaMeetingAssistDemoJson: !Ref QnaMeetingAssistDemoJson
-      QNASummarizeCallFunction: !Ref QNASummarizeCallFunction
-      QNAMeetingAssistLambdaHookFunction: !If
-        - ShouldConfigureQnabot
-        - !If
-          - ShouldCreateQPlugin
-          - !Ref QBusinessLambdaHookFunction
-          - !If
-            - ShouldConfigureBedrockKB
-            - !Ref QNABedrockKnowledgeBaseFunction
-            - !If
-              - ShouldConfigureBedrockAgent
-              - !Ref QNABedrockAgentFunction
-              - !Ref QNABedrockLLMFunction
-        - !If
-          - ShouldDeployStrandsFunction
-          - !Ref StrandsMeetingAssistFunction
-          - !Ref AWS::NoValue
-      QnaBotSettings: !Ref QnaBotSettings
+      StrandsMeetingAssistFunction: !If
+        - ShouldDeployStrandsFunction
+        - !Ref StrandsMeetingAssistFunction
+        - !Ref AWS::NoValue
       TranscriptBedrockKnowledgeBaseId: !If
-      - ShouldConfigureTranscriptBedrockKB
-      - !Ref TranscriptBedrockKnowledgeBaseId
-      - !Ref AWS::NoValue
-      ModelValidation: !Ref ModelValidation
+        - ShouldConfigureTranscriptBedrockKB
+        - !Ref TranscriptBedrockKnowledgeBaseId
+        - !Ref AWS::NoValue
+      CloudFrontDomainName: !Sub "https://${CloudFrontDomainName}/"
       # Changes to Params below force MeetingAssist Setup to execute.
       TranscribeLanguageCode: !Ref TranscribeLanguageCode
       TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
@@ -1072,390 +474,11 @@ Resources:
       TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
       EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
       EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
-      CloudFrontDomainName: !Sub "https://${CloudFrontDomainName}/"
       Version: !Ref Version
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
-  QManagedPolicy:
-    Type: AWS::IAM::ManagedPolicy
-    Condition: ShouldCreateQPlugin
-    Properties:
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: AllowQChat
-            Effect: Allow
-            Action:
-              - "qbusiness:ChatSync"
-            Resource: !Sub "arn:${AWS::Partition}:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${AmazonQAppId}"
-
-  QServiceRole:
-    Type: AWS::IAM::Role
-    Condition: ShouldCreateQPlugin
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS:
-                - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
-            Action:
-              - sts:AssumeRole
-              - sts:SetContext
-      Path: /
-      ManagedPolicyArns:
-        - !Ref QManagedPolicy
-
-  KMSKey:
-    Type: "AWS::KMS::Key"
-    Condition: ShouldCreateQPlugin
-    Properties:
-      KeySpec: "SYMMETRIC_DEFAULT"
-      KeyUsage: "ENCRYPT_DECRYPT"
-      EnableKeyRotation: true
-      KeyPolicy:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
-            Action:
-              - "kms:CreateAlias"
-              - "kms:CreateGrant"
-              - "kms:CreateKey"
-              - "kms:DescribeKey"
-              - "kms:EnableKey"
-              - "kms:EnableKeyRotation"
-              - "kms:ListAliases"
-              - "kms:ListGrants"
-              - "kms:ListKeys"
-              - "kms:ListKeyPolicies"
-              - "kms:ListResourceTags"
-              - "kms:PutKeyPolicy"
-              - "kms:UpdateAlias"
-              - "kms:UpdateKeyDescription"
-              - "kms:RevokeGrant"
-              - "kms:DisableKey"
-              - "kms:DisableKeyRotation"
-              - "kms:GetKeyPolicy"
-              - "kms:GetKeyRotationStatus"
-              - "kms:DeleteAlias"
-              - "kms:TagResource"
-              - "kms:UntagResource"
-              - "kms:ScheduleKeyDeletion"
-              - "kms:CancelKeyDeletion"
-              - "kms:Encrypt"
-              - "kms:Decrypt"
-              - "kms:ReEncryptFrom"
-              - "kms:ReEncryptTo"
-              - "kms:GenerateDataKey"
-              - "kms:GenerateDataKeyWithoutPlaintext"
-            Resource: "*"
-
-  # EventBridge rule for KMS key monitoring
-  QPluginKMSKeyMonitoringEventRule:
-    Type: AWS::Events::Rule
-    Condition: ShouldCreateQPlugin
-    Properties:
-      Name: !Sub "${LMAStackName}-QPlugin-KMS-Key-Monitoring"
-      Description: "EventBridge rule to monitor Q Plugin KMS key events for compliance and security"
-      EventPattern:
-        source:
-          - "aws.kms"
-        detail:
-          eventSource:
-            - "kms.amazonaws.com"
-          eventName:
-            - "DisableKey"
-            - "ScheduleKeyDeletion"
-            - "CancelKeyDeletion"
-            - "CreateKey"
-            - "PutKeyPolicy"
-            - "EnableKey"
-            - "DisableKeyRotation"
-            - "EnableKeyRotation"
-          resources:
-            - !GetAtt KMSKey.Arn
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt QPluginKMSKeyMonitoringFunction.Arn
-          Id: "QPluginKMSKeyMonitoringTarget"
-
-  # Lambda function for Q Plugin KMS key monitoring
-  QPluginKMSKeyMonitoringFunction:
-    Type: AWS::Serverless::Function
-    Condition: ShouldCreateQPlugin
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: Customer can use VPC if desired
-          - id: W92
-            reason: Customer can choose reserved concurrency based on their requirement.
-    # checkov:skip=CKV_AWS_116: "DLQ not required for monitoring function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    Properties:
-      Handler: index.handler
-      Runtime: python3.12
-      Timeout: 60
-      MemorySize: 128
-      Description: "Lambda function to process Q Plugin KMS key events for monitoring and compliance"
-      InlineCode: |
-        import json
-        import boto3
-        import logging
-
-        logger = logging.getLogger()
-        logger.setLevel(logging.INFO)
-
-        def handler(event, context):
-            """
-            Process Q Plugin KMS key events for monitoring and compliance.
-            This function logs KMS key events and can be extended to send alerts.
-            """
-            try:
-                logger.info(f"Received Q Plugin KMS event: {json.dumps(event)}")
-                
-                # Extract event details
-                detail = event.get('detail', {})
-                event_name = detail.get('eventName', 'Unknown')
-                event_source = detail.get('eventSource', 'Unknown')
-                source_ip = detail.get('sourceIPAddress', 'Unknown')
-                user_identity = detail.get('userIdentity', {})
-                
-                # Log key information
-                logger.info(f"Q Plugin KMS Event: {event_name}")
-                logger.info(f"Source: {event_source}")
-                logger.info(f"Source IP: {source_ip}")
-                logger.info(f"User Identity: {json.dumps(user_identity)}")
-                
-                # Add custom logic here for specific event handling
-                if event_name in ['DisableKey', 'ScheduleKeyDeletion']:
-                    logger.warning(f"CRITICAL Q PLUGIN KMS EVENT: {event_name} - Key security may be compromised")
-                elif event_name == 'PutKeyPolicy':
-                    logger.info(f"Q Plugin KMS key policy updated - review for compliance")
-                
-                return {
-                    'statusCode': 200,
-                    'body': json.dumps({
-                        'message': f'Successfully processed Q Plugin KMS event: {event_name}',
-                        'eventProcessed': True
-                    })
-                }
-                
-            except Exception as e:
-                logger.error(f"Error processing Q Plugin KMS event: {str(e)}")
-                return {
-                    'statusCode': 500,
-                    'body': json.dumps({
-                        'message': f'Error processing Q Plugin KMS event: {str(e)}',
-                        'eventProcessed': False
-                    })
-                }
-      LoggingConfig:
-        LogGroup:
-          Fn::Sub: /${AWS::StackName}/lambda/QPluginKMSKeyMonitoringFunction
-    DependsOn:
-      - QPluginKMSKeyMonitoringFunctionLogGroup
-
-  QPluginKMSKeyMonitoringFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: ShouldCreateQPlugin
-    Properties:
-      LogGroupName:
-        Fn::Sub: /${AWS::StackName}/lambda/QPluginKMSKeyMonitoringFunction
-      RetentionInDays:
-        Ref: CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
-  # Permission for EventBridge to invoke the Q Plugin Lambda function
-  QPluginKMSKeyMonitoringFunctionPermission:
-    Type: AWS::Lambda::Permission
-    Condition: ShouldCreateQPlugin
-    Properties:
-      FunctionName: !Ref QPluginKMSKeyMonitoringFunction
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt QPluginKMSKeyMonitoringEventRule.Arn
-
-  CredentialsTable:
-    Type: AWS::DynamoDB::Table
-    Condition: ShouldCreateQPlugin
-    Properties:
-      AttributeDefinitions:
-        - AttributeName: "jti"
-          AttributeType: "S"
-      KeySchema:
-        - AttributeName: "jti"
-          KeyType: "HASH"
-      BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-      SSESpecification:
-        SSEEnabled: True
-        SSEType: KMS
-        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
-      TableName: !Sub "${LMAStackName}-QBusiness-CredentialsTable"
-      TimeToLiveSpecification:
-        AttributeName: ExpiresAt
-        Enabled: true
-
-  LambdaFunctionRole:
-    Type: AWS::IAM::Role
-    Condition: ShouldCreateQPlugin
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W11
-            reason: "QBusiness integration requires broad S3 access for transcript retrieval from various buckets"
-    # checkov:skip=CKV_AWS_111: "QBusiness integration requires broad S3 access for transcript retrieval from various buckets"
-    Properties:
-      RoleName: !Sub "QNA-${LMAStackName}-QBusiness-LambdaHook-FunctionRole"
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      PermissionsBoundary: !If
-        - HasPermissionsBoundary
-        - !Ref PermissionsBoundaryArn
-        - !Ref AWS::NoValue
-      Policies:
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "qbusiness:ChatSync"
-                Resource: !Sub "arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${AmazonQAppId}"
-          PolicyName: QBusinessPolicy
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: "arn:aws:s3:::*/*"
-          PolicyName: S3ImportBucketPolicy
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "dynamodb:PutItem"
-                  - "dynamodb:GetItem"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LMAStackName}-QBusiness-CredentialsTable"
-          PolicyName: DynamoDbPolicy
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "kms:Decrypt"
-                  - "kms:Encrypt"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${KMSKey}"
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
-          PolicyName: KmsPolicy
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "sso-oauth:CreateTokenWithIAM"
-                Resource: "*"
-          PolicyName: OICDPolicy
-        - PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Action: lambda:InvokeFunction
-                Effect: Allow
-                Resource: !Ref FetchTranscriptFunctionArn
-          PolicyName: LambdaInvoke
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "bedrock:InvokeModel"
-                Resource: 
-                  - !Sub "arn:aws:bedrock:*::foundation-model/*"
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:GetInferenceProfile"
-                Resource:
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:ApplyGuardrail"
-                Resource: "*"
-          PolicyName: BedrockInvoke
-        - PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "sts:AssumeRole"
-                  - "sts:SetContext"
-                Resource:
-                  - !GetAtt QServiceRole.Arn
-          PolicyName: AllowAssumeQRole
-
-  QBusinessLambdaHookFunction:
-    Type: AWS::Lambda::Function
-    Condition: ShouldCreateQPlugin
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: No VPC resources.
-          - id: W92
-            reason: No requirements to set reserved concurrencies.
-    # checkov:skip=CKV_AWS_116: "DLQ not required for QnABot integration function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    Properties:
-      # LambdaHook name must start with 'QNA-' to match QnAbot invoke policy
-      FunctionName: !Sub "QNA-${LMAStackName}-QBusiness-LambdaHook"
-      Handler: qna_qbusiness_lambdahook_function.handler
-      Role: !GetAtt "LambdaFunctionRole.Arn"
-      Runtime: python3.12
-      Layers:
-        - !Ref Boto3Layer
-      Timeout: 60
-      MemorySize: 128
-      TracingConfig:
-        Mode: Active
-      Environment:
-        Variables:
-          AWS_DATA_PATH: /opt/model
-          AMAZONQ_APP_ID: !Ref AmazonQAppId
-          AMAZONQ_ROLE_ARN: !GetAtt QServiceRole.Arn
-          DYNAMODB_CACHE_TABLE_NAME: !Ref CredentialsTable
-          KMS_KEY_ID: !Ref KMSKey
-          IDC_CLIENT_ID: !Ref IDCApplicationARN
-          AMAZONQ_REGION: !Ref "AWS::Region"
-          AMAZONQ_ENDPOINT_URL: ""
-          MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
-          FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
-      Code: ./src
-
 Outputs:
-  QBusinessLambdaHookFunctionRoleArn:
-    Value: !If [ShouldCreateQPlugin, !GetAtt "LambdaFunctionRole.Arn", "NA"]
-  
   StrandsMeetingAssistFunctionArn:
     Description: ARN of the Strands Meeting Assist Lambda function
     Value: !If [ShouldDeployStrandsFunction, !GetAtt StrandsMeetingAssistFunction.Arn, "NA"]

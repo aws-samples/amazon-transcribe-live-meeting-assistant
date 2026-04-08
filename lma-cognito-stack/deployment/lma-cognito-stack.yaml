@@ -116,12 +116,6 @@ Outputs:
   AppIdentityPoolId:
     Description: The Id for the App Cognito Identity Pool 
     Value: !Ref IdentityPool
-  LexAgentAssistIdentityPoolId:
-    Description: The Id for the Cognito Identity Pool created for the agent assist
-    Value: !Ref AgentAssistBotIdentityPool
-  LexAgentAssistUnauthRoleArn:
-    Description: The arn for the Agent Assist Bot Identity Pool Cognito role
-    Value: !GetAtt AgentAssistBotUnauthRole.Arn
 
 Resources:
 
@@ -477,71 +471,3 @@ Resources:
       SourceAccount: !Ref AWS::AccountId
       SourceArn: !GetAtt UserPool.Arn
 
-  ##########################################################################
-  # LexWebUI / Agent Assist Bot
-  ##########################################################################
-
-  AgentAssistBotIdentityPool:
-    Type: AWS::Cognito::IdentityPool
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W57
-            reason: Using cognito assume role with web identity and scoped permissions.
-    Properties:
-      IdentityPoolName: !Sub "${AWS::StackName}-AgentAssistBot-IdentityPool"
-      AllowUnauthenticatedIdentities: true
-      CognitoIdentityProviders:
-        - ClientId: !Ref UserPoolClient
-          ProviderName: !GetAtt UserPool.ProviderName
-
-  AgentAssistBotIdentityPoolSetRole:
-    Type: AWS::Cognito::IdentityPoolRoleAttachment
-    Properties:
-      IdentityPoolId: !Ref AgentAssistBotIdentityPool
-      Roles:
-        authenticated: !GetAtt AgentAssistBotAuthRole.Arn
-        unauthenticated: !GetAtt AgentAssistBotUnauthRole.Arn
-
-  AgentAssistBotUnauthRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Federated: cognito-identity.amazonaws.com
-            Action:
-              - sts:AssumeRoleWithWebIdentity
-            Condition:
-              StringEquals:
-                "cognito-identity.amazonaws.com:aud": !Ref AgentAssistBotIdentityPool
-              "ForAnyValue:StringLike":
-                "cognito-identity.amazonaws.com:amr": unauthenticated
-
-  AgentAssistBotAuthRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Federated: cognito-identity.amazonaws.com
-            Action:
-              - sts:AssumeRoleWithWebIdentity
-            Condition:
-              StringEquals:
-                "cognito-identity.amazonaws.com:aud": !Ref AgentAssistBotIdentityPool
-              "ForAnyValue:StringLike":
-                "cognito-identity.amazonaws.com:amr": authenticated
-      Policies:
-        - PolicyName: AgentAssistBotAuthPolicy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lex:RecognizeText
-                Resource: !Sub "arn:${AWS::Partition}:lex:${AWS::Region}:${AWS::AccountId}:bot-alias/PLCHLDR/PLCHLDR"
