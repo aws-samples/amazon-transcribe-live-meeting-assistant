@@ -63,12 +63,15 @@ export class NovaAgent implements VoiceAssistantProvider {
   private _isSpeaking: boolean = false;
   private _isProcessingTool: boolean = false;
   private _isMuted: boolean = false;
-  private audioQueue: Buffer[] = [];
-  private isPlayingQueue: boolean = false;
   private activationTimeout: NodeJS.Timeout | null = null;
   private defaultActivationDuration: number;
   private region: string;
   private audioChunkCount: number = 0;
+  
+  // Persistent audio playback stream (replaces per-batch paplay spawning)
+  private pacatProcess: ChildProcess | null = null;
+  private speakingTimeout: NodeJS.Timeout | null = null;
+  private readonly SPEAKING_TIMEOUT_MS = 500; // Mark as not speaking after 500ms of silence
   
   // Session refresh configuration
   private readonly SESSION_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes (3 min buffer before 8 min timeout)
@@ -984,10 +987,9 @@ export class NovaAgent implements VoiceAssistantProvider {
               
               // Check for interruption signal
               if (textContent.includes('"interrupted"') && textContent.includes('true')) {
-                console.log('⚠️  Interruption detected - clearing audio queue');
-                // Clear audio queue immediately to stop playback
-                this.audioQueue = [];
-                // Note: isPlayingQueue will be cleared when current batch finishes
+                console.log('⚠️  Interruption detected - restarting audio stream');
+                // Stop and restart the pacat stream to flush any buffered audio
+                this.stopPacatStream();
               }
               
               // Accumulate text for current turn if it's a FINAL transcript
@@ -1234,14 +1236,11 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private async handleMuteTool(toolUseId: string): Promise<void> {
-    console.log(' Mute tool called - muting agent');
+    console.log('🔇 Mute tool called - muting agent');
     this._isMuted = true;
     
-    // Clear audio queue to stop any buffered audio from playing
-    if (this.audioQueue.length > 0) {
-      console.log(`🗑️  Clearing ${this.audioQueue.length} buffered audio chunks`);
-      this.audioQueue = [];
-    }
+    // Stop the pacat stream to flush any buffered audio immediately
+    this.stopPacatStream();
     
     // Send tool result back to Nova
     if (this.session && this.session.isActive) {
@@ -1337,6 +1336,73 @@ export class NovaAgent implements VoiceAssistantProvider {
     });
   }
 
+  private ensurePacatStream(): ChildProcess | null {
+    if (this.pacatProcess && !this.pacatProcess.killed) {
+      return this.pacatProcess;
+    }
+
+    const playbackRate = parseInt(process.env.NOVA_PLAYBACK_RATE || '16000');
+    
+    console.log('🔊 Starting persistent pacat playback stream...');
+    this.pacatProcess = spawn('pacat', [
+      '--playback',
+      '--device=agent_output',
+      '--format=s16le',
+      '--rate=' + playbackRate,
+      '--channels=1',
+      '--latency-msec=20',
+    ]);
+
+    this.pacatProcess.stdin?.on('error', (error: any) => {
+      if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') {
+        console.log('🔊 pacat stdin closed (expected during cleanup)');
+      } else {
+        console.error('❌ pacat stdin error:', error);
+      }
+      this.pacatProcess = null;
+    });
+
+    this.pacatProcess.on('close', (code: number) => {
+      console.log(`🔊 pacat process exited with code ${code}`);
+      this.pacatProcess = null;
+    });
+
+    this.pacatProcess.on('error', (error: Error) => {
+      console.error('❌ pacat process error:', error);
+      this.pacatProcess = null;
+    });
+
+    this.pacatProcess.stderr?.on('data', (data: Buffer) => {
+      const msg = data.toString().trim();
+      if (msg) console.log(`pacat: ${msg}`);
+    });
+
+    console.log('✓ Persistent pacat playback stream started');
+    return this.pacatProcess;
+  }
+
+  /**
+   * Stop the persistent pacat process (called during cleanup/session close).
+   */
+  private stopPacatStream(): void {
+    if (this.pacatProcess && !this.pacatProcess.killed) {
+      try {
+        this.pacatProcess.stdin?.end();
+        this.pacatProcess.kill('SIGTERM');
+      } catch (e) {
+        // Ignore errors during cleanup
+      }
+      this.pacatProcess = null;
+      console.log('✓ Persistent pacat stream stopped');
+    }
+    // Clear speaking state
+    if (this.speakingTimeout) {
+      clearTimeout(this.speakingTimeout);
+      this.speakingTimeout = null;
+    }
+    this._isSpeaking = false;
+  }
+
   private async playAudio(audioBuffer: Buffer): Promise<void> {
     // CRITICAL: Enforce mute state in group meeting mode
     // This prevents Nova from speaking when muted (no wake phrase detected)
@@ -1344,9 +1410,6 @@ export class NovaAgent implements VoiceAssistantProvider {
       console.log('🔇 Audio dropped - agent is muted (group meeting mode)');
       return;
     }
-    
-    // Add audio to queue
-    this.audioQueue.push(audioBuffer);
     
     // Forward audio to Simli avatar for lip-sync animation
     // This runs in parallel with PulseAudio playback - Simli only uses it for video
@@ -1356,89 +1419,21 @@ export class NovaAgent implements VoiceAssistantProvider {
       });
     }
     
-    // Start processing queue if not already processing
-    if (!this.isPlayingQueue) {
-      this.processAudioQueue();
+    // Write audio directly to persistent pacat stream (non-blocking)
+    const pacat = this.ensurePacatStream();
+    if (pacat?.stdin && !pacat.stdin.destroyed) {
+      pacat.stdin.write(audioBuffer);
     }
-  }
-
-  private async processAudioQueue(): Promise<void> {
-    if (this.isPlayingQueue || this.audioQueue.length === 0) {
-      return;
-    }
-
-    this.isPlayingQueue = true;
-    this._isSpeaking = true;
-
-    // Batch audio chunks to reduce choppiness
-    const batchSize = 10; // Process 10 chunks at a time for smoother playback
-    const playbackRate = parseInt(process.env.NOVA_PLAYBACK_RATE || '16000');
     
-    while (this.audioQueue.length > 0) {
-      // Collect multiple chunks into a batch
-      const batch: Buffer[] = [];
-      for (let i = 0; i < batchSize && this.audioQueue.length > 0; i++) {
-        batch.push(this.audioQueue.shift()!);
-      }
-      
-      // Concatenate batch into single buffer
-      const combinedBuffer = Buffer.concat(batch);
-      
-      // Play audio at 16kHz (Nova Sonic 2 output format)
-      
-      await new Promise<void>((resolve, reject) => {
-        const paplay = spawn('paplay', [
-          '--device=agent_output',
-          '--format=s16le',
-          '--rate=' + playbackRate,
-          '--channels=1',
-          '--raw'
-        ]);
-
-        // Handle stdin errors (EPIPE when paplay exits before write completes)
-        paplay.stdin.on('error', (error: any) => {
-          if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') {
-            // Expected during cleanup - paplay exited before we finished writing
-            resolve();
-          } else {
-            console.error('❌ paplay stdin error:', error);
-            reject(error);
-          }
-        });
-
-        // Send audio to paplay
-        paplay.stdin.write(combinedBuffer);
-        paplay.stdin.end();
-
-        // Handle paplay completion
-        paplay.on('close', (code: number) => {
-          if (code === 0) {
-            resolve();
-          } else {
-            // During cleanup, non-zero exit is expected
-            resolve();
-          }
-        });
-
-        paplay.on('error', (error: Error) => {
-          console.error('❌ paplay error:', error);
-          reject(error);
-        });
-
-        paplay.stderr.on('data', (data: Buffer) => {
-          const msg = data.toString();
-          if (msg.trim()) {
-            console.log(`paplay: ${msg.trim()}`);
-          }
-        });
-      });
+    // Track speaking state with timeout-based detection
+    this._isSpeaking = true;
+    if (this.speakingTimeout) {
+      clearTimeout(this.speakingTimeout);
     }
-
-    // Clear speaking flag after all audio is played
-    setTimeout(() => {
+    this.speakingTimeout = setTimeout(() => {
       this._isSpeaking = false;
-      this.isPlayingQueue = false;
-      console.log('✅ All audio chunks played to virtual microphone');
+      this.speakingTimeout = null;
+      console.log('✅ Audio playback idle - speaking state cleared');
       
       // Check if there's a queued refresh waiting for agent to be idle
       if (this.refreshQueued) {
@@ -1449,7 +1444,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       if (this.autoMuteQueued) {
         this.checkAndExecuteQueuedAutoMute();
       }
-    }, 500); // Short delay after last chunk
+    }, this.SPEAKING_TIMEOUT_MS);
   }
 
   private _preConnecting: boolean = false;
@@ -1670,6 +1665,9 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   async stop(): Promise<void> {
     console.log('Stopping Nova agent...');
+
+    // Stop persistent audio playback stream
+    this.stopPacatStream();
 
     // Stop keep-alive timer
     this.stopKeepAliveTimer();

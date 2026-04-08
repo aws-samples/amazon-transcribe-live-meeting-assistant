@@ -28,7 +28,7 @@ async def publish_sns(
     alert: bool = False,
     max_retries: int = 3,
 ) -> PublishSNSResponseTypeDef:
-    """Runs Lex Recognize Text in the Async Event Loop"""
+    """Runs Agent Assist in the Async Event Loop"""
     # pylint: disable=too-many-arguments
     retry_count = 0
     sns_published: bool = False

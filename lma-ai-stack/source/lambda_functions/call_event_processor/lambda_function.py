@@ -29,7 +29,6 @@ from event_processor import execute_process_event_api_mutation
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource, Table as DynamoDbTable
-    from mypy_boto3_lexv2_runtime.client import LexRuntimeV2Client
     from mypy_boto3_lambda.client import LambdaClient
     from mypy_boto3_comprehend.client import ComprehendClient
     from mypy_boto3_sns.client import SNSClient
@@ -39,7 +38,6 @@ else:
     Boto3Session = object
     DynamoDBServiceResource = object
     DynamoDbTable = object
-    LexRuntimeV2Client = object
     LambdaClient = object
     ComprehendClient = object
     SNSClient = object
@@ -62,8 +60,6 @@ STATE_DYNAMODB_RESOURCE: DynamoDBServiceResource = BOTO3_SESSION.resource(
 STATE_DYNAMODB_TABLE: DynamoDbTable = STATE_DYNAMODB_RESOURCE.Table(
     STATE_DYNAMODB_TABLE_NAME)
 
-IS_LEX_AGENT_ASSIST_ENABLED = getenv(
-    "IS_LEX_AGENT_ASSIST_ENABLED", "true").lower() == "true"
 
 IS_LAMBDA_AGENT_ASSIST_ENABLED = getenv(
     "IS_LAMBDA_AGENT_ASSIST_ENABLED", "true").lower() == "true"
@@ -99,8 +95,7 @@ async def process_event(event) -> Dict[str, List]:
     async with TranscriptBatchProcessor(
         appsync_client=APPSYNC_CLIENT,
         agent_assist_args=dict(
-            is_lex_agent_assist_enabled=IS_LEX_AGENT_ASSIST_ENABLED,
-            is_lambda_agent_assist_enabled=IS_LAMBDA_AGENT_ASSIST_ENABLED,
+                is_lambda_agent_assist_enabled=IS_LAMBDA_AGENT_ASSIST_ENABLED,
         ),
         sentiment_analysis_args=dict(
             comprehend_client=COMPREHEND_CLIENT,

@@ -132,11 +132,13 @@ COMBINED_SINK=$(pactl load-module module-null-sink sink_name=combined_audio sink
 echo "Created combined_audio sink (module $COMBINED_SINK)"
 
 # Route meeting_audio.monitor to combined_audio sink
-pactl load-module module-loopback source=meeting_audio.monitor sink=combined_audio latency_msec=1
+# Note: latency_msec=1 was too aggressive and caused buffer underruns on smaller instances.
+# 20ms provides a good balance between low latency and stability across instance sizes.
+pactl load-module module-loopback source=meeting_audio.monitor sink=combined_audio latency_msec=20
 echo "Routed meeting audio to combined sink"
 
 # Route agent_output.monitor to combined_audio sink
-pactl load-module module-loopback source=agent_output.monitor sink=combined_audio latency_msec=1
+pactl load-module module-loopback source=agent_output.monitor sink=combined_audio latency_msec=20
 echo "Routed agent audio to combined sink"
 
 # Create a virtual microphone source from agent_output for Chromium

@@ -21,6 +21,7 @@
  */
 
 import { Browser, Page } from 'puppeteer';
+import { WebSocketServer, WebSocket } from 'ws';
 
 export interface SimliAvatarConfig {
   apiKey: string;
@@ -41,6 +42,10 @@ export class SimliAvatar {
   private _isReady: boolean = false;
   private enabled: boolean;
   private audioChunkCount: number = 0;
+  
+  private wsServer: any = null; // WebSocket.Server
+  private wsClient: any = null; // Active WebSocket connection from Simli page
+  private wsPort: number = 0;
 
   constructor(config: SimliAvatarConfig) {
     this.apiKey = config.apiKey || '';
@@ -202,9 +207,53 @@ export class SimliAvatar {
         console.log('[Simli-AudioBlock] All media elements muted and audio tracks disabled');
       });
 
+      // Start WebSocket audio bridge for efficient audio delivery
+      await this.startAudioWebSocket();
+      
+      // Connect the Simli page to the WebSocket audio bridge
+      // Note: This code runs in the browser context where WebSocket is the native browser API,
+      // not the Node.js 'ws' module. We use @ts-ignore to avoid type conflicts.
+      if (this.wsPort > 0) {
+        await this.simliPage.evaluate((port: number) => {
+          // @ts-ignore - Browser WebSocket, not Node.js ws module
+          const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+          ws.binaryType = 'arraybuffer';
+          
+          ws.onopen = () => {
+            console.log('[Simli-WS] Connected to audio bridge');
+            // @ts-ignore
+            window.__simliAudioWs = ws;
+          };
+          
+          // @ts-ignore - Browser MessageEvent type
+          ws.onmessage = (event: any) => {
+            try {
+              const bytes = new Uint8Array(event.data);
+              // @ts-ignore
+              const client = window.__simliClient;
+              if (client) client.sendAudioData(bytes);
+            } catch (error) {
+              console.error('[Simli-WS] Error processing audio:', error);
+            }
+          };
+          
+          ws.onclose = () => {
+            console.log('[Simli-WS] Audio bridge disconnected');
+            // @ts-ignore
+            window.__simliAudioWs = null;
+          };
+          
+          // @ts-ignore - Browser Event type
+          ws.onerror = (err: any) => {
+            console.error('[Simli-WS] Audio bridge error');
+          };
+        }, this.wsPort);
+        console.log('✓ Simli page connected to WebSocket audio bridge');
+      }
+
       this._isConnected = true;
       this._isReady = true;
-      console.log('✓ Simli Avatar initialized successfully (audio isolated)');
+      console.log('✓ Simli Avatar initialized successfully (audio isolated, WebSocket audio bridge active)');
 
     } catch (error) {
       console.error('Failed to initialize Simli Avatar:', error);
@@ -468,17 +517,81 @@ export class SimliAvatar {
     }
   }
 
+  private async startAudioWebSocket(): Promise<void> {
+    return new Promise((resolve) => {
+      // Use port 0 to let the OS assign a free port
+      this.wsServer = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+      
+      this.wsServer.on('listening', () => {
+        const addr = this.wsServer.address();
+        this.wsPort = typeof addr === 'object' ? addr.port : 0;
+        console.log(`✓ Simli audio WebSocket server listening on ws://127.0.0.1:${this.wsPort}`);
+        resolve();
+      });
+
+      this.wsServer.on('connection', (ws: WebSocket) => {
+        console.log('✓ Simli page connected to audio WebSocket bridge');
+        this.wsClient = ws;
+        
+        ws.on('close', () => {
+          console.log('🔊 Simli audio WebSocket client disconnected');
+          this.wsClient = null;
+        });
+        
+        ws.on('error', (err: Error) => {
+          console.error('❌ Simli audio WebSocket error:', err.message);
+          this.wsClient = null;
+        });
+      });
+
+      this.wsServer.on('error', (err: Error) => {
+        console.error('❌ Simli audio WebSocket server error:', err);
+        resolve(); // Don't block initialization
+      });
+    });
+  }
+
+  /**
+   * Stop the WebSocket server.
+   */
+  private stopAudioWebSocket(): void {
+    if (this.wsClient) {
+      try { this.wsClient.close(); } catch (e) { /* ignore */ }
+      this.wsClient = null;
+    }
+    if (this.wsServer) {
+      try { this.wsServer.close(); } catch (e) { /* ignore */ }
+      this.wsServer = null;
+      console.log('✓ Simli audio WebSocket server stopped');
+    }
+  }
+
+  /**
+   * Send audio data to Simli avatar for lip-sync.
+   * Falls back to page.evaluate() if WebSocket is not connected.
+   */
   async sendAudioData(audioData: Buffer): Promise<void> {
     if (!this.enabled || !this._isConnected || !this.simliPage) return;
 
-    try {
-      this.audioChunkCount++;
-      if (this.audioChunkCount % 50 === 0) {
-        console.log(`🎭 Sent ${this.audioChunkCount} audio chunks to Simli avatar (${audioData.length} bytes each)`);
-      }
+    this.audioChunkCount++;
+    if (this.audioChunkCount % 100 === 0) {
+      console.log(`🎭 Sent ${this.audioChunkCount} audio chunks to Simli avatar via ${this.wsClient ? 'WebSocket' : 'CDP fallback'}`);
+    }
 
+    // Primary path: WebSocket bridge (near-zero latency)
+    if (this.wsClient && this.wsClient.readyState === WebSocket.OPEN) {
+      try {
+        this.wsClient.send(audioData);
+        return;
+      } catch (err) {
+        // Fall through to CDP fallback
+      }
+    }
+
+    // Fallback: page.evaluate() via CDP (slower but always works)
+    try {
       const audioBase64 = audioData.toString('base64');
-      await this.simliPage.evaluate((base64Data: string) => {
+      this.simliPage.evaluate((base64Data: string) => {
         try {
           const binaryString = atob(base64Data);
           const bytes = new Uint8Array(binaryString.length);
@@ -491,7 +604,9 @@ export class SimliAvatar {
         } catch (error) {
           console.error('[Simli] Error sending audio data:', error);
         }
-      }, audioBase64);
+      }, audioBase64).catch(() => {
+        // Silently ignore CDP errors
+      });
     } catch (error) {
       if (this.audioChunkCount % 100 === 0) {
         console.error('Error sending audio to Simli:', error);
@@ -502,10 +617,16 @@ export class SimliAvatar {
   async stop(): Promise<void> {
     if (!this.enabled) return;
     console.log('Stopping Simli Avatar...');
+    
+    // Stop WebSocket audio bridge first
+    this.stopAudioWebSocket();
+    
     try {
       if (this.simliPage) {
         await this.simliPage.evaluate(() => {
           try {
+            // @ts-ignore
+            if (window.__simliAudioWs) window.__simliAudioWs.close();
             // @ts-ignore
             if (window.__simliClient) window.__simliClient.stop();
             // @ts-ignore

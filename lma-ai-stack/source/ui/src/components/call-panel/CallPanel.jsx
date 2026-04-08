@@ -1070,11 +1070,8 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
   };
 
   if (process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true') {
-    // Use STRANDS UI for Lambda mode, Lex UI for Lex mode
-    const iframeSrc =
-      process.env.REACT_APP_AGENT_ASSIST_MODE === 'LAMBDA'
-        ? `/strands-chat.html?callId=${item.callId}`
-        : `/index-lexwebui.html?callId=${item.callId}`;
+    // Use STRANDS chat UI
+    const iframeSrc = `/strands-chat.html?callId=${item.callId}`;
 
     console.log(`DEBUG: Agent Assist Mode: ${process.env.REACT_APP_AGENT_ASSIST_MODE}, Using iframe: ${iframeSrc}`);
 

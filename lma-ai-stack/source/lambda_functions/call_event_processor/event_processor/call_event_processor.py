@@ -80,7 +80,6 @@ if (TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN
         or POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN):
     LAMBDA_HOOK_CLIENT: LambdaClient = BOTO3_SESSION.client("lambda", config=CLIENT_CONFIG)
 
-IS_LEX_AGENT_ASSIST_ENABLED = False
 
 IS_LAMBDA_AGENT_ASSIST_ENABLED = False
 
@@ -1272,12 +1271,10 @@ async def execute_process_event_api_mutation(
 
     """Executes AppSync API Mutation"""
     # pylint: disable=global-statement
-    global IS_LEX_AGENT_ASSIST_ENABLED
     global IS_LAMBDA_AGENT_ASSIST_ENABLED
     global SETTINGS
     # pylint: enable=global-statement
 
-    IS_LEX_AGENT_ASSIST_ENABLED = agent_assist_args.get("is_lex_agent_assist_enabled")
     IS_LAMBDA_AGENT_ASSIST_ENABLED = agent_assist_args.get("is_lambda_agent_assist_enabled")
     SETTINGS = settings
 
@@ -1489,7 +1486,7 @@ async def execute_process_event_api_mutation(
                         appsync_session=appsync_session,
                     )
                 )
-            if (IS_LEX_AGENT_ASSIST_ENABLED or IS_LAMBDA_AGENT_ASSIST_ENABLED) and (not normalized_message["IsPartial"] or 'ContactId' in normalized_message.keys()) and isAssistantWakePhrase(normalized_message["Transcript"]):
+            if IS_LAMBDA_AGENT_ASSIST_ENABLED and (not normalized_message["IsPartial"] or 'ContactId' in normalized_message.keys()) and isAssistantWakePhrase(normalized_message["Transcript"]):
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN,
                     InvocationType='Event',
