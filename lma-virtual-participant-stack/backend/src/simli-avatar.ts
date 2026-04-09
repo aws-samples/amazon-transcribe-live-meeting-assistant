@@ -567,9 +567,32 @@ export class SimliAvatar {
   }
 
   /**
-   * Send audio data to Simli avatar for lip-sync.
-   * Falls back to page.evaluate() if WebSocket is not connected.
+   * Clear the Simli avatar's audio buffer to stop lip-syncing on barge-in.
+   * Calls SimliClient.ClearBuffer() — the official SDK method for stopping avatar speech.
    */
+  async clearAudioBuffer(): Promise<void> {
+    if (!this.enabled || !this._isConnected || !this.simliPage) return;
+
+    console.log('🎭 Calling Simli ClearBuffer() to stop avatar lip-sync');
+    try {
+      await this.simliPage.evaluate(() => {
+        // @ts-ignore
+        const client = window.__simliClient;
+        if (client) {
+          if (typeof client.ClearBuffer === 'function') {
+            client.ClearBuffer();
+            console.log('[Simli] ClearBuffer() called successfully');
+          } else if (typeof client.clearBuffer === 'function') {
+            client.clearBuffer();
+            console.log('[Simli] clearBuffer() called (legacy)');
+          }
+        }
+      });
+    } catch (err) {
+      // Non-critical
+    }
+  }
+
   async sendAudioData(audioData: Buffer): Promise<void> {
     if (!this.enabled || !this._isConnected || !this.simliPage) return;
 

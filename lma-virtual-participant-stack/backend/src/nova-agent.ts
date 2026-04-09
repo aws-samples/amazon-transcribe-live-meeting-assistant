@@ -63,6 +63,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   private _isSpeaking: boolean = false;
   private _isProcessingTool: boolean = false;
   private _isMuted: boolean = false;
+  private _isInterrupted: boolean = false; // Gate: drops all audio (voice + avatar) after barge-in until next turn
   private activationTimeout: NodeJS.Timeout | null = null;
   private defaultActivationDuration: number;
   private region: string;
@@ -967,6 +968,12 @@ export class NovaAgent implements VoiceAssistantProvider {
             if (jsonResponse.event?.contentStart) {
               console.log('Content start:', jsonResponse.event.contentStart.type);
               
+              // Clear interruption gate when Nova starts a new AUDIO content block
+              if (jsonResponse.event.contentStart.type === 'AUDIO' && this._isInterrupted) {
+                console.log('✓ New audio content started - clearing interruption gate');
+                this._isInterrupted = false;
+              }
+              
               // Check if this is a FINAL transcript (for conversation history)
               const additionalFields = jsonResponse.event.contentStart.additionalModelFields;
               if (additionalFields) {
@@ -987,9 +994,13 @@ export class NovaAgent implements VoiceAssistantProvider {
               
               // Check for interruption signal
               if (textContent.includes('"interrupted"') && textContent.includes('true')) {
-                console.log('⚠️  Interruption detected - restarting audio stream');
-                // Stop and restart the pacat stream to flush any buffered audio
+                console.log('⚠️  Interruption detected - dropping all audio until next turn');
+                this._isInterrupted = true;
                 this.stopPacatStream();
+                // Clear Simli avatar's server-side audio buffer via ClearBuffer() SDK method
+                if (simliAvatar.isConnected()) {
+                  simliAvatar.clearAudioBuffer().catch(() => {});
+                }
               }
               
               // Accumulate text for current turn if it's a FINAL transcript
@@ -1404,6 +1415,11 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private async playAudio(audioBuffer: Buffer): Promise<void> {
+    // Drop all audio after barge-in until Nova starts a new response turn
+    if (this._isInterrupted) {
+      return;
+    }
+    
     // CRITICAL: Enforce mute state in group meeting mode
     // This prevents Nova from speaking when muted (no wake phrase detected)
     if (this._isMuted) {
