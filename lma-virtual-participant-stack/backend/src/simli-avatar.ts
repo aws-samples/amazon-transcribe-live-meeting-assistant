@@ -330,21 +330,44 @@ export class SimliAvatar {
         navigator.mediaDevices.getUserMedia = async function(constraints?: MediaStreamConstraints): Promise<MediaStream> {
           console.log('[LMA-Simli] getUserMedia called with constraints:', JSON.stringify(constraints));
           
-          if (constraints?.video && simliStreamReady && simliVideoTrack) {
-            console.log(`[LMA-Simli] Returning Simli avatar video stream - track: readyState=${simliVideoTrack.readyState}, enabled=${simliVideoTrack.enabled}, muted=${simliVideoTrack.muted}, kind=${simliVideoTrack.kind}`);
-            try {
-              const settings = simliVideoTrack.getSettings();
-              console.log(`[LMA-Simli] Track settings: width=${settings.width}, height=${settings.height}, frameRate=${settings.frameRate}`);
-            } catch(e) { console.log('[LMA-Simli] Could not get track settings:', e); }
-            if (constraints.audio) {
-              const audioStream = await originalGetUserMedia({ audio: constraints.audio });
-              const combinedStream = new MediaStream();
-              combinedStream.addTrack(simliVideoTrack);
-              audioStream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
-              return combinedStream;
-            } else {
-              return new MediaStream([simliVideoTrack]);
+          // If video is requested, try to return the Simli avatar track
+          if (constraints?.video) {
+            // If track is live, return it immediately
+            if (simliStreamReady && simliVideoTrack && simliVideoTrack.readyState === 'live') {
+              console.log(`[LMA-Simli] Returning Simli avatar video stream - track: readyState=${simliVideoTrack.readyState}, enabled=${simliVideoTrack.enabled}, muted=${simliVideoTrack.muted}, kind=${simliVideoTrack.kind}`);
+              try {
+                const settings = simliVideoTrack.getSettings();
+                console.log(`[LMA-Simli] Track settings: width=${settings.width}, height=${settings.height}, frameRate=${settings.frameRate}`);
+              } catch(e) { console.log('[LMA-Simli] Could not get track settings:', e); }
+              if (constraints.audio) {
+                const audioStream = await originalGetUserMedia({ audio: constraints.audio });
+                const combinedStream = new MediaStream();
+                combinedStream.addTrack(simliVideoTrack);
+                audioStream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
+                return combinedStream;
+              } else {
+                return new MediaStream([simliVideoTrack]);
+              }
             }
+            
+            // Track is dead or missing — wait briefly for the poll to reconnect it
+            console.log('[LMA-Simli] ⏳ Simli track not ready - waiting up to 2s for reconnection...');
+            for (let i = 0; i < 20; i++) {
+              await new Promise(r => setTimeout(r, 100));
+              if (simliStreamReady && simliVideoTrack && simliVideoTrack.readyState === 'live') {
+                console.log(`[LMA-Simli] ✓ Simli track recovered after ${(i+1)*100}ms`);
+                if (constraints.audio) {
+                  const audioStream = await originalGetUserMedia({ audio: constraints.audio });
+                  const combinedStream = new MediaStream();
+                  combinedStream.addTrack(simliVideoTrack);
+                  audioStream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
+                  return combinedStream;
+                } else {
+                  return new MediaStream([simliVideoTrack]);
+                }
+              }
+            }
+            console.log('[LMA-Simli] ⚠️ Simli track did not recover in 2s - falling through');
           }
           
           console.log('[LMA-Simli] Falling through to original getUserMedia');
@@ -567,9 +590,32 @@ export class SimliAvatar {
   }
 
   /**
-   * Send audio data to Simli avatar for lip-sync.
-   * Falls back to page.evaluate() if WebSocket is not connected.
+   * Clear the Simli avatar's audio buffer to stop lip-syncing on barge-in.
+   * Calls SimliClient.ClearBuffer() — the official SDK method for stopping avatar speech.
    */
+  async clearAudioBuffer(): Promise<void> {
+    if (!this.enabled || !this._isConnected || !this.simliPage) return;
+
+    console.log('🎭 Calling Simli ClearBuffer() to stop avatar lip-sync');
+    try {
+      await this.simliPage.evaluate(() => {
+        // @ts-ignore
+        const client = window.__simliClient;
+        if (client) {
+          if (typeof client.ClearBuffer === 'function') {
+            client.ClearBuffer();
+            console.log('[Simli] ClearBuffer() called successfully');
+          } else if (typeof client.clearBuffer === 'function') {
+            client.clearBuffer();
+            console.log('[Simli] clearBuffer() called (legacy)');
+          }
+        }
+      });
+    } catch (err) {
+      // Non-critical
+    }
+  }
+
   async sendAudioData(audioData: Buffer): Promise<void> {
     if (!this.enabled || !this._isConnected || !this.simliPage) return;
 
