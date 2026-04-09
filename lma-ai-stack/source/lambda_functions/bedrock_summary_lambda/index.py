@@ -211,7 +211,7 @@ def handler(event, context):
             prompt_override = event['Prompt']
         summary = generate_summary(transcript, prompt_override)
         if not prompt_override:
-            # only write to S3 when using default summary prompt (eg not invoked via QnABot)
+            # only write to S3 when using default summary prompt
             write_to_s3(callId, metadata, transcript, summary)
     except Exception as e:
         print(e)

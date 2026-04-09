@@ -23,6 +23,10 @@ export class NoOpAgent implements VoiceAssistantProvider {
     // No-op
   }
 
+  async preConnect(): Promise<void> {
+    // No-op
+  }
+
   async activate(duration?: number, initialContext?: string): Promise<void> {
     // No-op
   }

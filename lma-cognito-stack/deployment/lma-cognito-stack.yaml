@@ -116,12 +116,6 @@ Outputs:
   AppIdentityPoolId:
     Description: The Id for the App Cognito Identity Pool 
     Value: !Ref IdentityPool
-  LexAgentAssistIdentityPoolId:
-    Description: The Id for the Cognito Identity Pool created for the agent assist
-    Value: !Ref AgentAssistBotIdentityPool
-  LexAgentAssistUnauthRoleArn:
-    Description: The arn for the Agent Assist Bot Identity Pool Cognito role
-    Value: !GetAtt AgentAssistBotUnauthRole.Arn
 
 Resources:
 
@@ -142,10 +136,7 @@ Resources:
           EmailMessage: !Sub |-
             <p>Hello {username},</p>
             <p>Welcome to Live Meeting Assistant (LMA)! Your temporary password is: <strong>{####}</strong></p>
-            <p>When the CloudFormation stack is COMPLETE, navigate to the Outputs tab of your CloudFormation stack and get the URL associated with ApplicationCloudfrontEndpoint. This is your LMA web interface. When you first login, it will prompt you to set a permanent password.</p> 
-            <p>Don't attempt to download the Chrome browser extension from LMA until the 
-            CloudFormation stack status is CREATE_COMPLETE or UPDATE_COMPLETE, as the 
-            extension will not be available until then.</p>
+            <p>When the CloudFormation stack is COMPLETE, navigate to the Outputs tab of your CloudFormation stack and get the URL associated with ApplicationCloudfrontEndpoint. This is your LMA web interface. When you first login, it will prompt you to set a permanent password.</p>
             <p>Thanks,</p>
             <p>Live Meeting Assistant (amazon.com/live-meeting-assistant)</p>
       AutoVerifiedAttributes:
@@ -265,7 +256,6 @@ Resources:
         - profile
       CallbackURLs:
         - http://localhost:3000/
-        - https://bmpfinegchjaiocjnfjfcgeohdiblomp.chromiumapp.org/
       AccessTokenValidity: 1
       ClientName: !Sub "${AWS::StackName}-Client"
       EnableTokenRevocation: true
@@ -477,71 +467,3 @@ Resources:
       SourceAccount: !Ref AWS::AccountId
       SourceArn: !GetAtt UserPool.Arn
 
-  ##########################################################################
-  # LexWebUI / Agent Assist Bot
-  ##########################################################################
-
-  AgentAssistBotIdentityPool:
-    Type: AWS::Cognito::IdentityPool
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W57
-            reason: Using cognito assume role with web identity and scoped permissions.
-    Properties:
-      IdentityPoolName: !Sub "${AWS::StackName}-AgentAssistBot-IdentityPool"
-      AllowUnauthenticatedIdentities: true
-      CognitoIdentityProviders:
-        - ClientId: !Ref UserPoolClient
-          ProviderName: !GetAtt UserPool.ProviderName
-
-  AgentAssistBotIdentityPoolSetRole:
-    Type: AWS::Cognito::IdentityPoolRoleAttachment
-    Properties:
-      IdentityPoolId: !Ref AgentAssistBotIdentityPool
-      Roles:
-        authenticated: !GetAtt AgentAssistBotAuthRole.Arn
-        unauthenticated: !GetAtt AgentAssistBotUnauthRole.Arn
-
-  AgentAssistBotUnauthRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Federated: cognito-identity.amazonaws.com
-            Action:
-              - sts:AssumeRoleWithWebIdentity
-            Condition:
-              StringEquals:
-                "cognito-identity.amazonaws.com:aud": !Ref AgentAssistBotIdentityPool
-              "ForAnyValue:StringLike":
-                "cognito-identity.amazonaws.com:amr": unauthenticated
-
-  AgentAssistBotAuthRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Federated: cognito-identity.amazonaws.com
-            Action:
-              - sts:AssumeRoleWithWebIdentity
-            Condition:
-              StringEquals:
-                "cognito-identity.amazonaws.com:aud": !Ref AgentAssistBotIdentityPool
-              "ForAnyValue:StringLike":
-                "cognito-identity.amazonaws.com:amr": authenticated
-      Policies:
-        - PolicyName: AgentAssistBotAuthPolicy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lex:RecognizeText
-                Resource: !Sub "arn:${AWS::Partition}:lex:${AWS::Region}:${AWS::AccountId}:bot-alias/PLCHLDR/PLCHLDR"

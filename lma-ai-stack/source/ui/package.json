@@ -43,8 +43,8 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.0/xlsx-0.20.0.tgz"
   },
   "scripts": {
-    "start": "./download-lexwebui.sh && ./generate-lexwebui-json.sh && react-scripts start",
-    "build": "./download-lexwebui.sh && react-scripts build",
+    "start": "react-scripts start",
+    "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "lint": "npx eslint 'src/**/*.{js,jsx}'"

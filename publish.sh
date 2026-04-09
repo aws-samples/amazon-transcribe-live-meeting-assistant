@@ -53,8 +53,8 @@ if ! [ -x "$(command -v npm)" ]; then
   echo 'Error: npm is not installed and required.' >&2
   exit 1
 fi
-if ! node -v | grep -qF "v18."; then
-    echo 'Error: Node.js version 18.x is not installed and required.' >&2
+if ! node -v | grep -qE "v(18|20|22)\."; then
+    echo 'Error: Node.js version 18.x, 20.x, or 22.x is required.' >&2
     exit 1
 fi
 
@@ -150,76 +150,6 @@ update_checksum() {
   echo "$current_checksum" > "$checksum_file"
 }
 
-# Function to check if the submodule commit hash has changed
-hassubmodulechanged() {
-    local dir=$1
-    local hash_file="${dir}/.commit-hash"
-    # Get the current commit hash of the submodule
-    cd "$dir" || exit 1
-    current_hash=$(git rev-parse HEAD)
-    cd - > /dev/null || exit 1
-    # Check if the hash file exists and read the previous hash
-    if [ -f "$hash_file" ]; then
-        previous_hash=$(cat "$hash_file")
-    else
-        previous_hash=""
-    fi
-    if [ "$current_hash" != "$previous_hash" ]; then
-        return 0  # True, the submodule has changed
-    else
-        return 1  # False, the submodule has not changed
-    fi
-}
-update_submodule_hash() {
-    local dir=$1
-    local hash_file="${dir}/.commit-hash"
-    # Get the current commit hash of the submodule
-    cd "$dir" || exit 1
-    current_hash=$(git rev-parse HEAD)
-    cd - > /dev/null || exit 1
-    # Save the current hash
-    echo "$current_hash" > "$hash_file"
-}
-
-dir=lma-browser-extension-stack
-cd $dir
-# by hashing the contents of the extension folder, we can create a zipfile name that 
-# changes when the extension folder contents change.
-# This allows us to force codebuild to re-run when the extension folder contents change.
-echo "Computing hash of extension folder contents"
-HASH=$(calculate_hash ".")
-zipfile=src-${HASH}.zip
-BROWSER_EXTENSION_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${dir}/${zipfile}
-cd ..
-if haschanged $dir; then
-pushd $dir
-echo "PACKAGING $dir"
-echo "Performing token replacement for version: $VERSION"
-# Create temporary directory for token replacement
-mkdir -p ${tmpdir}/${dir}-temp
-# Copy all files to temp directory
-cp -r . ${tmpdir}/${dir}-temp/
-# Replace tokens in temporary files
-sed -e "s/<VERSION_TOKEN>/$VERSION/g" ${tmpdir}/${dir}-temp/package.json > ${tmpdir}/${dir}-temp/package.json.tmp && mv ${tmpdir}/${dir}-temp/package.json.tmp ${tmpdir}/${dir}-temp/package.json
-sed -e "s/<VERSION_TOKEN>/$VERSION/g" ${tmpdir}/${dir}-temp/public/manifest.json > ${tmpdir}/${dir}-temp/public/manifest.json.tmp && mv ${tmpdir}/${dir}-temp/public/manifest.json.tmp ${tmpdir}/${dir}-temp/public/manifest.json
-sed -e "s/<VERSION_TOKEN>/$VERSION/g" ${tmpdir}/${dir}-temp/template.yaml > ${tmpdir}/${dir}-temp/template.yaml.tmp && mv ${tmpdir}/${dir}-temp/template.yaml.tmp ${tmpdir}/${dir}-temp/template.yaml
-echo "Zipping source to ${tmpdir}/${zipfile}"
-cd ${tmpdir}/${dir}-temp
-zip -r ../$zipfile . -x "node_modules/*" -x "build/*"
-cd - > /dev/null
-echo "Upload source and template to S3"
-aws s3 cp ${tmpdir}/${zipfile} s3://${BROWSER_EXTENSION_SRC_S3_LOCATION}
-s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
-https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
-# Upload the token-replaced template from temp directory
-aws s3 cp ${tmpdir}/${dir}-temp/template.yaml ${s3_template}
-aws cloudformation validate-template --template-url ${https_template} > /dev/null || exit 1
-popd
-update_checksum $dir
-else
-echo "SKIPPING $dir (unchanged)"
-fi
-
 dir=lma-virtual-participant-stack
 echo "PACKAGING $dir"
 pushd $dir
@@ -284,18 +214,6 @@ echo "SKIPPING $dir (unchanged)"
 fi
 
 dir=lma-bedrockkb-stack
-if haschanged $dir; then
-echo "PACKAGING $dir"
-pushd $dir
-chmod +x ./publish.sh
-./publish.sh $BUCKET $PREFIX_AND_VERSION $REGION || exit 1
-popd
-update_checksum $dir
-else
-echo "SKIPPING $dir (unchanged)"
-fi
-
-dir=lma-bedrockagent-stack
 if haschanged $dir; then
 echo "PACKAGING $dir"
 pushd $dir
@@ -423,71 +341,6 @@ else
 echo "SKIPPING $dir (unchanged)"
 fi
 
-# START QnABot Build Section - Advanced users can comment out this entire section to disable QnABot at build time
-dir=submodule-aws-qnabot
-echo "UPDATING $dir"
-# NOTE FOR ADVANCED USERS: To disable QnABot at build time for custom deployments,
-# you can comment out this entire QnABot build section (from START to END markers). 
-# However, most users should use the CloudFormation parameter 'MeetingAssistService=STRANDS_BEDROCK' 
-# instead, which allows runtime selection without modifying the build process.
-git submodule init
-echo "Removing any QnAbot changes from previous builds"
-pushd $dir && git checkout . && popd
-git submodule update
-# lma customizations
-echo "Applying patch files to remove unused KMS keys from QnABot and customize designer settings page"
-cp -v ./patches/qnabot/templates_examples_examples_index.js $dir/source/templates/examples/examples/index.js
-cp -v ./patches/qnabot/templates_examples_extensions_index.js $dir/source/templates/examples/extensions/index.js
-cp -v ./patches/qnabot/website_js_lib_store_api_actions_settings.js $dir/source/website/js/lib/store/api/actions/settings.js
-echo "Applying patch to fix Cognito permissions for OpenSearch domain"
-cp -v ./patches/qnabot/templates_util.js $dir/source/templates/util.js
-echo "modify QnABot version string from 'N.N.N' to 'N.N.N-lma'"
-# Detection of differences. sed varies betwen GNU sed and BSD sed
-if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
-  sed -i 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/source/package.json
-else # BSD like sed
-  sed -i '' 's/"version": *"\([0-9]*\.[0-9]*\.[0-9]*\)"/"version": "\1-lma"/' $dir/source/package.json
-fi
-echo "update QnABot lambdaRuntime from nodejs18.x to nodejs22.x"
-# Detection of differences. sed varies betwen GNU sed and BSD sed
-if sed --version 2>/dev/null | grep -q GNU; then # GNU sed
-  sed -i 's/"lambdaRuntime": *"nodejs18\.x"/"lambdaRuntime": "nodejs22.x"/' $dir/source/package.json
-else # BSD like sed
-  sed -i '' 's/"lambdaRuntime": *"nodejs18\.x"/"lambdaRuntime": "nodejs22.x"/' $dir/source/package.json
-fi
-echo "Creating config.json"
-cat > $dir/source/config.json <<_EOF
-{
-  "profile": "${AWS_PROFILE:-default}",
-  "region": "${REGION}",
-  "buildType": "Custom",
-  "skipCheckTemplate":true,
-  "noStackOutput": true
-}
-_EOF
-
-# only re-build QnABot if patch files or submodule version has changed
-if haschanged ./patches/qnabot || hassubmodulechanged $dir; then
-
-echo "PACKAGING $dir"
-
-pushd $dir/source
-mkdir -p build/templates/dev
-npm install
-npm run build || exit 1
-# Rename OpensearchDomain resource in template to force resource replacement during upgrade/downgrade
-# If the resource name is not changed, then CloudFomration does an inline upgrade from OpenSearch 1.3 to 2.1, but this upgrade cannot be reversed
-# which can create a problem with ROLLBACK if there is a stack failure during the upgrade.
-cat ./build/templates/master.json | sed -e "s%OpensearchDomain%LMAQnaBotOpensearchDomain%g" > ./build/templates/qnabot-main.json
-aws s3 sync ./build/ s3://${BUCKET}/${PREFIX_AND_VERSION}/aws-qnabot/ --delete 
-popd
-update_checksum ./patches/qnabot
-update_submodule_hash $dir
-else
-echo "SKIPPING $dir (unchanged)"
-fi
-# END QnABot Build Section
-
 echo "PACKAGING Main Stack Cfn artifacts"
 MAIN_TEMPLATE=lma-main.yaml
 
@@ -496,14 +349,12 @@ echo "   <ARTIFACT_BUCKET_TOKEN> with bucket name: $BUCKET"
 echo "   <ARTIFACT_PREFIX_TOKEN> with prefix: $PREFIX_AND_VERSION"
 echo "   <VERSION_TOKEN> with version: $VERSION"
 echo "   <REGION_TOKEN> with region: $REGION"
-echo "   <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN> with public: $BROWSER_EXTENSION_SRC_S3_LOCATION"
 echo "   <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN> with public: $VIRTUAL_PARTICIPANT_SRC_S3_LOCATION"
 cat ./$MAIN_TEMPLATE | 
 sed -e "s%<ARTIFACT_BUCKET_TOKEN>%$BUCKET%g" | 
 sed -e "s%<ARTIFACT_PREFIX_TOKEN>%$PREFIX_AND_VERSION%g" |
 sed -e "s%<VERSION_TOKEN>%$VERSION%g" |
 sed -e "s%<REGION_TOKEN>%$REGION%g" |
-sed -e "s%<BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>%$BROWSER_EXTENSION_SRC_S3_LOCATION%g" |
 sed -e "s%<VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>%$VIRTUAL_PARTICIPANT_SRC_S3_LOCATION%g" > $tmpdir/$MAIN_TEMPLATE
 # upload main template
 aws s3 cp $tmpdir/$MAIN_TEMPLATE s3://${BUCKET}/${PREFIX}/$MAIN_TEMPLATE || exit 1
@@ -531,6 +382,6 @@ fi
 echo "OUTPUTS"
 echo Template URL: $template
 echo CF Launch URL: https://${REGION}.console.aws.amazon.com/cloudformation/home?region=${REGION}#/stacks/create/review?templateURL=${template}\&stackName=LMA
-echo CLI Deploy: aws cloudformation deploy --region $REGION --template-file $tmpdir/$MAIN_TEMPLATE --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --stack-name LMA --parameter-overrides S3BucketName=\"\" AdminEmail='jdoe+admin@example.com' BedrockKnowledgeBaseId='xxxxxxxxxx'
+echo CLI Deploy: aws cloudformation deploy --region $REGION --template-file $tmpdir/$MAIN_TEMPLATE --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --stack-name LMA --parameter-overrides AdminEmail='jdoe+admin@example.com'
 echo Done
 exit 0

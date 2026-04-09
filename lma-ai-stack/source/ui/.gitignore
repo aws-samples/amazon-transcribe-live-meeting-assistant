@@ -45,10 +45,4 @@ amplifytools.xcconfig
 
 .env*
 
-public/lex-web-ui-loader-config.json
-public/lex-web-ui-loader.css
-public/lex-web-ui-loader.min.css 
-public/lex-web-ui-loader.min.js
-public/lex-web-ui.min.css
-public/lex-web-ui.min.js
 public/wav-worker.min.js 

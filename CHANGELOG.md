@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-09
+
+### Added
+- **STRANDS_BEDROCK_WITH_KB (Use Existing)** — new MeetingAssistService option to use an existing Bedrock Knowledge Base with the Strands agent
+- **Bedrock Guardrails for Strands agent** — `BedrockGuardrailId` and `BedrockGuardrailVersion` parameters to apply guardrails to the meeting assistant
+- Shared navigation component (`navigation-items.js`) — all layout navigation files now use a single source of truth for consistent nav items, ordering, Configuration section, and Deployment Info
+- Simli avatar integration for Virtual Participant animated lip-synced avatar as the VP's camera feed in meetings, driven by voice assistant audio output (Nova Sonic or ElevenLabs). Configure with Simli API Key and Face ID in CloudFormation parameters.
+- Wake phrase pre-connect optimization for voice assistant — detects wake phrase in partial (streaming) transcripts and pre-warms the voice agent connection (WebSocket for ElevenLabs, Bedrock session for Nova Sonic) in the background while the user is still speaking, eliminating 1-2 seconds of connection latency. Activation now triggers immediately when the Transcribe segment completes instead of waiting a fixed 3-second capture delay.
+- Compute-optimized EC2 instance types (c5, m5) for Virtual Participant — recommended for voice assistant + Simli avatar workloads requiring sustained CPU performance
+
+### Changed
+- **Consolidated on Strands Bedrock agent** — MeetingAssistService options simplified to `STRANDS_BEDROCK`, `STRANDS_BEDROCK_WITH_KB (Create)`, and `STRANDS_BEDROCK_WITH_KB (Use Existing)`
+- **CFT form reorganized** — VP Startup Optimization moved to 2nd position, Voice Assistant split into own group, MCP Server renamed to "LMA Hosted MCP Server", removed deprecated parameter groups
+- **Left nav Sources order** — Virtual Participant now listed first, Chrome Extension removed (VP → Stream Audio)
+- **Deprecated old models** — removed Claude 3.x from model selectors; only Claude 4+ and Nova models remain
+- Virtual Participant audio and avatar performance improvements — persistent audio playback stream (replaces per-chunk process spawning), WebSocket bridge for Simli avatar audio delivery (replaces CDP round-trips), and tuned PulseAudio buffering to eliminate audio glitches and lip-sync drift on smaller instances
+
+### Removed
+- **QnABot** — removed QNABOT nested stack, QnABot submodule (`.gitmodules`), all `qna_*` Lambda handlers, demo data files (`qna-ma-demo.jsonl`, `qna-ma-healthcare-demo.jsonl`), QnABot READMEs, QnABot build from `publish.sh`, and all QnABot-related CFT parameters/conditions/outputs
+- **Amazon Lex** — removed all Lex code paths from async_agent_assist_orchestrator, `lex_utils` Lambda layer, Lex env vars (`LEX_BOT_ID`, `IS_LEX_AGENT_ASSIST_ENABLED`), `IsLexAgentAssistEnabled` parameter, `TranscribeToLexLocaleId` mapping, Lex Web UI scripts and assets, `lex:RecognizeText` IAM permissions, AgentAssistBot Cognito Identity Pool and IAM roles
+- **Bedrock Agent stack** — removed BEDROCKAGENT nested stack and build
+- **Q Business** — removed all Q Business parameters, Lambda/IAM/DynamoDB/KMS resources from meetingassist-setup stack
+- **Healthcare domain** — removed `Domain` parameter and `IsHealthcareDomainSelected` condition
+- **OpenSearch Serverless** — removed from vector store allowed values (S3 Vectors only)
+- **S3 config parameters** — `S3BucketName`, `AudioFilePrefix`, `TranscriptFilePrefix` removed from CFT form (hardcoded to defaults)
+- **Vector store parameters** — removed from CFT form (hardcoded to `S3_VECTORS`)
+- **Chrome browser extension** — removed entire `lma-browser-extension-stack/` directory, `BROWSEREXTENSIONSTACK` nested stack, CodeBuild project, `ChromeExtensionDownloadUrl` output, extension packaging from `publish.sh`, "Download Chrome Extension" nav link, Chrome extension OAuth callback URL from Cognito, extension-related images, and all browser extension documentation sections from README. The Stream Audio tab and Virtual Participant are now the supported streaming options.
+
+### Fixed
+- Virtual Participant ECS task crash leaving meeting permanently stuck as "in progress" due to missing cleanup on uncaught transcription pipeline errors
+- Audio glitches and Simli avatar sync issues on smaller EC2 instances caused by CPU contention from process spawning overhead and aggressive PulseAudio buffering
+
 ## [0.2.30] - 2026-03-27
 
 ### Fixed

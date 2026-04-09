@@ -13,6 +13,7 @@ import { recordingService } from './recording.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { simliAvatar } from './simli-avatar.js';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
@@ -196,6 +197,18 @@ const main = async (): Promise<void> => {
     await new Promise(resolve => setTimeout(resolve, 2000));
     console.log('✓ Chrome launched with remote debugging on port 9222');
 
+    // Initialize Simli Avatar AFTER browser is launched (background page for avatar rendering)
+    if (simliAvatar.isSimliEnabled()) {
+        try {
+            console.log('Initializing Simli Avatar...');
+            await simliAvatar.initialize(browser);
+            console.log('✓ Simli Avatar initialized');
+        } catch (error) {
+            console.error('Failed to initialize Simli Avatar (non-critical):', error);
+            // Non-fatal - meeting can proceed without avatar
+        }
+    }
+
     // Initialize MCP command handler AFTER browser is launched
     if (statusManager && vpId) {
         try {
@@ -257,6 +270,64 @@ const main = async (): Promise<void> => {
     await page.setUserAgent(
         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
+
+    // Simli Avatar: Inject getUserMedia override and set up stream connection
+    // This must happen BEFORE the page navigates to the meeting URL
+    if (simliAvatar.isConnected()) {
+        try {
+            // 1. Grant camera+mic permissions at browser level for all meeting domains
+            const context = page.browser().defaultBrowserContext();
+            for (const domain of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com']) {
+                await context.overridePermissions(domain, ['camera', 'microphone']).catch(() => {});
+            }
+            console.log('✓ Camera and microphone permissions granted for meeting platforms');
+            
+            // 2. Inject getUserMedia/enumerateDevices/permissions overrides (evaluateOnNewDocument)
+            await simliAvatar.injectGetUserMediaOverride(page);
+            console.log('✓ Simli getUserMedia override injected into meeting page');
+            
+            // 3. Start background stream connection + polling (runs concurrently with meeting)
+            let isReconnecting = false;
+            const connectSimliStream = async () => {
+                try {
+                    await simliAvatar.connectStreamToMeetingPage(page);
+                    console.log('✓ Simli video stream connected to meeting page');
+                } catch (error) {
+                    console.error('Failed to connect Simli stream (non-critical):', error);
+                }
+            };
+            
+            // Poll for dead video track and re-connect when needed
+            const simliPollInterval = setInterval(async () => {
+                if (isReconnecting) return;
+                try {
+                    const needsReconnect = await page.evaluate(() => {
+                        // @ts-ignore
+                        if (!window.__simliOverrideInstalled) return true;
+                        // @ts-ignore
+                        const track = window.__simliCurrentTrack;
+                        if (!track) return true;
+                        return track.readyState !== 'live';
+                    }).catch(() => true);
+                    
+                    if (needsReconnect) {
+                        isReconnecting = true;
+                        console.log('Simli video track needs re-connection...');
+                        await connectSimliStream();
+                        isReconnecting = false;
+                    }
+                } catch (e) {
+                    isReconnecting = false;
+                }
+            }, 1000);
+            
+            // Initial connection (will be re-established by poll after page navigates)
+            await connectSimliStream();
+            
+        } catch (error) {
+            console.error('Failed to set up Simli avatar for meeting (non-critical):', error);
+        }
+    }
 
     let meeting: Chime | Zoom | Teams | Webex;
     let success = false;
@@ -372,6 +443,14 @@ const main = async (): Promise<void> => {
             }
         }
 
+        // Stop Simli Avatar
+        try {
+            await simliAvatar.stop();
+            console.log('✓ Simli Avatar stopped');
+        } catch (error) {
+            console.error('Error stopping Simli Avatar:', error);
+        }
+
         try {
             // Close browser
             await browser.close();
@@ -445,6 +524,13 @@ const signalHandler = async (signal: string) => {
         }
     }
     
+    // Stop Simli Avatar
+    try {
+        await simliAvatar.stop();
+    } catch (error) {
+        console.error('Error stopping Simli Avatar:', error);
+    }
+
     // Stop services
     try {
         await transcriptionService.stopTranscription();
@@ -463,29 +549,86 @@ const signalHandler = async (signal: string) => {
 process.on('SIGINT', () => signalHandler('SIGINT'));
 process.on('SIGTERM', () => signalHandler('SIGTERM'));
 
-// Handle uncaught exceptions - don't exit during cleanup to allow status update
-process.on('uncaughtException', (error: any) => {
+/**
+ * Emergency cleanup for uncaught exceptions and unhandled rejections.
+ * Ensures the meeting doesn't stay stuck as "in progress" in LMA when the
+ * ECS task crashes unexpectedly (e.g., ERR_STREAM_PREMATURE_CLOSE from
+ * transcription pipeline failures, expired Transcribe sessions, etc.).
+ * 
+ * This sends the END event to Kinesis (so the call_event_processor marks
+ * the meeting as ended) and updates the VP status to FAILED in DynamoDB.
+ */
+const emergencyCleanup = async (errorMessage: string): Promise<void> => {
+    // Set flag to prevent recursive cleanup if another exception fires during this
+    cleanupInProgress = true;
+    console.log('Performing emergency cleanup before exit...');
+
+    // Send END event to Kinesis so the meeting is marked as ended
+    try {
+        console.log('Emergency: Sending END meeting event to Kinesis...');
+        await sendEndMeeting();
+        console.log('Emergency: END meeting event sent successfully');
+    } catch (endError) {
+        console.error('Emergency: Failed to send END meeting event:', endError);
+    }
+
+    // Update VP status to FAILED so it doesn't show as in-progress
+    if (statusManager) {
+        try {
+            console.log('Emergency: Updating VP status to FAILED...');
+            await statusManager.setFailed(errorMessage);
+            console.log('Emergency: VP status updated to FAILED');
+        } catch (statusError) {
+            console.error('Emergency: Failed to update VP status:', statusError);
+        }
+
+        // Deregister from ALB target group
+        try {
+            await statusManager.deregisterFromTargetGroup();
+            console.log('Emergency: Deregistered from ALB target group');
+        } catch (albError) {
+            console.error('Emergency: Failed to deregister from ALB:', albError);
+        }
+    }
+
+    // Stop Strands warmup timer
+    if (strandsWarmupTimer) {
+        clearInterval(strandsWarmupTimer);
+        strandsWarmupTimer = null;
+    }
+
+    console.log('Emergency cleanup complete');
+};
+
+// Handle uncaught exceptions - always attempt cleanup before exiting
+process.on('uncaughtException', async (error: any) => {
     if (cleanupInProgress) {
         // During cleanup, log but don't exit - let the finally block complete
         console.error('Uncaught Exception during cleanup (non-fatal):', error.message || error);
     } else {
         console.error('Uncaught Exception:', error);
+        // Perform emergency cleanup before exiting to ensure meeting status is updated
+        // and the meeting doesn't stay stuck as "in progress" in LMA
+        await emergencyCleanup('Uncaught exception: ' + (error.message || error));
         process.exit(1);
     }
 });
 
-process.on('unhandledRejection', (reason: any, promise: any) => {
+process.on('unhandledRejection', async (reason: any, promise: any) => {
     if (cleanupInProgress) {
         // During cleanup, log but don't exit - let the finally block complete
         console.error('Unhandled Rejection during cleanup (non-fatal):', reason);
     } else {
         console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+        // Perform emergency cleanup before exiting to ensure meeting status is updated
+        await emergencyCleanup('Unhandled rejection: ' + (reason?.message || reason));
         process.exit(1);
     }
 });
 
 // Start the application
-main().catch((error) => {
+main().catch(async (error) => {
     console.error('Application failed to start:', error);
+    await emergencyCleanup('Application startup failed: ' + (error.message || error));
     process.exit(1);
 });
