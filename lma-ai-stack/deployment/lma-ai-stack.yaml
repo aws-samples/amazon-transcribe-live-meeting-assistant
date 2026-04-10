@@ -3982,10 +3982,9 @@ Resources:
     Properties:
       Name: MCPApiKeyAuth
       RestApiId: !Ref MCPApiKeyRestApi
-      Type: TOKEN
+      Type: REQUEST
       AuthorizerUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MCPApiKeyAuthorizerFunction.Arn}/invocations"
-      IdentitySource: method.request.header.x-api-key
-      AuthorizerResultTtlInSeconds: 300
+      AuthorizerResultTtlInSeconds: 0
 
   MCPApiKeyResource:
     Type: AWS::ApiGateway::Resource

@@ -20,8 +20,17 @@ TABLE_NAME = os.environ.get('MCP_API_KEYS_TABLE', '')
 
 def handler(event, context):
     logger.info(f"Authorizer event: {json.dumps(event)}")
-    token = event.get('authorizationToken', '')
     method_arn = event.get('methodArn', '')
+
+    # Support both x-api-key header and Authorization: Bearer <key>
+    token = event.get('authorizationToken', '')
+    if not token:
+        headers = event.get('headers', {})
+        token = headers.get('x-api-key', '') or headers.get('X-Api-Key', '')
+        if not token:
+            auth = headers.get('Authorization', '') or headers.get('authorization', '')
+            if auth.startswith('Bearer '):
+                token = auth[7:]
 
     if not token or not TABLE_NAME:
         return deny_policy(method_arn)

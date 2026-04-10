@@ -80,22 +80,50 @@ const MCPApiKeySection = () => {
 
   const hasKey = keys.length > 0;
 
+  const renderActions = () => (
+    <Button onClick={handleGenerate} loading={generating} disabled={hasKey || loading}>
+      Generate API Key
+    </Button>
+  );
+
+  const renderKeyList = () =>
+    keys.map((key) => (
+      <Box key={key.keyPrefix}>
+        <SpaceBetween direction="horizontal" size="s" alignItems="center">
+          <StatusIndicator type={key.enabled ? 'success' : 'stopped'}>
+            {key.keyPrefix}
+            ••••••••
+          </StatusIndicator>
+          <Box color="text-body-secondary" fontSize="body-s">
+            Created {new Date(key.createdAt).toLocaleDateString()}
+          </Box>
+          <Button variant="link" onClick={() => setShowRevokeConfirm(true)}>
+            Revoke
+          </Button>
+        </SpaceBetween>
+      </Box>
+    ));
+
+  const renderContent = () => {
+    if (loading) {
+      return <Spinner size="normal" />;
+    }
+    if (hasKey) {
+      return <SpaceBetween size="s">{renderKeyList()}</SpaceBetween>;
+    }
+    return (
+      <Box color="text-body-secondary">No API key generated. Click &quot;Generate API Key&quot; to create one.</Box>
+    );
+  };
+
   return (
     <>
       <Container
         header={
           <Header
             variant="h2"
-            description="Generate a personal API key to access the MCP server without OAuth. Use the x-api-key header with your requests."
-            actions={
-              <Button
-                onClick={handleGenerate}
-                loading={generating}
-                disabled={hasKey || loading}
-              >
-                Generate API Key
-              </Button>
-            }
+            description="Generate a personal API key for MCP server access via x-api-key header."
+            actions={renderActions()}
           >
             MCP API Key
           </Header>
@@ -108,55 +136,13 @@ const MCPApiKeySection = () => {
             </Alert>
           </Box>
         )}
-
-        {loading ? (
-          <Spinner size="normal" />
-        ) : hasKey ? (
-          <SpaceBetween size="s">
-            {keys.map((key) => (
-              <Box key={key.keyPrefix}>
-                <SpaceBetween direction="horizontal" size="s" alignItems="center">
-                  <StatusIndicator type={key.enabled ? 'success' : 'stopped'}>
-                    {key.keyPrefix}••••••••
-                  </StatusIndicator>
-                  <Box color="text-body-secondary" fontSize="body-s">
-                    Created {new Date(key.createdAt).toLocaleDateString()}
-                  </Box>
-                  <Button
-                    variant="link"
-                    onClick={() => setShowRevokeConfirm(true)}
-                  >
-                    Revoke
-                  </Button>
-                </SpaceBetween>
-              </Box>
-            ))}
-          </SpaceBetween>
-        ) : (
-          <Box color="text-body-secondary">
-            No API key generated. Click &quot;Generate API Key&quot; to create one.
-          </Box>
-        )}
+        {renderContent()}
       </Container>
 
-      {/* New key modal */}
       {newKey && (
-        <Modal
-          visible
-          onDismiss={() => setNewKey(null)}
-          header="API Key Generated"
-          footer={
-            <Box float="right">
-              <Button variant="primary" onClick={() => setNewKey(null)}>
-                Done
-              </Button>
-            </Box>
-          }
-        >
+        <Modal visible onDismiss={() => setNewKey(null)} header="API Key Generated">
           <SpaceBetween size="m">
-            <Alert type="warning">
-              Copy this key now. You won&apos;t be able to see it again.
-            </Alert>
+            <Alert type="warning">Copy this key now. You won&apos;t be able to see it again.</Alert>
             <CopyToClipboard
               copyButtonAriaLabel="Copy API key"
               copySuccessText="API key copied"
@@ -167,7 +153,6 @@ const MCPApiKeySection = () => {
         </Modal>
       )}
 
-      {/* Revoke confirmation modal */}
       <Modal
         visible={showRevokeConfirm}
         onDismiss={() => setShowRevokeConfirm(false)}
@@ -178,11 +163,7 @@ const MCPApiKeySection = () => {
               <Button variant="link" onClick={() => setShowRevokeConfirm(false)}>
                 Cancel
               </Button>
-              <Button
-                variant="primary"
-                loading={revoking}
-                onClick={() => handleRevoke(keys[0]?.keyPrefix)}
-              >
+              <Button variant="primary" loading={revoking} onClick={() => handleRevoke(keys[0]?.keyPrefix)}>
                 Revoke
               </Button>
             </SpaceBetween>

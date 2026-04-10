@@ -40,6 +40,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             username = authorizer.get('username', 'API Key User')
             is_admin = authorizer.get('isAdmin', 'false') == 'true'
             logger.info(f"API Gateway path - User: {username}, Admin: {is_admin}")
+
+            # Handle MCP JSON-RPC protocol messages
+            if 'jsonrpc' in tool_input and 'method' in tool_input:
+                return handle_mcp_jsonrpc(tool_input, user_id, username, is_admin)
         else:
             # BedrockAgentCore Gateway path
             request_context = event.get('requestContext', {})
@@ -163,6 +167,195 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error processing tool call: {e}", exc_info=True)
         return error_response(500, f"Internal error: {str(e)}")
+
+
+MCP_TOOLS = [
+    {
+        "name": "search_lma_meetings",
+        "description": "Search across all meeting transcripts and summaries using natural language queries",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Natural language search query"},
+                "startDate": {"type": "string", "description": "Optional ISO 8601 start date"},
+                "endDate": {"type": "string", "description": "Optional ISO 8601 end date"},
+                "maxResults": {"type": "number", "description": "Maximum results to return"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "get_meeting_transcript",
+        "description": "Retrieve the complete transcript for a specific meeting",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": {"type": "string", "description": "Meeting ID (CallId)"},
+                "format": {"type": "string", "description": "Output format (json, text, or srt)"},
+            },
+            "required": ["meetingId"],
+        },
+    },
+    {
+        "name": "get_meeting_summary",
+        "description": "Get AI-generated summary and action items for a meeting",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingId": {"type": "string", "description": "Meeting ID (CallId)"},
+                "includeActionItems": {"type": "boolean", "description": "Include action items"},
+                "includeTopics": {"type": "boolean", "description": "Include key topics"},
+            },
+            "required": ["meetingId"],
+        },
+    },
+    {
+        "name": "list_meetings",
+        "description": "List meetings with optional filters",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "startDate": {"type": "string", "description": "ISO 8601 start date"},
+                "endDate": {"type": "string", "description": "ISO 8601 end date"},
+                "participant": {"type": "string", "description": "Filter by participant name"},
+                "status": {"type": "string", "description": "Meeting status filter"},
+                "limit": {"type": "number", "description": "Maximum number of meetings to return"},
+            },
+        },
+    },
+    {
+        "name": "schedule_meeting",
+        "description": "Schedule a future meeting with virtual participant",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingName": {"type": "string", "description": "Name/title of the meeting"},
+                "meetingPlatform": {"type": "string", "description": "Platform (Zoom, Teams, Chime, Webex)"},
+                "meetingId": {"type": "string", "description": "Meeting ID (numeric ID only)"},
+                "scheduledTime": {"type": "string", "description": "ISO 8601 datetime"},
+                "meetingPassword": {"type": "string", "description": "Optional meeting password"},
+            },
+            "required": ["meetingName", "meetingPlatform", "meetingId", "scheduledTime"],
+        },
+    },
+    {
+        "name": "start_meeting_now",
+        "description": "Start a meeting immediately with virtual participant",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meetingName": {"type": "string", "description": "Name/title of the meeting"},
+                "meetingPlatform": {"type": "string", "description": "Platform (Zoom, Teams, Chime, Webex)"},
+                "meetingId": {"type": "string", "description": "Meeting ID (numeric ID only)"},
+                "meetingPassword": {"type": "string", "description": "Optional meeting password"},
+            },
+            "required": ["meetingName", "meetingPlatform", "meetingId"],
+        },
+    },
+]
+
+
+def handle_mcp_jsonrpc(msg, user_id, username, is_admin):
+    """Handle MCP JSON-RPC 2.0 protocol messages."""
+    method = msg.get('method')
+    msg_id = msg.get('id')
+    params = msg.get('params', {})
+
+    logger.info(f"MCP JSON-RPC method={method}, id={msg_id}")
+
+    if method == 'initialize':
+        return jsonrpc_response(msg_id, {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": "lma-mcp-server", "version": "0.2.30"},
+        })
+
+    if method == 'notifications/initialized':
+        # Client acknowledgment — no response needed for notifications
+        return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': ''}
+
+    if method == 'tools/list':
+        return jsonrpc_response(msg_id, {"tools": MCP_TOOLS})
+
+    if method == 'tools/call':
+        tool_name = params.get('name')
+        arguments = params.get('arguments', {})
+        return execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin)
+
+    if method == 'ping':
+        return jsonrpc_response(msg_id, {})
+
+    return jsonrpc_error(msg_id, -32601, f"Method not found: {method}")
+
+
+def execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin):
+    """Execute a tool call and return MCP JSON-RPC response."""
+    try:
+        if tool_name == 'search_lma_meetings':
+            result = search_meetings.execute(
+                query=arguments.get('query'), start_date=arguments.get('startDate'),
+                end_date=arguments.get('endDate'), max_results=arguments.get('maxResults', 10),
+                user_id=user_id, is_admin=is_admin)
+        elif tool_name == 'get_meeting_transcript':
+            result = get_transcript.execute(
+                meeting_id=arguments.get('meetingId'), format=arguments.get('format', 'text'),
+                user_id=user_id, is_admin=is_admin)
+        elif tool_name == 'get_meeting_summary':
+            result = get_summary.execute(
+                meeting_id=arguments.get('meetingId'),
+                include_action_items=arguments.get('includeActionItems', True),
+                include_topics=arguments.get('includeTopics', True),
+                user_id=user_id, is_admin=is_admin)
+        elif tool_name == 'list_meetings':
+            result = list_meetings.execute(
+                start_date=arguments.get('startDate'), end_date=arguments.get('endDate'),
+                participant=arguments.get('participant'), status=arguments.get('status', 'ALL'),
+                limit=arguments.get('limit', 20), user_id=user_id, is_admin=is_admin)
+        elif tool_name == 'schedule_meeting':
+            result = schedule_meeting.execute(
+                meeting_name=arguments.get('meetingName'),
+                meeting_platform=arguments.get('meetingPlatform'),
+                meeting_id=arguments.get('meetingId'),
+                scheduled_time=arguments.get('scheduledTime'),
+                meeting_password=arguments.get('meetingPassword'),
+                user_id=user_id, is_admin=is_admin)
+        elif tool_name == 'start_meeting_now':
+            result = start_meeting_now.execute(
+                meeting_name=arguments.get('meetingName'),
+                meeting_platform=arguments.get('meetingPlatform'),
+                meeting_id=arguments.get('meetingId'),
+                meeting_password=arguments.get('meetingPassword'),
+                user_id=user_id, is_admin=is_admin)
+        else:
+            return jsonrpc_error(msg_id, -32602, f"Unknown tool: {tool_name}")
+
+        return jsonrpc_response(msg_id, {
+            "content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}],
+        })
+    except Exception as e:
+        logger.error(f"Tool call error: {e}", exc_info=True)
+        return jsonrpc_response(msg_id, {
+            "content": [{"type": "text", "text": f"Error: {str(e)}"}],
+            "isError": True,
+        })
+
+
+def jsonrpc_response(msg_id, result):
+    """Format a JSON-RPC 2.0 success response."""
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": result}),
+    }
+
+
+def jsonrpc_error(msg_id, code, message):
+    """Format a JSON-RPC 2.0 error response."""
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps({"jsonrpc": "2.0", "id": msg_id, "error": {"code": code, "message": message}}),
+    }
 
 
 def success_response(result: Any) -> Dict[str, Any]:
