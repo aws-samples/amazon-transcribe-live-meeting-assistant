@@ -258,7 +258,7 @@ LMA presents result (voice or text)
 3. Start querying documentation in meetings
 
 ✅ **Nova Sonic Config Change (Optional):**
-For questions about LMA to work with Deepwiki, nova needs to format the query to the strans_agent tool correctly. Refer to docs/AWS_NOVA_SONIC_VOICE_ASSISTANT_SETUP.md for adding a custom Nova Sonic config. For the `promptMode` use inject and for the `systemPrompt` this something like this:
+For questions about LMA to work with Deepwiki, nova needs to format the query to the strans_agent tool correctly. Refer to [Nova Sonic 2 Setup](nova-sonic-setup.md) for adding a custom Nova Sonic config. For the `promptMode` use inject and for the `systemPrompt` this something like this:
 
 ```
 
