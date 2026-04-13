@@ -2426,6 +2426,10 @@ Outputs:
     Description: Cognito User Pool Client Id
     Value: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
 
+  LocalUITestingEnv:
+    Description: Copy to create .env file for local UI testing
+    Value: !GetAtt AISTACK.Outputs.LocalUITestingEnv
+
   OAuthCallbackUrl:
     Description: OAuth callback URL for MCP server authorization (use this in your OAuth provider configuration)
     Value: !GetAtt AISTACK.Outputs.OAuthCallbackUrl
