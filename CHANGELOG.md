@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 
+- **Root Makefile** — New developer-facing `Makefile` with `make help` for easy discovery. Key targets:
+  - `make setup` — sets up dev environment (nvm Node v20, Python `.venv` with lint tools)
+  - `make lint` / `make fastlint` — cfn-lint on all CloudFormation templates, pylint/flake8/black on Lambda functions, ESLint on UI
+  - `make format` — auto-format Python with black
+  - `make build` / `make build-ui` / `make build-websocket` / `make build-vp` — build all or individual stacks
+  - `make test` — run React UI tests
+  - `make ui-start STACK_NAME=<name>` — auto-generate `.env` from CloudFormation stack outputs and start local UI dev server
+  - `make publish BUCKET=<b> PREFIX=<p> REGION=<r>` — build and upload all artifacts to S3
+  - `make version V=x.y.z` — update VERSION file
+  - `make commit` / `make fastcommit` — lint, test, commit, and push
+  - `make clean` / `make clean-all` — clean build artifacts and node_modules
+- **LocalUITestingEnv output** — added to `lma-main.yaml` as passthrough from AI stack, enabling `make ui-start` to auto-configure `.env` for local UI development
+- **`.nvmrc`** — pins Node.js v20 for consistent development environments
 - **Documentation Overhaul** - Updated documents reflect new features and remove deprecated feature references. See ./docs.
 
   

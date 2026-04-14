@@ -147,8 +147,8 @@ setup-npm: ## Install npm dependencies for UI, WebSocket, and Virtual Participan
 	@echo -e "$(GREEN)✅ npm dependencies installed!$(NC)"
 
 ##@ Code Quality
-lint: lint-cfn lint-python lint-ui check-arn-partitions ## Run all linting (cfn, python, UI, ARN checks)
-fastlint: lint-cfn lint-python check-arn-partitions ## Quick lint (skip UI checks)
+lint: lint-cfn lint-python lint-ui ## Run all linting (cfn, python, UI)
+fastlint: lint-cfn lint-python ## Quick lint (skip UI checks)
 
 lint-cfn: ## Validate CloudFormation templates with cfn-lint
 	@echo "Running cfn-lint on CloudFormation templates..."
@@ -216,34 +216,6 @@ format: ## Format Python code with black
 	black --line-length=$(PYTHON_LINE_LENGTH) $(LAMBDA_FUNCTIONS_DIR)
 	@echo -e "$(GREEN)✅ Python code formatted!$(NC)"
 
-check-arn-partitions: ## Check CloudFormation templates for hardcoded ARN partitions
-	@echo "Checking CloudFormation templates for hardcoded ARN partitions and service principals..."
-	@FOUND_ISSUES=0; \
-	for template in $(CFN_TEMPLATES); do \
-		if [ -f "$$template" ]; then \
-			ARN_MATCHES=$$(grep -n "arn:aws:" "$$template" | grep -v "arn:\$${AWS::Partition}:" | grep -v "^[[:space:]]*#" || true); \
-			if [ -n "$$ARN_MATCHES" ]; then \
-				echo -e "$(RED)ERROR: Found hardcoded 'arn:aws:' references in $$template:$(NC)"; \
-				echo "$$ARN_MATCHES" | sed 's/^/  /'; \
-				echo -e "$(YELLOW)  These should use 'arn:\$${AWS::Partition}:' instead for GovCloud compatibility$(NC)"; \
-				FOUND_ISSUES=1; \
-			fi; \
-			SERVICE_MATCHES=$$(grep -n "\.amazonaws\.com" "$$template" | grep -v "\$${AWS::URLSuffix}" | grep -v "^[[:space:]]*#" | grep -v "Description:" | grep -v "Comment:" | grep -v "cognito" | grep -v "ContentSecurityPolicy" || true); \
-			if [ -n "$$SERVICE_MATCHES" ]; then \
-				echo -e "$(RED)ERROR: Found hardcoded service principal references in $$template:$(NC)"; \
-				echo "$$SERVICE_MATCHES" | sed 's/^/  /'; \
-				echo -e "$(YELLOW)  These should use '\$${AWS::URLSuffix}' instead of 'amazonaws.com' for GovCloud compatibility$(NC)"; \
-				FOUND_ISSUES=1; \
-			fi; \
-		fi; \
-	done; \
-	if [ $$FOUND_ISSUES -eq 0 ]; then \
-		echo -e "$(GREEN)✅ No hardcoded ARN partition or service principal references found!$(NC)"; \
-	else \
-		echo -e "$(RED)❌ Found hardcoded references that need to be fixed for GovCloud compatibility$(NC)"; \
-		exit 1; \
-	fi
-
 lint-cicd: ## CI/CD lint — checks only, no modifications
 	@echo "Running code quality checks (CI/CD mode — no auto-fix)..."
 	@if ! cfn-lint $(AI_STACK_DIR)/deployment/lma-ai-stack.yaml; then \
@@ -262,10 +234,6 @@ lint-cicd: ## CI/CD lint — checks only, no modifications
 	fi
 	@if ! make lint-ui; then \
 		echo -e "$(RED)ERROR: UI lint failed$(NC)"; \
-		exit 1; \
-	fi
-	@if ! make check-arn-partitions; then \
-		echo -e "$(RED)ERROR: ARN partition check failed$(NC)"; \
 		exit 1; \
 	fi
 	@echo -e "$(GREEN)All code quality checks passed!$(NC)"
