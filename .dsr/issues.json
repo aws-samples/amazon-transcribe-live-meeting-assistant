@@ -1897,7 +1897,7 @@
     "check_id": "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected",
     "priority": "LOW",
     "references": "https://cwe.mitre.org/data/definitions/939.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Semgrep",
@@ -2078,7 +2078,7 @@
     "check_id": "B310",
     "priority": "Medium",
     "references": "https://bandit.readthedocs.io/en/1.8.6/blacklists/blacklist_calls.html#b310-urllib-urlopen",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -2089,7 +2089,7 @@
     "check_id": "B113",
     "priority": "Medium",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b113_request_without_timeout.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -2100,7 +2100,7 @@
     "check_id": "B113",
     "priority": "Medium",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b113_request_without_timeout.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -2111,7 +2111,7 @@
     "check_id": "B113",
     "priority": "Medium",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b113_request_without_timeout.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -2122,7 +2122,7 @@
     "check_id": "B113",
     "priority": "Medium",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b113_request_without_timeout.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -3473,5 +3473,70 @@
     "resourceType": "Lambda Function",
     "resourceName": "VirtualParticipantSchedulerFunction",
     "isCustomResource": false
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-ai-stack/source/lambda_functions/edge_auth_deployer/index.py",
+    "line": 46,
+    "issue": "Detected a dynamic value being used with urllib. urllib supports 'file://' schemes, so a dynamic value controlled by a malicious actor may allow them to read arbitrary files. Audit uses of urllib calls to ensure user data cannot control the URLs, or consider using the 'requests' library instead.",
+    "check_id": "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected",
+    "priority": "LOW",
+    "references": "https://cwe.mitre.org/data/definitions/939.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lma-ai-stack/source/lambda_functions/edge_auth_deployer/index.py",
+    "line": 46,
+    "issue": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+    "fix": "Replace `urllib.urlopen()` with `urllib.request.urlopen()` and implement proper URL validation. Validate URLs against allowed protocols and domains.",
+    "check_id": "B310",
+    "priority": "Medium",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/blacklists/blacklist_calls.html#b310-urllib-urlopen",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lma-ai-stack/source/lambda_functions/mcp_analytics/tools/schedule_meeting.py",
+    "line": 132,
+    "issue": "Call to requests without timeout",
+    "fix": "Add timeout parameters to HTTP requests. Use `timeout=(connection_timeout, read_timeout)` to prevent indefinite blocking and potential denial of service.",
+    "check_id": "B113",
+    "priority": "Medium",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b113_request_without_timeout.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lma-ai-stack/source/lambda_functions/mcp_analytics/tools/start_meeting_now.py",
+    "line": 110,
+    "issue": "Call to requests without timeout",
+    "fix": "Add timeout parameters to HTTP requests. Use `timeout=(connection_timeout, read_timeout)` to prevent indefinite blocking and potential denial of service.",
+    "check_id": "B113",
+    "priority": "Medium",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b113_request_without_timeout.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lma-ai-stack/source/lambda_functions/oauth_manager/index.py",
+    "line": 197,
+    "issue": "Call to requests without timeout",
+    "fix": "Add timeout parameters to HTTP requests. Use `timeout=(connection_timeout, read_timeout)` to prevent indefinite blocking and potential denial of service.",
+    "check_id": "B113",
+    "priority": "Medium",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b113_request_without_timeout.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lma-ai-stack/source/lambda_functions/oauth_manager/index.py",
+    "line": 211,
+    "issue": "Call to requests without timeout",
+    "fix": "Add timeout parameters to HTTP requests. Use `timeout=(connection_timeout, read_timeout)` to prevent indefinite blocking and potential denial of service.",
+    "check_id": "B113",
+    "priority": "Medium",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b113_request_without_timeout.html",
+    "status": "Open"
   }
 ]
