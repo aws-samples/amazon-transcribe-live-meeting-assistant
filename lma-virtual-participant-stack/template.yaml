@@ -1148,9 +1148,12 @@ Resources:
             reason: Function does not require VPC access as it only interacts with AWS services via APIs
           - id: W92
             reason: Function does not require reserved concurrency as it scales based on demand
+          - id: LAMBDA-011
+            reason: CloudWatch alarms are an observability preference, not a security requirement
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # LAMBDA-011: CloudWatch alarms are an observability preference, not a security requirement
     Properties:
       Handler: index.handler
       Role: !GetAtt ASGDeletionHandlerRole.Arn
@@ -1295,6 +1298,7 @@ Resources:
 
   TaskDefinition:
     Type: "AWS::ECS::TaskDefinition"
+    # checkov:skip=ECS-002: RECORDINGS_KEY_PREFIX is a naming prefix for S3 objects, not sensitive data
     Properties:
       ContainerDefinitions:
         - Memory: !If [UseEC2LaunchType, 3500, !Ref AWS::NoValue]

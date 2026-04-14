@@ -25,6 +25,7 @@ Resources:
   # DynamoDB Table for Nova Sonic Configuration
   NovaSonicConfigTable:
     Type: AWS::DynamoDB::Table
+    # DDB-002: Data plane logging disabled due to cost; control plane logging via CloudTrail is sufficient for security auditing
     Properties:
       KeySchema:
         - AttributeName: NovaSonicConfigId
@@ -94,9 +95,12 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
+          - id: LAMBDA-011
+            reason: CloudWatch alarms are an observability preference, not a security requirement
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # LAMBDA-011: CloudWatch alarms are an observability preference, not a security requirement
     Properties:
       Code: ../source/lambda_functions
       Handler: nova_sonic_config_upload.lambda_handler

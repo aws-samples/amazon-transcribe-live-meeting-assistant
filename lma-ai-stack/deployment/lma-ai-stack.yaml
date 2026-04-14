@@ -5105,6 +5105,8 @@ Resources:
   # HTTP Listener (port 80)
   VNCALBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    # checkov:skip=CKV_AWS_103: ALB uses HTTP for internal traffic; TLS termination handled at CloudFront layer with Lambda@Edge auth
+    # checkov:skip=CKV_AWS_2: ALB uses HTTP for internal traffic; TLS termination handled at CloudFront layer with Lambda@Edge auth; ALB security group restricts traffic to CloudFront only
     Properties:
       LoadBalancerArn: !Ref VNCALB
       Port: 80

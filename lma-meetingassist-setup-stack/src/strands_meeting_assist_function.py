@@ -1777,7 +1777,7 @@ def handler(event, context):
                     send_chat_token_to_appsync(
                         call_id=call_id,
                         message_id=message_id,
-                        token='',
+                        token='',  # nosec B106 - Empty string is not a hardcoded password, it's a completion marker
                         is_complete=True,
                         sequence=sequence
                     )
