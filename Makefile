@@ -261,7 +261,7 @@ test: test-ui ## Run all tests
 
 test-ui: ## Run React UI tests
 	@echo "Running UI tests..."
-	cd $(UI_DIR) && CI=true npm test -- --watchAll=false
+	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --watchAll=false
 	@echo -e "$(GREEN)✅ UI tests passed!$(NC)"
 
 ##@ UI Development
