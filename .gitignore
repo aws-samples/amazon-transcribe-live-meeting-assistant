@@ -18,12 +18,17 @@ samconfig.toml
 !.dsr/issues.json
 !.dsr/settings.json
 
+# Node
+node_modules/
+.nvmrc
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+.venv/
 
 # Deprecated QnABot submodule (removed)
 submodule-aws-qnabot/

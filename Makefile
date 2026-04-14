@@ -75,10 +75,32 @@ help: ## Show this help message
 .DEFAULT_GOAL := all
 all: lint ## Run all linting (default)
 
+# Required Node.js version (major) - must match .nvmrc
+NODE_VERSION := 20
+
 ##@ Setup
-setup: setup-python setup-npm ## Set up everything (Python venv + npm deps)
+setup: setup-node setup-python ## Set up dev environment (Node version, Python venv)
 	@echo ""
 	@echo -e "$(GREEN)✅ Full setup complete!$(NC)"
+
+setup-node: ## Ensure correct Node.js version via nvm (installs if needed)
+	@CURRENT=$$(node -v 2>/dev/null | sed 's/v\([0-9]*\).*/\1/'); \
+	if [ "$$CURRENT" = "$(NODE_VERSION)" ]; then \
+		echo -e "$(GREEN)✅ Node.js v$$(node -v) already active$(NC)"; \
+	else \
+		echo "Current Node.js: v$${CURRENT:-not found} (need v$(NODE_VERSION))"; \
+		if [ -s "$$HOME/.nvm/nvm.sh" ]; then \
+			echo "Using nvm to switch to Node $(NODE_VERSION)..."; \
+			source "$$HOME/.nvm/nvm.sh" && nvm install $(NODE_VERSION) && nvm use $(NODE_VERSION); \
+			echo -e "$(GREEN)✅ Switched to Node.js $$(node -v)$(NC)"; \
+			echo -e "$(YELLOW)   Run 'nvm use $(NODE_VERSION)' in your shell, or add to .zshrc/.bashrc$(NC)"; \
+		else \
+			echo -e "$(RED)ERROR: Node.js v$(NODE_VERSION).x is required but v$${CURRENT:-none} is active.$(NC)"; \
+			echo -e "$(YELLOW)   Install nvm: https://github.com/nvm-sh/nvm$(NC)"; \
+			echo -e "$(YELLOW)   Then run: nvm install $(NODE_VERSION) && nvm use $(NODE_VERSION)$(NC)"; \
+			exit 1; \
+		fi; \
+	fi
 
 setup-python: ## Create .venv and install Python dev/lint dependencies
 	@if [ ! -f "$(VENV_DIR)/bin/python" ]; then \
@@ -323,13 +345,6 @@ endif
 	else \
 		bash publish.sh $(BUCKET) $(PREFIX) $(REGION); \
 	fi
-
-deploy-ai-stack: ## Deploy AI stack via SAM (requires CONFIG_ENV)
-ifndef CONFIG_ENV
-	$(error CONFIG_ENV is not set. Set in environment or lma-ai-stack/config.mk)
-endif
-	@echo "Deploying AI stack with CONFIG_ENV=$(CONFIG_ENV)..."
-	$(MAKE) -C $(AI_STACK_DIR) deploy
 
 ##@ Version Management
 # Usage: make version V=0.3.1
