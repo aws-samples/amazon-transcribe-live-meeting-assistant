@@ -156,7 +156,9 @@ lint-cfn: ## Validate CloudFormation templates with cfn-lint
 	for template in $(CFN_TEMPLATES); do \
 		if [ -f "$$template" ]; then \
 			echo "  Checking $$template..."; \
-			if ! cfn-lint "$$template" 2>/dev/null; then \
+			if ! cfn-lint --non-zero-exit-code error "$$template" > /dev/null 2>&1; then \
+				echo -e "$(RED)  FAIL: $$template$(NC)"; \
+				cfn-lint --non-zero-exit-code error "$$template"; \
 				FAILED=1; \
 			fi; \
 		else \
@@ -170,24 +172,11 @@ lint-cfn: ## Validate CloudFormation templates with cfn-lint
 		exit 1; \
 	fi
 
-lint-python: ## Lint Python Lambda functions (pylint, flake8, black --check)
-	@echo "Running Python linters on Lambda functions..."
-	@FAILED=0; \
-	echo "--- pylint ---"; \
-	for dir in $(LAMBDA_FUNCTION_DIRS); do \
-		echo "  pylint: $$dir"; \
-		pylint --max-line-length=$(PYTHON_LINE_LENGTH) --rcfile=$(AI_STACK_DIR)/.pylintrc "$$dir" || FAILED=1; \
-	done; \
-	echo "--- flake8 ---"; \
-	flake8 --max-line-length=$(PYTHON_LINE_LENGTH) --config=$(AI_STACK_DIR)/.flake8 $(LAMBDA_FUNCTIONS_DIR) || FAILED=1; \
-	echo "--- black (check) ---"; \
-	black --check --diff --line-length=$(PYTHON_LINE_LENGTH) $(LAMBDA_FUNCTIONS_DIR) || FAILED=1; \
-	if [ $$FAILED -eq 0 ]; then \
-		echo -e "$(GREEN)✅ All Python linting passed!$(NC)"; \
-	else \
-		echo -e "$(RED)❌ Python linting errors found$(NC)"; \
-		exit 1; \
-	fi
+lint-python: ## Lint Python Lambda functions with ruff
+	@echo "Running ruff on Lambda functions..."
+	cd $(AI_STACK_DIR) && ruff check --fix $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)
+	cd $(AI_STACK_DIR) && ruff format $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)
+	@echo -e "$(GREEN)✅ All Python linting passed!$(NC)"
 
 lint-bandit: ## Run bandit security scan on Python Lambda functions
 	@echo "Running bandit security scan..."
@@ -211,23 +200,23 @@ lint-typescript: ## TypeScript build check on WebSocket and Virtual Participant 
 	@cd $(VP_BACKEND_DIR) && npm ci --prefer-offline --no-audit 2>/dev/null && npm run build
 	@echo -e "$(GREEN)✅ All TypeScript builds succeeded!$(NC)"
 
-format: ## Format Python code with black
-	@echo "Formatting Python Lambda functions with black..."
-	black --line-length=$(PYTHON_LINE_LENGTH) $(LAMBDA_FUNCTIONS_DIR)
+format: ## Format Python code with ruff
+	@echo "Formatting Python Lambda functions with ruff..."
+	cd $(AI_STACK_DIR) && ruff format $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)
 	@echo -e "$(GREEN)✅ Python code formatted!$(NC)"
 
 lint-cicd: ## CI/CD lint — checks only, no modifications
 	@echo "Running code quality checks (CI/CD mode — no auto-fix)..."
-	@if ! cfn-lint $(AI_STACK_DIR)/deployment/lma-ai-stack.yaml; then \
+	@if ! cfn-lint --non-zero-exit-code error $(AI_STACK_DIR)/deployment/lma-ai-stack.yaml; then \
 		echo -e "$(RED)ERROR: cfn-lint failed!$(NC)"; \
 		exit 1; \
 	fi
-	@if ! flake8 --max-line-length=$(PYTHON_LINE_LENGTH) --config=$(AI_STACK_DIR)/.flake8 $(LAMBDA_FUNCTIONS_DIR); then \
-		echo -e "$(RED)ERROR: flake8 failed!$(NC)"; \
-		echo -e "$(YELLOW)Run 'make lint-python' locally to see details.$(NC)"; \
+	@if ! (cd $(AI_STACK_DIR) && ruff check $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)); then \
+		echo -e "$(RED)ERROR: Ruff linting failed!$(NC)"; \
+		echo -e "$(YELLOW)Run 'make lint-python' locally to fix these issues.$(NC)"; \
 		exit 1; \
 	fi
-	@if ! black --check --line-length=$(PYTHON_LINE_LENGTH) $(LAMBDA_FUNCTIONS_DIR); then \
+	@if ! (cd $(AI_STACK_DIR) && ruff format --check $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)); then \
 		echo -e "$(RED)ERROR: Code formatting check failed!$(NC)"; \
 		echo -e "$(YELLOW)Run 'make format' locally to fix these issues.$(NC)"; \
 		exit 1; \

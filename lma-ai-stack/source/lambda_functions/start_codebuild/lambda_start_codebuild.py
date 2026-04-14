@@ -3,13 +3,13 @@
 # See the LICENSE file in the project root for full license information.
 
 """CodeBuild Starter Lambda Function"""
+
 import logging
 from os import getenv
 
 import boto3
 from botocore.config import Config as BotoCoreConfig
 from crhelper import CfnResource
-
 
 LOGGER = logging.getLogger(__name__)
 LOG_LEVEL = getenv("LOG_LEVEL", "DEBUG")

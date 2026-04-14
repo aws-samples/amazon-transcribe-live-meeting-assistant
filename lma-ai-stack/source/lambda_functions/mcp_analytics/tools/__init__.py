@@ -7,14 +7,6 @@ MCP Analytics Tools Package
 Implements 4 core tools for LMA meeting data access
 """
 
-from . import search_meetings
-from . import get_transcript
-from . import get_summary
-from . import list_meetings
+from . import get_summary, get_transcript, list_meetings, search_meetings
 
-__all__ = [
-    'search_meetings',
-    'get_transcript',
-    'get_summary',
-    'list_meetings'
-]
+__all__ = ["search_meetings", "get_transcript", "get_summary", "list_meetings"]

@@ -256,10 +256,6 @@ Conditions:
     Fn::Equals:
       - Ref: pChunkingStrategy
       - Default chunking
-  IsChunkingStrategyNoChunking:
-    Fn::Equals:
-      - Ref: pChunkingStrategy
-      - No chunking
   IsChunkingStrategyFixedOrDefault:
     Fn::Or:
       - Condition: IsChunkingStrategyFixed
@@ -393,7 +389,6 @@ Resources:
     Condition: UseS3Vectors
     DependsOn:
       - S3VectorBucket
-      - S3VectorBucketName
     Properties:
       VectorBucketName: !If
         - HasS3VectorBucketName
@@ -568,8 +563,6 @@ Resources:
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    DependsOn:
-      - OSSSetupLambdaFunctionRole
     Properties:
       Handler: oss_handler.lambda_handler
       MemorySize: 1024
@@ -673,7 +666,6 @@ Resources:
     Type: AWS::CloudFormation::CustomResource
     Condition: UseOpenSearchServerless
     DependsOn:
-      - OSSIndexCustomResourceFunction
       - OSSDataAccessPolicy
     Properties:
       ServiceToken: !GetAtt OSSIndexCustomResourceFunction.Arn
@@ -804,8 +796,6 @@ Resources:
   KnowledgeBaseS3Vectors:
     Type: AWS::Bedrock::KnowledgeBase
     Condition: UseS3Vectors
-    DependsOn:
-      - S3VectorIndex
     Properties:
       Name: !Sub "${AWS::StackName}-S3Vectors"
       Description: "LMA Bedrock Knowledge Base with S3 Vectors"
@@ -834,8 +824,6 @@ Resources:
   S3KBDataSource:
     Type: AWS::Bedrock::DataSource
     Condition: IsS3DataSource
-    DependsOn:
-      - KnowledgeBaseIdParameter
     Properties:
       DataDeletionPolicy: DELETE
       DataSourceConfiguration:
@@ -859,28 +847,15 @@ Resources:
               - FIXED_SIZE
               - NONE
           FixedSizeChunkingConfiguration:
-            MaxTokens:
-              Fn::If:
-                - IsChunkingStrategyFixed
-                - Ref: pMaxTokens
-                - Fn::If:
-                    - IsChunkingStrategyDefault
-                    - 300
-                    - Ref: AWS::NoValue
-            OverlapPercentage:
-              Fn::If:
-                - IsChunkingStrategyFixed
-                - Ref: pOverlapPercentage
-                - Fn::If:
-                    - IsChunkingStrategyDefault
-                    - 20
-                    - Ref: AWS::NoValue
+            Fn::If:
+              - IsChunkingStrategyFixedOrDefault
+              - MaxTokens: !If [IsChunkingStrategyFixed, !Ref pMaxTokens, 300]
+                OverlapPercentage: !If [IsChunkingStrategyFixed, !Ref pOverlapPercentage, 20]
+              - !Ref AWS::NoValue
 
   WebKBDataSource:
     Type: AWS::Bedrock::DataSource
     Condition: ShouldCreateWebDataSource
-    DependsOn:
-      - KnowledgeBaseIdParameter
     Properties:
       DataDeletionPolicy: DELETE
       DataSourceConfiguration:
@@ -907,22 +882,11 @@ Resources:
               - FIXED_SIZE
               - NONE
           FixedSizeChunkingConfiguration:
-            MaxTokens:
-              Fn::If:
-                - IsChunkingStrategyFixed
-                - Ref: pMaxTokens
-                - Fn::If:
-                    - IsChunkingStrategyDefault
-                    - 300
-                    - Ref: AWS::NoValue
-            OverlapPercentage:
-              Fn::If:
-                - IsChunkingStrategyFixed
-                - Ref: pOverlapPercentage
-                - Fn::If:
-                    - IsChunkingStrategyDefault
-                    - 20
-                    - Ref: AWS::NoValue
+            Fn::If:
+              - IsChunkingStrategyFixedOrDefault
+              - MaxTokens: !If [IsChunkingStrategyFixed, !Ref pMaxTokens, 300]
+                OverlapPercentage: !If [IsChunkingStrategyFixed, !Ref pOverlapPercentage, 20]
+              - !Ref AWS::NoValue
 
   # Start sync jobs for datasources
   StartIngestionJobFunctionRole:
