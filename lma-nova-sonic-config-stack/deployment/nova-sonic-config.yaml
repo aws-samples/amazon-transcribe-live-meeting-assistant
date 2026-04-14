@@ -119,7 +119,7 @@ Resources:
       ServiceToken: !GetAtt NovaSonicConfigUploadFunction.Arn
       NovaSonicConfigTableName: !Ref NovaSonicConfigTable
       # hash below is updated by publish.sh script - used to force template updates when source has changed.
-      source_hash: 6c210dd58686aa4e
+      source_hash: 9f246647272285a9
 
 Outputs:
   NovaSonicConfigTableName:
