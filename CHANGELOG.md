@@ -20,8 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `make version V=x.y.z` — update VERSION file
   - `make commit` / `make fastcommit` — lint, test, commit, and push
   - `make clean` / `make clean-all` — clean build artifacts and node_modules
+
 - **LocalUITestingEnv output** — added to `lma-main.yaml` as passthrough from AI stack, enabling `make ui-start` to auto-configure `.env` for local UI development
 - **`.nvmrc`** — pins Node.js v20 for consistent development environments
+
 - **Documentation Overhaul** - Updated documents reflect new features and remove deprecated feature references. See ./docs.
 
   
