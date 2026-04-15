@@ -127,6 +127,7 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 		flake8 \
 		mypy \
 		pylint \
+		virtualenv \
 		yamllint \
 		boto3-stubs[comprehend,codebuild,dynamodb,lambda,lexv2-runtime,s3,sqs,sns]
 	@echo ""
