@@ -590,6 +590,7 @@ Parameters:
 
   VPC:
     Type: String
+    Default: ""
     Description: >-
       ID of the VPC to use for the solution. Required if UseExistingVPC is true. DO NOT CHANGE VALUE WHEN 
       UPDATING AN EXISTING STACK.
@@ -597,6 +598,7 @@ Parameters:
 
   PublicSubnet1:
     Type: String
+    Default: ""
     Description: >-
       ID of the public subnet in Availability Zone 1. Required if UseExistingVPC is
       true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
@@ -604,6 +606,7 @@ Parameters:
 
   PublicSubnet2:
     Type: String
+    Default: ""
     Description: >-
       ID of the public subnet in Availability Zone 2. Required if UseExistingVPC is
       true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
@@ -611,6 +614,7 @@ Parameters:
 
   PrivateSubnet1:
     Type: String
+    Default: ""
     Description: >-
       ID of the private subnet in Availability Zone 1. Required if UseExistingVPC is
       true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.
@@ -618,6 +622,7 @@ Parameters:
 
   PrivateSubnet2:
     Type: String
+    Default: ""
     Description: >-
       ID of the private subnet in Availability Zone 2. Required if UseExistingVPC is
       true. DO NOT CHANGE VALUE WHEN UPDATING AN EXISTING STACK.

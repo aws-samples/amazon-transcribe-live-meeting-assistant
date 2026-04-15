@@ -1,0 +1,3 @@
+[console_scripts]
+lma = lma_cli.entry:safe_main
+lma-cli = lma_cli.entry:safe_main

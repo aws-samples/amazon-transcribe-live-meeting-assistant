@@ -19,6 +19,22 @@ This guide covers how to update an existing LMA stack to a new version or change
 
 ## Update Steps
 
+### Using LMA CLI (Recommended)
+
+The simplest way to update your stack:
+
+```bash
+# Update from the latest published template for your region
+lma-cli deploy --stack-name LMA --wait
+
+# Or update from local code changes
+lma-cli deploy --stack-name LMA --from-code . --wait
+```
+
+The CLI auto-selects the correct template for your region and streams deployment events in real-time.
+
+### Using AWS Console
+
 1. Log into the AWS Console.
 2. Navigate to **CloudFormation** and select your LMA stack.
 3. Choose **Update** and then **Replace current template**.
@@ -36,7 +52,18 @@ This guide covers how to update an existing LMA stack to a new version or change
 
 ## Building from Source
 
-If you are building from source, use the template URL provided in the output of `publish.sh` instead of the URLs listed above.
+If you are building from source, use `lma-cli deploy --from-code .` to build and deploy in one step, or use `lma-cli publish` to build first and then deploy with the resulting template URL.
+
+```bash
+# Build and deploy in one step
+lma-cli deploy --stack-name LMA --from-code . --wait
+
+# Or publish first, then deploy separately
+lma-cli publish --source-dir . --region us-east-1
+lma-cli deploy --stack-name LMA --template-url <url-from-publish-output> --wait
+```
+
+The legacy `publish.sh` script is also still available — use its template URL output with `lma-cli deploy --template-url <url>`.
 
 ## What Is Preserved Across Updates
 

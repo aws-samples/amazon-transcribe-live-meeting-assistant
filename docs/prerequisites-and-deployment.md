@@ -80,6 +80,19 @@ You can find the Knowledge Base ID in the Amazon Bedrock console under **Knowled
 
 ## Deploy the CloudFormation Stack
 
+### Option 1: Using LMA CLI (Recommended)
+
+Install the CLI and deploy in one command:
+
+```bash
+pip install -e lib/lma_sdk lib/lma_cli_pkg
+lma-cli deploy --stack-name LMA --admin-email user@example.com --wait
+```
+
+The CLI auto-selects the correct template for your region and streams deployment events in real-time. See the [LMA CLI Reference](lma-cli.md) for all options.
+
+### Option 2: Using AWS Console
+
 Launch the LMA stack in one of the supported AWS regions using the buttons below:
 
 | Region | Launch Stack |
