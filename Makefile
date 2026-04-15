@@ -318,24 +318,20 @@ endif
 	@echo -e "$(YELLOW)   Current version: $$(cat $(VERSION_FILE))$(NC)"
 
 ##@ Git Workflow
-commit: lint test ## Lint, test, then commit and push
-	@echo "Committing changes..."
+commit: lint test ## Lint, test, auto-generate commit message, commit, and push
+	@echo "Generating commit message via Bedrock..."
 	@git add . && \
-	CHANGES=$$(git diff --cached --stat | tail -1) && \
-	BRANCH=$$(git rev-parse --abbrev-ref HEAD) && \
-	COMMIT_MSG="[$$(cat $(VERSION_FILE))] $$BRANCH: $$CHANGES" && \
-	echo "Commit message: $$COMMIT_MSG" && \
-	git commit -m "$$COMMIT_MSG" && \
+	COMMIT_MESSAGE=$$(bash scripts/generate_commit_message.sh) && \
+	echo "Commit message: $$COMMIT_MESSAGE" && \
+	git commit -m "$$COMMIT_MESSAGE" && \
 	git push
 
-fastcommit: fastlint ## Fast lint only, then commit and push
-	@echo "Committing changes (fast)..."
+fastcommit: ## Auto-generate commit message, commit, and push (no linting)
+	@echo "Generating commit message via Bedrock..."
 	@git add . && \
-	CHANGES=$$(git diff --cached --stat | tail -1) && \
-	BRANCH=$$(git rev-parse --abbrev-ref HEAD) && \
-	COMMIT_MSG="[$$(cat $(VERSION_FILE))] $$BRANCH: $$CHANGES" && \
-	echo "Commit message: $$COMMIT_MSG" && \
-	git commit -m "$$COMMIT_MSG" && \
+	COMMIT_MESSAGE=$$(bash scripts/generate_commit_message.sh) && \
+	echo "Commit message: $$COMMIT_MESSAGE" && \
+	git commit -m "$$COMMIT_MESSAGE" && \
 	git push
 
 ##@ Clean
