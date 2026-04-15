@@ -2,93 +2,118 @@
 
 ## Overview
 
-LMA's MCP server currently uses 3LO (three-legged OAuth) via Cognito for authentication. This works well for interactive clients like Amazon Quick Suite and Claude Desktop, but is cumbersome for headless/programmatic MCP clients that just need a simple API key.
+LMA's MCP server supports two authentication methods, both deployed automatically when MCP is enabled:
 
-This design adds per-user API key authentication as a second endpoint deployed alongside the existing Cognito 3LO gateway whenever MCP is enabled. Users generate their own API keys from the LMA UI settings page.
+1. **3LO (OAuth)** via Cognito + BedrockAgentCore Gateway — for interactive clients like Amazon Quick Suite and Claude Desktop
+2. **API Key** via REST API Gateway + Lambda authorizer — for headless/programmatic MCP clients, or Quick Suite via bearer token
 
-## Current Architecture
+Users generate personal API keys from the LMA UI (MCP Servers Configuration page). The API key endpoint speaks the full MCP JSON-RPC 2.0 protocol (streamable HTTP), so standard MCP clients can connect directly.
 
-- `MCPServerAnalyticsFunction` Lambda implements the MCP tools (search, transcript, summary, list, schedule, start meeting)
-- `AWS::BedrockAgentCore::Gateway` with `AuthorizerType: CUSTOM_JWT` handles auth via Cognito
-- Cognito `MCPServerExternalAppClient` provides OAuth authorization code flow
-- User identity (for UBAC) comes from JWT claims in the gateway event
-- Key files:
-  - `lma-ai-stack/deployment/lma-ai-stack.yaml` — all MCP resources (gateway, Lambda, Cognito client)
-  - `lma-main.yaml` — top-level parameters and outputs
-  - `lma-ai-stack/source/lambda_functions/mcp_analytics/index.py` — MCP tools Lambda
-- Existing condition: `ShouldEnableMCPServer` / `ShouldEnableMCP` gates all MCP resources
-- BedrockAgentCore Gateway does NOT support API key auth natively (only `CUSTOM_JWT`, `AWS_IAM`, `NONE`)
-
-## Design
-
-### Approach
-
-Deploy a separate REST API Gateway with a Lambda authorizer alongside the existing BedrockAgentCore Gateway. Both invoke the same `MCPServerAnalyticsFunction`. Per-user API keys are stored (hashed) in DynamoDB and managed via AppSync mutations from the UI.
-
-### Request Flow
+## Architecture
 
 ```
-MCP client sends request with x-api-key header
-  → REST API Gateway
-  → Lambda Authorizer (MCPApiKeyAuthorizerFunction)
-    → SHA-256 hashes the key
-    → Looks up hash in DynamoDB (MCPApiKeysTable)
-    → Finds userId, username, isAdmin
-    → Returns IAM allow policy + userId/username/isAdmin in context
-  → MCPServerAnalyticsFunction
-    → Extracts userId from requestContext.authorizer
-    → UBAC works as normal
+┌─────────────────────────────────────────────────────────────┐
+│                     MCP Clients                             │
+│  (Quick Suite, Claude Desktop, curl, custom clients)        │
+└──────────┬──────────────────────────┬───────────────────────┘
+           │ OAuth (3LO)              │ API Key (Bearer / x-api-key)
+           ▼                          ▼
+┌─────────────────────┐   ┌──────────────────────────────┐
+│ BedrockAgentCore    │   │ REST API Gateway             │
+│ Gateway (CUSTOM_JWT)│   │ (REQUEST authorizer)         │
+└─────────┬───────────┘   └──────────┬───────────────────┘
+          │                          │
+          │                ┌─────────▼──────────────┐
+          │                │ MCPApiKeyAuthorizer     │
+          │                │ Lambda                  │
+          │                │ - Checks Authorization: │
+          │                │   Bearer or x-api-key   │
+          │                │ - SHA-256 hash → DynamoDB│
+          │                │ - Returns user context   │
+          │                └─────────┬───────────────┘
+          │                          │
+          ▼                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                MCPServerAnalyticsFunction                    │
+│  - BedrockAgentCore path: raw tool input from gateway       │
+│  - API Gateway path: full MCP JSON-RPC 2.0 protocol         │
+│    (initialize, tools/list, tools/call, ping)               │
+│  - UBAC enforced on both paths                              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Key Generation Flow
+## Request Flow (API Key Path)
 
 ```
-User clicks "Generate API Key" in LMA UI settings
+MCP client connects to REST API Gateway endpoint
+  → POST with Authorization: Bearer <key> (or x-api-key: <key>)
+  → REQUEST authorizer Lambda invoked (no IdentitySource — always invoked)
+    → Extracts token from Authorization header (strips "Bearer ") or x-api-key header
+    → SHA-256 hashes the token
+    → Looks up hash in MCPApiKeysTable (DynamoDB)
+    → Returns IAM Allow policy + { userId, username, isAdmin } in context
+  → MCPServerAnalyticsFunction receives API Gateway proxy event
+    → Detects JSON-RPC 2.0 message (jsonrpc + method fields in body)
+    → Routes to MCP protocol handler:
+      - initialize → returns server capabilities + protocolVersion
+      - notifications/initialized → empty 200 acknowledgment
+      - tools/list → returns 6 tool definitions with inputSchema
+      - tools/call → routes to tool implementation, returns MCP result
+      - ping → returns empty result
+    → User context from authorizer enforces UBAC on tool calls
+```
+
+## Key Generation Flow
+
+```
+User clicks "Generate API Key" on MCP Servers Configuration page
   → AppSync mutation: generateMCPApiKey
   → MCPApiKeyManagerFunction Lambda
-    → Generates key: "lma_" + uuid4 (e.g. lma_a1b2c3d4-e5f6-7890-abcd-ef1234567890)
+    → Verifies user doesn't already have a key (queries UserIdIndex GSI)
+    → Generates key: "lma_" + uuid4
     → SHA-256 hashes the key
-    → Stores in DynamoDB: { KeyHash (PK), UserId, Username, IsAdmin, CreatedAt, KeyPrefix }
-    → KeyPrefix = first 8 chars (e.g. "lma_a1b2") for display/identification in UI
-    → Returns plaintext key to user (only time it's ever shown)
+    → Stores in DynamoDB: { KeyHash (PK), UserId, Username, IsAdmin, CreatedAt, KeyPrefix, Enabled }
+    → Returns plaintext key to user (shown once in modal with copy-to-clipboard)
 ```
 
-### Key Design Decisions
+## Files
 
-- **Hash keys, don't store plaintext** — if DynamoDB is compromised, keys aren't usable
-- **DynamoDB over Secrets Manager** — SM costs $0.40/secret/month and has 500k limit per account. DynamoDB is essentially free at this scale and supports the hash-lookup pattern
-- **One key per user** (simplest starting point, can expand to multiple later)
-- **Key format**: `lma_` prefix + UUID for easy identification
-- **KeyPrefix stored** for UI display so users can identify their key without seeing the full value
-- **Both endpoints always deployed** when MCP is enabled (no separate toggle — API key is less secure but useful, and the 3LO endpoint is always there for clients that support it)
+| File | Purpose |
+|------|---------|
+| `lma-ai-stack/deployment/lma-ai-stack.yaml` | All CF resources: MCPApiKeysTable, MCPApiKeyAuthorizerFunction, MCPApiKeyManagerFunction, MCPApiKeyRestApi (REQUEST authorizer, no IdentitySource), AppSync data source + 3 resolvers, MCPServerApiKeyEndpoint output |
+| `lma-main.yaml` | MCPServerApiKeyEndpoint output (pass-through from nested stack) |
+| `lma-ai-stack/source/appsync/schema.graphql` | MCPApiKey type, GenerateMCPApiKeyOutput type, generateMCPApiKey/revokeMCPApiKey mutations, listMCPApiKeys query |
+| `lma-ai-stack/source/lambda_functions/mcp_api_key_authorizer/index.py` | REQUEST authorizer — accepts both `Authorization: Bearer` and `x-api-key` headers, hashes token, DynamoDB lookup, returns IAM policy + user context |
+| `lma-ai-stack/source/lambda_functions/mcp_api_key_manager/index.py` | AppSync resolver — generate/list/revoke per-user API keys, one key per user enforced |
+| `lma-ai-stack/source/lambda_functions/mcp_analytics/index.py` | MCP JSON-RPC 2.0 protocol handler (initialize, tools/list, tools/call, ping) for API Gateway path; BedrockAgentCore path unchanged |
+| `lma-ai-stack/source/ui/src/graphql/mutations.js` | generateMCPApiKey, revokeMCPApiKey, listMCPApiKeys GraphQL operations |
+| `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPApiKeySection.jsx` | Cloudscape UI component for key management |
+| `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPServersPage.jsx` | Integrated MCPApiKeySection at top of page |
+| `utilities/test-mcp-api-key.sh` | End-to-end test script for the API key endpoint |
+| `docs/MCP_API_KEY_AUTH.md` | This document |
 
-## Implementation Status
+## MCP Protocol Support
 
-All backend changes are implemented. UI changes are a separate effort.
+The API key endpoint implements the MCP streamable HTTP transport (JSON-RPC 2.0 over HTTP POST). Supported methods:
 
-### Files Modified
+| Method | Description |
+|--------|-------------|
+| `initialize` | Returns server info (name: `lma-mcp-server`) and capabilities |
+| `notifications/initialized` | Client acknowledgment, returns empty 200 |
+| `tools/list` | Returns all 6 tool definitions with inputSchema |
+| `tools/call` | Executes a tool by name with arguments, returns MCP content result |
+| `ping` | Health check, returns empty result |
 
-| File | Change |
-|------|--------|
-| `lma-ai-stack/deployment/lma-ai-stack.yaml` | Added MCPApiKeysTable, MCPApiKeyAuthorizerFunction, MCPApiKeyManagerFunction, MCPApiKeyRestApi (REST API Gateway with TOKEN authorizer), AppSync data source + 3 resolvers, MCPServerApiKeyEndpoint output |
-| `lma-main.yaml` | Added MCPServerApiKeyEndpoint output |
-| `lma-ai-stack/source/appsync/schema.graphql` | Added MCPApiKey type, GenerateMCPApiKeyOutput type, generateMCPApiKey/revokeMCPApiKey mutations, listMCPApiKeys query |
-| `lma-ai-stack/source/lambda_functions/mcp_api_key_authorizer/index.py` | New — hashes x-api-key, looks up in DynamoDB, returns IAM policy + user context |
-| `lma-ai-stack/source/lambda_functions/mcp_api_key_manager/index.py` | New — generate/list/revoke per-user API keys via AppSync |
-| `lma-ai-stack/source/lambda_functions/mcp_analytics/index.py` | Updated — detects API Gateway proxy events, extracts user context from Lambda authorizer |
-| `lma-ai-stack/source/ui/src/graphql/mutations.js` | Added generateMCPApiKey, revokeMCPApiKey, listMCPApiKeys GraphQL operations |
-| `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPApiKeySection.jsx` | New — API key generate/revoke/list UI component |
-| `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPServersPage.jsx` | Updated — integrated MCPApiKeySection at top of page |
+### Tools Exposed
 
-### UI
-
-Added to the MCP Servers Configuration page (accessible to all authenticated users):
-
-- **MCP API Key** container section at the top of the page
-- Shows current key prefix + masked suffix + created date if a key exists
-- "Generate API Key" button (disabled if key already exists)
-- Generated key shown in a modal with CopyToClipboard and a warning it won't be shown again
-- "Revoke" button with confirmation modal
+| Tool | Description |
+|------|-------------|
+| `search_lma_meetings` | Search transcripts/summaries with natural language |
+| `get_meeting_transcript` | Get full transcript (json, text, or srt format) |
+| `get_meeting_summary` | Get AI summary with action items and topics |
+| `list_meetings` | List meetings with date/participant/status filters |
+| `schedule_meeting` | Schedule a future meeting with virtual participant |
+| `start_meeting_now` | Start a meeting immediately with virtual participant |
 
 ## DynamoDB Table Schema
 
@@ -97,33 +122,59 @@ Added to the MCP Servers Configuration page (accessible to all authenticated use
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `KeyHash` | S (PK) | SHA-256 hash of the API key |
-| `UserId` | S | Cognito user sub |
+| `UserId` | S | Cognito username |
 | `Username` | S | Cognito username/email |
-| `IsAdmin` | S | "true" or "false" |
-| `KeyPrefix` | S | First 8 chars of key for display |
+| `IsAdmin` | S | `"true"` or `"false"` |
+| `KeyPrefix` | S | First 12 chars of key (e.g. `lma_a1b2c3d4`) for UI display |
 | `CreatedAt` | S | ISO 8601 timestamp |
-| `Enabled` | S | "true" or "false" |
+| `Enabled` | S | `"true"` or `"false"` |
 
-**GSI: `UserIdIndex`**
-- Partition key: `UserId`
-- Projects all attributes
-- Used by: list keys for a user, check if user already has a key
+**GSI: `UserIdIndex`** — Partition key: `UserId`, projects all attributes. Used for listing a user's keys and enforcing one-key-per-user.
+
+## API Gateway Authorizer Details
+
+- **Type**: `REQUEST` (not TOKEN) — receives all headers, no IdentitySource filter
+- **TTL**: 0 (no caching — since the identity source varies between headers)
+- **Token extraction order**: `authorizationToken` (TOKEN mode compat) → `headers.x-api-key` → `headers.Authorization` (strips `Bearer ` prefix)
+- **On success**: returns IAM Allow policy with `context: { userId, username, isAdmin }`
+- **On failure**: returns IAM Deny policy
+
+## UI
+
+Located on the **MCP Servers Configuration** page (`/configuration/mcp-servers`):
+
+- **MCP API Key** container at the top of the page
+- Shows key prefix with masked suffix + creation date if a key exists
+- "Generate API Key" button (disabled when a key already exists)
+- Generated key shown in a modal with CopyToClipboard and warning it won't be shown again
+- "Revoke" button with confirmation modal
+- Currently on the admin-only Configuration page; consider making accessible to all users
 
 ## Security Considerations
 
 - API keys are less secure than 3LO — no token expiration, no refresh rotation
-- Keys are hashed (SHA-256) at rest — compromise of DynamoDB doesn't expose usable keys
+- Keys are SHA-256 hashed at rest — DynamoDB compromise doesn't expose usable keys
 - Users can only manage their own keys (enforced by AppSync identity context)
-- API Gateway throttling limits abuse (50 burst, 100 sustained requests/sec)
-- Keys can be revoked immediately by the user or an admin
-- The `lma_` prefix makes keys identifiable if leaked in logs
+- API Gateway throttling: 50 burst, 100 sustained requests/sec
+- Keys can be revoked immediately by the user
+- `lma_` prefix makes keys identifiable if leaked in logs
+- REQUEST authorizer with no IdentitySource means every request invokes the authorizer Lambda (no bypass via missing headers)
 
-## Implementation Order
+## Testing
 
-All items implemented:
+```bash
+# Run the end-to-end test
+./utilities/test-mcp-api-key.sh <your-api-key> [api-gateway-url]
 
-1. ✅ CloudFormation: DynamoDB table, authorizer Lambda, REST API Gateway, permissions
-2. ✅ CloudFormation: API key manager Lambda, AppSync schema/resolvers
-3. ✅ Lambda code: authorizer, key manager, update mcp_analytics
-4. ✅ Outputs: API key endpoint URL in both templates
-5. ✅ UI: MCP API Key section on MCP Servers Configuration page
+# Tests: initialize (Bearer), initialize (x-api-key), tools/list,
+#        tools/call (list_meetings), ping, bad key rejection
+```
+
+## Connecting from Quick Suite
+
+Add as a remote MCP server in Quick Suite:
+- **Transport**: SSE/HTTP
+- **URL**: The `MCPServerApiKeyEndpoint` stack output (e.g. `https://xxx.execute-api.us-west-2.amazonaws.com/mcp`)
+- **Token**: Your LMA API key (e.g. `lma_a1b2c3d4-e5f6-7890-abcd-ef1234567890`)
+
+Quick Suite sends `Authorization: Bearer <key>` on all requests via `streamablehttp_client`.
