@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 
+- **Documentation Overhaul** - Updated documents reflect new features and remove deprecated feature references. See ./docs.
+
 - **Root Makefile** — New developer-facing `Makefile` with `make help` for easy discovery. Key targets:
   - `make setup` — sets up dev environment (nvm Node v20, Python `.venv` with lint tools)
   - `make lint` / `make fastlint` — cfn-lint on all CloudFormation templates, pylint/flake8/black on Lambda functions, ESLint on UI
@@ -26,7 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Documentation Overhaul** - Updated documents reflect new features and remove deprecated feature references. See ./docs.
 
+- **LocalUITestingEnv output** — added to `lma-main.yaml` as passthrough from AI stack, enabling `make ui-start` to auto-configure `.env` for local UI development
   
+- **`.nvmrc`** — pins Node.js v20 for consistent development environments
+
+## Changed
+
+- **Bedrock Model Updates** — Removed deprecated Claude Sonnet 4 (`us.anthropic.claude-sonnet-4-20250514-v1:0`, `global.anthropic.claude-sonnet-4-20250514-v1:0`) from AllowedValues in response to Anthropic's deprecation notice (Legacy July 14, 2026; EOL October 14, 2026). Added Claude Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`, `global.anthropic.claude-sonnet-4-6`), Claude Opus 4.6 (`us.anthropic.claude-opus-4-6-v1`, `global.anthropic.claude-opus-4-6-v1`), and `us.amazon.nova-2-lite-v1:0` as new model options. Default model (`global.anthropic.claude-haiku-4-5-20251001-v1:0`) is unchanged.
 
 ## [0.3.0] - 2026-04-09
 
