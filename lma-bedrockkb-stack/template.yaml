@@ -796,6 +796,14 @@ Resources:
   KnowledgeBaseS3Vectors:
     Type: AWS::Bedrock::KnowledgeBase
     Condition: UseS3Vectors
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - E3002  # S3_VECTORS / S3VectorsConfiguration not yet in cfn-lint schema
+            - E3003  # Required properties for other storage types (not applicable)
+            - E3018  # Schema validation for new storage type
+            - E3030  # Enum validation for new storage type
     Properties:
       Name: !Sub "${AWS::StackName}-S3Vectors"
       Description: "LMA Bedrock Knowledge Base with S3 Vectors"

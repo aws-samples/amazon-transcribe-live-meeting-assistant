@@ -49,7 +49,7 @@ CFN_TEMPLATES := \
 	lma-nova-sonic-config-stack/deployment/nova-sonic-config.yaml \
 	$(VP_DIR)/template.yaml \
 	lma-vpc-stack/template.yaml \
-	$(WEBSOCKET_DIR)/deployment/lma-websocket-stack.yaml
+	$(WEBSOCKET_DIR)/deployment/lma-websocket-transcriber.yaml
 
 # Discover Python Lambda function directories (those with .py files)
 LAMBDA_FUNCTION_DIRS := $(sort $(dir $(wildcard $(LAMBDA_FUNCTIONS_DIR)/*/*.py)))
@@ -79,7 +79,7 @@ all: lint ## Run all linting (default)
 NODE_VERSION := 20
 
 ##@ Setup
-setup: setup-node setup-python ## Set up dev environment (Node version, Python venv)
+setup: setup-node setup-python setup-cli-dev ## Set up dev environment (Node version, Python venv, CLI)
 	@echo ""
 	@echo -e "$(GREEN)✅ Full setup complete!$(NC)"
 
@@ -135,6 +135,20 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 	@echo -e "$(YELLOW)   All 'make' targets will automatically use $(VENV_DIR)/bin/python.$(NC)"
 	@echo -e "$(YELLOW)   To activate manually: source $(VENV_DIR)/bin/activate$(NC)"
 
+setup-cli: ## Install LMA SDK and CLI packages into current Python environment
+	@echo "Installing LMA SDK..."
+	$(PIP) install -e lib/lma_sdk
+	@echo "Installing LMA CLI..."
+	$(PIP) install -e lib/lma_cli_pkg
+	@echo -e "$(GREEN)✅ LMA SDK and CLI installed! Run 'lma --help' to get started.$(NC)"
+
+setup-cli-dev: ## Install LMA SDK and CLI with dev/test dependencies
+	@echo "Installing LMA SDK with dev dependencies..."
+	$(PIP) install -e "lib/lma_sdk[dev]"
+	@echo "Installing LMA CLI with dev dependencies..."
+	$(PIP) install -e "lib/lma_cli_pkg[dev]"
+	@echo -e "$(GREEN)✅ LMA SDK and CLI (with test deps) installed!$(NC)"
+
 setup-npm: ## Install npm dependencies for UI, WebSocket, and Virtual Participant
 	@echo "Installing UI npm dependencies..."
 	cd $(UI_DIR) && npm ci --prefer-offline --no-audit
@@ -189,10 +203,20 @@ lint-mypy: ## Run mypy type checking on Python Lambda functions
 	mypy --config-file $(AI_STACK_DIR)/mypy.ini $(LAMBDA_FUNCTIONS_DIR)
 	@echo -e "$(GREEN)✅ mypy type checks passed!$(NC)"
 
-lint-ui: ## Lint React UI (ESLint)
-	@echo "Running UI lint..."
-	@cd $(UI_DIR) && npm ci --prefer-offline --no-audit 2>/dev/null && npm run lint
-	@echo -e "$(GREEN)✅ UI lint passed!$(NC)"
+# Checksum file for UI lint change detection
+UI_LINT_CHECKSUM_FILE := .ui-lint-checksum
+
+lint-ui: ## Lint React UI (ESLint, skips if source unchanged)
+	@NEW_CHECKSUM=$$(find $(UI_DIR)/src -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}'); \
+	OLD_CHECKSUM=$$(cat $(UI_LINT_CHECKSUM_FILE) 2>/dev/null || echo ""); \
+	if [ "$$NEW_CHECKSUM" = "$$OLD_CHECKSUM" ]; then \
+		echo -e "$(GREEN)✅ UI lint skipped — source unchanged since last run$(NC)"; \
+	else \
+		echo "Running UI lint..."; \
+		cd $(UI_DIR) && npm ci --prefer-offline --no-audit 2>/dev/null && npm run lint && \
+		echo "$$NEW_CHECKSUM" > $(CURDIR)/$(UI_LINT_CHECKSUM_FILE) && \
+		echo -e "$(GREEN)✅ UI lint passed!$(NC)"; \
+	fi
 
 lint-typescript: ## TypeScript build check on WebSocket and Virtual Participant stacks
 	@echo "Running TypeScript build check on WebSocket transcriber..."
@@ -247,11 +271,37 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui ## Run all tests
+test: test-ui test-sdk test-cli ## Run all tests
 
-test-ui: ## Run React UI tests
-	@echo "Running UI tests..."
+test-sdk: ## Run LMA SDK unit tests
+	@echo "Running LMA SDK tests..."
+	cd lib/lma_sdk && $(PYTHON) -m pytest tests/ -v
+	@echo -e "$(GREEN)✅ LMA SDK tests passed!$(NC)"
+
+test-cli: ## Run LMA CLI unit tests
+	@echo "Running LMA CLI tests..."
+	cd lib/lma_cli_pkg && $(PYTHON) -m pytest tests/ -v
+	@echo -e "$(GREEN)✅ LMA CLI tests passed!$(NC)"
+
+# Checksum file for UI test change detection
+UI_TEST_CHECKSUM_FILE := .ui-test-checksum
+
+test-ui: ## Run React UI tests (skips if source unchanged)
+	@NEW_CHECKSUM=$$(find $(UI_DIR)/src $(UI_DIR)/public -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}'); \
+	OLD_CHECKSUM=$$(cat $(UI_TEST_CHECKSUM_FILE) 2>/dev/null || echo ""); \
+	if [ "$$NEW_CHECKSUM" = "$$OLD_CHECKSUM" ]; then \
+		echo -e "$(GREEN)✅ UI tests skipped — source unchanged since last run$(NC)"; \
+	else \
+		echo "Running UI tests..."; \
+		cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --watchAll=false && \
+		echo "$$NEW_CHECKSUM" > $(CURDIR)/$(UI_TEST_CHECKSUM_FILE) && \
+		echo -e "$(GREEN)✅ UI tests passed!$(NC)"; \
+	fi
+
+test-ui-force: ## Run React UI tests (ignore checksum, always run)
+	@echo "Running UI tests (forced)..."
 	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --watchAll=false
+	@find $(UI_DIR)/src $(UI_DIR)/public -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}' > $(UI_TEST_CHECKSUM_FILE)
 	@echo -e "$(GREEN)✅ UI tests passed!$(NC)"
 
 ##@ UI Development
@@ -307,16 +357,27 @@ endif
 ##@ Version Management
 # Usage: make version V=0.3.1
 .PHONY: version
-version: ## Update version in VERSION file (Usage: make version V=x.y.z)
+version: ## Update version everywhere (Usage: make version V=x.y.z)
 ifndef V
 	$(error VERSION is not set. Usage: make version V=x.y.z)
 endif
 	@echo "$(V)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+' || \
 		(echo -e "$(RED)ERROR: '$(V)' is not a valid version. Use format: x.y.z$(NC)" && exit 1)
 	@echo "Updating version to $(V)..."
+	@# Root VERSION file
 	@echo "$(V)" > $(VERSION_FILE)
-	@echo -e "$(GREEN)✅ Version updated to $(V) in $(VERSION_FILE)$(NC)"
-	@echo -e "$(YELLOW)   Current version: $$(cat $(VERSION_FILE))$(NC)"
+	@echo "  $(VERSION_FILE)"
+	@# LMA SDK
+	@sed -i.bak 's/^version = ".*"/version = "$(V)"/' lib/lma_sdk/pyproject.toml && rm -f lib/lma_sdk/pyproject.toml.bak
+	@echo "  lib/lma_sdk/pyproject.toml"
+	@sed -i.bak 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/lma_sdk/lma_sdk/__init__.py && rm -f lib/lma_sdk/lma_sdk/__init__.py.bak
+	@echo "  lib/lma_sdk/lma_sdk/__init__.py"
+	@# LMA CLI
+	@sed -i.bak 's/^version = ".*"/version = "$(V)"/' lib/lma_cli_pkg/pyproject.toml && rm -f lib/lma_cli_pkg/pyproject.toml.bak
+	@echo "  lib/lma_cli_pkg/pyproject.toml"
+	@sed -i.bak 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/lma_cli_pkg/lma_cli/__init__.py && rm -f lib/lma_cli_pkg/lma_cli/__init__.py.bak
+	@echo "  lib/lma_cli_pkg/lma_cli/__init__.py"
+	@echo -e "$(GREEN)✅ Version updated to $(V) in all locations$(NC)"
 
 ##@ Git Workflow
 commit: lint test ## Lint, test, auto-generate commit message, commit, and push
@@ -344,6 +405,8 @@ clean: ## Clean all build artifacts
 	-rm -rf $(VP_DIR)/build $(VP_DIR)/dist
 	-rm -rf $(VP_BACKEND_DIR)/build $(VP_BACKEND_DIR)/dist
 	-rm -rf $(VENV_DIR)
+	-rm -f $(UI_TEST_CHECKSUM_FILE)
+	-rm -f $(UI_LINT_CHECKSUM_FILE)
 	@echo -e "$(GREEN)✅ Clean complete!$(NC)"
 
 clean-node: ## Clean all node_modules directories

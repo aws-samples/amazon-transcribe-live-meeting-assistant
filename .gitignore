@@ -12,6 +12,8 @@
 samconfig.toml
 .checksum
 .commit-hash
+.ui-test-checksum
+.ui-lint-checksum
 
 # DSR
 .dsr/

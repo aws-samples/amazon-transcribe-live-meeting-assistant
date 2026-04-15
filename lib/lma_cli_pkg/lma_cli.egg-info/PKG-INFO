@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: lma-cli
+Version: 0.3.1.dev4
+Summary: CLI for AWS Live Meeting Assistant (LMA)
+Author: Amazon Web Services
+License: MIT
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: lma-sdk>=0.3.0
+Requires-Dist: click>=8.1.0
+Requires-Dist: rich>=13.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0; extra == "dev"

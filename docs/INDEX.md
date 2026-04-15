@@ -63,4 +63,6 @@
 
 ### Development
 
-- [Developer Guide](developer-guide.md) — Building from source, publish.sh, local UI development, contributing
+- [Developer Guide](developer-guide.md) — Building from source, LMA CLI, local UI development, contributing
+- [LMA CLI Reference](lma-cli.md) — Command-line interface for deploy, publish, status, logs, and more
+- [LMA SDK Reference](lma-sdk.md) — Python SDK for programmatic LMA operations
