@@ -55,19 +55,6 @@ def main(ctx, region, profile, stack_name, verbose):
     """LMA CLI — AWS Live Meeting Assistant command-line interface.
 
     \b
-    Developer Commands:
-      publish       Build and upload artifacts to S3
-      deploy        Deploy/update the CloudFormation stack
-      status        Show stack status
-      outputs       Show stack outputs
-      delete        Delete the stack
-      logs          View CloudWatch logs
-
-    \b
-    Utility Commands:
-      check-prereqs  Verify publish prerequisites
-
-    \b
     Environment Variables:
       LMA_STACK_NAME      Default stack name (default: LMA)
       AWS_DEFAULT_REGION   AWS region
