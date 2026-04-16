@@ -45,8 +45,7 @@ ln -s "../../../images" "$CONTENT_ROOT/images"
 echo "   ✅ Linked images directory for relative paths"
 
 # Step 3: Symlink lma-ai-stack/images/ into src/content/lma-ai-stack/images/
-# (for ../lma-ai-stack/images/ relative paths in docs)
-# Only symlink the images subdirectory — NOT the whole lma-ai-stack (which contains UI source)
+# (for ../lma-ai-stack/images/ relative paths in docs — Astro resolves images from content dir)
 echo ""
 echo "🔗 Setting up lma-ai-stack/images symlink for cross-directory image references..."
 mkdir -p "$CONTENT_ROOT/lma-ai-stack"
