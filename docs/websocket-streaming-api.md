@@ -707,6 +707,18 @@ npx ts-node src/index.ts wss://<endpoint>/api/v1/ws --wavfile sample.wav
 - `BYTES_PER_SAMPLE` — Bytes per sample (default: `2`)
 - `CHUNK_SIZE_IN_MS` — Chunk duration in ms (default: `200`)
 
+### Browser Extension
+
+**Location:** `lma-browser-extension-stack/`
+
+A Chrome extension that captures browser tab audio and microphone input, mixes them into a stereo stream, and sends it over WebSocket. Demonstrates:
+- Query-string authentication (browser WebSocket limitation)
+- AudioWorklet-based audio capture at 16 kHz
+- Float32 to Int16 PCM conversion
+- Stereo interleaving (tab audio on channel 0, microphone on channel 1)
+- SPEAKER_CHANGE messages based on meeting provider participant detection
+- Mute/pause functionality
+
 ---
 
 ## 12. Server Configuration Reference
