@@ -1,3 +1,7 @@
+---
+title: "Troubleshooting"
+---
+
 # Troubleshooting
 
 ## Table of Contents

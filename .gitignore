@@ -12,6 +12,8 @@
 samconfig.toml
 .checksum
 .commit-hash
+.ui-test-checksum
+.ui-lint-checksum
 
 # DSR
 .dsr/
@@ -33,9 +35,14 @@ __pycache__/
 # Deprecated QnABot submodule (removed)
 submodule-aws-qnabot/
 
-# Deprecated browser extension (removed)
-lma-browser-extension-stack/
-
 # VP testing generated .env.local
 lma-virtual-participant-stack/backend/.env.local
 lma-virtual-participant-stack/backend/dist/
+
+# Docs site build output and generated symlinks (created by setup.sh)
+docs-site/dist/
+docs-site/src/content/docs/
+!docs-site/src/content/docs/index.mdx
+docs-site/src/content/images
+docs-site/src/content/lma-ai-stack/
+docs-site/public/images

@@ -1,3 +1,7 @@
+---
+title: "Simli Avatar Setup Guide"
+---
+
 # Simli Avatar Setup Guide
 
 ## Overview

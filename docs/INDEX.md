@@ -1,3 +1,7 @@
+---
+title: "LMA Documentation"
+---
+
 # LMA Documentation
 
 **Live Meeting Assistant (LMA) v0.3.0** — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation built on Amazon Transcribe, Amazon Bedrock, and the Strands Agents SDK.
@@ -47,6 +51,7 @@
 
 - [User-Based Access Control](user-based-access-control.md) — Admin vs non-admin users, meeting sharing, meeting deletion
 - [Infrastructure & Security](infrastructure-and-security.md) — Architecture overview, VPC, Cognito, KMS encryption, CloudFront, IAM, data retention
+- [CloudFormation Service Role](cloudformation-service-role.md) — Delegated IAM role for non-admin LMA deployment and management
 
 ### Integration & API
 
@@ -63,4 +68,6 @@
 
 ### Development
 
-- [Developer Guide](developer-guide.md) — Building from source, publish.sh, local UI development, contributing
+- [Developer Guide](developer-guide.md) — Building from source, LMA CLI, local UI development, contributing
+- [LMA CLI Reference](lma-cli.md) — Command-line interface for deploy, publish, status, logs, and more
+- [LMA SDK Reference](lma-sdk.md) — Python SDK for programmatic LMA operations

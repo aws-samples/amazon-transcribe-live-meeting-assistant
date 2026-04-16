@@ -1,3 +1,7 @@
+---
+title: "Transcript Summarization"
+---
+
 # Transcript Summarization
 
 ## Table of Contents

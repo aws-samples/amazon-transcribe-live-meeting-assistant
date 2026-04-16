@@ -1,3 +1,7 @@
+---
+title: "Developer Guide"
+---
+
 # Developer Guide
 
 This guide describes how to build the LMA project from source code, run local development, and contribute.
@@ -24,7 +28,7 @@ You need the following installed on your machine:
 | bash | Linux, macOS, or Windows WSL |
 | Node.js | v18, v20, or v22 |
 | npm | Bundled with Node.js |
-| Docker | Running (required for SAM builds) |
+| Docker | Running (required for SAM builds). On macOS, use Docker Desktop. |
 | zip | Any version |
 | Python 3 | With pip3 |
 | virtualenv | `pip3 install virtualenv` |
@@ -60,50 +64,71 @@ docs/                             # Documentation (you are here)
 
 ## Building and Publishing
 
-From the project root, run:
+### Using LMA CLI (Recommended)
+
+Set up your development environment (installs Node.js, Python venv, SDK, and CLI):
 
 ```bash
-./publish.sh <cfn_bucket_basename> <cfn_prefix> <region> [public]
+make setup
 ```
 
-This script:
-1. Validates all dependencies (Docker running, SAM version, Node.js version, etc.)
-2. Builds all stacks using SAM CLI and npm
-3. Creates the S3 bucket `<cfn_bucket_basename>-<region>` if it doesn't exist
-4. Uploads CloudFormation templates and artifact zip files to S3
-5. Outputs the CloudFormation template URL and one-click launch URL
+#### Check Prerequisites
 
-The optional `public` parameter makes artifacts publicly readable (your bucket must allow public ACLs).
+```bash
+lma-cli check-prereqs
+```
 
-The script uses content-hash-based checksums to skip rebuilding unchanged stacks on subsequent runs.
+#### Build and Deploy in One Step
+
+The simplest way to build from source and deploy:
+
+```bash
+lma-cli deploy --stack-name LMA --from-code . --admin-email user@example.com --wait
+```
+
+This builds all stacks, publishes artifacts to S3, and deploys the CloudFormation stack in one command. Use `--wait` to monitor progress with real-time event streaming.
+
+#### Publish Only (without deploying)
+
+```bash
+lma-cli publish --source-dir . --region us-east-1
+```
+
+This packages all sub-stacks, uploads to S3, and outputs a CloudFormation template URL you can use later.
+
+#### Deploy from Published Template
+
+```bash
+lma-cli deploy --stack-name LMA --template-url <template-url> --admin-email user@example.com --wait
+```
+
+See the [LMA CLI Reference](lma-cli.md) for the full list of options.
+
+Both `lma-cli publish` and `lma-cli deploy --from-code` use content-hash-based checksums to skip rebuilding unchanged stacks on subsequent runs.
+
+#### macOS Notes
+
+Publishing and deploying from source works on both Linux and macOS (including Apple Silicon). On macOS:
+
+- **Docker Desktop** must be installed and running. Docker Desktop handles x86_64 emulation via Rosetta — no additional QEMU setup is needed.
+- **Enable Rosetta emulation**: Open Docker Desktop → Settings → General → Enable "Use Rosetta for x86_64/amd64 emulation on Apple Silicon", then restart Docker Desktop.
+- **SAM CLI container preference**: If SAM CLI is configured to use Finch (via `/Library/Preferences/com.amazon.samcli.plist`), but Finch is not installed, builds will fail. Fix with:
+  ```bash
+  sudo plutil -replace DefaultContainerRuntime -string docker /Library/Preferences/com.amazon.samcli.plist
+  ```
+  Or remove the preference entirely to let SAM CLI auto-detect Docker: `sudo rm /Library/Preferences/com.amazon.samcli.plist`
 
 ## Local UI Development
 
-The React UI is in `lma-ai-stack/source/ui/`.
+The React UI is in `lma-ai-stack/source/ui/`. The simplest way to start the UI dev server is:
 
-1. Create a `.env` file in `lma-ai-stack/source/ui/` with values from your deployed stack's AISTACK nested stack output `LocalUITestingEnv`:
+```bash
+make ui-start STACK_NAME=<your-stack-name>
+```
 
-   ```
-   REACT_APP_USER_POOL_ID=us-west-2_XXXXXXXXX
-   REACT_APP_USER_POOL_CLIENT_ID=XXXXXXXXXXXXXXXXXXXXXXXXXX
-   REACT_APP_IDENTITY_POOL_ID=us-west-2:XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-   REACT_APP_APPSYNC_GRAPHQL_URL=https://XXXXXXXXXX.appsync-api.us-west-2.amazonaws.com/graphql
-   REACT_APP_AWS_REGION=us-west-2
-   REACT_APP_SETTINGS_PARAMETER=CFN-LMASettingsParameter-XXXXXXXXXXXX
-   REACT_APP_ENABLE_AGENT_ASSIST=true
-   ```
+This automatically retrieves the `.env` configuration from your deployed stack's CloudFormation outputs, installs dependencies, and starts the development server at [http://localhost:3000](http://localhost:3000). The page reloads on edits.
 
-2. Install and run:
-
-   ```bash
-   cd lma-ai-stack/source/ui
-   npm install
-   npm start
-   ```
-
-3. Open [http://localhost:3000](http://localhost:3000). The page reloads on edits.
-
-Other npm scripts:
+Other npm scripts (run from `lma-ai-stack/source/ui/`):
 - `npm test` — Run Jest tests in watch mode
 - `npm run build` — Production build to `build/`
 

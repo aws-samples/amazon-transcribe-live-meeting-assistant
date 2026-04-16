@@ -1,3 +1,7 @@
+---
+title: "CloudFormation Parameters Reference"
+---
+
 # CloudFormation Parameters Reference
 
 ## Table of Contents

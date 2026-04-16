@@ -1,3 +1,7 @@
+---
+title: "Salesforce MCP Server Setup Guide"
+---
+
 # Salesforce MCP Server Setup Guide
 
 ## Overview

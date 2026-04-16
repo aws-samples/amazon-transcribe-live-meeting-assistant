@@ -1,3 +1,7 @@
+---
+title: "Quick Start Guide"
+---
+
 # Quick Start Guide
 
 This guide walks you through your first meeting with the Live Meeting Assistant (LMA). You will learn how to stream audio, view transcripts, interact with the meeting assistant, and generate summaries.

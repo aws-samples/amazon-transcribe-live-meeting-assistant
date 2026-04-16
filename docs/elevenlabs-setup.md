@@ -1,3 +1,7 @@
+---
+title: "ElevenLabs Voice Assistant Setup Guide"
+---
+
 # ElevenLabs Voice Assistant Setup Guide
 
 ## Overview

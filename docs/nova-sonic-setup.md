@@ -1,3 +1,7 @@
+---
+title: "AWS Nova Sonic 2 Voice Assistant Setup Guide"
+---
+
 # AWS Nova Sonic 2 Voice Assistant Setup Guide
 
 ## Overview
