@@ -1,0 +1,43 @@
+.DS_Store
+**/.DS_Store
+.idea
+
+**/opensearchpy_layer/python
+**/boto3_layer/python
+**/boto3_layer/boto3_lambda_layer.zip
+**/strands_layer/python
+**/strands_layer/strands_layer.zip
+**/node_transcriber_layer/transcriber-layer.zip
+.aws-sam
+samconfig.toml
+.checksum
+.commit-hash
+.ui-test-checksum
+.ui-lint-checksum
+
+# DSR
+.dsr/
+!.dsr/issues.json
+!.dsr/settings.json
+
+# Node
+node_modules/
+.nvmrc
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+
+# Deprecated QnABot submodule (removed)
+submodule-aws-qnabot/
+
+# Deprecated browser extension (removed)
+lma-browser-extension-stack/
+
+# VP testing generated .env.local
+lma-virtual-participant-stack/backend/.env.local
+lma-virtual-participant-stack/backend/dist/

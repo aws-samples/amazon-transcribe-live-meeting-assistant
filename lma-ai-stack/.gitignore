@@ -1,0 +1,15 @@
+build
+*.iml
+.gradle
+.settings
+bin
+.classpath
+.project
+.DS_Store
+source/start_codebuild/package/
+deployment/regional-s3-assets/
+deployment/global-s3-assets/
+node_modules
+out
+.aws-sam
+.env
