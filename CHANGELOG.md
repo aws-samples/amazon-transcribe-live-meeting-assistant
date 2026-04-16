@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 
+- **CloudFormation Service Role** — New deployable CloudFormation template (`iam-roles/cloudformation-management/`) that creates a delegated service role for non-admin LMA deployment. Administrators deploy the role once; developers then use `lma-cli deploy --role-arn` or the CloudFormation console to deploy LMA without needing admin permissions. See [CloudFormation Service Role guide](docs/cloudformation-service-role.md).
+
 - **LMA CLI & SDK** (`lma-cli`, `lma-sdk`) — New Python CLI and SDK for building, deploying, and managing LMA stacks from the command line. Key commands: `lma deploy` (auto-selects public template by region, `--from-code` for build+deploy, `--wait` with real-time event streaming, `--admin-email` for new stacks), `lma publish` (build and upload artifacts to S3 with change detection), `lma status/outputs/delete/logs`. See [LMA CLI Reference](docs/lma-cli.md).
 
 - **Documentation Overhaul** - Updated documents reflect new features and remove deprecated feature references. See ./docs.
