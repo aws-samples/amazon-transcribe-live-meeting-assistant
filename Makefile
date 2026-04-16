@@ -137,16 +137,16 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 
 setup-cli: ## Install LMA SDK and CLI packages into current Python environment
 	@echo "Installing LMA SDK..."
-	$(PIP) install -e lib/lma_sdk
+	$(CURDIR)/$(VENV_DIR)/bin/pip install -e lib/lma_sdk
 	@echo "Installing LMA CLI..."
-	$(PIP) install -e lib/lma_cli_pkg
+	$(CURDIR)/$(VENV_DIR)/bin/pip install -e lib/lma_cli_pkg
 	@echo -e "$(GREEN)✅ LMA SDK and CLI installed! Run 'lma --help' to get started.$(NC)"
 
 setup-cli-dev: ## Install LMA SDK and CLI with dev/test dependencies
 	@echo "Installing LMA SDK with dev dependencies..."
-	$(PIP) install -e "lib/lma_sdk[dev]"
+	$(CURDIR)/$(VENV_DIR)/bin/pip install -e "lib/lma_sdk[dev]"
 	@echo "Installing LMA CLI with dev dependencies..."
-	$(PIP) install -e "lib/lma_cli_pkg[dev]"
+	$(CURDIR)/$(VENV_DIR)/bin/pip install -e "lib/lma_cli_pkg[dev]"
 	@echo -e "$(GREEN)✅ LMA SDK and CLI (with test deps) installed!$(NC)"
 
 setup-npm: ## Install npm dependencies for UI, WebSocket, and Virtual Participant
