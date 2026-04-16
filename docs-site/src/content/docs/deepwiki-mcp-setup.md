@@ -1,1 +1,0 @@
-../../../../docs/deepwiki-mcp-setup.md

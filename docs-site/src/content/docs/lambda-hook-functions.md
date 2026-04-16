@@ -1,1 +1,0 @@
-../../../../docs/lambda-hook-functions.md

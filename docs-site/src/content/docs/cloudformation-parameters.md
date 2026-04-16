@@ -1,1 +1,0 @@
-../../../../docs/cloudformation-parameters.md

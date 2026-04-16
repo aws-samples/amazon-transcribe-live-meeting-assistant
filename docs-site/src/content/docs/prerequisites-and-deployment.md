@@ -1,1 +1,0 @@
-../../../../docs/prerequisites-and-deployment.md

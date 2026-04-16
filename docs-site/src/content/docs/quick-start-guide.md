@@ -1,1 +1,0 @@
-../../../../docs/quick-start-guide.md

@@ -1,1 +1,0 @@
-../../../../docs/quicksuite-mcp-setup.md

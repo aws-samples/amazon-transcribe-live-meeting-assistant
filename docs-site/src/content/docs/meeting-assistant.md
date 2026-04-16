@@ -1,1 +1,0 @@
-../../../../docs/meeting-assistant.md

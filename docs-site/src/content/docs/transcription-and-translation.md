@@ -1,1 +1,0 @@
-../../../../docs/transcription-and-translation.md
