@@ -4,12 +4,11 @@
 # See the LICENSE file in the project root for full license information.
 
 ##############################################################################################
-# Publish wrapper — delegates to lma-cli (Python) if available, otherwise falls back to
-# the legacy bash implementation (publish-legacy.sh).
+# Publish — delegates to lma CLI (Python).
 #
 # Usage: ./publish.sh <cfn_bucket_basename> <cfn_prefix> <region> [public]
 #
-# To use the new Python implementation:
+# Install the CLI first:
 #   pip install -e lib/lma_sdk && pip install -e lib/lma_cli_pkg
 #   # or: make setup-cli
 ##############################################################################################
@@ -33,27 +32,13 @@ if [ "$ACL" == "public" ]; then
   PUBLIC_FLAG="--public"
 fi
 
-# Try lma-cli first (Python implementation)
-if command -v lma-cli &> /dev/null; then
-  echo "Using lma-cli (Python) for publish..."
-  exec lma-cli publish --bucket-basename "$BUCKET_BASENAME" --prefix "$PREFIX" --region "$REGION" $PUBLIC_FLAG
-elif command -v lma &> /dev/null; then
-  echo "Using lma (Python) for publish..."
+if command -v lma &> /dev/null; then
   exec lma publish --bucket-basename "$BUCKET_BASENAME" --prefix "$PREFIX" --region "$REGION" $PUBLIC_FLAG
+elif command -v lma-cli &> /dev/null; then
+  exec lma-cli publish --bucket-basename "$BUCKET_BASENAME" --prefix "$PREFIX" --region "$REGION" $PUBLIC_FLAG
 fi
 
-# Fall back to legacy bash implementation
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LEGACY_SCRIPT="${SCRIPT_DIR}/publish-legacy.sh"
-
-if [ -f "$LEGACY_SCRIPT" ]; then
-  echo "lma-cli not found. Falling back to legacy publish-legacy.sh..."
-  echo "Tip: Install lma-cli for a better experience: make setup-cli"
-  echo ""
-  exec bash "$LEGACY_SCRIPT" "$@"
-else
-  echo "ERROR: Neither lma-cli nor publish-legacy.sh found." >&2
-  echo "Install lma-cli: pip install -e lib/lma_sdk && pip install -e lib/lma_cli_pkg" >&2
-  echo "Or: make setup-cli" >&2
-  exit 1
-fi
+echo "ERROR: lma CLI not found." >&2
+echo "Install it: pip install -e lib/lma_sdk && pip install -e lib/lma_cli_pkg" >&2
+echo "Or: make setup-cli" >&2
+exit 1
