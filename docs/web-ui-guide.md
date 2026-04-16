@@ -1,3 +1,7 @@
+---
+title: "Web UI Guide"
+---
+
 # Web UI Guide
 
 ## Table of Contents

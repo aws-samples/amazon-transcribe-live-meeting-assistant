@@ -1,0 +1,1 @@
+../../../../docs/simli-avatar-setup.md

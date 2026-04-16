@@ -1,3 +1,7 @@
+---
+title: "Virtual Participant"
+---
+
 # Virtual Participant
 
 ## Table of Contents

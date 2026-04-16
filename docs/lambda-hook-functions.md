@@ -1,3 +1,7 @@
+---
+title: "Lambda Hook Functions"
+---
+
 # Lambda Hook Functions
 
 ## Table of Contents

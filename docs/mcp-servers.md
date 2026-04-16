@@ -1,3 +1,7 @@
+---
+title: "MCP Servers"
+---
+
 # MCP Servers
 
 ## Table of Contents

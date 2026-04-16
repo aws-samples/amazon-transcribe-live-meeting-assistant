@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Documentation Overhaul** - Updated documents reflect new features and remove deprecated feature references. See ./docs.
 
+- **Documentation Site** — New Starlight-based docs site deployed to GitHub Pages. Built with Astro and auto-synced sidebar from `docs/INDEX.md`. Key Makefile targets: `make docs-build`, `make docs-dev`, `make docs-deploy`. View at: https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/
+
 - **Root Makefile** — New developer-facing `Makefile` with `make help` for easy discovery. Key targets:
   - `make setup` — sets up dev environment (nvm Node v20, Python `.venv` with lint tools)
   - `make lint` / `make fastlint` — cfn-lint on all CloudFormation templates, pylint/flake8/black on Lambda functions, ESLint on UI
@@ -26,12 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `make clean` / `make clean-all` — clean build artifacts and node_modules
 
 - **LocalUITestingEnv output** — added to `lma-main.yaml` as passthrough from AI stack, enabling `make ui-start` to auto-configure `.env` for local UI development
-- **`.nvmrc`** — pins Node.js v20 for consistent development environments
-
-- **Documentation Overhaul** - Updated documents reflect new features and remove deprecated feature references. See ./docs.
-
-- **LocalUITestingEnv output** — added to `lma-main.yaml` as passthrough from AI stack, enabling `make ui-start` to auto-configure `.env` for local UI development
-  
 - **`.nvmrc`** — pins Node.js v20 for consistent development environments
 
 ## Changed

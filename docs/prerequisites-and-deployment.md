@@ -1,3 +1,7 @@
+---
+title: "Prerequisites and Deployment Guide"
+---
+
 # Prerequisites and Deployment Guide
 
 This guide covers everything you need to deploy the Live Meeting Assistant (LMA) solution, from AWS account requirements through your first login.

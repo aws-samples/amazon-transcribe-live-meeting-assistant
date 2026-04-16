@@ -1,0 +1,1 @@
+../../../../docs/embeddable-components.md

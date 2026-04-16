@@ -1,3 +1,7 @@
+---
+title: "Meeting Assistant"
+---
+
 # Meeting Assistant
 
 ## Table of Contents

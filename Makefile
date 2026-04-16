@@ -396,6 +396,34 @@ fastcommit: ## Auto-generate commit message, commit, and push (no linting)
 	git commit -m "$$COMMIT_MESSAGE" && \
 	git push
 
+##@ Documentation
+docs: docs-build ## Build and serve the documentation site locally
+	@echo "Starting docs preview server..."
+	cd docs-site && npm run preview
+
+docs-setup: ## One-time docs site setup (symlinks + npm install)
+	@echo "Setting up documentation site..."
+	cd docs-site && bash setup.sh && npm install
+	@echo -e "$(GREEN)✅ Docs site setup complete!$(NC)"
+
+docs-build: docs-setup ## Build documentation site (no serve)
+	@echo "Syncing sidebar with new docs..."
+	cd docs-site && node sync-sidebar.mjs
+	@echo "Building documentation site..."
+	cd docs-site && npm run build
+	@echo -e "$(GREEN)✅ Docs site built! $(NC)"
+	@echo "Preview at: http://localhost:4321"
+
+docs-dev: docs-setup ## Start docs dev server with hot reload
+	cd docs-site && npm run dev
+
+docs-deploy: docs-build ## Deploy docs to GitHub Pages (from local build)
+	@echo "Deploying to GitHub Pages..."
+	touch docs-site/dist/.nojekyll
+	cd docs-site && npx gh-pages -d dist --dotfiles --repo https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant.git
+	@echo -e "$(GREEN)✅ Docs deployed to GitHub Pages!$(NC)"
+	@echo "View at: https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/"
+
 ##@ Clean
 clean: ## Clean all build artifacts
 	@echo "Cleaning build artifacts..."

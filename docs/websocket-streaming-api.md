@@ -1,3 +1,7 @@
+---
+title: "LMA WebSocket Audio Streaming API Specification"
+---
+
 # LMA WebSocket Audio Streaming API Specification
 
 > **Version:** 1.0  

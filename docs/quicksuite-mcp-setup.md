@@ -1,3 +1,7 @@
+---
+title: "Amazon Quick Suite MCP Action Connector Setup Guide"
+---
+
 # Amazon Quick Suite MCP Action Connector Setup Guide
 
 ## Overview

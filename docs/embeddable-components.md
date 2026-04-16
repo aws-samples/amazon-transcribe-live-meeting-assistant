@@ -1,3 +1,7 @@
+---
+title: "Embedding LMA Components in Your Application"
+---
+
 # Embedding LMA Components in Your Application
 
 ## Overview

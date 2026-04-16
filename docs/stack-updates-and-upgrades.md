@@ -1,3 +1,7 @@
+---
+title: "Stack Updates & Upgrades"
+---
+
 # Stack Updates & Upgrades
 
 ## Table of Contents

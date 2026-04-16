@@ -1,3 +1,7 @@
+---
+title: "LMA Documentation"
+---
+
 # LMA Documentation
 
 **Live Meeting Assistant (LMA) v0.3.0** — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation built on Amazon Transcribe, Amazon Bedrock, and the Strands Agents SDK.

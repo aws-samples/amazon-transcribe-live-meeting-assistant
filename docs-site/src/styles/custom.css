@@ -1,0 +1,23 @@
+/* LMA Documentation - Custom Styles */
+/* Only customize the accent color — let Starlight handle everything else */
+
+:root {
+  --sl-hue-accent: 210;
+  --sl-saturation-accent: 90%;
+}
+
+/* Make images responsive and add a subtle border */
+.sl-markdown-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--sl-color-gray-4);
+}
+
+/* Embedded video styling */
+.sl-markdown-content video {
+  max-width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--sl-color-gray-4);
+  margin: 1rem 0;
+}

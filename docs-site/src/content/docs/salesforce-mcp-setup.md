@@ -1,0 +1,1 @@
+../../../../docs/salesforce-mcp-setup.md

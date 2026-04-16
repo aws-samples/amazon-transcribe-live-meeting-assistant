@@ -1,3 +1,7 @@
+---
+title: "LMA SDK — Python SDK for AWS Live Meeting Assistant"
+---
+
 # LMA SDK — Python SDK for AWS Live Meeting Assistant
 
 ## Overview

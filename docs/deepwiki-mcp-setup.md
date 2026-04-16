@@ -1,3 +1,7 @@
+---
+title: "DeepWiki MCP Server Setup Guide"
+---
+
 # DeepWiki MCP Server Setup Guide
 
 ## Overview

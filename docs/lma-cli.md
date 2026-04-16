@@ -1,3 +1,7 @@
+---
+title: "LMA CLI — Command-Line Interface for AWS Live Meeting Assistant"
+---
+
 # LMA CLI — Command-Line Interface for AWS Live Meeting Assistant
 
 ## Overview

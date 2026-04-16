@@ -1,3 +1,7 @@
+---
+title: "Stream Audio"
+---
+
 # Stream Audio
 
 ## Table of Contents

@@ -1,3 +1,7 @@
+---
+title: "Developer Guide"
+---
+
 # Developer Guide
 
 This guide describes how to build the LMA project from source code, run local development, and contribute.

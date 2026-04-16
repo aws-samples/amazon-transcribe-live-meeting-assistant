@@ -1,0 +1,1 @@
+../../../../docs/voice-assistant.md
