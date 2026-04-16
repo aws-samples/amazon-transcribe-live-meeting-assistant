@@ -388,6 +388,13 @@ class Publisher:
                 and not config.force
                 and not _has_changed(stack_dir, bucket, prefix_and_version, region)
             ):
+                # Even when skipped, compute S3 locations needed for main template tokens
+                if stack_def.name == "lma-browser-extension-stack":
+                    content_hash = _calculate_dir_hash(stack_dir)
+                    zip_filename = f"src-{content_hash}.zip"
+                    s3_zip_key = f"{prefix_and_version}/{stack_def.name}/{zip_filename}"
+                    browser_ext_src_s3_location = f"{bucket}/{s3_zip_key}"
+
                 if progress_callback:
                     progress_callback(stack_def.name, "Skipped (unchanged)")
                 stack_results.append(StackPublishResult(
