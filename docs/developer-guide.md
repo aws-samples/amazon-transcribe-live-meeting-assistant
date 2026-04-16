@@ -28,7 +28,7 @@ You need the following installed on your machine:
 | bash | Linux, macOS, or Windows WSL |
 | Node.js | v18, v20, or v22 |
 | npm | Bundled with Node.js |
-| Docker | Running (required for SAM builds) |
+| Docker | Running (required for SAM builds). On macOS, use Docker Desktop. |
 | zip | Any version |
 | Python 3 | With pip3 |
 | virtualenv | `pip3 install virtualenv` |
@@ -105,6 +105,18 @@ lma-cli deploy --stack-name LMA --template-url <template-url> --admin-email user
 See the [LMA CLI Reference](lma-cli.md) for the full list of options.
 
 Both `lma-cli publish` and `lma-cli deploy --from-code` use content-hash-based checksums to skip rebuilding unchanged stacks on subsequent runs.
+
+#### macOS Notes
+
+Publishing and deploying from source works on both Linux and macOS (including Apple Silicon). On macOS:
+
+- **Docker Desktop** must be installed and running. Docker Desktop handles x86_64 emulation via Rosetta — no additional QEMU setup is needed.
+- **Enable Rosetta emulation**: Open Docker Desktop → Settings → General → Enable "Use Rosetta for x86_64/amd64 emulation on Apple Silicon", then restart Docker Desktop.
+- **SAM CLI container preference**: If SAM CLI is configured to use Finch (via `/Library/Preferences/com.amazon.samcli.plist`), but Finch is not installed, builds will fail. Fix with:
+  ```bash
+  sudo plutil -replace DefaultContainerRuntime -string docker /Library/Preferences/com.amazon.samcli.plist
+  ```
+  Or remove the preference entirely to let SAM CLI auto-detect Docker: `sudo rm /Library/Preferences/com.amazon.samcli.plist`
 
 ## Local UI Development
 

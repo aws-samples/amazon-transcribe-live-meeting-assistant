@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Changed
 
+- **macOS Apple Silicon support for publish/deploy** — `lma-cli publish` and `lma-cli deploy --from-code` now work on macOS (including Apple Silicon). The `lma-ai-stack` Makefile skips the Linux-only QEMU multiarch setup on macOS since Docker Desktop handles x86_64 emulation natively via Rosetta.
+
 - **Bedrock Model Updates** — Removed deprecated Claude Sonnet 4 (`us.anthropic.claude-sonnet-4-20250514-v1:0`, `global.anthropic.claude-sonnet-4-20250514-v1:0`) from AllowedValues in response to Anthropic's deprecation notice (Legacy July 14, 2026; EOL October 14, 2026). Added Claude Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`, `global.anthropic.claude-sonnet-4-6`), Claude Opus 4.6 (`us.anthropic.claude-opus-4-6-v1`, `global.anthropic.claude-opus-4-6-v1`), and `us.amazon.nova-2-lite-v1:0` as new model options. Default model (`global.anthropic.claude-haiku-4-5-20251001-v1:0`) is unchanged.
 
 ## [0.3.0] - 2026-04-09

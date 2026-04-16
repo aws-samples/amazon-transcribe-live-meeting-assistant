@@ -213,12 +213,6 @@ class StackManager:
         name = stack_name or self._client.stack_name or "LMA"
         caps = capabilities or ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"]
 
-        # Build parameter list
-        param_list = []
-        if parameters:
-            for k, v in parameters.items():
-                param_list.append({"ParameterKey": k, "ParameterValue": v})
-
         try:
             # Check if stack exists
             existing = self.status(name)
@@ -235,13 +229,18 @@ class StackManager:
             else:
                 raise LMAStackError("Either template_url or template_file is required.")
 
-            # For new stack creation, auto-fill empty defaults for parameters
-            # that have no Default in the template but accept empty strings.
-            # This avoids CloudFormation "must have values" errors.
-            if not existing.exists:
-                param_list = self._fill_missing_parameter_defaults(
-                    kwargs, param_list
-                )
+            # Build parameter list based on whether stack exists
+            if existing.exists:
+                # For UPDATE: Use UsePreviousValue for parameters not explicitly provided.
+                # This avoids "must have values" errors for required parameters like AdminEmail.
+                param_list = self._build_update_parameters(kwargs, parameters or {})
+            else:
+                # For CREATE: Use only provided parameters, then auto-fill missing defaults.
+                param_list = []
+                if parameters:
+                    for k, v in parameters.items():
+                        param_list.append({"ParameterKey": k, "ParameterValue": v})
+                param_list = self._fill_missing_parameter_defaults(kwargs, param_list)
 
             if param_list:
                 kwargs["Parameters"] = param_list
@@ -332,6 +331,100 @@ class StackManager:
             )
 
         return param_list
+
+    def _build_update_parameters(
+        self,
+        kwargs: dict[str, Any],
+        parameters: dict[str, str],
+    ) -> list[dict[str, str | bool]]:
+        """Build CloudFormation parameter list for stack updates.
+
+        For existing stacks, uses ``UsePreviousValue: True`` for every
+        parameter the caller did *not* explicitly provide.  This ensures
+        required parameters like ``AdminEmail`` keep their current value
+        without forcing the user to re-supply them on every update.
+
+        Also detects deprecated parameters (present in the existing stack but
+        absent from the new template) and drops them to avoid update errors.
+        """
+        # Get current parameters from the existing stack
+        status = self.status(kwargs["StackName"])
+        current_params: dict[str, str] = {}
+        if status.exists and status.stack:
+            current_params = status.stack.parameters or {}
+
+        # Get valid parameter keys from the new template so we can detect
+        # deprecated parameters that were removed between versions.
+        valid_template_params = self._get_template_parameters(kwargs)
+
+        deprecated_params: set[str] = set()
+        if valid_template_params:
+            deprecated_params = set(current_params.keys()) - valid_template_params
+            if deprecated_params:
+                logger.warning(
+                    "Dropping deprecated parameters not in new template: %s",
+                    deprecated_params,
+                )
+
+        param_list: list[dict[str, str | bool]] = []
+
+        # First, handle all existing parameters
+        for param_key in current_params:
+            if param_key in deprecated_params:
+                logger.info("Skipping deprecated parameter: %s", param_key)
+                continue
+
+            if param_key in parameters:
+                # User provided a new value — use it
+                param_list.append(
+                    {"ParameterKey": param_key, "ParameterValue": parameters[param_key]}
+                )
+            else:
+                # Keep previous value
+                param_list.append(
+                    {"ParameterKey": param_key, "UsePreviousValue": True}
+                )
+
+        # Then, add any *new* parameters not present in the current stack
+        for param_key, param_value in parameters.items():
+            if param_key not in current_params:
+                param_list.append(
+                    {"ParameterKey": param_key, "ParameterValue": param_value}
+                )
+
+        return param_list
+
+    def _get_template_parameters(
+        self,
+        kwargs: dict[str, Any],
+    ) -> set[str]:
+        """Return the set of parameter keys defined in a CloudFormation template.
+
+        Uses ``GetTemplateSummary`` to introspect the template (from either
+        ``TemplateURL`` or ``TemplateBody`` in *kwargs*).  Returns an empty
+        set on failure so callers can gracefully fall back.
+        """
+        try:
+            summary_kwargs: dict[str, Any] = {}
+            if "TemplateURL" in kwargs:
+                summary_kwargs["TemplateURL"] = kwargs["TemplateURL"]
+            elif "TemplateBody" in kwargs:
+                summary_kwargs["TemplateBody"] = kwargs["TemplateBody"]
+            else:
+                return set()
+
+            response = self._cfn.get_template_summary(**summary_kwargs)
+            template_params = response.get("Parameters", [])
+            param_keys = {
+                tp.get("ParameterKey", "")
+                for tp in template_params
+                if tp.get("ParameterKey")
+            }
+            logger.debug("Template has %d parameters: %s", len(param_keys), param_keys)
+            return param_keys
+        except Exception as e:
+            logger.debug("Could not get template parameters: %s", e)
+            return set()
 
     def monitor(
         self,

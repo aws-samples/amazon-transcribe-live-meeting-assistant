@@ -152,6 +152,137 @@ class TestStackDeploy:
         with pytest.raises(LMAStackError, match="template_url or template_file"):
             client.stack.deploy()
 
+    def test_deploy_update_uses_previous_values(self, client):
+        """deploy() uses UsePreviousValue for params not explicitly provided on update."""
+        mock_cfn = MagicMock()
+        client.session.client.return_value = mock_cfn
+
+        # Stack exists with AdminEmail and other parameters
+        existing_stack = {
+            "Stacks": [{
+                "StackName": "test-lma-stack",
+                "StackId": "arn:id",
+                "StackStatus": "UPDATE_COMPLETE",
+                "Outputs": [],
+                "Parameters": [
+                    {"ParameterKey": "AdminEmail", "ParameterValue": "admin@example.com"},
+                    {"ParameterKey": "InstallDemoMode", "ParameterValue": "false"},
+                ],
+                "Tags": [],
+            }]
+        }
+        mock_cfn.describe_stacks.return_value = existing_stack
+
+        # Template summary returns same parameter keys
+        mock_cfn.get_template_summary.return_value = {
+            "Parameters": [
+                {"ParameterKey": "AdminEmail"},
+                {"ParameterKey": "InstallDemoMode"},
+            ]
+        }
+        mock_cfn.update_stack.return_value = {"StackId": "arn:id"}
+        mock_cfn.get_waiter.return_value.wait.return_value = None
+
+        # Deploy without providing AdminEmail — should use UsePreviousValue
+        result = client.stack.deploy(
+            template_url="https://s3.amazonaws.com/bucket/template.yaml",
+            wait=False,
+        )
+
+        mock_cfn.update_stack.assert_called_once()
+        call_kwargs = mock_cfn.update_stack.call_args[1]
+        params = call_kwargs["Parameters"]
+
+        # Both params should use UsePreviousValue
+        param_dict = {p["ParameterKey"]: p for p in params}
+        assert param_dict["AdminEmail"]["UsePreviousValue"] is True
+        assert param_dict["InstallDemoMode"]["UsePreviousValue"] is True
+        assert "ParameterValue" not in param_dict["AdminEmail"]
+        assert result.success is True
+
+    def test_deploy_update_overrides_only_provided_params(self, client):
+        """deploy() overrides only explicitly provided params, keeps others as previous."""
+        mock_cfn = MagicMock()
+        client.session.client.return_value = mock_cfn
+
+        existing_stack = {
+            "Stacks": [{
+                "StackName": "test-lma-stack",
+                "StackId": "arn:id",
+                "StackStatus": "UPDATE_COMPLETE",
+                "Outputs": [],
+                "Parameters": [
+                    {"ParameterKey": "AdminEmail", "ParameterValue": "admin@example.com"},
+                    {"ParameterKey": "InstallDemoMode", "ParameterValue": "false"},
+                ],
+                "Tags": [],
+            }]
+        }
+        mock_cfn.describe_stacks.return_value = existing_stack
+        mock_cfn.get_template_summary.return_value = {
+            "Parameters": [
+                {"ParameterKey": "AdminEmail"},
+                {"ParameterKey": "InstallDemoMode"},
+            ]
+        }
+        mock_cfn.update_stack.return_value = {"StackId": "arn:id"}
+
+        # Deploy providing only InstallDemoMode — AdminEmail should use previous
+        client.stack.deploy(
+            template_url="https://s3.amazonaws.com/bucket/template.yaml",
+            parameters={"InstallDemoMode": "true"},
+            wait=False,
+        )
+
+        call_kwargs = mock_cfn.update_stack.call_args[1]
+        params = call_kwargs["Parameters"]
+        param_dict = {p["ParameterKey"]: p for p in params}
+
+        # AdminEmail should use previous value
+        assert param_dict["AdminEmail"]["UsePreviousValue"] is True
+        # InstallDemoMode should use new value
+        assert param_dict["InstallDemoMode"]["ParameterValue"] == "true"
+        assert "UsePreviousValue" not in param_dict["InstallDemoMode"]
+
+    def test_deploy_update_drops_deprecated_params(self, client):
+        """deploy() drops params that exist in stack but not in new template."""
+        mock_cfn = MagicMock()
+        client.session.client.return_value = mock_cfn
+
+        existing_stack = {
+            "Stacks": [{
+                "StackName": "test-lma-stack",
+                "StackId": "arn:id",
+                "StackStatus": "UPDATE_COMPLETE",
+                "Outputs": [],
+                "Parameters": [
+                    {"ParameterKey": "AdminEmail", "ParameterValue": "admin@example.com"},
+                    {"ParameterKey": "OldParam", "ParameterValue": "old-value"},
+                ],
+                "Tags": [],
+            }]
+        }
+        mock_cfn.describe_stacks.return_value = existing_stack
+        # New template doesn't have OldParam
+        mock_cfn.get_template_summary.return_value = {
+            "Parameters": [
+                {"ParameterKey": "AdminEmail"},
+            ]
+        }
+        mock_cfn.update_stack.return_value = {"StackId": "arn:id"}
+
+        client.stack.deploy(
+            template_url="https://s3.amazonaws.com/bucket/template.yaml",
+            wait=False,
+        )
+
+        call_kwargs = mock_cfn.update_stack.call_args[1]
+        params = call_kwargs["Parameters"]
+        param_keys = [p["ParameterKey"] for p in params]
+
+        assert "AdminEmail" in param_keys
+        assert "OldParam" not in param_keys
+
 
 class TestStackDelete:
     """Tests for stack.delete()."""
