@@ -1,0 +1,345 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  This template creates a CloudFormation Service Role for the Live Meeting Assistant (LMA) solution.
+  This role grants permissions to create, update, and delete LMA CloudFormation
+  stacks and their resources. It follows the principle of least privilege
+  by allowing only the necessary actions for stack management. This template also
+  creates a user permission policy that allows users to pass the CloudFormation
+  service role to CloudFormation. The iam:PassRole policy must be attached to
+  the user or role that will be using the CloudFormation Service Role in order
+  to successfully pass the role.
+Resources:
+  CloudFormationServiceRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Broad permissions required for non-admin users to deploy LMA stacks via delegated CloudFormation service role"
+          - id: W28
+            reason: "Explicit role name required for consistent cross-stack references in delegated deployment model"
+          - id: F38
+            reason: "Resource wildcard needed with broad permissions required for non-admin users to deploy LMA stacks via delegated CloudFormation service role"
+          - id: W76
+            reason: "Suppressing W76: SPCM for IAM policy document is higher than 25"
+          - id: F3
+            reason: "Suppressing F3: wildcard action on named services required for CloudFormation service role, to allow CRUD on stack resources"
+          - id: AwsSolutions-IAM5
+            reason: "Broad permissions required for non-admin users to deploy LMA stacks via delegated CloudFormation service role"
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: "CloudFormation service role requires broad permissions to deploy and manage the full LMA application stack. Assumable only by cloudformation.amazonaws.com. All operations logged in CloudTrail."
+          - id: AwsSolutions-IAM4
+            reason: "AWS managed policies not used. All policies are inline and custom-scoped."
+    # checkov:skip=CKV_AWS_110: "CloudFormation service role requires IAM permissions to create Lambda execution roles and service-linked roles during stack deployment. Trust policy restricts to cloudformation.amazonaws.com service principal."
+    # checkov:skip=CKV_AWS_109: "CloudFormation service role requires IAM policy management permissions to attach policies to created roles during infrastructure deployment. Constrained by trust policy."
+    # checkov:skip=CKV_AWS_108: "CloudFormation service role requires S3/KMS permissions to create and configure encrypted data buckets for the LMA solution. All buckets use customer-managed KMS encryption."
+    # checkov:skip=CKV_AWS_111: "CloudFormation service role requires write permissions across AWS services to deploy complete LMA infrastructure. Trust policy limits to CloudFormation service. Use in conjunction with CloudTrail auditing."
+    # checkov:skip=CKV_AWS_107: "CloudFormation service role may need to create/configure secrets for service integrations. Actual secret values are provided via parameters, not embedded in templates."
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-CFServiceRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub 'cloudformation.${AWS::URLSuffix}'
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudFormationPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudFormationFullAccess
+                Effect: Allow
+                Action:
+                  - cloudformation:*
+                Resource: '*'
+              - Sid: CloudFormationTransform
+                Effect: Allow
+                Action:
+                  - serverlessrepo:CreateCloudFormationChangeSet
+                  - serverlessrepo:GetApplication
+                Resource: '*'
+              - Sid: IAMRolesAndPolicies
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:CreatePolicy
+                  - iam:DeletePolicy
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                  - iam:ListPolicyVersions
+                  - iam:CreatePolicyVersion
+                  - iam:DeletePolicyVersion
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:GetInstanceProfile
+                Resource: '*'
+              - Sid: IAMCreateServiceLinkedRole
+                Effect: Allow
+                Action: iam:CreateServiceLinkedRole
+                Resource: !Sub 'arn:${AWS::Partition}:iam::*:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS'
+                Condition:
+                  StringEquals:
+                    iam:AWSServiceName: ecs.amazonaws.com
+              - Sid: IAMPassRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    iam:PassedToService:
+                      - cloudformation.amazonaws.com
+                      - lambda.amazonaws.com
+                      - ecs-tasks.amazonaws.com
+                      - ec2.amazonaws.com
+                      - codebuild.amazonaws.com
+                      - appsync.amazonaws.com
+                      - states.amazonaws.com
+                      - bedrock.amazonaws.com
+                      - bedrock-agentcore.amazonaws.com
+                      - scheduler.amazonaws.com
+                      - logs.amazonaws.com
+                      - vpc-flow-logs.amazonaws.com
+        - PolicyName: LMAInfraAndDataPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: LambdaManagement
+                Effect: Allow
+                Action:
+                  - lambda:*
+                Resource: '*'
+              - Sid: DynamoDB
+                Effect: Allow
+                Action:
+                  - dynamodb:*
+                Resource: '*'
+              - Sid: S3Management
+                Effect: Allow
+                Action:
+                  - s3:*
+                Resource: '*'
+              - Sid: S3Vectors
+                Effect: Allow
+                Action:
+                  - s3vectors:*
+                Resource: '*'
+              - Sid: KinesisDataStreams
+                Effect: Allow
+                Action:
+                  - kinesis:*
+                Resource: '*'
+              - Sid: KMS
+                Effect: Allow
+                Action:
+                  - kms:*
+                Resource: '*'
+              - Sid: SecretsManager
+                Effect: Allow
+                Action:
+                  - secretsmanager:*
+                Resource: '*'
+              - Sid: SNS
+                Effect: Allow
+                Action:
+                  - sns:*
+                Resource: '*'
+              - Sid: SES
+                Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: '*'
+              - Sid: SSMParameterStore
+                Effect: Allow
+                Action:
+                  - ssm:*
+                Resource: '*'
+              - Sid: EventBridge
+                Effect: Allow
+                Action:
+                  - events:*
+                Resource: '*'
+              - Sid: EventBridgeScheduler
+                Effect: Allow
+                Action:
+                  - scheduler:*
+                Resource: '*'
+              - Sid: StepFunctions
+                Effect: Allow
+                Action:
+                  - states:*
+                Resource: '*'
+              - Sid: CodeBuild
+                Effect: Allow
+                Action:
+                  - codebuild:*
+                Resource: '*'
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:*
+                Resource: '*'
+        - PolicyName: LMAFrontendComputePermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AppSync
+                Effect: Allow
+                Action:
+                  - appsync:*
+                Resource: '*'
+              - Sid: CognitoUserPoolAndIdentity
+                Effect: Allow
+                Action:
+                  - cognito-idp:*
+                  - cognito-identity:*
+                Resource: '*'
+              - Sid: CloudFront
+                Effect: Allow
+                Action:
+                  - cloudfront:*
+                Resource: '*'
+              - Sid: BedrockModelsAndKnowledgeBases
+                Effect: Allow
+                Action:
+                  - bedrock:*
+                Resource: '*'
+              - Sid: BedrockAgentCore
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:*
+                Resource: '*'
+              - Sid: AWSMarketplace
+                Effect: Allow
+                Action:
+                  - aws-marketplace:Subscribe
+                  - aws-marketplace:Unsubscribe
+                  - aws-marketplace:ViewSubscriptions
+                Resource: '*'
+              - Sid: Transcribe
+                Effect: Allow
+                Action:
+                  - transcribe:*
+                Resource: '*'
+              - Sid: TranslateAndComprehend
+                Effect: Allow
+                Action:
+                  - translate:TranslateText
+                  - comprehend:DetectSentiment
+                  - comprehend:DetectDominantLanguage
+                Resource: '*'
+              - Sid: ECSAndFargate
+                Effect: Allow
+                Action:
+                  - ecs:*
+                Resource: '*'
+              - Sid: ECR
+                Effect: Allow
+                Action:
+                  - ecr:*
+                Resource: '*'
+              - Sid: EC2AndVPC
+                Effect: Allow
+                Action:
+                  - ec2:*
+                Resource: '*'
+              - Sid: ElasticLoadBalancing
+                Effect: Allow
+                Action:
+                  - elasticloadbalancing:*
+                Resource: '*'
+              - Sid: AutoScaling
+                Effect: Allow
+                Action:
+                  - autoscaling:*
+                Resource: '*'
+              - Sid: XRay
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: '*'
+        - PolicyName: LMAOptionalServicesPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: OpenSearchServerless
+                Effect: Allow
+                Action:
+                  - aoss:*
+                Resource: '*'
+              - Sid: LexBot
+                Effect: Allow
+                Action:
+                  - lex:*
+                Resource: '*'
+              - Sid: QBusiness
+                Effect: Allow
+                Action:
+                  - qbusiness:GetApplication
+                  - qbusiness:ChatSync
+                  - qbusiness:Chat
+                  - qbusiness:ListMessages
+                  - qbusiness:ListConversations
+                Resource: '*'
+              - Sid: SSOIdentityCenter
+                Effect: Allow
+                Action:
+                  - sso:CreateApplication
+                  - sso:DeleteApplication
+                  - sso:DescribeApplication
+                  - sso:PutApplicationGrant
+                  - sso:PutApplicationAuthenticationMethod
+                  - sso:PutApplicationAccessScope
+                  - sso-oauth:CreateTokenWithIAM
+                Resource: '*'
+
+  PassRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: "Explicit policy name required for consistent cross-stack references in delegated deployment model"
+    Properties:
+      ManagedPolicyName: !Sub '${AWS::StackName}-PassRolePolicy'
+      Description: Policy to allow passing the LMA CloudFormation service role
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt CloudFormationServiceRole.Arn
+
+Outputs:
+  ServiceRoleArn:
+    Description: ARN of the CloudFormation service role
+    Value: !GetAtt CloudFormationServiceRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceRoleArn'
+  PassRolePolicyArn:
+    Description: ARN of the PassRole policy for admins to assign to users
+    Value: !Ref PassRolePolicy
+    Export:
+      Name: !Sub '${AWS::StackName}-PassRolePolicyArn'
