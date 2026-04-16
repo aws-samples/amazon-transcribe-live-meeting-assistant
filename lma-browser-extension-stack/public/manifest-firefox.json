@@ -1,0 +1,31 @@
+{
+  "name": "Amazon Live Meeting Assistant",
+  "description": "Amazon Live Meeting Assistant, powered by Amazon Transcribe and Amazon Bedrock",
+  "version": "0.0.1",
+  "manifest_version": 3,
+  "action": {
+    "default_title": "Click to open Amazon Live Meeting Assistant",
+    "default_icon": "icon.png"
+  },
+  "sidebar_action": {
+    "default_icon": {
+      "32": "icon.png"
+    },
+    "default_title": "Amazon Live Meeting Assistant",
+    "default_panel": "indexhtml",
+    "open_at_install": true
+  },
+  "background": {
+    "scripts": [
+      "service-worker.js"
+    ]
+  },
+  "icons": {
+    "16": "icon.png"
+  },
+  "permissions": [
+    "storage",
+    "sidePanel"
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzjjofDn/rOq+a1mZANbQKiThKxJdakcxh8UTRGL3pPUSJH4HBqRrsAlZnq5Ip8lxBgMI+Iy5s8RzpLhhIbWEH3WlZ3HuOyB/1TGl9eRFZ9aSh9m0yApGjzIoc1QTqDlV3LddCxoCTDfe5PMv+muqdMqByQ+YG1SO9k/JtOE1PPLNQ5X36rsVfD437elJW4tmGk6M2SDPeZUQxgLLm5yq34gj4O1R/uEf1/lWjPghr/Rbx7u4VHsRgkIolz7ekK7w1h2c29L+1ARtY/q0YJNzWDiX6/xJ11QDBxnEyTUS79pbeT0B5ZvEwbiLtTDCdlmyUUvFZxRsIi9ASQoQsDkpVQIDAQAB"
+}
