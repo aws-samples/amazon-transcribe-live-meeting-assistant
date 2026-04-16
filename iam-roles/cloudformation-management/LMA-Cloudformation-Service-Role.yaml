@@ -100,23 +100,9 @@ Resources:
                     iam:AWSServiceName: ecs.amazonaws.com
               - Sid: IAMPassRole
                 Effect: Allow
-                Action: iam:PassRole
+                Action:
+                  - iam:PassRole
                 Resource: '*'
-                Condition:
-                  StringEquals:
-                    iam:PassedToService:
-                      - cloudformation.amazonaws.com
-                      - lambda.amazonaws.com
-                      - ecs-tasks.amazonaws.com
-                      - ec2.amazonaws.com
-                      - codebuild.amazonaws.com
-                      - appsync.amazonaws.com
-                      - states.amazonaws.com
-                      - bedrock.amazonaws.com
-                      - bedrock-agentcore.amazonaws.com
-                      - scheduler.amazonaws.com
-                      - logs.amazonaws.com
-                      - vpc-flow-logs.amazonaws.com
         - PolicyName: LMAInfraAndDataPermissions
           PolicyDocument:
             Version: '2012-10-17'
