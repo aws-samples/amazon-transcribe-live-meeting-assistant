@@ -300,7 +300,11 @@ $(PACKAGE_RELEASE_OUT_FILE): $(PACKAGE_RELEASE_REPLACE_OUT_FILE) | $(OUT_DIR)
 	  exit 1 || true
 
 	@echo '[INFO] configuring docker multiarchitecture for sam cross platform build'
-	docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+	@if [ "$$(uname -s)" = "Linux" ]; then \
+		docker run --rm --privileged multiarch/qemu-user-static --reset -p yes; \
+	else \
+		echo '[INFO] Skipping QEMU setup on macOS (Docker Desktop handles x86_64 emulation)'; \
+	fi
 
 	@echo '[INFO] sam building template file for release $(RELEASE_VERSION)'
 	sam build \
