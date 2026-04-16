@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Consolidated on Strands Bedrock agent** — MeetingAssistService options simplified to `STRANDS_BEDROCK`, `STRANDS_BEDROCK_WITH_KB (Create)`, and `STRANDS_BEDROCK_WITH_KB (Use Existing)`
 - **CFT form reorganized** — VP Startup Optimization moved to 2nd position, Voice Assistant split into own group, MCP Server renamed to "LMA Hosted MCP Server", removed deprecated parameter groups
-- **Left nav Sources order** — Virtual Participant now listed first, Chrome Extension removed (VP → Stream Audio)
+- **Left nav Sources order** — Virtual Participant now listed first (VP → Stream Audio → Chrome Extension)
 - **Deprecated old models** — removed Claude 3.x from model selectors; only Claude 4+ and Nova models remain
 - Virtual Participant audio and avatar performance improvements — persistent audio playback stream (replaces per-chunk process spawning), WebSocket bridge for Simli avatar audio delivery (replaces CDP round-trips), and tuned PulseAudio buffering to eliminate audio glitches and lip-sync drift on smaller instances
 
@@ -62,7 +62,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **OpenSearch Serverless** — removed from vector store allowed values (S3 Vectors only)
 - **S3 config parameters** — `S3BucketName`, `AudioFilePrefix`, `TranscriptFilePrefix` removed from CFT form (hardcoded to defaults)
 - **Vector store parameters** — removed from CFT form (hardcoded to `S3_VECTORS`)
-- **Chrome browser extension** — removed entire `lma-browser-extension-stack/` directory, `BROWSEREXTENSIONSTACK` nested stack, CodeBuild project, `ChromeExtensionDownloadUrl` output, extension packaging from `publish.sh`, "Download Chrome Extension" nav link, Chrome extension OAuth callback URL from Cognito, extension-related images, and all browser extension documentation sections from README. The Stream Audio tab and Virtual Participant are now the supported streaming options.
 
 ### Fixed
 - Virtual Participant ECS task crash leaving meeting permanently stuck as "in progress" due to missing cleanup on uncaught transcription pipeline errors

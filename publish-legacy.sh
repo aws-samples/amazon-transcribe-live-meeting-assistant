@@ -150,6 +150,45 @@ update_checksum() {
   echo "$current_checksum" > "$checksum_file"
 }
 
+dir=lma-browser-extension-stack
+cd $dir
+# by hashing the contents of the extension folder, we can create a zipfile name that 
+# changes when the extension folder contents change.
+# This allows us to force codebuild to re-run when the extension folder contents change.
+echo "Computing hash of extension folder contents"
+HASH=$(calculate_hash ".")
+zipfile=src-${HASH}.zip
+BROWSER_EXTENSION_SRC_S3_LOCATION=${BUCKET}/${PREFIX_AND_VERSION}/${dir}/${zipfile}
+cd ..
+if haschanged $dir; then
+pushd $dir
+echo "PACKAGING $dir"
+echo "Performing token replacement for version: $VERSION"
+# Create temporary directory for token replacement
+mkdir -p ${tmpdir}/${dir}-temp
+# Copy all files to temp directory
+cp -r . ${tmpdir}/${dir}-temp/
+# Replace tokens in temporary files
+sed -e "s/<VERSION_TOKEN>/$VERSION/g" ${tmpdir}/${dir}-temp/package.json > ${tmpdir}/${dir}-temp/package.json.tmp && mv ${tmpdir}/${dir}-temp/package.json.tmp ${tmpdir}/${dir}-temp/package.json
+sed -e "s/<VERSION_TOKEN>/$VERSION/g" ${tmpdir}/${dir}-temp/public/manifest.json > ${tmpdir}/${dir}-temp/public/manifest.json.tmp && mv ${tmpdir}/${dir}-temp/public/manifest.json.tmp ${tmpdir}/${dir}-temp/public/manifest.json
+sed -e "s/<VERSION_TOKEN>/$VERSION/g" ${tmpdir}/${dir}-temp/template.yaml > ${tmpdir}/${dir}-temp/template.yaml.tmp && mv ${tmpdir}/${dir}-temp/template.yaml.tmp ${tmpdir}/${dir}-temp/template.yaml
+echo "Zipping source to ${tmpdir}/${zipfile}"
+cd ${tmpdir}/${dir}-temp
+zip -r ../$zipfile . -x "node_modules/*" -x "build/*"
+cd - > /dev/null
+echo "Upload source and template to S3"
+aws s3 cp ${tmpdir}/${zipfile} s3://${BROWSER_EXTENSION_SRC_S3_LOCATION}
+s3_template="s3://${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
+https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX_AND_VERSION}/${dir}/template.yaml"
+# Upload the token-replaced template from temp directory
+aws s3 cp ${tmpdir}/${dir}-temp/template.yaml ${s3_template}
+aws cloudformation validate-template --template-url ${https_template} > /dev/null || exit 1
+popd
+update_checksum $dir
+else
+echo "SKIPPING $dir (unchanged)"
+fi
+
 dir=lma-virtual-participant-stack
 echo "PACKAGING $dir"
 pushd $dir
@@ -349,12 +388,14 @@ echo "   <ARTIFACT_BUCKET_TOKEN> with bucket name: $BUCKET"
 echo "   <ARTIFACT_PREFIX_TOKEN> with prefix: $PREFIX_AND_VERSION"
 echo "   <VERSION_TOKEN> with version: $VERSION"
 echo "   <REGION_TOKEN> with region: $REGION"
+echo "   <BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN> with public: $BROWSER_EXTENSION_SRC_S3_LOCATION"
 echo "   <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN> with public: $VIRTUAL_PARTICIPANT_SRC_S3_LOCATION"
 cat ./$MAIN_TEMPLATE | 
 sed -e "s%<ARTIFACT_BUCKET_TOKEN>%$BUCKET%g" | 
 sed -e "s%<ARTIFACT_PREFIX_TOKEN>%$PREFIX_AND_VERSION%g" |
 sed -e "s%<VERSION_TOKEN>%$VERSION%g" |
 sed -e "s%<REGION_TOKEN>%$REGION%g" |
+sed -e "s%<BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>%$BROWSER_EXTENSION_SRC_S3_LOCATION%g" |
 sed -e "s%<VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>%$VIRTUAL_PARTICIPANT_SRC_S3_LOCATION%g" > $tmpdir/$MAIN_TEMPLATE
 # upload main template
 aws s3 cp $tmpdir/$MAIN_TEMPLATE s3://${BUCKET}/${PREFIX}/$MAIN_TEMPLATE || exit 1

@@ -118,7 +118,7 @@ Parameters:
   # container source code
   SourceCodeLocation:
     Type: String
-    Description: S3 location of the virtual participant source code zipfile
+    Description: S3 location of the browser extension source code zipfile
 
   # transcibe parameters
 

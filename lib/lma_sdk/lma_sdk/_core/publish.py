@@ -44,6 +44,12 @@ logger = logging.getLogger(__name__)
 
 STACK_DEFINITIONS: list[StackDefinition] = [
     StackDefinition(
+        name="lma-browser-extension-stack",
+        package_type=StackPackageType.ZIP_WITH_TOKEN_REPLACE,
+        template_file="template.yaml",
+        supports_change_detection=True,
+    ),
+    StackDefinition(
         name="lma-virtual-participant-stack",
         package_type=StackPackageType.ZIP_AND_UPLOAD,
         template_file="template.yaml",
@@ -358,8 +364,9 @@ class Publisher:
         else:
             stacks_to_publish = STACK_DEFINITIONS
 
-        # Track the VP S3 location for main template substitution
+        # Track S3 locations for main template substitution
         vp_src_s3_location = ""
+        browser_ext_src_s3_location = ""
 
         # Publish each stack
         stack_results: list[StackPublishResult] = []
@@ -406,9 +413,11 @@ class Publisher:
                     tmpdir=tmpdir,
                 )
 
-                # Capture VP source location for main template
+                # Capture source locations for main template
                 if stack_def.name == "lma-virtual-participant-stack" and result.get("vp_src_s3_location"):
                     vp_src_s3_location = result["vp_src_s3_location"]
+                if stack_def.name == "lma-browser-extension-stack" and result.get("browser_ext_src_s3_location"):
+                    browser_ext_src_s3_location = result["browser_ext_src_s3_location"]
 
                 duration = time.time() - stack_start
                 stack_results.append(StackPublishResult(
@@ -450,6 +459,7 @@ class Publisher:
             region=region,
             version=version,
             vp_src_s3_location=vp_src_s3_location,
+            browser_ext_src_s3_location=browser_ext_src_s3_location,
             tmpdir=tmpdir,
         )
 
@@ -531,6 +541,7 @@ class Publisher:
         """Publish a single stack based on its definition."""
         handlers = {
             StackPackageType.ZIP_AND_UPLOAD: self._publish_zip_and_upload,
+            StackPackageType.ZIP_WITH_TOKEN_REPLACE: self._publish_zip_with_token_replace,
             StackPackageType.CFN_PACKAGE: self._publish_cfn_package,
             StackPackageType.DELEGATE_SCRIPT: self._publish_delegate_script,
             StackPackageType.BUILD_SCRIPT: self._publish_build_script,
@@ -586,6 +597,61 @@ class Publisher:
             "vp_src_s3_location": vp_src_s3_location,
             "s3_template_url": https_url,
             "message": f"Zipped and uploaded ({zip_filename})",
+        }
+
+    def _publish_zip_with_token_replace(
+        self, *, stack_def, project_dir, bucket, prefix_and_version, region, version, tmpdir, **_kw
+    ) -> dict:
+        """Zip source with VERSION token replacement, upload zip and template (for browser extension)."""
+        stack_dir = project_dir / stack_def.name
+        content_hash = _calculate_dir_hash(stack_dir)
+        zip_filename = f"src-{content_hash}.zip"
+
+        # Copy to temp dir for token replacement
+        temp_stack_dir = tmpdir / f"{stack_def.name}-temp"
+        skip_dirs = {"node_modules", "build", "dist", ".git", "__pycache__"}
+        shutil.copytree(stack_dir, temp_stack_dir, ignore=shutil.ignore_patterns(*skip_dirs))
+
+        # Replace <VERSION_TOKEN> in key files
+        token_files = ["package.json", "public/manifest.json", "template.yaml"]
+        for rel_path in token_files:
+            fpath = temp_stack_dir / rel_path
+            if fpath.exists():
+                content = fpath.read_text()
+                fpath.write_text(content.replace("<VERSION_TOKEN>", version))
+
+        # Create zip from token-replaced copy
+        zip_path = tmpdir / zip_filename
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(temp_stack_dir):
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                for fname in files:
+                    fpath = Path(root) / fname
+                    arcname = fpath.relative_to(temp_stack_dir)
+                    zf.write(fpath, arcname)
+
+        # Upload zip
+        s3_zip_key = f"{prefix_and_version}/{stack_def.name}/{zip_filename}"
+        src_s3_location = f"{bucket}/{s3_zip_key}"
+        logger.info("Uploading %s to s3://%s", zip_filename, src_s3_location)
+        self._s3.upload_file(str(zip_path), bucket, s3_zip_key)
+
+        # Upload token-replaced template
+        template_path = temp_stack_dir / stack_def.template_file
+        s3_template_key = f"{prefix_and_version}/{stack_def.name}/template.yaml"
+        self._s3.upload_file(str(template_path), bucket, s3_template_key)
+
+        # Validate template
+        https_url = f"https://s3.{region}.amazonaws.com/{bucket}/{s3_template_key}"
+        self._validate_template(https_url)
+
+        # Cleanup temp copy
+        shutil.rmtree(temp_stack_dir, ignore_errors=True)
+
+        return {
+            "browser_ext_src_s3_location": src_s3_location,
+            "s3_template_url": https_url,
+            "message": f"Zipped with token replacement and uploaded ({zip_filename})",
         }
 
     def _publish_cfn_package(self, *, stack_def, project_dir, bucket, prefix_and_version, region, tmpdir, **_kw) -> dict:
@@ -709,7 +775,8 @@ class Publisher:
         region: str,
         version: str,
         vp_src_s3_location: str,
-        tmpdir: Path,
+        browser_ext_src_s3_location: str = "",
+        tmpdir: Path = None,
     ) -> dict[str, Any]:
         """Replace tokens in lma-main.yaml, upload, and validate."""
         main_template_path = project_dir / "lma-main.yaml"
@@ -720,6 +787,7 @@ class Publisher:
             "<ARTIFACT_PREFIX_TOKEN>": prefix_and_version,
             "<VERSION_TOKEN>": version,
             "<REGION_TOKEN>": region,
+            "<BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>": browser_ext_src_s3_location,
             "<VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>": vp_src_s3_location,
         }
         for token, value in replacements.items():

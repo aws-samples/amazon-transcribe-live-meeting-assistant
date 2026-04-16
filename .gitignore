@@ -35,9 +35,6 @@ __pycache__/
 # Deprecated QnABot submodule (removed)
 submodule-aws-qnabot/
 
-# Deprecated browser extension (removed)
-lma-browser-extension-stack/
-
 # VP testing generated .env.local
 lma-virtual-participant-stack/backend/.env.local
 lma-virtual-participant-stack/backend/dist/

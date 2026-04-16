@@ -14,6 +14,7 @@ class StackPackageType(str, Enum):
     """How a stack is packaged during publish."""
 
     ZIP_AND_UPLOAD = "zip_and_upload"
+    ZIP_WITH_TOKEN_REPLACE = "zip_with_token_replace"
     CFN_PACKAGE = "cfn_package"
     DELEGATE_SCRIPT = "delegate_script"
     BUILD_SCRIPT = "build_script"

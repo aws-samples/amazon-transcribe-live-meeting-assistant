@@ -1,0 +1,18 @@
+main {
+  background-color: black;
+}
+
+.logo
+{
+  text-align: center;
+}
+
+.header {
+  text-align: center;
+  margin-bottom:0px;
+}
+
+.headerDesc {
+  text-align: center;
+  margin-top: 0px;
+}
