@@ -21,7 +21,7 @@ By default, CloudFormation operations use the caller's IAM permissions. This mea
 
 The template creates two resources:
 
-1. **CloudFormationServiceRole** — An IAM role that only `cloudformation.amazonaws.com` can assume. It has four inline policies covering all ~30 AWS services required by LMA.
+1. **CloudFormationServiceRole** — An IAM role that only `cloudformation.amazonaws.com` can assume. It has three inline policies covering all AWS services required by LMA.
 2. **PassRolePolicy** — A managed policy that grants `iam:PassRole` for the service role. Attach this to users or roles that need to deploy LMA.
 
 ```
@@ -135,13 +135,13 @@ The role provides access to the following AWS services required by LMA:
 | **Core Infrastructure** | CloudFormation, IAM, Serverless Application Repository |
 | **Compute & Serverless** | Lambda, Step Functions, CodeBuild, ECS, ECR |
 | **AI/ML Services** | Bedrock, Bedrock AgentCore, Transcribe, Translate, Comprehend |
-| **Storage & Data** | S3, S3 Vectors, DynamoDB, Kinesis, OpenSearch Serverless |
+| **Storage & Data** | S3, S3 Vectors, DynamoDB, Kinesis |
 | **API & Application** | AppSync, CloudFront, Elastic Load Balancing |
-| **Security & Identity** | Cognito, KMS, Secrets Manager, SSO/Identity Center |
+| **Security & Identity** | Cognito, KMS, Secrets Manager |
 | **Messaging & Events** | SNS, SES, EventBridge, EventBridge Scheduler |
 | **Monitoring** | CloudWatch Logs, X-Ray |
 | **Networking** | EC2/VPC, Auto Scaling |
-| **Optional** | Lex, Q Business, AWS Marketplace |
+| **Marketplace** | AWS Marketplace |
 
 ### Security Details
 
