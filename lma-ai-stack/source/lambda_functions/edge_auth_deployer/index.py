@@ -3,51 +3,51 @@ Custom Resource Lambda to deploy Lambda@Edge function in us-east-1.
 This function creates, updates, and deletes the Lambda@Edge function
 that validates Cognito tokens for VNC WebSocket connections.
 """
+
+import io
 import json
-import boto3
-from botocore.exceptions import ClientError
 import urllib.request
 import zipfile
-import io
+
+import boto3
+from botocore.exceptions import ClientError
 
 # cfnresponse module for Python 3.12+
 # Based on https://github.com/aws-cloudformation/custom-resource-helper-python
 SUCCESS = "SUCCESS"
 FAILED = "FAILED"
 
-def send(event, context, responseStatus, responseData, physicalResourceId=None, noEcho=False, reason=None):
+
+def send(
+    event, context, responseStatus, responseData, physicalResourceId=None, noEcho=False, reason=None
+):
     """Send response to CloudFormation"""
-    responseUrl = event['ResponseURL']
-    
+    responseUrl = event["ResponseURL"]
+
     responseBody = {
-        'Status': responseStatus,
-        'Reason': reason or f"See the details in CloudWatch Log Stream: {context.log_stream_name}",
-        'PhysicalResourceId': physicalResourceId or context.log_stream_name,
-        'StackId': event['StackId'],
-        'RequestId': event['RequestId'],
-        'LogicalResourceId': event['LogicalResourceId'],
-        'NoEcho': noEcho,
-        'Data': responseData
+        "Status": responseStatus,
+        "Reason": reason or f"See the details in CloudWatch Log Stream: {context.log_stream_name}",
+        "PhysicalResourceId": physicalResourceId or context.log_stream_name,
+        "StackId": event["StackId"],
+        "RequestId": event["RequestId"],
+        "LogicalResourceId": event["LogicalResourceId"],
+        "NoEcho": noEcho,
+        "Data": responseData,
     }
-    
+
     json_responseBody = json.dumps(responseBody)
-    
-    headers = {
-        'content-type': '',
-        'content-length': str(len(json_responseBody))
-    }
-    
+
+    headers = {"content-type": "", "content-length": str(len(json_responseBody))}
+
     try:
         req = urllib.request.Request(
-            responseUrl,
-            data=json_responseBody.encode('utf-8'),
-            headers=headers,
-            method='PUT'
+            responseUrl, data=json_responseBody.encode("utf-8"), headers=headers, method="PUT"
         )
         with urllib.request.urlopen(req) as response:
             print(f"Status code: {response.status}")
     except Exception as e:
         print(f"send(..) failed executing request: {e}")
+
 
 # Lambda@Edge function code
 EDGE_FUNCTION_CODE = '''
@@ -226,85 +226,93 @@ def lambda_handler(event, context):
     return request
 '''
 
+
 def create_zip_file(code_content):
     """Create a zip file containing the Lambda function code"""
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        zip_file.writestr('index.py', code_content)
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("index.py", code_content)
     zip_buffer.seek(0)
     return zip_buffer.read()
 
-def create_edge_function(lambda_client, iam_client, function_name, role_arn, user_pool_id, region, client_id):
+
+def create_edge_function(
+    lambda_client, iam_client, function_name, role_arn, user_pool_id, region, client_id
+):
     """Create Lambda@Edge function in us-east-1"""
     # Replace placeholders in code
-    code = EDGE_FUNCTION_CODE.replace('REGION_PLACEHOLDER', region)
-    code = code.replace('USER_POOL_ID_PLACEHOLDER', user_pool_id)
-    code = code.replace('CLIENT_ID_PLACEHOLDER', client_id)
-    
+    code = EDGE_FUNCTION_CODE.replace("REGION_PLACEHOLDER", region)
+    code = code.replace("USER_POOL_ID_PLACEHOLDER", user_pool_id)
+    code = code.replace("CLIENT_ID_PLACEHOLDER", client_id)
+
     # Create zip file
     zip_content = create_zip_file(code)
-    
+
     try:
         response = lambda_client.create_function(
             FunctionName=function_name,
-            Runtime='python3.12',
+            Runtime="python3.12",
             Role=role_arn,
-            Handler='index.lambda_handler',
-            Code={'ZipFile': zip_content},
-            Description='Lambda@Edge function for VNC WebSocket authentication',
+            Handler="index.lambda_handler",
+            Code={"ZipFile": zip_content},
+            Description="Lambda@Edge function for VNC WebSocket authentication",
             Timeout=5,
             MemorySize=128,
             Publish=True,  # Must publish for Lambda@Edge
         )
-        
+
         # When Publish=True, the response includes Version field
         # We need to construct the versioned ARN manually
-        version = response.get('Version', '1')
-        function_arn = response['FunctionArn']
-        
+        version = response.get("Version", "1")
+        function_arn = response["FunctionArn"]
+
         # If the ARN doesn't already have a version, append it
-        if not function_arn.split(':')[-1].isdigit():
+        if not function_arn.split(":")[-1].isdigit():
             versioned_arn = f"{function_arn}:{version}"
         else:
             versioned_arn = function_arn
-            
+
         print(f"Created function with version {version}, ARN: {versioned_arn}")
         return versioned_arn
-        
+
     except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceConflictException':
+        if e.response["Error"]["Code"] == "ResourceConflictException":
             # Function already exists, update it
-            return update_edge_function(lambda_client, function_name, user_pool_id, region, client_id)
+            return update_edge_function(
+                lambda_client, function_name, user_pool_id, region, client_id
+            )
         raise
+
 
 def update_edge_function(lambda_client, function_name, user_pool_id, region, client_id):
     """Update existing Lambda@Edge function"""
-    code = EDGE_FUNCTION_CODE.replace('REGION_PLACEHOLDER', region)
-    code = code.replace('USER_POOL_ID_PLACEHOLDER', user_pool_id)
-    code = code.replace('CLIENT_ID_PLACEHOLDER', client_id)
-    
+    code = EDGE_FUNCTION_CODE.replace("REGION_PLACEHOLDER", region)
+    code = code.replace("USER_POOL_ID_PLACEHOLDER", user_pool_id)
+    code = code.replace("CLIENT_ID_PLACEHOLDER", client_id)
+
     # Create zip file
     zip_content = create_zip_file(code)
-    
+
     # Update function code and publish new version
     response = lambda_client.update_function_code(
         FunctionName=function_name,
         ZipFile=zip_content,
         Publish=True,  # Must publish for Lambda@Edge
     )
-    
+
     # Construct versioned ARN
-    version = response.get('Version', '1')
-    function_arn = response['FunctionArn']
-    
+    version = response.get("Version", "1")
+    function_arn = response["FunctionArn"]
+
     # If the ARN doesn't already have a version, append it
-    if not function_arn.split(':')[-1].isdigit():
+    if not function_arn.split(":")[-1].isdigit():
         versioned_arn = f"{function_arn}:{version}"
     else:
         versioned_arn = function_arn
-        
+
     print(f"Updated function with version {version}, ARN: {versioned_arn}")
     return versioned_arn
+
 
 def delete_edge_function(lambda_client, function_name):
     """
@@ -315,91 +323,107 @@ def delete_edge_function(lambda_client, function_name):
     try:
         # List all versions
         versions = lambda_client.list_versions_by_function(FunctionName=function_name)
-        
+
         # Delete all versions except $LATEST
-        for version in versions.get('Versions', []):
-            if version['Version'] != '$LATEST':
+        for version in versions.get("Versions", []):
+            if version["Version"] != "$LATEST":
                 try:
                     lambda_client.delete_function(
-                        FunctionName=function_name,
-                        Qualifier=version['Version']
+                        FunctionName=function_name, Qualifier=version["Version"]
                     )
                     print(f"Deleted version {version['Version']}")
                 except ClientError as e:
-                    error_code = e.response['Error']['Code']
-                    if error_code == 'InvalidParameterValueException' and 'replicated function' in str(e):
-                        print(f"Version {version['Version']} is replicated - will be deleted automatically after CloudFront disassociation")
+                    error_code = e.response["Error"]["Code"]
+                    if (
+                        error_code == "InvalidParameterValueException"
+                        and "replicated function" in str(e)
+                    ):
+                        print(
+                            f"Version {version['Version']} is replicated - will be deleted automatically after CloudFront disassociation"
+                        )
                     else:
                         print(f"Error deleting version {version['Version']}: {e}")
-        
+
         # Try to delete the function
         try:
             lambda_client.delete_function(FunctionName=function_name)
             print(f"Deleted function: {function_name}")
         except ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == 'InvalidParameterValueException' and 'replicated function' in str(e):
-                print(f"Function {function_name} is replicated - will be deleted automatically (can take 1-2 hours)")
+            error_code = e.response["Error"]["Code"]
+            if error_code == "InvalidParameterValueException" and "replicated function" in str(e):
+                print(
+                    f"Function {function_name} is replicated - will be deleted automatically (can take 1-2 hours)"
+                )
                 print("This is expected behavior for Lambda@Edge functions")
                 # Don't raise - this is expected and will clean up automatically
             else:
                 raise
-                
+
     except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceNotFoundException':
+        if e.response["Error"]["Code"] == "ResourceNotFoundException":
             print(f"Function {function_name} not found - already deleted")
         else:
             raise
 
+
 def handler(event, context):
     """Custom resource handler"""
     print(f"Event: {json.dumps(event)}")
-    
+
     response_data = {}
-    physical_resource_id = event.get('PhysicalResourceId', 'EdgeAuthFunction')
-    
+    physical_resource_id = event.get("PhysicalResourceId", "EdgeAuthFunction")
+
     try:
         # Get properties
-        props = event['ResourceProperties']
-        function_name = props['FunctionName']
-        role_arn = props['RoleArn']
-        user_pool_id = props['UserPoolId']
-        region = props['Region']
-        client_id = props['ClientId']
-        
+        props = event["ResourceProperties"]
+        function_name = props["FunctionName"]
+        role_arn = props["RoleArn"]
+        user_pool_id = props["UserPoolId"]
+        region = props["Region"]
+        client_id = props["ClientId"]
+
         # Create clients for us-east-1
-        lambda_client = boto3.client('lambda', region_name='us-east-1')
-        iam_client = boto3.client('iam', region_name='us-east-1')
-        
-        if event['RequestType'] in ['Create', 'Update']:
+        lambda_client = boto3.client("lambda", region_name="us-east-1")
+        iam_client = boto3.client("iam", region_name="us-east-1")
+
+        if event["RequestType"] in ["Create", "Update"]:
             # Create or update function
             function_arn = create_edge_function(
-                lambda_client, iam_client, function_name, 
-                role_arn, user_pool_id, region, client_id
+                lambda_client, iam_client, function_name, role_arn, user_pool_id, region, client_id
             )
-            
+
             # Return the versioned ARN (required for Lambda@Edge)
-            response_data['FunctionArn'] = function_arn
+            response_data["FunctionArn"] = function_arn
             physical_resource_id = function_arn
-            
+
             print(f"Function ARN: {function_arn}")
             send(event, context, SUCCESS, response_data, physical_resource_id)
-            
-        elif event['RequestType'] == 'Delete':
+
+        elif event["RequestType"] == "Delete":
             # Delete function (may not complete immediately for Lambda@Edge)
             try:
                 delete_edge_function(lambda_client, function_name)
                 send(event, context, SUCCESS, response_data, physical_resource_id)
             except ClientError as e:
-                error_code = e.response['Error']['Code']
-                if error_code == 'InvalidParameterValueException' and 'replicated function' in str(e):
+                error_code = e.response["Error"]["Code"]
+                if error_code == "InvalidParameterValueException" and "replicated function" in str(
+                    e
+                ):
                     # Lambda@Edge replication - this is expected, return success
-                    print("Lambda@Edge function will be deleted automatically after replication cleanup")
-                    send(event, context, SUCCESS, response_data, physical_resource_id,
-                         reason="Lambda@Edge function marked for deletion (will complete automatically)")
+                    print(
+                        "Lambda@Edge function will be deleted automatically after replication cleanup"
+                    )
+                    send(
+                        event,
+                        context,
+                        SUCCESS,
+                        response_data,
+                        physical_resource_id,
+                        reason="Lambda@Edge function marked for deletion (will complete automatically)",
+                    )
                 else:
                     raise
-            
+
     except Exception as e:
         print(f"Error: {str(e)}")
         send(event, context, FAILED, {}, physical_resource_id, reason=str(e))

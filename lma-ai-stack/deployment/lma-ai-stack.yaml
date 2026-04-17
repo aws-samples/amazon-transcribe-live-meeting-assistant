@@ -185,16 +185,19 @@ Parameters:
       - "us.amazon.nova-premier-v1:0"
       - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
       - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-      - "us.anthropic.claude-sonnet-4-20250514-v1:0"
       - "us.anthropic.claude-opus-4-20250514-v1:0"
       - "us.anthropic.claude-opus-4-1-20250805-v1:0"
       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      - "us.anthropic.claude-sonnet-4-6"
+      - "us.anthropic.claude-opus-4-6-v1"
       - "eu.anthropic.claude-3-5-sonnet-20240620-v1:0"
       - "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"
-      - "global.anthropic.claude-sonnet-4-20250514-v1:0"
       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      - "global.anthropic.claude-sonnet-4-6"
+      - "global.anthropic.claude-opus-4-6-v1"
       - "global.amazon.nova-2-lite-v1:0"
+      - "us.amazon.nova-2-lite-v1:0"
 
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
@@ -691,6 +694,13 @@ Outputs:
     Condition: ShouldEnableMCPServer
     Description: OAuth authorization endpoint for authorization code flow (browser-based authentication)
     Value: !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
+
+  MCPServerApiKeyEndpoint:
+    Condition: ShouldEnableMCPServer
+    Description: >-
+      REST API Gateway endpoint for API key-authenticated MCP access.
+      Users generate personal API keys in the LMA UI settings and pass them via x-api-key header.
+    Value: !Sub "https://${MCPApiKeyRestApi}.execute-api.${AWS::Region}.amazonaws.com/mcp"
 
 Resources:
   EventSourcingTable:
@@ -3694,6 +3704,35 @@ Resources:
         SSEType: KMS
         KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
 
+  # MCP API Keys Table - Per-user API keys (hashed)
+  MCPApiKeysTable:
+    Type: AWS::DynamoDB::Table
+    Condition: ShouldEnableMCPServer
+    Properties:
+      TableName: !Sub "${AWS::StackName}-MCPApiKeys"
+      AttributeDefinitions:
+        - AttributeName: KeyHash
+          AttributeType: S
+        - AttributeName: UserId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: KeyHash
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserIdIndex
+          KeySchema:
+            - AttributeName: UserId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   # OAuth Manager Lambda Function
   OAuthManagerFunction:
     Type: AWS::Serverless::Function
@@ -3822,6 +3861,319 @@ Resources:
             "identity": $utils.toJson($context.identity),
             "info": {
               "fieldName": "handleOAuthCallback"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ##########################################################################
+  # MCP API Key Authentication
+  ##########################################################################
+
+  # API Key Authorizer Lambda
+  MCPApiKeyAuthorizerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableMCPServer
+    Properties:
+      LogGroupName: !Sub "/${LMAStackName}/lambda/MCPApiKeyAuthorizer"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MCPApiKeyAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldEnableMCPServer
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-MCPApiKeyAuthorizer"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/mcp_api_key_authorizer/
+      MemorySize: 128
+      Timeout: 10
+      Environment:
+        Variables:
+          MCP_API_KEYS_TABLE: !Ref MCPApiKeysTable
+          LOG_LEVEL: INFO
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MCPApiKeysTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+      LoggingConfig:
+        LogGroup: !Ref MCPApiKeyAuthorizerLogGroup
+    DependsOn:
+      - MCPApiKeyAuthorizerLogGroup
+
+  # API Key Manager Lambda (AppSync)
+  MCPApiKeyManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableMCPServer
+    Properties:
+      LogGroupName: !Sub "/${LMAStackName}/lambda/MCPApiKeyManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MCPApiKeyManagerFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldEnableMCPServer
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-MCPApiKeyManager"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/mcp_api_key_manager/
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          MCP_API_KEYS_TABLE: !Ref MCPApiKeysTable
+          LOG_LEVEL: INFO
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MCPApiKeysTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+      LoggingConfig:
+        LogGroup: !Ref MCPApiKeyManagerLogGroup
+    DependsOn:
+      - MCPApiKeyManagerLogGroup
+
+  # REST API Gateway with Lambda Authorizer
+  MCPApiKeyRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Condition: ShouldEnableMCPServer
+    Properties:
+      Name: !Sub "${LMAStackName}-MCP-ApiKey"
+      Description: "LMA MCP Server - API Key authenticated endpoint"
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  MCPApiKeyAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Condition: ShouldEnableMCPServer
+    Properties:
+      Name: MCPApiKeyAuth
+      RestApiId: !Ref MCPApiKeyRestApi
+      Type: REQUEST
+      AuthorizerUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MCPApiKeyAuthorizerFunction.Arn}/invocations"
+      AuthorizerResultTtlInSeconds: 0
+
+  MCPApiKeyResource:
+    Type: AWS::ApiGateway::Resource
+    Condition: ShouldEnableMCPServer
+    Properties:
+      RestApiId: !Ref MCPApiKeyRestApi
+      ParentId: !GetAtt MCPApiKeyRestApi.RootResourceId
+      PathPart: "{proxy+}"
+
+  MCPApiKeyMethod:
+    Type: AWS::ApiGateway::Method
+    Condition: ShouldEnableMCPServer
+    Properties:
+      RestApiId: !Ref MCPApiKeyRestApi
+      ResourceId: !Ref MCPApiKeyResource
+      HttpMethod: ANY
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref MCPApiKeyAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MCPServerAnalyticsFunction.Arn}/invocations"
+
+  MCPApiKeyRootMethod:
+    Type: AWS::ApiGateway::Method
+    Condition: ShouldEnableMCPServer
+    Properties:
+      RestApiId: !Ref MCPApiKeyRestApi
+      ResourceId: !GetAtt MCPApiKeyRestApi.RootResourceId
+      HttpMethod: ANY
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref MCPApiKeyAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MCPServerAnalyticsFunction.Arn}/invocations"
+
+  MCPApiKeyDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Condition: ShouldEnableMCPServer
+    DependsOn:
+      - MCPApiKeyMethod
+      - MCPApiKeyRootMethod
+    Properties:
+      RestApiId: !Ref MCPApiKeyRestApi
+
+  MCPApiKeyStage:
+    Type: AWS::ApiGateway::Stage
+    Condition: ShouldEnableMCPServer
+    Properties:
+      RestApiId: !Ref MCPApiKeyRestApi
+      DeploymentId: !Ref MCPApiKeyDeployment
+      StageName: mcp
+      MethodSettings:
+        - HttpMethod: "*"
+          ResourcePath: "/*"
+          ThrottlingBurstLimit: 50
+          ThrottlingRateLimit: 100
+
+  MCPApiKeyLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Condition: ShouldEnableMCPServer
+    Properties:
+      FunctionName: !GetAtt MCPServerAnalyticsFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MCPApiKeyRestApi}/*"
+
+  MCPApiKeyAuthorizerPermission:
+    Type: AWS::Lambda::Permission
+    Condition: ShouldEnableMCPServer
+    Properties:
+      FunctionName: !GetAtt MCPApiKeyAuthorizerFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MCPApiKeyRestApi}/authorizers/${MCPApiKeyAuthorizer}"
+
+  # AppSync data source and resolvers for API Key Manager
+  MCPApiKeyManagerDataSource:
+    Type: AWS::AppSync::DataSource
+    Condition: ShouldEnableMCPServer
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MCPApiKeyManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt MCPApiKeyManagerDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MCPApiKeyManagerFunction.Arn
+
+  MCPApiKeyManagerDataSourceRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableMCPServer
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt MCPApiKeyManagerFunction.Arn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  GenerateMCPApiKeyResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: ShouldEnableMCPServer
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: generateMCPApiKey
+      DataSourceName: !GetAtt MCPApiKeyManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "generateMCPApiKey"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  RevokeMCPApiKeyResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: ShouldEnableMCPServer
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: revokeMCPApiKey
+      DataSourceName: !GetAtt MCPApiKeyManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "revokeMCPApiKey"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ListMCPApiKeysResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: ShouldEnableMCPServer
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: listMCPApiKeys
+      DataSourceName: !GetAtt MCPApiKeyManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "listMCPApiKeys"
             }
           }
         }

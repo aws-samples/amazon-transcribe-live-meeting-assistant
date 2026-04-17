@@ -495,3 +495,29 @@ export const updateMCPServer = /* GraphQL */ `
     }
   }
 `;
+
+export const generateMCPApiKey = /* GraphQL */ `
+  mutation GenerateMCPApiKey {
+    generateMCPApiKey {
+      keyValue
+      keyPrefix
+      createdAt
+    }
+  }
+`;
+
+export const revokeMCPApiKey = /* GraphQL */ `
+  mutation RevokeMCPApiKey($keyPrefix: String!) {
+    revokeMCPApiKey(keyPrefix: $keyPrefix)
+  }
+`;
+
+export const listMCPApiKeys = /* GraphQL */ `
+  query ListMCPApiKeys {
+    listMCPApiKeys {
+      keyPrefix
+      createdAt
+      enabled
+    }
+  }
+`;

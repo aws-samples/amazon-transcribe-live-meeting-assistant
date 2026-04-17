@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lma-cli"
+version = "0.3.1"
+description = "CLI for AWS Live Meeting Assistant (LMA)"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Amazon Web Services"},
+]
+dependencies = [
+    "lma-sdk>=0.3.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+lma-cli = "lma_cli.entry:safe_main"
+lma = "lma_cli.entry:safe_main"
+
+[tool.setuptools.packages.find]
+include = ["lma_cli*"]

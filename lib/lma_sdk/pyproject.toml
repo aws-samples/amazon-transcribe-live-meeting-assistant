@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lma-sdk"
+version = "0.3.1"
+description = "Python SDK for AWS Live Meeting Assistant (LMA)"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Amazon Web Services"},
+]
+dependencies = [
+    "boto3>=1.34.0",
+    "botocore>=1.34.0",
+    "pydantic>=2.0.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "moto[s3,cloudformation,sts]>=5.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["lma_sdk*"]

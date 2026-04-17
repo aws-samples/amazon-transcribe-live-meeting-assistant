@@ -1,0 +1,49 @@
+.contentPlaceholder {
+  position:absolute;
+  bottom:100px;
+  left: 10px;
+  right: 10px;
+  top:70px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-left:10px;
+  padding-right:10px;
+}
+
+.userBox {
+  background-color:#f2f8fd;
+  border: 1px solid #b5d6f4;
+  padding:0.5em;
+  border-radius: 0.5em;
+}
+
+.otherBox {
+  background-color:#f2f8fd;
+  border: 1px solid #b5d6f4;
+  padding:0.5em;
+  border-radius: 0.5em;
+}
+
+.assistantBox {
+  background-color:#0972D3;
+  border: 1px solid #0972D3;
+  padding:0.5em;
+  border-radius: 0.5em;
+  color: white;
+}
+
+.valignLogo {
+  align-items:center;
+}
+
+.assistantLogo {
+  max-width: 3em;
+  padding-right:0.3em;
+}
+
+.version {
+  text-align: center;
+  margin-top: 0px;
+  font-size: 0.8em;
+  color:lightgray;
+}

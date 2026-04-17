@@ -12,7 +12,7 @@ import CallAnalyticsTopNavigation from '../components/call-analytics-top-navigat
 import MCPServersPage from '../components/mcp-servers-page/MCPServersPage';
 import Navigation from '../components/call-analytics-layout/navigation';
 import Breadcrumbs from '../components/mcp-servers-page/breadcrumbs';
-import ToolsPanel from '../components/call-analytics-layout/tools-panel';
+import ToolsPanel from '../components/mcp-servers-page/tools-panel';
 import { appLayoutLabels } from '../components/common/labels';
 import useNotifications from '../hooks/use-notifications';
 import useAppContext from '../contexts/app';
