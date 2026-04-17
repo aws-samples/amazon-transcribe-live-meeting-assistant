@@ -15,6 +15,24 @@ import boto3
 
 logger = logging.getLogger()
 
+# Bedrock inference profile prefixes (cross-region routing).
+# Model IDs starting with these prefixes must use an inference-profile ARN,
+# not a foundation-model ARN.
+_INFERENCE_PROFILE_PREFIXES = ("us.", "eu.", "apac.", "global.")
+
+
+def _build_model_arn(model_id: str, region: str, account_id: str) -> str:
+    """Build the correct Bedrock model ARN based on the model ID prefix.
+
+    Inference profiles (prefixed with region codes like ``us.``, ``eu.``,
+    ``apac.``, or ``global.``) must be referenced via the
+    ``inference-profile`` ARN path. Plain foundation model IDs use the
+    ``foundation-model`` ARN path.
+    """
+    if any(model_id.startswith(p) for p in _INFERENCE_PROFILE_PREFIXES):
+        return f"arn:aws:bedrock:{region}:{account_id}:inference-profile/{model_id}"
+    return f"arn:aws:bedrock:{region}::foundation-model/{model_id}"
+
 
 def execute(
     query: str,
@@ -43,10 +61,25 @@ def execute(
         raise ValueError("Query is required")
 
     kb_id = os.environ.get("TRANSCRIPT_KB_ID")
-    model_arn = os.environ.get("MODEL_ARN")
 
     if not kb_id:
         raise ValueError("Transcript Knowledge Base not configured")
+
+    # Resolve the model ARN. Prefer BEDROCK_MODEL_ID (builds correct ARN type
+    # for both foundation models and inference profiles). Fall back to the
+    # legacy pre-built MODEL_ARN for backward compatibility.
+    model_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
+    if model_id:
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        account_id = os.environ.get("AWS_ACCOUNT_ID") or boto3.client("sts").get_caller_identity()[
+            "Account"
+        ]
+        model_arn = _build_model_arn(model_id, region, account_id)
+    else:
+        model_arn = os.environ.get("MODEL_ARN")
+
+    if not model_arn:
+        raise ValueError("Bedrock model not configured (set BEDROCK_MODEL_ID or MODEL_ARN)")
 
     kb_client = boto3.client("bedrock-agent-runtime")
 
