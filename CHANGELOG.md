@@ -7,13 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.3.1] - 2026-04-17
+
 ## Added
+
+- **MCP Server API Key Authentication** — Users can now generate personal API keys from the LMA UI (MCP Servers Configuration page) for headless/programmatic MCP client access. Keys authenticate via a REST API Gateway with a Lambda REQUEST authorizer (SHA-256 hashed at rest in DynamoDB). The API key endpoint implements the full MCP JSON-RPC 2.0 streamable HTTP protocol (initialize, tools/list, tools/call, ping), so standard MCP clients — including Amazon Quick Suite via bearer token — can connect directly without OAuth. One key per user, revocable from the UI, with `lma_` prefix for leak detection. See [MCP API Key Authentication](docs/mcp-api-key-auth.md).
+
+- **Browser Extension restored** — Re-added the Chrome browser extension for streaming meeting audio directly from the browser, restored by popular demand.
 
 - **CloudFormation Service Role** — New deployable CloudFormation template (`iam-roles/cloudformation-management/`) that creates a delegated service role for non-admin LMA deployment. Administrators deploy the role once; developers then use `lma-cli deploy --role-arn` or the CloudFormation console to deploy LMA without needing admin permissions. See [CloudFormation Service Role guide](docs/cloudformation-service-role.md).
 
 - **LMA CLI & SDK** (`lma-cli`, `lma-sdk`) — New Python CLI and SDK for building, deploying, and managing LMA stacks from the command line. Key commands: `lma deploy` (auto-selects public template by region, `--from-code` for build+deploy, `--wait` with real-time event streaming, `--admin-email` for new stacks), `lma publish` (build and upload artifacts to S3 with change detection), `lma status/outputs/delete/logs`. See [LMA CLI Reference](docs/lma-cli.md).
 
 - **Documentation Overhaul** - Updated documents reflect new features and remove deprecated feature references. See ./docs.
+
+- **Information panels populated across all UI pages** — The Cloudscape Information (help) panel on every page now includes a brief feature summary and links to relevant documentation on the GitHub docs-site. Previously most pages had sparse or missing content; now Meetings List, Meeting Details, Stream Audio, Virtual Participant, Meetings Query Tool, MCP Servers, Nova Sonic Config, and Transcript Summary Config all have enriched panels. Also fixed: Stream Audio had duplicate text, Virtual Participant incorrectly reused the Stream Audio panel.
 
 - **Documentation Site** — New Starlight-based docs site deployed to GitHub Pages. Built with Astro and auto-synced sidebar from `docs/INDEX.md`. Key Makefile targets: `make docs-build`, `make docs-dev`, `make docs-deploy`. View at: https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/
 
@@ -31,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **LocalUITestingEnv output** — added to `lma-main.yaml` as passthrough from AI stack, enabling `make ui-start` to auto-configure `.env` for local UI development
 - **`.nvmrc`** — pins Node.js v20 for consistent development environments
+
+## Fixed
+
+- **Zoom VP: auto-dismiss recording consent and language popups** — Virtual Participant now automatically dismisses Zoom popup dialogs (recording consent, language interpretation) that appear on join or mid-meeting, preventing the VP from being disconnected after ~15-20 seconds. Uses a MutationObserver-based handler that only targets modal overlays with consent-related text.
+- **Zoom VP: meeting-end detection no longer falsely triggered by popups** — Replaced `waitForSelector` with text-content–aware `waitForFunction` to distinguish the "meeting has been ended" dialog from recording consent popups, which share the same button selector.
 
 ## Changed
 

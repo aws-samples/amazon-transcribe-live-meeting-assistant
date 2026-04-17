@@ -8,6 +8,7 @@ import { Route, Switch, useRouteMatch } from 'react-router-dom';
 
 import CallListToolsPanel from '../call-list/tools-panel';
 import CallDetailsToolsPanel from '../call-details/tools-panel';
+import MeetingsQueryToolsPanel from '../meetings-query-layout/tools-panel';
 
 const ToolsPanel = () => {
   const { path } = useRouteMatch();
@@ -16,6 +17,9 @@ const ToolsPanel = () => {
     <Switch>
       <Route exact path={path}>
         <CallListToolsPanel />
+      </Route>
+      <Route path={`${path}/query`}>
+        <MeetingsQueryToolsPanel />
       </Route>
       <Route path={`${path}/:callId`}>
         <CallDetailsToolsPanel />

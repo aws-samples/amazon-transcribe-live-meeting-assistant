@@ -46,6 +46,11 @@ fi
 [ -d ${OUT_DIR} ] && rm -fr ${OUT_DIR}
 mkdir -p ${OUT_DIR}
 
+# Cross-platform sha256sum
+if ! command -v sha256sum >/dev/null 2>&1; then
+  sha256sum() { shasum -a 256 "$@"; }
+fi
+
 cd ..
 
 HASH=$(

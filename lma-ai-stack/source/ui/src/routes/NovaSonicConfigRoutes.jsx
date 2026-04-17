@@ -12,7 +12,7 @@ import CallAnalyticsTopNavigation from '../components/call-analytics-top-navigat
 import NovaSonicConfigPage from '../components/nova-sonic-config/NovaSonicConfigPage';
 import Navigation from '../components/call-analytics-layout/navigation';
 import Breadcrumbs from '../components/nova-sonic-config/breadcrumbs';
-import ToolsPanel from '../components/call-analytics-layout/tools-panel';
+import ToolsPanel from '../components/nova-sonic-config/tools-panel';
 import { appLayoutLabels } from '../components/common/labels';
 import useNotifications from '../hooks/use-notifications';
 import useAppContext from '../contexts/app';

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lma-sdk"
-version = "0.3.1.dev4"
+version = "0.3.1"
 description = "Python SDK for AWS Live Meeting Assistant (LMA)"
 readme = "README.md"
 license = {text = "MIT"}

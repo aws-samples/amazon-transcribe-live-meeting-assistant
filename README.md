@@ -38,7 +38,9 @@ https://github.com/user-attachments/assets/cecf20c7-b52c-4bb8-ad5b-6b9f34e7df11
 
 ## Documentation
 
-**Full documentation: [docs/INDEX.md](./docs/INDEX.md)**
+**📖 Browse the docs site: [aws-samples.github.io/amazon-transcribe-live-meeting-assistant](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/)**
+
+Full documentation source: [docs/INDEX.md](./docs/INDEX.md)
 
 Quick links:
 - [Prerequisites & Deployment](./docs/prerequisites-and-deployment.md)
