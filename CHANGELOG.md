@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Documentation Overhaul** - Updated documents reflect new features and remove deprecated feature references. See ./docs.
 
+- **Information panels populated across all UI pages** — The Cloudscape Information (help) panel on every page now includes a brief feature summary and links to relevant documentation on the GitHub docs-site. Previously most pages had sparse or missing content; now Meetings List, Meeting Details, Stream Audio, Virtual Participant, Meetings Query Tool, MCP Servers, Nova Sonic Config, and Transcript Summary Config all have enriched panels. Also fixed: Stream Audio had duplicate text, Virtual Participant incorrectly reused the Stream Audio panel.
+
 - **Documentation Site** — New Starlight-based docs site deployed to GitHub Pages. Built with Astro and auto-synced sidebar from `docs/INDEX.md`. Key Makefile targets: `make docs-build`, `make docs-dev`, `make docs-deploy`. View at: https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/
 
 - **Root Makefile** — New developer-facing `Makefile` with `make help` for easy discovery. Key targets:
