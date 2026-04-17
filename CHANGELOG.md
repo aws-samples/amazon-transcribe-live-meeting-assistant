@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.3.1] - 2026-04-17
+
 ## Added
 
 - **MCP Server API Key Authentication** — Users can now generate personal API keys from the LMA UI (MCP Servers Configuration page) for headless/programmatic MCP client access. Keys authenticate via a REST API Gateway with a Lambda REQUEST authorizer (SHA-256 hashed at rest in DynamoDB). The API key endpoint implements the full MCP JSON-RPC 2.0 streamable HTTP protocol (initialize, tools/list, tools/call, ping), so standard MCP clients — including Amazon Quick Suite via bearer token — can connect directly without OAuth. One key per user, revocable from the UI, with `lma_` prefix for leak detection. See [MCP API Key Authentication](docs/mcp-api-key-auth.md).
