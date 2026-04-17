@@ -204,6 +204,119 @@ export default class Zoom {
             return;
         }
 
+        // Dismiss any Zoom popups (recording consent, language interpretation, etc.)
+        console.log('Setting up Zoom popup auto-dismiss handler.');
+        await page.evaluate(() => {
+            // Text patterns that indicate a dismissible consent/info popup.
+            // Only modals whose text matches one of these will be auto-dismissed.
+            const POPUP_TEXT_PATTERNS = [
+                'recording',
+                'consent',
+                'recorded',
+                'language interpretation',
+                'translation',
+                'request language',
+                'by joining',
+                'acknowledg',
+            ];
+
+            // Modal container selectors - only look inside actual overlay modals,
+            // never match toolbar buttons or the main meeting UI.
+            const MODAL_SELECTORS = [
+                '.zm-modal',
+                '.zm-modal-legacy',
+                '[role="alertdialog"]',
+                '.ReactModal__Content',
+                '.recording-disclaimer-dialog',
+            ];
+
+            const checkAndDismissPopups = (): boolean => {
+                let dismissed = false;
+
+                for (const modalSel of MODAL_SELECTORS) {
+                    const modals = document.querySelectorAll(modalSel);
+                    modals.forEach((modal) => {
+                        const modalEl = modal as HTMLElement;
+                        // Skip invisible/hidden modals
+                        if (!modalEl || modalEl.offsetParent === null) return;
+
+                        const modalText = modalEl.textContent?.toLowerCase() || '';
+                        const isRelevantPopup = POPUP_TEXT_PATTERNS.some(
+                            pattern => modalText.includes(pattern)
+                        );
+                        if (!isRelevantPopup) return;
+
+                        // Try to find and click the primary action button within this modal
+                        const actionButtonSelectors = [
+                            '.zm-modal-footer-default-actions button.zm-btn--primary',
+                            'button.zm-btn--primary',
+                            'button.zm-btn-legacy.zm-btn--primary',
+                            'button.zm-btn__outline--blue',
+                        ];
+
+                        for (const btnSel of actionButtonSelectors) {
+                            const btn = modalEl.querySelector(btnSel) as HTMLElement;
+                            if (btn && btn.offsetParent !== null) {
+                                console.log(`[LMA] Auto-dismissing popup: "${modalText.substring(0, 80).trim()}...", clicking: "${btn.textContent?.trim()}"`);
+                                btn.click();
+                                dismissed = true;
+                                return;
+                            }
+                        }
+
+                        // Fallback: find any button with dismiss-like text
+                        const allButtons = modalEl.querySelectorAll('button');
+                        for (const btn of allButtons) {
+                            const btnText = btn.textContent?.trim().toLowerCase() || '';
+                            if (['got it', 'i agree', 'ok', 'okay', 'continue', 'accept', 'consent', 'agree', 'close', 'dismiss'].includes(btnText)) {
+                                console.log(`[LMA] Auto-dismissing popup by button text: "${btn.textContent?.trim()}"`);
+                                (btn as HTMLElement).click();
+                                dismissed = true;
+                                return;
+                            }
+                        }
+                    });
+                }
+
+                return dismissed;
+            };
+
+            // Check immediately in case popup is already present
+            checkAndDismissPopups();
+
+            // Set up MutationObserver to catch popups that appear after join
+            const observer = new MutationObserver(() => {
+                checkAndDismissPopups();
+            });
+
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+            });
+
+            // Also poll periodically as a safety net (some popups may not trigger mutations reliably)
+            let pollCount = 0;
+            const maxPolls = 60; // Poll for up to 30 seconds (500ms interval)
+            const pollInterval = setInterval(() => {
+                checkAndDismissPopups();
+                pollCount++;
+                if (pollCount >= maxPolls) {
+                    clearInterval(pollInterval);
+                    // Keep the MutationObserver running for popups that may appear later
+                }
+            }, 500);
+
+            // Store cleanup function for later if needed
+            (window as any).__lmaPopupDismissCleanup = () => {
+                observer.disconnect();
+                clearInterval(pollInterval);
+            };
+        });
+
+        // Give a brief moment for any popup to appear and be dismissed
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        console.log('Popup handler active, proceeding to open chat.');
+
         console.log('Opening chat panel.');
         const chatButtonElement = await page.waitForSelector(
             'button[aria-label="open the chat panel"]'
@@ -429,9 +542,29 @@ export default class Zoom {
                     () => window.location.href === 'about:blank',
                     { timeout: 0 }
                 ).then(() => 'URL_CHANGE_BLANK'),
-                // Keep the 4-hour timeout as fallback
-                page.waitForSelector(
-                    'button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue',
+                // Detect meeting-end screen
+                page.waitForFunction(
+                    () => {
+                        const buttons = document.querySelectorAll('button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue');
+                        for (const btn of buttons) {
+                            const modal = btn.closest('.zm-modal, .zm-modal-legacy, .ReactModal__Content');
+                            if (modal) {
+                                const text = modal.textContent?.toLowerCase() || '';
+                                // Match meeting-end dialogs
+                                if (text.includes('meeting has been ended') ||
+                                    text.includes('meeting has ended') ||
+                                    text.includes('meeting is end') ||
+                                    text.includes('removed from the meeting')) {
+                                    return true;
+                                }
+                                // Skip consent/info popups (handled by auto-dismiss)
+                                continue;
+                            }
+                            // Button not inside a modal — match it (e.g. post-meeting page)
+                            return true;
+                        }
+                        return false;
+                    },
                     { timeout: details.meetingTimeout }
                 ).then(() => 'LEGACY_BUTTON_TIMEOUT')
             ]);
