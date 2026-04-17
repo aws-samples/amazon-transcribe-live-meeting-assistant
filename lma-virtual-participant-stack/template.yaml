@@ -397,11 +397,19 @@ Parameters:
     Type: String
     Default: t3.medium
     AllowedValues:
-      - t3.small
       - t3.medium
       - t3.large
       - t3.xlarge
-    Description: EC2 instance type (only used if VPLaunchType=EC2)
+      - c5.large
+      - c5.xlarge
+      - c5.2xlarge
+      - m5.large
+      - m5.xlarge
+    Description: >-
+      EC2 instance type (only used if VPLaunchType=EC2).
+      For voice assistant + Simli avatar workloads, use c5.xlarge or larger
+      for sustained CPU performance (no burstable throttling).
+      t3 instances are burstable and may cause audio glitches under sustained load.
 
   VPMinInstances:
     Type: Number

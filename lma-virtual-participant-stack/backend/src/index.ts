@@ -319,7 +319,7 @@ const main = async (): Promise<void> => {
                 } catch (e) {
                     isReconnecting = false;
                 }
-            }, 5000);
+            }, 1000);
             
             // Initial connection (will be re-established by poll after page navigates)
             await connectSimliStream();

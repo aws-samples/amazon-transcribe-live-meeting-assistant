@@ -5,14 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## Unreleased
+
+## Added
+
+- **Browser Extension restored** — Re-added the Chrome browser extension for streaming meeting audio directly from the browser, restored by popular demand.
+
+- **CloudFormation Service Role** — New deployable CloudFormation template (`iam-roles/cloudformation-management/`) that creates a delegated service role for non-admin LMA deployment. Administrators deploy the role once; developers then use `lma-cli deploy --role-arn` or the CloudFormation console to deploy LMA without needing admin permissions. See [CloudFormation Service Role guide](docs/cloudformation-service-role.md).
+
+- **LMA CLI & SDK** (`lma-cli`, `lma-sdk`) — New Python CLI and SDK for building, deploying, and managing LMA stacks from the command line. Key commands: `lma deploy` (auto-selects public template by region, `--from-code` for build+deploy, `--wait` with real-time event streaming, `--admin-email` for new stacks), `lma publish` (build and upload artifacts to S3 with change detection), `lma status/outputs/delete/logs`. See [LMA CLI Reference](docs/lma-cli.md).
+
+- **Documentation Overhaul** - Updated documents reflect new features and remove deprecated feature references. See ./docs.
+
+- **Documentation Site** — New Starlight-based docs site deployed to GitHub Pages. Built with Astro and auto-synced sidebar from `docs/INDEX.md`. Key Makefile targets: `make docs-build`, `make docs-dev`, `make docs-deploy`. View at: https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/
+
+- **Root Makefile** — New developer-facing `Makefile` with `make help` for easy discovery. Key targets:
+  - `make setup` — sets up dev environment (nvm Node v20, Python `.venv` with lint tools)
+  - `make lint` / `make fastlint` — cfn-lint on all CloudFormation templates, pylint/flake8/black on Lambda functions, ESLint on UI
+  - `make format` — auto-format Python with black
+  - `make build` / `make build-ui` / `make build-websocket` / `make build-vp` — build all or individual stacks
+  - `make test` — run React UI tests
+  - `make ui-start STACK_NAME=<name>` — auto-generate `.env` from CloudFormation stack outputs and start local UI dev server
+  - `make publish BUCKET=<b> PREFIX=<p> REGION=<r>` — build and upload all artifacts to S3
+  - `make version V=x.y.z` — update VERSION file
+  - `make commit` / `make fastcommit` — lint, test, commit, and push
+  - `make clean` / `make clean-all` — clean build artifacts and node_modules
+
+- **LocalUITestingEnv output** — added to `lma-main.yaml` as passthrough from AI stack, enabling `make ui-start` to auto-configure `.env` for local UI development
+- **`.nvmrc`** — pins Node.js v20 for consistent development environments
+
+## Fixed
+
+- **Zoom VP: auto-dismiss recording consent and language popups** — Virtual Participant now automatically dismisses Zoom popup dialogs (recording consent, language interpretation) that appear on join or mid-meeting, preventing the VP from being disconnected after ~15-20 seconds. Uses a MutationObserver-based handler that only targets modal overlays with consent-related text.
+- **Zoom VP: meeting-end detection no longer falsely triggered by popups** — Replaced `waitForSelector` with text-content–aware `waitForFunction` to distinguish the "meeting has been ended" dialog from recording consent popups, which share the same button selector.
+
+## Changed
+
+- **macOS Apple Silicon support for publish/deploy** — `lma-cli publish` and `lma-cli deploy --from-code` now work on macOS (including Apple Silicon). The `lma-ai-stack` Makefile skips the Linux-only QEMU multiarch setup on macOS since Docker Desktop handles x86_64 emulation natively via Rosetta.
+
+- **Bedrock Model Updates** — Removed deprecated Claude Sonnet 4 (`us.anthropic.claude-sonnet-4-20250514-v1:0`, `global.anthropic.claude-sonnet-4-20250514-v1:0`) from AllowedValues in response to Anthropic's deprecation notice (Legacy July 14, 2026; EOL October 14, 2026). Added Claude Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`, `global.anthropic.claude-sonnet-4-6`), Claude Opus 4.6 (`us.anthropic.claude-opus-4-6-v1`, `global.anthropic.claude-opus-4-6-v1`), and `us.amazon.nova-2-lite-v1:0` as new model options. Default model (`global.anthropic.claude-haiku-4-5-20251001-v1:0`) is unchanged.
+
+## [0.3.0] - 2026-04-09
 
 ### Added
+- **STRANDS_BEDROCK_WITH_KB (Use Existing)** — new MeetingAssistService option to use an existing Bedrock Knowledge Base with the Strands agent
+- **Bedrock Guardrails for Strands agent** — `BedrockGuardrailId` and `BedrockGuardrailVersion` parameters to apply guardrails to the meeting assistant
+- Shared navigation component (`navigation-items.js`) — all layout navigation files now use a single source of truth for consistent nav items, ordering, Configuration section, and Deployment Info
 - Simli avatar integration for Virtual Participant animated lip-synced avatar as the VP's camera feed in meetings, driven by voice assistant audio output (Nova Sonic or ElevenLabs). Configure with Simli API Key and Face ID in CloudFormation parameters.
 - Wake phrase pre-connect optimization for voice assistant — detects wake phrase in partial (streaming) transcripts and pre-warms the voice agent connection (WebSocket for ElevenLabs, Bedrock session for Nova Sonic) in the background while the user is still speaking, eliminating 1-2 seconds of connection latency. Activation now triggers immediately when the Transcribe segment completes instead of waiting a fixed 3-second capture delay.
+- Compute-optimized EC2 instance types (c5, m5) for Virtual Participant — recommended for voice assistant + Simli avatar workloads requiring sustained CPU performance
+
+### Changed
+- **Consolidated on Strands Bedrock agent** — MeetingAssistService options simplified to `STRANDS_BEDROCK`, `STRANDS_BEDROCK_WITH_KB (Create)`, and `STRANDS_BEDROCK_WITH_KB (Use Existing)`
+- **CFT form reorganized** — VP Startup Optimization moved to 2nd position, Voice Assistant split into own group, MCP Server renamed to "LMA Hosted MCP Server", removed deprecated parameter groups
+- **Left nav Sources order** — Virtual Participant now listed first (VP → Stream Audio → Chrome Extension)
+- **Deprecated old models** — removed Claude 3.x from model selectors; only Claude 4+ and Nova models remain
+- Virtual Participant audio and avatar performance improvements — persistent audio playback stream (replaces per-chunk process spawning), WebSocket bridge for Simli avatar audio delivery (replaces CDP round-trips), and tuned PulseAudio buffering to eliminate audio glitches and lip-sync drift on smaller instances
+
+### Removed
+- **QnABot** — removed QNABOT nested stack, QnABot submodule (`.gitmodules`), all `qna_*` Lambda handlers, demo data files (`qna-ma-demo.jsonl`, `qna-ma-healthcare-demo.jsonl`), QnABot READMEs, QnABot build from `publish.sh`, and all QnABot-related CFT parameters/conditions/outputs
+- **Amazon Lex** — removed all Lex code paths from async_agent_assist_orchestrator, `lex_utils` Lambda layer, Lex env vars (`LEX_BOT_ID`, `IS_LEX_AGENT_ASSIST_ENABLED`), `IsLexAgentAssistEnabled` parameter, `TranscribeToLexLocaleId` mapping, Lex Web UI scripts and assets, `lex:RecognizeText` IAM permissions, AgentAssistBot Cognito Identity Pool and IAM roles
+- **Bedrock Agent stack** — removed BEDROCKAGENT nested stack and build
+- **Q Business** — removed all Q Business parameters, Lambda/IAM/DynamoDB/KMS resources from meetingassist-setup stack
+- **Healthcare domain** — removed `Domain` parameter and `IsHealthcareDomainSelected` condition
+- **OpenSearch Serverless** — removed from vector store allowed values (S3 Vectors only)
+- **S3 config parameters** — `S3BucketName`, `AudioFilePrefix`, `TranscriptFilePrefix` removed from CFT form (hardcoded to defaults)
+- **Vector store parameters** — removed from CFT form (hardcoded to `S3_VECTORS`)
 
 ### Fixed
 - Virtual Participant ECS task crash leaving meeting permanently stuck as "in progress" due to missing cleanup on uncaught transcription pipeline errors
+- Audio glitches and Simli avatar sync issues on smaller EC2 instances caused by CPU contention from process spawning overhead and aggressive PulseAudio buffering
 
 ## [0.2.30] - 2026-03-27
 

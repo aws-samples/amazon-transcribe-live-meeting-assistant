@@ -112,16 +112,9 @@ install-node-dependencies: $(OUT_DIR)/$(PACKAGE_JSON)
 endif
 .PHONY: install-node-dependencies
 
-# Cross-platform multiarch: Linux needs QEMU binfmt, macOS Docker handles it natively
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Linux)
 BINFMT_MULTIARCH := /proc/sys/fs/binfmt_misc/qemu-arm
 $(BINFMT_MULTIARCH): | $(OUT_DIR)
-	@echo '[INFO] configuring docker multiarchitecture for sam cross platform build'
 	docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-else
-BINFMT_MULTIARCH :=
-endif
 
 install-docker-multiarch: $(BINFMT_MULTIARCH)
 .PHONY: install-docker-multiarch
@@ -306,9 +299,11 @@ $(PACKAGE_RELEASE_OUT_FILE): $(PACKAGE_RELEASE_REPLACE_OUT_FILE) | $(OUT_DIR)
 	  echo '[ERROR] need to set env var: RELEASE_S3_BUCKET_BASE' && \
 	  exit 1 || true
 
+	@echo '[INFO] configuring docker multiarchitecture for sam cross platform build'
 	@if [ "$$(uname -s)" = "Linux" ]; then \
-		echo '[INFO] configuring docker multiarchitecture for sam cross platform build'; \
 		docker run --rm --privileged multiarch/qemu-user-static --reset -p yes; \
+	else \
+		echo '[INFO] Skipping QEMU setup on macOS (Docker Desktop handles x86_64 emulation)'; \
 	fi
 
 	@echo '[INFO] sam building template file for release $(RELEASE_VERSION)'

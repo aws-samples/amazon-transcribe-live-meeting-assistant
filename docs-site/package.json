@@ -1,0 +1,18 @@
+{
+  "name": "lma-docs",
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.34.1",
+    "astro": "^5.7.10",
+    "sharp": "^0.33.3",
+    "zod": "^3.25.76"
+  }
+}

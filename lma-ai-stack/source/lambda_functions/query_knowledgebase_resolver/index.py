@@ -5,6 +5,7 @@
 #
 import json
 import os
+
 import boto3
 from botocore.config import Config
 
@@ -27,35 +28,31 @@ else:
 KB_CLIENT = boto3.client(
     service_name="bedrock-agent-runtime",
     region_name=KB_REGION,
-    config=Config(retries={'max_attempts': 50, 'mode': 'adaptive'})
+    config=Config(retries={"max_attempts": 50, "mode": "adaptive"}),
 )
+
 
 def get_kb_response(query, userId, isAdminUser, sessionId):
     input = {
-        "input": {
-            'text': query
-        },
+        "input": {"text": query},
         "retrieveAndGenerateConfiguration": {
-            'knowledgeBaseConfiguration': {
-                'knowledgeBaseId': KB_ID,
-                'modelArn': MODEL_ARN,
+            "knowledgeBaseConfiguration": {
+                "knowledgeBaseId": KB_ID,
+                "modelArn": MODEL_ARN,
                 "retrievalConfiguration": {
                     "vectorSearchConfiguration": {
-                        "filter": {
-                            "equals": {
-                                "key": "Owner",
-                                "value": userId
-                            }
-                        }
+                        "filter": {"equals": {"key": "Owner", "value": userId}}
                     }
-                }
+                },
             },
-            'type': 'KNOWLEDGE_BASE'
-        }
+            "type": "KNOWLEDGE_BASE",
+        },
     }
     if isAdminUser:
         print("Admin user, no retrieval filters")
-        input["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"].pop("retrievalConfiguration", None)
+        input["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"].pop(
+            "retrievalConfiguration", None
+        )
     if sessionId:
         input["sessionId"] = sessionId
     print("Amazon Bedrock KB Request: ", input)
@@ -63,34 +60,36 @@ def get_kb_response(query, userId, isAdminUser, sessionId):
         resp = KB_CLIENT.retrieve_and_generate(**input)
     except Exception as e:
         print("Amazon Bedrock KB Exception: ", e)
-        resp = {
-            "systemMessage": "Amazon Bedrock KB Error: " + str(e)
-        }
+        resp = {"systemMessage": "Amazon Bedrock KB Error: " + str(e)}
     print("Amazon Bedrock KB Response: ", json.dumps(resp))
     return resp
 
 
 def markdown_response(kb_response):
     showContextText = True
-    message = kb_response.get("output", {}).get("text", {}) or kb_response.get(
-        "systemMessage") or "No answer found"
+    message = (
+        kb_response.get("output", {}).get("text", {})
+        or kb_response.get("systemMessage")
+        or "No answer found"
+    )
     markdown = message
     if showContextText:
         contextText = ""
         sourceLinks = []
         for source in kb_response.get("citations", []):
             for reference in source.get("retrievedReferences", []):
-                snippet = reference.get("content", {}).get(
-                    "text", "no reference text")
-                callId = reference.get("metadata",{}).get("CallId")
+                snippet = reference.get("content", {}).get("text", "no reference text")
+                callId = reference.get("metadata", {}).get("CallId")
                 url = f"{callId}"
                 title = callId
-                contextText = f'{contextText}<br><callid href="{url}">{title}</callid><br>{snippet}\n'
+                contextText = (
+                    f'{contextText}<br><callid href="{url}">{title}</callid><br>{snippet}\n'
+                )
                 sourceLinks.append(f'<callid href="{url}">{title}</callid>')
         if contextText:
             markdown = f'{markdown}\n<details><summary>Context</summary><p style="white-space: pre-line;">{contextText}</p></details>'
         if len(sourceLinks):
-            markdown = f'{markdown}<br>Sources: ' + ", ".join(sourceLinks)
+            markdown = f"{markdown}<br>Sources: " + ", ".join(sourceLinks)
     return markdown
 
 
@@ -102,7 +101,7 @@ def handler(event, context):
     isAdminUser = False
     groups = event["identity"].get("groups")
     if groups:
-        isAdminUser = "Admin" in groups       
+        isAdminUser = "Admin" in groups
     kb_response = get_kb_response(query, userId, isAdminUser, sessionId)
     kb_response["markdown"] = markdown_response(kb_response)
     print("Returning response: %s" % json.dumps(kb_response))

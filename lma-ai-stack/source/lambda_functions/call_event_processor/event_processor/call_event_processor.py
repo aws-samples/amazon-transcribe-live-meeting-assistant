@@ -2,50 +2,49 @@
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
 
-""" Transcribe API Mutation Processor
-"""
+"""Transcribe API Mutation Processor"""
+
 import asyncio
-from datetime import datetime
-from statistics import fmean
-from os import getenv
-from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Optional, TypedDict
-import uuid
 import json
 import re
+import uuid
+from datetime import datetime
+from os import getenv
+from statistics import fmean
+from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, TypedDict
 
 # third-party imports from Lambda layer
 import boto3
-from botocore.config import Config as BotoCoreConfig
-from aws_lambda_powertools import Logger
-from gql.client import AsyncClientSession as AppsyncAsyncClientSession
-from gql.dsl import DSLMutation, DSLSchema, DSLQuery, dsl_gql
-from graphql.language.printer import print_ast
 
 # custom utils/helpers imports from Lambda layer
 # pylint: disable=import-error
 from appsync_utils import execute_gql_query_with_retries
+from aws_lambda_powertools import Logger
+from botocore.config import Config as BotoCoreConfig
+from eventprocessor_utils import (
+    get_meeting_ttl,
+    get_owner_from_jwt,
+    normalize_transcript_segments,
+    transform_segment_to_add_sentiment,
+    transform_segment_to_categories_agent_assist,
+)
+from gql.client import AsyncClientSession as AppsyncAsyncClientSession
+from gql.dsl import DSLMutation, DSLQuery, DSLSchema, dsl_gql
+from graphql.language.printer import print_ast
 from graphql_helpers import (
     call_fields,
     transcript_segment_fields,
     transcript_segment_sentiment_fields,
 )
 from sns_utils import publish_sns
-from lambda_utils import invoke_lambda
-from eventprocessor_utils import (
-    normalize_transcript_segments,
-    get_meeting_ttl,
-    get_transcription_ttl,
-    transform_segment_to_add_sentiment,
-    transform_segment_to_categories_agent_assist,
-    get_owner_from_jwt,
-)
+
 # pylint: enable=import-error
 if TYPE_CHECKING:
+    from boto3 import Session as Boto3Session
     from mypy_boto3_lambda.client import LambdaClient
     from mypy_boto3_lambda.type_defs import InvocationResponseTypeDef
     from mypy_boto3_sns.client import SNSClient
     from mypy_boto3_ssm.client import SSMClient
-    from boto3 import Session as Boto3Session
 else:
     LambdaClient = object
     InvocationResponseTypeDef = object
@@ -64,20 +63,25 @@ CLIENT_CONFIG = BotoCoreConfig(
 TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN = getenv("TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN", "")
 
 START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN = getenv("START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN", "")
-POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN = getenv("POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN", "")
+POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN = getenv(
+    "POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN", ""
+)
 
 ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN = getenv("ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN", "")
 IS_TRANSCRIPT_SUMMARY_ENABLED = getenv("IS_TRANSCRIPT_SUMMARY_ENABLED", "false").lower() == "true"
 
 ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN = getenv("ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN", "")
 
-TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY = getenv(
-    "TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY", "true").lower() == "true"
-if (TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN
-        or ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN
-        or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
-        or START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN
-        or POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN):
+TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY = (
+    getenv("TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY", "true").lower() == "true"
+)
+if (
+    TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN
+    or ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN
+    or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
+    or START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN
+    or POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN
+):
     LAMBDA_HOOK_CLIENT: LambdaClient = BOTO3_SESSION.client("lambda", config=CLIENT_CONFIG)
 
 
@@ -99,9 +103,11 @@ CALL_EVENT_TYPE_TO_STATUS = {
 DEFAULT_CUSTOMER_PHONE_NUMBER = getenv("DEFAULT_CUSTOMER_PHONE_NUMBER", "+18005550000")
 DEFAULT_SYSTEM_PHONE_NUMBER = getenv("DEFAULT_SYSTEM_PHONE_NUMBER", "+18005551111")
 CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER = getenv(
-    "CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER", "LCA Caller Phone Number")
+    "CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER", "LCA Caller Phone Number"
+)
 CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER = getenv(
-    "CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER", "LCA System Phone Number")
+    "CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER", "LCA System Phone Number"
+)
 
 CUSTOMER_PHONE_NUMBER = ""
 CALL_ID = ""
@@ -113,25 +119,19 @@ ChannelType = Literal["AGENT", "CALLER"]
 StatusType = Literal["STARTED", "TRANSCRIBING", "ERRORED", "ENDED"]
 SentimentPeriodType = Literal["QUARTER"]
 
+
 class SentimentEntry(TypedDict):
     """Sentiment Shape
     Held in a list per channel
     """
+
     Id: str
     BeginOffsetMillis: float
     EndOffsetMillis: float
     Sentiment: SentimentLabelType
     Score: float
 
-class SentimentEntry(TypedDict):
-    """Sentiment Shape
-    Held in a list per channel
-    """
-    Id: str
-    BeginOffsetMillis: float
-    EndOffsetMillis: float
-    Sentiment: SentimentLabelType
-    Score: float
+
 class SentimentPerChannel(TypedDict):
     """StatePerChannel Shape
     Holds state per channel under StatePerCallId. Use to keep values needed
@@ -140,20 +140,26 @@ class SentimentPerChannel(TypedDict):
 
     SentimentList: List[SentimentEntry]
 
+
 class SentimentByPeriodEntry(TypedDict):
     """Sentiment By Period Shape"""
+
     BeginOffsetMillis: float
     EndOffsetMillis: float
     Score: float
 
+
 class Sentiment(TypedDict):
     """Sentiment Shape"""
+
     OverallSentiment: Dict[ChannelType, float]
     SentimentByPeriod: Dict[SentimentPeriodType, Dict[ChannelType, List[SentimentByPeriodEntry]]]
+
 
 ##########################################################################
 # Transcripts
 ##########################################################################
+
 
 def add_transcript_segments(
     message: Dict[str, object],
@@ -181,7 +187,7 @@ def add_transcript_segments(
             message["Transcript"] = transcript
 
         message["SharedWith"] = people_can_access
-        
+
         query = dsl_gql(
             DSLMutation(
                 schema.Mutation.addTranscriptSegment.args(input=message).select(
@@ -189,8 +195,10 @@ def add_transcript_segments(
                 )
             )
         )
-        def ignore_exception_fn(e): return True if (
-            e["message"] == 'item put condition failure') else False
+
+        def ignore_exception_fn(e):
+            return True if (e["message"] == "item put condition failure") else False
+
         tasks.append(
             execute_gql_query_with_retries(
                 query,
@@ -202,6 +210,7 @@ def add_transcript_segments(
 
     return tasks
 
+
 async def add_sentiment_to_transcript(
     message: Dict[str, Any],
     sentiment_analysis_args: Dict[str, Any],
@@ -211,12 +220,16 @@ async def add_sentiment_to_transcript(
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
 
-    transcript_segment_with_sentiment = await transform_segment_to_add_sentiment(message, sentiment_analysis_args)
+    transcript_segment_with_sentiment = await transform_segment_to_add_sentiment(
+        message, sentiment_analysis_args
+    )
 
     result = {}
     query = dsl_gql(
         DSLMutation(
-            schema.Mutation.addTranscriptSegment.args(input=transcript_segment_with_sentiment).select(
+            schema.Mutation.addTranscriptSegment.args(
+                input=transcript_segment_with_sentiment
+            ).select(
                 *transcript_segment_fields(schema),
                 *transcript_segment_sentiment_fields(schema),
             )
@@ -230,6 +243,7 @@ async def add_sentiment_to_transcript(
     )
 
     return result
+
 
 def add_transcript_sentiment_analysis(
     message: Dict[str, Any],
@@ -245,11 +259,11 @@ def add_transcript_sentiment_analysis(
 
     return tasks
 
+
 async def execute_create_call_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
@@ -269,11 +283,20 @@ async def execute_create_call_mutation(
     # Contact Lens STARTED event type doesn't provide customer and system phone numbers, nor does it
     # have CreatedAt, so we will create a new message structure that conforms to other KDS channels.
 
-    if('ContactId' in message.keys()):
+    if "ContactId" in message.keys():
         CALL_ID = message.get("ContactId")
         created_at = datetime.utcnow().astimezone().isoformat()
-        (CUSTOMER_PHONE_NUMBER, system_phone_number) = get_caller_and_system_phone_numbers_from_connect(message)
-        message.update({"CallId": CALL_ID, "CreatedAt": created_at, "CustomerPhoneNumber": CUSTOMER_PHONE_NUMBER, "SystemPhoneNumber": system_phone_number})
+        (CUSTOMER_PHONE_NUMBER, system_phone_number) = (
+            get_caller_and_system_phone_numbers_from_connect(message)
+        )
+        message.update(
+            {
+                "CallId": CALL_ID,
+                "CreatedAt": created_at,
+                "CustomerPhoneNumber": CUSTOMER_PHONE_NUMBER,
+                "SystemPhoneNumber": system_phone_number,
+            }
+        )
 
     query = dsl_gql(
         DSLMutation(
@@ -283,8 +306,9 @@ async def execute_create_call_mutation(
         )
     )
 
-    def ignore_exception_fn(e): return True if (
-        e["message"] == 'item put condition failure') else False
+    def ignore_exception_fn(e):
+        return True if (e["message"] == "item put condition failure") else False
+
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
@@ -297,11 +321,11 @@ async def execute_create_call_mutation(
 
     return result
 
+
 async def execute_update_call_status_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     status = CALL_EVENT_TYPE_TO_STATUS.get(message.get("EventType"))
     if not status:
         error_message = "unrecognized status from event type in update call"
@@ -317,11 +341,11 @@ async def execute_update_call_status_mutation(
 
     # Contact Lens event requires CallId mapped to ContactId
 
-    if('ContactId' in message.keys()):
+    if "ContactId" in message.keys():
         call_id = message.get("ContactId")
         updated_at = datetime.utcnow().astimezone().isoformat()
-        message['CallId'] = call_id
-        message['UpdatedAt'] = updated_at
+        message["CallId"] = call_id
+        message["UpdatedAt"] = updated_at
 
     query = dsl_gql(
         DSLMutation(
@@ -341,11 +365,11 @@ async def execute_update_call_status_mutation(
 
     return result
 
+
 async def execute_get_transcript_segments_query(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     call_id = message.get("CallId")
     if not call_id:
         error_message = "callid does not exist"
@@ -385,6 +409,7 @@ async def execute_get_transcript_segments_query(
     LOGGER.debug("get transcript segments result", extra=dict(query=query_string, result=result))
 
     return result
+
 
 def _get_sentiment_per_quarter(
     sentiment_list: List[SentimentEntry],
@@ -426,9 +451,7 @@ def _get_sentiment_per_quarter(
                 "BeginOffsetMillis": (
                     min((i["BeginOffsetMillis"] for i in quarter)) if quarter else 0
                 ),
-                "EndOffsetMillis": (
-                    max((i["EndOffsetMillis"] for i in quarter)) if quarter else 0
-                ),
+                "EndOffsetMillis": (max((i["EndOffsetMillis"] for i in quarter)) if quarter else 0),
             }
         )
         for quarter in quarters
@@ -436,122 +459,110 @@ def _get_sentiment_per_quarter(
 
     return sentiment_per_quarter
 
+
 async def get_aggregated_sentiment(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     call_id = message.get("CallId")
     if not call_id:
         error_message = "callid does not exist"
         raise TypeError(error_message)
-    
+
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
-    schema = DSLSchema(appsync_session.client.schema)
- 
+    DSLSchema(appsync_session.client.schema)
+
     result = await execute_get_transcript_segments_query(
-        message=message,
-        appsync_session=appsync_session
+        message=message, appsync_session=appsync_session
     )
- 
+
     sentiment_entry_list_by_channel: Dict[ChannelType, SentimentPerChannel] = {}
 
-    for segment in result.get("getTranscriptSegmentsWithSentiment").get("TranscriptSegmentsWithSentiment"):
+    for segment in result.get("getTranscriptSegmentsWithSentiment").get(
+        "TranscriptSegmentsWithSentiment"
+    ):
         channel = segment.get("Channel", None)
-        if channel and channel in ["AGENT", "CALLER"] :
+        if channel and channel in ["AGENT", "CALLER"]:
             if segment.get("SentimentWeighted", None):
                 LOGGER.debug("Aggregating sentiment entry", extra=segment)
-                sentiment_entry : SentimentEntry = {
-                    "Id" : segment["SegmentId"],
+                sentiment_entry: SentimentEntry = {
+                    "Id": segment["SegmentId"],
                     "BeginOffsetMillis": segment["StartTime"] * 1000,
                     "EndOffsetMillis": segment["EndTime"] * 1000,
                     "Sentiment": segment["Sentiment"],
-                    "Score": segment["SentimentWeighted"]
+                    "Score": segment["SentimentWeighted"],
                 }
                 if channel in sentiment_entry_list_by_channel:
                     tmp = sentiment_entry_list_by_channel[channel].get("SentimentList", [])
                     tmp.append(sentiment_entry)
-                    sentiment_list_obj = {
-                        "SentimentList": tmp
-                    }
+                    sentiment_list_obj = {"SentimentList": tmp}
                 else:
-                    sentiment_list_obj = {
-                        "SentimentList": [sentiment_entry]
-                    }
+                    sentiment_list_obj = {"SentimentList": [sentiment_entry]}
 
                 sentiment_entry_list_by_channel[channel] = sentiment_list_obj
-                
-    aggregated_sentiment:Sentiment = {}
-    overall_sentiment:Dict[ChannelType, float] = {}
-    sentiment_by_period_by_channel:Dict[ChannelType, List[SentimentByPeriodEntry]] = {}
-    
+
+    aggregated_sentiment: Sentiment = {}
+    overall_sentiment: Dict[ChannelType, float] = {}
+    sentiment_by_period_by_channel: Dict[ChannelType, List[SentimentByPeriodEntry]] = {}
+
     for channel in sentiment_entry_list_by_channel.keys():
         sentiment_list = sentiment_entry_list_by_channel[channel].get("SentimentList", [])
         sentiment_scores = [i["Score"] for i in sentiment_list]
         sentiment_average = fmean(sentiment_scores) if sentiment_scores else 0
 
-        sentiment_per_quarter = (
-            _get_sentiment_per_quarter(sentiment_list) if sentiment_list else []
-        )
+        sentiment_per_quarter = _get_sentiment_per_quarter(sentiment_list) if sentiment_list else []
 
         overall_sentiment[channel] = sentiment_average
         sentiment_by_period_by_channel[channel] = sentiment_per_quarter
-    
+
     LOGGER.debug("Overall Sentiment: ", extra=dict(DebugOverallSentiment=overall_sentiment))
-    LOGGER.debug("Sentiment by Period: ", extra=dict(DebugSentimentByPeriod=sentiment_by_period_by_channel))
-        
+    LOGGER.debug(
+        "Sentiment by Period: ", extra=dict(DebugSentimentByPeriod=sentiment_by_period_by_channel)
+    )
+
     aggregated_sentiment = {
         "OverallSentiment": overall_sentiment,
-        "SentimentByPeriod": {
-                "QUARTER": sentiment_by_period_by_channel
-            },
-        }
+        "SentimentByPeriod": {"QUARTER": sentiment_by_period_by_channel},
+    }
 
     return aggregated_sentiment
+
 
 async def get_aggregate_call_data(
     message: Dict[str, object],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-    
     call_id = message.get("CallId")
     if not call_id:
         error_message = "callid does not exist"
         raise TypeError(error_message)
-    
+
     total_duration = float(message.get("EndTime", 0.0)) * 1000
 
-    sentiment = await get_aggregated_sentiment(
-        message=message,
-        appsync_session=appsync_session
-    ) 
-    
+    sentiment = await get_aggregated_sentiment(message=message, appsync_session=appsync_session)
+
     updated_at = message.get("UpdatedAt", datetime.utcnow().astimezone().isoformat())
     event_type = message.get("EventType", "")
     if event_type == "END":
-        call_aggregation: Dict[str, object] = {
-            "CallId": call_id,
-            "Sentiment": sentiment
-        }
+        call_aggregation: Dict[str, object] = {"CallId": call_id, "Sentiment": sentiment}
     else:
         call_aggregation: Dict[str, object] = {
             "CallId": call_id,
             "TotalConversationDurationMillis": total_duration,
             "Sentiment": sentiment,
-            "UpdatedAt": updated_at
+            "UpdatedAt": updated_at,
         }
 
     return call_aggregation
-    
+
+
 async def get_call_aggregation_tasks(
     message: Dict[str, object],
     appsync_session: AppsyncAsyncClientSession,
 ) -> List[Coroutine]:
-
     call_aggregation = await get_aggregate_call_data(
-        message=message,
-        appsync_session=appsync_session
+        message=message, appsync_session=appsync_session
     )
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
@@ -559,16 +570,17 @@ async def get_call_aggregation_tasks(
 
     query = dsl_gql(
         DSLMutation(
-            schema.Mutation.updateCallAggregation.args(
-                input=call_aggregation
-            ).select(*call_fields(schema))
+            schema.Mutation.updateCallAggregation.args(input=call_aggregation).select(
+                *call_fields(schema)
+            )
         )
     )
 
     tasks = []
 
-    def ignore_exception_fn(e): return True if (
-        e["message"] == 'item put condition failure') else False
+    def ignore_exception_fn(e):
+        return True if (e["message"] == "item put condition failure") else False
+
     tasks.append(
         execute_gql_query_with_retries(
             query,
@@ -585,10 +597,8 @@ async def execute_update_call_aggregation_mutation(
     message: Dict[str, object],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     call_aggregation = await get_aggregate_call_data(
-        message=message,
-        appsync_session=appsync_session
+        message=message, appsync_session=appsync_session
     )
 
     if not appsync_session.client.schema:
@@ -597,34 +607,31 @@ async def execute_update_call_aggregation_mutation(
 
     query = dsl_gql(
         DSLMutation(
-            schema.Mutation.updateCallAggregation.args(
-                input=call_aggregation
-            ).select(*call_fields(schema))
+            schema.Mutation.updateCallAggregation.args(input=call_aggregation).select(
+                *call_fields(schema)
+            )
         )
     )
 
-    def ignore_exception_fn(e): return True if (
-        e["message"] == 'item put condition failure') else False
-    
+    def ignore_exception_fn(e):
+        return True if (e["message"] == "item put condition failure") else False
+
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
         logger=LOGGER,
         should_ignore_exception_fn=ignore_exception_fn,
-
     )
 
     query_string = print_ast(query)
-    LOGGER.debug(
-        "transcript aggregation mutation", extra=dict(query=query_string, result=result)
-    )
+    LOGGER.debug("transcript aggregation mutation", extra=dict(query=query_string, result=result))
     return result
+
 
 async def execute_add_s3_recording_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     recording_url = message.get("RecordingUrl")
     if not recording_url:
         error_message = "recording url doesn't exist in add s3 recording url event"
@@ -653,11 +660,11 @@ async def execute_add_s3_recording_mutation(
 
     return result
 
+
 async def execute_add_pca_url_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     pca_url = message.get("PcaUrl")
     if not pca_url:
         error_message = "pca url doesn't exist in add pca url event"
@@ -669,9 +676,9 @@ async def execute_add_pca_url_mutation(
 
     query = dsl_gql(
         DSLMutation(
-            schema.Mutation.updatePcaUrl.args(
-                input={**message, "PcaUrl": pca_url}
-            ).select(*call_fields(schema))
+            schema.Mutation.updatePcaUrl.args(input={**message, "PcaUrl": pca_url}).select(
+                *call_fields(schema)
+            )
         )
     )
 
@@ -686,17 +693,17 @@ async def execute_add_pca_url_mutation(
 
     return result
 
+
 async def execute_add_call_category_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
 
     categories = message["CategoryEvent"]["MatchedCategories"]
-    if (len(categories) == 0):
+    if len(categories) == 0:
         error_message = "No MatchedCategories in ADD_CALL_CATEGORY event"
         raise TypeError(error_message)
 
@@ -719,11 +726,11 @@ async def execute_add_call_category_mutation(
 
     return result
 
+
 async def execute_add_issues_detected_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     issues_detected = message.get("IssuesDetected", None)
     issueText = ""
     if issues_detected and len(issues_detected) > 0:
@@ -731,7 +738,7 @@ async def execute_add_issues_detected_mutation(
         offsets = issues_detected[0].get("CharacterOffsets")
         start = int(offsets.get("Begin"))
         end = int(offsets.get("End"))
-        if (start >= 0 and end >= 0):
+        if start >= 0 and end >= 0:
             transcript = message["Transcript"]
             issueText = transcript[start:end]
 
@@ -758,11 +765,11 @@ async def execute_add_issues_detected_mutation(
 
     return result
 
+
 async def execute_add_call_summary_text_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     calltext = message.get("CallSummaryText", None)
     call_summary_text = ""
     if calltext and len(calltext) > 0:
@@ -772,7 +779,6 @@ async def execute_add_call_summary_text_mutation(
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
 
-    
     query = dsl_gql(
         DSLMutation(
             schema.Mutation.addCallSummaryText.args(
@@ -792,11 +798,11 @@ async def execute_add_call_summary_text_mutation(
 
     return result
 
+
 async def execute_add_agent_assist_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
@@ -812,7 +818,6 @@ async def execute_add_agent_assist_mutation(
 
     LOGGER.debug("Executing QUERY: %s", query)
 
-
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
@@ -824,11 +829,11 @@ async def execute_add_agent_assist_mutation(
 
     return result
 
+
 async def execute_update_agent_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
 ) -> Dict:
-
     agentId = message.get("AgentId")
     if not agentId:
         error_message = "AgentId doesn't exist in UPDATE_AGENT event"
@@ -840,9 +845,9 @@ async def execute_update_agent_mutation(
 
     query = dsl_gql(
         DSLMutation(
-            schema.Mutation.updateAgent.args(
-                input={**message, "AgentId": agentId}
-            ).select(*call_fields(schema))
+            schema.Mutation.updateAgent.args(input={**message, "AgentId": agentId}).select(
+                *call_fields(schema)
+            )
         )
     )
 
@@ -857,14 +862,16 @@ async def execute_update_agent_mutation(
 
     return result
 
+
 ##########################################################################
 # Call Categories
 ##########################################################################
 
+
 async def send_call_category(
     transcript_segment_args: Dict[str, Any],
     category: str,
-    appsync_session: AppsyncAsyncClientSession
+    appsync_session: AppsyncAsyncClientSession,
 ):
     """Send Call Category Transcript Segment"""
     if not appsync_session.client.schema:
@@ -889,31 +896,28 @@ async def send_call_category(
 
     return result
 
-async def publish_sns_category(
-    sns_client: SNSClient,
-    category_name: str,
-    call_id: str
-):
+
+async def publish_sns_category(sns_client: SNSClient, category_name: str, call_id: str):
     LOGGER.debug("Publishing Call Category to SNS")
     isAlert = False
     if "AlertRegEx" in SETTINGS:
         isMatch = SETTINGS["AlertRegEx"].match(category_name)
         if isMatch:
             isAlert = True
-    
-    result = await publish_sns(category_name=category_name,
-                               call_id=call_id,
-                               sns_topic_arn=SNS_TOPIC_ARN,
-                               sns_client=sns_client,
-                               alert=isAlert
-                               )
-                        
+
+    result = await publish_sns(
+        category_name=category_name,
+        call_id=call_id,
+        sns_topic_arn=SNS_TOPIC_ARN,
+        sns_client=sns_client,
+        alert=isAlert,
+    )
+
     return result
 
+
 def add_call_category(
-    message: Dict[str, Any],
-    appsync_session: AppsyncAsyncClientSession,
-    sns_client: SNSClient
+    message: Dict[str, Any], appsync_session: AppsyncAsyncClientSession, sns_client: SNSClient
 ) -> List[Coroutine]:
     """Add Categories GraphQL Mutations"""
     # pylint: disable=too-many-locals
@@ -923,19 +927,21 @@ def add_call_category(
     for category in message["CategoryEvent"]["MatchedCategories"]:
         # Publish SNS message for the category
         sns_task = publish_sns_category(
-            sns_client=sns_client,
-            category_name=category,
-            call_id=message["CallId"]
+            sns_client=sns_client, category_name=category, call_id=message["CallId"]
         )
         tasks.append(sns_task)
         # Insert Category marker into transcript, if timestamps are provided in the event.
         try:
-            timestampRanges = message["CategoryEvent"]["MatchedDetails"][category]["TimestampRanges"]
+            timestampRanges = message["CategoryEvent"]["MatchedDetails"][category][
+                "TimestampRanges"
+            ]
         except KeyError:
-            LOGGER.debug("Category: %s has no TimestampRanges. Skip transcript insertion.", category)
+            LOGGER.debug(
+                "Category: %s has no TimestampRanges. Skip transcript insertion.", category
+            )
             continue
         for timestampRange in timestampRanges:
-            start_time = timestampRange["EndOffsetMillis"]/1000
+            start_time = timestampRange["EndOffsetMillis"] / 1000
             end_time = start_time + 0.1
             send_call_category_args = []
             send_call_category_args.append(
@@ -963,10 +969,9 @@ def add_call_category(
 
     return tasks
 
+
 def add_contact_lens_call_category(
-    message: Dict[str, Any],
-    appsync_session: AppsyncAsyncClientSession,
-    sns_client: SNSClient
+    message: Dict[str, Any], appsync_session: AppsyncAsyncClientSession, sns_client: SNSClient
 ) -> List[Coroutine]:
     """Add Categories GraphQL Mutations"""
     # pylint: disable=too-many-locals
@@ -989,7 +994,7 @@ def add_contact_lens_call_category(
         categories = segment.get("Categories", {})
         matched_categories = categories.get("MatchedCategories", [])
 
-        if (len(matched_categories) > 0):
+        if len(matched_categories) > 0:
             query = dsl_gql(
                 DSLMutation(
                     schema.Mutation.addCallCategory.args(
@@ -1016,16 +1021,16 @@ def add_contact_lens_call_category(
 
             send_call_category_args.append(
                 dict(
-                    category=category_segment['Transcript'],
+                    category=category_segment["Transcript"],
                     transcript_segment_args=dict(
                         CallId=message["ContactId"],
                         Channel="CATEGORY_MATCH",
                         CreatedAt=category_segment["CreatedAt"],
-                        EndTime=category_segment['EndTime'],
+                        EndTime=category_segment["EndTime"],
                         ExpiresAfter=get_meeting_ttl(),
                         SegmentId=str(uuid.uuid4()),
-                        StartTime=category_segment['StartTime'],
-                        IsPartial=category_segment['IsPartial'],
+                        StartTime=category_segment["StartTime"],
+                        IsPartial=category_segment["IsPartial"],
                         Status="TRANSCRIBING",
                     ),
                 )
@@ -1038,15 +1043,11 @@ def add_contact_lens_call_category(
         )
         tasks.append(task)
         sns_task = publish_sns_category(
-            sns_client=sns_client,
-            category_name=category,
-            call_id=message["ContactId"]
+            sns_client=sns_client, category_name=category, call_id=message["ContactId"]
         )
         tasks.append(sns_task)
 
-
     return tasks
-
 
 
 ##########################################################################
@@ -1059,16 +1060,15 @@ def add_contact_lens_call_category(
 # field is used for Agent Assist input.
 ##########################################################################
 
-def invoke_transcript_lambda_hook(
-    message: Dict[str, Any]
-):
-    if (message.get("IsPartial") == False or TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY == False):
+
+def invoke_transcript_lambda_hook(message: Dict[str, Any]):
+    if not message.get("IsPartial") or not TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY:
         LOGGER.debug("Transcript Lambda Hook Arn: %s", TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN)
         LOGGER.debug("Transcript Lambda Hook Request: %s", message)
         lambda_response = LAMBDA_HOOK_CLIENT.invoke(
             FunctionName=TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN,
-            InvocationType='RequestResponse',
-            Payload=json.dumps(message)
+            InvocationType="RequestResponse",
+            Payload=json.dumps(message),
         )
         LOGGER.debug("Transcript Lambda Hook Response: ", extra=lambda_response)
         try:
@@ -1079,6 +1079,7 @@ def invoke_transcript_lambda_hook(
                 extra=error,
             )
     return message
+
 
 async def get_call_details(
     message: Dict[str, Any],
@@ -1106,11 +1107,11 @@ async def get_call_details(
         logger=LOGGER,
     )
 
-    result = result['getCall']
+    result = result["getCall"]
     LOGGER.debug("Get Call result %s", json.dumps(result))
 
-    CUSTOMER_PHONE_NUMBER = result['CustomerPhoneNumber']
-    CALL_ID = result['CallId']
+    CUSTOMER_PHONE_NUMBER = result["CustomerPhoneNumber"]
+    CALL_ID = result["CallId"]
     call_summary = result.get("CallSummaryText", "")
     people_can_access = result.get("SharedWith", None)
 
@@ -1122,32 +1123,32 @@ async def get_call_details(
         SharedWith=people_can_access,
     )
 
-def get_caller_and_system_phone_numbers_from_connect(
-    message: Dict[str, Any]
-):
+
+def get_caller_and_system_phone_numbers_from_connect(message: Dict[str, Any]):
     instanceId = message.get("InstanceId")
     contactId = message.get("ContactId")
 
-    client = boto3.client('connect')
-    response = client.get_contact_attributes(
-        InstanceId=instanceId,
-        InitialContactId=contactId
-    )
+    client = boto3.client("connect")
+    response = client.get_contact_attributes(InstanceId=instanceId, InitialContactId=contactId)
     # Try to retrieve customer phone number from contact attribute
     customer_phone_number = response["Attributes"].get(CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER)
     if not customer_phone_number:
         LOGGER.warning(
-            f"Unable to retrieve contact attribute: '{CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER}'. Reverting to default.")
+            f"Unable to retrieve contact attribute: '{CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER}'. Reverting to default."
+        )
         customer_phone_number = DEFAULT_CUSTOMER_PHONE_NUMBER
     # Try to retrieve system phone number from contact attribute: "LCA System Phone Number"
     system_phone_number = response["Attributes"].get(CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER)
     if not system_phone_number:
         LOGGER.warning(
-            "Unable to retrieve contact attribute: '{CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER}'. Reverting to default.")
+            "Unable to retrieve contact attribute: '{CONNECT_CONTACT_ATTR_SYSTEM_PHONE_NUMBER}'. Reverting to default."
+        )
         system_phone_number = DEFAULT_SYSTEM_PHONE_NUMBER
     LOGGER.info(
-        f"Setting customer_phone_number={customer_phone_number}, system_phone_number={system_phone_number}")
+        f"Setting customer_phone_number={customer_phone_number}, system_phone_number={system_phone_number}"
+    )
     return (customer_phone_number, system_phone_number)
+
 
 def add_contact_lens_agent_assistances(
     message: Dict[str, Any],
@@ -1200,9 +1201,11 @@ def add_contact_lens_agent_assistances(
 
     return tasks
 
+
 ##########################################################################
 # Fix CamelCasing from Chime
 ##########################################################################
+
 
 def convert_keys_to_uppercamelcase(d):
     new_dict = {}
@@ -1213,9 +1216,11 @@ def convert_keys_to_uppercamelcase(d):
             new_dict[k[0].upper() + k[1:]] = v
     return new_dict
 
+
 ##########################################################################
 # merge dicts
 ##########################################################################
+
 
 def merge_dicts(d1, d2):
     new_dict = d1.copy()
@@ -1227,30 +1232,38 @@ def merge_dicts(d1, d2):
 # Send call id to session id mapping event
 ##########################################################################
 
-def send_call_session_mapping_event(call_id, session_id):
-    client = boto3.client('events')
 
-    LOGGER.debug("Sending CALL_SESSION_MAPPING event. callId: %s, SessionId: %s", call_id, session_id)
+def send_call_session_mapping_event(call_id, session_id):
+    client = boto3.client("events")
+
+    LOGGER.debug(
+        "Sending CALL_SESSION_MAPPING event. callId: %s, SessionId: %s", call_id, session_id
+    )
     event_response = client.put_events(
         Entries=[
             {
-                'Source': "lca-solution",
-                'DetailType': "CALL_SESSION_MAPPING",
-                'Detail': json.dumps({
-                    'callId': call_id,
-                    'sessionId': session_id,
-                }),
+                "Source": "lca-solution",
+                "DetailType": "CALL_SESSION_MAPPING",
+                "Detail": json.dumps(
+                    {
+                        "callId": call_id,
+                        "sessionId": session_id,
+                    }
+                ),
             }
         ]
     )
     LOGGER.debug("Send CALL_SESSION_MAPPING Response: ", extra=event_response)
 
+
 ##########################################################################
 # check for agent assist wake phrase
 ##########################################################################
 def isAssistantWakePhrase(transcript):
-    LOGGER.debug("Checking for Assistant Wake Phrase Regex match '%s'", SETTINGS['AssistantWakePhraseRegEx'])
-    if (SETTINGS['AssistantWakePhraseRegEx'].search(transcript)):
+    LOGGER.debug(
+        "Checking for Assistant Wake Phrase Regex match '%s'", SETTINGS["AssistantWakePhraseRegEx"]
+    )
+    if SETTINGS["AssistantWakePhraseRegEx"].search(transcript):
         LOGGER.debug("Assistant Wake Phrase detected: %s", transcript)
         return True
     return False
@@ -1260,15 +1273,15 @@ def isAssistantWakePhrase(transcript):
 # Main event processing
 ##########################################################################
 
+
 async def execute_process_event_api_mutation(
     message: Dict[str, Any],
     settings: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
     sns_client: SNSClient,
     agent_assist_args: Dict[str, Any],
-    sentiment_analysis_args: Dict[str, Any]
+    sentiment_analysis_args: Dict[str, Any],
 ) -> Dict[Literal["successes", "errors"], List]:
-
     """Executes AppSync API Mutation"""
     # pylint: disable=global-statement
     global IS_LAMBDA_AGENT_ASSIST_ENABLED
@@ -1284,15 +1297,15 @@ async def execute_process_event_api_mutation(
     }
 
     metadata = None
-    
+
     # normalize the casing
     message = convert_keys_to_uppercamelcase(message)
-    
+
     metadata_str = message.get("Metadata", None)
-    if metadata_str != None:
+    if metadata_str is not None:
         metadata = json.loads(metadata_str)
         metadata = convert_keys_to_uppercamelcase(metadata)
-        
+
         message = merge_dicts(message, metadata)
 
     event_type_map = dict(
@@ -1323,13 +1336,16 @@ async def execute_process_event_api_mutation(
         if message.get("CategoryEvent", "") != "":
             message["EventType"] = "ADD_CALL_CATEGORY"
             event_type = "ADD_CALL_CATEGORY"
-        if message.get("Service-type", "") == "CallAnalytics" and message.get("Detail-type", "") == "CallAnalyticsMetadata":
+        if (
+            message.get("Service-type", "") == "CallAnalytics"
+            and message.get("Detail-type", "") == "CallAnalyticsMetadata"
+        ):
             message["EventType"] = "CALL_ANALYTICS_METADATA"
             event_type = "CALL_ANALYTICS_METADATA"
 
     message["EventType"] = event_type
     # default expiration for meeting (note: transcript segments can have a different - earlier - expiration)
-    message["ExpiresAfter"] = get_meeting_ttl() 
+    message["ExpiresAfter"] = get_meeting_ttl()
 
     LOGGER.debug("Process event. eventType: %s, callId: %s", event_type, message.get("CallId", ""))
 
@@ -1337,8 +1353,7 @@ async def execute_process_event_api_mutation(
         # CREATE CALL
         LOGGER.debug("CREATE CALL")
         response = await execute_create_call_mutation(
-            message=message,
-            appsync_session=appsync_session
+            message=message, appsync_session=appsync_session
         )
 
         if isinstance(response, Exception):
@@ -1346,7 +1361,7 @@ async def execute_process_event_api_mutation(
         else:
             return_value["successes"].append(response)
 
-        if (START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN):
+        if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN:
             payload = dict(
                 CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
                 CallId=CALL_ID,
@@ -1354,8 +1369,8 @@ async def execute_process_event_api_mutation(
             )
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN,
-                InvocationType='Event',
-                Payload=json.dumps(payload)
+                InvocationType="Event",
+                Payload=json.dumps(payload),
             )
 
     elif event_type in [
@@ -1363,49 +1378,44 @@ async def execute_process_event_api_mutation(
     ]:
         LOGGER.debug("END Event: update status")
         response = await execute_update_call_status_mutation(
-            message=message,
-            appsync_session=appsync_session
+            message=message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
-        
-        if (IS_TRANSCRIPT_SUMMARY_ENABLED):
+
+        if IS_TRANSCRIPT_SUMMARY_ENABLED:
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN,
-                InvocationType='Event',
-                Payload=json.dumps(message)
+                InvocationType="Event",
+                Payload=json.dumps(message),
             )
             LOGGER.debug("END Event: Invoked Async Transcript Summary Lambda")
-      
+
         if isinstance(response, Exception):
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
 
     elif event_type == "ADD_SUMMARY":
-
         LOGGER.debug("ADD_SUMMARY MUTATION ")
         response = await execute_add_call_summary_text_mutation(
-            message=message,
-            appsync_session=appsync_session
+            message=message, appsync_session=appsync_session
         )
- 
+
         if isinstance(response, Exception):
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
 
-        if (POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN):
-            payload = await get_call_details(
-                message=message,
-                appsync_session=appsync_session)
+        if POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN:
+            payload = await get_call_details(message=message, appsync_session=appsync_session)
 
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN,
-                InvocationType='Event',
-                Payload=json.dumps(payload)
+                InvocationType="Event",
+                Payload=json.dumps(payload),
             )
 
     elif event_type == "ADD_AGENT_ASSIST":
@@ -1413,8 +1423,7 @@ async def execute_process_event_api_mutation(
         normalized_message = normalize_transcript_segments({**message})
 
         response = await execute_add_agent_assist_mutation(
-            message=normalized_message[0],
-            appsync_session=appsync_session
+            message=normalized_message[0], appsync_session=appsync_session
         )
 
         if isinstance(response, Exception):
@@ -1423,7 +1432,6 @@ async def execute_process_event_api_mutation(
             return_value["successes"].append(response)
 
     elif event_type == "ADD_TRANSCRIPT_SEGMENT":
-
         # ADD_TRANSCRIPT_SEGMENT event supports these 3 types of message structure.
         #   The logic for populating transcripts, sentiment values and agent assist messages depend on
         #    which one of these 3 json structures are populated in the KDS Event message.
@@ -1445,17 +1453,15 @@ async def execute_process_event_api_mutation(
         add_transcript_sentiment_tasks = []
 
         for normalized_message in normalized_messages:
-
             # Invoke custom lambda hook (if any) and use returned version of message.
-            if (TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN):
+            if TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN:
                 normalized_message = invoke_transcript_lambda_hook(normalized_message)
 
             issues_detected = normalized_message.get("IssuesDetected", None)
             if issues_detected and len(issues_detected) > 0:
                 LOGGER.debug("Add Issues Detected to Call Summary")
                 response = await execute_add_issues_detected_mutation(
-                    message=normalized_message,
-                    appsync_session=appsync_session
+                    message=normalized_message, appsync_session=appsync_session
                 )
                 if isinstance(response, Exception):
                     return_value["errors"].append(response)
@@ -1463,11 +1469,10 @@ async def execute_process_event_api_mutation(
                     return_value["successes"].append(response)
 
             payload = await get_call_details(
-                message=normalized_message,
-                appsync_session=appsync_session)
-                
+                message=normalized_message, appsync_session=appsync_session
+            )
+
             people_can_access = payload.get("SharedWith", None)
-                
 
             LOGGER.debug("Add Transcript Segment")
             add_transcript_tasks.extend(
@@ -1486,16 +1491,22 @@ async def execute_process_event_api_mutation(
                         appsync_session=appsync_session,
                     )
                 )
-            if IS_LAMBDA_AGENT_ASSIST_ENABLED and (not normalized_message["IsPartial"] or 'ContactId' in normalized_message.keys()) and isAssistantWakePhrase(normalized_message["Transcript"]):
+            if (
+                IS_LAMBDA_AGENT_ASSIST_ENABLED
+                and (
+                    not normalized_message["IsPartial"] or "ContactId" in normalized_message.keys()
+                )
+                and isAssistantWakePhrase(normalized_message["Transcript"])
+            ):
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN,
-                    InvocationType='Event',
-                    Payload=json.dumps(normalized_message)
+                    InvocationType="Event",
+                    Payload=json.dumps(normalized_message),
                 )
 
         add_call_category_tasks = []
 
-        if 'ContactId' in message.keys():
+        if "ContactId" in message.keys():
             add_call_category_tasks = add_contact_lens_call_category(
                 message=message,
                 appsync_session=appsync_session,
@@ -1528,8 +1539,7 @@ async def execute_process_event_api_mutation(
     elif event_type == "ADD_CALL_CATEGORY":
         LOGGER.debug("Add Call Category to Call details")
         response = await execute_add_call_category_mutation(
-            message=message,
-            appsync_session=appsync_session
+            message=message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):
             return_value["errors"].append(response)
@@ -1539,9 +1549,7 @@ async def execute_process_event_api_mutation(
         LOGGER.debug("Add Call Category to Transcript segments")
         add_call_category_tasks = []
         add_call_category_tasks = add_call_category(
-            message=message,
-            appsync_session=appsync_session,
-            sns_client=sns_client
+            message=message, appsync_session=appsync_session, sns_client=sns_client
         )
         task_responses = await asyncio.gather(
             *add_call_category_tasks,
@@ -1558,8 +1566,7 @@ async def execute_process_event_api_mutation(
         # ADD S3 RECORDING URL
         LOGGER.debug("Add recording url")
         response = await execute_add_s3_recording_mutation(
-            message=message,
-            appsync_session=appsync_session
+            message=message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):
             return_value["errors"].append(response)
@@ -1570,8 +1577,7 @@ async def execute_process_event_api_mutation(
         # ADD PCA URL
         LOGGER.debug("Add PCA url")
         response = await execute_add_pca_url_mutation(
-            message=message,
-            appsync_session=appsync_session
+            message=message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):
             return_value["errors"].append(response)
@@ -1582,19 +1588,20 @@ async def execute_process_event_api_mutation(
         # UPDATE AGENT
         LOGGER.debug("Update AgentId for call")
         response = await execute_update_agent_mutation(
-            message=message,
-            appsync_session=appsync_session
+            message=message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
     elif event_type == "CALL_ANALYTICS_METADATA":
-        meta = json.loads(message['Metadata'])
-        LOGGER.debug("S3 URL from metadata %s", meta['oneTimeMetadata']['s3RecordingUrl'])
+        meta = json.loads(message["Metadata"])
+        LOGGER.debug("S3 URL from metadata %s", meta["oneTimeMetadata"]["s3RecordingUrl"])
 
-        session_id = re.search(r"(?i)\/(.+\/)*(.+)\.(wav)$", meta['oneTimeMetadata']['s3RecordingUrl']).group(2)
-        send_call_session_mapping_event(meta['callId'], session_id)
+        session_id = re.search(
+            r"(?i)\/(.+\/)*(.+)\.(wav)$", meta["oneTimeMetadata"]["s3RecordingUrl"]
+        ).group(2)
+        send_call_session_mapping_event(meta["callId"], session_id)
 
     else:
         LOGGER.warning("unknown event type [%s]", event_type)
