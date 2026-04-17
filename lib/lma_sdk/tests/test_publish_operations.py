@@ -129,11 +129,11 @@ class TestStackDefinitions:
 
     def test_all_stacks_defined(self):
         """All expected stacks are defined."""
-        assert len(STACK_DEFINITIONS) == 10
+        assert len(STACK_DEFINITIONS) == 11
 
     def test_stack_names_list(self):
         """STACK_NAMES matches definitions."""
-        assert len(STACK_NAMES) == 10
+        assert len(STACK_NAMES) == 11
         assert "lma-ai-stack" in STACK_NAMES
         assert "lma-virtual-participant-stack" in STACK_NAMES
 
@@ -141,7 +141,7 @@ class TestStackDefinitions:
         """PublishOperations.available_stacks() returns list."""
         stacks = client.publish.available_stacks()
         assert isinstance(stacks, list)
-        assert len(stacks) == 10
+        assert len(stacks) == 11
 
 
 class TestPrerequisiteChecks:

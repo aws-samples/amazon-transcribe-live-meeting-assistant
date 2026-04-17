@@ -83,6 +83,7 @@ Resources:
                   - iam:GetPolicy
                   - iam:GetPolicyVersion
                   - iam:ListPolicyVersions
+                  - iam:ListEntitiesForPolicy
                   - iam:CreatePolicyVersion
                   - iam:DeletePolicyVersion
                   - iam:CreateInstanceProfile
@@ -264,40 +265,6 @@ Resources:
                   - xray:PutTelemetryRecords
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
-                Resource: '*'
-        - PolicyName: LMAOptionalServicesPermissions
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: OpenSearchServerless
-                Effect: Allow
-                Action:
-                  - aoss:*
-                Resource: '*'
-              - Sid: LexBot
-                Effect: Allow
-                Action:
-                  - lex:*
-                Resource: '*'
-              - Sid: QBusiness
-                Effect: Allow
-                Action:
-                  - qbusiness:GetApplication
-                  - qbusiness:ChatSync
-                  - qbusiness:Chat
-                  - qbusiness:ListMessages
-                  - qbusiness:ListConversations
-                Resource: '*'
-              - Sid: SSOIdentityCenter
-                Effect: Allow
-                Action:
-                  - sso:CreateApplication
-                  - sso:DeleteApplication
-                  - sso:DescribeApplication
-                  - sso:PutApplicationGrant
-                  - sso:PutApplicationAuthenticationMethod
-                  - sso:PutApplicationAccessScope
-                  - sso-oauth:CreateTokenWithIAM
                 Resource: '*'
 
   PassRolePolicy:
