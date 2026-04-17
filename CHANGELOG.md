@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 
+- **MCP Server API Key Authentication** — Users can now generate personal API keys from the LMA UI (MCP Servers Configuration page) for headless/programmatic MCP client access. Keys authenticate via a REST API Gateway with a Lambda REQUEST authorizer (SHA-256 hashed at rest in DynamoDB). The API key endpoint implements the full MCP JSON-RPC 2.0 streamable HTTP protocol (initialize, tools/list, tools/call, ping), so standard MCP clients — including Amazon Quick Suite via bearer token — can connect directly without OAuth. One key per user, revocable from the UI, with `lma_` prefix for leak detection. See [MCP API Key Authentication](docs/mcp-api-key-auth.md).
+
 - **Browser Extension restored** — Re-added the Chrome browser extension for streaming meeting audio directly from the browser, restored by popular demand.
 
 - **CloudFormation Service Role** — New deployable CloudFormation template (`iam-roles/cloudformation-management/`) that creates a delegated service role for non-admin LMA deployment. Administrators deploy the role once; developers then use `lma-cli deploy --role-arn` or the CloudFormation console to deploy LMA without needing admin permissions. See [CloudFormation Service Role guide](docs/cloudformation-service-role.md).
