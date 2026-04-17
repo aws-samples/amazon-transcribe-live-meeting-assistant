@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 
+- **Browser Extension restored** — Re-added the Chrome browser extension for streaming meeting audio directly from the browser, restored by popular demand.
+
 - **CloudFormation Service Role** — New deployable CloudFormation template (`iam-roles/cloudformation-management/`) that creates a delegated service role for non-admin LMA deployment. Administrators deploy the role once; developers then use `lma-cli deploy --role-arn` or the CloudFormation console to deploy LMA without needing admin permissions. See [CloudFormation Service Role guide](docs/cloudformation-service-role.md).
 
 - **LMA CLI & SDK** (`lma-cli`, `lma-sdk`) — New Python CLI and SDK for building, deploying, and managing LMA stacks from the command line. Key commands: `lma deploy` (auto-selects public template by region, `--from-code` for build+deploy, `--wait` with real-time event streaming, `--admin-email` for new stacks), `lma publish` (build and upload artifacts to S3 with change detection), `lma status/outputs/delete/logs`. See [LMA CLI Reference](docs/lma-cli.md).
@@ -31,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **LocalUITestingEnv output** — added to `lma-main.yaml` as passthrough from AI stack, enabling `make ui-start` to auto-configure `.env` for local UI development
 - **`.nvmrc`** — pins Node.js v20 for consistent development environments
+
+## Fixed
+
+- **Zoom VP: auto-dismiss recording consent and language popups** — Virtual Participant now automatically dismisses Zoom popup dialogs (recording consent, language interpretation) that appear on join or mid-meeting, preventing the VP from being disconnected after ~15-20 seconds. Uses a MutationObserver-based handler that only targets modal overlays with consent-related text.
+- **Zoom VP: meeting-end detection no longer falsely triggered by popups** — Replaced `waitForSelector` with text-content–aware `waitForFunction` to distinguish the "meeting has been ended" dialog from recording consent popups, which share the same button selector.
 
 ## Changed
 
