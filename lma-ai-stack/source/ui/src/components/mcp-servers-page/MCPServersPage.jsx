@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { Container, Header, SpaceBetween } from '@awsui/components-react';
 import { API, graphqlOperation, Logger } from 'aws-amplify';
 import MCPServersContent from '../mcp-servers/MCPServersContent';
+import MCPApiKeySection from './MCPApiKeySection';
 import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
 
 const logger = new Logger('MCPServersPage');
@@ -68,6 +69,7 @@ const MCPServersPage = () => {
 
   return (
     <SpaceBetween size="l">
+      <MCPApiKeySection />
       <Container
         header={
           <Header variant="h1" description="Manage Model Context Protocol servers for the Strands agent">

@@ -46,7 +46,7 @@ else
     export AWS_REGION="$4"
 fi
 
-TEMPLATE_DIR=$(dirname "$(readlink -f "$0")")
+TEMPLATE_DIR=$(cd "$(dirname "$0")" && pwd)
 export TEMPLATE_FILE="$TEMPLATE_DIR/lma-ai-stack.yaml"
 
 cd "${TEMPLATE_DIR}/.."
