@@ -183,6 +183,8 @@ type Mutation @aws_iam {
 	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools
 	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools
 	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools
+	generateMCPApiKey: GenerateMCPApiKeyOutput @aws_cognito_user_pools
+	revokeMCPApiKey(keyPrefix: String!): Boolean @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -217,6 +219,7 @@ type Query @aws_cognito_user_pools
 	getLLMPromptTemplate(LLMPromptTemplateId: ID!): LLMPromptTemplate @aws_cognito_user_pools @aws_iam
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
+	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
 }
 
 type VirtualParticipant @aws_cognito_user_pools @aws_iam {
@@ -750,6 +753,18 @@ type OAuthCallbackOutput @aws_cognito_user_pools @aws_iam {
 	success: Boolean!
 	serverId: String
 	error: String
+}
+
+type MCPApiKey @aws_cognito_user_pools {
+	keyPrefix: String!
+	createdAt: String!
+	enabled: Boolean!
+}
+
+type GenerateMCPApiKeyOutput @aws_cognito_user_pools {
+	keyValue: String!
+	keyPrefix: String!
+	createdAt: String!
 }
 
 schema {
