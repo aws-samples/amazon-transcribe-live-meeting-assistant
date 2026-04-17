@@ -77,6 +77,10 @@ export default defineConfig({
           label: "MCP Server Integration",
           items: [
             { label: "MCP Servers Overview", slug: "mcp-servers" },
+            {
+              label: "MCP API Key Auth",
+              slug: "mcp-api-key-auth",
+            },
             { label: "Salesforce MCP", slug: "salesforce-mcp-setup" },
             {
               label: "Amazon QuickSuite MCP",
@@ -142,6 +146,14 @@ export default defineConfig({
             { label: "LMA SDK Reference", slug: "lma-sdk" },
           ],
         },
+        // AUTO-SIDEBAR-START
+        {
+          label: "New & Uncategorized",
+          items: [
+            { label: "Cloudformation Service Role", slug: "cloudformation-service-role" },
+          ],
+        },
+        // AUTO-SIDEBAR-END
       ],
     }),
   ],

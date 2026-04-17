@@ -1,3 +1,7 @@
+---
+title: "MCP API Key Authentication"
+---
+
 # MCP Server API Key Authentication
 
 ## Overview
@@ -90,7 +94,7 @@ User clicks "Generate API Key" on MCP Servers Configuration page
 | `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPApiKeySection.jsx` | Cloudscape UI component for key management |
 | `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPServersPage.jsx` | Integrated MCPApiKeySection at top of page |
 | `utilities/test-mcp-api-key.sh` | End-to-end test script for the API key endpoint |
-| `docs/MCP_API_KEY_AUTH.md` | This document |
+| `docs/mcp-api-key-auth.md` | This document |
 
 ## MCP Protocol Support
 

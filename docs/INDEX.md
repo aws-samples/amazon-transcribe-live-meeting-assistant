@@ -39,6 +39,7 @@ title: "LMA Documentation"
 ### MCP Server Integration
 
 - [MCP Servers Overview](mcp-servers.md) — Model Context Protocol, authentication methods, admin UI, built-in LMA tools
+- [MCP API Key Authentication](mcp-api-key-auth.md) — Per-user API key auth for programmatic MCP clients, JSON-RPC 2.0 protocol support
 - [Salesforce MCP Setup](salesforce-mcp-setup.md) — Salesforce Connected App with OAuth 2.1
 - [Amazon Quick Suite MCP Setup](quicksuite-mcp-setup.md) — Amazon Quick Suite integration
 - [DeepWiki MCP Setup](deepwiki-mcp-setup.md) — DeepWiki repository documentation search
