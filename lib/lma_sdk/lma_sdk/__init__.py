@@ -2,7 +2,7 @@
 # This file is licensed under the MIT License.
 """LMA SDK - Python SDK for AWS Live Meeting Assistant."""
 
-__version__ = "0.3.1.dev6"
+__version__ = "0.3.1.rc1"
 
 from lma_sdk.client import LMAClient
 from lma_sdk.exceptions import (

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lma-cli"
-version = "0.3.1.dev6"
+version = "0.3.1.rc1"
 description = "CLI for AWS Live Meeting Assistant (LMA)"
 readme = "README.md"
 license = {text = "MIT"}
