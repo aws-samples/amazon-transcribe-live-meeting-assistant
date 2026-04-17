@@ -542,11 +542,29 @@ export default class Zoom {
                     () => window.location.href === 'about:blank',
                     { timeout: 0 }
                 ).then(() => 'URL_CHANGE_BLANK'),
-                // Detect meeting-end screen (post-meeting "return to home" button).
-                // Note: The popup auto-dismiss handler above ensures recording consent
-                // and other popup buttons are clicked and removed before we reach here.
-                page.waitForSelector(
-                    'button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue',
+                // Detect meeting-end screen
+                page.waitForFunction(
+                    () => {
+                        const buttons = document.querySelectorAll('button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue');
+                        for (const btn of buttons) {
+                            const modal = btn.closest('.zm-modal, .zm-modal-legacy, .ReactModal__Content');
+                            if (modal) {
+                                const text = modal.textContent?.toLowerCase() || '';
+                                // Match meeting-end dialogs
+                                if (text.includes('meeting has been ended') ||
+                                    text.includes('meeting has ended') ||
+                                    text.includes('meeting is end') ||
+                                    text.includes('removed from the meeting')) {
+                                    return true;
+                                }
+                                // Skip consent/info popups (handled by auto-dismiss)
+                                continue;
+                            }
+                            // Button not inside a modal — match it (e.g. post-meeting page)
+                            return true;
+                        }
+                        return false;
+                    },
                     { timeout: details.meetingTimeout }
                 ).then(() => 'LEGACY_BUTTON_TIMEOUT')
             ]);
