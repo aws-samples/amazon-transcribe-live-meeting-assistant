@@ -437,6 +437,19 @@ Parameters:
     Description: >-
       (Optional) Comma-separated list of additional OAuth callback URLs for custom MCP clients.
 
+  WAFAllowedIPv4Ranges:
+    Type: String
+    Default: "0.0.0.0/0"
+    Description: >-
+      (Optional) Comma-separated list of IPv4 CIDR ranges allowed to access protected
+      regional resources (MCP API Gateway, and optionally other regional resources).
+      Default "0.0.0.0/0" disables WAF and allows all IPs.
+      Example to restrict: "192.168.1.0/24, 10.0.0.0/16"
+      When set to any non-default value, a REGIONAL WAFv2 WebACL is created and associated
+      with eligible resources (currently the MCP API Gateway stage when EnableMCPServer=true).
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}(,\s*([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2})*$'
+    ConstraintDescription: Must be valid comma-separated list of IPv4 CIDR ranges
+
   CognitoUserPoolDomain:
     Type: String
     Default: ""
@@ -535,6 +548,15 @@ Conditions:
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
   ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
   HasCustomMCPServerCallbackURLs: !Not [!Equals [!Ref MCPServerCallbackURLs, ""]]
+  # Generic WAF enablement - true when WAFAllowedIPv4Ranges is restricted (not 0.0.0.0/0).
+  # The WebACL is REGIONAL and can be associated with any eligible regional resource
+  # (API Gateway REST APIs, ALBs, AppSync APIs, etc.). Naming uses "Regional" to
+  # distinguish from potential CloudFront-scoped WAF which must be created in us-east-1.
+  IsRegionalWafEnabled: !Not [!Equals [!Ref WAFAllowedIPv4Ranges, "0.0.0.0/0"]]
+  # MCP API Gateway WAF is only associated when both MCP server is enabled AND WAF is enabled
+  ShouldAssociateMCPApiWithWaf: !And
+    - !Condition ShouldEnableMCPServer
+    - !Condition IsRegionalWafEnabled
   ShouldEnableLambdaAgentAssist:
     !Equals [!Ref IsLambdaAgentAssistEnabled, "true"]
   ShouldEnableTranscriptLambdaHookFunction:
@@ -3979,6 +4001,18 @@ Resources:
         Types:
           - REGIONAL
 
+  # Request Validator for MCPApiKey API
+  # Validates request parameters and headers. Body validation skipped because
+  # MCP protocol uses varying JSON-RPC payloads handled by Lambda authorizer/backend.
+  MCPApiKeyRequestValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Condition: ShouldEnableMCPServer
+    Properties:
+      RestApiId: !Ref MCPApiKeyRestApi
+      Name: "MCPApiKeyRequestValidator"
+      ValidateRequestBody: false
+      ValidateRequestParameters: true
+
   MCPApiKeyAuthorizer:
     Type: AWS::ApiGateway::Authorizer
     Condition: ShouldEnableMCPServer
@@ -4006,6 +4040,7 @@ Resources:
       HttpMethod: ANY
       AuthorizationType: CUSTOM
       AuthorizerId: !Ref MCPApiKeyAuthorizer
+      RequestValidatorId: !Ref MCPApiKeyRequestValidator
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -4020,6 +4055,7 @@ Resources:
       HttpMethod: ANY
       AuthorizationType: CUSTOM
       AuthorizerId: !Ref MCPApiKeyAuthorizer
+      RequestValidatorId: !Ref MCPApiKeyRequestValidator
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -4034,18 +4070,38 @@ Resources:
     Properties:
       RestApiId: !Ref MCPApiKeyRestApi
 
+  # CloudWatch Log Group for API Gateway access logs (security-matrix API-GW-001)
+  MCPApiKeyAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableMCPServer
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/${LMAStackName}-MCP-ApiKey/access"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   MCPApiKeyStage:
     Type: AWS::ApiGateway::Stage
     Condition: ShouldEnableMCPServer
+    # checkov:skip=CKV_AWS_73: "X-Ray tracing not required for this API; operational cost consideration"
+    # checkov:skip=CKV2_AWS_4: "Access logging enabled via AccessLogSetting property"
+    # checkov:skip=CKV2_AWS_29: "WAF protection is OPTIONAL via WAFAllowedIPv4Ranges parameter - customer configurable"
     Properties:
       RestApiId: !Ref MCPApiKeyRestApi
       DeploymentId: !Ref MCPApiKeyDeployment
       StageName: mcp
+      # Access logging (security-matrix API-GW-001): per-request structured JSON logs
+      AccessLogSetting:
+        DestinationArn: !GetAtt MCPApiKeyAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationStatus":"$context.integrationStatus","integrationLatency":"$context.integrationLatency","authorizerError":"$context.authorizer.error"}'
+      # Execution logs (security-matrix API-GW-006): authorizer/integration telemetry
       MethodSettings:
         - HttpMethod: "*"
           ResourcePath: "/*"
           ThrottlingBurstLimit: 50
           ThrottlingRateLimit: 100
+          LoggingLevel: INFO
+          DataTraceEnabled: false  # avoid logging request/response bodies (may contain sensitive MCP data)
+          MetricsEnabled: true
 
   MCPApiKeyLambdaPermission:
     Type: AWS::Lambda::Permission
