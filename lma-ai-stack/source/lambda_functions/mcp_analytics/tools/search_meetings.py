@@ -71,9 +71,9 @@ def execute(
     model_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
     if model_id:
         region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-        account_id = os.environ.get("AWS_ACCOUNT_ID") or boto3.client("sts").get_caller_identity()[
-            "Account"
-        ]
+        account_id = (
+            os.environ.get("AWS_ACCOUNT_ID") or boto3.client("sts").get_caller_identity()["Account"]
+        )
         model_arn = _build_model_arn(model_id, region, account_id)
     else:
         model_arn = os.environ.get("MODEL_ARN")

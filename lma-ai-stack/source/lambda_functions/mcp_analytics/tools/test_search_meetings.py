@@ -12,7 +12,6 @@ os.environ.setdefault("TRANSCRIPT_KB_ID", "test-kb-id")
 
 import search_meetings
 
-
 REGION = "us-west-2"
 ACCOUNT = "123456789012"
 
@@ -92,31 +91,33 @@ class TestExecuteResolvesArn(unittest.TestCase):
                     query="test query", max_results=5, user_id="u1", is_admin=True
                 )
                 call_kwargs = mock_kb.retrieve_and_generate.call_args[1]
-                return (
-                    call_kwargs["retrieveAndGenerateConfiguration"][
-                        "knowledgeBaseConfiguration"
-                    ]["modelArn"]
-                )
+                return call_kwargs["retrieveAndGenerateConfiguration"][
+                    "knowledgeBaseConfiguration"
+                ]["modelArn"]
 
     def test_inference_profile_model_resolves_correctly(self):
         """The original bug — global.* model now produces correct ARN."""
-        model_arn = self._run({
-            "BEDROCK_MODEL_ID": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-            "AWS_REGION": "us-west-2",
-            "AWS_ACCOUNT_ID": "123456789012",
-        })
+        model_arn = self._run(
+            {
+                "BEDROCK_MODEL_ID": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+                "AWS_REGION": "us-west-2",
+                "AWS_ACCOUNT_ID": "123456789012",
+            }
+        )
         self.assertIn(":inference-profile/", model_arn)
         self.assertNotIn("foundation-model", model_arn)
 
     def test_foundation_model_resolves_correctly(self):
         """Plain foundation model still works."""
-        model_arn = self._run({
-            "BEDROCK_MODEL_ID": "anthropic.claude-3-haiku-20240307-v1:0",
-            "AWS_REGION": "us-west-2",
-            "AWS_ACCOUNT_ID": "123456789012",
-            # Clear legacy env var so it falls through to the new logic
-            "MODEL_ARN": "",
-        })
+        model_arn = self._run(
+            {
+                "BEDROCK_MODEL_ID": "anthropic.claude-3-haiku-20240307-v1:0",
+                "AWS_REGION": "us-west-2",
+                "AWS_ACCOUNT_ID": "123456789012",
+                # Clear legacy env var so it falls through to the new logic
+                "MODEL_ARN": "",
+            }
+        )
         self.assertIn("::foundation-model/", model_arn)
 
     def test_legacy_model_arn_fallback(self):
@@ -137,9 +138,9 @@ class TestExecuteResolvesArn(unittest.TestCase):
                 search_meetings.execute(query="q", user_id="u", is_admin=True)
                 call_kwargs = mock_kb.retrieve_and_generate.call_args[1]
                 self.assertEqual(
-                    call_kwargs["retrieveAndGenerateConfiguration"][
-                        "knowledgeBaseConfiguration"
-                    ]["modelArn"],
+                    call_kwargs["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"][
+                        "modelArn"
+                    ],
                     legacy_arn,
                 )
 

@@ -124,6 +124,12 @@ export const generateNavigationItems = (settings, isAdmin) => {
     items: [
       {
         type: 'link',
+        text: 'LMA Documentation',
+        href: 'https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/',
+        external: true,
+      },
+      {
+        type: 'link',
         text: 'Blog Post',
         href: 'https://www.amazon.com/live-meeting-assistant',
         external: true,

@@ -78,6 +78,13 @@ const CallAnalyticsTopNavigation = () => {
                   text: 'Resources',
                   items: [
                     {
+                      id: 'lma-documentation',
+                      text: 'LMA Documentation',
+                      href: 'https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/',
+                      external: true,
+                      externalIconAriaLabel: ' (opens in new tab)',
+                    },
+                    {
                       id: 'documentation',
                       text: 'Blog Post',
                       href: 'https://www.amazon.com/live-meeting-assistant',
