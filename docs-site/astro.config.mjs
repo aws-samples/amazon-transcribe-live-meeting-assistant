@@ -61,6 +61,7 @@ export default defineConfig({
           label: "Meeting Sources",
           items: [
             { label: "Stream Audio", slug: "stream-audio" },
+            { label: "Browser Extension", slug: "browser-extension" },
             { label: "Virtual Participant", slug: "virtual-participant" },
           ],
         },
