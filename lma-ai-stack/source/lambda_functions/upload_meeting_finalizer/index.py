@@ -412,7 +412,18 @@ def lambda_handler(event, context):  # noqa: ARG001
 
 def _emit_end_event(job: dict, call_id: str) -> None:
     """Emit an END event on Kinesis. Reuses the same AgentId fallback path
-    as the START event so the Owner attribution lines up."""
+    as the START event so the Owner attribution lines up.
+
+    NOTE: We intentionally do NOT set ``UpdatedAt`` here. The
+    ``updateCall.request.vtl`` resolver requires
+    ``existing.UpdatedAt < incoming.UpdatedAt`` — and our ADD_TRANSCRIPT_SEGMENT
+    events (emitted just before this END) can update the call row's UpdatedAt
+    with a timestamp slightly *after* the one we'd stamp here, which races us
+    into a ``condition failure`` and the meeting never transitions to ENDED.
+    Leaving UpdatedAt unset lets the VTL fall back to
+    ``$util.time.nowISO8601()`` at resolver execution time, which is guaranteed
+    to be newer than anything already in DDB.
+    """
     owner = job.get("Owner") or job.get("AgentId") or "system@lma.aws"
     now = _now_iso()
     _put_kinesis(
@@ -424,6 +435,6 @@ def _emit_end_event(job: dict, call_id: str) -> None:
             "SystemPhoneNumber": job.get("ToNumber") or "System",
             "AgentId": owner,
             "CreatedAt": now,
-            "UpdatedAt": now,
+            # UpdatedAt intentionally omitted — see docstring.
         },
     )
