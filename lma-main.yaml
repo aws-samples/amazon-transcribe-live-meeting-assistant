@@ -1964,6 +1964,30 @@ Resources:
             Condition:
               Bool:
                 "aws:SecureTransport": false
+          - Sid: AllowTranscribeRead
+            Effect: Allow
+            Principal:
+              Service: transcribe.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource:
+              - !Sub "${RecordingsBucket.Arn}/lma-uploads-pending/*"
+              - !Sub "${RecordingsBucket.Arn}/lma-audio-recordings/*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+          - Sid: AllowTranscribeWrite
+            Effect: Allow
+            Principal:
+              Service: transcribe.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - !Sub "${RecordingsBucket.Arn}/lma-transcripts/*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+                "s3:x-amz-acl": "bucket-owner-full-control"
 
   RecordingsBucketNotificationFunctionRole:
     Type: AWS::IAM::Role
