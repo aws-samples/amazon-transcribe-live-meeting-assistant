@@ -2051,6 +2051,8 @@ Resources:
         LMASettingsParameterName: !Ref LMASettingsParameter
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        LMAVersion: "<VERSION_TOKEN>"
+        BuildDateTime: "<BUILD_DATE_TIME_TOKEN>"
 
   AISTACK:
     Type: AWS::CloudFormation::Stack

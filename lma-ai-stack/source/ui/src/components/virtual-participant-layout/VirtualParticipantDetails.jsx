@@ -3,9 +3,10 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
 import React, { useState, useEffect } from 'react';
-import { useParams, useHistory, Link as RouterLink } from 'react-router-dom';
-import { API, graphqlOperation, Logger } from 'aws-amplify';
+import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import PropTypes from 'prop-types';
 import {
   SpaceBetween,
@@ -19,10 +20,11 @@ import {
   Icon,
   Spinner,
   Flashbar,
-} from '@awsui/components-react';
+} from '@cloudscape-design/components';
 import StatusTimeline from './StatusTimeline';
 import VNCViewer from './VNCViewer';
 
+const client = generateClient();
 // VNC WebSocket URL is published by the backend in the vncEndpoint field
 // Format: wss://{api-id}.execute-api.{region}.amazonaws.com/prod
 
@@ -83,7 +85,7 @@ const endVirtualParticipant = `
   }
 `;
 
-const logger = new Logger('VirtualParticipantDetails');
+const logger = new ConsoleLogger('VirtualParticipantDetails');
 
 // Status configuration with enhanced messaging
 const STATUS_CONFIG = {
@@ -423,7 +425,7 @@ ActionButtons.propTypes = {
 
 const VirtualParticipantDetails = () => {
   const { vpId } = useParams();
-  const history = useHistory();
+  const navigate = useNavigate();
   const [vpDetails, setVpDetails] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -434,7 +436,7 @@ const VirtualParticipantDetails = () => {
       setLoading(true);
       setError(null);
 
-      const result = await API.graphql(graphqlOperation(getVirtualParticipant, { id: vpId }));
+      const result = await client.graphql({ query: getVirtualParticipant, variables: { id: vpId } });
 
       if (result.data.getVirtualParticipant) {
         const vpData = result.data.getVirtualParticipant;
@@ -462,7 +464,7 @@ const VirtualParticipantDetails = () => {
     if (!vpId) return undefined;
 
     console.log('=== Setting up AppSync subscription for VP:', vpId);
-    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipantDetailed)).subscribe({
+    const subscription = client.graphql({ query: onUpdateVirtualParticipantDetailed }).subscribe({
       next: ({ value }) => {
         console.log('=== AppSync subscription received update ===');
         console.log('Raw value:', JSON.stringify(value, null, 2));
@@ -528,15 +530,16 @@ const VirtualParticipantDetails = () => {
       console.log('=== FRONTEND: CALLING END VP MUTATION ===');
       console.log('VP ID:', vpId);
       console.log('Mutation:', endVirtualParticipant);
-      const result = await API.graphql(
-        graphqlOperation(endVirtualParticipant, {
+      const result = await client.graphql({
+        query: endVirtualParticipant,
+        variables: {
           input: {
             id: vpId,
             endReason: 'User requested termination',
             endedBy: 'User',
           },
-        }),
-      );
+        },
+      });
       console.log('=== FRONTEND: END VP MUTATION RESULT ===');
       console.log('Result:', JSON.stringify(result, null, 2));
 
@@ -567,15 +570,16 @@ const VirtualParticipantDetails = () => {
       console.log('=== FRONTEND: CALLING CANCEL SCHEDULE ===');
       console.log('VP ID:', vpId);
       // Use the endVirtualParticipant mutation with a different reason for scheduled VPs
-      const result = await API.graphql(
-        graphqlOperation(endVirtualParticipant, {
+      const result = await client.graphql({
+        query: endVirtualParticipant,
+        variables: {
           input: {
             id: vpId,
             endReason: 'Schedule cancelled by user',
             endedBy: 'User',
           },
-        }),
-      );
+        },
+      });
       console.log('=== FRONTEND: CANCEL SCHEDULE RESULT ===');
       console.log('Result:', JSON.stringify(result, null, 2));
 
@@ -618,7 +622,7 @@ const VirtualParticipantDetails = () => {
         <Alert type="error">
           <SpaceBetween direction="vertical" size="s">
             <div>{error}</div>
-            <Button onClick={() => history.goBack()}>Go Back</Button>
+            <Button onClick={() => navigate(-1)}>Go Back</Button>
           </SpaceBetween>
         </Alert>
       </Container>
@@ -643,7 +647,7 @@ const VirtualParticipantDetails = () => {
           variant="h1"
           actions={
             <SpaceBetween direction="horizontal" size="s">
-              <Button iconName="arrow-left" onClick={() => history.goBack()}>
+              <Button iconName="arrow-left" onClick={() => navigate(-1)}>
                 Back to List
               </Button>
               {vpDetails.CallId ? (

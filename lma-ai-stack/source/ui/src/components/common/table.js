@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { Box, Button, Header, SpaceBetween } from '@awsui/components-react';
+import { Box, Button, Header, SpaceBetween } from '@cloudscape-design/components';
 
 import { InfoLink } from './info-link';
 

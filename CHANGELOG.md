@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- **UI modernization** — Migrated web UI from Create React App to **Vite 7**, upgraded React Router from v5 to **v6**, completed Cloudscape rebrand (`@awsui/*` → `@cloudscape-design/*`), upgraded AWS Amplify to **v6**, and aligned all AWS SDK packages to `^3.637.0`.
+
 ## [0.3.1] - 2026-04-17
 
 ## Added

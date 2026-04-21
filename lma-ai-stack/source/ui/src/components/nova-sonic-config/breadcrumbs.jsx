@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { BreadcrumbGroup } from '@awsui/components-react';
+import { BreadcrumbGroup } from '@cloudscape-design/components';
 import { NOVA_SONIC_CONFIG_PATH, DEFAULT_PATH } from '../../routes/constants';
 
 export const novaSonicConfigBreadcrumbItems = [

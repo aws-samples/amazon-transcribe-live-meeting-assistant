@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: lma-cli
-Version: 0.3.1.dev4
+Version: 0.3.2.dev1
 Summary: CLI for AWS Live Meeting Assistant (LMA)
 Author: Amazon Web Services
 License: MIT

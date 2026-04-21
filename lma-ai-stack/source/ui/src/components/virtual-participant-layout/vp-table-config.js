@@ -13,7 +13,7 @@ import {
   SpaceBetween,
   Badge,
   Popover,
-} from '@awsui/components-react';
+} from '@cloudscape-design/components';
 import { Link as RouterLink } from 'react-router-dom';
 
 import { TableHeader } from '../common/table';

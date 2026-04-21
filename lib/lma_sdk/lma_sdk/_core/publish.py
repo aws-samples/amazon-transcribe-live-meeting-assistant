@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import time
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -789,6 +790,10 @@ class Publisher:
         main_template_path = project_dir / "lma-main.yaml"
         content = main_template_path.read_text()
 
+        # ISO 8601 UTC timestamp — matches the format used by lma-ai-stack/Makefile
+        # so the value rendered in the Cognito welcome email footer is consistent
+        # with the BuildDateTime shown in the UI nav panel.
+        build_date_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         replacements = {
             "<ARTIFACT_BUCKET_TOKEN>": bucket,
             "<ARTIFACT_PREFIX_TOKEN>": prefix_and_version,
@@ -796,6 +801,7 @@ class Publisher:
             "<REGION_TOKEN>": region,
             "<BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>": browser_ext_src_s3_location,
             "<VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>": vp_src_s3_location,
+            "<BUILD_DATE_TIME_TOKEN>": build_date_time,
         }
         for token, value in replacements.items():
             content = content.replace(token, value)

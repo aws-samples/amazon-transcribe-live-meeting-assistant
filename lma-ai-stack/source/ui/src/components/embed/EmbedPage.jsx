@@ -21,11 +21,11 @@
  *   autoStart    - Auto-start streaming (true/false)
  *   authMode     - Authentication mode: cognito (default), token
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useMemo, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import { useLocation } from 'react-router-dom';
-import { Logger } from 'aws-amplify';
-import { Box, Spinner } from '@awsui/components-react';
+import { Box, Spinner } from '@cloudscape-design/components';
 
 import usePostMessageAuth from '../../hooks/use-postmessage-auth';
 import useAppContext from '../../contexts/app';
@@ -33,7 +33,7 @@ import ComponentSelector from './ComponentSelector';
 
 import './EmbedPage.css';
 
-const logger = new Logger('EmbedPage');
+const logger = new ConsoleLogger('EmbedPage');
 
 /**
  * Parse query parameters from the URL hash.

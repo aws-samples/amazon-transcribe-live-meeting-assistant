@@ -3,22 +3,22 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Logger } from 'aws-amplify';
-import { AuthState } from '@aws-amplify/ui-components';
+import { useAuthenticator } from '@aws-amplify/ui-react';
 
 import UnauthRoutes from './UnauthRoutes';
-
-import useAppContext from '../contexts/app';
 import AuthRoutes from './AuthRoutes';
+import useAppContext from '../contexts/app';
 
 import { REDIRECT_URL_PARAM } from './constants';
 
-const logger = new Logger('Routes');
+const logger = new ConsoleLogger('Routes');
 
 const Routes = () => {
-  const { authState, user, currentCredentials } = useAppContext();
+  const { user, currentCredentials } = useAppContext();
+  const { authStatus } = useAuthenticator((context) => [context.authStatus]);
   const location = useLocation();
   const [urlSearchParams, setUrlSearchParams] = useState(new URLSearchParams({}));
   const [redirectParam, setRedirectParam] = useState('');
@@ -41,7 +41,7 @@ const Routes = () => {
     setRedirectParam(redirect);
   }, [urlSearchParams]);
 
-  return !(authState === AuthState.SignedIn && user && currentCredentials) ? (
+  return !(authStatus === 'authenticated' && user && currentCredentials) ? (
     <UnauthRoutes location={location} />
   ) : (
     <AuthRoutes redirectParam={redirectParam} />

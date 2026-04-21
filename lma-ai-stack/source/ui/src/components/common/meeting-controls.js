@@ -3,9 +3,9 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import { API } from 'aws-amplify';
+import { generateClient } from 'aws-amplify/api';
 import React, { useEffect, useState } from 'react';
-import { useParams, useHistory } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   Alert,
   Button,
@@ -19,10 +19,11 @@ import {
   Form,
   Box,
   ColumnLayout,
-} from '@awsui/components-react';
+} from '@cloudscape-design/components';
 import shareMeetings from '../../graphql/queries/shareMeetings';
 import deleteMeetings from '../../graphql/queries/deleteMeetings';
 
+const client = generateClient();
 const getListKeys = (callId, createdAt) => {
   const SHARDS_IN_DAY = 6;
   const SHARD_DIVIDER = 24 / SHARDS_IN_DAY;
@@ -64,7 +65,7 @@ const callsWithKeys = (props) => {
 
 const invokeShareMeetings = async (props, currentRecipients) => {
   const callsKeys = callsWithKeys(props);
-  const response = await API.graphql({
+  const response = await client.graphql({
     query: shareMeetings,
     variables: {
       input: { Calls: callsKeys, MeetingRecipients: currentRecipients },
@@ -77,7 +78,7 @@ const invokeShareMeetings = async (props, currentRecipients) => {
 
 const invokeDeleteMeetings = async (props) => {
   const callsKeys = callsWithKeys(props);
-  const response = await API.graphql({
+  const response = await client.graphql({
     query: deleteMeetings,
     variables: {
       input: { Calls: callsKeys },
@@ -288,7 +289,7 @@ export const deleteModal = (props) => {
   const [deleteResult, setDeleteResult] = useState(null);
   const [deletedCallIds, setDeletedCallIds] = useState([]);
 
-  const history = useHistory();
+  const navigate = useNavigate();
   const { callId } = useParams();
   const deleteConsentText = 'confirm';
 
@@ -313,7 +314,7 @@ export const deleteModal = (props) => {
     setDeleteResult(null);
     setDeletedCallIds([]);
     if (callId) {
-      history.goBack();
+      navigate(-1);
     }
   };
 

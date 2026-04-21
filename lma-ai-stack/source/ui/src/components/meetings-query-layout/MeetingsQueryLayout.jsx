@@ -3,17 +3,29 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
-import { Box, Button, Spinner, Header, Grid, Container, SpaceBetween, Input, Link } from '@awsui/components-react';
+import {
+  Box,
+  Button,
+  Spinner,
+  Header,
+  Grid,
+  Container,
+  SpaceBetween,
+  Input,
+  Link,
+} from '@cloudscape-design/components';
 import PropTypes from 'prop-types';
-import { API, Logger } from 'aws-amplify';
 import queryKnowledgeBase from '../../graphql/queries/queryKnowledgeBase';
 import { CALLS_PATH } from '../../routes/constants';
 import useSettingsContext from '../../contexts/settings';
 
-const logger = new Logger('queryKnowledgeBase');
+const client = generateClient();
+const logger = new ConsoleLogger('queryKnowledgeBase');
 
 const ValueWithLabel = ({ label, index, children }) => (
   <>
@@ -78,7 +90,7 @@ export const MeetingsQueryLayout = () => {
   };
 
   const getMeetingsQueryResponseFromKB = async (input, sessionId) => {
-    const response = await API.graphql({
+    const response = await client.graphql({
       query: queryKnowledgeBase,
       variables: { input, sessionId },
     });

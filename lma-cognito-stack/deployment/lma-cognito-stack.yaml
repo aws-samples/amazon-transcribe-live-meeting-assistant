@@ -91,6 +91,16 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  LMAVersion:
+    Type: String
+    Default: "0.0.0"
+    Description: LMA release version (used in welcome email footer)
+
+  BuildDateTime:
+    Type: String
+    Default: ""
+    Description: LMA build date/time (used in welcome email footer)
+
 Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
@@ -142,6 +152,7 @@ Resources:
             extension will not be available until then.</p>
             <p>Thanks,</p>
             <p>Live Meeting Assistant (amazon.com/live-meeting-assistant)</p>
+            <p><em>Stack: ${LMAStackName}, v${LMAVersion}, ${BuildDateTime}</em></p>
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:

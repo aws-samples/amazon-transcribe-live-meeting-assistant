@@ -4,24 +4,16 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { Route, Switch, useRouteMatch } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 
 import CallListBreadCrumbs from '../call-list/breadcrumbs';
 import CallDetailsBreadCrumbs from '../call-details/breadcrumbs';
 
-const Breadcrumbs = () => {
-  const { path } = useRouteMatch();
-
-  return (
-    <Switch>
-      <Route exact path={path}>
-        <CallListBreadCrumbs />
-      </Route>
-      <Route path={`${path}/:callId`}>
-        <CallDetailsBreadCrumbs />
-      </Route>
-    </Switch>
-  );
-};
+const Breadcrumbs = () => (
+  <Routes>
+    <Route index element={<CallListBreadCrumbs />} />
+    <Route path=":callId" element={<CallDetailsBreadCrumbs />} />
+  </Routes>
+);
 
 export default Breadcrumbs;
