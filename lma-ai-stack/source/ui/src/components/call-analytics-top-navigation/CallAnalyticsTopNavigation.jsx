@@ -4,10 +4,11 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { signOut } from 'aws-amplify/auth';
-import React, { useState } from 'react';
+import { signOut, fetchUserAttributes } from 'aws-amplify/auth';
+import React, { useEffect, useState } from 'react';
 import { Box, Button, Modal, SpaceBetween, TopNavigation } from '@cloudscape-design/components';
 import useAppContext from '../../contexts/app';
+import useUserGroups from '../../hooks/use-user-groups';
 
 const logger = new ConsoleLogger('TopNavigation');
 
@@ -48,9 +49,35 @@ const SignOutModal = ({ visible, setVisible }) => {
 };
 
 const CallAnalyticsTopNavigation = () => {
-  const { user } = useAppContext();
-  const userId = user?.attributes?.email || 'user';
+  const { user, authState } = useAppContext();
+  const { isAdmin } = useUserGroups();
+  const [email, setEmail] = useState('');
   const [isSignOutModalVisible, setIsSignOutModalVisiblesetVisible] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadEmail = async () => {
+      try {
+        const attrs = await fetchUserAttributes();
+        if (!cancelled && attrs?.email) {
+          setEmail(attrs.email);
+        }
+      } catch (error) {
+        logger.error('error fetching user attributes: ', error);
+      }
+    };
+    if (authState === 'authenticated') {
+      loadEmail();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [authState]);
+
+  const fallbackId = user?.signInDetails?.loginId || user?.username || 'user';
+  const displayEmail = email || fallbackId;
+  const roleLabel = isAdmin ? 'admin' : 'user';
+  const userId = `${displayEmail} (${roleLabel})`;
   return (
     <>
       <div id="top-navigation" style={{ position: 'sticky', top: 0, zIndex: 1002 }}>
