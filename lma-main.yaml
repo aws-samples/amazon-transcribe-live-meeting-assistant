@@ -1965,18 +1965,6 @@ Resources:
               Bool:
                 "aws:SecureTransport": false
 
-  ##########################################################################
-  # S3 ObjectCreated → upload_meeting_processor (Stage 2) notification wiring.
-  #
-  # We cannot put `NotificationConfiguration` directly on `RecordingsBucket`
-  # because the target Lambda is created inside `AISTACK`, and `AISTACK`
-  # already receives `S3BucketName = !Ref RecordingsBucket`. That would
-  # create a CloudFormation dependency cycle (AISTACK → RecordingsBucket →
-  # AISTACK). The standard AWS workaround is a Cfn custom resource that
-  # calls `s3:PutBucketNotificationConfiguration` *after* both resources
-  # exist — runtime behaviour is identical (same S3 → Lambda trigger), the
-  # wiring is just declared out of band.
-  ##########################################################################
   RecordingsBucketNotificationFunctionRole:
     Type: AWS::IAM::Role
     Condition: ShouldCreateRecordingBucket
@@ -2104,9 +2092,6 @@ Resources:
     DependsOn:
       - RecordingsBucketNotificationFunctionLogGroup
 
-  # The custom-resource invocation. By pulling both RecordingsBucket (via
-  # !Ref) and AISTACK (via !GetAtt on an output) here — and because nothing
-  # else depends on this resource — we break the cycle: it's a leaf.
   RecordingsBucketNotification:
     Type: AWS::CloudFormation::CustomResource
     Condition: ShouldCreateRecordingBucket
