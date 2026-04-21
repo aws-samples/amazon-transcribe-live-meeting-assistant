@@ -2522,6 +2522,163 @@ Resources:
       Principal: s3.amazonaws.com
       SourceAccount: !Ref AWS::AccountId
 
+  UploadMeetingFinalizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt UploadMeetingFinalizerFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/upload_meeting_finalizer
+      Description: Triggered by Transcribe Job State Change — reads transcript JSON and emits segments + END
+      # An hour of speech yields ~a few hundred audio_segments; each one is a
+      # PutRecord to Kinesis. 5 min timeout gives headroom for a long meeting.
+      MemorySize: 512
+      Timeout: 300
+      FunctionName: !Sub '${LMAStackName}-UploadMeetingFinalizer'
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          CALL_DATA_STREAM_NAME: !Ref CallDataStream
+          S3_BUCKET_NAME: !Ref S3BucketName
+          UPLOADS_PENDING_PREFIX: lma-uploads-pending/
+          RECORDINGS_PREFIX: !Ref AudioFilePrefix
+          TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
+          LOG_LEVEL: INFO
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingFinalizerFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; EventBridge retries + CW alarms cover the failure surface"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - UploadMeetingFinalizerFunctionLogGroup
+
+  UploadMeetingFinalizerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingFinalizerFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UploadMeetingFinalizerFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: UploadMeetingFinalizer Lambda execution role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UploadMeetingFinalizer
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # Read the transcript JSON Transcribe wrote, read the uploaded
+              # media to copy it, and write it to the long-term recordings
+              # prefix + delete the pending copy.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-uploads-pending/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-transcripts/*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-audio-recordings/*"
+              # Read the UploadJob row + mark it COMPLETED/FAILED.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt EventSourcingTable.Arn
+              # Emit transcript-segment / recording-url / END events onto the
+              # same Kinesis stream the live websocket transcriber uses; the
+              # existing call_event_processor consumes them.
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource: !Ref CallDataStreamArn
+              # Inspect the completed job's tags so we can confirm it's ours.
+              # transcribe:GetTranscriptionJob has no resource-level IAM.
+              - Effect: Allow
+                Action:
+                  - transcribe:GetTranscriptionJob
+                Resource: "*"
+              # KMS — same scope as the processor Lambda.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                      - !Sub "s3.${AWS::Region}.amazonaws.com"
+                      - !Sub "kinesis.${AWS::Region}.amazonaws.com"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "transcribe:GetTranscriptionJob does not support resource-level permissions"
+
+  # EventBridge rule that fires the finalizer on Transcribe job completions.
+  # We intentionally don't filter by tag in the rule — EventBridge only sees
+  # the published event payload, and Transcribe's "Transcribe Job State Change"
+  # event carries the job name + status but NOT the tags. The Lambda handler
+  # then fetches GetTranscriptionJob and rejects jobs that aren't tagged
+  # `lma:source=upload_meeting_processor`, so unrelated Transcribe traffic
+  # becomes a no-op invocation (cheap + logged).
+  UploadMeetingFinalizerEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-UploadMeetingFinalizer"
+      Description: Fires upload_meeting_finalizer on every Transcribe job COMPLETED/FAILED
+      EventPattern:
+        source:
+          - aws.transcribe
+        detail-type:
+          - "Transcribe Job State Change"
+        detail:
+          TranscriptionJobStatus:
+            - COMPLETED
+            - FAILED
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt UploadMeetingFinalizerFunction.Arn
+          Id: UploadMeetingFinalizerTarget
+
+  UploadMeetingFinalizerEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt UploadMeetingFinalizerFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt UploadMeetingFinalizerEventRule.Arn
+
   UpdateChatButtonConfigResolverFunction:
     Type: AWS::Serverless::Function
     Properties:
