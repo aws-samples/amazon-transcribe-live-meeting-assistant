@@ -2251,6 +2251,129 @@ Resources:
                   - lambda:InvokeFunction
                 Resource: !GetAtt MeetingControlsResolverFunction.Arn
 
+  ##########################################################################
+  # Upload Meeting Initiator Lambda — AppSync resolver for `createUploadMeeting`.
+  # Mints a presigned S3 PUT URL under the `lma-uploads-pending/` prefix of the
+  # recordings bucket and records an UploadJob row in the EventSourcing table.
+  # The S3 ObjectCreated notification on that prefix (Stage 2) will pick the job
+  # up and kick off the Transcribe batch ingestion pipeline.
+  ##########################################################################
+  UploadMeetingInitiatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt UploadMeetingInitiatorFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/upload_meeting_initiator
+      Description: AppSync resolver that mints a presigned upload URL for a new pre-recorded meeting
+      MemorySize: 256
+      Timeout: 30
+      FunctionName: !Sub '${LMAStackName}-UploadMeetingInitiator'
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref S3BucketName
+          UPLOADS_PENDING_PREFIX: lma-uploads-pending/
+          UPLOAD_URL_TTL_SECONDS: "900"
+          UPLOAD_JOB_TTL_DAYS: "14"
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          LOG_LEVEL: INFO
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingInitiatorFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - UploadMeetingInitiatorFunctionLogGroup
+
+  UploadMeetingInitiatorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingInitiatorFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UploadMeetingInitiatorFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: UploadMeetingInitiator Lambda execution role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UploadMeetingInitiator
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # Mint presigned PUT URLs scoped to the lma-uploads-pending/ prefix.
+              # PutObject is required by sigv4 signing for the presigned URL to be valid,
+              # even though the actual upload is done by the end-user's browser.
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-uploads-pending/*"
+              # Persist / condition-check the UploadJob row.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt EventSourcingTable.Arn
+              # The EventSourcing table is encrypted with a customer-managed KMS key.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                      - !Sub "s3.${AWS::Region}.amazonaws.com"
+
+  # AppSync → Lambda invocation role for the createUploadMeeting resolver.
+  AppSyncUploadMeetingInitiatorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt UploadMeetingInitiatorFunction.Arn
+
   UpdateChatButtonConfigResolverFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2834,6 +2957,17 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt MeetingControlsResolverFunction.Arn
 
+  UploadMeetingInitiatorDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UploadMeetingInitiator
+      Description: AppSync data source for the createUploadMeeting mutation — invokes the upload-meeting-initiator Lambda to mint a presigned S3 PUT URL.
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncUploadMeetingInitiatorLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt UploadMeetingInitiatorFunction.Arn
+
   KnowledgeBaseDataSource:
     Type: AWS::AppSync::DataSource
     Properties:
@@ -3153,6 +3287,22 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/shareMeetings.js
+
+  # Resolver for `createUploadMeeting` — pass-through JS resolver that forwards
+  # the full AppSync context to UploadMeetingInitiatorFunction and returns the
+  # presigned upload details (callId, uploadUrl, bucket, key, expiresInSeconds).
+  CreateUploadMeetingAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt UploadMeetingInitiatorDataSource.Name
+      TypeName: Mutation
+      FieldName: createUploadMeeting
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/createUploadMeeting.js
 
   ShareCallAppSyncResolver:
     Type: AWS::AppSync::Resolver

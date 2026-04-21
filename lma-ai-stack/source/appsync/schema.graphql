@@ -141,6 +141,30 @@ type DeleteMeetingsOutput {
 	Result: String
 }
 
+input CreateUploadMeetingInput {
+	callId: String
+	meetingTopic: String!
+	agentId: String!
+	fromNumber: String
+	toNumber: String
+	filename: String!
+	contentType: String!
+	fileSize: Float
+	enableDiarization: Boolean
+	maxSpeakers: Int
+	languageCode: String
+	meetingDateTime: AWSDateTime
+}
+
+type CreateUploadMeetingOutput {
+	callId: String!
+	uploadUrl: String!
+	uploadBucket: String!
+	uploadKey: String!
+	contentType: String!
+	expiresInSeconds: Int!
+}
+
 interface DynamoDbBase {
 	PK: ID!
 	SK: ID!
@@ -167,6 +191,7 @@ type Mutation @aws_iam {
 	shareTranscriptSegment(input: ShareTranscriptSegmentInput!): ShareTranscriptSegmentOutput
     shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools
 	deleteMeetings(input: DeleteMeetingsInput!): DeleteMeetingsOutput @aws_cognito_user_pools
+	createUploadMeeting(input: CreateUploadMeetingInput!): CreateUploadMeetingOutput @aws_cognito_user_pools
 	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
