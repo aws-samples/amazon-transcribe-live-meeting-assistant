@@ -1898,8 +1898,6 @@ Resources:
     DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
     UpdateReplacePolicy: Retain
     Condition: ShouldCreateRecordingBucket
-    DependsOn:
-      - AISTACK
     Properties:
       AccessControl: LogDeliveryWrite
       OwnershipControls:
@@ -1946,15 +1944,6 @@ Resources:
             ExposedHeaders:
               - ETag
             MaxAge: 3000
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Event: "s3:ObjectCreated:*"
-            Function: !GetAtt AISTACK.Outputs.UploadMeetingProcessorFunctionArn
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: "lma-uploads-pending/"
 
   RecordingsBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -1975,6 +1964,162 @@ Resources:
             Condition:
               Bool:
                 "aws:SecureTransport": false
+
+  ##########################################################################
+  # S3 ObjectCreated → upload_meeting_processor (Stage 2) notification wiring.
+  #
+  # We cannot put `NotificationConfiguration` directly on `RecordingsBucket`
+  # because the target Lambda is created inside `AISTACK`, and `AISTACK`
+  # already receives `S3BucketName = !Ref RecordingsBucket`. That would
+  # create a CloudFormation dependency cycle (AISTACK → RecordingsBucket →
+  # AISTACK). The standard AWS workaround is a Cfn custom resource that
+  # calls `s3:PutBucketNotificationConfiguration` *after* both resources
+  # exist — runtime behaviour is identical (same S3 → Lambda trigger), the
+  # wiring is just declared out of band.
+  ##########################################################################
+  RecordingsBucketNotificationFunctionRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldCreateRecordingBucket
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: ManageBucketNotification
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketNotification
+                  - s3:PutBucketNotification
+                  - s3:GetBucketNotificationConfiguration
+                  - s3:PutBucketNotificationConfiguration
+                Resource: !GetAtt RecordingsBucket.Arn
+
+  RecordingsBucketNotificationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldCreateRecordingBucket
+    Properties:
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  RecordingsBucketNotificationFunction:
+    Type: AWS::Lambda::Function
+    Condition: ShouldCreateRecordingBucket
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for one-shot Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 120
+      MemorySize: 128
+      Role: !GetAtt RecordingsBucketNotificationFunctionRole.Arn
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: |
+          """Custom resource that installs (or removes, on stack Delete) the
+          Stage-2 S3 ObjectCreated notification on RecordingsBucket. Decoupled
+          from the bucket resource itself to break the AISTACK ↔ RecordingsBucket
+          CloudFormation cycle."""
+          import json
+          import logging
+          import boto3
+          import cfnresponse
+
+          log = logging.getLogger()
+          log.setLevel(logging.INFO)
+          s3 = boto3.client("s3")
+
+          def handler(event, context):
+              log.info("event=%s", json.dumps(event))
+              status = cfnresponse.SUCCESS
+              reason = "ok"
+              try:
+                  props = event["ResourceProperties"]
+                  bucket = props["Bucket"]
+                  request_type = event["RequestType"]
+
+                  if request_type == "Delete":
+                      # Only strip Lambda notifications — leave any EventBridge
+                      # config the bucket may have accrued in future alone.
+                      current = s3.get_bucket_notification_configuration(Bucket=bucket)
+                      current.pop("ResponseMetadata", None)
+                      current.pop("LambdaFunctionConfigurations", None)
+                      s3.put_bucket_notification_configuration(
+                          Bucket=bucket,
+                          NotificationConfiguration=current,
+                      )
+                  else:
+                      lambda_arn = props["LambdaArn"]
+                      prefix = props.get("Prefix", "")
+                      events = props.get("Events", ["s3:ObjectCreated:*"])
+                      notif_id = props.get("Id", "LmaUploadsPendingProcessor")
+                      cfg = {
+                          "LambdaFunctionConfigurations": [
+                              {
+                                  "Id": notif_id,
+                                  "LambdaFunctionArn": lambda_arn,
+                                  "Events": events,
+                                  "Filter": {
+                                      "Key": {
+                                          "FilterRules": [
+                                              {"Name": "prefix", "Value": prefix}
+                                          ]
+                                      }
+                                  },
+                              }
+                          ]
+                      }
+                      s3.put_bucket_notification_configuration(
+                          Bucket=bucket,
+                          NotificationConfiguration=cfg,
+                      )
+              except Exception as err:
+                  log.exception("Failed to set bucket notification: %s", err)
+                  status = cfnresponse.FAILED
+                  reason = str(err)[:1024]
+              cfnresponse.send(event, context, status, {}, reason=reason)
+      LoggingConfig:
+        LogGroup: !Ref RecordingsBucketNotificationFunctionLogGroup
+    DependsOn:
+      - RecordingsBucketNotificationFunctionLogGroup
+
+  # The custom-resource invocation. By pulling both RecordingsBucket (via
+  # !Ref) and AISTACK (via !GetAtt on an output) here — and because nothing
+  # else depends on this resource — we break the cycle: it's a leaf.
+  RecordingsBucketNotification:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: ShouldCreateRecordingBucket
+    DependsOn:
+      - RecordingsBucketPolicy
+    Properties:
+      ServiceToken: !GetAtt RecordingsBucketNotificationFunction.Arn
+      Bucket: !Ref RecordingsBucket
+      LambdaArn: !GetAtt AISTACK.Outputs.UploadMeetingProcessorFunctionArn
+      Prefix: "lma-uploads-pending/"
+      Events:
+        - "s3:ObjectCreated:*"
+      Id: LmaUploadsPendingProcessor
 
   ToJSONFunction:
     Type: AWS::Serverless::Function
