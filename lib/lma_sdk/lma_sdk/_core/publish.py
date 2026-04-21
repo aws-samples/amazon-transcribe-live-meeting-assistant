@@ -278,6 +278,115 @@ def _update_checksum(
 
 
 # ──────────────────────────────────────────────────────────────
+# Git working-tree safety check
+# ──────────────────────────────────────────────────────────────
+# The lma-ai-stack and lma-websocket-transcriber-stack Makefiles build their
+# source bundle with `git ls-files`, which lists tracked *and staged* paths
+# only. Brand-new, untracked files are silently excluded, producing an
+# incomplete zip that deploys a broken app. The caller has typically already
+# written an updated `.checksum`, so naïve re-runs are a no-op until the
+# checksum is deleted. We therefore fail fast at the top of the publish if any
+# untracked files exist under a BUILD_SCRIPT stack dir, unless
+# ``allow_untracked=True`` is explicitly passed.
+
+def _list_untracked_files(directory: Path) -> list[str]:
+    """Return untracked-but-not-ignored files under ``directory``.
+
+    Uses ``git ls-files --others --exclude-standard`` so the result honours
+    .gitignore. Returns an empty list if the directory is not in a git repo,
+    if git is unavailable, or if there are no untracked files.
+
+    Paths are returned relative to ``directory`` for readable error messages.
+    """
+    if not directory.exists() or not directory.is_dir():
+        return []
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(directory), "ls-files", "--others", "--exclude-standard"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as err:
+        logger.debug("Could not run 'git ls-files --others' under %s: %s", directory, err)
+        return []
+    if proc.returncode != 0:
+        # Directory is not inside a git repo, or git reported an error.
+        logger.debug(
+            "git ls-files --others under %s failed (rc=%s): %s",
+            directory,
+            proc.returncode,
+            proc.stderr.strip(),
+        )
+        return []
+    return [line for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _git_untracked_preflight(
+    project_dir: Path,
+    stacks_to_publish: list[StackDefinition],
+    *,
+    allow_untracked: bool,
+) -> None:
+    """Abort the publish if BUILD_SCRIPT stacks contain untracked files.
+
+    Raises:
+        LMAPublishError: when any targeted BUILD_SCRIPT stack has untracked
+            files in its directory and ``allow_untracked`` is False.
+    """
+    offenders: list[tuple[str, list[str]]] = []
+    for stack_def in stacks_to_publish:
+        if stack_def.package_type is not StackPackageType.BUILD_SCRIPT:
+            continue
+        stack_dir = project_dir / stack_def.name
+        untracked = _list_untracked_files(stack_dir)
+        if untracked:
+            offenders.append((stack_def.name, untracked))
+
+    if not offenders:
+        return
+
+    # Build a readable, actionable error message.
+    lines = [
+        "Refusing to publish: the following BUILD_SCRIPT stack(s) contain "
+        "untracked files that would be EXCLUDED from the deployed source "
+        "bundle (the stack Makefile uses `git ls-files`):",
+        "",
+    ]
+    total = 0
+    display_cap = 25  # avoid walls of text for bigger additions
+    for stack_name, files in offenders:
+        lines.append(f"  {stack_name}:")
+        for rel in files[:display_cap]:
+            lines.append(f"    - {rel}")
+        if len(files) > display_cap:
+            lines.append(f"    … {len(files) - display_cap} more")
+        total += len(files)
+    lines.extend(
+        [
+            "",
+            f"Resolve by staging the new files before publishing ({total} total), e.g.:",
+            "  git add <paths above>",
+            "",
+            "Then retry the publish/deploy. You do NOT need to commit — a staged",
+            "path is enough for `git ls-files` to pick it up.",
+            "",
+            "To override (NOT recommended, produces an incomplete bundle):",
+            "  lma publish --allow-untracked … / lma deploy --from-code --allow-untracked …",
+            "  or PublishConfig(allow_untracked=True) programmatically.",
+        ]
+    )
+    message = "\n".join(lines)
+
+    if allow_untracked:
+        logger.warning("%s", message)
+        return
+
+    raise LMAPublishError(message)
+
+
+# ──────────────────────────────────────────────────────────────
 # Publisher — main publish orchestrator
 # ──────────────────────────────────────────────────────────────
 
@@ -364,6 +473,18 @@ class Publisher:
             stacks_to_publish = [s for s in STACK_DEFINITIONS if s.name in config.stacks]
         else:
             stacks_to_publish = STACK_DEFINITIONS
+
+        # Fail fast if any BUILD_SCRIPT stack has untracked files — those would
+        # be silently excluded from the `git ls-files`-based source bundle, and
+        # the stale per-stack `.checksum` written afterwards would silently skip
+        # the next publish attempt. See _git_untracked_preflight() for details.
+        if progress_callback:
+            progress_callback("git", "Checking for untracked files...")
+        _git_untracked_preflight(
+            project_dir,
+            stacks_to_publish,
+            allow_untracked=config.allow_untracked,
+        )
 
         # Track S3 locations for main template substitution
         vp_src_s3_location = ""

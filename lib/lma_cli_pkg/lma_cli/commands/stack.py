@@ -41,6 +41,7 @@ def _build_from_local_code(
     public: bool = False,
     clean_build: bool = False,
     no_validate: bool = False,
+    allow_untracked: bool = False,
 ):
     """Build and publish LMA artifacts from local code, returning the template URL.
 
@@ -101,6 +102,7 @@ def _build_from_local_code(
             public=public,
             project_dir=source_dir,
             force=clean_build,
+            allow_untracked=allow_untracked,
             progress_callback=progress_callback,
         )
     except LMAError as e:
@@ -336,6 +338,16 @@ def outputs_cmd(ctx, stack_name, region, as_json):
     help="Force full rebuild by deleting checksums (used with --from-code).",
 )
 @click.option(
+    "--allow-untracked",
+    is_flag=True,
+    default=False,
+    help=(
+        "Bypass the untracked-file safety check during --from-code builds. "
+        "Untracked files are silently excluded from BUILD_SCRIPT source bundles, "
+        "so this is NOT recommended."
+    ),
+)
+@click.option(
     "--no-validate-template",
     is_flag=True,
     default=False,
@@ -359,6 +371,7 @@ def deploy_cmd(
     prefix,
     public,
     clean_build,
+    allow_untracked,
     no_validate_template,
 ):
     """Deploy or update the LMA CloudFormation stack.
@@ -426,6 +439,7 @@ def deploy_cmd(
                 public=public,
                 clean_build=clean_build,
                 no_validate=no_validate_template,
+                allow_untracked=allow_untracked,
             )
 
         # Handle local template file
