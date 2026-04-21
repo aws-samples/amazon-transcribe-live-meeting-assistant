@@ -3,11 +3,21 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { fetchAuthSession } from 'aws-amplify/auth';
 import React, { useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import RFB from '@novnc/novnc/lib/rfb';
-import { Container, Header, SpaceBetween, Alert, Spinner, Box, Button, Toggle, Badge } from '@awsui/components-react';
-import { Auth } from 'aws-amplify';
+import {
+  Container,
+  Header,
+  SpaceBetween,
+  Alert,
+  Spinner,
+  Box,
+  Button,
+  Toggle,
+  Badge,
+} from '@cloudscape-design/components';
 
 const VNCViewer = ({
   vpId,
@@ -78,8 +88,11 @@ const VNCViewer = ({
     const connectWithAuth = async () => {
       try {
         // Get current Cognito session
-        const session = await Auth.currentSession();
-        const idToken = session.getIdToken().getJwtToken();
+        const session = await fetchAuthSession();
+        const idToken = session?.tokens?.idToken?.toString();
+        if (!idToken) {
+          throw new Error('No Cognito ID token available');
+        }
 
         // Append token as query parameter to the WebSocket URL
         // Format: wss://cloudfront-domain/vnc/{vpId}?token={idToken}

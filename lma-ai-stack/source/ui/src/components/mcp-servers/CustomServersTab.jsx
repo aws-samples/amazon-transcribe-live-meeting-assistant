@@ -3,6 +3,8 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import {
@@ -17,11 +19,11 @@ import {
   Link,
   SpaceBetween,
   Textarea,
-} from '@awsui/components-react';
-import { API, graphqlOperation, Logger } from 'aws-amplify';
+} from '@cloudscape-design/components';
 import AuthConfigModal from './AuthConfigModal';
 
-const logger = new Logger('CustomServersTab');
+const client = generateClient();
+const logger = new ConsoleLogger('CustomServersTab');
 
 /**
  * Custom Servers Tab - Add custom HTTP MCP server endpoints
@@ -93,8 +95,9 @@ const CustomServersTab = ({ onInstall }) => {
         }
       `;
 
-      const result = await API.graphql(
-        graphqlOperation(mutation, {
+      const result = await client.graphql({
+        query: mutation,
+        variables: {
           input: {
             ServerId: serverId,
             Name: serverName,
@@ -106,8 +109,8 @@ const CustomServersTab = ({ onInstall }) => {
             ServerUrl: serverUrl,
             AuthConfig: authConfig ? JSON.stringify(authConfig) : null,
           },
-        }),
-      );
+        },
+      });
 
       const response = result.data.installMCPServer;
 

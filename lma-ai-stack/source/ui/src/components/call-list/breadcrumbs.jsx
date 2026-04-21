@@ -5,7 +5,7 @@
  */
 import React from 'react';
 
-import { BreadcrumbGroup } from '@awsui/components-react';
+import { BreadcrumbGroup } from '@cloudscape-design/components';
 
 import { CALLS_PATH, DEFAULT_PATH } from '../../routes/constants';
 

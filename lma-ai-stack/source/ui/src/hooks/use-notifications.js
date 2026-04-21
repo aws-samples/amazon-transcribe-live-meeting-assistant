@@ -3,12 +3,11 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import { useEffect, useState } from 'react';
-import { Logger } from 'aws-amplify';
-
 import useAppContext from '../contexts/app';
 
-const logger = new Logger('useNotifications');
+const logger = new ConsoleLogger('useNotifications');
 
 const dismissedInitialNotificationsStorageKey = 'dismissedInitialNotifications';
 const initialNotifications = [

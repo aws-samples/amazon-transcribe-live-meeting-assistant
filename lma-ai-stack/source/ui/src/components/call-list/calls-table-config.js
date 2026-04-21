@@ -13,7 +13,7 @@ import {
   SpaceBetween,
   StatusIndicator,
   Popover,
-} from '@awsui/components-react';
+} from '@cloudscape-design/components';
 
 import rehypeRaw from 'rehype-raw';
 import ReactMarkdown from 'react-markdown';

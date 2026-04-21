@@ -3,14 +3,16 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
 import React, { useEffect, useState } from 'react';
-import { Container, Header, SpaceBetween } from '@awsui/components-react';
-import { API, graphqlOperation, Logger } from 'aws-amplify';
+import { Container, Header, SpaceBetween } from '@cloudscape-design/components';
 import MCPServersContent from '../mcp-servers/MCPServersContent';
 import MCPApiKeySection from './MCPApiKeySection';
 import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
 
-const logger = new Logger('MCPServersPage');
+const client = generateClient();
+const logger = new ConsoleLogger('MCPServersPage');
 
 /**
  * MCP Servers Configuration Page
@@ -23,7 +25,7 @@ const MCPServersPage = () => {
   useEffect(() => {
     const fetchVPData = async () => {
       try {
-        const result = await API.graphql(graphqlOperation(listVirtualParticipants));
+        const result = await client.graphql({ query: listVirtualParticipants });
 
         const vps = result.data.listVirtualParticipants || [];
         // Find the first active VP with VNC ready
@@ -50,7 +52,7 @@ const MCPServersPage = () => {
   useEffect(() => {
     if (!vpData?.id) return undefined;
 
-    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipant)).subscribe({
+    const subscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
       next: ({ value }) => {
         const updated = value?.data?.onUpdateVirtualParticipant;
         if (updated && updated.id === vpData.id) {

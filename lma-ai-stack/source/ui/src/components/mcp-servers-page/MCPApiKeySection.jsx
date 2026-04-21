@@ -3,6 +3,8 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Alert,
@@ -15,11 +17,11 @@ import {
   SpaceBetween,
   Spinner,
   StatusIndicator,
-} from '@awsui/components-react';
-import { API, graphqlOperation, Logger } from 'aws-amplify';
+} from '@cloudscape-design/components';
 import { generateMCPApiKey, revokeMCPApiKey, listMCPApiKeys } from '../../graphql/mutations';
 
-const logger = new Logger('MCPApiKeySection');
+const client = generateClient();
+const logger = new ConsoleLogger('MCPApiKeySection');
 
 const MCPApiKeySection = () => {
   const [keys, setKeys] = useState([]);
@@ -33,7 +35,7 @@ const MCPApiKeySection = () => {
   const fetchKeys = useCallback(async () => {
     try {
       setLoading(true);
-      const result = await API.graphql(graphqlOperation(listMCPApiKeys));
+      const result = await client.graphql({ query: listMCPApiKeys });
       setKeys(result.data.listMCPApiKeys || []);
     } catch (err) {
       logger.error('Error fetching API keys:', err);
@@ -51,7 +53,7 @@ const MCPApiKeySection = () => {
     try {
       setGenerating(true);
       setError(null);
-      const result = await API.graphql(graphqlOperation(generateMCPApiKey));
+      const result = await client.graphql({ query: generateMCPApiKey });
       setNewKey(result.data.generateMCPApiKey);
       await fetchKeys();
     } catch (err) {
@@ -67,7 +69,7 @@ const MCPApiKeySection = () => {
     try {
       setRevoking(true);
       setError(null);
-      await API.graphql(graphqlOperation(revokeMCPApiKey, { keyPrefix }));
+      await client.graphql({ query: revokeMCPApiKey, variables: { keyPrefix } });
       setShowRevokeConfirm(false);
       await fetchKeys();
     } catch (err) {

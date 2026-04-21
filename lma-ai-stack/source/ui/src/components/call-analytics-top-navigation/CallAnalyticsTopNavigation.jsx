@@ -3,19 +3,19 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { signOut } from 'aws-amplify/auth';
 import React, { useState } from 'react';
-import { Box, Button, Modal, SpaceBetween, TopNavigation } from '@awsui/components-react';
-import { Auth, Logger } from 'aws-amplify';
-
+import { Box, Button, Modal, SpaceBetween, TopNavigation } from '@cloudscape-design/components';
 import useAppContext from '../../contexts/app';
 
-const logger = new Logger('TopNavigation');
+const logger = new ConsoleLogger('TopNavigation');
 
 /* eslint-disable react/prop-types */
 const SignOutModal = ({ visible, setVisible }) => {
-  async function signOut() {
+  async function handleSignOut() {
     try {
-      await Auth.signOut();
+      await signOut();
       logger.debug('signed out');
       window.location.reload();
     } catch (error) {
@@ -34,7 +34,7 @@ const SignOutModal = ({ visible, setVisible }) => {
             <Button variant="link" onClick={() => setVisible(false)}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={() => signOut()}>
+            <Button variant="primary" onClick={() => handleSignOut()}>
               Sign Out
             </Button>
           </SpaceBetween>

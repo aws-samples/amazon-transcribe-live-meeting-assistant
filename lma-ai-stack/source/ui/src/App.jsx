@@ -4,12 +4,14 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState } from 'react';
-import { Amplify, Logger } from 'aws-amplify';
 import { HashRouter } from 'react-router-dom';
+import { Authenticator, ThemeProvider, useAuthenticator } from '@aws-amplify/ui-react';
+import { ConsoleLogger } from 'aws-amplify/utils';
+// eslint-disable-next-line import/no-unresolved
+import '@aws-amplify/ui-react/styles.css';
 
 import { AppContext } from './contexts/app';
 
-import useUserAuthState from './hooks/use-user-auth-state';
 import useAwsConfig from './hooks/use-aws-config';
 import useCurrentSessionCreds from './hooks/use-current-session-creds';
 
@@ -17,13 +19,13 @@ import Routes from './routes/Routes';
 
 import './App.css';
 
-Amplify.Logger.LOG_LEVEL = process.env.NODE_ENV === 'development' ? 'DEBUG' : 'WARNING';
-const logger = new Logger('App');
+ConsoleLogger.LOG_LEVEL = import.meta.env.DEV ? 'DEBUG' : 'WARN';
+const logger = new ConsoleLogger('App');
 
-const App = () => {
+const AppContent = () => {
   const awsConfig = useAwsConfig();
-  const { authState, user } = useUserAuthState(awsConfig);
-  const { currentSession, currentCredentials } = useCurrentSessionCreds({ authState });
+  const { authStatus: authState, user } = useAuthenticator((context) => [context.authStatus, context.user]);
+  const { currentSession, currentCredentials } = useCurrentSessionCreds({});
   const [errorMessage, setErrorMessage] = useState();
   const [navigationOpen, setNavigationOpen] = useState(true);
 
@@ -51,5 +53,13 @@ const App = () => {
     </div>
   );
 };
+
+const App = () => (
+  <ThemeProvider>
+    <Authenticator.Provider>
+      <AppContent />
+    </Authenticator.Provider>
+  </ThemeProvider>
+);
 
 export default App;

@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { Table, ColumnLayout, Box, Link } from '@awsui/components-react';
+import { Table, ColumnLayout, Box, Link } from '@cloudscape-design/components';
 import { SELECTION_LABELS } from './calls-table-config';
 import { CALLS_PATH } from '../../routes/constants';
 

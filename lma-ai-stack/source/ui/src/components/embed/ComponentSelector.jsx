@@ -7,7 +7,7 @@
  */
 import React from 'react';
 import PropTypes from 'prop-types';
-import { Box, Alert } from '@awsui/components-react';
+import { Box, Alert } from '@cloudscape-design/components';
 
 import EmbedStreamAudio from './EmbedStreamAudio';
 import EmbedCallDetails from './EmbedCallDetails';

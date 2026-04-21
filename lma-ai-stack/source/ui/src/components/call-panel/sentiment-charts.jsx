@@ -3,13 +3,12 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import React from 'react';
-import { Box, LineChart } from '@awsui/components-react';
-import { Logger } from 'aws-amplify';
-
+import { Box, LineChart } from '@cloudscape-design/components';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 
-const logger = new Logger('SentimentCharts');
+const logger = new ConsoleLogger('SentimentCharts');
 
 /* eslint-disable react/prop-types, react/destructuring-assignment */
 export const VoiceToneFluctuationChart = ({ item, callTranscriptPerCallId }) => {

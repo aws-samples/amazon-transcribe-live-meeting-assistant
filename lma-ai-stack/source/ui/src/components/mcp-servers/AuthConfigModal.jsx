@@ -3,12 +3,23 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { generateClient } from 'aws-amplify/api';
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { API } from 'aws-amplify';
-import { Alert, Box, Button, FormField, Input, Modal, Select, SpaceBetween, Textarea } from '@awsui/components-react';
+import {
+  Alert,
+  Box,
+  Button,
+  FormField,
+  Input,
+  Modal,
+  Select,
+  SpaceBetween,
+  Textarea,
+} from '@cloudscape-design/components';
 import { initOAuthFlow } from '../../graphql/mutations';
 
+const client = generateClient();
 /**
  * Generic Authentication Configuration Modal
  * Supports multiple auth types: Bearer Token, Custom Headers, OAuth 2.1
@@ -152,7 +163,7 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
       sessionStorage.setItem('oauth_server_id', serverId);
 
       // Initialize OAuth flow
-      const response = await API.graphql({
+      const response = await client.graphql({
         query: initOAuthFlow,
         variables: {
           input: {

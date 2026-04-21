@@ -4,10 +4,8 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState } from 'react';
-import { Switch, Route, useRouteMatch } from 'react-router-dom';
-import { AppLayout, Flashbar } from '@awsui/components-react';
+import { AppLayout, Flashbar } from '@cloudscape-design/components';
 
-import { Logger } from 'aws-amplify';
 import useNotifications from '../../hooks/use-notifications';
 
 import StreamAudio from '../stream-audio/StreamAudio';
@@ -19,14 +17,8 @@ import ToolsPanel from './tools-panel';
 
 import useAppContext from '../../contexts/app';
 
-const logger = new Logger('StreamAudioLayout');
-
 const StreamAudioLayout = () => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
-  const { path } = useRouteMatch();
-  // console.log(`StreamAudioLayout Path: ${path}`);
-  logger.info('path ', path);
-
   const notifications = useNotifications();
   const [toolsOpen, setToolsOpen] = useState(false);
 
@@ -41,13 +33,7 @@ const StreamAudioLayout = () => {
       tools={<ToolsPanel />}
       toolsOpen={toolsOpen}
       onToolsChange={({ detail }) => setToolsOpen(detail.open)}
-      content={
-        <Switch>
-          <Route path={path}>
-            <StreamAudio />
-          </Route>
-        </Switch>
-      }
+      content={<StreamAudio />}
       ariaLabels={appLayoutLabels}
     />
   );

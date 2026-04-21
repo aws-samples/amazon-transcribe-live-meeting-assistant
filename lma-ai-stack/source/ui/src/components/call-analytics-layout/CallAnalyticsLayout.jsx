@@ -3,11 +3,10 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useState } from 'react';
-import { Switch, Route, useRouteMatch } from 'react-router-dom';
-import { AppLayout, Flashbar } from '@awsui/components-react';
-
-import { Logger } from 'aws-amplify';
+import { Routes, Route } from 'react-router-dom';
+import { AppLayout, Flashbar } from '@cloudscape-design/components';
 
 import { CallsContext } from '../../contexts/calls';
 
@@ -29,38 +28,28 @@ import { CALL_LIST_SHARDS_PER_DAY, PERIODS_TO_LOAD_STORAGE_KEY } from '../call-l
 
 import useAppContext from '../../contexts/app';
 
-const logger = new Logger('CallAnalyticsLayout');
+const logger = new ConsoleLogger('CallAnalyticsLayout');
 
 const CallAnalyticsLayout = () => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
-
-  const { path } = useRouteMatch();
-  logger.debug('path', path);
 
   const notifications = useNotifications();
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
 
   const getInitialPeriodsToLoad = () => {
-    // default to 2 hours - half of one (4hr) shard period
     let periods = 0.5;
     try {
       const periodsFromStorage = Math.abs(JSON.parse(localStorage.getItem(PERIODS_TO_LOAD_STORAGE_KEY)));
-      // prettier-ignore
-      if (
-        !Number.isSafeInteger(periodsFromStorage)
-        // load max of to 30 days
-        || periodsFromStorage > CALL_LIST_SHARDS_PER_DAY * 30
-      ) {
+      if (!Number.isSafeInteger(periodsFromStorage) || periodsFromStorage > CALL_LIST_SHARDS_PER_DAY * 30) {
         logger.warn('invalid initialPeriodsToLoad value from local storage');
       } else {
-        periods = (periodsFromStorage > 0) ? periodsFromStorage : periods;
+        periods = periodsFromStorage > 0 ? periodsFromStorage : periods;
         localStorage.setItem(PERIODS_TO_LOAD_STORAGE_KEY, JSON.stringify(periods));
       }
     } catch {
       logger.warn('failed to parse initialPeriodsToLoad from local storage');
     }
-
     return periods;
   };
   const initialPeriodsToLoad = getInitialPeriodsToLoad();
@@ -77,13 +66,7 @@ const CallAnalyticsLayout = () => {
     sendGetTranscriptSegmentsRequest,
   } = useCallsGraphQlApi({ initialPeriodsToLoad });
 
-  // eslint-disable-next-line prettier/prettier
-  const {
-    splitPanelOpen,
-    onSplitPanelToggle,
-    splitPanelSize,
-    onSplitPanelResize,
-  } = useSplitPanel(selectedItems);
+  const { splitPanelOpen, onSplitPanelToggle, splitPanelSize, onSplitPanelResize } = useSplitPanel(selectedItems);
 
   // eslint-disable-next-line react/jsx-no-constructed-context-values
   const callsContextValue = {
@@ -120,17 +103,11 @@ const CallAnalyticsLayout = () => {
         onSplitPanelResize={onSplitPanelResize}
         splitPanel={<SplitPanel />}
         content={
-          <Switch>
-            <Route exact path={path}>
-              <CallList />
-            </Route>
-            <Route path={`${path}/query`}>
-              <MeetingsQueryLayout />
-            </Route>
-            <Route path={`${path}/:callId`}>
-              <CallDetails />
-            </Route>
-          </Switch>
+          <Routes>
+            <Route index element={<CallList />} />
+            <Route path="query" element={<MeetingsQueryLayout />} />
+            <Route path=":callId" element={<CallDetails />} />
+          </Routes>
         }
         ariaLabels={appLayoutLabels}
       />

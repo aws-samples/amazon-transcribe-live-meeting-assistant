@@ -17,8 +17,8 @@ import {
   Grid,
   Box,
   Link,
-} from '@awsui/components-react';
-import '@awsui/global-styles/index.css';
+} from '@cloudscape-design/components';
+import '@cloudscape-design/global-styles/index.css';
 import useWebSocket from 'react-use-websocket';
 
 import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '../common/constants';
@@ -32,9 +32,14 @@ const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if l
 const StreamAudio = () => {
   const { currentSession, user } = useAppContext();
   const { settings } = useSettingsContext();
-  const JWT_TOKEN = currentSession.getAccessToken().getJwtToken();
+  // Amplify v6 exposes tokens as currentSession.tokens.{accessToken,idToken}.toString().
+  // The refresh token is not exposed via fetchAuthSession in v6; pass an empty string
+  // since the websocket server's JWT verifier only strictly requires access/id tokens.
+  const JWT_TOKEN = currentSession?.tokens?.accessToken?.toString() ?? '';
+  const ID_TOKEN = currentSession?.tokens?.idToken?.toString() ?? '';
+  const REFRESH_TOKEN = '';
 
-  const userIdentifier = user?.attributes?.email || DEFAULT_LOCAL_SPEAKER_NAME;
+  const userIdentifier = user?.attributes?.email || user?.signInDetails?.loginId || DEFAULT_LOCAL_SPEAKER_NAME;
 
   const [meetingTopic, setMeetingTopic] = useState('Stream Audio');
   const [callMetaData, setCallMetaData] = useState({
@@ -78,8 +83,8 @@ const StreamAudio = () => {
   const { sendMessage } = useWebSocket(getSocketUrl, {
     queryParams: {
       authorization: `Bearer ${JWT_TOKEN}`,
-      id_token: `${currentSession.idToken.jwtToken}`,
-      refresh_token: `${currentSession.refreshToken.token}`,
+      id_token: ID_TOKEN,
+      refresh_token: REFRESH_TOKEN,
     },
     onOpen: (event) => {
       console.log(`
