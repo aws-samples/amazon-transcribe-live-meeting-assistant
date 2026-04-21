@@ -2457,13 +2457,16 @@ Resources:
           PolicyDocument:
             Version: 2012-10-17
             Statement:
-              # Read the uploaded media (Transcribe reads it via its own role,
-              # not ours, but we read the DDB job row that describes it).
               - Effect: Allow
                 Action:
                   - s3:GetObject
                 Resource:
                   - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-uploads-pending/*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-transcripts/*"
               # Read + update the UploadJob row (PK/SK uj#<callId>).
               - Effect: Allow
                 Action:
