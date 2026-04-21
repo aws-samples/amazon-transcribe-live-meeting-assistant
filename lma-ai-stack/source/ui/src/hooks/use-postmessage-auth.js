@@ -3,10 +3,10 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Logger } from 'aws-amplify';
 
-const logger = new Logger('usePostMessageAuth');
+const logger = new ConsoleLogger('usePostMessageAuth');
 
 /**
  * Hook that listens for authentication tokens via the postMessage Web API.

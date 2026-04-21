@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { useState, useEffect } from 'react';
-import Amplify from 'aws-amplify';
+import { Amplify } from 'aws-amplify';
 import awsExports from '../aws-exports';
 
 const useAwsConfig = () => {
@@ -12,7 +12,7 @@ const useAwsConfig = () => {
   useEffect(() => {
     Amplify.configure(awsExports);
     setAwsConfig(awsExports);
-  }, [awsExports]);
+  }, []);
   return awsConfig;
 };
 

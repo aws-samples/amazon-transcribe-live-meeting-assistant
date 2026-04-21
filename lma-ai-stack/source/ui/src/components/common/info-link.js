@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { Link } from '@awsui/components-react';
+import { Link } from '@cloudscape-design/components';
 
 /* eslint-disable react/prop-types, jsx-a11y/anchor-is-valid */
 export const InfoLink = ({ id, onFollow }) => (

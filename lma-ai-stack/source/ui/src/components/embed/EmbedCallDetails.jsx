@@ -14,9 +14,9 @@
  * When show includes all panels or component=call-details, renders the full CallPanel.
  * When show is a subset (e.g., just 'chat'), renders only that specific panel.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import PropTypes from 'prop-types';
-import { Logger } from 'aws-amplify';
 import rehypeRaw from 'rehype-raw';
 import ReactMarkdown from 'react-markdown';
 import {
@@ -33,7 +33,7 @@ import {
   TextContent,
   Toggle,
   Link,
-} from '@awsui/components-react';
+} from '@cloudscape-design/components';
 
 import useSettingsContext from '../../contexts/settings';
 import { CallsContext } from '../../contexts/calls';
@@ -46,7 +46,7 @@ import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 
-const logger = new Logger('EmbedCallDetails');
+const logger = new ConsoleLogger('EmbedCallDetails');
 
 const PAUSE_TO_MERGE_IN_SECONDS = 1;
 const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]`);
@@ -73,7 +73,7 @@ EmbedSummaryPanel.propTypes = {
 const EmbedChatPanel = ({ item }) => {
   const iframeSrc = `/strands-chat.html?callId=${item.callId}`;
 
-  if (process.env.REACT_APP_ENABLE_AGENT_ASSIST !== 'true') {
+  if (import.meta.env.VITE_ENABLE_AGENT_ASSIST !== 'true') {
     return (
       <Container header={<Header variant="h4">Meeting Assist Bot</Header>}>
         <Box textAlign="center" padding="l" color="text-body-secondary">

@@ -3,12 +3,14 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { Amplify } from 'aws-amplify';
+import { generateClient } from 'aws-amplify/api';
 import React, { useEffect, useState } from 'react';
-import { Amplify, API } from 'aws-amplify';
-import { Box, SpaceBetween, Spinner } from '@awsui/components-react';
+import { Box, SpaceBetween, Spinner } from '@cloudscape-design/components';
 import { handleOAuthCallback } from '../../graphql/mutations';
 import awsExports from '../../aws-exports';
 
+const client = generateClient();
 /**
  * OAuth Callback Handler Component
  * Handles the OAuth authorization callback and exchanges code for tokens
@@ -56,7 +58,7 @@ const OAuthCallback = () => {
         setMessage('Exchanging authorization code for tokens...');
 
         // Exchange code for tokens via GraphQL
-        const response = await API.graphql({
+        const response = await client.graphql({
           query: handleOAuthCallback,
           variables: {
             input: {

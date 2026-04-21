@@ -4,28 +4,14 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { Route, Switch, useRouteMatch } from 'react-router-dom';
-import { Logger } from 'aws-amplify';
-
 import CallAnalyticsLayout from '../components/call-analytics-layout';
 import CallAnalyticsTopNavigation from '../components/call-analytics-top-navigation';
 
-const logger = new Logger('CallsRoutes');
-
-const CallsRoutes = () => {
-  const { path } = useRouteMatch();
-  logger.info('path ', path);
-
-  return (
-    <Switch>
-      <Route path={path}>
-        <div>
-          <CallAnalyticsTopNavigation />
-          <CallAnalyticsLayout />
-        </div>
-      </Route>
-    </Switch>
-  );
-};
+const CallsRoutes = () => (
+  <div>
+    <CallAnalyticsTopNavigation />
+    <CallAnalyticsLayout />
+  </div>
+);
 
 export default CallsRoutes;

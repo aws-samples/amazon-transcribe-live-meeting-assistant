@@ -3,21 +3,20 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Logger } from 'aws-amplify';
-
 import useCallsContext from '../../contexts/calls';
 import useSettingsContext from '../../contexts/settings';
 
 import mapCallsAttributes from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 
-import '@awsui/global-styles/index.css';
+import '@cloudscape-design/global-styles/index.css';
 
 import CallPanel from '../call-panel';
 
-const logger = new Logger('CallDetails');
+const logger = new ConsoleLogger('CallDetails');
 
 const CallDetails = () => {
   const { callId } = useParams();
@@ -60,7 +59,7 @@ const CallDetails = () => {
     };
   }, [callId]);
 
-  useEffect(async () => {
+  useEffect(() => {
     if (!callId || !call || !calls?.length) {
       return;
     }

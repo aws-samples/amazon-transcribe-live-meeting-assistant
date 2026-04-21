@@ -4,23 +4,19 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { Route, Switch } from 'react-router-dom';
-import { SideNavigation } from '@awsui/components-react';
+import { SideNavigation } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
-import useAppContext from '../../contexts/app';
+import useUserGroups from '../../hooks/use-user-groups';
 import { NAV_HEADER, generateNavigationItems } from '../common/navigation-items';
 import { VIRTUAL_PARTICIPANT_PATH } from '../../routes/constants';
 
 export const callsNavHeader = NAV_HEADER;
 
 const defaultOnFollowHandler = (ev) => {
-  // Prevent navigation for Deployment Info items
   if (ev.detail.href === '#') {
     ev.preventDefault();
     return;
   }
-  // XXX keep the locked href for our demo pages
-  // ev.preventDefault();
   console.log(ev);
 };
 
@@ -32,25 +28,17 @@ const Navigation = ({
   onFollowHandler = defaultOnFollowHandler,
 }) => {
   const { settings } = useSettingsContext() || {};
-  const { user } = useAppContext();
-
-  // Check if user is admin
-  const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
-  const isAdmin = userGroups.includes('Admin');
+  const { isAdmin } = useUserGroups();
 
   const navigationItems = items || generateNavigationItems(settings, isAdmin);
 
   return (
-    <Switch>
-      <Route path={VIRTUAL_PARTICIPANT_PATH}>
-        <SideNavigation
-          items={navigationItems}
-          header={header || callsNavHeader}
-          activeHref={activeHref}
-          onFollow={onFollowHandler}
-        />
-      </Route>
-    </Switch>
+    <SideNavigation
+      items={navigationItems}
+      header={header || callsNavHeader}
+      activeHref={activeHref}
+      onFollow={onFollowHandler}
+    />
   );
 };
 

@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { HelpPanel, Icon } from '@awsui/components-react';
+import { HelpPanel, Icon } from '@cloudscape-design/components';
 
 const DOCS_BASE = 'https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant';
 

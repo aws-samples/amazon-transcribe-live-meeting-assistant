@@ -2,35 +2,16 @@
  * Copyright (c) 2025 Amazon.com
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
+ *
+ * NOTE: This hook previously wrapped the legacy Amplify v1 `onAuthUIStateChange`
+ * callback. With Amplify v6 we use `useAuthenticator` from @aws-amplify/ui-react.
+ * This shim is kept so existing callers (if any remain) continue to work.
  */
-import { useState, useEffect } from 'react';
-import { onAuthUIStateChange } from '@aws-amplify/ui-components';
-import { Logger } from 'aws-amplify';
+import { useAuthenticator } from '@aws-amplify/ui-react';
 
-const logger = new Logger('useUserAuthState');
-
-const useUserAuthState = (awsconfig) => {
-  const [authState, setAuthState] = useState();
-  const [user, setUser] = useState();
-
-  useEffect(() => {
-    onAuthUIStateChange((nextAuthState, authData) => {
-      logger.debug('auth state change nextAuthState:', nextAuthState);
-      logger.debug('auth state change authData:', authData);
-      setAuthState(nextAuthState);
-      setUser(authData);
-      if (authData) {
-        // prettier-ignore
-        localStorage.setItem(`${authData.pool.clientId}idtokenjwt`, authData.signInUserSession.idToken.jwtToken);
-        // prettier-ignore
-        localStorage.setItem(`${authData.pool.clientId}accesstokenjwt`, authData.signInUserSession.accessToken.jwtToken);
-        // prettier-ignore
-        localStorage.setItem(`${authData.pool.clientId}refreshtoken`, authData.signInUserSession.refreshToken.jwtToken);
-      }
-    });
-  }, [awsconfig]);
-
-  return { authState, user };
+const useUserAuthState = () => {
+  const { authStatus, user } = useAuthenticator((context) => [context.authStatus, context.user]);
+  return { authState: authStatus, user };
 };
 
 export default useUserAuthState;

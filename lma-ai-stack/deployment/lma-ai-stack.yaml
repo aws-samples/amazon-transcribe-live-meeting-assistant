@@ -603,12 +603,12 @@ Outputs:
   LocalUITestingEnv:
     Description: Copy to create .env file for local UI testing
     Value: !Sub >-
-      REACT_APP_USER_POOL_ID=${UserPoolId}
-      REACT_APP_USER_POOL_CLIENT_ID=${CognitoClientId}
-      REACT_APP_IDENTITY_POOL_ID=${AppIdentityPoolId}
-      REACT_APP_APPSYNC_GRAPHQL_URL=${AppSyncApiEncrypted.GraphQLUrl}
-      REACT_APP_AWS_REGION=${AWS::Region}
-      REACT_APP_SETTINGS_PARAMETER=${LMASettingsParameterName}
+      VITE_USER_POOL_ID=${UserPoolId}
+      VITE_USER_POOL_CLIENT_ID=${CognitoClientId}
+      VITE_IDENTITY_POOL_ID=${AppIdentityPoolId}
+      VITE_APPSYNC_GRAPHQL_URL=${AppSyncApiEncrypted.GraphQLUrl}
+      VITE_AWS_REGION=${AWS::Region}
+      VITE_SETTINGS_PARAMETER=${LMASettingsParameterName}
   VPTaskRegistryTableName:
     Description: Name of the VPTaskRegistry DynamoDB table
     Value: !Ref VPTaskRegistry
@@ -839,8 +839,8 @@ Resources:
                 - echo `ls -altr`
                 - echo `pwd`
                 - echo Installing NodeJS
-                - n 18.19.1
-                - npm install -g npm@10.2.4
+                - n 22.12.0
+                - npm install -g npm@10.9.0
                 - echo Installing Web UI dependencies
                 - cd source/ui
                 - npm install
@@ -859,6 +859,10 @@ Resources:
                 - echo Build started on `date`
                 - cd $CODEBUILD_SRC_DIR
                 - cd source/ui
+                - echo Writing Vite .env.production file from CodeBuild environment variables
+                - env | grep '^VITE_' > .env.production
+                - echo "Contents of .env.production (keys only):"
+                - cut -d= -f1 .env.production
                 - echo Building Web UI
                 - npm run build
                 - >
@@ -895,38 +899,38 @@ Resources:
             Value: !Ref WebAppBucket
           - Name: CLOUDFRONT_DISTRIBUTION_ID
             Value: !Ref WebAppCloudFrontDistribution
-            # These REACT_APP_ variables are used by the web ui in the
-            # aws-exports.js Amplify config. The values are embedded in the
-            # code at build time. See:
-            # https://create-react-app.dev/docs/adding-custom-environment-variables/
-          - Name: REACT_APP_SETTINGS_PARAMETER
+            # These VITE_ variables are used by the Vite web ui at build time.
+            # They are written to .env.production by the buildspec and embedded
+            # into the static bundle by `npm run build`.
+            # See: https://vite.dev/guide/env-and-mode
+          - Name: VITE_SETTINGS_PARAMETER
             Value: !Ref LMASettingsParameterName
-          - Name: REACT_APP_USER_POOL_ID
+          - Name: VITE_USER_POOL_ID
             Value: !Ref UserPoolId
-          - Name: REACT_APP_USER_POOL_CLIENT_ID
+          - Name: VITE_USER_POOL_CLIENT_ID
             Value: !Ref CognitoClientId
-          - Name: REACT_APP_IDENTITY_POOL_ID
+          - Name: VITE_IDENTITY_POOL_ID
             Value: !Ref AppIdentityPoolId
-          - Name: REACT_APP_APPSYNC_GRAPHQL_URL
+          - Name: VITE_APPSYNC_GRAPHQL_URL
             Value: !GetAtt AppSyncApiEncrypted.GraphQLUrl
-          - Name: REACT_APP_AWS_REGION
+          - Name: VITE_AWS_REGION
             Value: !Ref AWS::Region
-          - Name: REACT_APP_SHOULD_HIDE_SIGN_UP
+          - Name: VITE_SHOULD_HIDE_SIGN_UP
             Value: !If
               - ShouldAllowSignUpEmailDomain
               - "false"
               - "true"
-          - Name: REACT_APP_ENABLE_AGENT_ASSIST
+          - Name: VITE_ENABLE_AGENT_ASSIST
             Value: !If
               - ShouldEnableLambdaAgentAssist
               - "true"
               - "false"
-          - Name: REACT_APP_AGENT_ASSIST_MODE
+          - Name: VITE_AGENT_ASSIST_MODE
             Value: !If
               - ShouldEnableLambdaAgentAssist
               - "LAMBDA"
               - "DISABLED"
-          - Name: REACT_APP_CLOUDFRONT_DOMAIN
+          - Name: VITE_CLOUDFRONT_DOMAIN
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
   # CodeBuild project for building MCP servers Lambda layer
   MCPLayerBuildProject:
@@ -1811,6 +1815,10 @@ Resources:
           LOG_LEVEL: DEBUG
           POWERTOOLS_METRICS_NAMESPACE: !Sub "TranscriptProcessor-${AWS::StackName}"
           POWERTOOLS_SERVICE_NAME: TranscriptProcessor
+          # Used by transcript_enrichment_layer's get_owner_from_jwt to validate
+          # Cognito access tokens against the JWKS for the LMA user pool.
+          VITE_AWS_REGION: !Ref AWS::Region
+          VITE_USER_POOL_ID: !Ref UserPoolId
           # XXX add trace parameter or map
           POWERTOOLS_TRACE_DISABLED: false
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
@@ -2113,8 +2121,8 @@ Resources:
       Environment:
         Variables:
           LCA_CALL_EVENTS_TABLE: !Ref EventSourcingTable
-          REACT_APP_AWS_REGION: !Ref AWS::Region
-          REACT_APP_USER_POOL_ID: !Ref UserPoolId
+          VITE_AWS_REGION: !Ref AWS::Region
+          VITE_USER_POOL_ID: !Ref UserPoolId
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           S3_BUCKET_NAME: !Ref S3BucketName
           S3_RECORDINGS_PREFIX: !Ref AudioFilePrefix

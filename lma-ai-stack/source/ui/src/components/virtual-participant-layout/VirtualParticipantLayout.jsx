@@ -4,12 +4,10 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState } from 'react';
-import { Switch, Route, useRouteMatch } from 'react-router-dom';
-import { AppLayout, Flashbar } from '@awsui/components-react';
+import { Routes, Route } from 'react-router-dom';
+import { AppLayout, Flashbar } from '@cloudscape-design/components';
 
-import { Logger } from 'aws-amplify';
 import useNotifications from '../../hooks/use-notifications';
-
 import { appLayoutLabels } from '../common/labels';
 
 import Navigation from './navigation';
@@ -20,14 +18,8 @@ import useAppContext from '../../contexts/app';
 import VirtualParticipantList from './VirtualParticipantList';
 import VirtualParticipantDetails from './VirtualParticipantDetails';
 
-const logger = new Logger('VirtualParticipantLayout');
-
 const VirtualParticipantLayout = () => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
-  const { path } = useRouteMatch();
-  // console.log(`StreamAudioLayout Path: ${path}`);
-  logger.info('path ', path);
-
   const notifications = useNotifications();
   const [toolsOpen, setToolsOpen] = useState(false);
 
@@ -43,14 +35,10 @@ const VirtualParticipantLayout = () => {
       toolsOpen={toolsOpen}
       onToolsChange={({ detail }) => setToolsOpen(detail.open)}
       content={
-        <Switch>
-          <Route exact path={path}>
-            <VirtualParticipantList />
-          </Route>
-          <Route path={`${path}/:vpId`}>
-            <VirtualParticipantDetails />
-          </Route>
-        </Switch>
+        <Routes>
+          <Route index element={<VirtualParticipantList />} />
+          <Route path=":vpId" element={<VirtualParticipantDetails />} />
+        </Routes>
       }
       ariaLabels={appLayoutLabels}
     />

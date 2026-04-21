@@ -7,7 +7,7 @@ import React from 'react';
 import { PropTypes } from 'prop-types';
 
 import './CategoryPill.css';
-import { Popover } from '@awsui/components-react';
+import { Popover } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 
 // eslint-disable-next-line import/prefer-default-export, arrow-body-style

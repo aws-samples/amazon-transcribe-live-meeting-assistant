@@ -3,6 +3,8 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
 import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 import {
@@ -18,11 +20,11 @@ import {
   Link,
   SpaceBetween,
   Spinner,
-} from '@awsui/components-react';
-import { API, graphqlOperation, Logger } from 'aws-amplify';
+} from '@cloudscape-design/components';
 import AuthConfigModal from './AuthConfigModal';
 
-const logger = new Logger('PublicRegistryTab');
+const client = generateClient();
+const logger = new ConsoleLogger('PublicRegistryTab');
 
 // Official MCP Registry API
 const REGISTRY_API_BASE = 'https://registry.modelcontextprotocol.io/v0.1/servers';
@@ -209,8 +211,9 @@ const PublicRegistryTab = ({ onInstall, installedServers = [] }) => {
         }
       `;
 
-      const result = await API.graphql(
-        graphqlOperation(mutation, {
+      const result = await client.graphql({
+        query: mutation,
+        variables: {
           input: {
             ServerId: server.id,
             Name: server.name,
@@ -222,8 +225,8 @@ const PublicRegistryTab = ({ onInstall, installedServers = [] }) => {
             ServerUrl: server.serverUrl, // For HTTP servers
             AuthConfig: authConfig ? JSON.stringify(authConfig) : null,
           },
-        }),
-      );
+        },
+      });
 
       const response = result.data.installMCPServer;
 
@@ -276,11 +279,12 @@ const PublicRegistryTab = ({ onInstall, installedServers = [] }) => {
         }
       `;
 
-      const result = await API.graphql(
-        graphqlOperation(mutation, {
+      const result = await client.graphql({
+        query: mutation,
+        variables: {
           serverId: server.id,
-        }),
-      );
+        },
+      });
 
       const response = result.data.uninstallMCPServer;
 
@@ -323,14 +327,15 @@ const PublicRegistryTab = ({ onInstall, installedServers = [] }) => {
         }
       `;
 
-      const result = await API.graphql(
-        graphqlOperation(mutation, {
+      const result = await client.graphql({
+        query: mutation,
+        variables: {
           input: {
             ServerId: server.id,
             Version: server.version,
           },
-        }),
-      );
+        },
+      });
 
       const response = result.data.updateMCPServer;
 

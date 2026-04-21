@@ -3,18 +3,17 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useEffect } from 'react';
-import { SplitPanel } from '@awsui/components-react';
-import { Logger } from 'aws-amplify';
-
+import { SplitPanel } from '@cloudscape-design/components';
 import useCallsContext from '../../contexts/calls';
 
 import { getPanelContent, SPLIT_PANEL_I18NSTRINGS } from './calls-split-panel-config';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 
-import '@awsui/global-styles/index.css';
+import '@cloudscape-design/global-styles/index.css';
 
-const logger = new Logger('CallListSplitPanel');
+const logger = new ConsoleLogger('CallListSplitPanel');
 
 const CallListSplitPanel = () => {
   const {

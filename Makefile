@@ -293,14 +293,14 @@ test-ui: ## Run React UI tests (skips if source unchanged)
 		echo -e "$(GREEN)✅ UI tests skipped — source unchanged since last run$(NC)"; \
 	else \
 		echo "Running UI tests..."; \
-		cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --watchAll=false && \
+		cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --run && \
 		echo "$$NEW_CHECKSUM" > $(CURDIR)/$(UI_TEST_CHECKSUM_FILE) && \
 		echo -e "$(GREEN)✅ UI tests passed!$(NC)"; \
 	fi
 
 test-ui-force: ## Run React UI tests (ignore checksum, always run)
 	@echo "Running UI tests (forced)..."
-	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --watchAll=false
+	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --run
 	@find $(UI_DIR)/src $(UI_DIR)/public -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}' > $(UI_TEST_CHECKSUM_FILE)
 	@echo -e "$(GREEN)✅ UI tests passed!$(NC)"
 
@@ -321,7 +321,9 @@ endif
 			echo -e "$(YELLOW)Make sure the stack exists and has completed deployment.$(NC)"; \
 			exit 1; \
 		fi; \
-		echo "$$ENV_CONTENT" | sed 's/ \(REACT_APP_\)/\n\1/g' > $(UI_DIR)/.env; \
+		echo "$$ENV_CONTENT" \
+			| tr ' ' '\n' \
+			> $(UI_DIR)/.env; \
 		echo -e "$(GREEN)✅ Created $(UI_DIR)/.env from stack outputs$(NC)"; \
 	fi
 	@if [ ! -f $(UI_DIR)/.env ]; then \
