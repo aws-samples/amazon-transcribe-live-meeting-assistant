@@ -1898,6 +1898,8 @@ Resources:
     DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
     UpdateReplacePolicy: Retain
     Condition: ShouldCreateRecordingBucket
+    DependsOn:
+      - AISTACK
     Properties:
       AccessControl: LogDeliveryWrite
       OwnershipControls:
@@ -1927,6 +1929,32 @@ Resources:
             Status: Enabled
             Prefix: "lma-transcripts/"
             ExpirationInDays: !Ref TranscriptionExpirationInDays
+          - Id: PendingUploadCleanup
+            Status: Enabled
+            Prefix: "lma-uploads-pending/"
+            ExpirationInDays: 7
+      CorsConfiguration:
+        CorsRules:
+          - Id: LmaUploadsPendingPutFromBrowser
+            AllowedMethods:
+              - PUT
+            AllowedOrigins:
+              - "*"
+            AllowedHeaders:
+              - "content-type"
+              - "Content-Type"
+            ExposedHeaders:
+              - ETag
+            MaxAge: 3000
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: "s3:ObjectCreated:*"
+            Function: !GetAtt AISTACK.Outputs.UploadMeetingProcessorFunctionArn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: "lma-uploads-pending/"
 
   RecordingsBucketPolicy:
     Type: AWS::S3::BucketPolicy

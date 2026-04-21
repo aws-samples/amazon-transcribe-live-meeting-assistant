@@ -702,6 +702,10 @@ Outputs:
       Users generate personal API keys in the LMA UI settings and pass them via x-api-key header.
     Value: !Sub "https://${MCPApiKeyRestApi}.execute-api.${AWS::Region}.amazonaws.com/mcp"
 
+  UploadMeetingProcessorFunctionArn:
+    Description: Lambda function ARN invoked by S3 notifications on lma-uploads-pending/*
+    Value: !GetAtt UploadMeetingProcessorFunction.Arn
+
 Resources:
   EventSourcingTable:
     Type: AWS::DynamoDB::Table
@@ -2373,6 +2377,147 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: !GetAtt UploadMeetingInitiatorFunction.Arn
+
+  ##########################################################################
+  # Upload Meeting Processor Lambda (Stage 2) — S3 ObjectCreated:* trigger on
+  # `lma-uploads-pending/<callId>/<filename>`. Reads the UploadJob row,
+  # emits a START event to CallDataStream, and kicks off a Transcribe batch
+  # job. The actual ObjectCreated notification is wired up in `lma-main.yaml`
+  # on the RecordingsBucket (because RecordingsBucket is defined there), and
+  # the `UploadMeetingProcessorFunctionArn` output below is how the parent
+  # template obtains the target ARN without creating a CFN dependency cycle.
+  ##########################################################################
+  UploadMeetingProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt UploadMeetingProcessorFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/upload_meeting_processor
+      Description: Triggered by S3 ObjectCreated on lma-uploads-pending/ — emits a START Kinesis event and starts a Transcribe batch job
+      # Transcribe.start_transcription_job is an async API; the Lambda itself
+      # finishes in a few seconds. 60 s gives generous headroom for a cold
+      # start + a transient Kinesis/Transcribe retry.
+      MemorySize: 256
+      Timeout: 60
+      FunctionName: !Sub '${LMAStackName}-UploadMeetingProcessor'
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          CALL_DATA_STREAM_NAME: !Ref CallDataStream
+          S3_BUCKET_NAME: !Ref S3BucketName
+          UPLOADS_PENDING_PREFIX: lma-uploads-pending/
+          TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
+          DEFAULT_LANGUAGE_CODE: "en-US"
+          LOG_LEVEL: INFO
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingProcessorFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for S3-triggered processor; Lambda retries + CloudWatch monitor errors"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - UploadMeetingProcessorFunctionLogGroup
+
+  UploadMeetingProcessorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingProcessorFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UploadMeetingProcessorFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: UploadMeetingProcessor Lambda execution role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UploadMeetingProcessor
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # Read the uploaded media (Transcribe reads it via its own role,
+              # not ours, but we read the DDB job row that describes it).
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-uploads-pending/*"
+              # Read + update the UploadJob row (PK/SK uj#<callId>).
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt EventSourcingTable.Arn
+              # Emit the START event. Same permission the transcriber container has.
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource: !Ref CallDataStreamArn
+              # Start the batch job. Transcribe has no resource-level IAM for
+              # StartTranscriptionJob; the service itself reads the S3 object
+              # using its own service-linked permissions.
+              - Effect: Allow
+                Action:
+                  - transcribe:StartTranscriptionJob
+                  - transcribe:TagResource
+                Resource: "*"
+              # KMS: EventSourcingTable is CMK-encrypted; Transcribe writes its
+              # output JSON back to RecordingsBucket which may also be CMK-
+              # encrypted in some deployments.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                      - !Sub "s3.${AWS::Region}.amazonaws.com"
+                      - !Sub "kinesis.${AWS::Region}.amazonaws.com"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "transcribe:StartTranscriptionJob does not support resource-level permissions"
+
+  # Grant S3 permission to invoke the processor Lambda. We can't set
+  # SourceArn=RecordingsBucket here because that bucket lives in the parent
+  # stack; to avoid a circular dependency we scope via SourceAccount only.
+  # The Lambda itself cross-checks event["s3"]["bucket"]["name"] against
+  # its own S3_BUCKET_NAME env var before doing any work, so a misdelivered
+  # notification is a no-op.
+  UploadMeetingProcessorFunctionS3InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt UploadMeetingProcessorFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
 
   UpdateChatButtonConfigResolverFunction:
     Type: AWS::Serverless::Function
