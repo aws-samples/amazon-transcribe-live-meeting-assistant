@@ -9,7 +9,7 @@ import { BreadcrumbGroup } from '@cloudscape-design/components';
 import { DEFAULT_PATH, VIRTUAL_PARTICIPANT_PATH } from '../../routes/constants';
 
 export const callListBreadcrumbItems = [
-  { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` },
+  { text: 'Meeting Assistant', href: `#${DEFAULT_PATH}` },
   { text: 'Virtual Participant', href: `#${VIRTUAL_PARTICIPANT_PATH}` },
 ];
 

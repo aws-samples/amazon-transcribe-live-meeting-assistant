@@ -10,7 +10,7 @@ import { BreadcrumbGroup } from '@cloudscape-design/components';
 import { STREAM_AUDIO_PATH, DEFAULT_PATH } from '../../routes/constants';
 
 export const callListBreadcrumbItems = [
-  { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` },
+  { text: 'Meeting Assistant', href: `#${DEFAULT_PATH}` },
   { text: 'Stream Audio (Mic+Browser)', href: `#${STREAM_AUDIO_PATH}` },
 ];
 

@@ -17,7 +17,7 @@ import {
   DEFAULT_PATH,
 } from '../../routes/constants';
 
-export const NAV_HEADER = { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` };
+export const NAV_HEADER = { text: 'Meeting Assistant', href: `#${DEFAULT_PATH}` };
 
 /**
  * Generate consistent navigation items for all layouts.
