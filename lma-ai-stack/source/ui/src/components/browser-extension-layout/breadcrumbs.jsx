@@ -6,13 +6,13 @@
 import React from 'react';
 import { BreadcrumbGroup } from '@cloudscape-design/components';
 
-import { DEFAULT_PATH, VIRTUAL_PARTICIPANT_PATH } from '../../routes/constants';
+import { BROWSER_EXTENSION_PATH, DEFAULT_PATH } from '../../routes/constants';
 
-export const callListBreadcrumbItems = [
+export const browserExtensionBreadcrumbItems = [
   { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` },
-  { text: 'Virtual Participant', href: `#${VIRTUAL_PARTICIPANT_PATH}` },
+  { text: 'Chrome Extension', href: `#${BROWSER_EXTENSION_PATH}` },
 ];
 
-const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={callListBreadcrumbItems} />;
+const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={browserExtensionBreadcrumbItems} />;
 
 export default Breadcrumbs;

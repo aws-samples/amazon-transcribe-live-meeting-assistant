@@ -11,7 +11,7 @@ import { STREAM_AUDIO_PATH, DEFAULT_PATH } from '../../routes/constants';
 
 export const callListBreadcrumbItems = [
   { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` },
-  { text: 'Stream Audio', href: `#${STREAM_AUDIO_PATH}` },
+  { text: 'Stream Audio (Mic+Browser)', href: `#${STREAM_AUDIO_PATH}` },
 ];
 
 const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={callListBreadcrumbItems} />;

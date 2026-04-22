@@ -28,7 +28,8 @@ The left sidebar organizes the application into the following sections:
 
 ### Sources
 - **Virtual Participant** — Join meetings via a virtual participant bot
-- **Stream Audio** — Stream audio directly to LMA for transcription
+- **Stream Audio (from Mic+Browser)** — Stream audio directly to LMA from any Chrome tab (meetings, softphones, YouTube, audio/video playback)
+- **Chrome Extension** — Information, download, and install instructions for the LMA Chrome browser extension (see [Browser Extension](browser-extension.md))
 
 ### Meetings
 - **Meeting List** — View and manage all accessible meetings
