@@ -7,7 +7,7 @@ title: "Virtual Participant"
 ## Table of Contents
 
 - [Overview](#overview)
-- [Advantages over Stream Audio](#advantages-over-stream-audio)
+- [When to use Virtual Participant](#when-to-use-virtual-participant)
 - [Supported Platforms](#supported-platforms)
 - [Joining a Meeting](#joining-a-meeting)
 - [Meeting Scheduling](#meeting-scheduling)
@@ -23,13 +23,18 @@ title: "Virtual Participant"
 
 ## Overview
 
+> **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio, and Virtual Participant.
+
 The Virtual Participant (VP) is a headless Chrome browser running on ECS (Fargate or EC2) that joins meetings as a separate participant via Puppeteer. It captures audio and metadata, sending them to the LMA Kinesis Data Stream for transcription and processing.
 
-## Advantages over Stream Audio
+## When to use Virtual Participant
 
-- **Use native desktop apps**: You are free to use native desktop applications (Zoom, Teams, etc.) instead of being limited to the browser.
-- **Independent attendance**: The VP can join before you arrive, stay after you leave, or attend meetings you do not join at all.
-- **Voice assistant and avatar integration**: Supports optional voice assistant and avatar features for interactive meeting participation.
+- **Attendees on native desktop or mobile apps**: Participants are free to use native meeting apps (Zoom, Teams, etc.) instead of being limited to the browser — the Chrome Extension and Stream Audio require joining from the web client.
+- **Independent attendance**: The VP can join before you arrive, stay after you leave, or attend meetings you do not join at all — including scheduling it in advance.
+- **Voice Assistant**: The VP is the only capture option that supports the Voice Assistant (wake phrase, push-to-talk, always-on modes).
+- **Open VP live view**: Use the Meeting Assistant's "Open VP live view" feature to see the bot's browser view of the meeting in real time.
+
+See [Meeting Sources](meeting-sources.md) for the full comparison.
 
 ## Supported Platforms
 

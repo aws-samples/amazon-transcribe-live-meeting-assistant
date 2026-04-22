@@ -8,11 +8,9 @@ import {
   Alert,
   Box,
   Button,
-  ColumnLayout,
   Container,
   ExpandableSection,
   Header,
-  Icon,
   Link,
   SpaceBetween,
 } from '@cloudscape-design/components';
@@ -107,115 +105,6 @@ const BrowserExtension = () => {
             </Alert>
           )}
         </SpaceBetween>
-      </Container>
-
-      <Container header={<Header variant="h2">Which option is right for me?</Header>}>
-        <ColumnLayout columns={3} variant="text-grid">
-          <div>
-            <Box variant="awsui-key-label">Chrome Extension</Box>
-            <SpaceBetween size="xxs">
-              <div>
-                <Box variant="span" color="text-status-success">
-                  <Icon name="status-positive" />
-                </Box>{' '}
-                Runs inside meeting tab
-              </div>
-              <div>
-                <Box variant="span" color="text-status-success">
-                  <Icon name="status-positive" />
-                </Box>{' '}
-                Captures both sides of audio
-              </div>
-              <div>
-                <Box variant="span" color="text-status-success">
-                  <Icon name="status-positive" />
-                </Box>{' '}
-                Speaker attribution from meeting platform
-              </div>
-              <div>
-                <Box variant="span" color="text-status-success">
-                  <Icon name="status-positive" />
-                </Box>{' '}
-                Invisible to other attendees
-              </div>
-              <div>
-                <Box variant="span" color="text-status-info">
-                  <Icon name="status-info" />
-                </Box>{' '}
-                Requires joining meeting from Chrome browser
-              </div>
-              <div>
-                <Box variant="span" color="text-status-info">
-                  <Icon name="status-info" />
-                </Box>{' '}
-                One-time install (Chromium browsers only)
-              </div>
-            </SpaceBetween>
-          </div>
-          <div>
-            <Box variant="awsui-key-label">
-              <Link href={`#${STREAM_AUDIO_PATH}`}>Stream Audio (from Mic+Browser)</Link>
-            </Box>
-            <SpaceBetween size="xxs">
-              <div>
-                <Box variant="span" color="text-status-success">
-                  <Icon name="status-positive" />
-                </Box>{' '}
-                No install required
-              </div>
-              <div>
-                <Box variant="span" color="text-status-success">
-                  <Icon name="status-positive" />
-                </Box>{' '}
-                Works with any streaming audio in a Chrome tab &mdash; meetings, softphones, YouTube, audio/video
-                playback
-              </div>
-              <div>
-                <Box variant="span" color="text-status-info">
-                  <Icon name="status-info" />
-                </Box>{' '}
-                Separate LMA tab (not inside meeting)
-              </div>
-              <div>
-                <Box variant="span" color="text-status-info">
-                  <Icon name="status-info" />
-                </Box>{' '}
-                No speaker attribution (no access to meeting app metadata)
-              </div>
-            </SpaceBetween>
-          </div>
-          <div>
-            <Box variant="awsui-key-label">
-              <Link href={`#${VIRTUAL_PARTICIPANT_PATH}`}>Virtual Participant</Link>
-            </Box>
-            <SpaceBetween size="xxs">
-              <div>
-                <Box variant="span" color="text-status-success">
-                  <Icon name="status-positive" />
-                </Box>{' '}
-                No install required
-              </div>
-              <div>
-                <Box variant="span" color="text-status-success">
-                  <Icon name="status-positive" />
-                </Box>{' '}
-                Works even when you&apos;re offline
-              </div>
-              <div>
-                <Box variant="span" color="text-status-success">
-                  <Icon name="status-positive" />
-                </Box>{' '}
-                Supports the Voice Assistant and &quot;Open VP live view&quot; in the Meeting Assistant
-              </div>
-              <div>
-                <Box variant="span" color="text-status-info">
-                  <Icon name="status-info" />
-                </Box>{' '}
-                Joins meeting as a visible bot attendee
-              </div>
-            </SpaceBetween>
-          </div>
-        </ColumnLayout>
       </Container>
 
       <Container header={<Header variant="h2">Install the extension</Header>}>
