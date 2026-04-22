@@ -79,5 +79,6 @@ Always obtain permission from all participants before recording a meeting or con
 
 ## See Also
 
+- [Upload Audio](upload-audio.md) -- Transcribe an existing audio/video recording instead of streaming live
 - [Virtual Participant](virtual-participant.md) -- Join meetings as a separate automated participant
 - [WebSocket Streaming API](websocket-streaming-api.md) -- Technical details on the streaming protocol

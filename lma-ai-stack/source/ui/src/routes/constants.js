@@ -7,6 +7,7 @@ export const LOGIN_PATH = '/login';
 export const LOGOUT_PATH = '/logout';
 export const CALLS_PATH = '/calls';
 export const STREAM_AUDIO_PATH = '/stream';
+export const UPLOAD_AUDIO_PATH = '/upload';
 export const VIRTUAL_PARTICIPANT_PATH = '/virtual-participant';
 export const MCP_SERVERS_PATH = '/configuration/mcp-servers';
 export const NOVA_SONIC_CONFIG_PATH = '/configuration/nova-sonic';

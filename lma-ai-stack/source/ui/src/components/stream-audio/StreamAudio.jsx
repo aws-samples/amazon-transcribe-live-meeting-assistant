@@ -4,6 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import PropTypes from 'prop-types';
 
 import {
   Form,
@@ -36,9 +37,11 @@ import createUploadMeeting from '../../graphql/queries/createUploadMeeting';
 let SOURCE_SAMPLING_RATE;
 const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if left blank.';
 
-// Mode values for the top-of-page Tiles selector.
+// Mode values for the top-of-page Tiles selector (only shown when the
+// `mode` prop is not provided).
 const MODE_STREAM = 'stream';
 const MODE_UPLOAD = 'upload';
+const MODE_SELECT = 'select'; // render the Tiles mode switcher
 
 // Upload-phase labels shown in the progress card.
 const UPLOAD_PHASE = {
@@ -52,7 +55,18 @@ const UPLOAD_PHASE = {
 // AppSync client — reused only for the createUploadMeeting mutation.
 const appsyncClient = generateClient();
 
-const StreamAudio = () => {
+/**
+ * StreamAudio — unified component for both live streaming and uploading
+ * pre-recorded meetings.
+ *
+ * Props:
+ *   mode: 'stream' | 'upload' | 'select' | undefined
+ *     - 'stream'  → stream-only, hides the Input mode Tiles switcher
+ *     - 'upload'  → upload-only, hides the Input mode Tiles switcher
+ *     - 'select'  → shows the Input mode Tiles switcher (previous behavior)
+ *     - undefined → defaults to 'select' (preserves legacy standalone use)
+ */
+const StreamAudio = ({ mode: modeProp }) => {
   const { currentSession, user } = useAppContext();
   const { settings } = useSettingsContext();
   // Amplify v6 exposes tokens as currentSession.tokens.{accessToken,idToken}.toString().
@@ -65,7 +79,9 @@ const StreamAudio = () => {
   const userIdentifier = user?.attributes?.email || user?.signInDetails?.loginId || DEFAULT_LOCAL_SPEAKER_NAME;
 
   // --- Shared meeting-metadata form state (used by both modes) ------------
-  const [mode, setMode] = useState(MODE_STREAM);
+  const effectiveInitialMode = modeProp === MODE_UPLOAD ? MODE_UPLOAD : MODE_STREAM;
+  const showTiles = modeProp === undefined || modeProp === MODE_SELECT;
+  const [mode, setMode] = useState(effectiveInitialMode);
   const [meetingTopic, setMeetingTopic] = useState('Stream Audio');
   const [callMetaData, setCallMetaData] = useState({
     callId: `${meetingTopic} - ${getTimestampStr()}`,
@@ -406,7 +422,9 @@ const StreamAudio = () => {
     }
     if (!/^(audio|video)\//.test(file.type || '')) {
       setUploadError(
-        `Selected file has unsupported content type "${file.type || 'unknown'}". Please pick an audio/* or video/* file.`,
+        `Selected file has unsupported content type "${
+          file.type || 'unknown'
+        }". Please pick an audio/* or video/* file.`,
       );
       return;
     }
@@ -505,32 +523,32 @@ const StreamAudio = () => {
           }
         >
           <SpaceBetween direction="vertical" size="l">
-            <Container
-              header={
-                <Header variant="h2" description="Choose how you want to add a meeting to LMA.">
-                  Input mode
-                </Header>
-              }
-            >
-              <Tiles
-                value={mode}
-                onChange={({ detail }) => setMode(detail.value)}
-                items={[
-                  {
-                    value: MODE_STREAM,
-                    label: 'Stream live from a browser tab',
-                    description:
-                      'Capture a meeting happening right now in another Chrome tab (the existing Stream Audio behavior).',
-                  },
-                  {
-                    value: MODE_UPLOAD,
-                    label: 'Upload a pre-recorded audio or video file',
-                    description:
-                      'Send an existing recording to LMA. We will transcribe it with Amazon Transcribe and generate the meeting summary automatically.',
-                  },
-                ]}
-              />
-            </Container>
+            {showTiles && (
+              <Container
+                header={
+                  <Header variant="h2" description="Choose how you want to add a meeting to LMA.">
+                    Input mode
+                  </Header>
+                }
+              >
+                <Tiles
+                  value={mode}
+                  onChange={({ detail }) => setMode(detail.value)}
+                  items={[
+                    {
+                      value: MODE_STREAM,
+                      label: 'Stream live from a browser tab',
+                      description: 'Capture a meeting happening right now in another Chrome tab.',
+                    },
+                    {
+                      value: MODE_UPLOAD,
+                      label: 'Upload a pre-recorded audio or video file',
+                      description: 'Send an existing recording to LMA for transcription and automatic summary.',
+                    },
+                  ]}
+                />
+              </Container>
+            )}
 
             <Container
               header={
@@ -539,17 +557,17 @@ const StreamAudio = () => {
                   actions={
                     <div>
                       {mode === MODE_STREAM && recording && (
-                        <Button href={`#/calls/${callMetaData.callId}`} variant="link" iconName="external" target="blank">
-                          Open in progress meeting
-                        </Button>
-                      )}
-                      {mode === MODE_UPLOAD && uploadedCallId && (
                         <Button
-                          href={`#/calls/${uploadedCallId}`}
+                          href={`#/calls/${callMetaData.callId}`}
                           variant="link"
                           iconName="external"
                           target="blank"
                         >
+                          Open in progress meeting
+                        </Button>
+                      )}
+                      {mode === MODE_UPLOAD && uploadedCallId && (
+                        <Button href={`#/calls/${uploadedCallId}`} variant="link" iconName="external" target="blank">
                           Open meeting detail
                         </Button>
                       )}
@@ -575,9 +593,7 @@ const StreamAudio = () => {
                   stretch
                   required
                   description={
-                    mode === MODE_UPLOAD
-                      ? 'Label for the remote side of the conversation'
-                      : 'Label for stream audio'
+                    mode === MODE_UPLOAD ? 'Label for the remote side of the conversation' : 'Label for stream audio'
                   }
                   errorText={callMetaData.fromNumber.length < 1 && DEFAULT_BLANK_FIELD_MSG}
                 >
@@ -630,7 +646,10 @@ const StreamAudio = () => {
                 header={
                   <Header
                     variant="h2"
-                    description="Pick a recording and (optionally) enable speaker diarization for Amazon Transcribe's batch job."
+                    description={
+                      'Pick a recording and (optionally) enable speaker diarization ' +
+                      "for Amazon Transcribe's batch job."
+                    }
                   >
                     Recording
                   </Header>
@@ -639,7 +658,10 @@ const StreamAudio = () => {
                 <SpaceBetween direction="vertical" size="m">
                   <FormField
                     label="Audio or video file"
-                    description="Accepts audio/* and video/* formats supported by Amazon Transcribe (wav, mp3, mp4, m4a, webm, flac, ogg, amr)."
+                    description={
+                      'Accepts audio/* and video/* formats supported by Amazon Transcribe ' +
+                      '(wav, mp3, mp4, m4a, webm, flac, ogg, amr).'
+                    }
                     errorText={uploadError || undefined}
                   >
                     <FileUpload
@@ -659,14 +681,20 @@ const StreamAudio = () => {
                         limitShowMore: 'Show more files',
                         errorIconAriaLabel: 'Error',
                       }}
-                      constraintText="Max file size 5 GB. Uploaded directly to S3 from your browser — the file never transits a Lambda or API Gateway."
+                      constraintText={
+                        'Max file size 5 GB. Uploaded directly to S3 from your browser — ' +
+                        'the file never transits a Lambda or API Gateway.'
+                      }
                     />
                   </FormField>
 
                   <ColumnLayout columns={2}>
                     <FormField
                       label="Enable speaker diarization"
-                      description="Identifies up to N distinct speakers from a mixed audio track. Adds a few seconds to the Transcribe job."
+                      description={
+                        'Identifies up to N distinct speakers from a mixed audio track. ' +
+                        'Adds a few seconds to the Transcribe job.'
+                      }
                     >
                       <Checkbox
                         checked={enableDiarization}
@@ -754,6 +782,14 @@ const StreamAudio = () => {
       )}
     </div>
   );
+};
+
+StreamAudio.propTypes = {
+  mode: PropTypes.oneOf([MODE_STREAM, MODE_UPLOAD, MODE_SELECT]),
+};
+
+StreamAudio.defaultProps = {
+  mode: undefined,
 };
 
 export default StreamAudio;

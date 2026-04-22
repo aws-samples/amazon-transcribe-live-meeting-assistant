@@ -15,6 +15,7 @@ import useAppContext from '../contexts/app';
 
 import CallsRoutes from './CallsRoutes';
 import StreamAudioRoutes from './StreamAudioRoutes';
+import UploadAudioRoutes from './UploadAudioRoutes';
 import VirtualParticipantRoutes from './VirtualParticipantRoutes';
 import MeetingsQueryRoutes from './MeetingsQueryRoutes';
 import MCPServersRoutes from './MCPServersRoutes';
@@ -29,6 +30,7 @@ import {
   LOGIN_PATH,
   LOGOUT_PATH,
   STREAM_AUDIO_PATH,
+  UPLOAD_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
   MEETINGS_QUERY_PATH,
   MCP_SERVERS_PATH,
@@ -72,6 +74,7 @@ const AuthRoutes = ({ redirectParam }) => {
         <Route path={LOGOUT_PATH} element={<SignOutRedirect />} />
         <Route path={`${MEETINGS_QUERY_PATH}/*`} element={<MeetingsQueryRoutes />} />
         <Route path={`${STREAM_AUDIO_PATH}/*`} element={<StreamAudioRoutes />} />
+        <Route path={`${UPLOAD_AUDIO_PATH}/*`} element={<UploadAudioRoutes />} />
         <Route path={`${VIRTUAL_PARTICIPANT_PATH}/*`} element={<VirtualParticipantRoutes />} />
         <Route path={`${MCP_SERVERS_PATH}/*`} element={<MCPServersRoutes />} />
         <Route path={`${NOVA_SONIC_CONFIG_PATH}/*`} element={<NovaSonicConfigRoutes />} />

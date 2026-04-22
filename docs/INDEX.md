@@ -29,6 +29,7 @@ title: "LMA Documentation"
 ### Meeting Sources
 
 - [Stream Audio](stream-audio.md) — Browser-based audio capture from your microphone and any Chrome tab
+- [Upload Audio](upload-audio.md) — Upload a pre-recorded audio/video file for batch transcription and summary
 - [Browser Extension](browser-extension.md) — Chrome extension for capturing browser tab audio from any meeting platform
 - [Virtual Participant](virtual-participant.md) — Headless Chrome bot that joins Zoom, Teams, Chime, Google Meet, and WebEx meetings
 

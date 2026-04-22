@@ -9,6 +9,7 @@ import {
   CALLS_PATH,
   MEETINGS_QUERY_PATH,
   STREAM_AUDIO_PATH,
+  UPLOAD_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
   MCP_SERVERS_PATH,
   NOVA_SONIC_CONFIG_PATH,
@@ -43,6 +44,12 @@ export const generateNavigationItems = (settings, isAdmin) => {
           type: 'link',
           text: 'Stream Audio (no extension)',
           href: `#${STREAM_AUDIO_PATH}`,
+          external: true,
+        },
+        {
+          type: 'link',
+          text: 'Upload Audio',
+          href: `#${UPLOAD_AUDIO_PATH}`,
           external: true,
         },
         {
