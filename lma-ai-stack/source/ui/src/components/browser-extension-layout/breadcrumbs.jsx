@@ -9,7 +9,7 @@ import { BreadcrumbGroup } from '@cloudscape-design/components';
 import { BROWSER_EXTENSION_PATH, DEFAULT_PATH } from '../../routes/constants';
 
 export const browserExtensionBreadcrumbItems = [
-  { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` },
+  { text: 'Meeting Assistant', href: `#${DEFAULT_PATH}` },
   { text: 'Chrome Extension', href: `#${BROWSER_EXTENSION_PATH}` },
 ];
 

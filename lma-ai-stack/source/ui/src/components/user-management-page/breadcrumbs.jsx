@@ -10,7 +10,7 @@ import { USER_MANAGEMENT_PATH } from '../../routes/constants';
 const Breadcrumbs = () => (
   <BreadcrumbGroup
     items={[
-      { text: 'Meeting Analytics', href: '#/' },
+      { text: 'Meeting Assistant', href: '#/' },
       { text: 'User Management', href: `#${USER_MANAGEMENT_PATH}` },
     ]}
     ariaLabel="Breadcrumbs"
