@@ -17,6 +17,7 @@ import CallsRoutes from './CallsRoutes';
 import StreamAudioRoutes from './StreamAudioRoutes';
 import UploadAudioRoutes from './UploadAudioRoutes';
 import VirtualParticipantRoutes from './VirtualParticipantRoutes';
+import BrowserExtensionRoutes from './BrowserExtensionRoutes';
 import MeetingsQueryRoutes from './MeetingsQueryRoutes';
 import MCPServersRoutes from './MCPServersRoutes';
 import NovaSonicConfigRoutes from './NovaSonicConfigRoutes';
@@ -32,6 +33,7 @@ import {
   STREAM_AUDIO_PATH,
   UPLOAD_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
+  BROWSER_EXTENSION_PATH,
   MEETINGS_QUERY_PATH,
   MCP_SERVERS_PATH,
   NOVA_SONIC_CONFIG_PATH,
@@ -76,6 +78,7 @@ const AuthRoutes = ({ redirectParam }) => {
         <Route path={`${STREAM_AUDIO_PATH}/*`} element={<StreamAudioRoutes />} />
         <Route path={`${UPLOAD_AUDIO_PATH}/*`} element={<UploadAudioRoutes />} />
         <Route path={`${VIRTUAL_PARTICIPANT_PATH}/*`} element={<VirtualParticipantRoutes />} />
+        <Route path={`${BROWSER_EXTENSION_PATH}/*`} element={<BrowserExtensionRoutes />} />
         <Route path={`${MCP_SERVERS_PATH}/*`} element={<MCPServersRoutes />} />
         <Route path={`${NOVA_SONIC_CONFIG_PATH}/*`} element={<NovaSonicConfigRoutes />} />
         <Route path={`${TRANSCRIPT_SUMMARY_PATH}/*`} element={<TranscriptSummaryRoutes />} />

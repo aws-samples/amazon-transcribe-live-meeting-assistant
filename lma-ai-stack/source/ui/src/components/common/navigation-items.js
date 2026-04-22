@@ -3,14 +3,13 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import { LMA_VERSION } from './constants';
-
 import {
   CALLS_PATH,
   MEETINGS_QUERY_PATH,
   STREAM_AUDIO_PATH,
   UPLOAD_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
+  BROWSER_EXTENSION_PATH,
   MCP_SERVERS_PATH,
   NOVA_SONIC_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
@@ -36,13 +35,13 @@ export const generateNavigationItems = (settings, isAdmin) => {
       items: [
         {
           type: 'link',
-          text: 'Virtual Participant (Preview)',
+          text: 'Virtual Participant',
           href: `#${VIRTUAL_PARTICIPANT_PATH}`,
           external: true,
         },
         {
           type: 'link',
-          text: 'Stream Audio (no extension)',
+          text: 'Stream Audio (Mic+Browser)',
           href: `#${STREAM_AUDIO_PATH}`,
           external: true,
         },
@@ -54,8 +53,8 @@ export const generateNavigationItems = (settings, isAdmin) => {
         },
         {
           type: 'link',
-          text: 'Download Chrome Extension',
-          href: `/lma-chrome-extension-${LMA_VERSION}.zip`,
+          text: 'Chrome Extension',
+          href: `#${BROWSER_EXTENSION_PATH}`,
         },
       ],
     },

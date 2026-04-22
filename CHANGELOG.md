@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Chrome Extension nav link** — The side-nav "Download Chrome Extension" link no longer triggers an immediate zip download. It now opens a new **Chrome Extension** page with an overview, a three-way comparison of the Chrome Extension vs. Stream Audio vs. Virtual Participant capture options, a version-stamped Download button, step-by-step install instructions, usage steps, and a Troubleshooting section. The right-side information panel is populated with features, requirements, alternatives, and documentation links. Also renamed the nav items "Virtual Participant (Preview)" → "Virtual Participant" and "Stream Audio (no extension)" → "Stream Audio (from Mic+Browser)" for clarity. See [Browser Extension](docs/browser-extension.md).
+
 - **UI modernization** — Migrated web UI from Create React App to **Vite 7**, upgraded React Router from v5 to **v6**, completed Cloudscape rebrand (`@awsui/*` → `@cloudscape-design/*`), upgraded AWS Amplify to **v6**, and aligned all AWS SDK packages to `^3.637.0`.
 
 ## [0.3.1] - 2026-04-17

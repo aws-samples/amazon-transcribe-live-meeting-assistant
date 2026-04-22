@@ -9,6 +9,7 @@ export const CALLS_PATH = '/calls';
 export const STREAM_AUDIO_PATH = '/stream';
 export const UPLOAD_AUDIO_PATH = '/upload';
 export const VIRTUAL_PARTICIPANT_PATH = '/virtual-participant';
+export const BROWSER_EXTENSION_PATH = '/browser-extension';
 export const MCP_SERVERS_PATH = '/configuration/mcp-servers';
 export const NOVA_SONIC_CONFIG_PATH = '/configuration/nova-sonic';
 export const TRANSCRIPT_SUMMARY_PATH = '/configuration/transcript-summary';

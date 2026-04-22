@@ -8,7 +8,7 @@ import { HelpPanel, Icon } from '@cloudscape-design/components';
 
 const DOCS_BASE = 'https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant';
 
-const header = <h2>Stream Audio</h2>;
+const header = <h2>Stream Audio (Mic+Browser)</h2>;
 const content = (
   <>
     <p>
