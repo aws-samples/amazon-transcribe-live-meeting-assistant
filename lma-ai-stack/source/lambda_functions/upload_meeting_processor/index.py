@@ -62,9 +62,7 @@ TRANSCRIPTS_PREFIX = os.environ.get("TRANSCRIPTS_PREFIX", "lma-transcripts/")
 DEFAULT_LANGUAGE_CODE = os.environ.get("DEFAULT_LANGUAGE_CODE", "en-US")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
-# Human-friendly Transcribe job name = the callId. Must be 1–200 chars,
-# alphanumeric + ._-. We already enforce that shape on callId in the
-# initiator, so we can pass it straight through.
+# Transcribe job name == callId. Must be 1-200 chars, alphanumeric + ._-
 TRANSCRIBE_JOB_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]{1,200}$")
 
 # ---------------------------------------------------------------------------
@@ -83,12 +81,9 @@ transcribe_client = boto3.client("transcribe", region_name=AWS_REGION)
 # Helpers
 # ---------------------------------------------------------------------------
 def _call_id_from_key(key: str) -> str | None:
-    """Extract ``<callId>`` from a key of the form ``lma-uploads-pending/<callId>/<filename>``.
-
-    Returns ``None`` for any key that doesn't match that shape so the Lambda
-    can idempotently ignore unrelated puts (e.g. transcript outputs landing
-    back in the same bucket).
-    """
+    """Extract ``<callId>`` from a key of the form
+    ``lma-uploads-pending/<callId>/<filename>``. Returns ``None`` for any key
+    that doesn't match that shape."""
     if not key.startswith(UPLOADS_PENDING_PREFIX):
         return None
     remainder = key[len(UPLOADS_PENDING_PREFIX):]
@@ -110,12 +105,9 @@ def _load_upload_job(call_id: str) -> dict | None:
 
 
 def _mark_job(call_id: str, status: str, extra: dict | None = None) -> None:
-    """Update the UploadJob row. Best-effort — errors are logged but not raised,
-    so a transient DynamoDB blip can't prevent us from retrying Transcribe."""
+    """Update the UploadJob row. Best-effort — errors are logged but not raised."""
     pk = f"uj#{call_id}"
     now = datetime.now(timezone.utc).isoformat()
-    # Build an UpdateExpression dynamically from ``extra`` to keep the per-status
-    # call sites short.
     set_parts: list[str] = [
         "#status = :status",
         "UpdatedAt = :now",
@@ -143,17 +135,12 @@ def _mark_job(call_id: str, status: str, extra: dict | None = None) -> None:
 def _emit_start_event(job: dict) -> None:
     """Put a ``START`` event on the Call Data Kinesis stream.
 
-    Matches the shape produced by
-    ``lma-websocket-transcriber-stack/source/app/src/calleventdata/transcribe.ts``
-    so ``lma-ai-stack/source/lambda_functions/call_event_processor`` can
-    ``createCall`` without any code changes.
-
-    We intentionally omit ``AccessToken`` / ``IdToken`` / ``RefreshToken``:
-    this is a server-side event, so ``call_event_processor.execute_create_call_mutation``
-    will fall through to the "JWT decode failed" branch and use ``AgentId``
-    as ``Owner`` (same path the virtual-participant integration uses). We set
-    ``AgentId`` to the original Cognito caller recorded on the UploadJob row
-    so UBAC attribution is preserved.
+    Matches the shape produced by the live websocket transcriber so
+    ``call_event_processor`` can ``createCall`` without any code changes.
+    AccessToken/IdToken/RefreshToken are intentionally omitted — without a
+    JWT, ``call_event_processor`` uses ``AgentId`` as ``Owner`` (same path
+    the virtual-participant integration takes), which preserves UBAC
+    attribution to the original Cognito caller.
     """
     call_id = job["CallId"]
     owner = job.get("Owner") or job.get("AgentId") or "system@lma.aws"
@@ -164,7 +151,6 @@ def _emit_start_event(job: dict) -> None:
         "CallId": call_id,
         "CustomerPhoneNumber": job.get("FromNumber") or "Customer",
         "SystemPhoneNumber": job.get("ToNumber") or "System",
-        # AgentId becomes Owner in call_event_processor when no JWT is present.
         "AgentId": owner,
         "CreatedAt": created_at,
     }
@@ -183,16 +169,15 @@ def _start_transcription_job(job: dict) -> str:
     key = job["PendingObjectKey"]
     media_file_uri = f"s3://{bucket}/{key}"
 
-    # TranscriptionJobName is globally-unique per account+region and hard-coded
-    # by us to callId. If we retry (e.g. S3 event redelivery) the AWS SDK will
-    # raise ConflictException which the handler below treats as idempotency.
+    # TranscriptionJobName == callId. Retries raise ConflictException,
+    # handled as idempotency below.
     if not TRANSCRIBE_JOB_NAME_RE.match(call_id):
         raise ValueError(f"CallId {call_id!r} is not a valid TranscriptionJobName")
 
     settings: dict[str, Any] = {}
     if job.get("EnableDiarization"):
         max_speakers = int(job.get("MaxSpeakers") or 4)
-        # Transcribe accepts 2–30 in ShowSpeakerLabels mode.
+        # Transcribe accepts 2-30 speakers in ShowSpeakerLabels mode.
         max_speakers = max(2, min(30, max_speakers))
         settings["ShowSpeakerLabels"] = True
         settings["MaxSpeakerLabels"] = max_speakers
@@ -205,7 +190,7 @@ def _start_transcription_job(job: dict) -> str:
         "Media": {"MediaFileUri": media_file_uri},
         "OutputBucketName": bucket,
         "OutputKey": f"{TRANSCRIPTS_PREFIX}{call_id}.transcribe.json",
-        # Tags let the Stage 3 finalizer cross-reference jobs to our stack.
+        # The `lma:source` tag is used by the Stage 3 finalizer to filter jobs.
         "Tags": [
             {"Key": "lma:callId", "Value": call_id},
             {"Key": "lma:source", "Value": "upload_meeting_processor"},
@@ -220,7 +205,6 @@ def _start_transcription_job(job: dict) -> str:
     except ClientError as err:
         code = err.response.get("Error", {}).get("Code", "")
         if code == "ConflictException":
-            # Already running or completed — treat as success.
             logger.warning("Transcribe job %s already exists — treating as idempotent", call_id)
         else:
             logger.error("StartTranscriptionJob failed for %s: %s", call_id, err)
@@ -232,12 +216,8 @@ def _start_transcription_job(job: dict) -> str:
 # Handler
 # ---------------------------------------------------------------------------
 def lambda_handler(event, context):  # noqa: ARG001
-    """S3 ObjectCreated:* handler.
-
-    One S3 batch may contain multiple records. We process them independently;
-    a single bad record doesn't poison the rest. If any record raises, we
-    re-raise at the end so Lambda's retry + DLQ (if configured) take over.
-    """
+    """S3 ObjectCreated:* handler. Processes records independently; re-raises
+    at the end if any failed so Lambda retries take over."""
     logger.debug("S3 event: %s", json.dumps(event, default=str))
 
     errors: list[tuple[str, Exception]] = []
@@ -248,7 +228,6 @@ def lambda_handler(event, context):  # noqa: ARG001
         bucket_obj = s3_info.get("bucket") or {}
         obj = s3_info.get("object") or {}
         bucket = bucket_obj.get("name", "")
-        # S3 URL-encodes spaces and other special chars in the event payload.
         key = urllib.parse.unquote_plus(obj.get("key", ""))
         size = obj.get("size", 0)
 
@@ -267,9 +246,7 @@ def lambda_handler(event, context):  # noqa: ARG001
         try:
             job = _load_upload_job(call_id)
             if not job:
-                # Could be a manual s3 cp, a race with a deleted job row, or a
-                # stale TTL'd row. Log + skip rather than fail loudly; the
-                # orphan file will be cleaned up by the 7-day lifecycle rule.
+                # Orphan files are cleaned up by the 7-day lifecycle rule.
                 logger.warning(
                     "No UploadJob row for callId=%s (key=%s, size=%s) — skipping",
                     call_id, key, size,
@@ -277,10 +254,7 @@ def lambda_handler(event, context):  # noqa: ARG001
                 continue
 
             status = job.get("Status")
-            # Idempotency: second delivery of the same event, or a retry after
-            # Transcribe already accepted the job. We intentionally allow
-            # re-processing from any pre-UPLOADED state (PENDING_UPLOAD is
-            # the normal case).
+            # Idempotency: skip reprocessing if the job has already advanced.
             if status in ("TRANSCRIBING", "COMPLETED", "FAILED"):
                 logger.info(
                     "callId=%s already in status %s — skipping reprocessing",
@@ -288,8 +262,6 @@ def lambda_handler(event, context):  # noqa: ARG001
                 )
                 continue
 
-            # Mark UPLOADED first so downstream observers can tell an object
-            # landed even if the Kinesis or Transcribe call fails mid-flight.
             _mark_job(
                 call_id,
                 "UPLOADED",
@@ -316,8 +288,6 @@ def lambda_handler(event, context):  # noqa: ARG001
                 "Processing failed for callId=%s key=%s: %s",
                 call_id, key, err,
             )
-            # Best-effort surface the error on the job row so it's visible in
-            # the UI (Stage 4) and via the CLI (`lma-cli logs …`).
             _mark_job(
                 call_id,
                 "ERROR",
@@ -326,9 +296,6 @@ def lambda_handler(event, context):  # noqa: ARG001
             errors.append((call_id, err))
 
     if errors:
-        # Let Lambda retry per its event-source policy; partial-batch reporting
-        # isn't useful here because S3→Lambda already splits records into
-        # separate invocations in practice.
         raise RuntimeError(
             f"{len(errors)} of {len(records)} records failed: "
             + "; ".join(f"{cid}: {exc}" for cid, exc in errors)

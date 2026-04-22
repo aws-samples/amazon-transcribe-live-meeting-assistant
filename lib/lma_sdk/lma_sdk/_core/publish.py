@@ -280,23 +280,17 @@ def _update_checksum(
 # ──────────────────────────────────────────────────────────────
 # Git working-tree safety check
 # ──────────────────────────────────────────────────────────────
-# The lma-ai-stack and lma-websocket-transcriber-stack Makefiles build their
-# source bundle with `git ls-files`, which lists tracked *and staged* paths
-# only. Brand-new, untracked files are silently excluded, producing an
-# incomplete zip that deploys a broken app. The caller has typically already
-# written an updated `.checksum`, so naïve re-runs are a no-op until the
-# checksum is deleted. We therefore fail fast at the top of the publish if any
-# untracked files exist under a BUILD_SCRIPT stack dir, unless
-# ``allow_untracked=True`` is explicitly passed.
+# BUILD_SCRIPT stacks package their source with `git ls-files`, which
+# excludes untracked files and produces broken bundles. Fail fast if any
+# untracked files exist under a BUILD_SCRIPT stack dir (override with
+# allow_untracked=True).
 
 def _list_untracked_files(directory: Path) -> list[str]:
     """Return untracked-but-not-ignored files under ``directory``.
 
     Uses ``git ls-files --others --exclude-standard`` so the result honours
-    .gitignore. Returns an empty list if the directory is not in a git repo,
-    if git is unavailable, or if there are no untracked files.
-
-    Paths are returned relative to ``directory`` for readable error messages.
+    .gitignore. Returns an empty list if the directory is not in a git repo
+    or if there are no untracked files.
     """
     if not directory.exists() or not directory.is_dir():
         return []
@@ -474,10 +468,8 @@ class Publisher:
         else:
             stacks_to_publish = STACK_DEFINITIONS
 
-        # Fail fast if any BUILD_SCRIPT stack has untracked files — those would
-        # be silently excluded from the `git ls-files`-based source bundle, and
-        # the stale per-stack `.checksum` written afterwards would silently skip
-        # the next publish attempt. See _git_untracked_preflight() for details.
+        # See _git_untracked_preflight() — fail fast so untracked files don't
+        # get silently excluded from the `git ls-files`-based source bundle.
         if progress_callback:
             progress_callback("git", "Checking for untracked files...")
         _git_untracked_preflight(

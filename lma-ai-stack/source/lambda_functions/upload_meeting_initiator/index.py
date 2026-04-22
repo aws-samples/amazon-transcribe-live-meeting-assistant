@@ -42,8 +42,7 @@ UPLOAD_JOB_TTL_DAYS = int(os.environ.get("UPLOAD_JOB_TTL_DAYS", "14"))
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
-# Upper bounds on user-provided values — keep these permissive enough for real meetings
-# but tight enough to avoid abuse / accidental huge uploads.
+# Upper bounds on user-provided values.
 MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", str(5 * 1024 * 1024 * 1024)))  # 5 GiB
 MIN_SPEAKERS = 2
 MAX_SPEAKERS = 30
@@ -56,7 +55,7 @@ ALLOWED_CONTENT_TYPE_PREFIXES = ("audio/", "video/")
 logger = logging.getLogger(__name__)
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-# Use signature version v4 so presigned URLs support KMS-encrypted buckets.
+# signature_version=s3v4 is required for presigned URLs on KMS-encrypted buckets.
 s3_client = boto3.client("s3", config=Config(signature_version="s3v4", region_name=AWS_REGION))
 ddb = boto3.resource("dynamodb")
 job_table = ddb.Table(EVENT_SOURCING_TABLE)
@@ -70,8 +69,7 @@ class ValidationError(Exception):
 
 
 def _slugify(value: str, fallback: str = "meeting") -> str:
-    """Produce a filesystem / S3-key safe slug. Keeps the behavior close to
-    StreamAudio.jsx's meetingTopic.replace(/[\\/?#%\\+&]/g, '|') but stricter."""
+    """Produce an S3-key-safe slug."""
     if not value:
         return fallback
     slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-_.")
@@ -79,12 +77,11 @@ def _slugify(value: str, fallback: str = "meeting") -> str:
 
 
 def _sanitize_filename(name: str) -> str:
-    """Strip any path components the browser may have included, then restrict
-    to a conservative character set."""
+    """Strip any path components the browser may have included and restrict to a
+    conservative character set."""
     base = os.path.basename(name or "")
     base = re.sub(r"[^a-zA-Z0-9._-]+", "_", base)
     base = base.strip("._") or "recording"
-    # Force a reasonable max length while preserving the extension.
     if len(base) > 128:
         root, ext = os.path.splitext(base)
         base = (root[: 128 - len(ext)]) + ext
@@ -162,7 +159,6 @@ def _parse_and_validate_input(arguments: dict) -> dict:
 
     meeting_date_time = raw.get("meetingDateTime")
     if meeting_date_time:
-        # Accept an ISO-8601 string; reject anything we can't parse.
         try:
             datetime.fromisoformat(meeting_date_time.replace("Z", "+00:00"))
         except ValueError as err:
@@ -204,8 +200,6 @@ def _build_call_id(meeting_topic: str, caller_supplied: str | None) -> str:
 
 
 def _build_object_key(call_id: str, filename: str) -> str:
-    # Keep the original filename for operator clarity, but namespace under callId so
-    # multiple uploads can never collide and a bulk-delete is trivial.
     return f"{UPLOADS_PENDING_PREFIX}{call_id}/{filename}"
 
 
@@ -269,7 +263,7 @@ def _write_upload_job(
         "UpdatedAt": now.isoformat(),
         "ExpiresAfter": expires_at,
     }
-    # Drop any None values — DynamoDB disallows them.
+    # DynamoDB disallows None values.
     item = {k: v for k, v in item.items() if v is not None}
 
     try:
@@ -278,7 +272,6 @@ def _write_upload_job(
             ConditionExpression="attribute_not_exists(PK)",
         )
     except ClientError as err:
-        # A duplicate callId is the only expected reason; surface it as a validation error.
         if err.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
             raise ValidationError(f"An upload job already exists for callId {call_id}") from err
         logger.error("Failed to write UploadJob row: %s", err)
@@ -314,7 +307,6 @@ def lambda_handler(event, context):  # noqa: ARG001
         normalized = _parse_and_validate_input(event.get("arguments") or {})
     except ValidationError as err:
         logger.warning("Validation error: %s", err)
-        # AppSync JS resolver will translate this into util.error() on the client.
         raise
 
     call_id = _build_call_id(normalized["meetingTopic"], normalized["callerSuppliedCallId"])

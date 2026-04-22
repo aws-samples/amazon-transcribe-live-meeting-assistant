@@ -2049,10 +2049,10 @@ Resources:
         Mode: Active
       Code:
         ZipFile: |
-          """Custom resource that installs (or removes, on stack Delete) the
-          Stage-2 S3 ObjectCreated notification on RecordingsBucket. Decoupled
-          from the bucket resource itself to break the AISTACK ↔ RecordingsBucket
-          CloudFormation cycle."""
+          """Installs (or removes on Delete) an S3 ObjectCreated notification
+          on RecordingsBucket routed to the upload processor Lambda in AISTACK.
+          Implemented as a custom resource to break the AISTACK ↔
+          RecordingsBucket CloudFormation cycle."""
           import json
           import logging
           import boto3
@@ -2072,8 +2072,7 @@ Resources:
                   request_type = event["RequestType"]
 
                   if request_type == "Delete":
-                      # Only strip Lambda notifications — leave any EventBridge
-                      # config the bucket may have accrued in future alone.
+                      # Remove only Lambda notifications; preserve any other config.
                       current = s3.get_bucket_notification_configuration(Bucket=bucket)
                       current.pop("ResponseMetadata", None)
                       current.pop("LambdaFunctionConfigurations", None)

@@ -44,10 +44,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-import urllib.parse
 from datetime import datetime, timezone
 from typing import Any
-from urllib.request import urlopen
 
 import boto3
 from botocore.exceptions import ClientError
@@ -121,31 +119,9 @@ def _put_kinesis(partition_key: str, payload: dict) -> None:
     )
 
 
-def _job_is_from_upload_meeting(job_name: str) -> bool:
-    """Return True if the Transcribe job was started by our Stage-2 Lambda
-    (identified by the ``lma:source=upload_meeting_processor`` tag)."""
-    try:
-        arn = (
-            f"arn:aws:transcribe:{AWS_REGION}:{os.environ.get('ACCOUNT_ID','')}"
-            f":transcription-job/{job_name}"
-        )
-        # Prefer GetTranscriptionJob because it also returns the job's
-        # OutputKey + Tags in one call; we already need those.
-        resp = transcribe_client.get_transcription_job(TranscriptionJobName=job_name)
-        for tag in resp["TranscriptionJob"].get("Tags") or []:
-            if tag.get("Key") == "lma:source" and tag.get("Value") == "upload_meeting_processor":
-                return True
-    except ClientError as err:
-        logger.warning(
-            "Could not fetch Transcribe job %s to check tags: %s", job_name, err
-        )
-    return False
-
-
 def _fetch_transcript_json(bucket: str, key: str) -> dict:
-    """Read the Transcribe output JSON from S3. We chose OutputBucketName at job
-    start time so this path is predictable — no need to follow the presigned
-    TranscriptFileUri."""
+    """Read the Transcribe output JSON from S3 (written to our predictable
+    path because the Stage 2 processor set OutputBucketName + OutputKey)."""
     resp = s3_client.get_object(Bucket=bucket, Key=key)
     return json.loads(resp["Body"].read())
 
@@ -155,18 +131,16 @@ def _build_segments(
     enable_diarization: bool,
 ) -> list[dict]:
     """Turn a Transcribe output JSON into a list of segment dicts in the shape
-    ``call_event_processor.add_transcript_segments`` consumes.
+    ``call_event_processor`` consumes.
 
-    Preferred source is ``results.audio_segments[]`` which Transcribe produces
-    as sentence-like chunks with start/end/transcript. If the job was run
-    with diarization each item in ``audio_segments`` additionally has a
-    ``speaker_label`` (e.g. ``spk_0``).
+    Prefers ``results.audio_segments[]``, which Transcribe produces as
+    sentence-like chunks. With diarization enabled each chunk carries a
+    ``speaker_label`` (e.g. ``spk_0``). Falls back to a single glued segment
+    from ``results.transcripts[]`` if ``audio_segments`` is absent.
     """
     results = transcript_json.get("results") or {}
     audio_segments = results.get("audio_segments") or []
 
-    # Fallback: if audio_segments absent (older Transcribe jobs or edge cases),
-    # glue individual pronunciations into one big utterance. Better than nothing.
     if not audio_segments:
         transcripts = results.get("transcripts") or []
         text = " ".join(t.get("transcript", "") for t in transcripts).strip()
@@ -187,7 +161,6 @@ def _build_segments(
         transcript = (seg.get("transcript") or "").strip()
         if not transcript:
             continue
-        # `start_time` / `end_time` come as strings.
         try:
             start = float(seg.get("start_time") or 0.0)
         except (TypeError, ValueError):
@@ -196,7 +169,6 @@ def _build_segments(
             end = float(seg.get("end_time") or 0.0)
         except (TypeError, ValueError):
             end = 0.0
-        # speaker_label is only present when diarization was requested.
         speaker_label = seg.get("speaker_label") or "spk_0"
         segments.append(
             {
@@ -235,7 +207,6 @@ def _promote_media_file(
 
     Returns (new_key, new_s3_url).
     """
-    # Preserve the extension. Filename under pending is lma-uploads-pending/<callId>/<originalName>.
     original_name = pending_key.rsplit("/", 1)[-1]
     ext = original_name.rsplit(".", 1)[-1] if "." in original_name else "bin"
     new_key = f"{RECORDINGS_PREFIX}{call_id}.{ext}"
@@ -247,8 +218,7 @@ def _promote_media_file(
         Key=new_key,
         MetadataDirective="COPY",
     )
-    # Best effort: delete the pending object. If this fails the 7-day lifecycle
-    # rule will clean it up; no need to raise.
+    # Best effort: if the delete fails, the 7-day lifecycle rule cleans up.
     try:
         s3_client.delete_object(Bucket=bucket, Key=pending_key)
     except ClientError as err:
@@ -285,9 +255,7 @@ def lambda_handler(event, context):  # noqa: ARG001
         logger.warning("Missing TranscriptionJobName or status — nothing to do")
         return {"ok": False, "reason": "missing fields"}
 
-    # Only handle jobs Stage 2 started. We can't fetch Tags *and* also check the
-    # status in one API call without side-effects, so we do get_transcription_job
-    # once and reuse it below.
+    # Only handle jobs Stage 2 started (tagged lma:source=upload_meeting_processor).
     try:
         resp = transcribe_client.get_transcription_job(TranscriptionJobName=job_name)
     except ClientError as err:
@@ -307,10 +275,8 @@ def lambda_handler(event, context):  # noqa: ARG001
         )
         return {"ok": True, "skipped": "not-ours"}
 
-    # call_id == job_name by convention (we set it in Stage 2).
-    call_id = job_name
+    call_id = job_name  # Stage 2 sets TranscriptionJobName == CallId.
 
-    # Load the UploadJob row so we know the bucket/key, owner, and diarization flag.
     job = _get_upload_job(call_id)
     if not job:
         logger.warning("No UploadJob row uj#%s — skipping", call_id)
@@ -353,10 +319,6 @@ def lambda_handler(event, context):  # noqa: ARG001
     logger.info("Emitting %d transcript segment(s) for %s", len(segments), call_id)
 
     now = _now_iso()
-    # Each segment is emitted as its own ADD_TRANSCRIPT_SEGMENT record.
-    # call_event_processor's Kinesis consumer fans in batches of 200 so the
-    # throughput is fine for reasonable-size meetings (an hour of speech is
-    # typically a few hundred audio_segments).
     for seg in segments:
         channel = _channel_for_speaker(seg["Speaker"], enable_diarization)
         event_record = {
@@ -367,7 +329,7 @@ def lambda_handler(event, context):  # noqa: ARG001
             "StartTime": seg["StartTime"],
             "EndTime": seg["EndTime"],
             "Transcript": seg["Transcript"],
-            "IsPartial": False,   # batch-mode Transcribe only gives us final segments
+            "IsPartial": False,  # batch mode only produces final segments.
             "Speaker": seg["Speaker"],
             "CreatedAt": now,
             "UpdatedAt": now,
@@ -411,18 +373,17 @@ def lambda_handler(event, context):  # noqa: ARG001
 
 
 def _emit_end_event(job: dict, call_id: str) -> None:
-    """Emit an END event on Kinesis. Reuses the same AgentId fallback path
-    as the START event so the Owner attribution lines up.
+    """Emit an END event on Kinesis. Reuses the same AgentId fallback path as
+    the START event so the Owner attribution lines up.
 
-    NOTE: We intentionally do NOT set ``UpdatedAt`` here. The
-    ``updateCall.request.vtl`` resolver requires
-    ``existing.UpdatedAt < incoming.UpdatedAt`` — and our ADD_TRANSCRIPT_SEGMENT
-    events (emitted just before this END) can update the call row's UpdatedAt
-    with a timestamp slightly *after* the one we'd stamp here, which races us
-    into a ``condition failure`` and the meeting never transitions to ENDED.
-    Leaving UpdatedAt unset lets the VTL fall back to
-    ``$util.time.nowISO8601()`` at resolver execution time, which is guaranteed
-    to be newer than anything already in DDB.
+    NOTE: ``UpdatedAt`` is intentionally omitted. ``updateCall.request.vtl``
+    enforces ``existing.UpdatedAt < incoming.UpdatedAt``, and the
+    ADD_TRANSCRIPT_SEGMENT events emitted just before END can bump the call
+    row's UpdatedAt to a timestamp after anything we could stamp here,
+    causing a ``condition failure`` and leaving the meeting "In Progress".
+    Omitting the field lets the VTL fall back to ``$util.time.nowISO8601()``
+    at resolver execution time, which is guaranteed to be newer than
+    anything already persisted.
     """
     owner = job.get("Owner") or job.get("AgentId") or "system@lma.aws"
     now = _now_iso()
@@ -435,6 +396,5 @@ def _emit_end_event(job: dict, call_id: str) -> None:
             "SystemPhoneNumber": job.get("ToNumber") or "System",
             "AgentId": owner,
             "CreatedAt": now,
-            # UpdatedAt intentionally omitted — see docstring.
         },
     )

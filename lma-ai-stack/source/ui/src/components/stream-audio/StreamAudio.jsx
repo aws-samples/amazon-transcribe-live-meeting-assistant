@@ -441,7 +441,7 @@ const StreamAudio = () => {
       setUploadPhase(UPLOAD_PHASE.UPLOADING);
       await putFileToS3(file, result.uploadUrl, result.contentType || input.contentType);
 
-      // 3. Hand off to the backend pipeline (Stage 2 will take it from here).
+      // 3. Hand off to the backend pipeline.
       setUploadedCallId(result.callId);
       setUploadProgress(100);
       setUploadPhase(UPLOAD_PHASE.DONE);

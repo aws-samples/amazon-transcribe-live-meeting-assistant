@@ -2255,13 +2255,6 @@ Resources:
                   - lambda:InvokeFunction
                 Resource: !GetAtt MeetingControlsResolverFunction.Arn
 
-  ##########################################################################
-  # Upload Meeting Initiator Lambda — AppSync resolver for `createUploadMeeting`.
-  # Mints a presigned S3 PUT URL under the `lma-uploads-pending/` prefix of the
-  # recordings bucket and records an UploadJob row in the EventSourcing table.
-  # The S3 ObjectCreated notification on that prefix (Stage 2) will pick the job
-  # up and kick off the Transcribe batch ingestion pipeline.
-  ##########################################################################
   UploadMeetingInitiatorFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2355,7 +2348,6 @@ Resources:
                       - !Sub "dynamodb.${AWS::Region}.amazonaws.com"
                       - !Sub "s3.${AWS::Region}.amazonaws.com"
 
-  # AppSync → Lambda invocation role for the createUploadMeeting resolver.
   AppSyncUploadMeetingInitiatorLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -2378,15 +2370,6 @@ Resources:
                   - lambda:InvokeFunction
                 Resource: !GetAtt UploadMeetingInitiatorFunction.Arn
 
-  ##########################################################################
-  # Upload Meeting Processor Lambda (Stage 2) — S3 ObjectCreated:* trigger on
-  # `lma-uploads-pending/<callId>/<filename>`. Reads the UploadJob row,
-  # emits a START event to CallDataStream, and kicks off a Transcribe batch
-  # job. The actual ObjectCreated notification is wired up in `lma-main.yaml`
-  # on the RecordingsBucket (because RecordingsBucket is defined there), and
-  # the `UploadMeetingProcessorFunctionArn` output below is how the parent
-  # template obtains the target ARN without creating a CFN dependency cycle.
-  ##########################################################################
   UploadMeetingProcessorFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2397,9 +2380,6 @@ Resources:
         - arm64
       CodeUri: ../source/lambda_functions/upload_meeting_processor
       Description: Triggered by S3 ObjectCreated on lma-uploads-pending/ — emits a START Kinesis event and starts a Transcribe batch job
-      # Transcribe.start_transcription_job is an async API; the Lambda itself
-      # finishes in a few seconds. 60 s gives generous headroom for a cold
-      # start + a transient Kinesis/Transcribe retry.
       MemorySize: 256
       Timeout: 60
       FunctionName: !Sub '${LMAStackName}-UploadMeetingProcessor'
@@ -2508,12 +2488,6 @@ Resources:
           - id: W11
             reason: "transcribe:StartTranscriptionJob does not support resource-level permissions"
 
-  # Grant S3 permission to invoke the processor Lambda. We can't set
-  # SourceArn=RecordingsBucket here because that bucket lives in the parent
-  # stack; to avoid a circular dependency we scope via SourceAccount only.
-  # The Lambda itself cross-checks event["s3"]["bucket"]["name"] against
-  # its own S3_BUCKET_NAME env var before doing any work, so a misdelivered
-  # notification is a no-op.
   UploadMeetingProcessorFunctionS3InvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -2532,8 +2506,6 @@ Resources:
         - arm64
       CodeUri: ../source/lambda_functions/upload_meeting_finalizer
       Description: Triggered by Transcribe Job State Change — reads transcript JSON and emits segments + END
-      # An hour of speech yields ~a few hundred audio_segments; each one is a
-      # PutRecord to Kinesis. 5 min timeout gives headroom for a long meeting.
       MemorySize: 512
       Timeout: 300
       FunctionName: !Sub '${LMAStackName}-UploadMeetingFinalizer'
@@ -2645,13 +2617,6 @@ Resources:
           - id: W11
             reason: "transcribe:GetTranscriptionJob does not support resource-level permissions"
 
-  # EventBridge rule that fires the finalizer on Transcribe job completions.
-  # We intentionally don't filter by tag in the rule — EventBridge only sees
-  # the published event payload, and Transcribe's "Transcribe Job State Change"
-  # event carries the job name + status but NOT the tags. The Lambda handler
-  # then fetches GetTranscriptionJob and rejects jobs that aren't tagged
-  # `lma:source=upload_meeting_processor`, so unrelated Transcribe traffic
-  # becomes a no-op invocation (cheap + logged).
   UploadMeetingFinalizerEventRule:
     Type: AWS::Events::Rule
     Properties:
@@ -3593,9 +3558,6 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/shareMeetings.js
 
-  # Resolver for `createUploadMeeting` — pass-through JS resolver that forwards
-  # the full AppSync context to UploadMeetingInitiatorFunction and returns the
-  # presigned upload details (callId, uploadUrl, bucket, key, expiresInSeconds).
   CreateUploadMeetingAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
