@@ -47,7 +47,7 @@ export const generateNavigationItems = (settings, isAdmin) => {
         },
         {
           type: 'link',
-          text: 'Upload Audio',
+          text: 'Upload Audio (File)',
           href: `#${UPLOAD_AUDIO_PATH}`,
           external: true,
         },
