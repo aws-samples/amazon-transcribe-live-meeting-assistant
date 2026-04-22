@@ -1,0 +1,3 @@
+# The Lambda runtime (python3.12) ships boto3/botocore, so we intentionally do not
+# pin them here. This file exists primarily to signal "no extra deps required" to
+# sam build and keep the function footprint small.

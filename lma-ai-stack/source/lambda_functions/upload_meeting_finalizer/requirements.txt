@@ -1,0 +1,1 @@
+# boto3/botocore ship with the python3.12 Lambda runtime; no deps to pin.
