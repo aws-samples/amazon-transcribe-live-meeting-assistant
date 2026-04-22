@@ -7,8 +7,7 @@ A focused ~10-minute video demo of [Live Meeting Assistant](../../README.md) for
 | File | Description |
 |------|-------------|
 | [demo-script.md](demo-script.md) | Scene-by-scene script with exact dialogue, screen actions, timing, pacing notes, and recovery lines |
-| [slides/index.html](slides/index.html) | Reveal.js slide deck (2 slides: title + closing with differentiators and GitHub QR placeholder) |
-| [slides/lma-theme.css](slides/lma-theme.css) | AWS-branded CSS theme for the slides |
+| [slides.md](slides.md) | 2 slides: title + closing with differentiators and GitHub link |
 | [setup-checklist.md](setup-checklist.md) | Pre-demo infrastructure, data, recording, and dry-run checklist |
 | [salesforce-test-data.md](salesforce-test-data.md) | Fictional Salesforce accounts, contacts, and opportunities to load in the demo org |
 
