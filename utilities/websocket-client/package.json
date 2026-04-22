@@ -23,7 +23,7 @@
     "stream-chain": "^2.2.5",
     "@aws-sdk/client-kinesis": "^3.1031.0",
     "@aws-sdk/client-transcribe-streaming": "^3.1031.0",
-    "uuid": "^8.3.2",
+    "uuid": "^14.0.0",
     "wav": "^1.0.2",
     "ws": "^8.17.1",
     "wscat": "^5.2.0"
