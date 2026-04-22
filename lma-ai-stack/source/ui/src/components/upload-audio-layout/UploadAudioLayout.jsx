@@ -17,7 +17,7 @@ import ToolsPanel from './tools-panel';
 
 import useAppContext from '../../contexts/app';
 
-const StreamAudioLayout = () => {
+const UploadAudioLayout = () => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const notifications = useNotifications();
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -33,10 +33,10 @@ const StreamAudioLayout = () => {
       tools={<ToolsPanel />}
       toolsOpen={toolsOpen}
       onToolsChange={({ detail }) => setToolsOpen(detail.open)}
-      content={<StreamAudio mode="stream" />}
+      content={<StreamAudio mode="upload" />}
       ariaLabels={appLayoutLabels}
     />
   );
 };
 
-export default StreamAudioLayout;
+export default UploadAudioLayout;

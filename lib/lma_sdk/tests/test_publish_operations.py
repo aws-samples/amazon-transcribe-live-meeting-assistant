@@ -8,14 +8,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import subprocess
+
 from lma_sdk._core.publish import (
     _calculate_dir_hash,
     _compare_versions,
+    _git_untracked_preflight,
     _has_changed,
+    _list_untracked_files,
     check_prerequisites,
     STACK_DEFINITIONS,
     STACK_NAMES,
 )
+from lma_sdk.models.publish import StackDefinition, StackPackageType
 from lma_sdk.exceptions import LMAPublishError, LMAValidationError
 
 
@@ -172,3 +177,179 @@ class TestPrerequisiteChecks:
         errors = check_prerequisites()
         # May have errors if some checks fail in test env, but structure is correct
         assert isinstance(errors, list)
+
+
+class TestUntrackedPreflight:
+    """Tests for the git untracked-files safety check.
+
+    These use real `git init` sandboxes (no mocking) so we exercise the same
+    subprocess-based code path the publish workflow runs in production.
+    """
+
+    @staticmethod
+    def _git_init_stack(project_dir: Path, stack_name: str) -> Path:
+        """Create a project_dir/<stack_name> directory inside a fresh git repo
+        with one tracked file, and return the stack path."""
+        subprocess.run(
+            ["git", "init", "-q", "-b", "main", str(project_dir)],
+            check=True,
+            capture_output=True,
+        )
+        # Minimum config so `git add` works without a user config.
+        for key, val in (("user.email", "ci@example.com"), ("user.name", "ci")):
+            subprocess.run(
+                ["git", "-C", str(project_dir), "config", key, val],
+                check=True,
+                capture_output=True,
+            )
+        stack_dir = project_dir / stack_name
+        stack_dir.mkdir()
+        (stack_dir / "template.yaml").write_text("# stub\n")
+        subprocess.run(
+            ["git", "-C", str(project_dir), "add", f"{stack_name}/template.yaml"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(project_dir), "commit", "-q", "-m", "init"],
+            check=True,
+            capture_output=True,
+        )
+        return stack_dir
+
+    @staticmethod
+    def _build_script_stack(name: str) -> StackDefinition:
+        return StackDefinition(
+            name=name,
+            package_type=StackPackageType.BUILD_SCRIPT,
+            build_script="build-s3-dist.sh",
+            deployment_subdir="deployment",
+            supports_change_detection=True,
+        )
+
+    @staticmethod
+    def _non_build_stack(name: str) -> StackDefinition:
+        return StackDefinition(
+            name=name,
+            package_type=StackPackageType.ZIP_AND_UPLOAD,
+            supports_change_detection=False,
+        )
+
+    def test_list_untracked_nonexistent_dir(self, tmp_path):
+        """_list_untracked_files returns [] when the dir doesn't exist."""
+        assert _list_untracked_files(tmp_path / "missing") == []
+
+    def test_list_untracked_not_in_git_repo(self, tmp_path):
+        """A plain directory outside a git repo returns []."""
+        (tmp_path / "file.py").write_text("hello")
+        assert _list_untracked_files(tmp_path) == []
+
+    def test_list_untracked_empty_repo(self, tmp_path):
+        """A clean git repo with only tracked files returns []."""
+        stack_dir = self._git_init_stack(tmp_path, "stack-a")
+        assert _list_untracked_files(stack_dir) == []
+
+    def test_list_untracked_finds_new_file(self, tmp_path):
+        """An untracked file is reported (path is relative to the stack dir)."""
+        stack_dir = self._git_init_stack(tmp_path, "stack-a")
+        (stack_dir / "newfile.py").write_text("print('x')")
+        result = _list_untracked_files(stack_dir)
+        assert result == ["newfile.py"]
+
+    def test_list_untracked_honors_gitignore(self, tmp_path):
+        """Files matched by .gitignore are excluded."""
+        stack_dir = self._git_init_stack(tmp_path, "stack-a")
+        (stack_dir / ".gitignore").write_text("ignored.py\n")
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "add", "stack-a/.gitignore"],
+            check=True,
+            capture_output=True,
+        )
+        (stack_dir / "ignored.py").write_text("x")
+        (stack_dir / "kept.py").write_text("y")
+        result = _list_untracked_files(stack_dir)
+        assert result == ["kept.py"]
+
+    def test_preflight_passes_when_no_untracked(self, tmp_path):
+        """Clean tree → no exception."""
+        self._git_init_stack(tmp_path, "lma-ai-stack")
+        _git_untracked_preflight(
+            tmp_path,
+            [self._build_script_stack("lma-ai-stack")],
+            allow_untracked=False,
+        )
+
+    def test_preflight_ignores_non_build_script_stacks(self, tmp_path):
+        """Untracked files in non-BUILD_SCRIPT stacks do not trigger the check."""
+        stack_dir = self._git_init_stack(tmp_path, "lma-virtual-participant-stack")
+        (stack_dir / "newfile.py").write_text("x")
+        _git_untracked_preflight(
+            tmp_path,
+            [self._non_build_stack("lma-virtual-participant-stack")],
+            allow_untracked=False,
+        )
+
+    def test_preflight_raises_for_build_script_with_untracked(self, tmp_path):
+        """BUILD_SCRIPT stack with an untracked file → LMAPublishError."""
+        stack_dir = self._git_init_stack(tmp_path, "lma-ai-stack")
+        (stack_dir / "source" / "lambda_functions").mkdir(parents=True)
+        (stack_dir / "source" / "lambda_functions" / "newfile.py").write_text("x")
+        with pytest.raises(LMAPublishError) as exc:
+            _git_untracked_preflight(
+                tmp_path,
+                [self._build_script_stack("lma-ai-stack")],
+                allow_untracked=False,
+            )
+        msg = str(exc.value)
+        assert "lma-ai-stack" in msg
+        # Path is shown relative to the stack dir (`git ls-files -C stack_dir` output).
+        assert "source/lambda_functions/newfile.py" in msg
+        assert "git add" in msg  # actionable hint
+        assert "allow-untracked" in msg  # escape hatch mentioned
+
+    def test_preflight_allow_untracked_bypasses(self, tmp_path):
+        """allow_untracked=True lets the publish proceed despite untracked files."""
+        stack_dir = self._git_init_stack(tmp_path, "lma-ai-stack")
+        (stack_dir / "newfile.py").write_text("x")
+        # Should NOT raise.
+        _git_untracked_preflight(
+            tmp_path,
+            [self._build_script_stack("lma-ai-stack")],
+            allow_untracked=True,
+        )
+
+    def test_preflight_lists_all_offending_stacks(self, tmp_path):
+        """Untracked files in multiple BUILD_SCRIPT stacks all get reported."""
+        ai_stack = self._git_init_stack(tmp_path, "lma-ai-stack")
+        # Second stack can live in the same repo.
+        ws_stack = tmp_path / "lma-websocket-transcriber-stack"
+        ws_stack.mkdir()
+        (ws_stack / "template.yaml").write_text("# stub\n")
+        subprocess.run(
+            [
+                "git", "-C", str(tmp_path),
+                "add", "lma-websocket-transcriber-stack/template.yaml",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "commit", "-q", "-m", "add ws stack"],
+            check=True,
+            capture_output=True,
+        )
+        (ai_stack / "ai-new.py").write_text("x")
+        (ws_stack / "ws-new.py").write_text("y")
+        stacks = [
+            self._build_script_stack("lma-ai-stack"),
+            self._build_script_stack("lma-websocket-transcriber-stack"),
+        ]
+        with pytest.raises(LMAPublishError) as exc:
+            _git_untracked_preflight(tmp_path, stacks, allow_untracked=False)
+        msg = str(exc.value)
+        # Each stack name is shown as a header, and paths under each stack
+        # are reported relative to that stack's directory.
+        assert "lma-ai-stack:" in msg
+        assert "- ai-new.py" in msg
+        assert "lma-websocket-transcriber-stack:" in msg
+        assert "- ws-new.py" in msg

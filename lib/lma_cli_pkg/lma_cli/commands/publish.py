@@ -26,11 +26,33 @@ from lma_cli.formatters import (
 @click.option("--region", default=None, envvar="AWS_DEFAULT_REGION", help="AWS region for deployment (default: from AWS CLI profile).")
 @click.option("--public", is_flag=True, default=False, help="Make S3 artifacts publicly readable.")
 @click.option("--force", "force", is_flag=True, default=False, help="Delete all checksum files to force full rebuild.")
+@click.option(
+    "--allow-untracked",
+    is_flag=True,
+    default=False,
+    help=(
+        "Bypass the safety check that blocks publishing when BUILD_SCRIPT stacks "
+        "contain untracked files. Untracked files are silently excluded from the "
+        "`git ls-files`-based source bundle, so this is NOT recommended."
+    ),
+)
 @click.option("--version", "version_override", default="", help="Override version (default: read from VERSION file).")
 @click.option("--no-validate", is_flag=True, default=False, help="Skip CloudFormation template validation.")
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose build output.")
 @click.pass_context
-def publish_cmd(ctx, source_dir, bucket_basename, prefix, region, public, force, version_override, no_validate, verbose):
+def publish_cmd(
+    ctx,
+    source_dir,
+    bucket_basename,
+    prefix,
+    region,
+    public,
+    force,
+    allow_untracked,
+    version_override,
+    no_validate,
+    verbose,
+):
     """Build, package, and publish LMA CloudFormation artifacts to S3.
 
     This is the Python replacement for publish.sh. It packages all LMA sub-stacks,
@@ -114,6 +136,7 @@ def publish_cmd(ctx, source_dir, bucket_basename, prefix, region, public, force,
             project_dir=source_dir,
             version=version_override,
             force=force,
+            allow_untracked=allow_untracked,
             progress_callback=progress_callback,
         )
     except LMAError as e:

@@ -1,0 +1,2 @@
+# The Lambda runtime (python3.12) ships boto3/botocore, so we intentionally do
+# not pin them here. Keeping this file empty keeps the function footprint small.

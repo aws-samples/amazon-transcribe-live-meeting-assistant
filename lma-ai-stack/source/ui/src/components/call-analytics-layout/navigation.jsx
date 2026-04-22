@@ -14,6 +14,7 @@ import {
   CALLS_PATH,
   MEETINGS_QUERY_PATH,
   STREAM_AUDIO_PATH,
+  UPLOAD_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
   BROWSER_EXTENSION_PATH,
   MCP_SERVERS_PATH,
@@ -40,6 +41,7 @@ const NAV_PATHS = [
   TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
   STREAM_AUDIO_PATH,
+  UPLOAD_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
   BROWSER_EXTENSION_PATH,
   MEETINGS_QUERY_PATH,
@@ -73,6 +75,8 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
     activeHref = `#${CALLS_PATH}`;
   } else if (path.includes(STREAM_AUDIO_PATH)) {
     activeHref = `#${STREAM_AUDIO_PATH}`;
+  } else if (path.includes(UPLOAD_AUDIO_PATH)) {
+    activeHref = `#${UPLOAD_AUDIO_PATH}`;
   } else if (path.includes(VIRTUAL_PARTICIPANT_PATH)) {
     activeHref = `#${VIRTUAL_PARTICIPANT_PATH}`;
   } else if (path.includes(BROWSER_EXTENSION_PATH)) {
