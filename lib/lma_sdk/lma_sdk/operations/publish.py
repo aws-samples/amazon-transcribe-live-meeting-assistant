@@ -63,6 +63,7 @@ class PublishOperations:
         version: str = "",
         stacks: list[str] | None = None,
         force: bool = False,
+        allow_untracked: bool = False,
         progress_callback: Callable[[str, str], None] | None = None,
     ) -> PublishResult:
         """Publish LMA artifacts to S3.
@@ -79,6 +80,10 @@ class PublishOperations:
             version: Version override (default: read from VERSION file).
             stacks: List of specific stacks to publish (default: all).
             force: Skip change detection and publish all.
+            allow_untracked: Skip the git preflight check and let the publish
+                proceed even if a BUILD_SCRIPT stack contains untracked files.
+                Untracked files will still be silently dropped from the source
+                bundle; use at your own risk.
             progress_callback: Optional callback(stack_name, message).
 
         Returns:
@@ -103,5 +108,6 @@ class PublishOperations:
             version=version,
             stacks=stacks,
             force=force,
+            allow_untracked=allow_untracked,
         )
         return self._publisher.publish(config, progress_callback)

@@ -141,6 +141,30 @@ type DeleteMeetingsOutput {
 	Result: String
 }
 
+input CreateUploadMeetingInput {
+	callId: String
+	meetingTopic: String!
+	agentId: String!
+	fromNumber: String
+	toNumber: String
+	filename: String!
+	contentType: String!
+	fileSize: Float
+	enableDiarization: Boolean
+	maxSpeakers: Int
+	languageCode: String
+	meetingDateTime: AWSDateTime
+}
+
+type CreateUploadMeetingOutput {
+	callId: String!
+	uploadUrl: String!
+	uploadBucket: String!
+	uploadKey: String!
+	contentType: String!
+	expiresInSeconds: Int!
+}
+
 interface DynamoDbBase {
 	PK: ID!
 	SK: ID!
@@ -167,6 +191,7 @@ type Mutation @aws_iam {
 	shareTranscriptSegment(input: ShareTranscriptSegmentInput!): ShareTranscriptSegmentOutput
     shareMeetings(input: ShareMeetingsInput!): ShareMeetingsOutput @aws_cognito_user_pools
 	deleteMeetings(input: DeleteMeetingsInput!): DeleteMeetingsOutput @aws_cognito_user_pools
+	createUploadMeeting(input: CreateUploadMeetingInput!): CreateUploadMeetingOutput @aws_cognito_user_pools
 	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
@@ -185,6 +210,8 @@ type Mutation @aws_iam {
 	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools
 	generateMCPApiKey: GenerateMCPApiKeyOutput @aws_cognito_user_pools
 	revokeMCPApiKey(keyPrefix: String!): Boolean @aws_cognito_user_pools
+	createUser(input: CreateUserInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	deleteUser(input: DeleteUserInput!): DeleteUserOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -220,6 +247,7 @@ type Query @aws_cognito_user_pools
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
+	listUsers: UserList @aws_cognito_user_pools(cognito_groups: ["Admin"])
 }
 
 type VirtualParticipant @aws_cognito_user_pools @aws_iam {
@@ -765,6 +793,34 @@ type GenerateMCPApiKeyOutput @aws_cognito_user_pools {
 	keyValue: String!
 	keyPrefix: String!
 	createdAt: String!
+}
+
+# User Management (Admin-only)
+type User @aws_cognito_user_pools {
+	username: String!
+	email: String
+	role: String!
+	status: String
+	enabled: Boolean
+	createdAt: AWSDateTime
+}
+
+type UserList @aws_cognito_user_pools {
+	users: [User]
+}
+
+input CreateUserInput {
+	email: String!
+	role: String!
+}
+
+input DeleteUserInput {
+	username: String!
+}
+
+type DeleteUserOutput @aws_cognito_user_pools {
+	username: String!
+	success: Boolean!
 }
 
 schema {

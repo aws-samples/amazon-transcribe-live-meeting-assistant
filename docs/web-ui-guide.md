@@ -28,7 +28,8 @@ The left sidebar organizes the application into the following sections:
 
 ### Sources
 - **Virtual Participant** — Join meetings via a virtual participant bot
-- **Stream Audio** — Stream audio directly to LMA for transcription
+- **Stream Audio (from Mic+Browser)** — Stream audio directly to LMA from any Chrome tab (meetings, softphones, YouTube, audio/video playback)
+- **Chrome Extension** — Information, download, and install instructions for the LMA Chrome browser extension (see [Browser Extension](browser-extension.md))
 
 ### Meetings
 - **Meeting List** — View and manage all accessible meetings
@@ -38,6 +39,7 @@ The left sidebar organizes the application into the following sections:
 - **MCP Servers** — Install and manage MCP server integrations
 - **Nova Sonic** — Configure the Nova Sonic voice assistant
 - **Transcript Summary** — Manage summary prompt templates
+- **User Management** — Create and delete LMA users (see [User Management](user-management.md))
 
 ### Deployment Info
 - Stack name, build date, and version information
@@ -176,6 +178,19 @@ Manage the prompt templates used for generating meeting summaries:
 - View default prompts provided by LMA
 - Create custom prompt templates
 - Edit and delete existing custom templates
+
+### User Management
+
+**Route**: `/#/configuration/user-management`
+
+Create and delete LMA users (Admin and non-Admin), directly from the Web UI without needing the AWS console.
+
+- View all users in the Cognito user pool, with role, status, and creation date
+- Create a new user and choose their role (Admin or User) — Cognito emails them a temporary password
+- Select and delete one or more users
+- Guard rails prevent self-delete and deletion of the last remaining Admin
+
+See [User Management](user-management.md) for full documentation.
 
 ### Chat Buttons
 

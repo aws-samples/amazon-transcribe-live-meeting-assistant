@@ -28,7 +28,9 @@ title: "LMA Documentation"
 
 ### Meeting Sources
 
+- [Meeting Sources Overview](meeting-sources.md) — Side-by-side comparison of the three capture options and guidance on when to use each
 - [Stream Audio](stream-audio.md) — Browser-based audio capture from your microphone and any Chrome tab
+- [Upload Audio](upload-audio.md) — Upload a pre-recorded audio/video file for batch transcription and summary
 - [Browser Extension](browser-extension.md) — Chrome extension for capturing browser tab audio from any meeting platform
 - [Virtual Participant](virtual-participant.md) — Headless Chrome bot that joins Zoom, Teams, Chime, Google Meet, and WebEx meetings
 
@@ -53,6 +55,7 @@ title: "LMA Documentation"
 
 ### Access Control & Security
 
+- [User Management](user-management.md) — Admin-only UI to create and delete LMA users (Admin or User roles)
 - [User-Based Access Control](user-based-access-control.md) — Admin vs non-admin users, meeting sharing, meeting deletion
 - [Infrastructure & Security](infrastructure-and-security.md) — Architecture overview, VPC, Cognito, KMS encryption, CloudFront, IAM, data retention
 - [CloudFormation Service Role](cloudformation-service-role.md) — Delegated IAM role for non-admin LMA deployment and management

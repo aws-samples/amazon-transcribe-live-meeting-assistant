@@ -33,7 +33,7 @@ const StreamAudioLayout = () => {
       tools={<ToolsPanel />}
       toolsOpen={toolsOpen}
       onToolsChange={({ detail }) => setToolsOpen(detail.open)}
-      content={<StreamAudio />}
+      content={<StreamAudio mode="stream" />}
       ariaLabels={appLayoutLabels}
     />
   );

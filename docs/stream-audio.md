@@ -16,6 +16,8 @@ title: "Stream Audio"
 
 ## Overview
 
+> **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio, and Virtual Participant.
+
 The Stream Audio tab in the LMA web UI lets you capture stereo audio from your Chrome browser -- combining your microphone with any incoming audio source (meeting app, softphone, YouTube, etc.).
 
 ![Stream Audio UI](../images/readme-stream-audio.png)
@@ -79,5 +81,6 @@ Always obtain permission from all participants before recording a meeting or con
 
 ## See Also
 
+- [Upload Audio](upload-audio.md) -- Transcribe an existing audio/video recording instead of streaming live
 - [Virtual Participant](virtual-participant.md) -- Join meetings as a separate automated participant
 - [WebSocket Streaming API](websocket-streaming-api.md) -- Technical details on the streaming protocol

@@ -4,6 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import PropTypes from 'prop-types';
 
 import {
   Form,
@@ -17,19 +18,55 @@ import {
   Grid,
   Box,
   Link,
+  Tiles,
+  FileUpload,
+  Checkbox,
+  ProgressBar,
+  Alert,
 } from '@cloudscape-design/components';
 import '@cloudscape-design/global-styles/index.css';
 import useWebSocket from 'react-use-websocket';
+import { generateClient } from 'aws-amplify/api';
 
 import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '../common/constants';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
+import createUploadMeeting from '../../graphql/queries/createUploadMeeting';
 
 let SOURCE_SAMPLING_RATE;
 const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if left blank.';
 
-const StreamAudio = () => {
+// Mode values for the top-of-page Tiles selector (only shown when the
+// `mode` prop is not provided).
+const MODE_STREAM = 'stream';
+const MODE_UPLOAD = 'upload';
+const MODE_SELECT = 'select'; // render the Tiles mode switcher
+
+// Upload-phase labels shown in the progress card.
+const UPLOAD_PHASE = {
+  IDLE: 'idle',
+  REQUESTING_URL: 'requesting_url',
+  UPLOADING: 'uploading',
+  DONE: 'done',
+  ERROR: 'error',
+};
+
+// AppSync client — reused only for the createUploadMeeting mutation.
+const appsyncClient = generateClient();
+
+/**
+ * StreamAudio — unified component for both live streaming and uploading
+ * pre-recorded meetings.
+ *
+ * Props:
+ *   mode: 'stream' | 'upload' | 'select' | undefined
+ *     - 'stream'  → stream-only, hides the Input mode Tiles switcher
+ *     - 'upload'  → upload-only, hides the Input mode Tiles switcher
+ *     - 'select'  → shows the Input mode Tiles switcher (previous behavior)
+ *     - undefined → defaults to 'select' (preserves legacy standalone use)
+ */
+const StreamAudio = ({ mode: modeProp }) => {
   const { currentSession, user } = useAppContext();
   const { settings } = useSettingsContext();
   // Amplify v6 exposes tokens as currentSession.tokens.{accessToken,idToken}.toString().
@@ -41,6 +78,10 @@ const StreamAudio = () => {
 
   const userIdentifier = user?.attributes?.email || user?.signInDetails?.loginId || DEFAULT_LOCAL_SPEAKER_NAME;
 
+  // --- Shared meeting-metadata form state (used by both modes) ------------
+  const effectiveInitialMode = modeProp === MODE_UPLOAD ? MODE_UPLOAD : MODE_STREAM;
+  const showTiles = modeProp === undefined || modeProp === MODE_SELECT;
+  const [mode, setMode] = useState(effectiveInitialMode);
   const [meetingTopic, setMeetingTopic] = useState('Stream Audio');
   const [callMetaData, setCallMetaData] = useState({
     callId: `${meetingTopic} - ${getTimestampStr()}`,
@@ -49,11 +90,22 @@ const StreamAudio = () => {
     toNumber: SYSTEM,
   });
 
+  // --- Streaming mode state (unchanged behavior) --------------------------
   const [recording, setRecording] = useState(false);
   const [streamingStarted, setStreamingStarted] = useState(false);
   const [isFlashing, setIsFlashing] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [recordedMeetingId, setRecordedMeetingId] = useState('');
+
+  // --- Upload mode state --------------------------------------------------
+  const [uploadFiles, setUploadFiles] = useState([]);
+  const [enableDiarization, setEnableDiarization] = useState(false);
+  const [maxSpeakers, setMaxSpeakers] = useState('4');
+  const [uploadPhase, setUploadPhase] = useState(UPLOAD_PHASE.IDLE);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState(null);
+  const [uploadedCallId, setUploadedCallId] = useState('');
+  const uploadXhrRef = useRef(null);
 
   useEffect(() => {
     let interval;
@@ -296,89 +348,429 @@ const StreamAudio = () => {
     setMicMuted(!micStream.current.getAudioTracks()[0].enabled);
   };
 
+  // ------------------------------------------------------------------------
+  // Upload-mode helpers
+  // ------------------------------------------------------------------------
+
+  /**
+   * Put the file to S3 via a presigned URL, reporting progress.
+   * Returns a Promise that resolves on HTTP 2xx or rejects with an Error.
+   * Uses XMLHttpRequest so we can surface progress events (fetch() cannot).
+   */
+  const putFileToS3 = (file, presignedUrl, contentType) =>
+    new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      uploadXhrRef.current = xhr;
+      xhr.open('PUT', presignedUrl, true);
+      xhr.setRequestHeader('Content-Type', contentType);
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable) {
+          const pct = Math.round((evt.loaded / evt.total) * 100);
+          setUploadProgress(pct);
+        }
+      };
+      xhr.onload = () => {
+        uploadXhrRef.current = null;
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+        } else {
+          reject(new Error(`S3 upload failed: HTTP ${xhr.status} ${xhr.statusText}`));
+        }
+      };
+      xhr.onerror = () => {
+        uploadXhrRef.current = null;
+        reject(new Error('Network error while uploading to S3.'));
+      };
+      xhr.onabort = () => {
+        uploadXhrRef.current = null;
+        reject(new Error('Upload cancelled.'));
+      };
+      xhr.send(file);
+    });
+
+  const resetUploadForm = () => {
+    setUploadFiles([]);
+    setUploadProgress(0);
+    setUploadError(null);
+    setUploadedCallId('');
+    setUploadPhase(UPLOAD_PHASE.IDLE);
+  };
+
+  const cancelUpload = () => {
+    if (uploadXhrRef.current) {
+      uploadXhrRef.current.abort();
+    }
+  };
+
+  const uploadDisabled =
+    uploadFiles.length !== 1 ||
+    !meetingTopic ||
+    !callMetaData.agentId ||
+    !callMetaData.fromNumber ||
+    uploadPhase === UPLOAD_PHASE.REQUESTING_URL ||
+    uploadPhase === UPLOAD_PHASE.UPLOADING;
+
+  const handleUploadSubmit = async () => {
+    setUploadError(null);
+    setUploadProgress(0);
+    setUploadedCallId('');
+
+    const file = uploadFiles[0];
+    if (!file) {
+      setUploadError('Please select an audio or video file.');
+      return;
+    }
+    if (!/^(audio|video)\//.test(file.type || '')) {
+      setUploadError(
+        `Selected file has unsupported content type "${
+          file.type || 'unknown'
+        }". Please pick an audio/* or video/* file.`,
+      );
+      return;
+    }
+
+    try {
+      // 1. Ask AppSync for a presigned PUT URL + callId.
+      setUploadPhase(UPLOAD_PHASE.REQUESTING_URL);
+      // eslint-disable-next-line no-useless-escape
+      const meetingPrefix = (meetingTopic || 'Uploaded Meeting').replace(/[\/?#%\+&]/g, '|');
+      const input = {
+        meetingTopic: meetingPrefix,
+        agentId: callMetaData.agentId || DEFAULT_LOCAL_SPEAKER_NAME,
+        fromNumber: callMetaData.fromNumber || DEFAULT_OTHER_SPEAKER_NAME,
+        toNumber: callMetaData.toNumber || SYSTEM,
+        filename: file.name,
+        contentType: file.type || 'application/octet-stream',
+        fileSize: file.size,
+        enableDiarization,
+        maxSpeakers: Number.parseInt(maxSpeakers, 10) || 4,
+      };
+      const response = await appsyncClient.graphql({
+        query: createUploadMeeting,
+        variables: { input },
+      });
+
+      const result = response?.data?.createUploadMeeting;
+      if (!result?.uploadUrl || !result?.callId) {
+        throw new Error('Server did not return a presigned upload URL.');
+      }
+
+      // 2. PUT the file to S3 directly from the browser.
+      setUploadPhase(UPLOAD_PHASE.UPLOADING);
+      await putFileToS3(file, result.uploadUrl, result.contentType || input.contentType);
+
+      // 3. Hand off to the backend pipeline.
+      setUploadedCallId(result.callId);
+      setUploadProgress(100);
+      setUploadPhase(UPLOAD_PHASE.DONE);
+    } catch (err) {
+      console.error('Upload failed:', err);
+      setUploadError(err.message || String(err));
+      setUploadPhase(UPLOAD_PHASE.ERROR);
+    }
+  };
+
+  const submitLabel = (() => {
+    if (mode === MODE_STREAM) return recording ? 'Stop Streaming' : 'Start Streaming';
+    switch (uploadPhase) {
+      case UPLOAD_PHASE.REQUESTING_URL:
+        return 'Preparing upload…';
+      case UPLOAD_PHASE.UPLOADING:
+        return `Uploading… ${uploadProgress}%`;
+      case UPLOAD_PHASE.DONE:
+        return 'Upload new file';
+      default:
+        return 'Upload & Transcribe';
+    }
+  })();
+
+  const handleSubmit = async () => {
+    if (mode === MODE_STREAM) {
+      handleRecording();
+      return;
+    }
+    if (uploadPhase === UPLOAD_PHASE.DONE || uploadPhase === UPLOAD_PHASE.ERROR) {
+      resetUploadForm();
+      return;
+    }
+    await handleUploadSubmit();
+  };
+
+  const uploadInProgress = uploadPhase === UPLOAD_PHASE.UPLOADING || uploadPhase === UPLOAD_PHASE.REQUESTING_URL;
+
   return (
     <div>
       <form onSubmit={(e) => e.preventDefault()}>
         <Form
           actions={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button variant={recording ? 'secondary' : 'primary'} onClick={handleRecording} disabled={false}>
-                {recording ? 'Stop Streaming' : 'Start Streaming'}
+              {mode === MODE_UPLOAD && uploadInProgress && (
+                <Button variant="link" onClick={cancelUpload}>
+                  Cancel
+                </Button>
+              )}
+              <Button
+                variant={
+                  // eslint-disable-next-line no-nested-ternary
+                  mode === MODE_STREAM ? (recording ? 'secondary' : 'primary') : 'primary'
+                }
+                onClick={handleSubmit}
+                disabled={mode === MODE_UPLOAD ? uploadDisabled : false}
+              >
+                {submitLabel}
               </Button>
             </SpaceBetween>
           }
         >
-          <Container
-            header={
-              <Header
-                variant="h2"
-                actions={
-                  <div>
-                    {recording && (
-                      <Button href={`#/calls/${callMetaData.callId}`} variant="link" iconName="external" target="blank">
-                        Open in progress meeting
-                      </Button>
-                    )}
-                  </div>
+          <SpaceBetween direction="vertical" size="l">
+            {showTiles && (
+              <Container
+                header={
+                  <Header variant="h2" description="Choose how you want to add a meeting to LMA.">
+                    Input mode
+                  </Header>
                 }
               >
-                Meeting Information
-              </Header>
-            }
-          >
-            <ColumnLayout columns={2}>
-              <FormField
-                label="Meeting Topic"
-                stretch
-                required
-                description="Prefix for unique meeting identifier"
-                errorText={meetingTopic.length < 1 && DEFAULT_BLANK_FIELD_MSG}
-              >
-                <Input value={meetingTopic} onChange={handleCallIdChange} disabled={recording} />
-              </FormField>
-              <FormField
-                label="Participants (stream)"
-                stretch
-                required
-                description="Label for stream audio"
-                errorText={callMetaData.fromNumber.length < 1 && DEFAULT_BLANK_FIELD_MSG}
-              >
-                <Input value={callMetaData.fromNumber} onChange={handlefromNumberChange} disabled={recording} />
-              </FormField>
-
-              <FormField
-                label="Meeting owner (microphone)"
-                stretch
-                required
-                description="Label for microphone input"
-                errorText={callMetaData.agentId.length < 1 && DEFAULT_BLANK_FIELD_MSG}
-              >
-                <Grid gridDefinition={[{ colspan: 10 }, { colspan: 1 }]}>
-                  <Input value={callMetaData.agentId} onChange={handleAgentIdChange} disabled={recording} />
-                  <Button
-                    variant={micMuted ? 'secondary' : 'primary'}
-                    onClick={toggleMicrophoneEnabled}
-                    disabled={!recording}
-                    iconAlign="left"
-                    iconName={micMuted ? 'microphone-off' : 'microphone'}
-                  />
-                </Grid>
-              </FormField>
-            </ColumnLayout>
-
-            {recording && (
-              <Box
-                margin={{ top: 'xl' }}
-                float="right"
-                color={isFlashing && recording ? 'text-status-error' : 'text-body-secondary'}
-              >
-                Recording in progress, do not close or refresh this tab.
-              </Box>
+                <Tiles
+                  value={mode}
+                  onChange={({ detail }) => setMode(detail.value)}
+                  items={[
+                    {
+                      value: MODE_STREAM,
+                      label: 'Stream live from a browser tab',
+                      description: 'Capture a meeting happening right now in another Chrome tab.',
+                    },
+                    {
+                      value: MODE_UPLOAD,
+                      label: 'Upload a pre-recorded audio or video file',
+                      description: 'Send an existing recording to LMA for transcription and automatic summary.',
+                    },
+                  ]}
+                />
+              </Container>
             )}
-          </Container>
+
+            <Container
+              header={
+                <Header
+                  variant="h2"
+                  actions={
+                    <div>
+                      {mode === MODE_STREAM && recording && (
+                        <Button
+                          href={`#/calls/${callMetaData.callId}`}
+                          variant="link"
+                          iconName="external"
+                          target="blank"
+                        >
+                          Open in progress meeting
+                        </Button>
+                      )}
+                      {mode === MODE_UPLOAD && uploadedCallId && (
+                        <Button href={`#/calls/${uploadedCallId}`} variant="link" iconName="external" target="blank">
+                          Open meeting detail
+                        </Button>
+                      )}
+                    </div>
+                  }
+                >
+                  Meeting Information
+                </Header>
+              }
+            >
+              <ColumnLayout columns={2}>
+                <FormField
+                  label="Meeting Topic"
+                  stretch
+                  required
+                  description="Prefix for unique meeting identifier"
+                  errorText={meetingTopic.length < 1 && DEFAULT_BLANK_FIELD_MSG}
+                >
+                  <Input value={meetingTopic} onChange={handleCallIdChange} disabled={recording || uploadInProgress} />
+                </FormField>
+                <FormField
+                  label={mode === MODE_UPLOAD ? 'Participants' : 'Participants (stream)'}
+                  stretch
+                  required
+                  description={
+                    mode === MODE_UPLOAD ? 'Label for the remote side of the conversation' : 'Label for stream audio'
+                  }
+                  errorText={callMetaData.fromNumber.length < 1 && DEFAULT_BLANK_FIELD_MSG}
+                >
+                  <Input
+                    value={callMetaData.fromNumber}
+                    onChange={handlefromNumberChange}
+                    disabled={recording || uploadInProgress}
+                  />
+                </FormField>
+
+                <FormField
+                  label={mode === MODE_UPLOAD ? 'Meeting owner' : 'Meeting owner (microphone)'}
+                  stretch
+                  required
+                  description={mode === MODE_UPLOAD ? 'Label for the meeting owner' : 'Label for microphone input'}
+                  errorText={callMetaData.agentId.length < 1 && DEFAULT_BLANK_FIELD_MSG}
+                >
+                  <Grid gridDefinition={[{ colspan: 10 }, { colspan: 1 }]}>
+                    <Input
+                      value={callMetaData.agentId}
+                      onChange={handleAgentIdChange}
+                      disabled={recording || uploadInProgress}
+                    />
+                    {mode === MODE_STREAM && (
+                      <Button
+                        variant={micMuted ? 'secondary' : 'primary'}
+                        onClick={toggleMicrophoneEnabled}
+                        disabled={!recording}
+                        iconAlign="left"
+                        iconName={micMuted ? 'microphone-off' : 'microphone'}
+                      />
+                    )}
+                  </Grid>
+                </FormField>
+              </ColumnLayout>
+
+              {recording && mode === MODE_STREAM && (
+                <Box
+                  margin={{ top: 'xl' }}
+                  float="right"
+                  color={isFlashing && recording ? 'text-status-error' : 'text-body-secondary'}
+                >
+                  Recording in progress, do not close or refresh this tab.
+                </Box>
+              )}
+            </Container>
+
+            {mode === MODE_UPLOAD && (
+              <Container
+                header={
+                  <Header
+                    variant="h2"
+                    description={
+                      'Pick a recording and (optionally) enable speaker diarization ' +
+                      "for Amazon Transcribe's batch job."
+                    }
+                  >
+                    Recording
+                  </Header>
+                }
+              >
+                <SpaceBetween direction="vertical" size="m">
+                  <FormField
+                    label="Audio or video file"
+                    description={
+                      'Accepts audio/* and video/* formats supported by Amazon Transcribe ' +
+                      '(wav, mp3, mp4, m4a, webm, flac, ogg, amr).'
+                    }
+                    errorText={uploadError || undefined}
+                  >
+                    <FileUpload
+                      value={uploadFiles}
+                      onChange={({ detail }) => {
+                        setUploadFiles(detail.value);
+                        setUploadError(null);
+                      }}
+                      showFileLastModified
+                      showFileSize
+                      accept="audio/*,video/*"
+                      i18nStrings={{
+                        uploadButtonText: (e) => (e ? 'Choose files' : 'Choose file'),
+                        dropzoneText: (e) => (e ? 'Drop files to upload' : 'Drop file to upload'),
+                        removeFileAriaLabel: (e) => `Remove file ${e + 1}`,
+                        limitShowFewer: 'Show fewer files',
+                        limitShowMore: 'Show more files',
+                        errorIconAriaLabel: 'Error',
+                      }}
+                      constraintText={
+                        'Max file size 5 GB. Uploaded directly to S3 from your browser — ' +
+                        'the file never transits a Lambda or API Gateway.'
+                      }
+                    />
+                  </FormField>
+
+                  <ColumnLayout columns={2}>
+                    <FormField
+                      label="Enable speaker diarization"
+                      description={
+                        'Identifies up to N distinct speakers from a mixed audio track. ' +
+                        'Adds a few seconds to the Transcribe job.'
+                      }
+                    >
+                      <Checkbox
+                        checked={enableDiarization}
+                        onChange={({ detail }) => setEnableDiarization(detail.checked)}
+                        disabled={uploadInProgress}
+                      >
+                        Diarize speakers
+                      </Checkbox>
+                    </FormField>
+                    <FormField
+                      label="Max speakers"
+                      description="2–30. Used when diarization is enabled."
+                      errorText={
+                        enableDiarization &&
+                        (Number.isNaN(Number.parseInt(maxSpeakers, 10)) ||
+                          Number.parseInt(maxSpeakers, 10) < 2 ||
+                          Number.parseInt(maxSpeakers, 10) > 30)
+                          ? 'Must be between 2 and 30'
+                          : undefined
+                      }
+                    >
+                      <Input
+                        value={maxSpeakers}
+                        type="number"
+                        onChange={({ detail }) => setMaxSpeakers(detail.value)}
+                        disabled={!enableDiarization || uploadInProgress}
+                      />
+                    </FormField>
+                  </ColumnLayout>
+
+                  {(uploadPhase === UPLOAD_PHASE.UPLOADING ||
+                    uploadPhase === UPLOAD_PHASE.REQUESTING_URL ||
+                    uploadPhase === UPLOAD_PHASE.DONE) && (
+                    <ProgressBar
+                      status={uploadPhase === UPLOAD_PHASE.DONE ? 'success' : 'in-progress'}
+                      value={uploadProgress}
+                      label={
+                        // eslint-disable-next-line no-nested-ternary
+                        uploadPhase === UPLOAD_PHASE.REQUESTING_URL
+                          ? 'Preparing secure upload…'
+                          : uploadPhase === UPLOAD_PHASE.DONE
+                          ? 'Upload complete. Transcription will begin shortly.'
+                          : 'Uploading file to Amazon S3…'
+                      }
+                      description={uploadFiles[0]?.name}
+                    />
+                  )}
+
+                  {uploadPhase === UPLOAD_PHASE.ERROR && uploadError && (
+                    <Alert type="error" header="Upload failed">
+                      {uploadError}
+                    </Alert>
+                  )}
+
+                  {uploadPhase === UPLOAD_PHASE.DONE && uploadedCallId && (
+                    <Alert type="success" header="Upload complete">
+                      <SpaceBetween direction="vertical" size="xs">
+                        <span>
+                          The recording has been uploaded and a new meeting has been queued for transcription.
+                        </span>
+                        <span>
+                          Meeting ID: <code>{uploadedCallId}</code>
+                        </span>
+                        <Link href={`#/calls/${uploadedCallId}`} external>
+                          Open meeting detail page
+                        </Link>
+                      </SpaceBetween>
+                    </Alert>
+                  )}
+                </SpaceBetween>
+              </Container>
+            )}
+          </SpaceBetween>
         </Form>
       </form>
-      {!recording && recordedMeetingId !== '' && (
+      {mode === MODE_STREAM && !recording && recordedMeetingId !== '' && (
         <Box margin={{ top: 'xl' }} float="right" color="text-label">
           <SpaceBetween direction="horizontal" size="s">
             <span>Stream ended:</span>
@@ -390,6 +782,14 @@ const StreamAudio = () => {
       )}
     </div>
   );
+};
+
+StreamAudio.propTypes = {
+  mode: PropTypes.oneOf([MODE_STREAM, MODE_UPLOAD, MODE_SELECT]),
+};
+
+StreamAudio.defaultProps = {
+  mode: undefined,
 };
 
 export default StreamAudio;

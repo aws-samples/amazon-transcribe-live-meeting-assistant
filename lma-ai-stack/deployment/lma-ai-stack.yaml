@@ -724,6 +724,10 @@ Outputs:
       Users generate personal API keys in the LMA UI settings and pass them via x-api-key header.
     Value: !Sub "https://${MCPApiKeyRestApi}.execute-api.${AWS::Region}.amazonaws.com/mcp"
 
+  UploadMeetingProcessorFunctionArn:
+    Description: Lambda function ARN invoked by S3 notifications on lma-uploads-pending/*
+    Value: !GetAtt UploadMeetingProcessorFunction.Arn
+
 Resources:
   EventSourcingTable:
     Type: AWS::DynamoDB::Table
@@ -767,6 +771,10 @@ Resources:
         StackName: !Ref LMAStackName
         Version: !Ref BootstrapVersion
         BuildDateTime: "<BUILD_DATE_TIME>"
+        # CloudFrontEndpoint is embedded in the Cognito welcome email for users created
+        # after the stack is deployed (initial admin created at stack-create time falls
+        # back to the default email wording since this value is not yet populated).
+        CloudFrontEndpoint: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
         # Add other existing settings that might be needed
         S3BucketName: !Ref S3BucketName
         AudioFilePrefix: !Ref AudioFilePrefix
@@ -2273,6 +2281,395 @@ Resources:
                   - lambda:InvokeFunction
                 Resource: !GetAtt MeetingControlsResolverFunction.Arn
 
+  UploadMeetingInitiatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt UploadMeetingInitiatorFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/upload_meeting_initiator
+      Description: AppSync resolver that mints a presigned upload URL for a new pre-recorded meeting
+      MemorySize: 256
+      Timeout: 30
+      FunctionName: !Sub '${LMAStackName}-UploadMeetingInitiator'
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref S3BucketName
+          UPLOADS_PENDING_PREFIX: lma-uploads-pending/
+          UPLOAD_URL_TTL_SECONDS: "900"
+          UPLOAD_JOB_TTL_DAYS: "14"
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          LOG_LEVEL: INFO
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingInitiatorFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - UploadMeetingInitiatorFunctionLogGroup
+
+  UploadMeetingInitiatorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingInitiatorFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UploadMeetingInitiatorFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: UploadMeetingInitiator Lambda execution role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UploadMeetingInitiator
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # Mint presigned PUT URLs scoped to the lma-uploads-pending/ prefix.
+              # PutObject is required by sigv4 signing for the presigned URL to be valid,
+              # even though the actual upload is done by the end-user's browser.
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-uploads-pending/*"
+              # Persist / condition-check the UploadJob row.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt EventSourcingTable.Arn
+              # The EventSourcing table is encrypted with a customer-managed KMS key.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                      - !Sub "s3.${AWS::Region}.amazonaws.com"
+
+  AppSyncUploadMeetingInitiatorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt UploadMeetingInitiatorFunction.Arn
+
+  UploadMeetingProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt UploadMeetingProcessorFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/upload_meeting_processor
+      Description: Triggered by S3 ObjectCreated on lma-uploads-pending/ — emits a START Kinesis event and starts a Transcribe batch job
+      MemorySize: 256
+      Timeout: 60
+      FunctionName: !Sub '${LMAStackName}-UploadMeetingProcessor'
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          CALL_DATA_STREAM_NAME: !Ref CallDataStream
+          S3_BUCKET_NAME: !Ref S3BucketName
+          UPLOADS_PENDING_PREFIX: lma-uploads-pending/
+          TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
+          DEFAULT_LANGUAGE_CODE: "en-US"
+          LOG_LEVEL: INFO
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingProcessorFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for S3-triggered processor; Lambda retries + CloudWatch monitor errors"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - UploadMeetingProcessorFunctionLogGroup
+
+  UploadMeetingProcessorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingProcessorFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UploadMeetingProcessorFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: UploadMeetingProcessor Lambda execution role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UploadMeetingProcessor
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-uploads-pending/*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-transcripts/*"
+              # Read + update the UploadJob row (PK/SK uj#<callId>).
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt EventSourcingTable.Arn
+              # Emit the START event. Same permission the transcriber container has.
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource: !Ref CallDataStreamArn
+              # Start the batch job. Transcribe has no resource-level IAM for
+              # StartTranscriptionJob; the service itself reads the S3 object
+              # using its own service-linked permissions.
+              - Effect: Allow
+                Action:
+                  - transcribe:StartTranscriptionJob
+                  - transcribe:TagResource
+                Resource: "*"
+              # KMS: EventSourcingTable is CMK-encrypted; Transcribe writes its
+              # output JSON back to RecordingsBucket which may also be CMK-
+              # encrypted in some deployments.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                      - !Sub "s3.${AWS::Region}.amazonaws.com"
+                      - !Sub "kinesis.${AWS::Region}.amazonaws.com"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "transcribe:StartTranscriptionJob does not support resource-level permissions"
+
+  UploadMeetingProcessorFunctionS3InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt UploadMeetingProcessorFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+
+  UploadMeetingFinalizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt UploadMeetingFinalizerFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/upload_meeting_finalizer
+      Description: Triggered by Transcribe Job State Change — reads transcript JSON and emits segments + END
+      MemorySize: 512
+      Timeout: 300
+      FunctionName: !Sub '${LMAStackName}-UploadMeetingFinalizer'
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          CALL_DATA_STREAM_NAME: !Ref CallDataStream
+          S3_BUCKET_NAME: !Ref S3BucketName
+          UPLOADS_PENDING_PREFIX: lma-uploads-pending/
+          RECORDINGS_PREFIX: !Ref AudioFilePrefix
+          TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
+          LOG_LEVEL: INFO
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingFinalizerFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; EventBridge retries + CW alarms cover the failure surface"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - UploadMeetingFinalizerFunctionLogGroup
+
+  UploadMeetingFinalizerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingFinalizerFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UploadMeetingFinalizerFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: UploadMeetingFinalizer Lambda execution role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UploadMeetingFinalizer
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # Read the transcript JSON Transcribe wrote, read the uploaded
+              # media to copy it, and write it to the long-term recordings
+              # prefix + delete the pending copy.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-uploads-pending/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-transcripts/*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-audio-recordings/*"
+              # Read the UploadJob row + mark it COMPLETED/FAILED.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt EventSourcingTable.Arn
+              # Emit transcript-segment / recording-url / END events onto the
+              # same Kinesis stream the live websocket transcriber uses; the
+              # existing call_event_processor consumes them.
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource: !Ref CallDataStreamArn
+              # Inspect the completed job's tags so we can confirm it's ours.
+              # transcribe:GetTranscriptionJob has no resource-level IAM.
+              - Effect: Allow
+                Action:
+                  - transcribe:GetTranscriptionJob
+                Resource: "*"
+              # KMS — same scope as the processor Lambda.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                      - !Sub "s3.${AWS::Region}.amazonaws.com"
+                      - !Sub "kinesis.${AWS::Region}.amazonaws.com"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "transcribe:GetTranscriptionJob does not support resource-level permissions"
+
+  UploadMeetingFinalizerEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-UploadMeetingFinalizer"
+      Description: Fires upload_meeting_finalizer on every Transcribe job COMPLETED/FAILED
+      EventPattern:
+        source:
+          - aws.transcribe
+        detail-type:
+          - "Transcribe Job State Change"
+        detail:
+          TranscriptionJobStatus:
+            - COMPLETED
+            - FAILED
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt UploadMeetingFinalizerFunction.Arn
+          Id: UploadMeetingFinalizerTarget
+
+  UploadMeetingFinalizerEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt UploadMeetingFinalizerFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt UploadMeetingFinalizerEventRule.Arn
+
   UpdateChatButtonConfigResolverFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2856,6 +3253,17 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt MeetingControlsResolverFunction.Arn
 
+  UploadMeetingInitiatorDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UploadMeetingInitiator
+      Description: AppSync data source for the createUploadMeeting mutation — invokes the upload-meeting-initiator Lambda to mint a presigned S3 PUT URL.
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncUploadMeetingInitiatorLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt UploadMeetingInitiatorFunction.Arn
+
   KnowledgeBaseDataSource:
     Type: AWS::AppSync::DataSource
     Properties:
@@ -3175,6 +3583,19 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/shareMeetings.js
+
+  CreateUploadMeetingAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt UploadMeetingInitiatorDataSource.Name
+      TypeName: Mutation
+      FieldName: createUploadMeeting
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/createUploadMeeting.js
 
   ShareCallAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -4816,6 +5237,190 @@ Resources:
             "identity": $utils.toJson($context.identity),
             "info": {
               "fieldName": "getMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ##########################################################################
+  # User Management - Admin-only Cognito user CRUD via AppSync
+  ##########################################################################
+
+  UserManagementFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-UserManagement"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/user_management
+      Description: Admin-only user management resolver (list/create/delete Cognito users)
+      MemorySize: 256
+      Timeout: 30
+      Role: !GetAtt UserManagementFunctionExecutionRole.Arn
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref UserPoolId
+          ADMIN_GROUP: "Admin"
+          ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/UserManagement"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - UserManagementFunctionLogGroup
+
+  UserManagementFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/UserManagement"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UserManagementFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: UserManagement Lambda execution role - admin-only Cognito operations
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UserManagement
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  # Scoped to the minimum set needed to list/create/delete
+                  # users and manage their Admin-group membership.
+                  - cognito-idp:ListUsers
+                  - cognito-idp:ListUsersInGroup
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminCreateUser
+                  - cognito-idp:AdminDeleteUser
+                  - cognito-idp:AdminAddUserToGroup
+                  - cognito-idp:AdminRemoveUserFromGroup
+                  - cognito-idp:AdminListGroupsForUser
+                Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+
+  UserManagementDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt UserManagementFunction.Arn
+
+  UserManagementDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UserManagement
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt UserManagementDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt UserManagementFunction.Arn
+
+  ListUsersResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: listUsers
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "listUsers"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  CreateUserResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: createUser
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "createUser"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  DeleteUserResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: deleteUser
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "deleteUser"
             }
           }
         }

@@ -14,10 +14,13 @@ import {
   CALLS_PATH,
   MEETINGS_QUERY_PATH,
   STREAM_AUDIO_PATH,
+  UPLOAD_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
+  BROWSER_EXTENSION_PATH,
   MCP_SERVERS_PATH,
   NOVA_SONIC_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
+  USER_MANAGEMENT_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
 
@@ -36,8 +39,11 @@ const NAV_PATHS = [
   MCP_SERVERS_PATH,
   NOVA_SONIC_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
+  USER_MANAGEMENT_PATH,
   STREAM_AUDIO_PATH,
+  UPLOAD_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
+  BROWSER_EXTENSION_PATH,
   MEETINGS_QUERY_PATH,
 ];
 
@@ -63,12 +69,18 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
     activeHref = `#${NOVA_SONIC_CONFIG_PATH}`;
   } else if (path.includes(TRANSCRIPT_SUMMARY_PATH)) {
     activeHref = `#${TRANSCRIPT_SUMMARY_PATH}`;
+  } else if (path.includes(USER_MANAGEMENT_PATH)) {
+    activeHref = `#${USER_MANAGEMENT_PATH}`;
   } else if (path.includes(CALLS_PATH)) {
     activeHref = `#${CALLS_PATH}`;
   } else if (path.includes(STREAM_AUDIO_PATH)) {
     activeHref = `#${STREAM_AUDIO_PATH}`;
+  } else if (path.includes(UPLOAD_AUDIO_PATH)) {
+    activeHref = `#${UPLOAD_AUDIO_PATH}`;
   } else if (path.includes(VIRTUAL_PARTICIPANT_PATH)) {
     activeHref = `#${VIRTUAL_PARTICIPANT_PATH}`;
+  } else if (path.includes(BROWSER_EXTENSION_PATH)) {
+    activeHref = `#${BROWSER_EXTENSION_PATH}`;
   }
 
   return (

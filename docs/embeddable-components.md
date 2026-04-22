@@ -61,6 +61,35 @@ The simplest way to get started is to embed the Stream Audio component:
 
 > **Important**: The `allow="microphone; display-capture"` attribute is required for the Stream Audio component to access the user's microphone and screen audio.
 
+### 1b. Upload Audio (Pre-recorded)
+
+To let users upload an existing audio/video file instead of streaming live:
+
+```html
+<iframe
+  src="https://YOUR_LMA_CLOUDFRONT_URL/#/embed?component=upload-audio"
+  width="100%"
+  height="550px"
+  style="border: none;"
+></iframe>
+```
+
+> Upload Audio does **not** need the `allow="microphone; display-capture"` attribute — the file is selected from the user's device and uploaded directly to Amazon S3.
+
+### 1c. Combined Stream / Upload Selector
+
+To show both options with a Tiles-style switcher at the top of the form:
+
+```html
+<iframe
+  src="https://YOUR_LMA_CLOUDFRONT_URL/#/embed?component=select-audio"
+  width="100%"
+  height="600px"
+  style="border: none;"
+  allow="microphone; display-capture"
+></iframe>
+```
+
 ### 2. Pre-Populated Stream Audio
 
 Pre-fill the meeting form fields so users just click "Start Streaming":
@@ -105,7 +134,9 @@ Show the VNC live view and transcript for a virtual participant session:
 
 | Component Value | Description | Key Parameters |
 |----------------|-------------|----------------|
-| `stream-audio` | Full Stream Audio interface with meeting form and recording controls | `meetingTopic`, `participants`, `owner`, `autoStart` |
+| `stream-audio` | Stream-only: live meeting form + recording controls (mic / screen audio) | `meetingTopic`, `participants`, `owner`, `autoStart` |
+| `upload-audio` | Upload-only: file-picker form for pre-recorded audio / video + diarization toggle | `meetingTopic`, `participants`, `owner` |
+| `select-audio` | Combined page with a top-of-page Stream / Upload mode switcher | `meetingTopic`, `participants`, `owner` |
 | `call-details` | Complete call details view (transcript + summary + chat) | `callId`, `show`, `layout` |
 | `transcript` | Live meeting transcript only | `callId` |
 | `summary` | Meeting summary only | `callId` |
@@ -727,6 +758,16 @@ Base URL: `https://YOUR_LMA_CLOUDFRONT_URL/#/embed`
 **Auto-start Stream Audio:**
 ```
 /#/embed?component=stream-audio&meetingTopic=Auto+Meeting&autoStart=true
+```
+
+**Upload Audio (pre-populated):**
+```
+/#/embed?component=upload-audio&meetingTopic=Client+Review&participants=Customer&owner=analyst@co.com
+```
+
+**Combined Stream / Upload selector:**
+```
+/#/embed?component=select-audio
 ```
 
 **Full Call Details:**

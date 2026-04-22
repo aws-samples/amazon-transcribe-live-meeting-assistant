@@ -98,6 +98,10 @@ export default defineConfig({
           label: "Access Control & Security",
           items: [
             {
+              label: "User Management",
+              slug: "user-management",
+            },
+            {
               label: "User-Based Access Control",
               slug: "user-based-access-control",
             },
@@ -152,6 +156,7 @@ export default defineConfig({
           label: "New & Uncategorized",
           items: [
             { label: "Cloudformation Service Role", slug: "cloudformation-service-role" },
+            { label: "Meeting Sources", slug: "meeting-sources" },
           ],
         },
         // AUTO-SIDEBAR-END
