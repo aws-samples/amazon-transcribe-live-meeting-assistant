@@ -16,7 +16,7 @@ To download the Chrome browser extension zip file, either:
   <p align="center"><img src="../images/readme-cf-extension-download.png" alt="Download from Stack Outputs" width="300"/></p>
 
 
-- OR Open the LMA web application and choose **Download Chrome Extension**
+- OR Open the LMA web application, choose **Chrome Extension** under **Sources** in the side navigation, and click **Download extension** on the Chrome Extension page. The page also includes a comparison of the Chrome Extension vs. Stream Audio vs. Virtual Participant, step-by-step install instructions, usage steps, and a troubleshooting section.
 
   <p align="center"><img src="../images/readme-app-extension-download.png" alt="Download from App" width="300"/></p>
 
