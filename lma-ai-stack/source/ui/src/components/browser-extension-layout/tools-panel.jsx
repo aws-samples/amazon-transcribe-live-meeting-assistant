@@ -32,17 +32,13 @@ const content = (
         browser). The extension cannot capture audio from native desktop or mobile meeting apps.
       </li>
     </ul>
-    <h3>Alternatives</h3>
-    <ul>
-      <li>
-        <strong>Stream Audio (Mic+Browser)</strong> &mdash; no install; streams any audio playing in a Chrome tab
-        (meetings, softphones, YouTube, audio/video playback). Does not provide speaker attribution.
-      </li>
-      <li>
-        <strong>Virtual Participant</strong> &mdash; server-side bot that joins the meeting; no extension required.
-        Visible to other attendees. Required for the Voice Assistant and &quot;Open VP live view&quot; features.
-      </li>
-    </ul>
+    <p>
+      <strong>Not sure which option to use?</strong> See the{' '}
+      <a href={`${DOCS_BASE}/meeting-sources/`} target="_blank" rel="noopener noreferrer">
+        <Icon name="external" /> Meeting Sources comparison
+      </a>{' '}
+      for a side-by-side of the Chrome Extension, Stream Audio, and Virtual Participant.
+    </p>
     <h3>Documentation</h3>
     <ul>
       <li>
@@ -58,16 +54,6 @@ const content = (
       <li>
         <a href={`${DOCS_BASE}/web-ui-guide/`} target="_blank" rel="noopener noreferrer">
           <Icon name="external" /> Web UI Guide
-        </a>
-      </li>
-      <li>
-        <a href={`${DOCS_BASE}/stream-audio/`} target="_blank" rel="noopener noreferrer">
-          <Icon name="external" /> Stream Audio (alternative)
-        </a>
-      </li>
-      <li>
-        <a href={`${DOCS_BASE}/virtual-participant/`} target="_blank" rel="noopener noreferrer">
-          <Icon name="external" /> Virtual Participant (alternative)
         </a>
       </li>
     </ul>

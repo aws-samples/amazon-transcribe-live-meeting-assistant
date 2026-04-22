@@ -28,6 +28,7 @@ title: "LMA Documentation"
 
 ### Meeting Sources
 
+- [Meeting Sources Overview](meeting-sources.md) — Side-by-side comparison of the three capture options and guidance on when to use each
 - [Stream Audio](stream-audio.md) — Browser-based audio capture from your microphone and any Chrome tab
 - [Browser Extension](browser-extension.md) — Chrome extension for capturing browser tab audio from any meeting platform
 - [Virtual Participant](virtual-participant.md) — Headless Chrome bot that joins Zoom, Teams, Chime, Google Meet, and WebEx meetings

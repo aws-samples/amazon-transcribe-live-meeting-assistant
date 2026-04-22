@@ -156,6 +156,7 @@ export default defineConfig({
           label: "New & Uncategorized",
           items: [
             { label: "Cloudformation Service Role", slug: "cloudformation-service-role" },
+            { label: "Meeting Sources", slug: "meeting-sources" },
           ],
         },
         // AUTO-SIDEBAR-END
