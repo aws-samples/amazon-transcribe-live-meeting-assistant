@@ -185,6 +185,8 @@ type Mutation @aws_iam {
 	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools
 	generateMCPApiKey: GenerateMCPApiKeyOutput @aws_cognito_user_pools
 	revokeMCPApiKey(keyPrefix: String!): Boolean @aws_cognito_user_pools
+	createUser(input: CreateUserInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	deleteUser(input: DeleteUserInput!): DeleteUserOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -220,6 +222,7 @@ type Query @aws_cognito_user_pools
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
+	listUsers: UserList @aws_cognito_user_pools(cognito_groups: ["Admin"])
 }
 
 type VirtualParticipant @aws_cognito_user_pools @aws_iam {
@@ -765,6 +768,34 @@ type GenerateMCPApiKeyOutput @aws_cognito_user_pools {
 	keyValue: String!
 	keyPrefix: String!
 	createdAt: String!
+}
+
+# User Management (Admin-only)
+type User @aws_cognito_user_pools {
+	username: String!
+	email: String
+	role: String!
+	status: String
+	enabled: Boolean
+	createdAt: AWSDateTime
+}
+
+type UserList @aws_cognito_user_pools {
+	users: [User]
+}
+
+input CreateUserInput {
+	email: String!
+	role: String!
+}
+
+input DeleteUserInput {
+	username: String!
+}
+
+type DeleteUserOutput @aws_cognito_user_pools {
+	username: String!
+	success: Boolean!
 }
 
 schema {

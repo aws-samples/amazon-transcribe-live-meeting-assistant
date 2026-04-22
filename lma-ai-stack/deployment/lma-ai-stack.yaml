@@ -745,6 +745,10 @@ Resources:
         StackName: !Ref LMAStackName
         Version: !Ref BootstrapVersion
         BuildDateTime: "<BUILD_DATE_TIME>"
+        # CloudFrontEndpoint is embedded in the Cognito welcome email for users created
+        # after the stack is deployed (initial admin created at stack-create time falls
+        # back to the default email wording since this value is not yet populated).
+        CloudFrontEndpoint: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
         # Add other existing settings that might be needed
         S3BucketName: !Ref S3BucketName
         AudioFilePrefix: !Ref AudioFilePrefix
@@ -4760,6 +4764,190 @@ Resources:
             "identity": $utils.toJson($context.identity),
             "info": {
               "fieldName": "getMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ##########################################################################
+  # User Management - Admin-only Cognito user CRUD via AppSync
+  ##########################################################################
+
+  UserManagementFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-UserManagement"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/user_management
+      Description: Admin-only user management resolver (list/create/delete Cognito users)
+      MemorySize: 256
+      Timeout: 30
+      Role: !GetAtt UserManagementFunctionExecutionRole.Arn
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref UserPoolId
+          ADMIN_GROUP: "Admin"
+          ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/UserManagement"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - UserManagementFunctionLogGroup
+
+  UserManagementFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/UserManagement"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UserManagementFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: UserManagement Lambda execution role - admin-only Cognito operations
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UserManagement
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  # Scoped to the minimum set needed to list/create/delete
+                  # users and manage their Admin-group membership.
+                  - cognito-idp:ListUsers
+                  - cognito-idp:ListUsersInGroup
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminCreateUser
+                  - cognito-idp:AdminDeleteUser
+                  - cognito-idp:AdminAddUserToGroup
+                  - cognito-idp:AdminRemoveUserFromGroup
+                  - cognito-idp:AdminListGroupsForUser
+                Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+
+  UserManagementDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt UserManagementFunction.Arn
+
+  UserManagementDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UserManagement
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt UserManagementDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt UserManagementFunction.Arn
+
+  ListUsersResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: listUsers
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "listUsers"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  CreateUserResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: createUser
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "createUser"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  DeleteUserResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: deleteUser
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "deleteUser"
             }
           }
         }

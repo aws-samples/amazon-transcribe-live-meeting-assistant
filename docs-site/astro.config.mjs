@@ -98,6 +98,10 @@ export default defineConfig({
           label: "Access Control & Security",
           items: [
             {
+              label: "User Management",
+              slug: "user-management",
+            },
+            {
               label: "User-Based Access Control",
               slug: "user-based-access-control",
             },
