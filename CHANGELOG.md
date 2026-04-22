@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- **User Management (admin only)** — New **Configuration → User Management** page lets Admin users list, create, and delete LMA users (Admin or User role) directly from the Web UI — no AWS console needed. New users receive a Cognito-sent invitation email with a temporary password and a clickable link to the LMA Web UI (CloudFront URL), injected at send-time by a new Cognito `CustomMessage` Lambda trigger that reads the URL from the LMA Settings SSM parameter. Secure by design with three-layer authorization: AppSync schema `@aws_cognito_user_pools(cognito_groups: ["Admin"])`, defense-in-depth `cognito:groups` re-check in the new `user_management` Lambda resolver, and UI route/nav guards. The Lambda's IAM role is scoped to the LMA Cognito User Pool ARN with only the required `cognito-idp` admin actions. Guard rails prevent self-delete and deletion of the last remaining Admin, and honor the existing `AllowedSignUpEmailDomain` parameter. See [User Management](docs/user-management.md).
+
 ### Changed
 
 - **UI modernization** — Migrated web UI from Create React App to **Vite 7**, upgraded React Router from v5 to **v6**, completed Cloudscape rebrand (`@awsui/*` → `@cloudscape-design/*`), upgraded AWS Amplify to **v6**, and aligned all AWS SDK packages to `^3.637.0`.
