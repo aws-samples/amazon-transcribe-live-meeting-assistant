@@ -190,8 +190,8 @@ const VirtualParticipantList = () => {
     `;
 
     const subscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
-      next: ({ value }) => {
-        const updatedParticipant = value?.data?.onUpdateVirtualParticipant;
+      next: (subscriptionMessage) => {
+        const updatedParticipant = subscriptionMessage?.data?.onUpdateVirtualParticipant;
 
         if (!updatedParticipant || !updatedParticipant.id) {
           return;

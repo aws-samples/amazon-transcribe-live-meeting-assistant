@@ -1807,8 +1807,8 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
               },
             })
             .subscribe({
-              next: ({ value }) => {
-                const token = value?.data?.onAddChatToken;
+              next: (message) => {
+                const token = message?.data?.onAddChatToken;
                 if (token) {
                   // Send token to the chat iframe
                   event.source.postMessage(
@@ -1876,8 +1876,8 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     if (!vpData?.id) return undefined;
 
     const subscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
-      next: ({ value }) => {
-        const updated = value?.data?.onUpdateVirtualParticipant;
+      next: (message) => {
+        const updated = message?.data?.onUpdateVirtualParticipant;
         if (updated && updated.id === vpData.id) {
           setVpData((prev) => ({
             ...prev,
@@ -1911,8 +1911,8 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         variables: { callId: item.callId },
       })
       .subscribe({
-        next: ({ value }) => {
-          const control = value?.data?.onVNCPreviewToggle;
+        next: (message) => {
+          const control = message?.data?.onVNCPreviewToggle;
           if (control) {
             if (control.Success) {
               const shouldShow = control.Action === 'open';
