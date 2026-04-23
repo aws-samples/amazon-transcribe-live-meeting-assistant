@@ -26,7 +26,7 @@ import logging
 import os
 import re
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 import boto3
 from botocore.config import Config
@@ -153,9 +153,7 @@ def _parse_and_validate_input(arguments: dict) -> dict:
     except (TypeError, ValueError) as err:
         raise ValidationError("maxSpeakers must be an integer") from err
     if not (MIN_SPEAKERS <= max_speakers <= MAX_SPEAKERS):
-        raise ValidationError(
-            f"maxSpeakers must be between {MIN_SPEAKERS} and {MAX_SPEAKERS}"
-        )
+        raise ValidationError(f"maxSpeakers must be between {MIN_SPEAKERS} and {MAX_SPEAKERS}")
 
     meeting_date_time = raw.get("meetingDateTime")
     if meeting_date_time:

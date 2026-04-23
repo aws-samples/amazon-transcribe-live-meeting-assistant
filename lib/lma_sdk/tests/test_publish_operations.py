@@ -196,7 +196,14 @@ class TestUntrackedPreflight:
             capture_output=True,
         )
         # Minimum config so `git add` works without a user config.
-        for key, val in (("user.email", "ci@example.com"), ("user.name", "ci")):
+        # Also disable any system-wide git hooks path (e.g. Amazon's
+        # git-defender) which could otherwise block the test commits.
+        for key, val in (
+            ("user.email", "ci@example.com"),
+            ("user.name", "ci"),
+            ("core.hooksPath", "/dev/null"),
+            ("commit.gpgsign", "false"),
+        ):
             subprocess.run(
                 ["git", "-C", str(project_dir), "config", key, val],
                 check=True,
@@ -211,11 +218,15 @@ class TestUntrackedPreflight:
             capture_output=True,
         )
         subprocess.run(
-            ["git", "-C", str(project_dir), "commit", "-q", "-m", "init"],
+            [
+                "git", "-C", str(project_dir),
+                "commit", "-q", "--no-verify", "-m", "init",
+            ],
             check=True,
             capture_output=True,
         )
         return stack_dir
+
 
     @staticmethod
     def _build_script_stack(name: str) -> StackDefinition:
@@ -334,7 +345,10 @@ class TestUntrackedPreflight:
             capture_output=True,
         )
         subprocess.run(
-            ["git", "-C", str(tmp_path), "commit", "-q", "-m", "add ws stack"],
+            [
+                "git", "-C", str(tmp_path),
+                "commit", "-q", "--no-verify", "-m", "add ws stack",
+            ],
             check=True,
             capture_output=True,
         )

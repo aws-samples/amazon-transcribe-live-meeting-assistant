@@ -27,6 +27,7 @@ import {
 import '@cloudscape-design/global-styles/index.css';
 import useWebSocket from 'react-use-websocket';
 import { generateClient } from 'aws-amplify/api';
+import { fetchUserAttributes } from 'aws-amplify/auth';
 
 import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '../common/constants';
 import useAppContext from '../../contexts/app';
@@ -67,7 +68,7 @@ const appsyncClient = generateClient();
  *     - undefined → defaults to 'select' (preserves legacy standalone use)
  */
 const StreamAudio = ({ mode: modeProp }) => {
-  const { currentSession, user } = useAppContext();
+  const { currentSession, user, authState } = useAppContext();
   const { settings } = useSettingsContext();
   // Amplify v6 exposes tokens as currentSession.tokens.{accessToken,idToken}.toString().
   // The refresh token is not exposed via fetchAuthSession in v6; pass an empty string
@@ -76,7 +77,12 @@ const StreamAudio = ({ mode: modeProp }) => {
   const ID_TOKEN = currentSession?.tokens?.idToken?.toString() ?? '';
   const REFRESH_TOKEN = '';
 
-  const userIdentifier = user?.attributes?.email || user?.signInDetails?.loginId || DEFAULT_LOCAL_SPEAKER_NAME;
+  // In Amplify v6 the `user` object from the Authenticator does NOT reliably
+  // expose `.attributes.email`; we must call fetchUserAttributes() for email.
+  // Fall back to the Cognito loginId / username which are available on `user`.
+  const fallbackUserId = user?.signInDetails?.loginId || user?.username || '';
+  const [userEmail, setUserEmail] = useState('');
+  const userIdentifier = userEmail || fallbackUserId;
 
   // --- Shared meeting-metadata form state (used by both modes) ------------
   const effectiveInitialMode = modeProp === MODE_UPLOAD ? MODE_UPLOAD : MODE_STREAM;
@@ -85,10 +91,51 @@ const StreamAudio = ({ mode: modeProp }) => {
   const [meetingTopic, setMeetingTopic] = useState('Stream Audio');
   const [callMetaData, setCallMetaData] = useState({
     callId: `${meetingTopic} - ${getTimestampStr()}`,
-    agentId: userIdentifier,
+    agentId: userIdentifier || DEFAULT_LOCAL_SPEAKER_NAME,
     fromNumber: DEFAULT_OTHER_SPEAKER_NAME,
     toNumber: SYSTEM,
   });
+  // Track whether the user has manually edited the agentId field so we don't
+  // overwrite their input when the authenticated user's identifier becomes
+  // available asynchronously after initial render.
+  const [agentIdEdited, setAgentIdEdited] = useState(false);
+
+  // Fetch the authenticated user's email attribute from Cognito (Amplify v6
+  // does not include it on the useAuthenticator `user` object).
+  useEffect(() => {
+    let cancelled = false;
+    const loadEmail = async () => {
+      try {
+        const attrs = await fetchUserAttributes();
+        if (!cancelled && attrs?.email) {
+          setUserEmail(attrs.email);
+        }
+      } catch (err) {
+        // Non-fatal; we'll fall back to loginId / 'Me'.
+        console.log(`DEBUG - StreamAudio: fetchUserAttributes failed: ${err}`);
+      }
+    };
+    if (authState === 'authenticated') {
+      loadEmail();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [authState]);
+
+  // When the authenticated user's identifier becomes available (it may not
+  // be present on the first render), default the microphone label to that
+  // identifier instead of the generic 'Me'.
+  useEffect(() => {
+    if (!userIdentifier || agentIdEdited) return;
+    setCallMetaData((prev) => {
+      if (prev.agentId === userIdentifier) return prev;
+      // Only override if the current value is the placeholder default
+      // ('Me') or empty — never clobber a user-entered value.
+      if (prev.agentId && prev.agentId !== DEFAULT_LOCAL_SPEAKER_NAME) return prev;
+      return { ...prev, agentId: userIdentifier };
+    });
+  }, [userIdentifier, agentIdEdited]);
 
   // --- Streaming mode state (unchanged behavior) --------------------------
   const [recording, setRecording] = useState(false);
@@ -165,6 +212,7 @@ const StreamAudio = ({ mode: modeProp }) => {
   };
 
   const handleAgentIdChange = (e) => {
+    setAgentIdEdited(true);
     setCallMetaData({
       ...callMetaData,
       agentId: e.detail.value,

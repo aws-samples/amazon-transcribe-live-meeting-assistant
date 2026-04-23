@@ -71,10 +71,12 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
       name: 'Salesforce',
       authorizationUrl: 'https://login.salesforce.com/services/oauth2/authorize',
       tokenUrl: 'https://login.salesforce.com/services/oauth2/token',
-      defaultScopes: 'api refresh_token offline_access sfap_api einstein_gpt_api',
+      defaultScopes: 'mcp_api refresh_token offline_access',
       instructions:
         'Create a Connected App in Salesforce Setup with OAuth enabled. ' +
-        'Enable PKCE and select scopes: api, refresh_token, offline_access, sfap_api, einstein_gpt_api',
+        'Enable PKCE and select scopes: mcp_api, refresh_token, offline_access. ' +
+        'Activate at least one MCP server under Setup > MCP Servers; the Server ' +
+        'URL uses the pattern https://api.salesforce.com/platform/mcp/v1/platform/<server-api-name>.',
     },
     google: {
       name: 'Google',

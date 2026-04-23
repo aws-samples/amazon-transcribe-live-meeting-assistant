@@ -86,7 +86,7 @@ def _call_id_from_key(key: str) -> str | None:
     that doesn't match that shape."""
     if not key.startswith(UPLOADS_PENDING_PREFIX):
         return None
-    remainder = key[len(UPLOADS_PENDING_PREFIX):]
+    remainder = key[len(UPLOADS_PENDING_PREFIX) :]
     parts = remainder.split("/", 1)
     if len(parts) != 2 or not parts[0] or not parts[1]:
         return None
@@ -249,7 +249,9 @@ def lambda_handler(event, context):  # noqa: ARG001
                 # Orphan files are cleaned up by the 7-day lifecycle rule.
                 logger.warning(
                     "No UploadJob row for callId=%s (key=%s, size=%s) — skipping",
-                    call_id, key, size,
+                    call_id,
+                    key,
+                    size,
                 )
                 continue
 
@@ -258,7 +260,8 @@ def lambda_handler(event, context):  # noqa: ARG001
             if status in ("TRANSCRIBING", "COMPLETED", "FAILED"):
                 logger.info(
                     "callId=%s already in status %s — skipping reprocessing",
-                    call_id, status,
+                    call_id,
+                    status,
                 )
                 continue
 
@@ -281,12 +284,15 @@ def lambda_handler(event, context):  # noqa: ARG001
             )
             logger.info(
                 "callId=%s: START emitted, Transcribe job %s started, status=TRANSCRIBING",
-                call_id, job_name,
+                call_id,
+                job_name,
             )
         except Exception as err:  # noqa: BLE001
             logger.exception(
                 "Processing failed for callId=%s key=%s: %s",
-                call_id, key, err,
+                call_id,
+                key,
+                err,
             )
             _mark_job(
                 call_id,

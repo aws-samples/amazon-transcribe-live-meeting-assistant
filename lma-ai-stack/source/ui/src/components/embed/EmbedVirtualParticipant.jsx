@@ -243,8 +243,8 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     if (!vpId) return undefined;
 
     const subscription = client.graphql({ query: onUpdateVirtualParticipantDetailed }).subscribe({
-      next: ({ value }) => {
-        const updated = value?.data?.onUpdateVirtualParticipant;
+      next: (message) => {
+        const updated = message?.data?.onUpdateVirtualParticipant;
         if (updated && updated.id === vpId) {
           setVpDetails((prev) => ({
             ...prev,

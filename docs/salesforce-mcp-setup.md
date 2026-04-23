@@ -6,12 +6,16 @@ title: "Salesforce MCP Server Setup Guide"
 
 ## Overview
 
-This guide walks you through setting up the Salesforce MCP server with OAuth 2.1 authentication in LMA. The Salesforce MCP server provides AI agents with the ability to query and interact with Salesforce data during meetings.
+This guide walks you through setting up the Salesforce Platform MCP server
+with OAuth 2.1 authentication in LMA. Once connected, AI agents in LMA can
+query and interact with Salesforce data during meetings using the tools and
+prompts provided by Salesforce's built-in MCP servers.
 
 ## Prerequisites
 
 - LMA deployed with OAuth 2.1 support (0.2.23 and above)
-- Salesforce account (Developer Edition, Sandbox, or Production)
+- A Salesforce org with the Platform MCP feature enabled (Developer Edition,
+  Sandbox, or Production)
 - Admin access to Salesforce Setup
 
 ## Step 1: Get Your OAuth Callback URL
@@ -49,11 +53,9 @@ This guide walks you through setting up the Salesforce MCP server with OAuth 2.1
    https://your-cloudfront-domain.cloudfront.net/#/oauth/callback
    ```
 
-3. **Selected OAuth Scopes:** Add these scopes (in order):
-   - ✅ Manage user data via APIs (api)
-   - ✅ Perform requests at any time (refresh_token, offline_access)
-   - ✅ Access the Salesforce API Platform (sfap_api)
-   - ✅ Access Einstein GPT services (einstein_gpt_api)
+3. **Selected OAuth Scopes:** Add these three scopes:
+   - ✅ **Access Salesforce Platform MCP services** (`mcp_api`)
+   - ✅ **Perform requests at any time** (`refresh_token`, `offline_access`)
 
 4. **Enable Authorization Code and Credentials Flow:** ✅ Checked
 
@@ -74,246 +76,285 @@ This guide walks you through setting up the Salesforce MCP server with OAuth 2.1
 3. Verify your identity (may require 2FA code)
 4. Copy the **Consumer Key** (this is your OAuth Client ID)
    - Example: `[YOUR_CONSUMER_KEY_HERE]...`
-5. **Note:** You don't need the Consumer Secret for this flow
+5. You don't need the Consumer Secret for this flow (PKCE is used instead).
 
-## Step 3: Add Salesforce MCP Server in LMA
+## Step 3: Activate at Least One MCP Server in Salesforce
 
-### 3.1 Navigate to MCP Servers
+Salesforce's Platform MCP feature exposes a catalog of server definitions
+under **Setup → MCP Servers**. Activate the ones you want to use.
+
+1. In Salesforce Setup, search for **MCP Servers**
+2. Pick a server — common built-ins include:
+   - **sobject-all** — full CRUD + SOQL + SOSL (9 tools, 2 prompts)
+   - **sobject-reads** — read-only subset
+   - **sobject-mutations** — write-only subset
+   - **sobject-deletes** — delete-only subset
+   - **metadata-experts** — schema / describe helpers
+   - **salesforce-api-context** — Salesforce REST API context
+   - **data-cloud-queries** — CDP / Data Cloud
+   - **engagement-interaction** — engagement events
+3. Take note of the server's **API Name** — e.g., `platform.sobject-all`.
+   The dot in the API name becomes a slash in the URL path, so
+   `platform.sobject-all` → `/platform/sobject-all`.
+4. Click **Activate**.
+
+The Server URL to use in LMA is:
+
+```
+https://api.salesforce.com/platform/mcp/v1/platform/<server-api-name>
+```
+
+For `sobject-all` that is:
+
+```
+https://api.salesforce.com/platform/mcp/v1/platform/sobject-all
+```
+
+## Step 4: Add Salesforce MCP Server in LMA
+
+### 4.1 Navigate to MCP Servers
 
 1. Log into your LMA application
 2. Go to **Configuration** → **MCP Servers**
 3. Click the **Custom Servers** tab
 
-### 3.2 Add Custom HTTP Server
+### 4.2 Add Custom HTTP Server
 
 1. Fill in the server details:
-   - **Server Name:** `Salesforce`
-   - **Server URL:** `https://api.salesforce.com/platform/mcp/v1-beta.2/sobject-all`
-   - **Description (Optional):** `Salesforce MCP server for working with Salesforce data`
+   - **Server Name:** `Salesforce` (or any name you prefer)
+   - **Server URL:** `https://api.salesforce.com/platform/mcp/v1/platform/sobject-all`
+     (replace `sobject-all` with the API name of whichever MCP server you
+     activated in Step 3)
+   - **Description (Optional):** `Salesforce Platform MCP — sobject-all`
 
 2. Check ✅ **This server requires authentication**
 
 3. Click **Add Server**
 
-### 3.3 Configure OAuth Authentication
+### 4.3 Configure OAuth Authentication
 
 The authentication modal will open automatically:
 
 1. **Authentication Type:** Select `OAuth 2.1 with PKCE (User Authorization)`
 
 2. **OAuth Provider:** Select `Salesforce`
-   - Authorization and Token URLs will be pre-filled
-   - Scopes will be pre-filled with: `api refresh_token offline_access sfap_api einstein_gpt_api`
+   - Authorization and Token URLs are pre-filled with
+     `https://login.salesforce.com/services/oauth2/{authorize,token}`
+   - Scopes are pre-filled with: `mcp_api refresh_token offline_access`
 
 3. **Client ID:** Paste your Consumer Key from Step 2.4
 
-4. **Scopes:** Verify the scopes are correct (should be pre-filled)
+4. **Scopes:** Verify the scopes are `mcp_api refresh_token offline_access`
 
 5. Click **Authorize with OAuth**
 
-### 3.4 Complete Authorization
+### 4.4 Complete Authorization
 
 1. A popup window will open with Salesforce login
 2. Log into your Salesforce org (if not already logged in)
 3. Review the permissions being requested
-4. Click **Allow** to grant access
-5. The popup will show "✅ Authorization complete!"
-6. The popup will close automatically
+4. Click **Allow**
+5. The popup will show "✅ Authorization complete!" and close automatically
 
-## Step 4: Verify Installation
+## Step 5: Verify Installation
 
-### 4.1 Check Installed Servers
+### 5.1 Check Installed Servers
 
 1. Go to **Configuration** → **MCP Servers**
 2. Click the **Installed Servers** tab
-3. You should see **Salesforce** with:
+3. You should see your `Salesforce` entry with:
    - Status: `ACTIVE`
    - Package Type: `streamable-http`
    - Authentication: OAuth 2.1
 
-### 4.2 Test in Chat
+### 5.2 Test in Chat
 
 1. Start or join a meeting
 2. Open the chat assistant
-3. Ask: `"What tools do you have for Salesforce?"`
-4. You should see Salesforce tools listed:
-   - `Salesforce_describe_global`
-   - `Salesforce_describe_sobject`
-   - `Salesforce_soql_query`
+3. Ask: `"What Salesforce tools do you have?"`
+4. For the `sobject-all` server you should see nine tools:
+   - `getUserInfo` — current user identity
+   - `soqlQuery` — execute SOQL
+   - `find` — SOSL cross-object search
+   - `getObjectSchema` — schema / describe
+   - `listRecentSobjectRecords` — recently viewed records
+   - `getRelatedRecords` — parent→child traversal
+   - `createSobjectRecord`, `updateSobjectRecord`, `updateRelatedRecord`
 
-5. Test a query: `"List products in Salesforce"`
-6. The assistant should query Salesforce and return results!
+5. Test a query: `"Who am I in Salesforce?"` (invokes `getUserInfo`)
+6. Or: `"List recent accounts in Salesforce"` (invokes `listRecentSobjectRecords`)
 
 ## Troubleshooting
 
-### Issue: "redirect_uri_mismatch" Error
+### Issue: `404 {"error":{"code":404,"message":"Server definition not found for: <name>"}}`
 
-**Cause:** The callback URL in Salesforce doesn't match the one being sent
+The MCP server name in the URL doesn't match an activated server in your
+org.
 
-**Solution:**
-- Verify the callback URL in Salesforce includes the `#` character
-- Should be: `https://domain/#/oauth/callback` (with hash)
-- NOT: `https://domain/oauth/callback` (without hash)
+**Fix:**
+- The path segment after `/v1/` must match the server's **API Name** in
+  Setup → MCP Servers, with dots replaced by slashes. For
+  `platform.sobject-all` the URL path ends with `/platform/sobject-all`.
+- Confirm the server is **Active** (not Inactive) in Setup → MCP Servers.
 
-### Issue: "401 Unauthorized" When Connecting
+### Issue: `403 {"error":{"code":403,"message":"OAuth invalid scope"}}`
 
-**Cause:** Missing required OAuth scopes
+The token does not have the `mcp_api` scope.
 
-**Solution:**
-- Verify all 5 scopes are selected in Salesforce Connected App
-- Most important: `sfap_api` (Salesforce API Platform)
-- Delete and re-add the server with correct scopes
+**Fix:**
+- Add `mcp_api` (plus `refresh_token` / `offline_access`) to the Connected
+  App's Selected OAuth Scopes and save.
+- In LMA, delete and re-add (or re-authorize) the Salesforce MCP server so
+  a fresh token is minted with the new scope. Refreshing the existing token
+  will not pick up newly granted scopes — a full re-authorization is
+  required.
 
-### Issue: "invalid_client_id" Error
+### Issue: `401 {"errors":[{"message":"Invalid token"}]}`
 
-**Cause:** Wrong Consumer Key entered
+Token expired, issued for the wrong org, or missing the
+`https://api.salesforce.com` audience.
 
-**Solution:**
-- Go back to Salesforce → App Manager
-- Find your Connected App → Manage Consumer Details
-- Copy the correct Consumer Key
-- Delete the server in LMA and add it again with the correct key
+**Fix:** Re-authorize from LMA. If the problem persists, confirm the
+Connected App is in the correct org and that the JWT `sfap_op` claim
+includes `MCPService` (org is entitled for Platform MCP).
 
-### Issue: Token Expired
+### Issue: `redirect_uri_mismatch`
 
-**Cause:** Access tokens expire after 2 hours
+The callback URL in Salesforce doesn't match the one being sent.
 
-**Solution:**
-- Tokens are automatically refreshed before expiration
-- If refresh fails, delete and re-authorize the server
-- Refresh tokens last 365 days (1 year)
+**Fix:**
+- The callback URL in Salesforce must include the `#` character:
+  `https://domain/#/oauth/callback`.
+
+### Issue: `invalid_client_id`
+
+Wrong Consumer Key entered.
+
+**Fix:**
+- Go to Salesforce → App Manager → your Connected App → Manage Consumer
+  Details, copy the correct Consumer Key, and re-enter it in LMA.
 
 ## Token Management
 
 ### Automatic Token Refresh
 
 - Access tokens expire after **2 hours**
-- LMA automatically refreshes tokens **5 minutes before expiration**
+- LMA automatically refreshes tokens **5 minutes before expiration** using
+  the stored refresh token
 - Refresh tokens last **365 days** (configurable in Salesforce)
 - No manual intervention needed
 
 ### Token Storage
 
-- Tokens are encrypted with AWS KMS
-- Stored in DynamoDB
-- Only accessible by Lambda functions
-- Compliant with security best practices
+- Access and refresh tokens are encrypted with AWS KMS before being written
+  to DynamoDB
+- Only accessible by the LMA Lambda functions that connect to MCP servers
 
-## Available Salesforce Tools
+## Available Salesforce MCP Servers and Tools
 
-Once connected, the following tools are available to the AI assistant:
+The exact set of servers, tools and prompts depends on your org edition and
+which servers you activate. For `sobject-all` in a current Developer org:
 
-### 1. Salesforce_describe_global
-Lists all available Salesforce objects (Account, Contact, Opportunity, etc.)
+**Tools**
 
-**Example:** `"What Salesforce objects are available?"`
+- `getUserInfo` — current user identity, role, timezone, preferences
+- `soqlQuery` — execute a SOQL query
+- `find` — SOSL cross-object text search
+- `getObjectSchema` — LLM-optimized schema / describe
+- `listRecentSobjectRecords` — recently viewed/modified records
+- `getRelatedRecords` — traverse parent→child relationships
+- `createSobjectRecord` — create a record
+- `updateSobjectRecord` — update a record by ID
+- `updateRelatedRecord` — update a child record via parent navigation
 
-### 2. Salesforce_describe_sobject
-Describes the fields and metadata for a specific Salesforce object
+**Prompts**
 
-**Example:** `"Describe the Account object in Salesforce"`
+- `accountReviewBriefing` — renders an account-review template
+  (takes `AccountName`)
+- `revenueReconciliationAnalysis` — renders a revenue-reconciliation
+  template (takes `Lookback Days`, `Minimum Opportunity Amount`)
 
-### 3. Salesforce_soql_query
-Executes SOQL queries against Salesforce data
-
-**Example:** `"List all accounts in Salesforce"`
-**Example:** `"Show me opportunities closing this month"`
-**Example:** `"Find contacts with email containing @example.com"`
-
-### 4. Salesforce_create_record
-Creates new records in Salesforce
-
-**Example:** `"Create a new account named 'Acme Corp' with industry 'Technology'"`
-**Example:** `"Create a contact named John Doe with email john@example.com"`
-
-### 5. Salesforce_update_record
-Updates existing records in Salesforce
-
-**Example:** `"Update account ABC123 to set annual revenue to 1000000"`
-**Example:** `"Change the status of opportunity XYZ789 to 'Closed Won'"`
-
-### 6. Salesforce_delete_record
-Deletes records from Salesforce
-
-**Example:** `"Delete the test account with ID 001ABC123"`
-
-**Note:** The exact tools available depend on the Salesforce MCP server version and your Salesforce permissions.
+The other read/write/metadata-specific servers (`sobject-reads`,
+`sobject-mutations`, `metadata-experts`, `salesforce-api-context`,
+`data-cloud-queries`, `engagement-interaction`) publish narrower subsets of
+the above.
 
 ## Security Considerations
 
 ### OAuth 2.1 with PKCE
 
-- **PKCE (Proof Key for Code Exchange)** protects against authorization code interception
-- More secure than OAuth 2.0
+- **PKCE (Proof Key for Code Exchange)** protects against authorization
+  code interception
 - Required by Salesforce for public clients
 
 ### Token Security
 
-- Access tokens encrypted with KMS before storage
-- Refresh tokens encrypted with KMS before storage
+- Access and refresh tokens are encrypted with KMS before storage
 - DynamoDB table encrypted at rest
 - Tokens only accessible by authorized Lambda functions
+- Tokens are scoped to the user who authorized (one token per user)
 
 ### Permissions
 
-- Users only see their own authorized connections
-- Tokens tied to the user who authorized
-- Can be revoked in Salesforce at any time
+- All MCP operations respect the authorized user's Salesforce permissions
+  and field-level security
+- Access can be revoked from Salesforce Setup → Connected Apps OAuth Usage
+  at any time
 
 ## Revoking Access
 
-To revoke LMA's access to Salesforce:
-
 1. Go to Salesforce Setup
-2. Search for **"Connected Apps OAuth Usage"**
+2. Search for **Connected Apps OAuth Usage**
 3. Find **LMA MCP Integration**
 4. Click **Revoke** next to your username
 5. Delete the server in LMA
 
 ## Advanced Configuration
 
-### Custom Salesforce Instance
+### Sandbox or My Domain
 
-If using a Sandbox or custom domain:
+The **MCP Server URL** is always on the unified gateway:
 
-1. When adding the server, use your instance URL:
-   - Production: `https://api.salesforce.com/platform/mcp/v1-beta.2/sobject-all`
-   - Sandbox: `https://test.salesforce.com/platform/mcp/v1-beta.2/sobject-all`
-   - Custom: `https://your-domain.my.salesforce.com/platform/mcp/v1-beta.2/sobject-all`
+```
+https://api.salesforce.com/platform/mcp/v1/platform/<server-api-name>
+```
 
-2. Update Authorization URL in OAuth config:
-   - Production: `https://login.salesforce.com/services/oauth2/authorize`
-   - Sandbox: `https://test.salesforce.com/services/oauth2/authorize`
+Salesforce routes the call to your org based on the bearer token; leave the
+host as `api.salesforce.com`.
 
-### Additional Scopes
+Your My Domain only affects the OAuth endpoints. For a Sandbox or a custom
+domain, override the Authorization / Token URLs in LMA:
 
-If you need additional Salesforce permissions, add more scopes in the Connected App:
+- Production: `https://login.salesforce.com/services/oauth2/{authorize,token}`
+- Sandbox: `https://test.salesforce.com/services/oauth2/{authorize,token}`
+- Custom: `https://<your-domain>.my.salesforce.com/services/oauth2/{authorize,token}`
 
-- `full` - Full access to all data
-- `web` - Access to web applications
-- `chatter_api` - Access to Chatter
-- `custom_permissions` - Access to custom permissions
+### Multiple MCP Servers From One Org
 
-Then update the scopes in LMA when authorizing.
+If you activate several MCP servers in Setup → MCP Servers (e.g.
+`sobject-reads` and `metadata-experts`), add each one as a separate entry
+in LMA → Configuration → MCP Servers, with its own URL
+(`…/v1/platform/sobject-reads`, `…/v1/platform/metadata-experts`, etc.) and
+re-authorize once per entry. They can share the same Connected App.
 
 ## Support
 
-For issues specific to:
-- **LMA OAuth implementation:** Check LMA documentation
-- **Salesforce MCP server:** Check [Salesforce MCP documentation](https://developer.salesforce.com/docs/platform/mcp)
-- **OAuth configuration:** Check [Salesforce OAuth documentation](https://help.salesforce.com/s/articleView?id=sf.remoteaccess_oauth_flows.htm)
+- **LMA OAuth implementation:** see the troubleshooting section above
+- **Salesforce MCP server:** see the Salesforce Platform MCP documentation
+- **OAuth configuration:** see Salesforce's Connected Apps and OAuth flow
+  documentation
 
 ## Summary
 
 ✅ **What You Get:**
-- AI assistant can query Salesforce data during meetings
+- AI assistant can query and mutate Salesforce data during meetings
 - Automatic token refresh (no manual intervention)
 - Secure OAuth 2.1 with PKCE
-- Works with any Salesforce org (Developer, Sandbox, Production)
+- Works with any Salesforce org that has Platform MCP enabled
 
 ✅ **What You Need:**
-- Salesforce admin access (to create Connected App)
-- 5 minutes to set up
-- Consumer Key from Salesforce
-
-That's it! Your AI assistant can now access Salesforce data during meetings.
+- Salesforce admin access (to create the Connected App and activate MCP
+  servers)
+- Scopes `mcp_api`, `refresh_token`, `offline_access` on the Connected App
+- The Consumer Key from the Connected App
+- At least one Active MCP server in Setup → MCP Servers

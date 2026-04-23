@@ -199,9 +199,7 @@ def _channel_for_speaker(speaker_label: str, enable_diarization: bool) -> str:
     return "AGENT"
 
 
-def _promote_media_file(
-    bucket: str, pending_key: str, call_id: str
-) -> tuple[str, str]:
+def _promote_media_file(bucket: str, pending_key: str, call_id: str) -> tuple[str, str]:
     """Copy the uploaded media from ``lma-uploads-pending/...`` to
     ``lma-audio-recordings/<callId>.<ext>`` and delete the pending copy.
 
@@ -265,13 +263,13 @@ def lambda_handler(event, context):  # noqa: ARG001
     tj = resp["TranscriptionJob"]
     tags = tj.get("Tags") or []
     is_ours = any(
-        t.get("Key") == "lma:source" and t.get("Value") == "upload_meeting_processor"
-        for t in tags
+        t.get("Key") == "lma:source" and t.get("Value") == "upload_meeting_processor" for t in tags
     )
     if not is_ours:
         logger.info(
             "Job %s is not from upload_meeting_processor (tags=%s) — skipping",
-            job_name, tags,
+            job_name,
+            tags,
         )
         return {"ok": True, "skipped": "not-ours"}
 
