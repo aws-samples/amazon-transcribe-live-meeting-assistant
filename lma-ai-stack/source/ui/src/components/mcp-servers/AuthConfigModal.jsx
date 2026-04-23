@@ -315,7 +315,7 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
       // Reset form
       setBearerToken('');
       setCustomHeaders('{\n  "X-API-Key": "your-key-here"\n}');
-      setEnvVars('{\n  "API_KEY": "your-key-here"\n}');
+      setEnvVars('{\n  "API_KEY": "your-key-here"\n}');  // pragma: allowlist secret
       setOauthClientId('');
       setOauthClientSecret('');
       setOauthTokenUrl('');
@@ -330,8 +330,8 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
 
   const handleCancel = () => {
     setBearerToken('');
-    setCustomHeaders('{\n  "X-API-Key": "your-key-here"\n}');
-    setEnvVars('{\n  "API_KEY": "your-key-here"\n}');
+    setCustomHeaders('{\n  "X-API-Key": "your-key-here"\n}'); // pragma: allowlist secret
+    setEnvVars('{\n  "API_KEY": "your-key-here"\n}'); // pragma: allowlist secret
     setError(null);
     onDismiss();
   };
@@ -417,7 +417,7 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
             <Textarea
               value={customHeaders}
               onChange={({ detail }) => setCustomHeaders(detail.value)}
-              placeholder='{\n  "API_KEY": "your-key-here",\n  "DATABASE_URL": "postgres://..."\n}'
+              placeholder='{\n  "API_KEY": "your-key-here",\n  "DATABASE_URL": "postgres://..."\n}' // pragma: allowlist secret
               disabled={loading}
               rows={8}
             />

@@ -233,7 +233,7 @@ class VirtualParticipantManager:
                 # Try to use a fallback pattern based on the known format
                 logger.info("Attempting to use fallback schedule group name pattern")
                 # This is a temporary fallback - ideally the environment variable should be set
-                schedule_group_name = "LMA-VIRTUALPARTICIPANTSTACK-1ICEYE8S4JXFV-vp-schedules"
+                schedule_group_name = "LMA-VIRTUALPARTICIPANTSTACK-1ICEYE8S4JXFV-vp-schedules"  # pragma: allowlist secret
                 logger.info(f"Using fallback schedule group name: {schedule_group_name}")
 
             # The schedule name is the VP ID (as set by the VirtualParticipantSchedulerFunction)

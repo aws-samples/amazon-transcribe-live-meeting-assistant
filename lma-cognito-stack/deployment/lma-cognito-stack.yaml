@@ -282,7 +282,7 @@ Resources:
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
-      GenerateSecret: false
+      GenerateSecret: false  # pragma: allowlist secret
       IdTokenValidity: 1
       PreventUserExistenceErrors: ENABLED
       ReadAttributes:

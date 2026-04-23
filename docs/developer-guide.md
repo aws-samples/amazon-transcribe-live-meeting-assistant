@@ -188,7 +188,7 @@ Execute the VP scheduler Step Function directly:
 ```bash
 aws stepfunctions start-execution \
   --state-machine-arn arn:aws:states:us-east-1:123456789012:stateMachine:SchedulerStateMachine-XXXX \
-  --input '{"apiInfo":{"httpMethod":"POST"},"data":{"meetingPlatform":"Zoom","meetingID":"12345678","meetingPassword":"a1b2c3","meetingName":"Test","meetingTime":"","userName":"Bob"}}'
+  --input '{"apiInfo":{"httpMethod":"POST"},"data":{"meetingPlatform":"Zoom","meetingID":"12345678","meetingPassword":"a1b2c3","meetingName":"Test","meetingTime":"","userName":"Bob"}}'  # pragma: allowlist secret
 ```
 
 Supported `httpMethod` values: `POST` (join/schedule), `GET` (list scheduled), `DELETE` (cancel scheduled).

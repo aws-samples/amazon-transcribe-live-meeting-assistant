@@ -144,6 +144,7 @@ export class RecordingService {
         console.log(`File ${filename} has been successfully deleted.`);
       }
     } catch (error) {
+      // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
       console.error(`An error occurred while trying to delete ${filename}:`, error);
     }
   }

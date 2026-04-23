@@ -198,6 +198,7 @@ def handle_oauth_callback(event: Dict[str, Any], context: Any) -> Dict[str, Any]
                 token_url,
                 data=token_data,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=(5, 30),
             )
 
             if token_response.status_code != 200:
@@ -212,6 +213,7 @@ def handle_oauth_callback(event: Dict[str, Any], context: Any) -> Dict[str, Any]
                         token_url,
                         data=token_data,
                         headers={"Content-Type": "application/x-www-form-urlencoded"},
+                        timeout=(5, 30),
                     )
 
                     if token_response.status_code != 200:

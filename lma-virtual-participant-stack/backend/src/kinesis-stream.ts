@@ -114,6 +114,7 @@ class KinesisStreamManager {
         console.log(`Error sending ${record.EventType} event to Kinesis: ${error.message}`);
         console.log('Note: This is expected during local testing without proper IAM permissions');
       } else {
+      // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
         console.error(`Error sending ${record.EventType} event to Kinesis:`, error);
       }
       // Don't throw error - continue execution like Python version
