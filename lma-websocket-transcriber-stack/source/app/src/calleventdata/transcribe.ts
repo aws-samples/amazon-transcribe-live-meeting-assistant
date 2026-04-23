@@ -270,7 +270,7 @@ export const startTranscribe = async (
                     }
                 }
             } else if (TRANSCRIBE_LANGUAGE_CODE === 'identify-multiple-languages') {
-                tsParams.IdentifyMultipleLanguages = true;
+                (tsParams as StartStreamTranscriptionCommandInput).IdentifyMultipleLanguages = true;
                 if (TRANSCRIBE_LANGUAGE_OPTIONS) {
                     tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
                     if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
@@ -327,7 +327,7 @@ export const startTranscribe = async (
                 ).EnableChannelIdentification = true;
                 (tsParams as StartStreamTranscriptionCommandInput).NumberOfChannels = 2;
                 if (showSpeakerLabel) {
-                    tsParams.ShowSpeakerLabel = true;
+                    (tsParams as StartStreamTranscriptionCommandInput).ShowSpeakerLabel = true;
                 }
                 server.log.debug(
                     `[TRANSCRIBING]: [${
