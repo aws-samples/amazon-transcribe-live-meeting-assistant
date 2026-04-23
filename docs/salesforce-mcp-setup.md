@@ -186,20 +186,6 @@ The authentication modal will open automatically:
 
 ## Troubleshooting
 
-Two helpers are included in the repo to debug each step independently of LMA:
-
-- `scripts/test-salesforce-mcp.sh` — take a token file (raw JWT or the
-  KMS-encrypted blob stored in LMA's DynamoDB), decrypt if needed, decode
-  the JWT, and POST MCP `initialize` against candidate URLs. On `403` it
-  auto-pulls the required scopes from Salesforce's RFC 9728
-  `oauth-protected-resource` metadata and reports any missing scope.
-
-- `scripts/sf-mcp-oauth-e2e.py` — pure-stdlib Python, runs the full
-  OAuth 2.1 + PKCE flow with a loopback listener on
-  `http://localhost:8765/oauth/callback`, then exercises
-  `initialize → tools/list → prompts/list → tools/call`. Subcommands:
-  `listen`, `exchange`, `mcp`, `all`. See `--help`.
-
 ### Issue: `404 {"error":{"code":404,"message":"Server definition not found for: <name>"}}`
 
 The MCP server name in the URL doesn't match an activated server in your
@@ -353,8 +339,7 @@ re-authorize once per entry. They can share the same Connected App.
 
 ## Support
 
-- **LMA OAuth implementation:** see the troubleshooting section above and
-  try the bundled `scripts/sf-mcp-oauth-e2e.py` tester
+- **LMA OAuth implementation:** see the troubleshooting section above
 - **Salesforce MCP server:** see the Salesforce Platform MCP documentation
 - **OAuth configuration:** see Salesforce's Connected Apps and OAuth flow
   documentation
