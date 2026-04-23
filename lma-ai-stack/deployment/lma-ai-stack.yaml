@@ -602,13 +602,28 @@ Outputs:
       ]
   LocalUITestingEnv:
     Description: Copy to create .env file for local UI testing
-    Value: !Sub >-
-      VITE_USER_POOL_ID=${UserPoolId}
-      VITE_USER_POOL_CLIENT_ID=${CognitoClientId}
-      VITE_IDENTITY_POOL_ID=${AppIdentityPoolId}
-      VITE_APPSYNC_GRAPHQL_URL=${AppSyncApiEncrypted.GraphQLUrl}
-      VITE_AWS_REGION=${AWS::Region}
-      VITE_SETTINGS_PARAMETER=${LMASettingsParameterName}
+    Value: !Sub
+      - >-
+        VITE_USER_POOL_ID=${UserPoolId}
+        VITE_USER_POOL_CLIENT_ID=${CognitoClientId}
+        VITE_IDENTITY_POOL_ID=${AppIdentityPoolId}
+        VITE_APPSYNC_GRAPHQL_URL=${AppSyncApiEncrypted.GraphQLUrl}
+        VITE_AWS_REGION=${AWS::Region}
+        VITE_SETTINGS_PARAMETER=${LMASettingsParameterName}
+        VITE_ENABLE_MCP_SERVER=${EnableMCPServer}
+        VITE_MCP_SERVER_ENDPOINT=${McpServerEndpointValue}
+        VITE_MCP_SERVER_API_KEY_ENDPOINT=${McpServerApiKeyEndpointValue}
+        VITE_MCP_SERVER_AUTH_URL=${McpServerAuthUrlValue}
+        VITE_MCP_SERVER_TOKEN_URL=${McpServerTokenUrlValue}
+        VITE_MCP_SERVER_CLIENT_ID=${McpServerClientIdValue}
+        VITE_MCP_SERVER_USER_POOL_ID=${McpServerUserPoolIdValue}
+        VITE_OAUTH_CALLBACK_URL=https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback
+      - McpServerEndpointValue: !If [ShouldEnableMCPServer, !GetAtt MCPServerGateway.GatewayUrl, ""]
+        McpServerApiKeyEndpointValue: !If [ShouldEnableMCPServer, !Sub "https://${MCPApiKeyRestApi}.execute-api.${AWS::Region}.amazonaws.com/mcp", ""]
+        McpServerAuthUrlValue: !If [ShouldEnableMCPServer, !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize", ""]
+        McpServerTokenUrlValue: !If [ShouldEnableMCPServer, !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token", ""]
+        McpServerClientIdValue: !If [ShouldEnableMCPServer, !Ref MCPServerExternalAppClient, ""]
+        McpServerUserPoolIdValue: !If [ShouldEnableMCPServer, !Ref UserPoolId, ""]
   VPTaskRegistryTableName:
     Description: Name of the VPTaskRegistry DynamoDB table
     Value: !Ref VPTaskRegistry
@@ -940,6 +955,40 @@ Resources:
               - "DISABLED"
           - Name: VITE_CLOUDFRONT_DOMAIN
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
+          - Name: VITE_ENABLE_MCP_SERVER
+            Value: !Ref EnableMCPServer
+          - Name: VITE_MCP_SERVER_ENDPOINT
+            Value: !If
+              - ShouldEnableMCPServer
+              - !GetAtt MCPServerGateway.GatewayUrl
+              - ""
+          - Name: VITE_MCP_SERVER_API_KEY_ENDPOINT
+            Value: !If
+              - ShouldEnableMCPServer
+              - !Sub "https://${MCPApiKeyRestApi}.execute-api.${AWS::Region}.amazonaws.com/mcp"
+              - ""
+          - Name: VITE_MCP_SERVER_AUTH_URL
+            Value: !If
+              - ShouldEnableMCPServer
+              - !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
+              - ""
+          - Name: VITE_MCP_SERVER_TOKEN_URL
+            Value: !If
+              - ShouldEnableMCPServer
+              - !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token"
+              - ""
+          - Name: VITE_MCP_SERVER_CLIENT_ID
+            Value: !If
+              - ShouldEnableMCPServer
+              - !Ref MCPServerExternalAppClient
+              - ""
+          - Name: VITE_MCP_SERVER_USER_POOL_ID
+            Value: !If
+              - ShouldEnableMCPServer
+              - !Ref UserPoolId
+              - ""
+          - Name: VITE_OAUTH_CALLBACK_URL
+            Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
   # CodeBuild project for building MCP servers Lambda layer
   MCPLayerBuildProject:
     Type: AWS::CodeBuild::Project
