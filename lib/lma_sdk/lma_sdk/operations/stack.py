@@ -4,10 +4,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Callable
 
 from lma_sdk._core.stack import StackManager
 from lma_sdk.models.stack import (
+    FailureAnalysis,
     LogEntry,
     StackDeleteResult,
     StackDeployResult,
@@ -188,6 +190,33 @@ class StackOperations:
             List of StackEvent objects, newest first.
         """
         return self._manager.get_stack_events(stack_name, limit)
+
+    def get_failure_analysis(
+        self,
+        stack_name: str | None = None,
+        deploy_start_time: datetime | None = None,
+    ) -> FailureAnalysis:
+        """Analyze a deployment failure with root cause identification.
+
+        Recursively collects failed events from the main stack and all nested
+        stacks, classifies root causes vs. cascade failures, and returns
+        structured analysis.
+
+        Args:
+            stack_name: Stack name override.
+            deploy_start_time: UTC timestamp when deployment started.
+                Only events after this time are analyzed.
+
+        Returns:
+            FailureAnalysis with root_causes and all_failures.
+
+        Example::
+
+            analysis = client.stack.get_failure_analysis()
+            for cause in analysis.root_causes:
+                print(f"{cause.stack_path} → {cause.resource}: {cause.reason}")
+        """
+        return self._manager.get_failure_analysis(stack_name, deploy_start_time)
 
     def delete(self, stack_name: str | None = None, wait: bool = True) -> StackDeleteResult:
         """Delete the LMA stack.
