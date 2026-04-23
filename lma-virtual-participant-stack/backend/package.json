@@ -36,7 +36,7 @@
     "puppeteer": "^24.22.1",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "uuid": "^9.0.1",
+    "uuid": "^14.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
