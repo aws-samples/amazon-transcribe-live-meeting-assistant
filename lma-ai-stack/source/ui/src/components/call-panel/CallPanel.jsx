@@ -629,7 +629,7 @@ const CallInProgressTranscript = ({
       setLastUpdated(Date.now());
     };
     runTranslation();
-  }, [callTranscriptPerCallId]);
+  }, [callTranscriptPerCallId, translateOn, targetLanguage]);
 
   const getTurnByTurnSegments = () => {
     const currentTurnByTurnSegments = transcriptChannels
