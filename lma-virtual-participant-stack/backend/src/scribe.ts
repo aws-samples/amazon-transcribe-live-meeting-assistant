@@ -247,6 +247,7 @@ export class TranscriptionService {
                 break;
 
             } catch (error: any) {
+                // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
                 console.error(`Transcription error (attempt ${attempt + 1}/${maxRetries}):`, error.message);
                 
                 // If the session has expired, clear the session ID so next retry starts fresh

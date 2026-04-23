@@ -40,10 +40,12 @@ def send(
     headers = {"content-type": "", "content-length": str(len(json_responseBody))}
 
     try:
-        req = urllib.request.Request(
+        # nosec B310 - URL is CloudFormation-provided event["ResponseURL"], always HTTPS, AWS-controlled (not attacker-influenced)
+        req = urllib.request.Request(  # nosec B310
             responseUrl, data=json_responseBody.encode("utf-8"), headers=headers, method="PUT"
         )
-        with urllib.request.urlopen(req) as response:
+        # URL is CloudFormation-provided event["ResponseURL"], always HTTPS, AWS-controlled.
+        with urllib.request.urlopen(req) as response:  # nosec B310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             print(f"Status code: {response.status}")
     except Exception as e:
         print(f"send(..) failed executing request: {e}")

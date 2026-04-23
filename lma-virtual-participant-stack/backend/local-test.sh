@@ -335,7 +335,7 @@ ENABLE_AUDIO_RECORDING=true
 # Voice Assistant Configuration
 # Values fetched from CloudFormation stack (VP_STACK)
 # For ElevenLabs, set API key as environment variable:
-#   export ELEVENLABS_API_KEY="your-key"
+#   export ELEVENLABS_API_KEY="your-key"  # pragma: allowlist secret
 VOICE_ASSISTANT_PROVIDER=${VOICE_ASSISTANT_PROVIDER:-none}
 VOICE_ASSISTANT_ACTIVATION_MODE=${VOICE_ASSISTANT_ACTIVATION_MODE:-wake_phrase}
 ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
@@ -348,7 +348,7 @@ NOVA_SONIC_CONFIG_TABLE_NAME=${NOVA_SONIC_CONFIG_TABLE_NAME:-}
 # Simli Avatar Configuration
 # Provides an animated lip-synced avatar as the VP's camera feed
 # For Simli, set API key as environment variable:
-#   export SIMLI_API_KEY="your-key"
+#   export SIMLI_API_KEY="your-key"  # pragma: allowlist secret -- placeholder in comment, not real secret
 SIMLI_API_KEY=${SIMLI_API_KEY:-}
 SIMLI_FACE_ID=${SIMLI_FACE_ID:-}
 SIMLI_TRANSPORT_MODE=${SIMLI_TRANSPORT_MODE:-livekit}

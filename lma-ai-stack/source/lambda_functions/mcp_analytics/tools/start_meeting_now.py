@@ -107,7 +107,12 @@ def execute(
 
         SigV4Auth(credentials, "appsync", session.region_name).add_auth(request)
 
-        response = requests.post(appsync_url, headers=dict(request.headers), data=request_body)
+        response = requests.post(
+            appsync_url,
+            headers=dict(request.headers),
+            data=request_body,
+            timeout=(5, 30),
+        )
 
         response.raise_for_status()
         result = response.json()

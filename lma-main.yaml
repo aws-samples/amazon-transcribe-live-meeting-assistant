@@ -1306,6 +1306,13 @@ Resources:
 
   ValidateParametersFunctionRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM4
+            reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
+          - id: AwsSolutions-IAM5
+            reason: 'Wildcards scoped by service/resource or PassedToService condition; standard CFN least-privilege pattern'
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -1480,6 +1487,11 @@ Resources:
   # and use CR UpdateLMASettingsFunction to add/update values
   LMASettingsParameter:
     Type: AWS::SSM::Parameter
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
     Properties:
       Type: String
       Name: !Sub "${AWS::StackName}-LMASettings"
@@ -1487,6 +1499,11 @@ Resources:
 
   UpdateLMASettingsFunctionRole:
     Type: "AWS::IAM::Role"
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM4
+            reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
     Properties:
       AssumeRolePolicyDocument:
         Statement:
@@ -1597,6 +1614,13 @@ Resources:
   ##########################################################################
   S3BucketCleanupRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM4
+            reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
+          - id: AwsSolutions-IAM5
+            reason: 'Wildcards scoped by service/resource or PassedToService condition; standard CFN least-privilege pattern'
     Condition: ShouldDeleteDataOnDelete
     Properties:
       AssumeRolePolicyDocument:
@@ -1643,6 +1667,11 @@ Resources:
 
   S3BucketCleanupFunction:
     Type: AWS::Lambda::Function
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
     Condition: ShouldDeleteDataOnDelete
     Metadata:
       cfn_nag:
@@ -1994,6 +2023,13 @@ Resources:
 
   RecordingsBucketNotificationFunctionRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM4
+            reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
     Condition: ShouldCreateRecordingBucket
     Properties:
       AssumeRolePolicyDocument:

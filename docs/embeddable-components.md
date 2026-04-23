@@ -259,7 +259,7 @@ response = client.initiate_auth(
     AuthFlow='USER_PASSWORD_AUTH',  # or USER_SRP_AUTH
     AuthParameters={
         'USERNAME': 'user@example.com',
-        'PASSWORD': 'user-password'
+        'PASSWORD': 'user-password'  # pragma: allowlist secret
     }
 )
 

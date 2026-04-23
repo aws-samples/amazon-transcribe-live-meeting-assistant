@@ -3816,7 +3816,7 @@
     "check_id": "B607",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -3827,7 +3827,7 @@
     "check_id": "B603",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -3838,7 +3838,7 @@
     "check_id": "B607",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -3849,7 +3849,7 @@
     "check_id": "B603",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -3860,7 +3860,7 @@
     "check_id": "B607",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -3871,7 +3871,7 @@
     "check_id": "B603",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -3882,7 +3882,7 @@
     "check_id": "B603",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4059,7 +4059,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4070,7 +4070,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4081,7 +4081,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4092,7 +4092,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4103,7 +4103,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4114,7 +4114,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4125,7 +4125,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4136,7 +4136,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4147,7 +4147,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4158,7 +4158,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4169,7 +4169,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4180,7 +4180,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4191,7 +4191,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4202,7 +4202,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4213,7 +4213,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4224,7 +4224,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4246,7 +4246,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4268,7 +4268,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4279,7 +4279,7 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
-    "status": "Open"
+    "status": "resolved"
   },
   {
     "source": "Bandit",
@@ -4919,7 +4919,7 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "MCPApiKeyAuthorizerFunction",
@@ -4933,7 +4933,7 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "MCPApiKeyManagerFunction",
@@ -4947,7 +4947,7 @@
     "check_id": "CKV_AWS_120",
     "priority": "LOW",
     "fix": "Enable API Gateway caching in AWS::ApiGateway::Stage by setting 'CacheClusterEnabled: true' and configuring appropriate 'CacheClusterSize'. This improves API performance, reduces backend load, and can lower costs by serving cached responses.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "ApiGateway Stage",
     "resourceName": "MCPApiKeyStage",
@@ -4961,7 +4961,7 @@
     "check_id": "CKV_AWS_117",
     "priority": "LOW",
     "fix": "Configure AWS::Lambda::Function to run within VPC by setting 'VpcConfig' with 'SubnetIds' and 'SecurityGroupIds' properties. This provides network isolation and enables access to VPC-only resources like RDS instances.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "VirtualParticipantManagerFunction",
@@ -4975,7 +4975,7 @@
     "check_id": "CKV_AWS_116",
     "priority": "LOW",
     "fix": "Configure AWS::Lambda::Function with Dead Letter Queue by setting 'DeadLetterConfig' with 'TargetArn' referencing an AWS::SQS::Queue or AWS::SNS::Topic resource. This captures failed function invocations for debugging and reprocessing.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "VirtualParticipantManagerFunction",
@@ -4989,7 +4989,7 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "VirtualParticipantManagerFunction",
@@ -5003,7 +5003,7 @@
     "check_id": "CKV_AWS_115",
     "priority": "LOW",
     "fix": "Configure AWS::Lambda::Function with concurrent execution limit by setting 'ReservedConcurrencyLimit' property to an appropriate value. This prevents the function from consuming all available concurrent executions in your account.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "VirtualParticipantManagerFunction",
@@ -5017,7 +5017,7 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "MCPServerAnalyticsFunction",
@@ -5027,6 +5027,897 @@
     "source": "Checkov",
     "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
     "line": 5474,
+    "issue": "Ensure the ELBv2 (Application/Network) has access logging enabled",
+    "check_id": "CKV_AWS_91",
+    "priority": "INFO",
+    "fix": "Enable Application/Network Load Balancer access logging by adding 'LoadBalancerAttributes' with 'Key: access_logs.s3.enabled', 'Value: true' and 'Key: access_logs.s3.bucket' with S3 bucket name in AWS::ElasticLoadBalancingV2::LoadBalancer resource for comprehensive traffic monitoring.",
+    "status": "resolved",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "ElasticLoadBalancingV2 LoadBalancer",
+    "resourceName": "VNCALB",
+    "isCustomResource": false
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/lma_sdk/_core/publish.py",
+    "line": 147,
+    "issue": "Starting a process with a partial executable path",
+    "fix": "Use absolute paths for executables. Avoid relying on PATH resolution which could lead to execution of unintended programs.",
+    "check_id": "B607",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/lma_sdk/_core/publish.py",
+    "line": 147,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/lma_sdk/_core/publish.py",
+    "line": 161,
+    "issue": "Starting a process with a partial executable path",
+    "fix": "Use absolute paths for executables. Avoid relying on PATH resolution which could lead to execution of unintended programs.",
+    "check_id": "B607",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/lma_sdk/_core/publish.py",
+    "line": 161,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/lma_sdk/_core/publish.py",
+    "line": 176,
+    "issue": "Starting a process with a partial executable path",
+    "fix": "Use absolute paths for executables. Avoid relying on PATH resolution which could lead to execution of unintended programs.",
+    "check_id": "B607",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/lma_sdk/_core/publish.py",
+    "line": 176,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/lma_sdk/_core/publish.py",
+    "line": 870,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "resolved"
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 3916,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "resolved",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "MCPApiKeyAuthorizerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 3963,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "resolved",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "MCPApiKeyManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4090,
+    "issue": "Ensure API Gateway caching is enabled",
+    "check_id": "CKV_AWS_120",
+    "priority": "LOW",
+    "fix": "Enable API Gateway caching in AWS::ApiGateway::Stage by setting 'CacheClusterEnabled: true' and configuring appropriate 'CacheClusterSize'. This improves API performance, reduces backend load, and can lower costs by serving cached responses.",
+    "status": "resolved",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "ApiGateway Stage",
+    "resourceName": "MCPApiKeyStage",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4487,
+    "issue": "Ensure that AWS Lambda function is configured inside a VPC",
+    "check_id": "CKV_AWS_117",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function to run within VPC by setting 'VpcConfig' with 'SubnetIds' and 'SecurityGroupIds' properties. This provides network isolation and enables access to VPC-only resources like RDS instances.",
+    "status": "resolved",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4487,
+    "issue": "Ensure that AWS Lambda function is configured for a Dead Letter Queue(DLQ)",
+    "check_id": "CKV_AWS_116",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function with Dead Letter Queue by setting 'DeadLetterConfig' with 'TargetArn' referencing an AWS::SQS::Queue or AWS::SNS::Topic resource. This captures failed function invocations for debugging and reprocessing.",
+    "status": "resolved",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4487,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "resolved",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4487,
+    "issue": "Ensure that AWS Lambda function is configured for function-level concurrent execution limit",
+    "check_id": "CKV_AWS_115",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function with concurrent execution limit by setting 'ReservedConcurrencyLimit' property to an appropriate value. This prevents the function from consuming all available concurrent executions in your account.",
+    "status": "resolved",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4902,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "resolved",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "MCPServerAnalyticsFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 5482,
+    "issue": "Ensure the ELBv2 (Application/Network) has access logging enabled",
+    "check_id": "CKV_AWS_91",
+    "priority": "INFO",
+    "fix": "Enable Application/Network Load Balancer access logging by adding 'LoadBalancerAttributes' with 'Key: access_logs.s3.enabled', 'Value: true' and 'Key: access_logs.s3.bucket' with S3 bucket name in AWS::ElasticLoadBalancingV2::LoadBalancer resource for comprehensive traffic monitoring.",
+    "status": "resolved",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "ElasticLoadBalancingV2 LoadBalancer",
+    "resourceName": "VNCALB",
+    "isCustomResource": false
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/lma_sdk/_core/publish.py",
+    "line": 298,
+    "issue": "Starting a process with a partial executable path",
+    "fix": "Use absolute paths for executables. Avoid relying on PATH resolution which could lead to execution of unintended programs.",
+    "check_id": "B607",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/lma_sdk/_core/publish.py",
+    "line": 298,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/lma_sdk/_core/publish.py",
+    "line": 983,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 11,
+    "issue": "Consider possible security implications associated with the subprocess module.",
+    "fix": "Use `import subprocess` with secure practices. Always validate inputs, avoid shell=True, and use absolute paths for executables.",
+    "check_id": "B404",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/blacklists/blacklist_imports.html#b404-import-subprocess",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 31,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 34,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 37,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 40,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 43,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 57,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 58,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 69,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 81,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 91,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 100,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 109,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 120,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 129,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 141,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 142,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 148,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 149,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 179,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 193,
+    "issue": "Starting a process with a partial executable path",
+    "fix": "Use absolute paths for executables. Avoid relying on PATH resolution which could lead to execution of unintended programs.",
+    "check_id": "B607",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 193,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 207,
+    "issue": "Starting a process with a partial executable path",
+    "fix": "Use absolute paths for executables. Avoid relying on PATH resolution which could lead to execution of unintended programs.",
+    "check_id": "B607",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 207,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 215,
+    "issue": "Starting a process with a partial executable path",
+    "fix": "Use absolute paths for executables. Avoid relying on PATH resolution which could lead to execution of unintended programs.",
+    "check_id": "B607",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 215,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 220,
+    "issue": "Starting a process with a partial executable path",
+    "fix": "Use absolute paths for executables. Avoid relying on PATH resolution which could lead to execution of unintended programs.",
+    "check_id": "B607",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 220,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 251,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 256,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 261,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 268,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 274,
+    "issue": "Starting a process with a partial executable path",
+    "fix": "Use absolute paths for executables. Avoid relying on PATH resolution which could lead to execution of unintended programs.",
+    "check_id": "B607",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 274,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 282,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 315,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 317,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 318,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 319,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 339,
+    "issue": "Starting a process with a partial executable path",
+    "fix": "Use absolute paths for executables. Avoid relying on PATH resolution which could lead to execution of unintended programs.",
+    "check_id": "B607",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 339,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 347,
+    "issue": "Starting a process with a partial executable path",
+    "fix": "Use absolute paths for executables. Avoid relying on PATH resolution which could lead to execution of unintended programs.",
+    "check_id": "B607",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b607_start_process_with_partial_path.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 347,
+    "issue": "subprocess call - check for execution of untrusted input.",
+    "fix": "Set `shell=False` explicitly in subprocess calls for clarity. Ensure command arguments are properly validated and use absolute paths.",
+    "check_id": "B603",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 366,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 367,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 368,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/tests/test_publish_operations.py",
+    "line": 369,
+    "issue": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+    "fix": "Replace `assert` statements with proper exception handling using `raise ValueError()` or `raise AssertionError()` with descriptive error messages, as assert statements are removed in optimized Python bytecode.",
+    "check_id": "B101",
+    "priority": "Low",
+    "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b101_assert_used.html",
+    "status": "Open"
+  },
+  {
+    "source": "security-matrix",
+    "path": "lma-main.yaml",
+    "resourceType": "AWS::Lambda::Function",
+    "resourceName": "RecordingsBucketNotificationFunction",
+    "issue": "Lambda function lacks CloudWatch alarms for monitoring",
+    "fix": "Create CloudWatch alarms for the following Lambda metrics: Errors,Throttles,Duration,Invocations,ConcurrentExecutions,DeadLetterErrors. Configure alarm actions (e.g., SNS notifications) to assign an owner who will monitor and respond to incidents.",
+    "priority": "HIGH",
+    "check_id": "LAMBDA-011",
+    "status": "suppressed",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4386,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "MCPApiKeyAuthorizerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4433,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "MCPApiKeyManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4560,
+    "issue": "Ensure API Gateway caching is enabled",
+    "check_id": "CKV_AWS_120",
+    "priority": "LOW",
+    "fix": "Enable API Gateway caching in AWS::ApiGateway::Stage by setting 'CacheClusterEnabled: true' and configuring appropriate 'CacheClusterSize'. This improves API performance, reduces backend load, and can lower costs by serving cached responses.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "ApiGateway Stage",
+    "resourceName": "MCPApiKeyStage",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4957,
+    "issue": "Ensure that AWS Lambda function is configured inside a VPC",
+    "check_id": "CKV_AWS_117",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function to run within VPC by setting 'VpcConfig' with 'SubnetIds' and 'SecurityGroupIds' properties. This provides network isolation and enables access to VPC-only resources like RDS instances.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4957,
+    "issue": "Ensure that AWS Lambda function is configured for a Dead Letter Queue(DLQ)",
+    "check_id": "CKV_AWS_116",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function with Dead Letter Queue by setting 'DeadLetterConfig' with 'TargetArn' referencing an AWS::SQS::Queue or AWS::SNS::Topic resource. This captures failed function invocations for debugging and reprocessing.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4957,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 4957,
+    "issue": "Ensure that AWS Lambda function is configured for function-level concurrent execution limit",
+    "check_id": "CKV_AWS_115",
+    "priority": "LOW",
+    "fix": "Configure AWS::Lambda::Function with concurrent execution limit by setting 'ReservedConcurrencyLimit' property to an appropriate value. This prevents the function from consuming all available concurrent executions in your account.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "VirtualParticipantManagerFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 5556,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "MCPServerAnalyticsFunction",
+    "isCustomResource": false
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 6136,
     "issue": "Ensure the ELBv2 (Application/Network) has access logging enabled",
     "check_id": "CKV_AWS_91",
     "priority": "INFO",

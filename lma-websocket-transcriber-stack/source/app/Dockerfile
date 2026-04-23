@@ -1,3 +1,4 @@
+# checkov:skip=CKV_DOCKER_2: "Health monitored by ECS target-group health check on /health/check endpoint rather than container HEALTHCHECK"
 ARG NODE_VERSION=20
 
 # First, build the project

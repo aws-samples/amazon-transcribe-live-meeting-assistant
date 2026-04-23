@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 # Set env vars before importing
-os.environ["MCP_API_KEYS_TABLE"] = "test-mcp-api-keys"
+os.environ["MCP_API_KEYS_TABLE"] = "test-mcp-api-keys"  # pragma: allowlist secret
 os.environ["LOG_LEVEL"] = "WARNING"
 
 import index

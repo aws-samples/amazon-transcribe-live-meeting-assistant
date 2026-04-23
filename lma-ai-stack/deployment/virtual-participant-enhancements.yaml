@@ -48,6 +48,10 @@ Resources:
   
   VirtualParticipantManagerFunction:
     Type: AWS::Serverless::Function
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for management function"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; reaches AWS public APIs only"
+    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive table names, stream names, and log level; AWS-owned key encryption is sufficient"
     Properties:
       FunctionName: !Sub "${LMAStackName}-VirtualParticipantManager"
       Handler: index.lambda_handler
@@ -72,6 +76,12 @@ Resources:
             reason: Customer can use VPC if desired
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM4
+            reason: "AWS-managed policies are used intentionally for standard Lambda execution"
+          - id: AwsSolutions-IAM5
+            reason: "Wildcards scoped by service/resource or PassedToService condition"
 
   VirtualParticipantManagerLogGroup:
     Type: AWS::Logs::LogGroup
@@ -82,6 +92,14 @@ Resources:
 
   VirtualParticipantManagerRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM4
+            reason: "AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow"
+          - id: AwsSolutions-IAM5
+            reason: "Wildcards scoped by service/resource or PassedToService condition; standard CFN least-privilege pattern"
+    # checkov:skip=CKV_AWS_111: "PassRole wildcard gated by iam:PassedToService condition (standard ECS task scheduling pattern); equivalent to cfn-nag F38/F40 false positives"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
