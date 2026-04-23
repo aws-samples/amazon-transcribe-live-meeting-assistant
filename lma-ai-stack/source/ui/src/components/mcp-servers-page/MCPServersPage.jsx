@@ -53,8 +53,8 @@ const MCPServersPage = () => {
     if (!vpData?.id) return undefined;
 
     const subscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
-      next: ({ value }) => {
-        const updated = value?.data?.onUpdateVirtualParticipant;
+      next: (message) => {
+        const updated = message?.data?.onUpdateVirtualParticipant;
         if (updated && updated.id === vpData.id) {
           setVpData((prev) => ({
             ...prev,

@@ -465,11 +465,11 @@ const VirtualParticipantDetails = () => {
 
     console.log('=== Setting up AppSync subscription for VP:', vpId);
     const subscription = client.graphql({ query: onUpdateVirtualParticipantDetailed }).subscribe({
-      next: ({ value }) => {
+      next: (message) => {
         console.log('=== AppSync subscription received update ===');
-        console.log('Raw value:', JSON.stringify(value, null, 2));
+        console.log('Raw value:', JSON.stringify(message, null, 2));
 
-        const updated = value?.data?.onUpdateVirtualParticipant;
+        const updated = message?.data?.onUpdateVirtualParticipant;
         console.log('Parsed update:', updated);
 
         if (updated && updated.id === vpId) {
