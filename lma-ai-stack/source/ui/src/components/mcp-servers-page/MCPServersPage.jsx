@@ -6,9 +6,9 @@
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
 import React, { useEffect, useState } from 'react';
-import { Container, Header, SpaceBetween } from '@cloudscape-design/components';
+import { Container, Header, SpaceBetween, Tabs } from '@cloudscape-design/components';
 import MCPServersContent from '../mcp-servers/MCPServersContent';
-import MCPApiKeySection from './MCPApiKeySection';
+import HostedMcpAccessTab from './HostedMcpAccessTab';
 import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
 
 const client = generateClient();
@@ -16,10 +16,18 @@ const logger = new ConsoleLogger('MCPServersPage');
 
 /**
  * MCP Servers Configuration Page
- * Full-page view for managing MCP servers (admin only)
+ *
+ * Split into two tabs:
+ *   1. "External MCP Servers" (default) — configure MCP servers that LMA's
+ *      Strands agent connects OUT to (public registry + custom servers + VP).
+ *   2. "Hosted MCP Access" — connection info for external MCP clients
+ *      (Claude Desktop / Quick Suite / custom agents) to connect IN to
+ *      LMA's own hosted MCP server (API key + OAuth). Surfaces the values
+ *      that otherwise live only in CloudFormation stack outputs.
  */
 const MCPServersPage = () => {
   const [vpData, setVpData] = useState(null);
+  const [activeTabId, setActiveTabId] = useState('external-servers');
 
   // Fetch Virtual Participant data for active meetings
   useEffect(() => {
@@ -40,8 +48,6 @@ const MCPServersPage = () => {
       } catch (error) {
         logger.error('Error fetching VP data:', error);
         setVpData(null);
-      } finally {
-        // Loading complete
       }
     };
 
@@ -71,16 +77,47 @@ const MCPServersPage = () => {
 
   return (
     <SpaceBetween size="l">
-      <MCPApiKeySection />
-      <Container
-        header={
-          <Header variant="h1" description="Manage Model Context Protocol servers for the Strands agent">
-            MCP Servers Configuration
-          </Header>
+      <Header
+        variant="h1"
+        description={
+          "Configure external MCP servers for LMA's Strands agent, or get the connection info " +
+          "needed to access LMA's hosted MCP server from external clients like Amazon Quick Suite or Claude Desktop."
         }
       >
-        <MCPServersContent vpData={vpData} />
-      </Container>
+        MCP Servers
+      </Header>
+      <Tabs
+        activeTabId={activeTabId}
+        onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
+        tabs={[
+          {
+            id: 'external-servers',
+            label: 'External MCP Servers',
+            content: (
+              <Container
+                header={
+                  <Header
+                    variant="h2"
+                    description={
+                      'Install and manage MCP servers that the Strands agent can call out to ' +
+                      '(public registry, custom servers, and Virtual Participant MCP).'
+                    }
+                  >
+                    External MCP Servers Configuration
+                  </Header>
+                }
+              >
+                <MCPServersContent vpData={vpData} />
+              </Container>
+            ),
+          },
+          {
+            id: 'hosted-access',
+            label: 'Hosted MCP Access',
+            content: <HostedMcpAccessTab />,
+          },
+        ]}
+      />
     </SpaceBetween>
   );
 };
