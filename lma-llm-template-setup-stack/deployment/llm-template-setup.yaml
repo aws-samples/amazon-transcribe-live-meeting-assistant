@@ -86,6 +86,10 @@ Resources:
 
   LLMPromptUploadFunction:
     Type: "AWS::Lambda::Function"
+    # checkov:skip=CKV_AWS_115: "CloudFormation custom resource; runs at stack deploy time only; reserved concurrency not required"
+    # checkov:skip=CKV_AWS_116: "CloudFormation custom resource; DLQ not applicable to synchronous cfnresponse invocation"
+    # checkov:skip=CKV_AWS_117: "CloudFormation custom resource; only interacts with DynamoDB and SSM via public AWS APIs; VPC adds no isolation benefit"
+    # checkov:skip=CKV_AWS_173: "Environment contains only a non-sensitive Domain string; AWS-owned key encryption is sufficient"
     Properties:
       Code: ../source/lambda_functions
       Handler: llm_prompt_upload.lambda_handler

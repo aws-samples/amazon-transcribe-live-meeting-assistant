@@ -86,6 +86,11 @@ Resources:
 
   BrowserExtensionCodeBuildServiceRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: 'Wildcards scoped by service/resource or PassedToService condition; standard CFN least-privilege pattern'
     Properties:
       Path: /
       AssumeRolePolicyDocument:
@@ -131,6 +136,11 @@ Resources:
 
   BrowserExtensionCodeBuildProject:
     Type: AWS::CodeBuild::Project
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-CB4
+            reason: 'CodeBuild encryption uses AWS-managed KMS (default); customer can override via EncryptionKey parameter'
     Properties:
       Description: !Sub >-
         Builds preconfigured browser extension for stack: ${AWS::StackName}
@@ -208,6 +218,11 @@ Resources:
 
   LambdaExecutionRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: 'Wildcards scoped by service/resource or PassedToService condition; standard CFN least-privilege pattern'
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -253,6 +268,10 @@ Resources:
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
     Properties:
       Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: python3.12

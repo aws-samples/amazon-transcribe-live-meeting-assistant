@@ -437,6 +437,19 @@ Parameters:
     Description: >-
       (Optional) Comma-separated list of additional OAuth callback URLs for custom MCP clients.
 
+  WAFAllowedIPv4Ranges:
+    Type: String
+    Default: "0.0.0.0/0"
+    Description: >-
+      (Optional) Comma-separated list of IPv4 CIDR ranges allowed to access protected
+      regional resources (MCP API Gateway, and optionally other regional resources).
+      Default "0.0.0.0/0" disables WAF and allows all IPs.
+      Example to restrict: "192.168.1.0/24, 10.0.0.0/16"
+      When set to any non-default value, a REGIONAL WAFv2 WebACL is created and associated
+      with eligible resources (currently the MCP API Gateway stage when EnableMCPServer=true).
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}(,\s*([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2})*$'
+    ConstraintDescription: Must be valid comma-separated list of IPv4 CIDR ranges
+
   CognitoUserPoolDomain:
     Type: String
     Default: ""
@@ -479,7 +492,7 @@ Parameters:
 
   VPScheduleGroupName:
     Type: String
-    Default: "LMA-VIRTUALPARTICIPANTSTACK-1ICEYE8S4JXFV-vp-schedules"
+    Default: "LMA-VIRTUALPARTICIPANTSTACK-1ICEYE8S4JXFV-vp-schedules"  # pragma: allowlist secret
     Description: >-
       Name of the EventBridge Schedule Group for Virtual Participants from the VP stack.
       This should match the schedule group name created by the Virtual Participant stack.
@@ -535,6 +548,15 @@ Conditions:
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
   ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
   HasCustomMCPServerCallbackURLs: !Not [!Equals [!Ref MCPServerCallbackURLs, ""]]
+  # Generic WAF enablement - true when WAFAllowedIPv4Ranges is restricted (not 0.0.0.0/0).
+  # The WebACL is REGIONAL and can be associated with any eligible regional resource
+  # (API Gateway REST APIs, ALBs, AppSync APIs, etc.). Naming uses "Regional" to
+  # distinguish from potential CloudFront-scoped WAF which must be created in us-east-1.
+  IsRegionalWafEnabled: !Not [!Equals [!Ref WAFAllowedIPv4Ranges, "0.0.0.0/0"]]
+  # MCP API Gateway WAF is only associated when both MCP server is enabled AND WAF is enabled
+  ShouldAssociateMCPApiWithWaf: !And
+    - !Condition ShouldEnableMCPServer
+    - !Condition IsRegionalWafEnabled
   ShouldEnableLambdaAgentAssist:
     !Equals [!Ref IsLambdaAgentAssistEnabled, "true"]
   ShouldEnableTranscriptLambdaHookFunction:
@@ -4374,6 +4396,7 @@ Resources:
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_116: "DLQ not required"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive DynamoDB table name and log level; AWS-owned key encryption is sufficient"
     Properties:
       FunctionName: !Sub "${LMAStackName}-MCPApiKeyAuthorizer"
       Handler: index.handler
@@ -4421,6 +4444,7 @@ Resources:
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_116: "DLQ not required"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive DynamoDB table name and log level; AWS-owned key encryption is sufficient"
     Properties:
       FunctionName: !Sub "${LMAStackName}-MCPApiKeyManager"
       Handler: index.handler
@@ -4457,6 +4481,18 @@ Resources:
         Types:
           - REGIONAL
 
+  # Request Validator for MCPApiKey API
+  # Validates request parameters and headers. Body validation skipped because
+  # MCP protocol uses varying JSON-RPC payloads handled by Lambda authorizer/backend.
+  MCPApiKeyRequestValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Condition: ShouldEnableMCPServer
+    Properties:
+      RestApiId: !Ref MCPApiKeyRestApi
+      Name: "MCPApiKeyRequestValidator"
+      ValidateRequestBody: false
+      ValidateRequestParameters: true
+
   MCPApiKeyAuthorizer:
     Type: AWS::ApiGateway::Authorizer
     Condition: ShouldEnableMCPServer
@@ -4484,6 +4520,7 @@ Resources:
       HttpMethod: ANY
       AuthorizationType: CUSTOM
       AuthorizerId: !Ref MCPApiKeyAuthorizer
+      RequestValidatorId: !Ref MCPApiKeyRequestValidator
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -4498,6 +4535,7 @@ Resources:
       HttpMethod: ANY
       AuthorizationType: CUSTOM
       AuthorizerId: !Ref MCPApiKeyAuthorizer
+      RequestValidatorId: !Ref MCPApiKeyRequestValidator
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -4512,18 +4550,39 @@ Resources:
     Properties:
       RestApiId: !Ref MCPApiKeyRestApi
 
+  # CloudWatch Log Group for API Gateway access logs (security-matrix API-GW-001)
+  MCPApiKeyAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableMCPServer
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/${LMAStackName}-MCP-ApiKey/access"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   MCPApiKeyStage:
     Type: AWS::ApiGateway::Stage
     Condition: ShouldEnableMCPServer
+    # checkov:skip=CKV_AWS_73: "X-Ray tracing not required for this API; operational cost consideration"
+    # checkov:skip=CKV2_AWS_4: "Access logging enabled via AccessLogSetting property"
+    # checkov:skip=CKV2_AWS_29: "WAF protection is OPTIONAL via WAFAllowedIPv4Ranges parameter - customer configurable"
+    # checkov:skip=CKV_AWS_120: "Caching disabled by design - this is the API Key auth endpoint; caching would serve stale authorization decisions after a user revokes their key. AuthorizerResultTtlInSeconds=0 ensures every request re-evaluates the key hash against DynamoDB."
     Properties:
       RestApiId: !Ref MCPApiKeyRestApi
       DeploymentId: !Ref MCPApiKeyDeployment
       StageName: mcp
+      # Access logging (security-matrix API-GW-001): per-request structured JSON logs
+      AccessLogSetting:
+        DestinationArn: !GetAtt MCPApiKeyAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationStatus":"$context.integrationStatus","integrationLatency":"$context.integrationLatency","authorizerError":"$context.authorizer.error"}'
+      # Execution logs (security-matrix API-GW-006): authorizer/integration telemetry
       MethodSettings:
         - HttpMethod: "*"
           ResourcePath: "/*"
           ThrottlingBurstLimit: 50
           ThrottlingRateLimit: 100
+          LoggingLevel: INFO
+          DataTraceEnabled: false  # avoid logging request/response bodies (may contain sensitive MCP data)
+          MetricsEnabled: true
 
   MCPApiKeyLambdaPermission:
     Type: AWS::Lambda::Permission
@@ -4900,6 +4959,10 @@ Resources:
   # Virtual Participant Manager Lambda Function
   VirtualParticipantManagerFunction:
     Type: AWS::Serverless::Function
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for management function"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; reaches AWS public APIs only"
+    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive table names, stream names, schedule group names, and ARNs; AWS-owned key encryption is sufficient"
     Properties:
       FunctionName: !Sub "${AWS::StackName}-VirtualParticipantManager"
       Handler: index.lambda_handler
@@ -5435,7 +5498,7 @@ Resources:
     Properties:
       ClientName: "LMA-MCPServer-ExternalApp-Client"
       UserPoolId: !Ref UserPoolId
-      GenerateSecret: true
+      GenerateSecret: true  # pragma: allowlist secret
       ExplicitAuthFlows:
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
@@ -5510,6 +5573,7 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ not required for MCP handler"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive configuration (table names, S3 bucket name, KB IDs, model IDs, SSM parameter names); no secrets"
     Properties:
       FunctionName: !Sub "${LMAStackName}-MCPServerAnalytics"
       CodeUri: ../source/lambda_functions/mcp_analytics/
@@ -6079,6 +6143,8 @@ Resources:
   # Application Load Balancer
   VNCALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    # checkov:skip=CKV_AWS_91: "ALB ingress is restricted to CloudFront prefix list only; request-level audit trail is maintained via CloudFront access logs written to the shared logging bucket. ALB access logs would only show CloudFront edge IPs (not client IPs)."
+    # checkov:skip=CKV_AWS_150: "Deletion protection not required for this deployment-managed resource; stack deletion is expected to clean up all resources"
     Properties:
       Type: application
       Scheme: internet-facing
@@ -6120,6 +6186,8 @@ Resources:
   # HTTP Listener (port 80)
   VNCALBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    # checkov:skip=CKV_AWS_103: ALB uses HTTP for internal traffic; TLS termination handled at CloudFront layer with Lambda@Edge auth
+    # checkov:skip=CKV_AWS_2: ALB uses HTTP for internal traffic; TLS termination handled at CloudFront layer with Lambda@Edge auth; ALB security group restricts traffic to CloudFront only
     Properties:
       LoadBalancerArn: !Ref VNCALB
       Port: 80

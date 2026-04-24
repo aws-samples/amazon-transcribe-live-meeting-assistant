@@ -717,6 +717,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       
       // Create regex with word boundaries
       // \b ensures we match complete words, not partial matches
+      // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- Inputs are regex-escaped by the preceding .replace() call; escaped wake-phrase cannot produce catastrophic backtracking
       const regex = new RegExp(`\\b${escapedPhrase}\\b`, 'i');
       const matches = regex.test(normalized);
       

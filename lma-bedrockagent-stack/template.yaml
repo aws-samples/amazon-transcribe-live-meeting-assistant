@@ -131,6 +131,13 @@ Resources:
 
   SendMessageFunctionRole:
     Type: 'AWS::IAM::Role'
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM4
+            reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -166,6 +173,10 @@ Resources:
             reason: Function does not require VPC access as it only interacts with AWS services via APIs
           - id: W92
             reason: Function does not require reserved concurrency as it scales based on demand
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: "python3.12 is an actively supported Lambda runtime; upgrade is an availability/testing consideration"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"

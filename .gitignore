@@ -19,6 +19,7 @@ samconfig.toml
 .dsr/
 !.dsr/issues.json
 !.dsr/settings.json
+.ash/
 
 # Node
 node_modules/

@@ -376,6 +376,7 @@ Resources:
   ##########################################################################
   TranscriberECRRepository:
     Type: AWS::ECR::Repository
+    # checkov:skip=CKV_AWS_51: "MUTABLE required to support rolling :latest deployments from CodeBuild; IMMUTABLE would break redeployment model. Push is restricted to the CodeBuild service role, repo is private and KMS-encrypted with ScanOnPush enabled."
     Properties:
       ImageScanningConfiguration:
         ScanOnPush: true
