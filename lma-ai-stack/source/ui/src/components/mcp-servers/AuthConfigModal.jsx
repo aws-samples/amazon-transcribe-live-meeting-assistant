@@ -315,7 +315,7 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
       // Reset form
       setBearerToken('');
       setCustomHeaders('{\n  "X-API-Key": "your-key-here"\n}');
-      setEnvVars('{\n  "API_KEY": "your-key-here"\n}');  // pragma: allowlist secret
+      setEnvVars('{\n  "API_KEY": "your-key-here"\n}'); // pragma: allowlist secret
       setOauthClientId('');
       setOauthClientSecret('');
       setOauthTokenUrl('');

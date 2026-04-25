@@ -1188,13 +1188,12 @@ Resources:
 
   ASGDeletionHandlerFunction:
     Type: AWS::Lambda::Function
+    Condition: UseEC2LaunchType
     Metadata:
       cdk_nag:
         rules_to_suppress:
           - id: AwsSolutions-L1
             reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
-    Condition: UseEC2LaunchType
-    Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: W89

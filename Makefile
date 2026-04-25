@@ -206,17 +206,20 @@ lint-mypy: ## Run mypy type checking on Python Lambda functions
 # Checksum file for UI lint change detection
 UI_LINT_CHECKSUM_FILE := .ui-lint-checksum
 
-lint-ui: ## Lint React UI (ESLint, skips if source unchanged)
+lint-ui: ## Lint React UI (ESLint, skips if source unchanged; use FORCE=1 to bypass cache)
 	@NEW_CHECKSUM=$$(find $(UI_DIR)/src -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}'); \
 	OLD_CHECKSUM=$$(cat $(UI_LINT_CHECKSUM_FILE) 2>/dev/null || echo ""); \
-	if [ "$$NEW_CHECKSUM" = "$$OLD_CHECKSUM" ]; then \
-		echo -e "$(GREEN)✅ UI lint skipped — source unchanged since last run$(NC)"; \
+	if [ -z "$(FORCE)" ] && [ "$$NEW_CHECKSUM" = "$$OLD_CHECKSUM" ]; then \
+		echo -e "$(GREEN)✅ UI lint skipped — source unchanged since last run (use FORCE=1 to override)$(NC)"; \
 	else \
-		echo "Running UI lint..."; \
+		if [ -n "$(FORCE)" ]; then echo "Running UI lint (forced)..."; else echo "Running UI lint..."; fi; \
 		cd $(UI_DIR) && npm ci --prefer-offline --no-audit 2>/dev/null && npm run lint && \
 		echo "$$NEW_CHECKSUM" > $(CURDIR)/$(UI_LINT_CHECKSUM_FILE) && \
 		echo -e "$(GREEN)✅ UI lint passed!$(NC)"; \
 	fi
+
+lint-ui-force: ## Lint React UI (ignore checksum, always run)
+	@$(MAKE) lint-ui FORCE=1
 
 lint-typescript: ## TypeScript build check on WebSocket and Virtual Participant stacks
 	@echo "Running TypeScript build check on WebSocket transcriber..."
