@@ -78,6 +78,17 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
         'Activate at least one MCP server under Setup > MCP Servers; the Server ' +
         'URL uses the pattern https://api.salesforce.com/platform/mcp/v1/platform/<server-api-name>.',
     },
+    salesforce_sandbox: {
+      name: 'Salesforce Sandbox',
+      authorizationUrl: 'https://test.salesforce.com/services/oauth2/authorize',
+      tokenUrl: 'https://test.salesforce.com/services/oauth2/token',
+      defaultScopes: 'mcp_api refresh_token offline_access',
+      instructions:
+        'Create a Connected App in Salesforce Sandbox Setup with OAuth enabled. ' +
+        'Enable PKCE and select scopes: mcp_api, refresh_token, offline_access. ' +
+        'Activate at least one MCP server under Setup > MCP Servers; the Server ' +
+        'URL uses the pattern https://api.salesforce.com/platform/mcp/v1/platform/<server-api-name>.',
+    },
     google: {
       name: 'Google',
       authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
@@ -315,7 +326,7 @@ const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
       // Reset form
       setBearerToken('');
       setCustomHeaders('{\n  "X-API-Key": "your-key-here"\n}');
-      setEnvVars('{\n  "API_KEY": "your-key-here"\n}');  // pragma: allowlist secret
+      setEnvVars('{\n  "API_KEY": "your-key-here"\n}'); // pragma: allowlist secret
       setOauthClientId('');
       setOauthClientSecret('');
       setOauthTokenUrl('');
