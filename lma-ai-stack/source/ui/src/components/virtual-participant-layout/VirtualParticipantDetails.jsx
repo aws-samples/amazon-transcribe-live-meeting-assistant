@@ -21,6 +21,7 @@ import {
   Spinner,
   Flashbar,
 } from '@cloudscape-design/components';
+import useAppContext from '../../contexts/app';
 import StatusTimeline from './StatusTimeline';
 import VNCViewer from './VNCViewer';
 
@@ -426,6 +427,7 @@ ActionButtons.propTypes = {
 const VirtualParticipantDetails = () => {
   const { vpId } = useParams();
   const navigate = useNavigate();
+  const { authState } = useAppContext();
   const [vpDetails, setVpDetails] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -454,14 +456,16 @@ const VirtualParticipantDetails = () => {
   };
 
   useEffect(() => {
-    if (vpId) {
+    if (vpId && authState === 'authenticated') {
       loadVpDetails();
     }
-  }, [vpId]);
+  }, [vpId, authState]);
 
   // Set up real-time updates subscription - NO NOTIFICATIONS (handled by VirtualParticipantList)
   useEffect(() => {
     if (!vpId) return undefined;
+
+    if (authState !== 'authenticated') return undefined;
 
     console.log('=== Setting up AppSync subscription for VP:', vpId);
     const subscription = client.graphql({ query: onUpdateVirtualParticipantDetailed }).subscribe({
@@ -519,7 +523,7 @@ const VirtualParticipantDetails = () => {
       console.log('=== Unsubscribing from AppSync for VP:', vpId);
       subscription.unsubscribe();
     };
-  }, [vpId]);
+  }, [vpId, authState]);
 
   const handleRefresh = () => {
     loadVpDetails();

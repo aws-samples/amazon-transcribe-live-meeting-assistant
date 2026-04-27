@@ -123,7 +123,7 @@ export class VirtualParticipantStatusManager {
       console.log(`Current VP state from query:`, JSON.stringify(current, null, 2));
       console.log(`Preserving CallId: ${current.CallId}, VNC fields while updating status to ${status}`);
 
-      // Update with new status while preserving CallId and VNC fields
+      // Update with new status while preserving CallId and VNC fields.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
           updateVirtualParticipant(input: $input) {
@@ -134,6 +134,8 @@ export class VirtualParticipantStatusManager {
             vncPort
             vncReady
             updatedAt
+            Owner
+            SharedWith
           }
         }
       `;
@@ -307,6 +309,8 @@ export class VirtualParticipantStatusManager {
             id
             CallId
             updatedAt
+            Owner
+            SharedWith
           }
         }
       `;
@@ -405,7 +409,7 @@ export class VirtualParticipantStatusManager {
       const current = currentVP.getVirtualParticipant;
       console.log(`Setting manual action required: ${actionType} - ${message}`);
 
-      // Update with MANUAL_ACTION_REQUIRED status and metadata
+      // Update with MANUAL_ACTION_REQUIRED status and metadata.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
           updateVirtualParticipant(input: $input) {
@@ -420,6 +424,8 @@ export class VirtualParticipantStatusManager {
             manualActionTimeoutSeconds
             manualActionStartTime
             updatedAt
+            Owner
+            SharedWith
           }
         }
       `;
@@ -491,7 +497,7 @@ export class VirtualParticipantStatusManager {
       const current = currentVP.getVirtualParticipant;
       console.log(`Clearing manual action for VP ${this.participantId}`);
 
-      // Update to clear manual action fields by setting them to null
+      // Update to clear manual action fields by setting them to null.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
           updateVirtualParticipant(input: $input) {
@@ -506,6 +512,8 @@ export class VirtualParticipantStatusManager {
             manualActionTimeoutSeconds
             manualActionStartTime
             updatedAt
+            Owner
+            SharedWith
           }
         }
       `;
@@ -1018,7 +1026,7 @@ export class VirtualParticipantStatusManager {
 
       const currentCallId = currentVP.getVirtualParticipant.CallId;
 
-      // Update VP with vncReady flag and full URL
+      // Update VP with vncReady flag and full URL.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
           updateVirtualParticipant(input: $input) {
@@ -1028,6 +1036,8 @@ export class VirtualParticipantStatusManager {
             vncReady
             CallId
             updatedAt
+            Owner
+            SharedWith
           }
         }
       `;

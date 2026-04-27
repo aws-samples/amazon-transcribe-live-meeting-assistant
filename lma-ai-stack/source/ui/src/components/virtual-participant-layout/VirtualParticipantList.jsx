@@ -5,7 +5,7 @@
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
-import { fetchAuthSession } from 'aws-amplify/auth';
+import { fetchAuthSession, fetchUserAttributes } from 'aws-amplify/auth';
 import React, { useState, useEffect } from 'react';
 import {
   Table,
@@ -393,7 +393,15 @@ const VirtualParticipantList = () => {
     setCreatingType(isScheduled ? 'scheduled' : 'immediate');
 
     try {
-      const userName = user?.attributes?.email || 'test-user@example.com';
+      let email;
+      try {
+        const attrs = await fetchUserAttributes();
+        email = attrs?.email;
+      } catch (attrErr) {
+        logger.debug('fetchUserAttributes failed, falling back to user identifier', attrErr);
+      }
+      const userName =
+        email || user?.attributes?.email || user?.signInDetails?.loginId || user?.username || 'test-user@example.com';
 
       // Calculate meeting time for scheduling
       let meetingTimestamp = null;

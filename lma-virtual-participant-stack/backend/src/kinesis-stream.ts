@@ -203,7 +203,7 @@ class KinesisStreamManager {
         const currentStatus = currentVP.status || 'INITIALIZING';
         console.log(`Current VP status: ${currentStatus}`);
 
-        // Now update with CallId while preserving status
+        // Now update with CallId while preserving status.
         const mutation = `
             mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
                 updateVirtualParticipant(input: $input) {
@@ -211,6 +211,8 @@ class KinesisStreamManager {
                     status
                     CallId
                     updatedAt
+                    Owner
+                    SharedWith
                 }
             }
         `;

@@ -385,6 +385,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
         const residualBaseHour = baseDate.getUTCHours() % hoursInShard;
         residualHours = [...Array(hoursInShard - residualBaseHour).keys()].map((h) => baseDate.getUTCHours() + h);
       }
+      residualHours = residualHours.filter((h) => h >= 0 && h <= 23);
       const baseDateString = baseDate.toISOString().split('T')[0];
 
       const residualDateHours = { date: baseDateString, hours: residualHours };
