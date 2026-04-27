@@ -3,21 +3,31 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 import {
+  Alert,
+  Box,
   Button,
   ButtonDropdown,
+  ColumnLayout,
   CollectionPreferences,
+  FormField,
   Icon,
+  Input,
+  Modal,
   SpaceBetween,
   Badge,
   Popover,
 } from '@cloudscape-design/components';
+import { generateClient } from 'aws-amplify/api';
 import { Link as RouterLink } from 'react-router-dom';
 
 import { TableHeader } from '../common/table';
 import { exportToExcel } from '../common/download-func';
+import { deleteVirtualParticipants } from '../../graphql/queries/virtualParticipantQueries';
+
+const client = generateClient();
 
 export const KEY_COLUMN_ID = 'id';
 
@@ -308,6 +318,162 @@ const TIME_PERIOD_DROPDOWN_ITEMS = Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map(
 // Local storage key to persist the last time filter
 export const TIME_FILTER_STORAGE_KEY = 'vpTimeFilter';
 
+// Statuses that indicate the VP is currently running/scheduled and will be
+// ended server-side before its record is deleted.
+const ACTIVE_VP_STATUSES = ['SCHEDULED', 'INITIALIZING', 'CONNECTING', 'JOINING', 'JOINED', 'ACTIVE'];
+
+// Delete modal for Virtual Participants. Mirrors the `deleteModal` used on the
+// meetings list page: requires the user to type "confirm" before the delete
+// mutation is issued. Supports multi-select bulk delete.
+export const VpDeleteModal = (props) => {
+  const { selectedItems = [], loading, onRefresh, onNotify } = props;
+
+  const [visible, setVisible] = useState(false);
+  const [deleteDisabled, setDeleteDisabled] = useState(false);
+  const [deleteResult, setDeleteResult] = useState(null);
+  const [deleteInputText, setDeleteInputText] = useState('');
+  const deleteConsentText = 'confirm';
+  const inputMatchesConsentText = deleteInputText.toLowerCase() === deleteConsentText;
+
+  useEffect(() => {
+    setDeleteInputText('');
+    setDeleteDisabled(false);
+    setDeleteResult(null);
+  }, [visible]);
+
+  const hasActiveSelection = selectedItems.some((vp) => ACTIVE_VP_STATUSES.includes(vp.status));
+
+  const modalContent =
+    selectedItems.length === 1
+      ? `"${selectedItems[0].meetingName || selectedItems[0].id}"`
+      : `${selectedItems.length} Virtual Participants`;
+
+  const openDeleteSettings = () => {
+    setVisible(true);
+  };
+
+  const closeDeleteSettings = () => {
+    setVisible(false);
+  };
+
+  const handleDelete = async (e) => {
+    e.preventDefault();
+    setDeleteDisabled(true);
+    try {
+      const ids = selectedItems.map((vp) => vp.id);
+      const response = await client.graphql({
+        query: deleteVirtualParticipants,
+        variables: { input: { ids } },
+      });
+      const result = response.data.deleteVirtualParticipants?.Result || 'Deletion completed.';
+      setDeleteResult(result);
+      if (typeof onNotify === 'function') {
+        onNotify({ type: 'success', content: result });
+      }
+      if (typeof onRefresh === 'function') {
+        onRefresh();
+      }
+      // Close the modal shortly after showing the success banner.
+      setTimeout(() => setVisible(false), 800);
+    } catch (err) {
+      const message = err?.errors?.[0]?.message || err?.message || 'Failed to delete Virtual Participants';
+      setDeleteResult(null);
+      if (typeof onNotify === 'function') {
+        onNotify({ type: 'error', content: message });
+      }
+      setDeleteDisabled(false);
+    }
+  };
+
+  const handleDeleteSubmit = (event) => {
+    event.preventDefault();
+    if (inputMatchesConsentText && !deleteDisabled) {
+      handleDelete(event);
+    }
+  };
+
+  return (
+    <SpaceBetween size="xxs" direction="horizontal">
+      <Button
+        iconName="remove"
+        variant="normal"
+        loading={loading}
+        disabled={selectedItems.length === 0}
+        onClick={openDeleteSettings}
+      />
+      <Modal
+        visible={visible}
+        onDismiss={closeDeleteSettings}
+        header={<h3>Delete {modalContent}</h3>}
+        closeAriaLabel="Close dialog"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={closeDeleteSettings}>
+                Close
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleDelete}
+                disabled={!inputMatchesConsentText || deleteDisabled || selectedItems.length === 0}
+                data-testid="submit"
+              >
+                Delete
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          {selectedItems.length > 1 ? (
+            <Box variant="span">
+              Permanently delete{' '}
+              <Box variant="span" fontWeight="bold">
+                {selectedItems.length} Virtual Participants
+              </Box>
+              ? You can’t undo this action.
+            </Box>
+          ) : (
+            <Box variant="span">
+              Permanently delete Virtual Participant{' '}
+              <Box variant="span" fontWeight="bold">
+                {selectedItems[0]?.meetingName || selectedItems[0]?.id}
+              </Box>
+              ? You can’t undo this action.
+            </Box>
+          )}
+
+          {hasActiveSelection && (
+            <Alert type="warning" statusIconAriaLabel="Warning">
+              {selectedItems.length > 1
+                ? 'One or more selected Virtual Participants are currently active or scheduled. ' +
+                  'They will be ended (ECS task stopped, ALB/schedule cleanup) before deletion.'
+                : 'This Virtual Participant is currently active or scheduled. ' +
+                  'It will be ended (ECS task stopped, ALB/schedule cleanup) before deletion.'}
+            </Alert>
+          )}
+
+          <Box>To avoid accidental deletions, we ask you to provide additional written consent.</Box>
+
+          <form onSubmit={handleDeleteSubmit}>
+            <FormField label={`To confirm this deletion, type "${deleteConsentText}".`}>
+              <ColumnLayout columns={1}>
+                <Input
+                  placeholder={deleteConsentText}
+                  onChange={(event) => setDeleteInputText(event.detail.value)}
+                  value={deleteInputText}
+                  ariaRequired
+                />
+                {deleteResult && <Alert type="success">{deleteResult}</Alert>}
+              </ColumnLayout>
+            </FormField>
+          </form>
+        </SpaceBetween>
+      </Modal>
+    </SpaceBetween>
+  );
+};
+
 export const VPCommonHeader = ({ resourceName = 'Virtual Participants', ...props }) => {
   const onTimeFilterChange = ({ detail }) => {
     const { id } = detail;
@@ -334,6 +500,12 @@ export const VPCommonHeader = ({ resourceName = 'Virtual Participants', ...props
             variant="normal"
             loading={props.loading}
             onClick={() => exportToExcel(props.items, 'Virtual-Participants-List')}
+          />
+          <VpDeleteModal
+            selectedItems={props.selectedItems || []}
+            loading={props.loading}
+            onRefresh={props.onRefresh}
+            onNotify={props.onNotify}
           />
           <Button variant="normal" onClick={() => props.onPasteInvite()}>
             Paste Meeting Invite

@@ -195,6 +195,7 @@ type Mutation @aws_iam {
 	createVirtualParticipant(input: CreateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	updateVirtualParticipant(input: UpdateVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
+	deleteVirtualParticipants(input: DeleteVirtualParticipantsInput!): DeleteVirtualParticipantsOutput @aws_cognito_user_pools @aws_iam
 	shareVirtualParticipant(input: ShareVirtualParticipantInput!): ShareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
 	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
 	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools
@@ -307,6 +308,14 @@ input EndVirtualParticipantInput {
 	id: ID!
 	endReason: String!
 	endedBy: String
+}
+
+input DeleteVirtualParticipantsInput {
+	ids: [ID!]!
+}
+
+type DeleteVirtualParticipantsOutput @aws_cognito_user_pools @aws_iam {
+	Result: String
 }
 
 input ShareVirtualParticipantInput {

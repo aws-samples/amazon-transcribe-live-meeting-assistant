@@ -32,7 +32,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
   {
     id: KEY_COLUMN_ID,
     header: 'Meeting ID',
-    cell: (item) => <Link href={`#${CALLS_PATH}/${item.callId}`}>{item.callId}</Link>,
+    cell: (item) => <Link href={`#${CALLS_PATH}/${encodeURIComponent(item.callId)}`}>{item.callId}</Link>,
     sortingField: 'callId',
     width: 325,
   },
