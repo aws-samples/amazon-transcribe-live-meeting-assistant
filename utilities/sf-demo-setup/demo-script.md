@@ -171,7 +171,7 @@
 > **[SCREEN: Transcript shows Alex's spoken response as new transcript lines attributed to the assistant.]**
 
 **Jeremy:**
-"That's great context. Does AWS have any recent relevant announcements for healthcare?"
+"That's great context. v"
 
 > **[AUDIO: Alex responds with recent AWS healthcare announcements — e.g., Amazon Bedrock for healthcare, HealthLake updates, HIPAA-eligible services.]**
 
@@ -200,7 +200,7 @@
 > **[SCREEN: Bob navigates to the Meetings List page (left nav → Meetings). Shows the table with multiple meetings — columns visible: Meeting Topic, Status, Duration, Sentiment, Owner.]**
 
 **Bob:**
-"Here's the meeting inventory — every meeting is logged with its status, duration, and even sentiment analysis. You can filter, sort, and search across all your meetings."
+"Here's the meeting inventory — every meeting is logged with its status, duration, summary. You can filter, sort, and search across all your meetings."
 
 > **[SCREEN: Bob navigates to Meetings Query (left nav → Meetings Query). Types in the search box: "What did we decide about the ACME Healthcare pricing?"]**
 

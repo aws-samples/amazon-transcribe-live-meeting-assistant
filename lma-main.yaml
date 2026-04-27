@@ -1667,13 +1667,12 @@ Resources:
 
   S3BucketCleanupFunction:
     Type: AWS::Lambda::Function
+    Condition: ShouldDeleteDataOnDelete
     Metadata:
       cdk_nag:
         rules_to_suppress:
           - id: AwsSolutions-L1
             reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
-    Condition: ShouldDeleteDataOnDelete
-    Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: W89
