@@ -334,7 +334,12 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
               variant="h2"
               actions={
                 <SpaceBetween direction="horizontal" size="xs">
-                  <Button href={`#/calls/${callId}`} variant="link" iconName="external" target="blank">
+                  <Button
+                    href={`#/calls/${encodeURIComponent(callId)}`}
+                    variant="link"
+                    iconName="external"
+                    target="blank"
+                  >
                     Open meeting details
                   </Button>
                   <Button variant="primary" onClick={stopMeeting}>
@@ -390,7 +395,12 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
             </Box>
             {callId && (
               <Box margin={{ top: 'm' }}>
-                <Button href={`#/calls/${callId}`} variant="primary" iconName="external" target="blank">
+                <Button
+                  href={`#/calls/${encodeURIComponent(callId)}`}
+                  variant="primary"
+                  iconName="external"
+                  target="blank"
+                >
                   View Meeting Recording
                 </Button>
               </Box>
