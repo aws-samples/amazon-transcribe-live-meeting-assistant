@@ -606,7 +606,7 @@ const StreamAudio = ({ mode: modeProp }) => {
                     <div>
                       {mode === MODE_STREAM && recording && (
                         <Button
-                          href={`#/calls/${callMetaData.callId}`}
+                          href={`#/calls/${encodeURIComponent(callMetaData.callId)}`}
                           variant="link"
                           iconName="external"
                           target="blank"
@@ -615,7 +615,12 @@ const StreamAudio = ({ mode: modeProp }) => {
                         </Button>
                       )}
                       {mode === MODE_UPLOAD && uploadedCallId && (
-                        <Button href={`#/calls/${uploadedCallId}`} variant="link" iconName="external" target="blank">
+                        <Button
+                          href={`#/calls/${encodeURIComponent(uploadedCallId)}`}
+                          variant="link"
+                          iconName="external"
+                          target="blank"
+                        >
                           Open meeting detail
                         </Button>
                       )}
@@ -806,7 +811,7 @@ const StreamAudio = ({ mode: modeProp }) => {
                         <span>
                           Meeting ID: <code>{uploadedCallId}</code>
                         </span>
-                        <Link href={`#/calls/${uploadedCallId}`} external>
+                        <Link href={`#/calls/${encodeURIComponent(uploadedCallId)}`} external>
                           Open meeting detail page
                         </Link>
                       </SpaceBetween>
@@ -822,7 +827,7 @@ const StreamAudio = ({ mode: modeProp }) => {
         <Box margin={{ top: 'xl' }} float="right" color="text-label">
           <SpaceBetween direction="horizontal" size="s">
             <span>Stream ended:</span>
-            <Link href={`#/calls/${recordedMeetingId}`} external>
+            <Link href={`#/calls/${encodeURIComponent(recordedMeetingId)}`} external>
               Open recorded meeting
             </Link>
           </SpaceBetween>

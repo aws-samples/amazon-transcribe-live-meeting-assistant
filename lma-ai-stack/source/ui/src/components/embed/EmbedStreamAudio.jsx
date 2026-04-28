@@ -340,7 +340,12 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
                 actions={
                   <div>
                     {recording && (
-                      <Button href={`#/calls/${callMetaData.callId}`} variant="link" iconName="external" target="blank">
+                      <Button
+                        href={`#/calls/${encodeURIComponent(callMetaData.callId)}`}
+                        variant="link"
+                        iconName="external"
+                        target="blank"
+                      >
                         Open in progress meeting
                       </Button>
                     )}
@@ -407,7 +412,7 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
         <Box margin={{ top: 'xl' }} float="right" color="text-label">
           <SpaceBetween direction="horizontal" size="s">
             <span>Stream ended:</span>
-            <Link href={`#/calls/${recordedMeetingId}`} external>
+            <Link href={`#/calls/${encodeURIComponent(recordedMeetingId)}`} external>
               Open recorded meeting
             </Link>
           </SpaceBetween>

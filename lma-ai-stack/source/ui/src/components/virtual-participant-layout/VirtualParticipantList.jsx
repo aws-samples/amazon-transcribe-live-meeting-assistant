@@ -617,6 +617,7 @@ const VirtualParticipantList = () => {
             onRefresh={loadParticipants}
             onPasteInvite={() => setShowPasteInviteModal(true)}
             onCreateVP={() => setShowCreateModal(true)}
+            onNotify={setNotification}
             items={filteredParticipants}
           />
         }

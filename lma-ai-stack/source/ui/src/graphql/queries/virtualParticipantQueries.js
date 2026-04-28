@@ -108,6 +108,17 @@ export const endVirtualParticipant = /* GraphQL */ `
   }
 `;
 
+// Mutation to delete one or more Virtual Participants. Active VPs are ended
+// server-side (ECS task stopped, ALB/schedule cleanup) before the DynamoDB
+// record is removed.
+export const deleteVirtualParticipants = /* GraphQL */ `
+  mutation DeleteVirtualParticipants($input: DeleteVirtualParticipantsInput!) {
+    deleteVirtualParticipants(input: $input) {
+      Result
+    }
+  }
+`;
+
 // Subscription for real-time Virtual Participant updates with detailed info
 export const onUpdateVirtualParticipantDetailed = /* GraphQL */ `
   subscription OnUpdateVirtualParticipant($id: ID!) {

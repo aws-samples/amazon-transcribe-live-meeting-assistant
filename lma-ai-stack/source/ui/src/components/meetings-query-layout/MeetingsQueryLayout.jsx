@@ -53,7 +53,7 @@ const CustomLink = ({ href, children }) => {
   };
 
   return (
-    <Link href={`#${CALLS_PATH}/${href}`} onClick={handleClick}>
+    <Link href={`#${CALLS_PATH}/${encodeURIComponent(href)}`} onClick={handleClick}>
       {children}
     </Link>
   );

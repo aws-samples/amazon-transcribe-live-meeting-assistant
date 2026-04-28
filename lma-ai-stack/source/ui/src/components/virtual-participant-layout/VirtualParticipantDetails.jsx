@@ -400,7 +400,7 @@ const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule }) => {
         )}
 
         {vpDetails.CallId && (
-          <RouterLink to={`/calls/${vpDetails.CallId}`} style={{ textDecoration: 'none' }}>
+          <RouterLink to={`/calls/${encodeURIComponent(vpDetails.CallId)}`} style={{ textDecoration: 'none' }}>
             <Button iconName="external">View Meeting Transcript</Button>
           </RouterLink>
         )}
@@ -655,7 +655,7 @@ const VirtualParticipantDetails = () => {
                 Back to List
               </Button>
               {vpDetails.CallId ? (
-                <RouterLink to={`/calls/${vpDetails.CallId}`} style={{ textDecoration: 'none' }}>
+                <RouterLink to={`/calls/${encodeURIComponent(vpDetails.CallId)}`} style={{ textDecoration: 'none' }}>
                   <Button iconName="external">View Call Details</Button>
                 </RouterLink>
               ) : (
