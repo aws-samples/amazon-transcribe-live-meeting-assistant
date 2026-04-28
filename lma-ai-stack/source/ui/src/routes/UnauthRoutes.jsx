@@ -44,7 +44,7 @@ const UnauthRoutes = ({ location }) => (
         <Navigate
           to={{
             pathname: LOGIN_PATH,
-            search: `?${REDIRECT_URL_PARAM}=${location.pathname}${location.search}`,
+            search: `?${REDIRECT_URL_PARAM}=${encodeURIComponent(location.pathname + location.search)}`,
           }}
           replace
         />
