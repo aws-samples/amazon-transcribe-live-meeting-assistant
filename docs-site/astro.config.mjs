@@ -157,6 +157,7 @@ export default defineConfig({
           items: [
             { label: "Cloudformation Service Role", slug: "cloudformation-service-role" },
             { label: "Meeting Sources", slug: "meeting-sources" },
+            { label: "Upload Audio", slug: "upload-audio" },
           ],
         },
         // AUTO-SIDEBAR-END

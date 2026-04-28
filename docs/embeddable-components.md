@@ -45,11 +45,13 @@ The embed page is a chrome-free (no navigation sidebar, top bar, or breadcrumbs)
 
 ## Interactive Demo Page
 
-A ready-to-use demo page is included that showcases the embeddable components inside a mock "Acme CRM" parent application — useful for quickly validating your deployment or for producing screenshots:
+A ready-to-use demo page is included that showcases the embeddable components inside a mock "Acme CRM" parent application — useful for quickly validating your deployment or for producing screenshots.
 
-**[`embeddable-components-demo.html`](./embeddable-components-demo.html)**
+**▶ [Open the live demo](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/embeddable-components-demo.html)** (hosted on the LMA docs site — renders directly in the browser)
 
-Open the file directly in a browser, enter your LMA CloudFront URL and an existing `callId`, and click **Apply**. The page demonstrates:
+Source: [`docs/embeddable-components-demo.html`](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/main/docs/embeddable-components-demo.html)
+
+Enter your LMA CloudFront URL and an existing `callId`, and click **Apply**. The page demonstrates:
 
 - A **stream-audio** widget pre-populated with meeting fields, with parent-app Start/Stop buttons that drive the iframe via `postMessage`, plus a live event log showing every `LMA_*` event the iframe emits.
 - A **multi-panel dashboard** combining `summary`, `chat`, and `transcript` iframes in a CSS Grid layout — all bound to the same meeting.
