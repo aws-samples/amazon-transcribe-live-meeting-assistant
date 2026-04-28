@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- Avoid stale cached copies of this demo page -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 <title>Acme CRM — Meeting Workspace (LMA embedded demo)</title>
 <style>
   :root {
@@ -574,7 +578,13 @@ function currentCallId() {
 function buildUrl(params) {
   const base = currentBaseUrl();
   if (!base) return '';
-  const qs = new URLSearchParams(params).toString();
+  // NOTE: use encodeURIComponent (→ %20) rather than URLSearchParams (→ +)
+  // because the LMA embed SPA parses hash query params with decodeURIComponent,
+  // which does NOT decode `+` back to space. Meeting IDs contain spaces.
+  const qs = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
   return `${base}/#/embed?${qs}`;
 }
 
