@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Acme CRM — Meeting Workspace (LMA embedded demo)</title>
+<style>
+  :root {
+    --acme-primary: #2f3b52;
+    --acme-accent: #ff6a3d;
+    --acme-bg: #f4f6fb;
+    --acme-card: #ffffff;
+    --acme-border: #e2e6ef;
+    --acme-text: #1f2937;
+    --acme-muted: #6b7280;
+    --acme-success: #16a34a;
+    --acme-info: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+      Arial, sans-serif;
+    background: var(--acme-bg);
+    color: var(--acme-text);
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* ---------- Fake "Acme CRM" chrome ---------- */
+  .app-shell {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    grid-template-rows: 56px 1fr;
+    min-height: 100vh;
+  }
+  .app-topbar {
+    grid-column: 1 / -1;
+    background: var(--acme-primary);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 20px;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.05);
+  }
+  .app-topbar .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: 0.3px;
+  }
+  .app-topbar .logo .dot {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: var(--acme-accent);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 800; color: #fff;
+  }
+  .app-topbar .spacer { flex: 1; }
+  .app-topbar .search {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    padding: 6px 12px;
+    color: #fff;
+    width: 320px;
+    font-size: 13px;
+  }
+  .app-topbar .search::placeholder { color: rgba(255,255,255,0.6); }
+  .app-topbar .user {
+    display: flex; align-items: center; gap: 10px; font-size: 13px;
+  }
+  .app-topbar .avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, #ff6a3d, #ffb08a);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px; color: #fff;
+  }
+
+  .app-sidebar {
+    background: #fff;
+    border-right: 1px solid var(--acme-border);
+    padding: 16px 0;
+  }
+  .app-sidebar .nav-group {
+    padding: 8px 16px 4px;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.8px;
+    color: var(--acme-muted);
+  }
+  .app-sidebar a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 16px;
+    color: var(--acme-text);
+    text-decoration: none;
+    font-size: 13.5px;
+    border-left: 3px solid transparent;
+  }
+  .app-sidebar a:hover { background: #f9fafb; }
+  .app-sidebar a.active {
+    background: #fff4ef;
+    border-left-color: var(--acme-accent);
+    color: var(--acme-primary);
+    font-weight: 600;
+  }
+  .app-sidebar .icon { width: 16px; display: inline-block; text-align: center; }
+
+  .app-main {
+    padding: 20px 24px 40px;
+    overflow: auto;
+  }
+
+  /* ---------- Config bar ---------- */
+  .config-bar {
+    background: #fffbe6;
+    border: 1px solid #facc15;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+  .config-bar label {
+    font-size: 12px; color: #713f12; font-weight: 600;
+  }
+  .config-bar input {
+    border: 1px solid #fcd34d;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 13px;
+    background: #fff;
+    min-width: 260px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .config-bar button {
+    background: #713f12;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 7px 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .config-bar button.secondary {
+    background: transparent;
+    color: #713f12;
+    border: 1px solid #713f12;
+  }
+  .config-bar.hidden { display: none; }
+  .reopen-config {
+    position: fixed;
+    top: 68px; right: 14px;
+    z-index: 10;
+    background: #fff;
+    border: 1px solid var(--acme-border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--acme-muted);
+    display: none;
+  }
+
+  /* ---------- Page heading ---------- */
+  .page-title {
+    display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: 4px;
+  }
+  .page-title h1 {
+    font-size: 22px;
+    margin: 0;
+    color: var(--acme-primary);
+  }
+  .page-title .subtitle {
+    color: var(--acme-muted);
+    font-size: 13px;
+  }
+  .breadcrumb {
+    color: var(--acme-muted);
+    font-size: 12px;
+    margin-bottom: 14px;
+  }
+  .breadcrumb span.sep { margin: 0 6px; opacity: 0.6; }
+
+  /* ---------- Tabs ---------- */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--acme-border);
+    margin-bottom: 16px;
+  }
+  .tab {
+    background: transparent;
+    border: none;
+    padding: 10px 16px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--acme-muted);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--acme-primary); }
+  .tab.active {
+    color: var(--acme-primary);
+    border-bottom-color: var(--acme-accent);
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ---------- Cards ---------- */
+  .card {
+    background: var(--acme-card);
+    border: 1px solid var(--acme-border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+  .card-header {
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--acme-border);
+    background: #fbfcfe;
+  }
+  .card-header .title {
+    font-weight: 700;
+    font-size: 13.5px;
+    color: var(--acme-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    background: #eef2ff;
+    color: #3730a3;
+    letter-spacing: 0.2px;
+  }
+  .badge.lma {
+    background: #ff6a3d;
+    color: #fff;
+  }
+  .card-url {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    color: var(--acme-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 60%;
+  }
+  .card-body { padding: 0; background: #fff; }
+  .card-body.padded { padding: 14px; }
+  .card iframe {
+    display: block;
+    width: 100%;
+    border: none;
+    background: #fff;
+  }
+
+  /* ---------- Scenario 1: Start Meeting widget ---------- */
+  .scenario-1 {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 16px;
+    align-items: start;
+  }
+  .controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .controls button {
+    background: var(--acme-primary);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .controls button.stop { background: #b91c1c; }
+  .controls button.secondary {
+    background: #fff;
+    color: var(--acme-primary);
+    border: 1px solid var(--acme-border);
+  }
+  .controls button:hover { opacity: 0.92; }
+  .event-log {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    max-height: 340px;
+    overflow: auto;
+  }
+  .event-log .line {
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    line-height: 1.4;
+    word-break: break-word;
+  }
+  .event-log .line .t { color: #64748b; margin-right: 8px; }
+  .event-log .line .k { color: #34d399; }
+  .event-log .line .v { color: #fde68a; }
+  .event-log .empty { color: #64748b; font-style: italic; }
+
+  /* ---------- Scenario 2: Live Dashboard grid ---------- */
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 360px 460px;
+    gap: 12px;
+  }
+  .dashboard-grid .transcript-card {
+    grid-column: 1 / -1;
+  }
+
+  /* ---------- Info strip ---------- */
+  .info-strip {
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: #eef2ff;
+    border-left: 4px solid var(--acme-info);
+    border-radius: 6px;
+    font-size: 12.5px;
+    color: #1e3a8a;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .info-strip strong { font-family: inherit; }
+  .info-strip code {
+    background: rgba(37,99,235,0.1);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* Empty-state placeholder shown when no base URL configured */
+  .placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    background: repeating-linear-gradient(
+      45deg,
+      #f9fafb,
+      #f9fafb 10px,
+      #f3f4f6 10px,
+      #f3f4f6 20px
+    );
+    color: var(--acme-muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 20px;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- ================= Top bar ================= -->
+  <header class="app-topbar">
+    <div class="logo">
+      <span class="dot">A</span>
+      Acme CRM
+    </div>
+    <input class="search" type="text" placeholder="Search contacts, opportunities, meetings…" />
+    <div class="spacer"></div>
+    <div class="user">
+      <span>Riley Strahan</span>
+      <span class="avatar">RS</span>
+    </div>
+  </header>
+
+  <!-- ================= Sidebar ================= -->
+  <aside class="app-sidebar">
+    <div class="nav-group">Workspace</div>
+    <a href="#"><span class="icon">🏠</span> Dashboard</a>
+    <a href="#"><span class="icon">👥</span> Contacts</a>
+    <a href="#"><span class="icon">💼</span> Opportunities</a>
+    <a href="#" class="active"><span class="icon">🎙️</span> Meetings</a>
+    <a href="#"><span class="icon">📊</span> Reports</a>
+
+    <div class="nav-group" style="margin-top:14px;">Tools</div>
+    <a href="#"><span class="icon">📧</span> Email</a>
+    <a href="#"><span class="icon">📅</span> Calendar</a>
+    <a href="#"><span class="icon">⚙️</span> Settings</a>
+  </aside>
+
+  <!-- ================= Main content ================= -->
+  <main class="app-main">
+    <div class="breadcrumb">
+      Home <span class="sep">/</span> Opportunities <span class="sep">/</span>
+      <strong style="color: var(--acme-primary);">Globex Corp — Q4 Renewal</strong>
+      <span class="sep">/</span> Meeting Workspace
+    </div>
+
+    <div class="page-title">
+      <h1>Meeting Workspace</h1>
+      <span class="subtitle">Powered by <strong>LMA</strong> embeddable components</span>
+    </div>
+
+    <!-- Config bar (for setting LMA URL / callId) -->
+    <div class="config-bar" id="configBar">
+      <label>LMA Base URL</label>
+      <input id="lmaUrl" type="text" placeholder="https://dxxxxxxxxxx.cloudfront.net" />
+      <label>Call ID</label>
+      <input id="callId" type="text" placeholder="My Meeting - 2025-01-29T14:30:00.000Z" />
+      <button onclick="applyConfig()">Apply</button>
+      <button class="secondary" onclick="fillDemoDefaults()">Fill demo defaults</button>
+      <button class="secondary" onclick="hideConfig()">🔧 Hide config (for screenshot)</button>
+    </div>
+    <button class="reopen-config" id="reopenConfigBtn" onclick="showConfig()">🔧 Show config</button>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" data-tab="start">① Start a Meeting (stream-audio widget)</button>
+      <button class="tab" data-tab="dashboard">② Live Meeting Dashboard (multi-panel)</button>
+    </div>
+
+    <!-- ================= Scenario 1 ================= -->
+    <section class="tab-panel active" id="tab-start">
+      <div class="scenario-1">
+        <!-- Left: stream-audio iframe -->
+        <div class="card">
+          <div class="card-header">
+            <div class="title">
+              <span class="badge lma">LMA</span>
+              Record this meeting
+            </div>
+            <div class="card-url" id="url-stream">https://YOUR_LMA_URL/#/embed?component=stream-audio&amp;...</div>
+          </div>
+          <div class="card-body">
+            <iframe id="iframe-stream"
+              title="LMA Stream Audio"
+              height="440"
+              allow="microphone; display-capture"
+              src="about:blank"></iframe>
+            <div class="placeholder" id="placeholder-stream">
+              <div>
+                <div style="font-size: 28px; margin-bottom: 8px;">🎙️</div>
+                <strong>LMA Stream Audio component appears here.</strong><br />
+                Set your LMA Base URL in the yellow bar above, then click <em>Apply</em>.
+              </div>
+            </div>
+          </div>
+          <div class="info-strip">
+            Embedded via:
+            <code>&lt;iframe src="<span id="exampleSrc1">…/#/embed?component=stream-audio&amp;meetingTopic=Globex+Renewal+Discovery&amp;participants=Globex+Team&amp;owner=rs@acme.com</span>"&gt;</code>
+          </div>
+        </div>
+
+        <!-- Right: controls + event log -->
+        <div>
+          <div class="card">
+            <div class="card-header">
+              <div class="title">Parent-app controls</div>
+              <span class="badge">postMessage</span>
+            </div>
+            <div class="card-body padded">
+              <div class="controls">
+                <button onclick="startMeeting()">▶ Start meeting</button>
+                <button class="stop" onclick="stopMeeting()">■ Stop meeting</button>
+                <button class="secondary" onclick="clearLog()">Clear log</button>
+              </div>
+              <div style="font-size: 12px; color: var(--acme-muted); margin-bottom: 8px;">
+                Parent sends
+                <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;">LMA_START_MEETING</code>
+                /
+                <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;">LMA_STOP_MEETING</code>.
+                Live events from iframe appear below.
+              </div>
+              <div class="event-log" id="eventLog">
+                <div class="empty">Waiting for events from LMA iframe…</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Scenario 2 ================= -->
+    <section class="tab-panel" id="tab-dashboard">
+      <div class="dashboard-grid">
+        <!-- Summary -->
+        <div class="card">
+          <div class="card-header">
+            <div class="title">
+              <span class="badge lma">LMA</span>
+              AI Meeting Summary
+            </div>
+            <div class="card-url" id="url-summary">https://YOUR_LMA_URL/#/embed?component=summary&amp;callId=…</div>
+          </div>
+          <div class="card-body" style="height: calc(100% - 45px);">
+            <iframe id="iframe-summary" title="LMA Summary"
+              style="height:100%;" src="about:blank"></iframe>
+          </div>
+        </div>
+
+        <!-- Chat -->
+        <div class="card">
+          <div class="card-header">
+            <div class="title">
+              <span class="badge lma">LMA</span>
+              Meeting Assist Chat
+            </div>
+            <div class="card-url" id="url-chat">https://YOUR_LMA_URL/#/embed?component=chat&amp;callId=…</div>
+          </div>
+          <div class="card-body" style="height: calc(100% - 45px);">
+            <iframe id="iframe-chat" title="LMA Chat"
+              style="height:100%;" src="about:blank"></iframe>
+          </div>
+        </div>
+
+        <!-- Transcript (spans full width) -->
+        <div class="card transcript-card">
+          <div class="card-header">
+            <div class="title">
+              <span class="badge lma">LMA</span>
+              Live Transcript
+            </div>
+            <div class="card-url" id="url-transcript">https://YOUR_LMA_URL/#/embed?component=transcript&amp;callId=…</div>
+          </div>
+          <div class="card-body" style="height: calc(100% - 45px);">
+            <iframe id="iframe-transcript" title="LMA Transcript"
+              style="height:100%;" src="about:blank"></iframe>
+          </div>
+        </div>
+      </div>
+      <div class="info-strip" style="margin-top:16px;">
+        This dashboard combines three independent LMA embed iframes:
+        <code>component=summary</code>, <code>component=chat</code>, and
+        <code>component=transcript</code> — all bound to the same
+        <code>callId</code>. Layout is pure CSS Grid in the parent app.
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* ------------- Persisted config ------------- */
+const STORAGE_KEY = 'lma-embed-demo-config';
+function loadConfig() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveConfig(c) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(c));
+}
+
+function currentBaseUrl() {
+  return (document.getElementById('lmaUrl').value || '').trim().replace(/\/+$/, '');
+}
+function currentCallId() {
+  return (document.getElementById('callId').value || '').trim();
+}
+
+function buildUrl(params) {
+  const base = currentBaseUrl();
+  if (!base) return '';
+  const qs = new URLSearchParams(params).toString();
+  return `${base}/#/embed?${qs}`;
+}
+
+function applyConfig() {
+  const cfg = {
+    lmaUrl: document.getElementById('lmaUrl').value.trim(),
+    callId: document.getElementById('callId').value.trim(),
+  };
+  saveConfig(cfg);
+  refreshIframes();
+}
+
+function fillDemoDefaults() {
+  document.getElementById('lmaUrl').value =
+    document.getElementById('lmaUrl').value || 'https://dxxxxxxxxxx.cloudfront.net';
+  document.getElementById('callId').value =
+    document.getElementById('callId').value ||
+    'Globex Renewal Discovery - 2025-01-29T14:30:00.000Z';
+  applyConfig();
+}
+
+function hideConfig() {
+  document.getElementById('configBar').classList.add('hidden');
+  document.getElementById('reopenConfigBtn').style.display = 'block';
+}
+function showConfig() {
+  document.getElementById('configBar').classList.remove('hidden');
+  document.getElementById('reopenConfigBtn').style.display = 'none';
+}
+
+/* ------------- Iframe URL management ------------- */
+function refreshIframes() {
+  const base = currentBaseUrl();
+  const callId = currentCallId();
+
+  // --- Scenario 1: stream-audio ---
+  const streamParams = {
+    component: 'stream-audio',
+    meetingTopic: 'Globex Renewal Discovery',
+    participants: 'Globex Team',
+    owner: 'rs@acme.com',
+  };
+  const streamUrl = buildUrl(streamParams);
+  const iframeStream = document.getElementById('iframe-stream');
+  const placeholder = document.getElementById('placeholder-stream');
+
+  if (streamUrl) {
+    iframeStream.src = streamUrl;
+    iframeStream.style.display = 'block';
+    placeholder.style.display = 'none';
+  } else {
+    iframeStream.src = 'about:blank';
+    iframeStream.style.display = 'none';
+    placeholder.style.display = 'flex';
+  }
+  document.getElementById('url-stream').textContent =
+    streamUrl || 'https://YOUR_LMA_URL/#/embed?component=stream-audio&...';
+  document.getElementById('exampleSrc1').textContent =
+    (streamUrl || 'https://YOUR_LMA_URL/#/embed?component=stream-audio&meetingTopic=Globex+Renewal+Discovery&participants=Globex+Team&owner=rs@acme.com');
+
+  // --- Scenario 2: dashboard (summary / chat / transcript) ---
+  const pairs = [
+    ['summary', 'iframe-summary', 'url-summary'],
+    ['chat', 'iframe-chat', 'url-chat'],
+    ['transcript', 'iframe-transcript', 'url-transcript'],
+  ];
+  pairs.forEach(([component, iframeId, urlId]) => {
+    const url = (base && callId)
+      ? buildUrl({ component, callId })
+      : '';
+    const iframe = document.getElementById(iframeId);
+    iframe.src = url || 'about:blank';
+    document.getElementById(urlId).textContent =
+      url || `https://YOUR_LMA_URL/#/embed?component=${component}&callId=…`;
+  });
+}
+
+/* ------------- Tabs ------------- */
+document.querySelectorAll('.tab').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+/* ------------- postMessage control + event log ------------- */
+function log(type, data = {}) {
+  const logEl = document.getElementById('eventLog');
+  if (logEl.querySelector('.empty')) logEl.innerHTML = '';
+  const ts = new Date().toLocaleTimeString();
+  const pretty = Object.entries(data)
+    .filter(([k]) => k !== 'type')
+    .map(([k, v]) => `<span class="k">${k}</span>=<span class="v">${String(v).slice(0, 80)}</span>`)
+    .join(' ');
+  const line = document.createElement('div');
+  line.className = 'line';
+  line.innerHTML = `<span class="t">${ts}</span><strong>${type}</strong> ${pretty}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function clearLog() {
+  document.getElementById('eventLog').innerHTML =
+    '<div class="empty">Waiting for events from LMA iframe…</div>';
+}
+
+function targetOrigin() {
+  const base = currentBaseUrl();
+  if (!base) return '*';
+  try { return new URL(base).origin; } catch { return '*'; }
+}
+
+function startMeeting() {
+  const iframe = document.getElementById('iframe-stream');
+  if (!iframe.contentWindow) return;
+  iframe.contentWindow.postMessage({
+    type: 'LMA_START_MEETING',
+    meetingTopic: 'Globex Renewal Discovery',
+    participants: 'Globex Team',
+    owner: 'rs@acme.com',
+  }, targetOrigin());
+  log('→ LMA_START_MEETING (sent)', {});
+}
+
+function stopMeeting() {
+  const iframe = document.getElementById('iframe-stream');
+  if (!iframe.contentWindow) return;
+  iframe.contentWindow.postMessage({ type: 'LMA_STOP_MEETING' }, targetOrigin());
+  log('→ LMA_STOP_MEETING (sent)', {});
+}
+
+window.addEventListener('message', (event) => {
+  const data = event.data || {};
+  if (!data.type || typeof data.type !== 'string') return;
+  if (!data.type.startsWith('LMA_')) return;
+  log('← ' + data.type, data);
+});
+
+/* ------------- Init ------------- */
+(function init() {
+  const cfg = loadConfig();
+  if (cfg.lmaUrl) document.getElementById('lmaUrl').value = cfg.lmaUrl;
+  if (cfg.callId) document.getElementById('callId').value = cfg.callId;
+  refreshIframes();
+})();
+</script>
+</body>
+</html>

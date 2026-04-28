@@ -287,9 +287,7 @@ def _delete_virtual_participants(
 
             status = vp.get("status", "")
             if status not in _INACTIVE_VP_STATUSES:
-                logger.info(
-                    f"VP {vp_id} has status {status}, ending before delete"
-                )
+                logger.info(f"VP {vp_id} has status {status}, ending before delete")
                 try:
                     vp_manager.end_virtual_participant(
                         vp_id=vp_id,
@@ -299,9 +297,7 @@ def _delete_virtual_participants(
                 except Exception as end_err:  # noqa: BLE001
                     # Log but continue - we still want to attempt the delete so
                     # stale records can be removed.
-                    logger.error(
-                        f"Error ending VP {vp_id} before delete: {end_err}"
-                    )
+                    logger.error(f"Error ending VP {vp_id} before delete: {end_err}")
 
             # Delete the DynamoDB record
             vp_manager.table.delete_item(Key={"id": vp_id})
@@ -314,8 +310,7 @@ def _delete_virtual_participants(
 
     if errors:
         result_msg = (
-            f"Deleted {len(deleted)} Virtual Participant(s). "
-            f"{len(errors)} failed: {errors}"
+            f"Deleted {len(deleted)} Virtual Participant(s). {len(errors)} failed: {errors}"
         )
     elif len(deleted) == 1:
         result_msg = "Successfully deleted 1 Virtual Participant."
@@ -358,9 +353,7 @@ def lambda_handler(event, context):
             identity = event.get("identity") or {}
             claims = identity.get("claims") or {}
             ended_by = (
-                claims.get("email")
-                or claims.get("cognito:username")
-                or identity.get("username")
+                claims.get("email") or claims.get("cognito:username") or identity.get("username")
             )
 
             result = _delete_virtual_participants(vp_manager, ids, ended_by=ended_by)

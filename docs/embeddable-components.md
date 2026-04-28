@@ -43,6 +43,17 @@ The embed page is a chrome-free (no navigation sidebar, top bar, or breadcrumbs)
   - **Cognito Identity Federation** — users authenticate via your IdP, federated through Cognito
   - **Token passing via postMessage** — your app obtains tokens and passes them to the iframe
 
+## Interactive Demo Page
+
+A ready-to-use demo page is included that showcases the embeddable components inside a mock "Acme CRM" parent application — useful for quickly validating your deployment or for producing screenshots:
+
+**[`embeddable-components-demo.html`](./embeddable-components-demo.html)**
+
+Open the file directly in a browser, enter your LMA CloudFront URL and an existing `callId`, and click **Apply**. The page demonstrates:
+
+- A **stream-audio** widget pre-populated with meeting fields, with parent-app Start/Stop buttons that drive the iframe via `postMessage`, plus a live event log showing every `LMA_*` event the iframe emits.
+- A **multi-panel dashboard** combining `summary`, `chat`, and `transcript` iframes in a CSS Grid layout — all bound to the same meeting.
+
 ## Quick Start
 
 ### 1. Basic Embed (Stream Audio)
