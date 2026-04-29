@@ -340,7 +340,53 @@ endif
 	@echo "Starting UI development server..."
 	cd $(UI_DIR) && npm run start
 
+##@ Virtual Participant Development
+# Usage:
+#   make vp-start STACK_NAME=<stack> PLATFORM=<WEBEX|ZOOM|TEAMS|CHIME> MEETING_ID=<id> \
+#                 [MEETING_PASSWORD=<pw>] [DEV=1] [REUSE_ENV=1]
+#
+# Runs the Virtual Participant Docker container locally against a deployed LMA
+# stack. See docs/virtual-participant-local-dev.md for the recommended EC2 +
+# VSCode Remote-SSH + VNC workflow.
+vp-start: ## Run VP locally via Docker (requires STACK_NAME, PLATFORM, MEETING_ID)
+ifndef STACK_NAME
+	$(error STACK_NAME is not set. Usage: make vp-start STACK_NAME=<stack> PLATFORM=<platform> MEETING_ID=<id> [MEETING_PASSWORD=<pw>] [DEV=1] [REUSE_ENV=1])
+endif
+ifndef PLATFORM
+	$(error PLATFORM is not set. Must be one of: WEBEX, ZOOM, TEAMS, CHIME)
+endif
+ifndef MEETING_ID
+	$(error MEETING_ID is not set)
+endif
+	@EXTRA_FLAGS=""; \
+	if [ "$(DEV)" = "1" ]; then EXTRA_FLAGS="$$EXTRA_FLAGS --dev"; fi; \
+	if [ "$(REUSE_ENV)" = "1" ]; then EXTRA_FLAGS="$$EXTRA_FLAGS --reuse-env"; fi; \
+	echo -e "$(CYAN)Launching Virtual Participant locally (stack=$(STACK_NAME), platform=$(PLATFORM), id=$(MEETING_ID))$(NC)"; \
+	cd $(VP_BACKEND_DIR) && bash local-test.sh $$EXTRA_FLAGS "$(STACK_NAME)" "$(PLATFORM)" "$(MEETING_ID)" "$(MEETING_PASSWORD)"
+
+vp-start-dev: ## Run VP locally in dev mode (auto-reload on src changes); same args as vp-start
+	@$(MAKE) vp-start DEV=1 STACK_NAME="$(STACK_NAME)" PLATFORM="$(PLATFORM)" MEETING_ID="$(MEETING_ID)" MEETING_PASSWORD="$(MEETING_PASSWORD)" REUSE_ENV="$(REUSE_ENV)"
+
+vp-start-reuse: ## Run VP locally reusing existing .env.local (keeps manually-set secrets); same args as vp-start
+	@$(MAKE) vp-start REUSE_ENV=1 STACK_NAME="$(STACK_NAME)" PLATFORM="$(PLATFORM)" MEETING_ID="$(MEETING_ID)" MEETING_PASSWORD="$(MEETING_PASSWORD)" DEV="$(DEV)"
+
+vp-stop: ## Stop and remove the local VP container (lma-vp-local-test)
+	@if docker ps -a --format '{{.Names}}' | grep -q "^lma-vp-local-test$$"; then \
+		echo "Stopping and removing lma-vp-local-test..."; \
+		docker rm -f lma-vp-local-test; \
+		echo -e "$(GREEN)✅ Container removed.$(NC)"; \
+	else \
+		echo -e "$(YELLOW)No lma-vp-local-test container found.$(NC)"; \
+	fi
+
+vp-logs: ## Tail logs for the local VP container (dev mode)
+	@docker logs -f lma-vp-local-test
+
+vp-shell: ## Open a shell inside the running local VP container
+	@docker exec -it lma-vp-local-test /bin/bash
+
 ##@ Publishing & Deployment
+
 # Usage: make publish BUCKET=<bucket-basename> PREFIX=<prefix> REGION=<region> [PUBLIC=true]
 publish: ## Run publish.sh to build and upload all artifacts to S3
 ifndef BUCKET

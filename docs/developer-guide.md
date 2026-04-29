@@ -157,29 +157,26 @@ npm run build     # TypeScript compilation
 
 ### Local Docker Testing
 
-Build and run the VP container locally:
+The simplest way to run the VP locally against a deployed LMA stack is via the Makefile:
 
 ```bash
-cd lma-virtual-participant-stack
-docker build -t lma-vp .
+make vp-start STACK_NAME=<your-stack-name> PLATFORM=WEBEX MEETING_ID=<meeting-id>
 ```
 
-Run with required environment variables:
+This wraps `lma-virtual-participant-stack/backend/local-test.sh`: it fetches configuration from CloudFormation, writes `.env.local`, builds the Docker image, and runs the container with VNC on ports `5900` (VNC client) and `5901` (noVNC web browser).
 
-```bash
-docker run \
-  --env MEETING_ID=123456789 \
-  --env MEETING_PASSWORD=abc123 \
-  --env MEETING_NAME=TestMeeting \
-  --env AWS_DEFAULT_REGION=us-east-1 \
-  --env KINESIS_STREAM_NAME=<CallDataStreamName> \
-  --env SHOULD_RECORD_CALL=true \
-  --env RECORDINGS_BUCKET_NAME=<RecordingsS3Bucket> \
-  --env RECORDINGS_KEY_PREFIX=lca-audio-recordings/ \
-  --env MEETING_PLATFORM=Zoom \
-  --env USER_NAME=TestUser \
-  lma-vp
-```
+Other useful targets:
+
+| Target | Purpose |
+|--------|---------|
+| `make vp-start-dev ...` | Dev mode: source-mounted, auto-reloads on TS changes |
+| `make vp-start-reuse ...` | Reuse existing `.env.local` (preserves manually-added secrets like `ELEVENLABS_API_KEY`) |
+| `make vp-stop` | Stop and remove the `lma-vp-local-test` container |
+| `make vp-logs` | Tail container logs (dev mode) |
+| `make vp-shell` | Open a shell inside the running container |
+
+Because the VP runs on Linux in ECS, the most production-like local environment is a Linux EC2 instance edited via VSCode Remote-SSH with VNC previewed on your laptop. For the full workflow (EC2 setup, secret handling, dev-mode auto-reload, and the VSCode stale-port-forwarding gotcha), see [Virtual Participant Local Development](virtual-participant-local-dev.md).
+
 
 ### Manual Step Function Testing
 

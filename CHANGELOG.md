@@ -5,9 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.2] - 2026-04-28
+## [0.3.2] - 2026-04-29
 
 ### Added
+
+- **Virtual Participant local development workflow** — First-class `make vp-*` targets wrap the existing `lma-virtual-participant-stack/backend/local-test.sh` so developers can run the VP container locally against a deployed LMA stack the same way `make ui-start` runs the UI dev server. New targets: `vp-start` (build + run), `vp-start-dev` (`DEV=1` — mounts `src/` with auto-reload on TypeScript changes), `vp-start-reuse` (`REUSE_ENV=1` — preserves manually-added secrets like `ELEVENLABS_API_KEY` / `SIMLI_API_KEY` in `.env.local` between runs), plus `vp-stop`, `vp-logs`, and `vp-shell`. New [Virtual Participant Local Development](docs/virtual-participant-local-dev.md) doc covers the recommended EC2 + VSCode Remote-SSH + TigerVNC/noVNC workflow (most production-like since the VP's Chromium/audio/puppeteer stack is Linux-specific), the `--reuse-env` secret-handling flow, and the VSCode stale-port-forwarding gotcha where TigerVNC hangs on `localhost:5900` until stale 5900/5901 forwards are deleted and re-created. Cross-linked from `docs/virtual-participant.md`, `docs/developer-guide.md` (replacing an outdated manual `docker run --env …` snippet), and `docs/INDEX.md`.
 
 - **Upload Audio (pre-recorded files)** — New **Sources → Upload Audio** page lets users transcribe existing audio/video files. The file is uploaded directly from the browser to S3 via a presigned URL, Amazon Transcribe (batch) runs on it, and the meeting appears in the Meetings List with the usual summary — same downstream pipeline as live streaming. Ships a 3-stage Lambda pipeline (`upload_meeting_initiator` mints the presigned URL, `upload_meeting_processor` triggers on S3 `ObjectCreated` to emit a Kinesis `START` and kick off the Transcribe job, `upload_meeting_finalizer` handles the Transcribe `COMPLETED`/`FAILED` EventBridge event to emit transcript segments + `END` and promote the media to the long-term recordings prefix), a new `createUploadMeeting` AppSync mutation, and a matching `EmbedUploadAudio` / `EmbedSelectAudio` variant so hosts can iframe the uploader. See [Upload Audio](docs/upload-audio.md).
 
