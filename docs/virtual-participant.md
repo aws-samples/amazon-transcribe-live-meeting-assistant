@@ -146,10 +146,20 @@ You can manually invoke the VP Step Function with a JSON payload for testing. Th
 
 ### Local Docker Testing
 
-For local development and debugging, you can run the VP Docker container locally with the appropriate environment variables configured for your AWS account and meeting parameters.
+For local development and debugging, run the VP Docker container against a deployed LMA stack using the `make vp-start` target:
+
+```bash
+make vp-start STACK_NAME=<your-stack> PLATFORM=WEBEX MEETING_ID=<id>
+```
+
+This invokes `lma-virtual-participant-stack/backend/local-test.sh`, which reads configuration from CloudFormation, generates a `.env.local`, builds the Docker image, and runs the container locally with VNC exposed on ports 5900 / 5901.
+
+For the recommended EC2 + VSCode Remote-SSH + VNC workflow — including how to manage secrets (`--reuse-env`), enable dev-mode auto-reload, and fix stale VSCode port forwarding — see [Virtual Participant Local Development](virtual-participant-local-dev.md).
 
 ## See Also
 
+- [Virtual Participant Local Development](virtual-participant-local-dev.md) -- EC2 + VSCode + VNC workflow for running the VP locally
 - [Stream Audio](stream-audio.md) -- Browser-based audio capture alternative
 - [Voice Assistant](voice-assistant.md) -- Add a voice assistant to the Virtual Participant
 - [Simli Avatar Setup](simli-avatar-setup.md) -- Configure a visual avatar for the VP
+

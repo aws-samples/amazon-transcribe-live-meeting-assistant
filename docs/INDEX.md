@@ -76,5 +76,7 @@ title: "LMA Documentation"
 ### Development
 
 - [Developer Guide](developer-guide.md) — Building from source, LMA CLI, local UI development, contributing
+- [Virtual Participant Local Development](virtual-participant-local-dev.md) — Run the VP locally on EC2 via `make vp-start` with VSCode Remote-SSH + VNC
 - [LMA CLI Reference](lma-cli.md) — Command-line interface for deploy, publish, status, logs, and more
 - [LMA SDK Reference](lma-sdk.md) — Python SDK for programmatic LMA operations
+
