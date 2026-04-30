@@ -16,7 +16,6 @@ Check out our demo to see many of the latest features.
 
 https://github.com/user-attachments/assets/7642f659-ed9e-4abf-8baf-2f6fb27b08cb
 
-> Need to embed this video elsewhere (e.g. WordPress, blog posts, or other sites)? Use the stable GitHub Pages-hosted copy instead — the `user-attachments` URL above only works inside github.com: [https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/videos/LMADemo0426.mp4](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/videos/LMADemo0426.mp4)
 
 
 ## Key Features
