@@ -14,7 +14,9 @@ All of this, and more, is now possible with the Live Meeting Assistant (LMA).
 
 Check out our demo to see many of the latest features.
 
-https://github.com/user-attachments/assets/7642f659-ed9e-4abf-8baf-2f6fb27b08cb
+<video src="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/videos/LMADemo0426.mp4" controls playsinline width="720">
+  Your browser does not support the video tag. <a href="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/videos/LMADemo0426.mp4">Watch the LMA demo video</a>.
+</video>
 
 
 ## Key Features

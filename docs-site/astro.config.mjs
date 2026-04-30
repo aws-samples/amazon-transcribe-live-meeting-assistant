@@ -158,6 +158,7 @@ export default defineConfig({
             { label: "Cloudformation Service Role", slug: "cloudformation-service-role" },
             { label: "Meeting Sources", slug: "meeting-sources" },
             { label: "Upload Audio", slug: "upload-audio" },
+            { label: "Virtual Participant Local Dev", slug: "virtual-participant-local-dev" },
           ],
         },
         // AUTO-SIDEBAR-END
