@@ -50,3 +50,5 @@ docs-site/src/content/lma-ai-stack/
 docs-site/public/images
 docs-site/public/*.html
 
+# scatch dir
+scratch
