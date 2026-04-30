@@ -13,6 +13,8 @@ import botocore.exceptions
 
 from lma_sdk.exceptions import LMAStackError, LMAResourceNotFoundError
 from lma_sdk.models.stack import (
+    FailureAnalysis,
+    FailureCause,
     LogEntry,
     StackDeleteResult,
     StackDeployResult,
@@ -468,6 +470,7 @@ class StackManager:
 
         seen_event_ids: set[str] = set()
         start_time = time.time()
+        deploy_start_time = datetime.now(timezone.utc)
 
         while True:
             elapsed = time.time() - start_time
@@ -523,12 +526,174 @@ class StackManager:
                             operation=operation,
                             status=current_status,
                             error=error_reason,
+                            deploy_start_time=deploy_start_time,
                         )
 
             except Exception as e:
                 logger.debug("Error during monitoring poll: %s", e)
 
             time.sleep(poll_interval)
+
+    def get_failure_analysis(
+        self,
+        stack_name: str | None = None,
+        deploy_start_time: datetime | None = None,
+    ) -> FailureAnalysis:
+        """Analyze a deployment failure with root cause identification.
+
+        Recursively collects failed events from the main stack and all nested
+        stacks, classifies root causes vs. cascade failures, and returns
+        structured analysis.
+
+        Args:
+            stack_name: Stack name (defaults to client's stack_name).
+            deploy_start_time: UTC timestamp when deployment started.
+                Only events after this time are analyzed.
+
+        Returns:
+            FailureAnalysis with root_causes and all_failures.
+        """
+        name = stack_name or self._client.stack_name
+        if not name:
+            raise LMAStackError("No stack name specified.")
+
+        raw = self._get_deployment_failure_analysis(name, deploy_start_time=deploy_start_time)
+
+        def _to_cause(d: dict) -> FailureCause:
+            return FailureCause(
+                resource=d.get("resource", "Unknown"),
+                resource_type=d.get("resource_type", ""),
+                reason=d.get("reason", "Unknown"),
+                status=d.get("status", ""),
+                physical_id=d.get("physical_id", ""),
+                stack=d.get("stack", name),
+                stack_path=d.get("stack_path", ""),
+                is_cascade=d.get("is_cascade", False),
+            )
+
+        return FailureAnalysis(
+            stack_name=raw.get("stack_name", name),
+            root_causes=[_to_cause(c) for c in raw.get("root_causes", [])],
+            all_failures=[_to_cause(f) for f in raw.get("all_failures", [])],
+        )
+
+    def _get_deployment_failure_analysis(
+        self,
+        stack_name: str,
+        _depth: int = 0,
+        deploy_start_time: datetime | None = None,
+    ) -> dict:
+        """Recursively collect failed events from a stack and its nested stacks.
+
+        Args:
+            stack_name: Stack name or ARN.
+            _depth: Internal recursion depth counter (max 5).
+            deploy_start_time: Only events after this time are considered.
+
+        Returns:
+            Dict with root_causes, all_failures, and stack_name.
+        """
+        if _depth > 5:
+            return {"root_causes": [], "all_failures": [], "stack_name": stack_name}
+
+        all_failures: list[dict] = []
+
+        try:
+            paginator = self._cfn.get_paginator("describe_stack_events")
+            for page in paginator.paginate(StackName=stack_name):
+                for event in page.get("StackEvents", []):
+                    status = event.get("ResourceStatus", "")
+                    if "FAILED" not in status:
+                        continue
+
+                    if deploy_start_time:
+                        event_time = event.get("Timestamp")
+                        if event_time and event_time < deploy_start_time:
+                            continue
+
+                    reason = event.get("ResourceStatusReason", "")
+                    resource_id = event.get("LogicalResourceId", "Unknown")
+                    resource_type = event.get("ResourceType", "")
+                    physical_id = event.get("PhysicalResourceId", "")
+
+                    display_stack = stack_name
+                    if "/" in str(stack_name):
+                        try:
+                            display_stack = str(stack_name).split("/")[1]
+                        except IndexError:
+                            pass
+
+                    failure = {
+                        "resource": resource_id,
+                        "resource_type": resource_type,
+                        "reason": reason,
+                        "status": status,
+                        "physical_id": physical_id,
+                        "stack": display_stack,
+                        "stack_path": "",
+                        "is_nested_wrapper": False,
+                        "is_cascade": False,
+                    }
+
+                    if reason and (
+                        "Resource creation cancelled" in reason
+                        or "resource creation Cancelled" in reason
+                        or "Resource update cancelled" in reason
+                    ):
+                        failure["is_cascade"] = True
+
+                    if (
+                        resource_type == "AWS::CloudFormation::Stack"
+                        and reason
+                        and (
+                            "was not successfully created" in reason
+                            or "was not successfully updated" in reason
+                        )
+                    ):
+                        failure["is_nested_wrapper"] = True
+
+                        if physical_id:
+                            nested = self._get_deployment_failure_analysis(
+                                physical_id,
+                                _depth=_depth + 1,
+                                deploy_start_time=deploy_start_time,
+                            )
+                            for nested_failure in nested.get("all_failures", []):
+                                if nested_failure.get("stack_path"):
+                                    nested_failure["stack_path"] = (
+                                        f"{resource_id} → {nested_failure['stack_path']}"
+                                    )
+                                else:
+                                    nested_failure["stack_path"] = resource_id
+                            all_failures.extend(nested.get("all_failures", []))
+
+                    all_failures.append(failure)
+
+        except Exception as e:
+            logger.warning("Error getting stack events for %s: %s", stack_name, e)
+            all_failures.append(
+                {
+                    "resource": "Unknown",
+                    "resource_type": "",
+                    "reason": f"Could not retrieve stack events: {e}",
+                    "status": "UNKNOWN",
+                    "physical_id": "",
+                    "stack": str(stack_name),
+                    "stack_path": "",
+                    "is_nested_wrapper": False,
+                    "is_cascade": False,
+                }
+            )
+
+        root_causes = [
+            f for f in all_failures if not f["is_cascade"] and not f["is_nested_wrapper"]
+        ]
+
+        return {
+            "root_causes": root_causes,
+            "all_failures": all_failures,
+            "stack_name": stack_name,
+        }
 
     def _wait_for_stack(
         self, stack_name: str, action: str, poll_interval: int = 15

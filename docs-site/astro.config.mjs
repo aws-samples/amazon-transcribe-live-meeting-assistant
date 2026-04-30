@@ -61,6 +61,7 @@ export default defineConfig({
           label: "Meeting Sources",
           items: [
             { label: "Stream Audio", slug: "stream-audio" },
+            { label: "Browser Extension", slug: "browser-extension" },
             { label: "Virtual Participant", slug: "virtual-participant" },
           ],
         },
@@ -96,6 +97,10 @@ export default defineConfig({
         {
           label: "Access Control & Security",
           items: [
+            {
+              label: "User Management",
+              slug: "user-management",
+            },
             {
               label: "User-Based Access Control",
               slug: "user-based-access-control",
@@ -151,6 +156,9 @@ export default defineConfig({
           label: "New & Uncategorized",
           items: [
             { label: "Cloudformation Service Role", slug: "cloudformation-service-role" },
+            { label: "Meeting Sources", slug: "meeting-sources" },
+            { label: "Upload Audio", slug: "upload-audio" },
+            { label: "Virtual Participant Local Dev", slug: "virtual-participant-local-dev" },
           ],
         },
         // AUTO-SIDEBAR-END

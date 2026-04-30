@@ -91,6 +91,16 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  LMAVersion:
+    Type: String
+    Default: "0.0.0"
+    Description: LMA release version (used in welcome email footer)
+
+  BuildDateTime:
+    Type: String
+    Default: ""
+    Description: LMA build date/time (used in welcome email footer)
+
 Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
@@ -142,6 +152,7 @@ Resources:
             extension will not be available until then.</p>
             <p>Thanks,</p>
             <p>Live Meeting Assistant (amazon.com/live-meeting-assistant)</p>
+            <p><em>Stack: ${LMAStackName}, v${LMAVersion}, ${BuildDateTime}</em></p>
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
@@ -151,11 +162,16 @@ Resources:
         {####}.
       EmailVerificationSubject: >-
         Account Verification
-      LambdaConfig: !If
-        - ShouldAllowSignUpEmailDomain
-        - PreAuthentication: !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
-          PreSignUp: !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
-        - !Ref AWS::NoValue
+      LambdaConfig:
+        CustomMessage: !GetAtt CognitoCustomMessageFunction.Arn
+        PreAuthentication: !If
+          - ShouldAllowSignUpEmailDomain
+          - !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
+          - !Ref AWS::NoValue
+        PreSignUp: !If
+          - ShouldAllowSignUpEmailDomain
+          - !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
+          - !Ref AWS::NoValue
       Policies:
         PasswordPolicy:
           MinimumLength: 8
@@ -266,7 +282,7 @@ Resources:
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
-      GenerateSecret: false
+      GenerateSecret: false  # pragma: allowlist secret
       IdTokenValidity: 1
       PreventUserExistenceErrors: ENABLED
       ReadAttributes:
@@ -467,6 +483,183 @@ Resources:
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref CognitoUserPoolEmailDomainVerifyFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt UserPool.Arn
+
+  ##########################################################################
+  # Cognito CustomMessage trigger
+  #
+  # Customizes the AdminCreateUser invitation email so it includes the
+  # clickable LMA web UI (CloudFront) URL. The URL is read from the LMA
+  # Settings SSM parameter, which is populated by AISTACK after the
+  # CloudFront distribution exists. For the initial admin user (created
+  # at stack-create time before AISTACK populates the parameter), the
+  # Lambda falls back to the default wording that references the
+  # CloudFormation Outputs tab.
+  #
+  # For other CustomMessage trigger sources (forgot password, verify
+  # email, resend code, etc.) the Lambda returns the event untouched so
+  # Cognito's default messages continue to be used.
+  ##########################################################################
+
+  CognitoCustomMessageFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: ReadLMASettings
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
+
+  CognitoCustomMessageFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/CognitoCustomMessageFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  CognitoCustomMessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 10
+      MemorySize: 256
+      Role: !GetAtt CognitoCustomMessageFunctionRole.Arn
+      Environment:
+        Variables:
+          LMA_SETTINGS_PARAMETER: !Ref LMASettingsParameterName
+          LMA_STACK_NAME: !Ref LMAStackName
+          LMA_VERSION: !Ref LMAVersion
+          LMA_BUILD_DATETIME: !Ref BuildDateTime
+      InlineCode: |
+        # Cognito CustomMessage trigger for LMA. Reads the CloudFront URL
+        # (if present) from the LMA Settings SSM parameter and injects it
+        # into the AdminCreateUser invitation email. Falls back to the
+        # default wording if the URL is not yet available (e.g. at initial
+        # stack create time, before AISTACK has populated the parameter).
+        import html
+        import json
+        import logging
+        import os
+
+        import boto3
+
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        ssm = boto3.client("ssm")
+
+        PARAM_NAME = os.environ.get("LMA_SETTINGS_PARAMETER", "")
+        STACK_NAME = os.environ.get("LMA_STACK_NAME", "")
+        VERSION = os.environ.get("LMA_VERSION", "")
+        BUILD_DT = os.environ.get("LMA_BUILD_DATETIME", "")
+
+
+        def _get_cloudfront_url():
+            if not PARAM_NAME:
+                return ""
+            try:
+                resp = ssm.get_parameter(Name=PARAM_NAME)
+                raw = resp.get("Parameter", {}).get("Value", "")
+                if not raw:
+                    return ""
+                settings = json.loads(raw)
+                return (settings.get("CloudFrontEndpoint") or "").strip()
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.warning("Could not read LMA settings parameter: %s", exc)
+                return ""
+
+
+        def lambda_handler(event, _context):
+            logger.info("Event: %s", json.dumps(event))
+
+            trigger = event.get("triggerSource", "")
+            # Only customize the admin-create-user invitation email.
+            # Leave all other CustomMessage triggers (forgot password, verify
+            # email, resend code, etc.) untouched so Cognito defaults apply.
+            if trigger != "CustomMessage_AdminCreateUser":
+                return event
+
+            req = event.get("request", {}) or {}
+            code = req.get("codeParameter", "{####}")
+            username = html.escape(req.get("usernameParameter", "") or "")
+            url = _get_cloudfront_url()
+
+            event.setdefault("response", {})
+            event["response"]["emailSubject"] = "Welcome to Live Meeting Assistant!"
+
+            if url:
+                safe_url = html.escape(url, quote=True)
+                event["response"]["emailMessage"] = (
+                    f"<p>Hello {username},</p>"
+                    f"<p>Welcome to Live Meeting Assistant (LMA)! Your temporary password is: <strong>{code}</strong></p>"
+                    f"<p>Sign in to LMA at "
+                    f"<a href=\"{safe_url}\">{safe_url}</a>. "
+                    f"You'll be prompted to set a permanent password on first sign-in.</p>"
+                    f"<p>Thanks,</p>"
+                    f"<p>Live Meeting Assistant (amazon.com/live-meeting-assistant)</p>"
+                    f"<p><em>Stack: {html.escape(STACK_NAME)}, v{html.escape(VERSION)}, {html.escape(BUILD_DT)}</em></p>"
+                )
+            else:
+                # Fallback: AISTACK hasn't populated CloudFrontEndpoint yet
+                # (e.g. initial stack creation).
+                event["response"]["emailMessage"] = (
+                    f"<p>Hello {username},</p>"
+                    f"<p>Welcome to Live Meeting Assistant (LMA)! Your temporary password is: <strong>{code}</strong></p>"
+                    f"<p>When the CloudFormation stack is COMPLETE, navigate to the Outputs tab of your "
+                    f"CloudFormation stack and get the URL associated with ApplicationCloudfrontEndpoint. "
+                    f"This is your LMA web interface. When you first login, it will prompt you to set a permanent password.</p>"
+                    f"<p>Don't attempt to download the Chrome browser extension from LMA until the "
+                    f"CloudFormation stack status is CREATE_COMPLETE or UPDATE_COMPLETE, as the "
+                    f"extension will not be available until then.</p>"
+                    f"<p>Thanks,</p>"
+                    f"<p>Live Meeting Assistant (amazon.com/live-meeting-assistant)</p>"
+                    f"<p><em>Stack: {html.escape(STACK_NAME)}, v{html.escape(VERSION)}, {html.escape(BUILD_DT)}</em></p>"
+                )
+            return event
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/CognitoCustomMessageFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cognito trigger"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - CognitoCustomMessageFunctionLogGroup
+
+  CognitoCustomMessagePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CognitoCustomMessageFunction
       Principal: cognito-idp.amazonaws.com
       SourceAccount: !Ref AWS::AccountId
       SourceArn: !GetAtt UserPool.Arn

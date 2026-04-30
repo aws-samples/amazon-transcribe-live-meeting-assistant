@@ -23,8 +23,8 @@ MEETING_RECORD_EXPIRATION_IN_DAYS = getenv(
 TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS = getenv(
     "TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
 
-region = getenv("REACT_APP_AWS_REGION", "us-east-1")
-user_pool_id = getenv("REACT_APP_USER_POOL_ID", '')
+region = getenv("VITE_AWS_REGION", "us-east-1")
+user_pool_id = getenv("VITE_USER_POOL_ID", '')
 
 jwks_url = f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}/.well-known/jwks.json"
 jwks_client = PyJWKClient(jwks_url)

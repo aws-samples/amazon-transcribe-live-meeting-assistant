@@ -3,6 +3,8 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -26,11 +28,10 @@ import {
   TextContent,
   Textarea,
   Toggle,
-} from '@awsui/components-react';
+} from '@cloudscape-design/components';
 import rehypeRaw from 'rehype-raw';
 import ReactMarkdown from 'react-markdown';
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
-import { API, Logger, graphqlOperation } from 'aws-amplify';
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
 import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
 import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
@@ -48,6 +49,7 @@ import './CallPanel.css';
 import { SentimentTrendIcon } from '../sentiment-trend-icon/SentimentTrendIcon';
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import useAppContext from '../../contexts/app';
+import useUserGroups from '../../hooks/use-user-groups';
 import awsExports from '../../aws-exports';
 import {
   downloadTranscriptAsExcel,
@@ -62,7 +64,8 @@ import VNCViewer from '../virtual-participant-layout/VNCViewer';
 import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
 import MCPServersModal from '../mcp-servers';
 
-const logger = new Logger('CallPanel');
+const client = generateClient();
+const logger = new ConsoleLogger('CallPanel');
 
 // comprehend PII types
 const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]`);
@@ -569,61 +572,64 @@ const CallInProgressTranscript = ({
   }, [targetLanguage, agentTranscript, translateOn, item.recordingStatusLabel]);
 
   // Translate real-time segments when the call is in progress.
-  useEffect(async () => {
-    const c = getSegments();
-    // prettier-ignore
-    if (
-      translateOn
-      && targetLanguage !== ''
-      && c.length > 0
-      && item.recordingStatusLabel === IN_PROGRESS_STATUS
-    ) {
-      const k = c[c.length - 1].segmentId.concat('-', targetLanguage);
-      const n = {};
-      if (c[c.length - 1].isPartial === false && cacheSeen[k] === undefined) {
-        n[k] = { seen: true };
-        setCacheSeen((state) => ({
-          ...state,
-          ...n,
-        }));
+  useEffect(() => {
+    const runTranslation = async () => {
+      const c = getSegments();
+      // prettier-ignore
+      if (
+        translateOn
+        && targetLanguage !== ''
+        && c.length > 0
+        && item.recordingStatusLabel === IN_PROGRESS_STATUS
+      ) {
+        const k = c[c.length - 1].segmentId.concat('-', targetLanguage);
+        const n = {};
+        if (c[c.length - 1].isPartial === false && cacheSeen[k] === undefined) {
+          n[k] = { seen: true };
+          setCacheSeen((state) => ({
+            ...state,
+            ...n,
+          }));
 
-        // prettier-ignore
-        if (translateCache[k] === undefined) {
-          // Now call translate API
-          const params = {
-            Text: c[c.length - 1].transcript,
-            SourceLanguageCode: 'auto',
-            TargetLanguageCode: targetLanguage,
-          };
-          const command = new TranslateTextCommand(params);
-
-          logger.debug('Translate API being invoked for:', c[c.length - 1].transcript, targetLanguage);
-
-          try {
-            const data = await translateClient.send(command);
-            const o = {};
-            logger.debug('Translate API response:', c[c.length - 1].transcript, data.TranslatedText);
-            o[k] = {
-              cacheId: k,
-              transcript: c[c.length - 1].transcript,
-              translated: data.TranslatedText,
+          // prettier-ignore
+          if (translateCache[k] === undefined) {
+            // Now call translate API
+            const params = {
+              Text: c[c.length - 1].transcript,
+              SourceLanguageCode: 'auto',
+              TargetLanguageCode: targetLanguage,
             };
-            setTranslateCache((state) => ({
-              ...state,
-              ...o,
-            }));
-          } catch (error) {
-            logger.debug('Error from translate:', error);
+            const command = new TranslateTextCommand(params);
+
+            logger.debug('Translate API being invoked for:', c[c.length - 1].transcript, targetLanguage);
+
+            try {
+              const data = await translateClient.send(command);
+              const o = {};
+              logger.debug('Translate API response:', c[c.length - 1].transcript, data.TranslatedText);
+              o[k] = {
+                cacheId: k,
+                transcript: c[c.length - 1].transcript,
+                translated: data.TranslatedText,
+              };
+              setTranslateCache((state) => ({
+                ...state,
+                ...o,
+              }));
+            } catch (error) {
+              logger.debug('Error from translate:', error);
+            }
           }
         }
+        if (Date.now() - lastUpdated > 500) {
+          setUpdateFlag((state) => !state);
+          logger.debug('Updating turn by turn with latest cache');
+        }
       }
-      if (Date.now() - lastUpdated > 500) {
-        setUpdateFlag((state) => !state);
-        logger.debug('Updating turn by turn with latest cache');
-      }
-    }
-    setLastUpdated(Date.now());
-  }, [callTranscriptPerCallId]);
+      setLastUpdated(Date.now());
+    };
+    runTranslation();
+  }, [callTranscriptPerCallId, translateOn, targetLanguage]);
 
   const getTurnByTurnSegments = () => {
     const currentTurnByTurnSegments = transcriptChannels
@@ -792,9 +798,8 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
   const [alertMessage, setAlertMessage] = useState(null);
   const [alertType, setAlertType] = useState('success');
 
-  // Check if user is admin
-  const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
-  const isAdmin = userGroups.includes('Admin');
+  // Check if user is admin (Amplify v6 pattern)
+  const { isAdmin } = useUserGroups();
 
   const loadButtonConfiguration = async () => {
     setIsLoading(true);
@@ -817,7 +822,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
         customId: 'CustomChatButtonConfig',
       };
 
-      const result = await API.graphql(graphqlOperation(query, variables));
+      const result = await client.graphql({ query, variables });
 
       // Parse the JSON strings returned from the resolver
       const defaultData = result?.data?.default?.ChatButtonConfigId
@@ -882,7 +887,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
         },
       };
 
-      await API.graphql(graphqlOperation(mutation, variables));
+      await client.graphql({ query: mutation, variables });
 
       setAlertType('success');
       setAlertMessage('Button configuration saved successfully!');
@@ -939,7 +944,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
         },
       };
 
-      await API.graphql(graphqlOperation(mutation, variables));
+      await client.graphql({ query: mutation, variables });
 
       setAlertType('success');
       setAlertMessage('Reset to defaults successfully!');
@@ -1069,11 +1074,11 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
     });
   };
 
-  if (process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true') {
+  if (import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true') {
     // Use STRANDS chat UI
     const iframeSrc = `/strands-chat.html?callId=${item.callId}`;
 
-    console.log(`DEBUG: Agent Assist Mode: ${process.env.REACT_APP_AGENT_ASSIST_MODE}, Using iframe: ${iframeSrc}`);
+    console.log(`DEBUG: Agent Assist Mode: ${import.meta.env.VITE_AGENT_ASSIST_MODE}, Using iframe: ${iframeSrc}`);
 
     return (
       <>
@@ -1088,7 +1093,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
                 </Link>
               }
               actions={
-                isAdmin && process.env.REACT_APP_AGENT_ASSIST_MODE === 'LAMBDA' ? (
+                isAdmin && import.meta.env.VITE_AGENT_ASSIST_MODE === 'LAMBDA' ? (
                   <ButtonDropdown
                     items={[
                       { text: 'Edit Chat Buttons', id: 'edit-buttons' },
@@ -1278,13 +1283,13 @@ const CallTranscriptContainer = ({
         {
           colspan: {
             default: 12,
-            xs: process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true' ? 8 : 12,
+            xs: import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true' ? 8 : 12,
           },
         },
         {
           colspan: {
             default: 12,
-            xs: process.env.REACT_APP_ENABLE_AGENT_ASSIST === 'true' ? 4 : 0,
+            xs: import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true' ? 4 : 0,
           },
         },
       ]}
@@ -1486,6 +1491,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
 
 export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCallDetailsFromCallIds }) => {
   const { currentCredentials, user } = useAppContext();
+  const { userGroups, isAdmin: isAdminUser } = useUserGroups();
 
   const { settings } = useSettingsContext();
   const [collapseSentiment, setCollapseSentiment] = useState(false);
@@ -1529,17 +1535,13 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     const sendUserContextToIframe = () => {
       const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
       if (iframe && iframe.contentWindow && user) {
-        // Extract user groups from Cognito token
-        const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
-        const isAdmin = userGroups.includes('Admin');
-
         const iframeOrigin = new URL(iframe.src).origin;
         iframe.contentWindow.postMessage(
           {
             type: 'STRANDS_USER_CONTEXT',
             userGroups,
-            isAdmin,
-            email: user?.attributes?.email || '',
+            isAdmin: isAdminUser,
+            email: user?.attributes?.email || user?.username || '',
           },
           iframeOrigin,
         );
@@ -1550,7 +1552,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     const timer = setTimeout(sendUserContextToIframe, 500);
 
     return () => clearTimeout(timer);
-  }, [user, item.callId]);
+  }, [user, userGroups, isAdminUser, item.callId]);
 
   // Add message handler for STRANDS iframe requests
   useEffect(() => {
@@ -1560,9 +1562,6 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
       // Handle user context request from iframe
       if (event.data && event.data.type === 'STRANDS_REQUEST_USER_CONTEXT') {
-        const userGroups = user?.signInUserSession?.accessToken?.payload['cognito:groups'] || [];
-        const isAdmin = userGroups.includes('Admin');
-
         const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
         if (iframe && iframe.contentWindow) {
           const iframeOrigin = new URL(iframe.src).origin;
@@ -1570,8 +1569,8 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
             {
               type: 'STRANDS_USER_CONTEXT',
               userGroups,
-              isAdmin,
-              email: user?.attributes?.email || '',
+              isAdmin: isAdminUser,
+              email: user?.attributes?.email || user?.username || '',
             },
             iframeOrigin,
           );
@@ -1597,7 +1596,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
             customId: 'CustomChatButtonConfig',
           };
 
-          const result = await API.graphql(graphqlOperation(query, variables));
+          const result = await client.graphql({ query, variables });
 
           // Parse the JSON strings returned from the resolver
           const defaultData = result?.data?.default?.ChatButtonConfigId
@@ -1680,7 +1679,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
             },
           };
 
-          const result = await API.graphql(graphqlOperation(mutation, variables));
+          const result = await client.graphql({ query: mutation, variables });
 
           // Send success response back to iframe
           const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
@@ -1738,7 +1737,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
             },
           };
 
-          const result = await API.graphql(graphqlOperation(mutation, variables));
+          const result = await client.graphql({ query: mutation, variables });
 
           // Send success response back to iframe
           const iframe = document.querySelector(`iframe[src*="strands-chat.html"]`);
@@ -1799,29 +1798,32 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           `;
 
           // Set up token subscription
-          API.graphql(
-            graphqlOperation(subscription, {
-              callId: event.data.callId,
-              messageId: event.data.messageId,
-            }),
-          ).subscribe({
-            next: ({ value }) => {
-              const token = value?.data?.onAddChatToken;
-              if (token) {
-                // Send token to the chat iframe
-                event.source.postMessage(
-                  {
-                    type: 'STRANDS_TOKEN_MESSAGE',
-                    token,
-                  },
-                  event.origin,
-                );
-              }
-            },
-            error: (error) => {
-              logger.error('Token subscription error', error);
-            },
-          });
+          client
+            .graphql({
+              query: subscription,
+              variables: {
+                callId: event.data.callId,
+                messageId: event.data.messageId,
+              },
+            })
+            .subscribe({
+              next: (message) => {
+                const token = message?.data?.onAddChatToken;
+                if (token) {
+                  // Send token to the chat iframe
+                  event.source.postMessage(
+                    {
+                      type: 'STRANDS_TOKEN_MESSAGE',
+                      token,
+                    },
+                    event.origin,
+                  );
+                }
+              },
+              error: (error) => {
+                logger.error('Token subscription error', error);
+              },
+            });
         } catch (error) {
           logger.error('Failed to set up token subscription', error);
         }
@@ -1847,7 +1849,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
       try {
         setLoadingVP(true);
-        const result = await API.graphql(graphqlOperation(listVirtualParticipants));
+        const result = await client.graphql({ query: listVirtualParticipants });
 
         const vps = result.data.listVirtualParticipants || [];
         const matchingVP = vps.find((vp) => vp.CallId === item.callId);
@@ -1873,9 +1875,9 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   useEffect(() => {
     if (!vpData?.id) return undefined;
 
-    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipant)).subscribe({
-      next: ({ value }) => {
-        const updated = value?.data?.onUpdateVirtualParticipant;
+    const subscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
+      next: (message) => {
+        const updated = message?.data?.onUpdateVirtualParticipant;
         if (updated && updated.id === vpData.id) {
           setVpData((prev) => ({
             ...prev,
@@ -1894,9 +1896,9 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   useEffect(() => {
     if (!item.callId) return undefined;
 
-    const subscription = API.graphql(
-      graphqlOperation(
-        `
+    const subscription = client
+      .graphql({
+        query: `
         subscription OnVNCPreviewToggle($callId: ID!) {
           onVNCPreviewToggle(CallId: $callId) {
             CallId
@@ -1906,23 +1908,23 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           }
         }
       `,
-        { callId: item.callId },
-      ),
-    ).subscribe({
-      next: ({ value }) => {
-        const control = value?.data?.onVNCPreviewToggle;
-        if (control) {
-          if (control.Success) {
-            const shouldShow = control.Action === 'open';
-            setShowVNCPreview(shouldShow);
-            logger.info(`VNC preview ${control.Action} by ${control.RequestedBy || 'agent'}`);
+        variables: { callId: item.callId },
+      })
+      .subscribe({
+        next: (message) => {
+          const control = message?.data?.onVNCPreviewToggle;
+          if (control) {
+            if (control.Success) {
+              const shouldShow = control.Action === 'open';
+              setShowVNCPreview(shouldShow);
+              logger.info(`VNC preview ${control.Action} by ${control.RequestedBy || 'agent'}`);
+            }
           }
-        }
-      },
-      error: (err) => {
-        logger.error('VNC control subscription error:', err);
-      },
-    });
+        },
+        error: (err) => {
+          logger.error('VNC control subscription error:', err);
+        },
+      });
 
     return () => {
       subscription.unsubscribe();

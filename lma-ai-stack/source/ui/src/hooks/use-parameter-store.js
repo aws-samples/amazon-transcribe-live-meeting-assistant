@@ -9,7 +9,7 @@ import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 // import { useState, useEffect } from 'react';
 import awsExports from '../aws-exports';
 
-const LCA_PARAMETER_NAME = process.env.REACT_APP_SETTINGS_PARAMETER;
+const LCA_PARAMETER_NAME = import.meta.env.VITE_SETTINGS_PARAMETER;
 
 const useParameterStore = (creds) => {
   const [settings, setSettings] = useState({});
@@ -29,7 +29,7 @@ const useParameterStore = (creds) => {
     setSettings(lcaSettings);
   };
 
-  useEffect(async () => {
+  useEffect(() => {
     refreshSettings(creds);
   }, []);
 

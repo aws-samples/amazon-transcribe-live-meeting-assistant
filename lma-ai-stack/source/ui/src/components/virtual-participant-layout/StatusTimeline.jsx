@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import PropTypes from 'prop-types';
-import { Container, Header, SpaceBetween, Box, Icon, Alert, Badge } from '@awsui/components-react';
+import { Container, Header, SpaceBetween, Box, Icon, Alert, Badge } from '@cloudscape-design/components';
 import './StatusTimeline.css';
 
 // Status configuration matching VirtualParticipantDetails

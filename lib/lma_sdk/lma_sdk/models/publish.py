@@ -48,6 +48,12 @@ class PublishConfig(BaseModel):
     version: str = ""
     stacks: list[str] | None = None  # None = all stacks
     force: bool = False  # Skip change detection
+    # When True, proceed even if there are untracked files inside BUILD_SCRIPT
+    # stack directories. Default is False so publishes fail fast when new source
+    # files haven't been `git add`-ed — those files would otherwise be silently
+    # excluded from the build zip (the lma-ai-stack Makefile uses `git ls-files`
+    # to assemble the source bundle).
+    allow_untracked: bool = False
 
 
 class StackPublishResult(BaseModel):

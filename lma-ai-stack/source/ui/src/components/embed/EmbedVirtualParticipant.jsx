@@ -12,10 +12,20 @@
  *   show    - Comma-separated panels: vnc, transcript, summary, chat, details
  *   layout  - Layout: vertical, horizontal, grid
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
 import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
-import { API, graphqlOperation, Logger } from 'aws-amplify';
-import { Box, Container, Header, SpaceBetween, Spinner, Alert, Badge, ColumnLayout } from '@awsui/components-react';
+import {
+  Box,
+  Container,
+  Header,
+  SpaceBetween,
+  Spinner,
+  Alert,
+  Badge,
+  ColumnLayout,
+} from '@cloudscape-design/components';
 
 import VNCViewer from '../virtual-participant-layout/VNCViewer';
 import useSettingsContext from '../../contexts/settings';
@@ -25,7 +35,8 @@ import mapCallsAttributes from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { CallPanel } from '../call-panel/CallPanel';
 
-const logger = new Logger('EmbedVirtualParticipant');
+const client = generateClient();
+const logger = new ConsoleLogger('EmbedVirtualParticipant');
 
 const getVirtualParticipant = `
   query GetVirtualParticipant($id: ID!) {
@@ -201,7 +212,7 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     const loadVP = async () => {
       try {
         setLoading(true);
-        const result = await API.graphql(graphqlOperation(getVirtualParticipant, { id: vpId }));
+        const result = await client.graphql({ query: getVirtualParticipant, variables: { id: vpId } });
 
         if (result.data.getVirtualParticipant) {
           const vpData = result.data.getVirtualParticipant;
@@ -231,9 +242,9 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
   useEffect(() => {
     if (!vpId) return undefined;
 
-    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipantDetailed)).subscribe({
-      next: ({ value }) => {
-        const updated = value?.data?.onUpdateVirtualParticipant;
+    const subscription = client.graphql({ query: onUpdateVirtualParticipantDetailed }).subscribe({
+      next: (message) => {
+        const updated = message?.data?.onUpdateVirtualParticipant;
         if (updated && updated.id === vpId) {
           setVpDetails((prev) => ({
             ...prev,

@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { HelpPanel, Icon } from '@awsui/components-react';
+import { HelpPanel, Icon } from '@cloudscape-design/components';
 
 const DOCS_BASE = 'https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant';
 
@@ -25,6 +25,13 @@ const content = (
       <li>Stop or remove virtual participants from active meetings</li>
       <li>Transcription and analysis happen automatically once the bot joins</li>
     </ul>
+    <p>
+      <strong>Not sure which option to use?</strong> See the{' '}
+      <a href={`${DOCS_BASE}/meeting-sources/`} target="_blank" rel="noopener noreferrer">
+        <Icon name="external" /> Meeting Sources comparison
+      </a>{' '}
+      for a side-by-side of the Chrome Extension, Stream Audio, and Virtual Participant.
+    </p>
     <h3>Documentation</h3>
     <ul>
       <li>

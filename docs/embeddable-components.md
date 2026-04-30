@@ -43,6 +43,19 @@ The embed page is a chrome-free (no navigation sidebar, top bar, or breadcrumbs)
   - **Cognito Identity Federation** — users authenticate via your IdP, federated through Cognito
   - **Token passing via postMessage** — your app obtains tokens and passes them to the iframe
 
+## Interactive Demo Page
+
+A ready-to-use demo page is included that showcases the embeddable components inside a mock "Acme CRM" parent application — useful for quickly validating your deployment or for producing screenshots.
+
+**▶ [Open the live demo](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/embeddable-components-demo.html)** (hosted on the LMA docs site — renders directly in the browser)
+
+Source: [`docs/embeddable-components-demo.html`](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/main/docs/embeddable-components-demo.html)
+
+Enter your LMA CloudFront URL and an existing `callId`, and click **Apply**. The page demonstrates:
+
+- A **stream-audio** widget pre-populated with meeting fields, with parent-app Start/Stop buttons that drive the iframe via `postMessage`, plus a live event log showing every `LMA_*` event the iframe emits.
+- A **multi-panel dashboard** combining `summary`, `chat`, and `transcript` iframes in a CSS Grid layout — all bound to the same meeting.
+
 ## Quick Start
 
 ### 1. Basic Embed (Stream Audio)
@@ -60,6 +73,35 @@ The simplest way to get started is to embed the Stream Audio component:
 ```
 
 > **Important**: The `allow="microphone; display-capture"` attribute is required for the Stream Audio component to access the user's microphone and screen audio.
+
+### 1b. Upload Audio (Pre-recorded)
+
+To let users upload an existing audio/video file instead of streaming live:
+
+```html
+<iframe
+  src="https://YOUR_LMA_CLOUDFRONT_URL/#/embed?component=upload-audio"
+  width="100%"
+  height="550px"
+  style="border: none;"
+></iframe>
+```
+
+> Upload Audio does **not** need the `allow="microphone; display-capture"` attribute — the file is selected from the user's device and uploaded directly to Amazon S3.
+
+### 1c. Combined Stream / Upload Selector
+
+To show both options with a Tiles-style switcher at the top of the form:
+
+```html
+<iframe
+  src="https://YOUR_LMA_CLOUDFRONT_URL/#/embed?component=select-audio"
+  width="100%"
+  height="600px"
+  style="border: none;"
+  allow="microphone; display-capture"
+></iframe>
+```
 
 ### 2. Pre-Populated Stream Audio
 
@@ -105,7 +147,9 @@ Show the VNC live view and transcript for a virtual participant session:
 
 | Component Value | Description | Key Parameters |
 |----------------|-------------|----------------|
-| `stream-audio` | Full Stream Audio interface with meeting form and recording controls | `meetingTopic`, `participants`, `owner`, `autoStart` |
+| `stream-audio` | Stream-only: live meeting form + recording controls (mic / screen audio) | `meetingTopic`, `participants`, `owner`, `autoStart` |
+| `upload-audio` | Upload-only: file-picker form for pre-recorded audio / video + diarization toggle | `meetingTopic`, `participants`, `owner` |
+| `select-audio` | Combined page with a top-of-page Stream / Upload mode switcher | `meetingTopic`, `participants`, `owner` |
 | `call-details` | Complete call details view (transcript + summary + chat) | `callId`, `show`, `layout` |
 | `transcript` | Live meeting transcript only | `callId` |
 | `summary` | Meeting summary only | `callId` |
@@ -228,7 +272,7 @@ response = client.initiate_auth(
     AuthFlow='USER_PASSWORD_AUTH',  # or USER_SRP_AUTH
     AuthParameters={
         'USERNAME': 'user@example.com',
-        'PASSWORD': 'user-password'
+        'PASSWORD': 'user-password'  # pragma: allowlist secret
     }
 )
 
@@ -727,6 +771,16 @@ Base URL: `https://YOUR_LMA_CLOUDFRONT_URL/#/embed`
 **Auto-start Stream Audio:**
 ```
 /#/embed?component=stream-audio&meetingTopic=Auto+Meeting&autoStart=true
+```
+
+**Upload Audio (pre-populated):**
+```
+/#/embed?component=upload-audio&meetingTopic=Client+Review&participants=Customer&owner=analyst@co.com
+```
+
+**Combined Stream / Upload selector:**
+```
+/#/embed?component=select-audio
 ```
 
 **Full Call Details:**

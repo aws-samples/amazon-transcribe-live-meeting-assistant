@@ -4,58 +4,60 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { useState, useEffect } from 'react';
-
-import { Auth, Logger } from 'aws-amplify';
-import { AuthState } from '@aws-amplify/ui-components';
+import { fetchAuthSession } from 'aws-amplify/auth';
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { useAuthenticator } from '@aws-amplify/ui-react';
 
 const DEFAULT_CREDS_REFRESH_INTERVAL_IN_MS = 60 * 15 * 1000;
 
-const logger = new Logger('useCurrentSessionCreds');
+const logger = new ConsoleLogger('useCurrentSessionCreds');
 
-const useCurrentSessionCreds = ({ authState, credsIntervalInMs = DEFAULT_CREDS_REFRESH_INTERVAL_IN_MS }) => {
+const useCurrentSessionCreds = ({ credsIntervalInMs = DEFAULT_CREDS_REFRESH_INTERVAL_IN_MS } = {}) => {
+  const { authStatus } = useAuthenticator((context) => [context.authStatus]);
   const [currentSession, setCurrentSession] = useState();
   const [currentCredentials, setCurrentCredentials] = useState();
-  let interval;
-
-  const refreshCredentials = async () => {
-    try {
-      setCurrentSession(await Auth.currentSession());
-      setCurrentCredentials(await Auth.currentUserCredentials());
-      logger.debug('successfully refreshed credentials');
-    } catch (error) {
-      // XXX surface credential refresh error
-      logger.error('failed to get credentials', error);
-    }
-  };
-  const clearRefreshInterval = () => {
-    if (interval) {
-      clearInterval(interval);
-      interval = null;
-    }
-  };
 
   useEffect(() => {
-    if (authState === AuthState.SignedIn) {
-      if (!interval) {
-        refreshCredentials();
-        interval = setInterval(refreshCredentials, credsIntervalInMs);
-      } else {
-        clearRefreshInterval();
-        interval = setInterval(refreshCredentials, credsIntervalInMs);
+    let interval = null;
+
+    const refreshCredentials = async () => {
+      try {
+        const session = await fetchAuthSession();
+        setCurrentSession(session);
+        setCurrentCredentials(session.credentials);
+
+        // Persist JWT tokens under the legacy localStorage keys that other LMA
+        // modules (VNCViewer, websocket streaming client, etc.) read directly.
+        try {
+          const idToken = session?.tokens?.idToken?.toString();
+          const accessToken = session?.tokens?.accessToken?.toString();
+          const poolClientId = session?.tokens?.accessToken?.payload?.client_id;
+          if (poolClientId) {
+            if (idToken) localStorage.setItem(`${poolClientId}idtokenjwt`, idToken);
+            if (accessToken) localStorage.setItem(`${poolClientId}accesstokenjwt`, accessToken);
+          }
+          if (idToken) localStorage.setItem('lma.idtokenjwt', idToken);
+          if (accessToken) localStorage.setItem('lma.accesstokenjwt', accessToken);
+        } catch (tokenErr) {
+          logger.warn('unable to persist JWT tokens to localStorage', tokenErr);
+        }
+      } catch (error) {
+        logger.error('failed to get credentials', error);
       }
-    } else {
-      clearRefreshInterval();
-    }
-    if (authState === AuthState.SignedOut) {
-      clearRefreshInterval();
-      setCurrentSession();
-      setCurrentCredentials();
+    };
+
+    if (authStatus === 'authenticated') {
+      refreshCredentials();
+      interval = setInterval(refreshCredentials, credsIntervalInMs);
+    } else if (authStatus === 'unauthenticated') {
+      setCurrentSession(undefined);
+      setCurrentCredentials(undefined);
     }
 
     return () => {
-      clearRefreshInterval();
+      if (interval) clearInterval(interval);
     };
-  }, [authState, credsIntervalInMs]);
+  }, [authStatus, credsIntervalInMs]);
 
   return { currentSession, currentCredentials };
 };

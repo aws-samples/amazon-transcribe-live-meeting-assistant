@@ -5,12 +5,12 @@
  */
 import React from 'react';
 
-import { BreadcrumbGroup } from '@awsui/components-react';
+import { BreadcrumbGroup } from '@cloudscape-design/components';
 
 import { CALLS_PATH, DEFAULT_PATH } from '../../routes/constants';
 
 export const callListBreadcrumbItems = [
-  { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` },
+  { text: 'Meeting Assistant', href: `#${DEFAULT_PATH}` },
   { text: 'Meetings', href: `#${CALLS_PATH}` },
 ];
 

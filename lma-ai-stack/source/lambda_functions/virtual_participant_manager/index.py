@@ -233,7 +233,7 @@ class VirtualParticipantManager:
                 # Try to use a fallback pattern based on the known format
                 logger.info("Attempting to use fallback schedule group name pattern")
                 # This is a temporary fallback - ideally the environment variable should be set
-                schedule_group_name = "LMA-VIRTUALPARTICIPANTSTACK-1ICEYE8S4JXFV-vp-schedules"
+                schedule_group_name = "LMA-VIRTUALPARTICIPANTSTACK-1ICEYE8S4JXFV-vp-schedules"  # pragma: allowlist secret
                 logger.info(f"Using fallback schedule group name: {schedule_group_name}")
 
             # The schedule name is the VP ID (as set by the VirtualParticipantSchedulerFunction)
@@ -259,6 +259,67 @@ class VirtualParticipantManager:
             return False
 
 
+# Statuses that indicate the VP is not actively running / scheduled and can be
+# deleted immediately without first calling end_virtual_participant.
+_INACTIVE_VP_STATUSES = {"ENDED", "COMPLETED", "FAILED", "CANCELLED"}
+
+
+def _delete_virtual_participants(
+    vp_manager: "VirtualParticipantManager", vp_ids, ended_by: Optional[str] = None
+):
+    """Delete one or more Virtual Participants.
+
+    For any VP that is not already in a terminal state, end_virtual_participant
+    is invoked first to clean up ECS task, ALB resources and any EventBridge
+    schedule. The DynamoDB record is then removed.
+    """
+
+    deleted = []
+    errors = []
+
+    for vp_id in vp_ids:
+        try:
+            vp = vp_manager.get_virtual_participant(vp_id)
+            if not vp:
+                logger.warning(f"VP {vp_id} not found - treating as already deleted")
+                deleted.append(vp_id)
+                continue
+
+            status = vp.get("status", "")
+            if status not in _INACTIVE_VP_STATUSES:
+                logger.info(f"VP {vp_id} has status {status}, ending before delete")
+                try:
+                    vp_manager.end_virtual_participant(
+                        vp_id=vp_id,
+                        end_reason="Deleted by user",
+                        ended_by=ended_by,
+                    )
+                except Exception as end_err:  # noqa: BLE001
+                    # Log but continue - we still want to attempt the delete so
+                    # stale records can be removed.
+                    logger.error(f"Error ending VP {vp_id} before delete: {end_err}")
+
+            # Delete the DynamoDB record
+            vp_manager.table.delete_item(Key={"id": vp_id})
+            logger.info(f"Deleted VP record for {vp_id}")
+            deleted.append(vp_id)
+
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Error deleting VP {vp_id}: {e}")
+            errors.append({"id": vp_id, "error": str(e)})
+
+    if errors:
+        result_msg = (
+            f"Deleted {len(deleted)} Virtual Participant(s). {len(errors)} failed: {errors}"
+        )
+    elif len(deleted) == 1:
+        result_msg = "Successfully deleted 1 Virtual Participant."
+    else:
+        result_msg = f"Successfully deleted {len(deleted)} Virtual Participants."
+
+    return {"Result": result_msg}
+
+
 def lambda_handler(event, context):
     """Lambda handler for Virtual Participant management operations"""
 
@@ -281,6 +342,23 @@ def lambda_handler(event, context):
             )
 
             logger.info("VP termination completed successfully")
+
+        elif operation == "deleteVirtualParticipants":
+            input_data = arguments.get("input", {})
+            ids = input_data.get("ids", [])
+            if not ids:
+                raise ValueError("deleteVirtualParticipants requires at least one id")
+
+            # Determine who performed the deletion (for end_virtual_participant audit)
+            identity = event.get("identity") or {}
+            claims = identity.get("claims") or {}
+            ended_by = (
+                claims.get("email") or claims.get("cognito:username") or identity.get("username")
+            )
+
+            result = _delete_virtual_participants(vp_manager, ids, ended_by=ended_by)
+
+            logger.info("VP deletion completed successfully")
 
         else:
             raise ValueError(f"Unknown operation: {operation}")

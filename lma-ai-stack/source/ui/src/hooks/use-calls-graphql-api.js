@@ -3,9 +3,9 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
 import { useEffect, useState } from 'react';
-import { API, Logger, graphqlOperation } from 'aws-amplify';
-
 import useAppContext from '../contexts/app';
 
 import listCallDateShard from '../graphql/queries/listCallDateShard';
@@ -23,7 +23,8 @@ import getTranscriptSegments from '../graphql/queries/getTranscriptSegments';
 
 import { CALL_LIST_SHARDS_PER_DAY } from '../components/call-list/calls-table-config';
 
-const logger = new Logger('useCallsGraphQlApi');
+const client = generateClient();
+const logger = new ConsoleLogger('useCallsGraphQlApi');
 
 const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 2 } = {}) => {
   const [periodsToLoad, setPeriodsToLoad] = useState(initialPeriodsToLoad);
@@ -50,7 +51,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
   const getCallDetailsFromCallIds = async (callIds) => {
     // prettier-ignore
     const getCallPromises = callIds.map((callId) => (
-      API.graphql({ query: getCall, variables: { callId } })
+      client.graphql({ query: getCall, variables: { callId } })
     ));
     const getCallResolutions = await Promise.allSettled(getCallPromises);
     const getCallRejected = getCallResolutions.filter((r) => r.status === 'rejected');
@@ -65,10 +66,10 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
   useEffect(() => {
     logger.debug('onCreateCall subscription');
-    const subscription = API.graphql(graphqlOperation(onCreateCall)).subscribe({
-      next: async ({ provider, value }) => {
-        logger.debug('call list subscription update', { provider, value });
-        const callId = value?.data?.onCreateCall.CallId || '';
+    const subscription = client.graphql({ query: onCreateCall }).subscribe({
+      next: async (message) => {
+        logger.debug('call list subscription update', message);
+        const callId = message.data?.onCreateCall?.CallId || '';
         if (callId) {
           const callValues = await getCallDetailsFromCallIds([callId]);
           setCallsDeduped(callValues);
@@ -85,10 +86,10 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
   useEffect(() => {
     logger.debug('onUpdateCall subscription');
-    const subscription = API.graphql(graphqlOperation(onUpdateCall)).subscribe({
-      next: async ({ provider, value }) => {
-        logger.debug('call update', { provider, value });
-        const callUpdateEvent = value?.data?.onUpdateCall;
+    const subscription = client.graphql({ query: onUpdateCall }).subscribe({
+      next: async (message) => {
+        logger.debug('call update', message);
+        const callUpdateEvent = message.data?.onUpdateCall;
         if (callUpdateEvent?.CallId) {
           setCallsDeduped([callUpdateEvent]);
         }
@@ -104,10 +105,10 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
   useEffect(() => {
     logger.debug('onShareMeetings subscription');
-    const subscription = API.graphql(graphqlOperation(onShareMeetings)).subscribe({
-      next: async ({ provider, value }) => {
-        logger.debug('share meetings subscription update', { provider, value });
-        const sharedCalls = value?.data?.onShareMeetings.Calls || '';
+    const subscription = client.graphql({ query: onShareMeetings }).subscribe({
+      next: async (message) => {
+        logger.debug('share meetings subscription update', message);
+        const sharedCalls = message.data?.onShareMeetings?.Calls || '';
         if (sharedCalls && sharedCalls.length > 0) {
           const callValues = await getCallDetailsFromCallIds(sharedCalls);
           setCallsDeduped(callValues);
@@ -124,10 +125,10 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
   useEffect(() => {
     logger.debug('onDeleteCall subscription');
-    const subscription = API.graphql(graphqlOperation(onDeleteCall)).subscribe({
-      next: async ({ provider, value }) => {
-        logger.debug('call delete subscription update', { provider, value });
-        const callId = value?.data?.onDeleteCall.CallId || '';
+    const subscription = client.graphql({ query: onDeleteCall }).subscribe({
+      next: async (message) => {
+        logger.debug('call delete subscription update', message);
+        const callId = message.data?.onDeleteCall?.CallId || '';
         if (callId) {
           setCalls((currentCalls) => currentCalls.filter((c) => c.CallId !== callId));
         }
@@ -143,10 +144,10 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
   useEffect(() => {
     logger.debug('onUnshareCall subscription');
-    const subscription = API.graphql(graphqlOperation(onUnshareCall)).subscribe({
-      next: async ({ provider, value }) => {
-        logger.debug('call unshare subscription update', { provider, value });
-        const callId = value?.data?.onUnshareCall.CallId || '';
+    const subscription = client.graphql({ query: onUnshareCall }).subscribe({
+      next: async (message) => {
+        logger.debug('call unshare subscription update', message);
+        const callId = message.data?.onUnshareCall?.CallId || '';
         if (callId) {
           setCalls((currentCalls) => currentCalls.filter((c) => c.CallId !== callId));
         }
@@ -248,27 +249,29 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
     }
     logger.debug('setting up onAddTranscriptSegment subscription');
 
-    subscription = API.graphql(graphqlOperation(onAddTranscriptSegment, { callId: liveTranscriptCallId })).subscribe({
-      next: async ({ provider, value }) => {
-        logger.debug('call transcript subscription update', { provider, value });
-        const transcriptSegmentValue = value?.data?.onAddTranscriptSegment;
-        if (!transcriptSegmentValue) {
-          return;
-        }
-        const transcriptSegment = mapTranscriptSegmentValue(transcriptSegmentValue);
-        const { callId, transcript, segmentId } = transcriptSegment;
-        if (callId !== liveTranscriptCallId) {
-          return;
-        }
-        if (transcript && segmentId) {
-          handleCallTranscriptSegmentMessage(transcriptSegment);
-        }
-      },
-      error: (error) => {
-        logger.error(error);
-        setErrorMessage('transcript update network subscription failed - please reload the page');
-      },
-    });
+    subscription = client
+      .graphql({ query: onAddTranscriptSegment, variables: { callId: liveTranscriptCallId } })
+      .subscribe({
+        next: async (message) => {
+          logger.debug('call transcript subscription update', message);
+          const transcriptSegmentValue = message.data?.onAddTranscriptSegment;
+          if (!transcriptSegmentValue) {
+            return;
+          }
+          const transcriptSegment = mapTranscriptSegmentValue(transcriptSegmentValue);
+          const { callId, transcript, segmentId } = transcriptSegment;
+          if (callId !== liveTranscriptCallId) {
+            return;
+          }
+          if (transcript && segmentId) {
+            handleCallTranscriptSegmentMessage(transcriptSegment);
+          }
+        },
+        error: (error) => {
+          logger.error(error);
+          setErrorMessage('transcript update network subscription failed - please reload the page');
+        },
+      });
 
     return () => {
       logger.debug('unsubscribed from transcript segments');
@@ -279,7 +282,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
   const listCallIdsByDateShards = async ({ date, shards }) => {
     const listCallDateShardPromises = shards.map((i) => {
       logger.debug('sending list call date shard', date, i);
-      return API.graphql({ query: listCallDateShard, variables: { date, shard: i } });
+      return client.graphql({ query: listCallDateShard, variables: { date, shard: i } });
     });
     const listCallDateShardResolutions = await Promise.allSettled(listCallDateShardPromises);
 
@@ -299,7 +302,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
   const listCallIdsByDateHours = async ({ date, hours }) => {
     const listCallDateHourPromises = hours.map((i) => {
       logger.debug('sending list call date hour', date, i);
-      return API.graphql({ query: listCallDateHour, variables: { date, hour: i } });
+      return client.graphql({ query: listCallDateHour, variables: { date, hour: i } });
     });
     const listCallDateHourResolutions = await Promise.allSettled(listCallDateHourPromises);
 
@@ -320,7 +323,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
   // eslint-disable-next-line no-unused-vars
   const listCallIds = async () => {
     // this uses a Scan of dynamoDB - prefer using the shard based queries
-    const listCallsPromise = API.graphql({ query: listCalls });
+    const listCallsPromise = client.graphql({ query: listCalls });
     const listCallsResolutions = await Promise.allSettled([listCallsPromise]);
 
     const listRejected = listCallsResolutions.filter((r) => r.status === 'rejected');
@@ -382,6 +385,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
         const residualBaseHour = baseDate.getUTCHours() % hoursInShard;
         residualHours = [...Array(hoursInShard - residualBaseHour).keys()].map((h) => baseDate.getUTCHours() + h);
       }
+      residualHours = residualHours.filter((h) => h >= 0 && h <= 23);
       const baseDateString = baseDate.toISOString().split('T')[0];
 
       const residualDateHours = { date: baseDateString, hours: residualHours };
@@ -446,7 +450,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
 
   const sendGetTranscriptSegmentsRequest = async (callId) => {
     try {
-      const response = await API.graphql({
+      const response = await client.graphql({
         query: getTranscriptSegments,
         variables: { callId },
       });

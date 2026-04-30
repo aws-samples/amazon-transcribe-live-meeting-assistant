@@ -21,11 +21,11 @@
  *   autoStart    - Auto-start streaming (true/false)
  *   authMode     - Authentication mode: cognito (default), token
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useMemo, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import { useLocation } from 'react-router-dom';
-import { Logger } from 'aws-amplify';
-import { Box, Spinner } from '@awsui/components-react';
+import { Box, Spinner } from '@cloudscape-design/components';
 
 import usePostMessageAuth from '../../hooks/use-postmessage-auth';
 import useAppContext from '../../contexts/app';
@@ -33,7 +33,7 @@ import ComponentSelector from './ComponentSelector';
 
 import './EmbedPage.css';
 
-const logger = new Logger('EmbedPage');
+const logger = new ConsoleLogger('EmbedPage');
 
 /**
  * Parse query parameters from the URL hash.
@@ -66,6 +66,14 @@ const useEmbedParams = () => {
 
       // Authentication
       authMode: searchParams.get('authMode') || 'cognito',
+
+      allowedOrigins: searchParams.get('allowedOrigins')
+        ? searchParams
+            .get('allowedOrigins')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [],
     };
 
     logger.debug('Embed params:', params);
@@ -75,20 +83,26 @@ const useEmbedParams = () => {
 
 /**
  * Sends events to the parent window via postMessage.
+ * Uses a specific target origin (from allowedOrigins) rather than '*' to prevent
+ * delivering messages to a malicious origin if the parent frame is ever navigated.
  */
-const useParentMessaging = () => {
-  const sendToParent = useCallback((message) => {
-    try {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage(message, '*');
+const useParentMessaging = (allowedOrigins = []) => {
+  const sendToParent = useCallback(
+    (message) => {
+      try {
+        const targetOrigin = allowedOrigins.length > 0 ? allowedOrigins[0] : window.location.origin;
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(message, targetOrigin);
+        }
+        if (window.opener) {
+          window.opener.postMessage(message, targetOrigin);
+        }
+      } catch (err) {
+        logger.warn('Failed to send message to parent:', err);
       }
-      if (window.opener) {
-        window.opener.postMessage(message, '*');
-      }
-    } catch (err) {
-      logger.warn('Failed to send message to parent:', err);
-    }
-  }, []);
+    },
+    [allowedOrigins],
+  );
 
   return { sendToParent };
 };
@@ -143,7 +157,7 @@ AuthErrorState.defaultProps = {
  */
 const EmbedPage = () => {
   const params = useEmbedParams();
-  const { sendToParent } = useParentMessaging();
+  const { sendToParent } = useParentMessaging(params.allowedOrigins);
   const { currentCredentials, currentSession, user } = useAppContext();
 
   // PostMessage auth for token mode
@@ -153,6 +167,7 @@ const EmbedPage = () => {
     error: postMessageError,
   } = usePostMessageAuth({
     enabled: params.authMode === 'token',
+    allowedOrigins: params.allowedOrigins,
   });
 
   // Listen for control messages from parent

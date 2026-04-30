@@ -7,7 +7,7 @@ title: "Virtual Participant"
 ## Table of Contents
 
 - [Overview](#overview)
-- [Advantages over Stream Audio](#advantages-over-stream-audio)
+- [When to use Virtual Participant](#when-to-use-virtual-participant)
 - [Supported Platforms](#supported-platforms)
 - [Joining a Meeting](#joining-a-meeting)
 - [Meeting Scheduling](#meeting-scheduling)
@@ -23,13 +23,18 @@ title: "Virtual Participant"
 
 ## Overview
 
+> **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio, and Virtual Participant.
+
 The Virtual Participant (VP) is a headless Chrome browser running on ECS (Fargate or EC2) that joins meetings as a separate participant via Puppeteer. It captures audio and metadata, sending them to the LMA Kinesis Data Stream for transcription and processing.
 
-## Advantages over Stream Audio
+## When to use Virtual Participant
 
-- **Use native desktop apps**: You are free to use native desktop applications (Zoom, Teams, etc.) instead of being limited to the browser.
-- **Independent attendance**: The VP can join before you arrive, stay after you leave, or attend meetings you do not join at all.
-- **Voice assistant and avatar integration**: Supports optional voice assistant and avatar features for interactive meeting participation.
+- **Attendees on native desktop or mobile apps**: Participants are free to use native meeting apps (Zoom, Teams, etc.) instead of being limited to the browser — the Chrome Extension and Stream Audio require joining from the web client.
+- **Independent attendance**: The VP can join before you arrive, stay after you leave, or attend meetings you do not join at all — including scheduling it in advance.
+- **Voice Assistant**: The VP is the only capture option that supports the Voice Assistant (wake phrase, push-to-talk, always-on modes).
+- **Open VP live view**: Use the Meeting Assistant's "Open VP live view" feature to see the bot's browser view of the meeting in real time.
+
+See [Meeting Sources](meeting-sources.md) for the full comparison.
 
 ## Supported Platforms
 
@@ -141,10 +146,20 @@ You can manually invoke the VP Step Function with a JSON payload for testing. Th
 
 ### Local Docker Testing
 
-For local development and debugging, you can run the VP Docker container locally with the appropriate environment variables configured for your AWS account and meeting parameters.
+For local development and debugging, run the VP Docker container against a deployed LMA stack using the `make vp-start` target:
+
+```bash
+make vp-start STACK_NAME=<your-stack> PLATFORM=WEBEX MEETING_ID=<id>
+```
+
+This invokes `lma-virtual-participant-stack/backend/local-test.sh`, which reads configuration from CloudFormation, generates a `.env.local`, builds the Docker image, and runs the container locally with VNC exposed on ports 5900 / 5901.
+
+For the recommended EC2 + VSCode Remote-SSH + VNC workflow — including how to manage secrets (`--reuse-env`), enable dev-mode auto-reload, and fix stale VSCode port forwarding — see [Virtual Participant Local Development](virtual-participant-local-dev.md).
 
 ## See Also
 
+- [Virtual Participant Local Development](virtual-participant-local-dev.md) -- EC2 + VSCode + VNC workflow for running the VP locally
 - [Stream Audio](stream-audio.md) -- Browser-based audio capture alternative
 - [Voice Assistant](voice-assistant.md) -- Add a voice assistant to the Virtual Participant
 - [Simli Avatar Setup](simli-avatar-setup.md) -- Configure a visual avatar for the VP
+

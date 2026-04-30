@@ -12,15 +12,11 @@ You've likely experienced the challenge of taking notes during a meeting while t
 
 All of this, and more, is now possible with the Live Meeting Assistant (LMA).
 
-Check out our original demo, and/or the updated demo to see the latest features including Virtual Participant, MCP based AI Agentic assistant - powered by Strands, and the new all voice assistant (think: Alexa or Siri in your meetings) - powered by Nova Sonic2, with optional Quick Suite integration.
+Check out our demo to see many of the latest features.
 
-#### Original demo:
+https://github.com/user-attachments/assets/7642f659-ed9e-4abf-8baf-2f6fb27b08cb
 
-https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/assets/10953374/d5979569-c99c-4141-be56-9f436b48b0ec
 
-#### Latest demo:
-
-https://github.com/user-attachments/assets/cecf20c7-b52c-4bb8-ad5b-6b9f34e7df11
 
 ## Key Features
 

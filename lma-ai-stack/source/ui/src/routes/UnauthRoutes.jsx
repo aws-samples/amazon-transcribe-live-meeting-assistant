@@ -5,57 +5,52 @@
  */
 import React from 'react';
 import PropTypes from 'prop-types';
-import { Redirect, Route, Switch } from 'react-router-dom';
-
-import { AmplifyAuthContainer, AmplifyAuthenticator, AmplifySignIn, AmplifySignUp } from '@aws-amplify/ui-react';
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { Authenticator } from '@aws-amplify/ui-react';
 
 import { LOGIN_PATH, LOGOUT_PATH, REDIRECT_URL_PARAM } from './constants';
 import OAuthCallback from '../components/mcp-servers/OAuthCallback';
 
-// this is set at build time depending on the AllowedSignUpEmailDomain CloudFormation parameter
-const { REACT_APP_SHOULD_HIDE_SIGN_UP = 'true' } = process.env;
+// Set at build time via the AllowedSignUpEmailDomain CloudFormation parameter.
+const VITE_SHOULD_HIDE_SIGN_UP = import.meta.env.VITE_SHOULD_HIDE_SIGN_UP ?? 'true';
+
+const AuthHeader = () => <h1 style={{ textAlign: 'center', margin: '2rem 0' }}>Welcome to Live Meeting Assistant!</h1>;
+
+const AuthPanel = () => (
+  <Authenticator
+    initialState="signIn"
+    components={{ Header: AuthHeader }}
+    services={{
+      async validateCustomSignUp(formData) {
+        if (formData.email) {
+          return undefined;
+        }
+        return { email: 'Email is required' };
+      },
+    }}
+    signUpAttributes={['email']}
+    hideSignUp={VITE_SHOULD_HIDE_SIGN_UP === 'true'}
+  />
+);
 
 const UnauthRoutes = ({ location }) => (
-  <Switch>
-    <Route path="/oauth/callback">
-      <OAuthCallback />
-    </Route>
-    <Route path={LOGIN_PATH}>
-      <AmplifyAuthContainer>
-        <AmplifyAuthenticator>
-          <AmplifySignIn
-            headerText="Welcome to Live Meeting Assistant!"
-            hideSignUp={REACT_APP_SHOULD_HIDE_SIGN_UP}
-            slot="sign-in"
-          />
-          <AmplifySignUp
-            headerText="Welcome to Live Meeting Assistant!"
-            slot="sign-up"
-            h
-            usernameAlias="email"
-            formFields={[
-              {
-                type: 'email',
-                inputProps: { required: true, autocomplete: 'email' },
-              },
-              { type: 'password' },
-            ]}
-          />
-        </AmplifyAuthenticator>
-      </AmplifyAuthContainer>
-    </Route>
-    <Route path={LOGOUT_PATH}>
-      <Redirect to={LOGIN_PATH} />
-    </Route>
-    <Route>
-      <Redirect
-        to={{
-          pathname: LOGIN_PATH,
-          search: `?${REDIRECT_URL_PARAM}=${location.pathname}${location.search}`,
-        }}
-      />
-    </Route>
-  </Switch>
+  <Routes>
+    <Route path="/oauth/callback" element={<OAuthCallback />} />
+    <Route path={LOGIN_PATH} element={<AuthPanel />} />
+    <Route path={LOGOUT_PATH} element={<Navigate to={LOGIN_PATH} replace />} />
+    <Route
+      path="*"
+      element={
+        <Navigate
+          to={{
+            pathname: LOGIN_PATH,
+            search: `?${REDIRECT_URL_PARAM}=${encodeURIComponent(location.pathname + location.search)}`,
+          }}
+          replace
+        />
+      }
+    />
+  </Routes>
 );
 
 UnauthRoutes.propTypes = {

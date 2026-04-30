@@ -3,6 +3,7 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { generateClient } from 'aws-amplify/api';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container,
@@ -19,9 +20,9 @@ import {
   ColumnLayout,
   Box,
   ExpandableSection,
-} from '@awsui/components-react';
-import { API, graphqlOperation } from 'aws-amplify';
+} from '@cloudscape-design/components';
 
+const client = generateClient();
 const PROMPT_MODE_OPTIONS = [
   { label: 'Base', value: 'base' },
   { label: 'Inject', value: 'inject' },
@@ -73,8 +74,8 @@ const NovaSonicConfigPage = () => {
     setError(null);
     try {
       const [defaultResult, customResult] = await Promise.all([
-        API.graphql(graphqlOperation(getNovaSonicConfigQuery, { NovaSonicConfigId: 'DefaultNovaSonicConfig' })),
-        API.graphql(graphqlOperation(getNovaSonicConfigQuery, { NovaSonicConfigId: 'CustomNovaSonicConfig' })),
+        client.graphql({ query: getNovaSonicConfigQuery, variables: { NovaSonicConfigId: 'DefaultNovaSonicConfig' } }),
+        client.graphql({ query: getNovaSonicConfigQuery, variables: { NovaSonicConfigId: 'CustomNovaSonicConfig' } }),
       ]);
 
       const defaultData = JSON.parse(defaultResult.data.getNovaSonicConfig.NovaSonicConfigId);
@@ -123,14 +124,15 @@ const NovaSonicConfigPage = () => {
       if (endpointingSensitivity) configData.endpointingSensitivity = endpointingSensitivity.value;
       configData.groupMeetingMode = groupMeetingMode;
 
-      await API.graphql(
-        graphqlOperation(updateNovaSonicConfigMutation, {
+      await client.graphql({
+        query: updateNovaSonicConfigMutation,
+        variables: {
           input: {
             NovaSonicConfigId: 'CustomNovaSonicConfig',
             ConfigData: JSON.stringify(configData),
           },
-        }),
-      );
+        },
+      });
 
       setSuccess('Configuration saved successfully.');
       await loadConfig();
@@ -147,14 +149,15 @@ const NovaSonicConfigPage = () => {
     setError(null);
     setSuccess(null);
     try {
-      await API.graphql(
-        graphqlOperation(updateNovaSonicConfigMutation, {
+      await client.graphql({
+        query: updateNovaSonicConfigMutation,
+        variables: {
           input: {
             NovaSonicConfigId: 'CustomNovaSonicConfig',
             ConfigData: JSON.stringify({}),
           },
-        }),
-      );
+        },
+      });
 
       setSystemPrompt('');
       setPromptMode(null);

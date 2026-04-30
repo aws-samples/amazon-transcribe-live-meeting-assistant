@@ -19,6 +19,7 @@
  *   autoStart     - Auto-start streaming (true/false)
  *   callId        - If provided, redirect to call details view
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import PropTypes from 'prop-types';
 import {
@@ -32,17 +33,15 @@ import {
   Input,
   ColumnLayout,
   Alert,
-} from '@awsui/components-react';
-import '@awsui/global-styles/index.css';
+} from '@cloudscape-design/components';
+import '@cloudscape-design/global-styles/index.css';
 import useWebSocket from 'react-use-websocket';
-import { Logger } from 'aws-amplify';
-
 import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '../common/constants';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
 
-const logger = new Logger('EmbedMeetingLoader');
+const logger = new ConsoleLogger('EmbedMeetingLoader');
 
 let SOURCE_SAMPLING_RATE;
 
@@ -67,9 +66,12 @@ const STATES = {
 const EmbedMeetingLoader = ({ params, sendToParent }) => {
   const { currentSession, user } = useAppContext();
   const { settings } = useSettingsContext();
-  const JWT_TOKEN = currentSession.getAccessToken().getJwtToken();
+  // Amplify v6 exposes tokens via currentSession.tokens.{accessToken,idToken}.toString()
+  const JWT_TOKEN = currentSession?.tokens?.accessToken?.toString() ?? '';
+  const ID_TOKEN = currentSession?.tokens?.idToken?.toString() ?? '';
+  const REFRESH_TOKEN = '';
 
-  const userIdentifier = user?.attributes?.email || DEFAULT_LOCAL_SPEAKER_NAME;
+  const userIdentifier = user?.attributes?.email || user?.signInDetails?.loginId || DEFAULT_LOCAL_SPEAKER_NAME;
 
   const initialTopic = params.meetingTopic || '';
   const initialParticipants = params.participants || '';
@@ -114,8 +116,8 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
   const { sendMessage } = useWebSocket(getSocketUrl, {
     queryParams: {
       authorization: `Bearer ${JWT_TOKEN}`,
-      id_token: `${currentSession.idToken.jwtToken}`,
-      refresh_token: `${currentSession.refreshToken.token}`,
+      id_token: ID_TOKEN,
+      refresh_token: REFRESH_TOKEN,
     },
     onOpen: () => logger.debug('WebSocket connected'),
     onClose: () => logger.debug('WebSocket closed'),
@@ -332,7 +334,12 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
               variant="h2"
               actions={
                 <SpaceBetween direction="horizontal" size="xs">
-                  <Button href={`#/calls/${callId}`} variant="link" iconName="external" target="blank">
+                  <Button
+                    href={`#/calls/${encodeURIComponent(callId)}`}
+                    variant="link"
+                    iconName="external"
+                    target="blank"
+                  >
                     Open meeting details
                   </Button>
                   <Button variant="primary" onClick={stopMeeting}>
@@ -388,7 +395,12 @@ const EmbedMeetingLoader = ({ params, sendToParent }) => {
             </Box>
             {callId && (
               <Box margin={{ top: 'm' }}>
-                <Button href={`#/calls/${callId}`} variant="primary" iconName="external" target="blank">
+                <Button
+                  href={`#/calls/${encodeURIComponent(callId)}`}
+                  variant="primary"
+                  iconName="external"
+                  target="blank"
+                >
                   View Meeting Recording
                 </Button>
               </Box>

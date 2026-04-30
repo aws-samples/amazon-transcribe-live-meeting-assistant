@@ -41,6 +41,7 @@ def _build_from_local_code(
     public: bool = False,
     clean_build: bool = False,
     no_validate: bool = False,
+    allow_untracked: bool = False,
 ):
     """Build and publish LMA artifacts from local code, returning the template URL.
 
@@ -101,6 +102,7 @@ def _build_from_local_code(
             public=public,
             project_dir=source_dir,
             force=clean_build,
+            allow_untracked=allow_untracked,
             progress_callback=progress_callback,
         )
     except LMAError as e:
@@ -180,18 +182,66 @@ def _display_deployment_success(stack_name: str, result, outputs=None):
     console.print()
 
 
-def _display_deployment_failure(stack_name: str, result, console_url=None):
-    """Display failure message after deployment."""
+def _display_deployment_failure(stack_name: str, result, client=None, console_url=None):
+    """Display failure message with root cause analysis.
+
+    Recursively collects failure events from main and nested stacks
+    to identify and display root causes.
+    """
+    import logging as _logging
+
     operation = getattr(result, "operation", "deploy")
     status = getattr(result, "status", "FAILED")
     error = getattr(result, "error", None) or getattr(result, "message", "Unknown error")
 
     console.print(f"\n[red]✗ Stack {operation.lower()} failed[/red]")
     console.print(f"  Status: [red]{status}[/red]")
-    console.print(f"  Error: {error}")
+    console.print()
+
+    if client:
+        try:
+            deploy_start_time = getattr(result, "deploy_start_time", None)
+            analysis = client.stack.get_failure_analysis(
+                stack_name, deploy_start_time=deploy_start_time
+            )
+
+            if analysis.root_causes:
+                console.print("[bold red]Root Cause Analysis:[/bold red]")
+                console.print("[red]" + "━" * 70 + "[/red]")
+                for i, cause in enumerate(analysis.root_causes, 1):
+                    if cause.stack_path:
+                        location = f"{cause.stack_path} → {cause.resource}"
+                    else:
+                        location = cause.resource
+
+                    type_hint = f" ({cause.resource_type})" if cause.resource_type else ""
+
+                    console.print(f"  [red]✗[/red] {location}{type_hint}")
+                    console.print(f"    [yellow]{cause.reason}[/yellow]")
+                    if i < len(analysis.root_causes):
+                        console.print()
+
+                console.print("[red]" + "━" * 70 + "[/red]")
+
+                if analysis.cascade_count > 0:
+                    console.print(
+                        f"[dim]  ({analysis.cascade_count} additional resource(s) "
+                        f"cancelled due to the above failure(s))[/dim]"
+                    )
+                console.print()
+            else:
+                console.print(f"  Error: {error}")
+                console.print()
+        except Exception as e:
+            _logging.getLogger(__name__).debug("Failure analysis error: %s", e)
+            console.print(f"  Error: {error}")
+            console.print()
+    else:
+        console.print(f"  Error: {error}")
+        console.print()
+
     if console_url:
         console.print(f"  Console: [link={console_url}]{console_url}[/link]")
-    console.print()
     console.print("[bold]Troubleshooting:[/bold]")
     console.print(f"  [cyan]lma-cli logs --stack-name {stack_name} --list[/cyan] — view logs")
     console.print("  Check CloudFormation console for detailed event history")
@@ -336,6 +386,16 @@ def outputs_cmd(ctx, stack_name, region, as_json):
     help="Force full rebuild by deleting checksums (used with --from-code).",
 )
 @click.option(
+    "--allow-untracked",
+    is_flag=True,
+    default=False,
+    help=(
+        "Bypass the untracked-file safety check during --from-code builds. "
+        "Untracked files are silently excluded from BUILD_SCRIPT source bundles, "
+        "so this is NOT recommended."
+    ),
+)
+@click.option(
     "--no-validate-template",
     is_flag=True,
     default=False,
@@ -359,6 +419,7 @@ def deploy_cmd(
     prefix,
     public,
     clean_build,
+    allow_untracked,
     no_validate_template,
 ):
     """Deploy or update the LMA CloudFormation stack.
@@ -426,6 +487,7 @@ def deploy_cmd(
                 public=public,
                 clean_build=clean_build,
                 no_validate=no_validate_template,
+                allow_untracked=allow_untracked,
             )
 
         # Handle local template file
@@ -487,7 +549,7 @@ def deploy_cmd(
                     resolved_stack_name, result, outputs=result.outputs
                 )
             else:
-                _display_deployment_failure(resolved_stack_name, result)
+                _display_deployment_failure(resolved_stack_name, result, client=client)
                 sys.exit(1)
             return
 
@@ -570,7 +632,7 @@ def deploy_cmd(
                 _display_deployment_failure(
                     resolved_stack_name,
                     monitor_result,
-                    console_url=None,
+                    client=client,
                 )
                 sys.exit(1)
         else:

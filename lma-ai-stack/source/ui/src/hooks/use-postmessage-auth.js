@@ -3,10 +3,10 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Logger } from 'aws-amplify';
 
-const logger = new Logger('usePostMessageAuth');
+const logger = new ConsoleLogger('usePostMessageAuth');
 
 /**
  * Hook that listens for authentication tokens via the postMessage Web API.
@@ -30,18 +30,29 @@ const usePostMessageAuth = ({ enabled = false, allowedOrigins = [] } = {}) => {
   const [tokens, setTokens] = useState(null);
   const tokensRef = useRef(null);
 
-  const sendToParent = useCallback((message) => {
-    try {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage(message, '*');
-      }
-      if (window.opener) {
-        window.opener.postMessage(message, '*');
-      }
-    } catch (err) {
-      logger.warn('Failed to send message to parent:', err);
+  const getTargetOrigin = useCallback(() => {
+    if (allowedOrigins.length > 0) {
+      return allowedOrigins[0];
     }
-  }, []);
+    return window.location.origin;
+  }, [allowedOrigins]);
+
+  const sendToParent = useCallback(
+    (message) => {
+      try {
+        const targetOrigin = getTargetOrigin();
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(message, targetOrigin);
+        }
+        if (window.opener) {
+          window.opener.postMessage(message, targetOrigin);
+        }
+      } catch (err) {
+        logger.warn('Failed to send message to parent:', err);
+      }
+    },
+    [getTargetOrigin],
+  );
 
   const handleTokens = useCallback(
     async (tokenData) => {

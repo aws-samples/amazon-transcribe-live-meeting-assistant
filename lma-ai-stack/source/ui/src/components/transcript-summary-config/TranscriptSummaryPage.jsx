@@ -3,6 +3,7 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { generateClient } from 'aws-amplify/api';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container,
@@ -17,9 +18,9 @@ import {
   Box,
   ExpandableSection,
   Icon,
-} from '@awsui/components-react';
-import { API, graphqlOperation } from 'aws-amplify';
+} from '@cloudscape-design/components';
 
+const client = generateClient();
 const getLLMPromptTemplateQuery = `
   query GetLLMPromptTemplate($LLMPromptTemplateId: ID!) {
     getLLMPromptTemplate(LLMPromptTemplateId: $LLMPromptTemplateId) {
@@ -68,12 +69,14 @@ const TranscriptSummaryPage = () => {
     setError(null);
     try {
       const [defaultResult, customResult] = await Promise.all([
-        API.graphql(
-          graphqlOperation(getLLMPromptTemplateQuery, { LLMPromptTemplateId: 'DefaultSummaryPromptTemplates' }),
-        ),
-        API.graphql(
-          graphqlOperation(getLLMPromptTemplateQuery, { LLMPromptTemplateId: 'CustomSummaryPromptTemplates' }),
-        ),
+        client.graphql({
+          query: getLLMPromptTemplateQuery,
+          variables: { LLMPromptTemplateId: 'DefaultSummaryPromptTemplates' },
+        }),
+        client.graphql({
+          query: getLLMPromptTemplateQuery,
+          variables: { LLMPromptTemplateId: 'CustomSummaryPromptTemplates' },
+        }),
       ]);
 
       const defaultData = JSON.parse(defaultResult.data.getLLMPromptTemplate.LLMPromptTemplateId);
@@ -141,14 +144,15 @@ const TranscriptSummaryPage = () => {
         configData[key] = template.prompt;
       });
 
-      await API.graphql(
-        graphqlOperation(updateLLMPromptTemplateMutation, {
+      await client.graphql({
+        query: updateLLMPromptTemplateMutation,
+        variables: {
           input: {
             LLMPromptTemplateId: 'CustomSummaryPromptTemplates',
             TemplateConfig: JSON.stringify(configData),
           },
-        }),
-      );
+        },
+      });
 
       setSuccess('Summary prompt templates saved successfully.');
       await loadConfig();
@@ -165,14 +169,15 @@ const TranscriptSummaryPage = () => {
     setError(null);
     setSuccess(null);
     try {
-      await API.graphql(
-        graphqlOperation(updateLLMPromptTemplateMutation, {
+      await client.graphql({
+        query: updateLLMPromptTemplateMutation,
+        variables: {
           input: {
             LLMPromptTemplateId: 'CustomSummaryPromptTemplates',
             TemplateConfig: JSON.stringify({}),
           },
-        }),
-      );
+        },
+      });
 
       setTemplates(parseTemplateConfig(defaultConfig));
       setSuccess('Custom overrides cleared. Default templates will be used.');

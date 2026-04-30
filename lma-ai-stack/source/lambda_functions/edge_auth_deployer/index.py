@@ -10,7 +10,7 @@ import urllib.request
 import zipfile
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, WaiterError
 
 # cfnresponse module for Python 3.12+
 # Based on https://github.com/aws-cloudformation/custom-resource-helper-python
@@ -40,10 +40,12 @@ def send(
     headers = {"content-type": "", "content-length": str(len(json_responseBody))}
 
     try:
-        req = urllib.request.Request(
+        # nosec B310 - URL is CloudFormation-provided event["ResponseURL"], always HTTPS, AWS-controlled (not attacker-influenced)
+        req = urllib.request.Request(  # nosec B310
             responseUrl, data=json_responseBody.encode("utf-8"), headers=headers, method="PUT"
         )
-        with urllib.request.urlopen(req) as response:
+        # URL is CloudFormation-provided event["ResponseURL"], always HTTPS, AWS-controlled.
+        with urllib.request.urlopen(req) as response:  # nosec B310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             print(f"Status code: {response.status}")
     except Exception as e:
         print(f"send(..) failed executing request: {e}")
@@ -236,6 +238,42 @@ def create_zip_file(code_content):
     return zip_buffer.read()
 
 
+def wait_for_function_updated(lambda_client, function_name):
+    """
+    Wait for $LATEST code update to finish applying (LastUpdateStatus == Successful).
+    Required between successive update_function_code calls.
+    """
+    try:
+        waiter = lambda_client.get_waiter("function_updated_v2")
+        waiter.wait(
+            FunctionName=function_name,
+            WaiterConfig={"Delay": 5, "MaxAttempts": 60},  # up to 5 minutes
+        )
+        print(f"Function {function_name} $LATEST update completed (LastUpdateStatus=Successful)")
+    except WaiterError as e:
+        print(f"Timed out waiting for function {function_name} update to finish: {e}")
+        raise
+
+
+def wait_for_version_active(lambda_client, function_name, version):
+    """
+    Wait for a specific published Lambda version to reach State == Active.
+    Required for Lambda@Edge: CloudFront rejects associations to versions
+    that are still in Pending state.
+    """
+    try:
+        waiter = lambda_client.get_waiter("function_active_v2")
+        waiter.wait(
+            FunctionName=function_name,
+            Qualifier=version,
+            WaiterConfig={"Delay": 5, "MaxAttempts": 60},  # up to 5 minutes
+        )
+        print(f"Function {function_name}:{version} is now Active")
+    except WaiterError as e:
+        print(f"Timed out waiting for function {function_name}:{version} to become Active: {e}")
+        raise
+
+
 def create_edge_function(
     lambda_client, iam_client, function_name, role_arn, user_pool_id, region, client_id
 ):
@@ -273,6 +311,12 @@ def create_edge_function(
             versioned_arn = function_arn
 
         print(f"Created function with version {version}, ARN: {versioned_arn}")
+
+        # Newly-published Lambda versions start in Pending state. Lambda@Edge /
+        # CloudFront associations require State=Active, so we must wait before
+        # returning the versioned ARN to CloudFormation.
+        wait_for_version_active(lambda_client, function_name, version)
+
         return versioned_arn
 
     except ClientError as e:
@@ -293,6 +337,10 @@ def update_edge_function(lambda_client, function_name, user_pool_id, region, cli
     # Create zip file
     zip_content = create_zip_file(code)
 
+    # Make sure any previous in-flight update on $LATEST has finished before we
+    # try to publish a new version (otherwise we can hit ResourceConflictException).
+    wait_for_function_updated(lambda_client, function_name)
+
     # Update function code and publish new version
     response = lambda_client.update_function_code(
         FunctionName=function_name,
@@ -311,6 +359,15 @@ def update_edge_function(lambda_client, function_name, user_pool_id, region, cli
         versioned_arn = function_arn
 
     print(f"Updated function with version {version}, ARN: {versioned_arn}")
+
+    # Newly-published Lambda versions start in Pending state. Lambda@Edge /
+    # CloudFront associations require State=Active, so we must wait before
+    # returning the versioned ARN to CloudFormation. Without this wait,
+    # CloudFront rejects the association with:
+    #   "The function must be in an Active state.
+    #    The current state for function ...:N is Pending"
+    wait_for_version_active(lambda_client, function_name, version)
+
     return versioned_arn
 
 

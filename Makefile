@@ -206,17 +206,20 @@ lint-mypy: ## Run mypy type checking on Python Lambda functions
 # Checksum file for UI lint change detection
 UI_LINT_CHECKSUM_FILE := .ui-lint-checksum
 
-lint-ui: ## Lint React UI (ESLint, skips if source unchanged)
+lint-ui: ## Lint React UI (ESLint, skips if source unchanged; use FORCE=1 to bypass cache)
 	@NEW_CHECKSUM=$$(find $(UI_DIR)/src -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}'); \
 	OLD_CHECKSUM=$$(cat $(UI_LINT_CHECKSUM_FILE) 2>/dev/null || echo ""); \
-	if [ "$$NEW_CHECKSUM" = "$$OLD_CHECKSUM" ]; then \
-		echo -e "$(GREEN)✅ UI lint skipped — source unchanged since last run$(NC)"; \
+	if [ -z "$(FORCE)" ] && [ "$$NEW_CHECKSUM" = "$$OLD_CHECKSUM" ]; then \
+		echo -e "$(GREEN)✅ UI lint skipped — source unchanged since last run (use FORCE=1 to override)$(NC)"; \
 	else \
-		echo "Running UI lint..."; \
+		if [ -n "$(FORCE)" ]; then echo "Running UI lint (forced)..."; else echo "Running UI lint..."; fi; \
 		cd $(UI_DIR) && npm ci --prefer-offline --no-audit 2>/dev/null && npm run lint && \
 		echo "$$NEW_CHECKSUM" > $(CURDIR)/$(UI_LINT_CHECKSUM_FILE) && \
 		echo -e "$(GREEN)✅ UI lint passed!$(NC)"; \
 	fi
+
+lint-ui-force: ## Lint React UI (ignore checksum, always run)
+	@$(MAKE) lint-ui FORCE=1
 
 lint-typescript: ## TypeScript build check on WebSocket and Virtual Participant stacks
 	@echo "Running TypeScript build check on WebSocket transcriber..."
@@ -293,14 +296,14 @@ test-ui: ## Run React UI tests (skips if source unchanged)
 		echo -e "$(GREEN)✅ UI tests skipped — source unchanged since last run$(NC)"; \
 	else \
 		echo "Running UI tests..."; \
-		cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --watchAll=false && \
+		cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --run && \
 		echo "$$NEW_CHECKSUM" > $(CURDIR)/$(UI_TEST_CHECKSUM_FILE) && \
 		echo -e "$(GREEN)✅ UI tests passed!$(NC)"; \
 	fi
 
 test-ui-force: ## Run React UI tests (ignore checksum, always run)
 	@echo "Running UI tests (forced)..."
-	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --watchAll=false
+	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --run
 	@find $(UI_DIR)/src $(UI_DIR)/public -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}' > $(UI_TEST_CHECKSUM_FILE)
 	@echo -e "$(GREEN)✅ UI tests passed!$(NC)"
 
@@ -321,7 +324,9 @@ endif
 			echo -e "$(YELLOW)Make sure the stack exists and has completed deployment.$(NC)"; \
 			exit 1; \
 		fi; \
-		echo "$$ENV_CONTENT" | sed 's/ \(REACT_APP_\)/\n\1/g' > $(UI_DIR)/.env; \
+		echo "$$ENV_CONTENT" \
+			| tr ' ' '\n' \
+			> $(UI_DIR)/.env; \
 		echo -e "$(GREEN)✅ Created $(UI_DIR)/.env from stack outputs$(NC)"; \
 	fi
 	@if [ ! -f $(UI_DIR)/.env ]; then \
@@ -335,7 +340,53 @@ endif
 	@echo "Starting UI development server..."
 	cd $(UI_DIR) && npm run start
 
+##@ Virtual Participant Development
+# Usage:
+#   make vp-start STACK_NAME=<stack> PLATFORM=<WEBEX|ZOOM|TEAMS|CHIME> MEETING_ID=<id> \
+#                 [MEETING_PASSWORD=<pw>] [DEV=1] [REUSE_ENV=1]
+#
+# Runs the Virtual Participant Docker container locally against a deployed LMA
+# stack. See docs/virtual-participant-local-dev.md for the recommended EC2 +
+# VSCode Remote-SSH + VNC workflow.
+vp-start: ## Run VP locally via Docker (requires STACK_NAME, PLATFORM, MEETING_ID)
+ifndef STACK_NAME
+	$(error STACK_NAME is not set. Usage: make vp-start STACK_NAME=<stack> PLATFORM=<platform> MEETING_ID=<id> [MEETING_PASSWORD=<pw>] [DEV=1] [REUSE_ENV=1])
+endif
+ifndef PLATFORM
+	$(error PLATFORM is not set. Must be one of: WEBEX, ZOOM, TEAMS, CHIME)
+endif
+ifndef MEETING_ID
+	$(error MEETING_ID is not set)
+endif
+	@EXTRA_FLAGS=""; \
+	if [ "$(DEV)" = "1" ]; then EXTRA_FLAGS="$$EXTRA_FLAGS --dev"; fi; \
+	if [ "$(REUSE_ENV)" = "1" ]; then EXTRA_FLAGS="$$EXTRA_FLAGS --reuse-env"; fi; \
+	echo -e "$(CYAN)Launching Virtual Participant locally (stack=$(STACK_NAME), platform=$(PLATFORM), id=$(MEETING_ID))$(NC)"; \
+	cd $(VP_BACKEND_DIR) && bash local-test.sh $$EXTRA_FLAGS "$(STACK_NAME)" "$(PLATFORM)" "$(MEETING_ID)" "$(MEETING_PASSWORD)"
+
+vp-start-dev: ## Run VP locally in dev mode (auto-reload on src changes); same args as vp-start
+	@$(MAKE) vp-start DEV=1 STACK_NAME="$(STACK_NAME)" PLATFORM="$(PLATFORM)" MEETING_ID="$(MEETING_ID)" MEETING_PASSWORD="$(MEETING_PASSWORD)" REUSE_ENV="$(REUSE_ENV)"
+
+vp-start-reuse: ## Run VP locally reusing existing .env.local (keeps manually-set secrets); same args as vp-start
+	@$(MAKE) vp-start REUSE_ENV=1 STACK_NAME="$(STACK_NAME)" PLATFORM="$(PLATFORM)" MEETING_ID="$(MEETING_ID)" MEETING_PASSWORD="$(MEETING_PASSWORD)" DEV="$(DEV)"
+
+vp-stop: ## Stop and remove the local VP container (lma-vp-local-test)
+	@if docker ps -a --format '{{.Names}}' | grep -q "^lma-vp-local-test$$"; then \
+		echo "Stopping and removing lma-vp-local-test..."; \
+		docker rm -f lma-vp-local-test; \
+		echo -e "$(GREEN)✅ Container removed.$(NC)"; \
+	else \
+		echo -e "$(YELLOW)No lma-vp-local-test container found.$(NC)"; \
+	fi
+
+vp-logs: ## Tail logs for the local VP container (dev mode)
+	@docker logs -f lma-vp-local-test
+
+vp-shell: ## Open a shell inside the running local VP container
+	@docker exec -it lma-vp-local-test /bin/bash
+
 ##@ Publishing & Deployment
+
 # Usage: make publish BUCKET=<bucket-basename> PREFIX=<prefix> REGION=<region> [PUBLIC=true]
 publish: ## Run publish.sh to build and upload all artifacts to S3
 ifndef BUCKET

@@ -4,28 +4,14 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { Route, Switch, useRouteMatch } from 'react-router-dom';
-import { Logger } from 'aws-amplify';
-
 import StreamAudioLayout from '../components/stream-audio-layout';
 import CallAnalyticsTopNavigation from '../components/call-analytics-top-navigation';
 
-const logger = new Logger('StreamAudioRoutes');
-
-const StreamAudioRoutes = () => {
-  const { path } = useRouteMatch();
-  logger.info('path ', path);
-
-  return (
-    <Switch>
-      <Route path={path}>
-        <div>
-          <CallAnalyticsTopNavigation />
-          <StreamAudioLayout />
-        </div>
-      </Route>
-    </Switch>
-  );
-};
+const StreamAudioRoutes = () => (
+  <div>
+    <CallAnalyticsTopNavigation />
+    <StreamAudioLayout />
+  </div>
+);
 
 export default StreamAudioRoutes;

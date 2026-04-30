@@ -114,6 +114,7 @@ class KinesisStreamManager {
         console.log(`Error sending ${record.EventType} event to Kinesis: ${error.message}`);
         console.log('Note: This is expected during local testing without proper IAM permissions');
       } else {
+      // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
         console.error(`Error sending ${record.EventType} event to Kinesis:`, error);
       }
       // Don't throw error - continue execution like Python version
@@ -202,7 +203,7 @@ class KinesisStreamManager {
         const currentStatus = currentVP.status || 'INITIALIZING';
         console.log(`Current VP status: ${currentStatus}`);
 
-        // Now update with CallId while preserving status
+        // Now update with CallId while preserving status.
         const mutation = `
             mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
                 updateVirtualParticipant(input: $input) {
@@ -210,6 +211,8 @@ class KinesisStreamManager {
                     status
                     CallId
                     updatedAt
+                    Owner
+                    SharedWith
                 }
             }
         `;

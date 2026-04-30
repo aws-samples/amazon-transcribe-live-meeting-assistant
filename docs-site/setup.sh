@@ -60,5 +60,21 @@ mkdir -p "$SCRIPT_DIR/public"
 ln -s "../../images" "$SCRIPT_DIR/public/images"
 echo "   ✅ Linked images directory for public serving"
 
+# Step 4: Symlink any standalone HTML demo pages from docs/ into public/
+# so they are served verbatim on the Starlight site (e.g., GitHub Pages).
+echo ""
+echo "🔗 Linking standalone HTML pages from docs/ into public/..."
+html_count=0
+for html_file in "$PROJECT_ROOT"/docs/*.html; do
+    [ -e "$html_file" ] || continue
+    filename=$(basename "$html_file")
+    target="$SCRIPT_DIR/public/$filename"
+    [ -L "$target" ] && rm "$target"
+    ln -s "../../docs/$filename" "$target"
+    html_count=$((html_count + 1))
+done
+echo "   ✅ Linked $html_count standalone HTML file(s)"
+
+
 echo ""
 echo "✨ Setup complete! Run 'npm install && npm run dev' to start the dev server."

@@ -7,9 +7,11 @@
  */
 import React from 'react';
 import PropTypes from 'prop-types';
-import { Box, Alert } from '@awsui/components-react';
+import { Box, Alert } from '@cloudscape-design/components';
 
 import EmbedStreamAudio from './EmbedStreamAudio';
+import EmbedUploadAudio from './EmbedUploadAudio';
+import EmbedSelectAudio from './EmbedSelectAudio';
 import EmbedCallDetails from './EmbedCallDetails';
 import EmbedVirtualParticipant from './EmbedVirtualParticipant';
 import EmbedMeetingLoader from './EmbedMeetingLoader';
@@ -19,6 +21,8 @@ import EmbedMeetingLoader from './EmbedMeetingLoader';
  */
 const COMPONENT_MAP = {
   'stream-audio': EmbedStreamAudio,
+  'upload-audio': EmbedUploadAudio,
+  'select-audio': EmbedSelectAudio,
   'call-details': EmbedCallDetails,
   transcript: EmbedCallDetails,
   summary: EmbedCallDetails,
@@ -68,7 +72,13 @@ const ComponentSelector = ({ params, sendToParent }) => {
           <p>Available components:</p>
           <ul>
             <li>
-              <strong>stream-audio</strong> - Stream Audio meeting component
+              <strong>stream-audio</strong> - Stream Audio meeting component (live streaming only)
+            </li>
+            <li>
+              <strong>upload-audio</strong> - Upload a pre-recorded audio / video file
+            </li>
+            <li>
+              <strong>select-audio</strong> - Combined page with a Stream / Upload mode switcher
             </li>
             <li>
               <strong>call-details</strong> - Full call details (transcript + summary + chat)

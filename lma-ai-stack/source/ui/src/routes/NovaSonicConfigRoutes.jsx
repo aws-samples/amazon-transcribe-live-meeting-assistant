@@ -4,10 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState } from 'react';
-import { Route, Switch, useRouteMatch } from 'react-router-dom';
-import { AppLayout, Flashbar } from '@awsui/components-react';
-import { Logger } from 'aws-amplify';
-
+import { AppLayout, Flashbar } from '@cloudscape-design/components';
 import CallAnalyticsTopNavigation from '../components/call-analytics-top-navigation';
 import NovaSonicConfigPage from '../components/nova-sonic-config/NovaSonicConfigPage';
 import Navigation from '../components/call-analytics-layout/navigation';
@@ -17,15 +14,10 @@ import { appLayoutLabels } from '../components/common/labels';
 import useNotifications from '../hooks/use-notifications';
 import useAppContext from '../contexts/app';
 
-const logger = new Logger('NovaSonicConfigRoutes');
-
 const NovaSonicConfigRoutes = () => {
-  const { path } = useRouteMatch();
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const notifications = useNotifications();
   const [toolsOpen, setToolsOpen] = useState(false);
-
-  logger.info('path ', path);
 
   return (
     <div>
@@ -40,13 +32,7 @@ const NovaSonicConfigRoutes = () => {
         tools={<ToolsPanel />}
         toolsOpen={toolsOpen}
         onToolsChange={({ detail }) => setToolsOpen(detail.open)}
-        content={
-          <Switch>
-            <Route path={path}>
-              <NovaSonicConfigPage />
-            </Route>
-          </Switch>
-        }
+        content={<NovaSonicConfigPage />}
         ariaLabels={appLayoutLabels}
       />
     </div>

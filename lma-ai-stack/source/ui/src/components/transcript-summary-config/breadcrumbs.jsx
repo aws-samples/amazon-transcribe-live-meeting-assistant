@@ -4,11 +4,11 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { BreadcrumbGroup } from '@awsui/components-react';
+import { BreadcrumbGroup } from '@cloudscape-design/components';
 import { TRANSCRIPT_SUMMARY_PATH, DEFAULT_PATH } from '../../routes/constants';
 
 export const transcriptSummaryBreadcrumbItems = [
-  { text: 'Meeting Analytics', href: `#${DEFAULT_PATH}` },
+  { text: 'Meeting Assistant', href: `#${DEFAULT_PATH}` },
   { text: 'Configuration', href: '#' },
   { text: 'Transcript Summary', href: `#${TRANSCRIPT_SUMMARY_PATH}` },
 ];

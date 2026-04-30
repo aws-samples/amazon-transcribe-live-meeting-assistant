@@ -19,6 +19,7 @@ samconfig.toml
 .dsr/
 !.dsr/issues.json
 !.dsr/settings.json
+.ash/
 
 # Node
 node_modules/
@@ -47,3 +48,7 @@ docs-site/src/content/docs/
 docs-site/src/content/images
 docs-site/src/content/lma-ai-stack/
 docs-site/public/images
+docs-site/public/*.html
+
+# scatch dir
+scratch

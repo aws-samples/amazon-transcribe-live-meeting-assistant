@@ -3,6 +3,8 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
 import React, { useCallback, useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 import {
@@ -18,13 +20,13 @@ import {
   Spinner,
   StatusIndicator,
   Tabs,
-} from '@awsui/components-react';
-import { API, graphqlOperation, Logger } from 'aws-amplify';
+} from '@cloudscape-design/components';
 import PublicRegistryTab from './PublicRegistryTab';
 import CustomServersTab from './CustomServersTab';
 import './mcp-servers.css';
 
-const logger = new Logger('MCPServersContent');
+const client = generateClient();
+const logger = new ConsoleLogger('MCPServersContent');
 
 /**
  * MCP Servers Content - Reusable component for managing MCP servers
@@ -103,7 +105,7 @@ const MCPServersContent = ({ vpData }) => {
         }
       `;
 
-      const result = await API.graphql(graphqlOperation(query));
+      const result = await client.graphql({ query });
       const servers = result.data.listInstalledMCPServers || [];
 
       setInstalledServers(servers);
@@ -146,11 +148,12 @@ const MCPServersContent = ({ vpData }) => {
         }
       `;
 
-      const result = await API.graphql(
-        graphqlOperation(mutation, {
+      const result = await client.graphql({
+        query: mutation,
+        variables: {
           serverId,
-        }),
-      );
+        },
+      });
 
       const response = result.data.uninstallMCPServer;
 
@@ -188,14 +191,15 @@ const MCPServersContent = ({ vpData }) => {
         }
       `;
 
-      const result = await API.graphql(
-        graphqlOperation(mutation, {
+      const result = await client.graphql({
+        query: mutation,
+        variables: {
           input: {
             ServerId: serverId,
             Version: 'latest',
           },
-        }),
-      );
+        },
+      });
 
       const response = result.data.updateMCPServer;
 

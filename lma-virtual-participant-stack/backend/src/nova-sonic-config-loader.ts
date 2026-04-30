@@ -125,6 +125,7 @@ async function getConfigItem(
     
     return response.Item as DynamoDBConfigItem;
   } catch (error) {
+    // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
     console.error(`Error fetching config item ${configId}:`, error);
     return null;
   }

@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 # Set env vars before importing
-os.environ["MCP_API_KEYS_TABLE"] = "test-mcp-api-keys"
+os.environ["MCP_API_KEYS_TABLE"] = "test-mcp-api-keys"  # pragma: allowlist secret
 os.environ["LOG_LEVEL"] = "WARNING"
 
 import index
@@ -213,7 +213,7 @@ class TestSHA256Hashing(unittest.TestCase):
     @patch.object(index, "dynamodb")
     def test_hash_matches_expected(self, mock_dynamo):
         """Verify the hash sent to DynamoDB matches SHA-256 of the token."""
-        token = "lma_12345678-abcd-efgh-ijkl-mnopqrstuvwx"
+        token = "lma_12345678-abcd-efgh-ijkl-mnopqrstuvwx"  # pragma: allowlist secret
         expected_hash = hashlib.sha256(token.encode()).hexdigest()
 
         mock_table = MagicMock()

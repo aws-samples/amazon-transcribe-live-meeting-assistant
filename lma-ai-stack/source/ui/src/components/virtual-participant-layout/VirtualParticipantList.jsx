@@ -3,8 +3,10 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
+import { fetchAuthSession, fetchUserAttributes } from 'aws-amplify/auth';
 import React, { useState, useEffect } from 'react';
-import { API, graphqlOperation, Logger } from 'aws-amplify';
 import {
   Table,
   Box,
@@ -23,9 +25,9 @@ import {
   Textarea,
   Pagination,
   TextFilter,
-} from '@awsui/components-react';
+} from '@cloudscape-design/components';
 import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
-import { useCollection } from '@awsui/collection-hooks';
+import { useCollection } from '@cloudscape-design/collection-hooks';
 
 import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
@@ -46,9 +48,10 @@ import {
   filterVPsByTime,
 } from './vp-table-config';
 
-import '@awsui/global-styles/index.css';
+import '@cloudscape-design/global-styles/index.css';
 
-const logger = new Logger('VirtualParticipantList');
+const client = generateClient();
+const logger = new ConsoleLogger('VirtualParticipantList');
 
 const listVirtualParticipants = `
   query ListVirtualParticipants {
@@ -143,7 +146,7 @@ const VirtualParticipantList = () => {
     try {
       setLoading(true);
       logger.debug('Loading virtual participants');
-      const result = await API.graphql(graphqlOperation(listVirtualParticipants));
+      const result = await client.graphql({ query: listVirtualParticipants });
       const vpList = result.data.listVirtualParticipants || [];
       logger.debug('Loaded virtual participants:', vpList);
       setParticipants(vpList);
@@ -186,9 +189,9 @@ const VirtualParticipantList = () => {
       }
     `;
 
-    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipant)).subscribe({
-      next: ({ value }) => {
-        const updatedParticipant = value?.data?.onUpdateVirtualParticipant;
+    const subscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
+      next: (subscriptionMessage) => {
+        const updatedParticipant = subscriptionMessage?.data?.onUpdateVirtualParticipant;
 
         if (!updatedParticipant || !updatedParticipant.id) {
           return;
@@ -297,11 +300,12 @@ const VirtualParticipantList = () => {
     setParseError('');
 
     try {
-      const result = await API.graphql(
-        graphqlOperation(parseMeetingInvitation, {
+      const result = await client.graphql({
+        query: parseMeetingInvitation,
+        variables: {
           invitationText: invitationText.trim(),
-        }),
-      );
+        },
+      });
 
       const parsedResponse = JSON.parse(result.data.parseMeetingInvitation);
 
@@ -389,7 +393,15 @@ const VirtualParticipantList = () => {
     setCreatingType(isScheduled ? 'scheduled' : 'immediate');
 
     try {
-      const userName = user?.attributes?.email || 'test-user@example.com';
+      let email;
+      try {
+        const attrs = await fetchUserAttributes();
+        email = attrs?.email;
+      } catch (attrErr) {
+        logger.debug('fetchUserAttributes failed, falling back to user identifier', attrErr);
+      }
+      const userName =
+        email || user?.attributes?.email || user?.signInDetails?.loginId || user?.username || 'test-user@example.com';
 
       // Calculate meeting time for scheduling
       let meetingTimestamp = null;
@@ -414,11 +426,12 @@ const VirtualParticipantList = () => {
         vpInput.isScheduled = true;
       }
 
-      const vpResult = await API.graphql(
-        graphqlOperation(createVirtualParticipant, {
+      const vpResult = await client.graphql({
+        query: createVirtualParticipant,
+        variables: {
           input: vpInput,
-        }),
-      );
+        },
+      });
 
       const virtualParticipantId = vpResult.data.createVirtualParticipant.id;
 
@@ -441,9 +454,9 @@ const VirtualParticipantList = () => {
               meetingTime: '',
               userName,
               virtualParticipantId,
-              accessToken: user.signInUserSession.accessToken.jwtToken,
-              idToken: user.signInUserSession.idToken.jwtToken,
-              rereshToken: user.signInUserSession.refreshToken.token,
+              accessToken: (await fetchAuthSession()).tokens?.accessToken?.toString() || '',
+              idToken: (await fetchAuthSession()).tokens?.idToken?.toString() || '',
+              rereshToken: '', // Amplify v6 does not expose refresh tokens directly
             },
           }),
         };
@@ -604,6 +617,7 @@ const VirtualParticipantList = () => {
             onRefresh={loadParticipants}
             onPasteInvite={() => setShowPasteInviteModal(true)}
             onCreateVP={() => setShowCreateModal(true)}
+            onNotify={setNotification}
             items={filteredParticipants}
           />
         }

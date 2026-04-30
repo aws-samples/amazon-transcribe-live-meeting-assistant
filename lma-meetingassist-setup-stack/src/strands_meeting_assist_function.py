@@ -912,7 +912,8 @@ def create_vp_browser_control_tool(call_id: str, event_api_http_url: str, messag
                 response = requests.post(
                     f"{event_api_http_url}/event",
                     data=body,
-                    headers=dict(request.headers)
+                    headers=dict(request.headers),
+                    timeout=(5, 30),
                 )
                 
                 logger.info(f"📥 Response received:")
@@ -1010,7 +1011,8 @@ def create_vp_browser_control_tool(call_id: str, event_api_http_url: str, messag
             response = requests.post(
                 f"{event_api_http_url}/event",
                 data=body,
-                headers=dict(request.headers)
+                headers=dict(request.headers),
+                timeout=(5, 30),
             )
             
             logger.info(f"📥 Response received:")
@@ -1777,7 +1779,7 @@ def handler(event, context):
                     send_chat_token_to_appsync(
                         call_id=call_id,
                         message_id=message_id,
-                        token='',
+                        token='',  # nosec B106 - Empty string is not a hardcoded password, it's a completion marker
                         is_complete=True,
                         sequence=sequence
                     )
