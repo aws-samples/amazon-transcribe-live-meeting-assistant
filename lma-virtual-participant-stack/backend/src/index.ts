@@ -14,6 +14,8 @@ import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { simliAvatar } from './simli-avatar.js';
+import { voiceAssistant } from './voice-assistant.js';
+import { agentSpeakingDetector } from './agent-speaking-detector.js';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
@@ -186,6 +188,16 @@ const main = async (): Promise<void> => {
     if (statusManager) {
         await statusManager.setConnecting();
         console.log(`VP ${vpId} status: CONNECTING`);
+    }
+
+    // Start the platform-agnostic agent-speaking detector (listens to
+    // agent_output.monitor for voice agent PCM output).
+    if (voiceAssistant.isEnabled()) {
+        try {
+            agentSpeakingDetector.start();
+        } catch (error) {
+            console.error('Failed to start AgentSpeakingDetector (non-critical):', error);
+        }
     }
 
     // Launch Puppeteer browser with stealth plugin for all platforms
@@ -449,6 +461,13 @@ const main = async (): Promise<void> => {
             console.log('✓ Simli Avatar stopped');
         } catch (error) {
             console.error('Error stopping Simli Avatar:', error);
+        }
+
+        // Stop agent speaking detector
+        try {
+            agentSpeakingDetector.stop();
+        } catch (error) {
+            console.error('Error stopping AgentSpeakingDetector:', error);
         }
 
         try {
