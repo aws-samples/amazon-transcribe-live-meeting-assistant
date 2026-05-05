@@ -1,2 +1,7 @@
 # Script only processes files that already exist in the build directory
 lma-ai-stack/deployment/manifest-generator/app.js
+
+# Prior scan artifacts and DSR workspace — exclude so we don't find our own
+# findings inside prior scan output files (base64 strings, SHA256 digests, etc.)
+.dsr/
+.ash/
