@@ -16,9 +16,10 @@ samconfig.toml
 .ui-lint-checksum
 
 # DSR
-.dsr/
+.dsr/*
 !.dsr/issues.json
 !.dsr/settings.json
+!.dsr/feature-security-review-v0.1.0-to-v0.3.2.md
 .ash/
 
 # Node

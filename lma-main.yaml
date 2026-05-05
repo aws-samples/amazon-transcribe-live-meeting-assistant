@@ -1353,6 +1353,10 @@ Resources:
   ValidateParametersFunction:
     Type: AWS::Serverless::Function
     Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
       cfn_nag:
         rules_to_suppress:
           - id: W89
@@ -1487,11 +1491,6 @@ Resources:
   # and use CR UpdateLMASettingsFunction to add/update values
   LMASettingsParameter:
     Type: AWS::SSM::Parameter
-    Metadata:
-      cdk_nag:
-        rules_to_suppress:
-          - id: AwsSolutions-L1
-            reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
     Properties:
       Type: String
       Name: !Sub "${AWS::StackName}-LMASettings"
@@ -1541,6 +1540,10 @@ Resources:
             reason: Customer can choose reserved concurrency based on their requirement.
           - id: W58
             reason: Managed policy already provides access to CloudWatch logs.
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
     # checkov:skip=CKV_AWS_116: "DLQ not required for settings update function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
@@ -2068,6 +2071,10 @@ Resources:
     Type: AWS::Lambda::Function
     Condition: ShouldCreateRecordingBucket
     Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
       cfn_nag:
         rules_to_suppress:
           - id: W89

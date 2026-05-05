@@ -1,0 +1,52 @@
+# Automated Security Helper (ASH) configuration for LMA
+# Docs: https://awslabs.github.io/automated-security-helper/
+#
+# Purpose:
+#  - Exclude DSR workspace and prior ASH scan output from the scan set so we
+#    don't find our own prior-scan findings (e.g. base64 strings inside
+#    syft-scan.json, bandit-scan.json, or extracted zip archives).
+#  - All LMA source and CloudFormation templates remain in scope.
+
+project_name: lma
+
+global_settings:
+  severity_threshold: MEDIUM
+  ignore_paths:
+    - path: ".dsr/"
+      reason: "DSR workspace contains prior scan outputs, reviewer analysis, and zip archives — not LMA source."
+    - path: ".dsr/**"
+      reason: "DSR workspace (recursive)."
+    - path: ".ash/"
+      reason: "ASH's own output directory — avoid scanning previous run artifacts."
+    - path: ".ash/**"
+      reason: "ASH output (recursive)."
+
+  # Documented false positives for detect-secrets. Each item has been reviewed
+  # by a human and confirmed NOT to be a secret. See review notes in each entry.
+  suppressions:
+    - rule_id: "SECRET-BASE64-HIGH-ENTROPY-STRING"
+      path: "lma-ai-stack/source/ui/public/strands-chat.html"
+      line_start: 336
+      line_end: 336
+      reason: >-
+        Public Subresource Integrity (SRI) hash for the jsDelivr CDN copy of
+        marked@11.1.1. The sha384 value is a content hash of a public script,
+        not a secret. Already annotated inline via HTML comment on line 335.
+
+    - rule_id: "SECRET-BASE64-HIGH-ENTROPY-STRING"
+      path: "lma-browser-extension-stack/public/manifest.json"
+      line_start: 122
+      line_end: 122
+      reason: >-
+        Chrome extension manifest `key` field. This is the PEM-encoded PUBLIC
+        key used by the browser to derive a stable extension ID; it is not a
+        private/secret key. Documented at
+        https://developer.chrome.com/docs/extensions/reference/manifest/key .
+
+    - rule_id: "SECRET-BASE64-HIGH-ENTROPY-STRING"
+      path: "lma-browser-extension-stack/public/manifest-firefox.json"
+      line_start: 30
+      line_end: 30
+      reason: >-
+        Firefox extension manifest `key` field. PEM-encoded PUBLIC key (same
+        key as the Chrome manifest for identity parity). Not a secret.
