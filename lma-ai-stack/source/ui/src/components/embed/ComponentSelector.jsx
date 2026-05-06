@@ -15,6 +15,7 @@ import EmbedSelectAudio from './EmbedSelectAudio';
 import EmbedCallDetails from './EmbedCallDetails';
 import EmbedVirtualParticipant from './EmbedVirtualParticipant';
 import EmbedMeetingLoader from './EmbedMeetingLoader';
+import EmbedVpLoader from './EmbedVpLoader';
 
 /**
  * Maps component name to the appropriate React component.
@@ -30,6 +31,7 @@ const COMPONENT_MAP = {
   'vp-details': EmbedVirtualParticipant,
   vnc: EmbedVirtualParticipant,
   'meeting-loader': EmbedMeetingLoader,
+  'vp-loader': EmbedVpLoader,
 };
 
 /**
@@ -127,6 +129,10 @@ ComponentSelector.propTypes = {
     owner: PropTypes.string,
     autoStart: PropTypes.bool,
     authMode: PropTypes.string,
+    meetingName: PropTypes.string,
+    meetingPlatform: PropTypes.string,
+    meetingId: PropTypes.string,
+    meetingPassword: PropTypes.string,
   }).isRequired,
   sendToParent: PropTypes.func.isRequired,
 };

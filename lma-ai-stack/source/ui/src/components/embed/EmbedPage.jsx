@@ -64,6 +64,12 @@ const useEmbedParams = () => {
       owner: searchParams.get('owner') || '',
       autoStart: searchParams.get('autoStart') === 'true',
 
+      // VP-loader parameters
+      meetingName: searchParams.get('meetingName') || '',
+      meetingPlatform: searchParams.get('meetingPlatform') || '',
+      meetingId: searchParams.get('meetingId') || '',
+      meetingPassword: searchParams.get('meetingPassword') || '',
+
       // Authentication
       authMode: searchParams.get('authMode') || 'cognito',
 

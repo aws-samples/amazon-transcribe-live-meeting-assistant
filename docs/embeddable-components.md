@@ -56,6 +56,22 @@ Enter your LMA CloudFront URL and an existing `callId`, and click **Apply**. The
 - A **stream-audio** widget pre-populated with meeting fields, with parent-app Start/Stop buttons that drive the iframe via `postMessage`, plus a live event log showing every `LMA_*` event the iframe emits.
 - A **multi-panel dashboard** combining `summary`, `chat`, and `transcript` iframes in a CSS Grid layout — all bound to the same meeting.
 
+### Virtual Participant Demo Page
+
+A companion demo page showcases the **Virtual Participant** flow end-to-end: create a VP from the
+parent app, watch it join a Zoom / Teams / Chime / WebEx meeting via the noVNC live view, and see
+the transcript and summary panels auto-populate via AppSync subscriptions — all with zero manual
+refreshes.
+
+**▶ [Open the live VP demo](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/embeddable-vp-demo.html)**
+
+Source: [`docs/embeddable-vp-demo.html`](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/main/docs/embeddable-vp-demo.html)
+
+The VP demo is pure HTML (no SDK/auth required in the parent app): it uses a hidden
+`component=vp-loader` iframe to create the VP via `postMessage`, and then renders a 2×2 grid of
+dependent iframes (`vnc`, `vp-details`, `transcript`, `summary`) that all load as soon as the
+backend emits the corresponding events.
+
 ## Quick Start
 
 ### 1. Basic Embed (Stream Audio)
@@ -157,6 +173,7 @@ Show the VNC live view and transcript for a virtual participant session:
 | `vp-details` | Virtual participant details with selectable panels | `vpId`, `show`, `layout` |
 | `vnc` | VNC live view of virtual participant only | `vpId` |
 | `meeting-loader` | Blank meeting starter page (for programmatic control) | `meetingTopic`, `participants`, `owner`, `autoStart` |
+| `vp-loader` | Programmatic Virtual Participant creator (accepts `LMA_CREATE_VP` postMessage) | `meetingName`, `meetingPlatform`, `meetingId`, `meetingPassword`, `autoStart` |
 
 ## Query Parameter Reference
 
@@ -337,6 +354,34 @@ iframe.contentWindow.postMessage({
 }, targetOrigin);
 ```
 
+#### Virtual Participant Control (vp-loader)
+
+```javascript
+// Create & join a meeting as a Virtual Participant
+iframe.contentWindow.postMessage({
+  type: 'LMA_CREATE_VP',
+  meetingName: 'Globex Q4 Renewal Sync',  // Required
+  meetingPlatform: 'ZOOM',                // Required: ZOOM | TEAMS | CHIME | WEBEX
+  meetingId: '1234567890',                // Required
+  meetingPassword: 'optional'             // Optional
+}, targetOrigin);
+
+// End a running VP
+iframe.contentWindow.postMessage({
+  type: 'LMA_END_VP',
+  vpId: 'abc-123-def'
+}, targetOrigin);
+
+// Pre-fill VP form params without submitting
+iframe.contentWindow.postMessage({
+  type: 'LMA_SET_VP_PARAMS',
+  meetingName: '...',
+  meetingPlatform: '...',
+  meetingId: '...',
+  meetingPassword: '...'
+}, targetOrigin);
+```
+
 ### Messages FROM Iframe → Parent
 
 #### Authentication Events
@@ -426,10 +471,29 @@ window.addEventListener('message', (event) => {
       // event.data.callId - associated call ID (if available)
       break;
     case 'LMA_VP_STATUS_CHANGED':
-      // VP status changed (real-time update)
+      // VP status changed (real-time update).
+      // Emitted by vp-details/vnc and vp-loader components.
       // event.data.vpId - VP ID
       // event.data.status - new status
-      // event.data.callId - associated call ID
+      // event.data.callId - associated call ID (becomes available once the
+      //                     VP joins and the backend creates the call)
+      break;
+    case 'LMA_VP_LOADER_READY':
+      // vp-loader iframe has mounted and is ready to receive LMA_CREATE_VP
+      break;
+    case 'LMA_VP_CREATED':
+      // vp-loader has created the VP record and started the Step Function.
+      // event.data.vpId - VP ID
+      // event.data.status - initial status (usually INITIALIZING)
+      // event.data.meetingName / meetingPlatform / meetingId
+      // event.data.callId - associated call ID if available (usually null here)
+      break;
+    case 'LMA_VP_ERROR':
+      // vp-loader failed to create or end the VP.
+      // event.data.error - human-readable error message
+      break;
+    case 'LMA_VP_PARAMS_SET':
+      // vp-loader accepted an LMA_SET_VP_PARAMS update
       break;
   }
 });
@@ -693,6 +757,25 @@ For cross-origin iframes, you may also need:
    ?callId=Sales%20Call%20-%202025-01-29T14%3A30%3A00.000Z
    ```
 
+### Issue: Transcript / summary / chat iframe shows nothing when the meeting is started at the same time
+
+**Cause**: Prior to v0.2.24, if you loaded a `component=transcript` (or `summary` /
+`chat` / `call-details`) iframe with a `callId` for a meeting that hadn't been
+created yet — for example, the parent app started a `stream-audio` iframe and a
+`transcript` iframe for the same `callId` at the same time — the transcript
+iframe would show a "Meeting not found" error and you had to refresh the page
+once the meeting actually started.
+
+**Resolution**: This is now handled automatically. The transcript / summary /
+chat / call-details / vp-details embed components now subscribe to the
+`onCreateCall` and `onUpdateCall` AppSync subscriptions. If the meeting does
+not yet exist when the iframe loads, the component shows a
+"Waiting for meeting to start..." spinner and auto-loads the meeting as soon as
+it appears — no page refresh needed.
+
+On successful auto-load, the iframe emits a standard `LMA_CALL_LOADED`
+postMessage event to the parent, just as if it had loaded normally.
+
 ### Issue: Components appear but data doesn't load
 
 **Cause**: Settings not loaded from SSM Parameter Store.
@@ -821,6 +904,21 @@ Base URL: `https://YOUR_LMA_CLOUDFRONT_URL/#/embed`
 **Meeting Loader (with token auth):**
 ```
 /#/embed?component=meeting-loader&authMode=token
+```
+
+**VP Loader (waiting for postMessage):**
+```
+/#/embed?component=vp-loader
+```
+
+**VP Loader (pre-populated, starts on form submit):**
+```
+/#/embed?component=vp-loader&meetingName=Globex+Q4+Renewal&meetingPlatform=ZOOM&meetingId=1234567890
+```
+
+**VP Loader (auto-start from URL):**
+```
+/#/embed?component=vp-loader&meetingName=Globex+Q4+Renewal&meetingPlatform=ZOOM&meetingId=1234567890&autoStart=true
 ```
 
 ## Additional Resources

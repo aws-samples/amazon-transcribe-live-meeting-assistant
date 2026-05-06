@@ -14,7 +14,7 @@
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import {
   Box,
@@ -274,52 +274,74 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     return () => subscription.unsubscribe();
   }, [vpId]);
 
-  // Load call details when VP has a CallId and we need call panels
+  // Load call details when VP has a CallId and we need call panels.
+  // If the call hasn't been created yet (VP still joining the meeting),
+  // don't error out — just wait. The useCallsGraphQlApi onCreateCall /
+  // onUpdateCall subscriptions will populate `calls` when it appears,
+  // and the effect below will auto-load it.
   const effectiveCallId = paramCallId || vpDetails?.CallId;
 
-  useEffect(() => {
-    if (!effectiveCallId || !showCallPanels) return () => {};
-
-    const fetchCall = async () => {
+  const fetchCallForVP = useCallback(
+    async (cid) => {
+      if (!cid) return false;
       try {
         setCallLoading(true);
-        const response = await getCallDetailsFromCallIds([effectiveCallId]);
+        const response = await getCallDetailsFromCallIds([cid]);
         const callsMap = mapCallsAttributes(response, settings);
         const callDetails = callsMap[0];
 
-        if (callDetails) {
-          setCall(callDetails);
-          if (!callTranscriptPerCallId[effectiveCallId]) {
-            await sendGetTranscriptSegmentsRequest(effectiveCallId);
-          }
-          if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
-            setLiveTranscriptCallId(effectiveCallId);
-          }
+        if (!callDetails) {
+          return false;
         }
+
+        setCall(callDetails);
+        if (!callTranscriptPerCallId[cid]) {
+          await sendGetTranscriptSegmentsRequest(cid);
+        }
+        if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
+          setLiveTranscriptCallId(cid);
+        }
+        return true;
       } catch (err) {
         logger.error('Error fetching call details for VP:', err);
+        return false;
       } finally {
         setCallLoading(false);
       }
-    };
+    },
+    [settings],
+  );
 
-    fetchCall();
+  useEffect(() => {
+    if (!effectiveCallId || !showCallPanels) return () => {};
+    fetchCallForVP(effectiveCallId);
     return () => setLiveTranscriptCallId(null);
   }, [effectiveCallId, showCallPanels]);
 
-  // Update call from real-time updates
+  // Auto-refresh via AppSync: when the shared calls list updates (driven by
+  // onCreateCall / onUpdateCall subscriptions in useCallsGraphQlApi), either
+  // auto-load the call if we didn't have it yet, or refresh it in place.
   useEffect(() => {
-    if (!effectiveCallId || !call || !calls?.length) return;
+    if (!effectiveCallId || !showCallPanels || !calls?.length) return;
 
-    const callsFiltered = calls.filter((c) => c.CallId === effectiveCallId);
-    if (callsFiltered?.length) {
-      const callsMap = mapCallsAttributes([callsFiltered[0]], settings);
-      const callDetails = callsMap[0];
-      if (callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt) {
-        setCall(callDetails);
+    const matching = calls.find((c) => c.CallId === effectiveCallId);
+    if (!matching) return;
+
+    if (!call) {
+      logger.info('Call for VP appeared via AppSync subscription, auto-loading:', effectiveCallId);
+      fetchCallForVP(effectiveCallId);
+      return;
+    }
+
+    const callsMap = mapCallsAttributes([matching], settings);
+    const callDetails = callsMap[0];
+    if (callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt) {
+      setCall(callDetails);
+      if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
+        setLiveTranscriptCallId(effectiveCallId);
       }
     }
-  }, [calls, effectiveCallId]);
+  }, [calls, effectiveCallId, showCallPanels, call]);
 
   // Build calls context
   // eslint-disable-next-line react/jsx-no-constructed-context-values

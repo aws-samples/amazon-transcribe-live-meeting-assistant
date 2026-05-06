@@ -15,6 +15,7 @@
  * When show is a subset (e.g., just 'chat'), renders only that specific panel.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from 'aws-amplify/api';
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import rehypeRaw from 'rehype-raw';
@@ -45,7 +46,10 @@ import { getMarkdownSummary } from '../common/summary';
 import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import { getWeightedSentimentLabel } from '../common/sentiment';
+import onCreateCall from '../../graphql/queries/onCreateCall';
+import onUpdateCall from '../../graphql/queries/onUpdateCall';
 
+const gqlClient = generateClient();
 const logger = new ConsoleLogger('EmbedCallDetails');
 
 const PAUSE_TO_MERGE_IN_SECONDS = 1;
@@ -471,6 +475,7 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
   const [call, setCall] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [waitingForMeeting, setWaitingForMeeting] = useState(false);
 
   const {
     calls,
@@ -493,7 +498,58 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
   const showChat = show.includes('chat');
   const showAll = showTranscript && showSummary && showChat;
 
-  // Fetch call details on mount
+  /**
+   * Load the call details for our callId. Returns true if found, false if not
+   * yet created. When `notifyParent` is true, a LMA_CALL_LOADED postMessage is
+   * sent on successful load.
+   */
+  const loadCall = useCallback(
+    async ({ notifyParent = false } = {}) => {
+      if (!callId) return false;
+      try {
+        const response = await getCallDetailsFromCallIds([callId]);
+        logger.debug('Call detail response:', response);
+
+        const callsMap = mapCallsAttributes(response, settings);
+        const callDetails = callsMap[0];
+
+        if (!callDetails) {
+          return false;
+        }
+
+        setCall(callDetails);
+        setError(null);
+        setWaitingForMeeting(false);
+
+        if (!callTranscriptPerCallId[callId]) {
+          await sendGetTranscriptSegmentsRequest(callId);
+        }
+        if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
+          setLiveTranscriptCallId(callId);
+        }
+
+        if (notifyParent) {
+          sendToParent({
+            type: 'LMA_CALL_LOADED',
+            callId,
+            status: callDetails.recordingStatusLabel,
+          });
+        }
+        return true;
+      } catch (err) {
+        logger.error('Error fetching call details:', err);
+        throw err;
+      }
+    },
+    [callId, settings],
+  );
+
+  // Initial fetch on mount / callId change.
+  // If the meeting isn't found yet (e.g. the parent UI just started the
+  // stream and this iframe raced the backend's onCreateCall event), we do
+  // NOT hard-error. We enter a "waiting for meeting" state and let the
+  // onCreateCall / onUpdateCall AppSync subscriptions below auto-load it
+  // once it appears.
   useEffect(() => {
     if (!callId) {
       setError('No callId provided. Use ?callId=<meeting-id> to specify a meeting.');
@@ -501,60 +557,115 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
       return () => {};
     }
 
-    const fetchCall = async () => {
+    let cancelled = false;
+    const run = async () => {
       try {
         setLoading(true);
-        const response = await getCallDetailsFromCallIds([callId]);
-        logger.debug('Call detail response:', response);
-
-        const callsMap = mapCallsAttributes(response, settings);
-        const callDetails = callsMap[0];
-
-        if (callDetails) {
-          setCall(callDetails);
-          if (!callTranscriptPerCallId[callId]) {
-            await sendGetTranscriptSegmentsRequest(callId);
-          }
-          if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
-            setLiveTranscriptCallId(callId);
-          }
-
-          sendToParent({
-            type: 'LMA_CALL_LOADED',
-            callId,
-            status: callDetails.recordingStatusLabel,
-          });
-        } else {
-          setError(`Meeting "${callId}" not found.`);
+        setError(null);
+        const found = await loadCall({ notifyParent: true });
+        if (cancelled) return;
+        if (!found) {
+          setWaitingForMeeting(true);
         }
       } catch (err) {
-        logger.error('Error fetching call details:', err);
-        setError('Failed to load meeting details. Please check the callId and try again.');
+        if (!cancelled) {
+          setError('Failed to load meeting details. Please check the callId and try again.');
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
-
-    fetchCall();
+    run();
 
     return () => {
+      cancelled = true;
       setLiveTranscriptCallId(null);
     };
   }, [callId]);
 
-  // Update call when calls list updates (real-time)
+  // Watch the shared calls list (populated by onCreateCall / onUpdateCall
+  // subscriptions inside useCallsGraphQlApi) for our callId. If we were
+  // waiting for the meeting and it just appeared, auto-load it.
   useEffect(() => {
-    if (!callId || !call || !calls?.length) return;
+    if (!callId || !calls?.length) return;
 
-    const callsFiltered = calls.filter((c) => c.CallId === callId);
-    if (callsFiltered?.length) {
-      const callsMap = mapCallsAttributes([callsFiltered[0]], settings);
+    const matching = calls.find((c) => c.CallId === callId);
+    if (!matching) return;
+
+    if (waitingForMeeting && !call) {
+      logger.info('Meeting appeared via AppSync subscription, auto-loading:', callId);
+      loadCall({ notifyParent: true }).catch((err) => {
+        logger.error('Auto-load on subscription event failed:', err);
+      });
+      return;
+    }
+
+    // Refresh in-place when the call is updated (status transitions etc).
+    if (call) {
+      const callsMap = mapCallsAttributes([matching], settings);
       const callDetails = callsMap[0];
       if (callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt) {
         setCall(callDetails);
+        if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
+          setLiveTranscriptCallId(callId);
+        }
       }
     }
-  }, [calls, callId]);
+  }, [calls, callId, waitingForMeeting, call]);
+
+  // Dedicated AppSync subscriptions scoped to THIS embed instance.
+  // Even though useCallsGraphQlApi already subscribes, it only reacts when
+  // the event falls into its currently-loaded "period" window. For robustness
+  // in the embed (which is often loaded in parallel with a meeting start),
+  // we also listen directly and auto-load whenever our specific callId
+  // appears or is updated.
+  useEffect(() => {
+    if (!callId) return () => {};
+
+    const createSub = gqlClient.graphql({ query: onCreateCall }).subscribe({
+      next: (message) => {
+        const createdId = message?.data?.onCreateCall?.CallId;
+        if (createdId && createdId === callId) {
+          logger.info('onCreateCall matched our callId, auto-loading:', callId);
+          loadCall({ notifyParent: true }).catch((err) => {
+            logger.error('Auto-load on onCreateCall failed:', err);
+          });
+        }
+      },
+      error: (err) => logger.error('Embed onCreateCall subscription error:', err),
+    });
+
+    const updateSub = gqlClient.graphql({ query: onUpdateCall }).subscribe({
+      next: (message) => {
+        const updatedId = message?.data?.onUpdateCall?.CallId;
+        if (updatedId && updatedId === callId) {
+          // On any update for our callId, ensure we have the call loaded.
+          // If we're still waiting (e.g. onCreateCall was missed), load now;
+          // otherwise the calls-list effect above will pick up the refresh.
+          if (!call) {
+            logger.info('onUpdateCall for our callId while not loaded, loading:', callId);
+            loadCall({ notifyParent: true }).catch((err) => {
+              logger.error('Auto-load on onUpdateCall failed:', err);
+            });
+          }
+        }
+      },
+      error: (err) => logger.error('Embed onUpdateCall subscription error:', err),
+    });
+
+    return () => {
+      try {
+        createSub.unsubscribe();
+      } catch (e) {
+        /* ignore */
+      }
+      try {
+        updateSub.unsubscribe();
+      } catch (e) {
+        /* ignore */
+      }
+    };
+  }, [callId, call]);
 
   // eslint-disable-next-line react/jsx-no-constructed-context-values
   const callsContextValue = {
@@ -592,7 +703,26 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
     );
   }
 
+  // No call yet: either actively waiting for the meeting to be created
+  // (auto-refresh via AppSync subscription), or genuinely not found.
   if (!call) {
+    if (waitingForMeeting) {
+      return (
+        <Box textAlign="center" padding="xxl">
+          <Spinner size="large" />
+          <Box margin={{ top: 's' }} fontSize="heading-s">
+            Waiting for meeting to start...
+          </Box>
+          <Box margin={{ top: 'xs' }} color="text-body-secondary">
+            This view will load automatically as soon as the meeting
+            <br />
+            <code>{callId}</code>
+            <br />
+            is created.
+          </Box>
+        </Box>
+      );
+    }
     return (
       <Box padding="l">
         <Alert type="warning">Meeting not found</Alert>
