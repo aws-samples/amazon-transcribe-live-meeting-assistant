@@ -673,6 +673,13 @@ function refreshVpLoaderIframe() {
   iframe.style.display = 'block';
   placeholder.style.display = 'none';
   urlEl.textContent = url;
+  // Enable the Create button once the iframe has an LMA URL to load.
+  // The loader will also emit LMA_VP_LOADER_READY once it's mounted (which
+  // confirms readiness), but we don't strictly require it — if the user
+  // clicks too early, the postMessage is simply queued until the iframe is
+  // ready to receive it. Requiring the event would leave the button stuck
+  // disabled if the iframe loads before our message listener is attached.
+  document.getElementById('btn-create').disabled = false;
 }
 
 function showMonitorIframes({ vpId, callId }) {
