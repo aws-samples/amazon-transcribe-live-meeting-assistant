@@ -111,8 +111,14 @@ const PLATFORM_OPTIONS = [
 ];
 
 const EmbedVpLoader = ({ params, sendToParent }) => {
-  const { user, currentCredentials } = useAppContext();
+  const { user, currentCredentials, currentSession } = useAppContext();
   const { settings } = useSettingsContext();
+  // Gate all GraphQL calls / subscriptions on a valid Cognito session being
+  // available. Without this, the component's onUpdateVirtualParticipant
+  // subscription fires before Amplify has been configured (or before the user
+  // is authenticated), producing `Not Authorized to access
+  // onUpdateVirtualParticipant on type Subscription` from AppSync.
+  const isAuthenticated = !!(currentCredentials && currentSession && user);
 
   const initialName = params.meetingName || '';
   const initialPlatform = params.meetingPlatform || 'ZOOM';
@@ -295,7 +301,15 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
   }, [params.autoStart]);
 
   // Subscribe to VP status updates & forward the ones matching our vpId.
+  // Only subscribe once we (a) have a Cognito session (so AppSync will
+  // authorize the subscription) and (b) have actually created a VP — there's
+  // no reason to listen before then, and subscribing eagerly during page
+  // init causes "Not Authorized to access onUpdateVirtualParticipant" errors
+  // because Amplify hasn't finished configuring yet.
   useEffect(() => {
+    if (!isAuthenticated) return undefined;
+    if (!createdVp?.id) return undefined;
+
     const subscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
       next: (msg) => {
         const upd = msg?.data?.onUpdateVirtualParticipant;
@@ -318,7 +332,7 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
         /* ignore */
       }
     };
-  }, [sendToParent]);
+  }, [isAuthenticated, createdVp?.id, sendToParent]);
 
   // Listen for parent control messages
   useEffect(() => {
