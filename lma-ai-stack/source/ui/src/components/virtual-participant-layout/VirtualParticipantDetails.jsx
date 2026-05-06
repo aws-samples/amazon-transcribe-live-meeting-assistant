@@ -169,7 +169,9 @@ const STATUS_CONFIG = {
   },
 };
 
-const StatusBadge = ({ status }) => {
+export const VP_STATUS_CONFIG = STATUS_CONFIG;
+
+export const StatusBadge = ({ status }) => {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.FAILED;
   return <Badge color={config.color}>{status}</Badge>;
 };
@@ -178,7 +180,7 @@ StatusBadge.propTypes = {
   status: PropTypes.string.isRequired,
 };
 
-const StatusDetails = ({ status, updatedAt, scheduledFor }) => {
+export const StatusDetails = ({ status, updatedAt, scheduledFor }) => {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.FAILED;
   const isInProgress = ['INITIALIZING', 'CONNECTING', 'JOINING'].includes(status);
 
@@ -219,7 +221,7 @@ StatusDetails.defaultProps = {
   scheduledFor: null,
 };
 
-const ConnectionDetails = ({ vpDetails }) => {
+export const ConnectionDetails = ({ vpDetails }) => {
   const calculateDuration = () => {
     if (!vpDetails.createdAt) return 'N/A';
 

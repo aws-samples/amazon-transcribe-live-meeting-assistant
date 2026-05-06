@@ -16,18 +16,14 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
 import React, { useEffect, useState, useCallback } from 'react';
 import PropTypes from 'prop-types';
-import {
-  Box,
-  Container,
-  Header,
-  SpaceBetween,
-  Spinner,
-  Alert,
-  Badge,
-  ColumnLayout,
-} from '@cloudscape-design/components';
+import { Box, Container, Header, SpaceBetween, Spinner, Alert } from '@cloudscape-design/components';
 
 import VNCViewer from '../virtual-participant-layout/VNCViewer';
+import {
+  StatusBadge as VPStatusBadge,
+  StatusDetails as VPStatusDetails,
+  ConnectionDetails as VPConnectionDetails,
+} from '../virtual-participant-layout/VirtualParticipantDetails';
 import useSettingsContext from '../../contexts/settings';
 import { CallsContext } from '../../contexts/calls';
 import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
@@ -86,73 +82,17 @@ const onUpdateVirtualParticipantDetailed = `
 `;
 
 /**
- * Compact VP status display for embed mode.
- */
-const VPStatusBadge = ({ status }) => {
-  const colorMap = {
-    SCHEDULED: 'blue',
-    INITIALIZING: 'blue',
-    CONNECTING: 'blue',
-    JOINING: 'blue',
-    JOINED: 'green',
-    ACTIVE: 'green',
-    COMPLETED: 'green',
-    FAILED: 'red',
-    ENDED: 'grey',
-    CANCELLED: 'grey',
-    MANUAL_ACTION_REQUIRED: 'red',
-  };
-  return <Badge color={colorMap[status] || 'grey'}>{status}</Badge>;
-};
-
-VPStatusBadge.propTypes = {
-  status: PropTypes.string.isRequired,
-};
-
-/**
- * VP Details panel showing connection info.
+ * Full VP details panel — mirrors the main LMA Virtual Participant details page
+ * by composing the exported `StatusDetails` + `ConnectionDetails` cards so the
+ * embed view matches the host application's design.
  */
 const VPDetailsPanel = ({ vpDetails }) => (
-  <Container header={<Header variant="h3">Virtual Participant Details</Header>}>
-    <ColumnLayout columns={3} variant="text-grid">
-      <SpaceBetween size="xs">
-        <Box color="text-label" fontWeight="bold">
-          Meeting
-        </Box>
-        <div>{vpDetails.meetingName}</div>
-      </SpaceBetween>
-      <SpaceBetween size="xs">
-        <Box color="text-label" fontWeight="bold">
-          Platform
-        </Box>
-        <div>{vpDetails.meetingPlatform}</div>
-      </SpaceBetween>
-      <SpaceBetween size="xs">
-        <Box color="text-label" fontWeight="bold">
-          Status
-        </Box>
-        <VPStatusBadge status={vpDetails.status} />
-      </SpaceBetween>
-      <SpaceBetween size="xs">
-        <Box color="text-label" fontWeight="bold">
-          Meeting ID
-        </Box>
-        <div>{vpDetails.meetingId}</div>
-      </SpaceBetween>
-      <SpaceBetween size="xs">
-        <Box color="text-label" fontWeight="bold">
-          Owner
-        </Box>
-        <div>{vpDetails.owner || 'N/A'}</div>
-      </SpaceBetween>
-      <SpaceBetween size="xs">
-        <Box color="text-label" fontWeight="bold">
-          Last Updated
-        </Box>
-        <div>{new Date(vpDetails.updatedAt).toLocaleString()}</div>
-      </SpaceBetween>
-    </ColumnLayout>
-  </Container>
+  <SpaceBetween direction="vertical" size="l">
+    <VPStatusDetails status={vpDetails.status} updatedAt={vpDetails.updatedAt} scheduledFor={vpDetails.scheduledFor} />
+    <Container header={<Header variant="h3">Connection Details</Header>}>
+      <VPConnectionDetails vpDetails={vpDetails} />
+    </Container>
+  </SpaceBetween>
 );
 
 VPDetailsPanel.propTypes = {
@@ -163,6 +103,7 @@ VPDetailsPanel.propTypes = {
     status: PropTypes.string,
     owner: PropTypes.string,
     updatedAt: PropTypes.string,
+    scheduledFor: PropTypes.string,
   }).isRequired,
 };
 
