@@ -106,5 +106,6 @@ export type SocketCallData = {
     recordingFileSize?: number
     startStreamTime: Date,
     speakerEvents: [],
-    ended: boolean
+    ended: boolean,
+    isAlive: boolean
 }

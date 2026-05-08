@@ -48,6 +48,8 @@ const LOCAL_TEMP_DIR = process.env['LOCAL_TEMP_DIR'] || '/tmp/';
 const WS_LOG_LEVEL = process.env['WS_LOG_LEVEL'] || 'debug';
 const WS_LOG_INTERVAL = parseInt(process.env['WS_LOG_INTERVAL'] || '120', 10);
 const SHOULD_RECORD_CALL = (process.env['SHOULD_RECORD_CALL'] || '') === 'true';
+const WS_PING_INTERVAL_MS = parseInt(process.env['WS_PING_INTERVAL_MS'] || '25000', 10);
+const WS_PONG_TIMEOUT_MS = parseInt(process.env['WS_PONG_TIMEOUT_MS'] || '10000', 10);
 
 const s3Client = new S3Client({ region: AWS_REGION });
 
@@ -207,6 +209,13 @@ const registerHandlers = (
         );
         ws.close();
     });
+
+    ws.on('pong', () => {
+        const socketData = socketMap.get(ws);
+        if (socketData) {
+            socketData.isAlive = true;
+        }
+    });
 };
 
 const onBinaryMessage = async (
@@ -342,6 +351,7 @@ const onTextMessage = async (
           startStreamTime: new Date(),
           speakerEvents: [],
           ended: false,
+          isAlive: true,
       };
       socketMap.set(ws, socketCallMap);
       startTranscribe(socketCallMap, server);
@@ -634,3 +644,29 @@ server.listen(
         server.log.info(`[[WS SERVER STARTUP]]: Routes: \n${server.printRoutes()}`);
     }
 );
+
+// Keepalive ping interval to prevent idle connection timeouts from ALB/CloudFront
+const pingInterval = setInterval(() => {
+    socketMap.forEach((socketData, ws) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            if (socketData.isAlive === false) {
+                server.log.info(`[KEEPALIVE]: Connection for call ${socketData.callMetadata?.callId} did not respond to ping. Terminating.`);
+                ws.terminate();
+                return;
+            }
+            socketData.isAlive = false;
+            ws.ping();
+        }
+    });
+}, WS_PING_INTERVAL_MS);
+
+// Clean up ping interval on server shutdown
+process.on('SIGTERM', () => {
+    clearInterval(pingInterval);
+    server.close();
+});
+
+process.on('SIGINT', () => {
+    clearInterval(pingInterval);
+    server.close();
+});
