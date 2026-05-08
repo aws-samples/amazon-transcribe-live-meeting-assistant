@@ -616,7 +616,8 @@ function currentFormValues() {
 function buildUrl(params) {
   const base = currentBaseUrl();
   if (!base) return '';
-  const qs = Object.entries(params)
+  const finalParams = { ...params, allowedOrigins: window.location.origin };
+  const qs = Object.entries(finalParams)
     .filter(([, v]) => v !== undefined && v !== null && v !== '')
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join('&');
@@ -668,7 +669,10 @@ function refreshVpLoaderIframe() {
     return;
   }
 
-  const url = buildUrl({ component: 'vp-loader' });
+  const url = buildUrl({
+    component: 'vp-loader',
+    // simple: 'true' // uncomment for the simple view for the 'Virtual Participant creator' iframe
+  });
   iframe.src = url;
   iframe.style.display = 'block';
   placeholder.style.display = 'none';
@@ -837,11 +841,14 @@ window.addEventListener('message', (event) => {
       showMonitorIframes({ vpId: currentVpId, callId: currentCallId });
       break;
     case 'LMA_VP_STATUS_CHANGED':
-      updateStatusBadge(data.status);
+      // Only update the badge when we actually received a status (DDB-stream
+      // subscription events sometimes fire with just a CallId/vnc* update
+      // and no status field — ignoring these keeps the last real status).
+      if (data.status) {
+        updateStatusBadge(data.status);
+      }
       // If the callId just became available, swap the transcript/summary
-      // iframes over from their "pending-<vpId>" placeholder to the real
-      // callId (the auto-refresh in the embed would also pick it up, but
-      // this makes the demo URL accurate).
+      // iframes over to the real callId.
       if (data.callId && data.callId !== currentCallId) {
         currentCallId = data.callId;
         showMonitorIframes({ vpId: currentVpId, callId: currentCallId });

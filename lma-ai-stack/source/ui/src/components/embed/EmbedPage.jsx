@@ -69,6 +69,7 @@ const useEmbedParams = () => {
       meetingPlatform: searchParams.get('meetingPlatform') || '',
       meetingId: searchParams.get('meetingId') || '',
       meetingPassword: searchParams.get('meetingPassword') || '',
+      simple: searchParams.get('simple') === 'true',
 
       // Authentication
       authMode: searchParams.get('authMode') || 'cognito',

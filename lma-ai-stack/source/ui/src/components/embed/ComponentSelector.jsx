@@ -133,6 +133,7 @@ ComponentSelector.propTypes = {
     meetingPlatform: PropTypes.string,
     meetingId: PropTypes.string,
     meetingPassword: PropTypes.string,
+    simple: PropTypes.bool,
   }).isRequired,
   sendToParent: PropTypes.func.isRequired,
 };

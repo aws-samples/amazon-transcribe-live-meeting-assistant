@@ -19,6 +19,10 @@
  *   meetingId       - Pre-fill meeting id
  *   meetingPassword - Pre-fill meeting password
  *   autoStart       - When true, auto-create the VP from URL params on load
+ *   simple          - When true, render a minimal confirmation card after
+ *                     creation instead of the full status + connection details
+ *                     view (useful when a separate vp-details iframe is shown
+ *                     alongside this one)
  *
  * postMessage in (parent -> iframe):
  *   { type: 'LMA_CREATE_VP',
@@ -56,6 +60,10 @@ import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import awsExports from '../../aws-exports';
+import {
+  StatusDetails as VPStatusDetails,
+  ConnectionDetails as VPConnectionDetails,
+} from '../virtual-participant-layout/VirtualParticipantDetails';
 
 const client = generateClient();
 const logger = new ConsoleLogger('EmbedVpLoader');
@@ -77,7 +85,13 @@ const createVirtualParticipant = /* GraphQL */ `
       meetingId
       status
       createdAt
+      updatedAt
+      owner
+      Owner
       CallId
+      vncEndpoint
+      vncPort
+      vncReady
     }
   }
 `;
@@ -92,13 +106,48 @@ const endVirtualParticipant = /* GraphQL */ `
   }
 `;
 
+const getVirtualParticipant = /* GraphQL */ `
+  query GetVirtualParticipant($id: ID!) {
+    getVirtualParticipant(id: $id) {
+      id
+      meetingName
+      meetingPlatform
+      meetingId
+      meetingTime
+      scheduledFor
+      isScheduled
+      scheduleId
+      status
+      createdAt
+      updatedAt
+      owner
+      Owner
+      SharedWith
+      CallId
+      vncEndpoint
+      vncPort
+      vncReady
+    }
+  }
+`;
+
 const onUpdateVirtualParticipant = /* GraphQL */ `
   subscription OnUpdateVirtualParticipant {
     onUpdateVirtualParticipant {
       id
+      meetingName
+      meetingPlatform
+      meetingId
       status
       updatedAt
+      createdAt
+      owner
+      Owner
+      SharedWith
       CallId
+      vncEndpoint
+      vncPort
+      vncReady
     }
   }
 `;
@@ -113,11 +162,6 @@ const PLATFORM_OPTIONS = [
 const EmbedVpLoader = ({ params, sendToParent }) => {
   const { user, currentCredentials, currentSession } = useAppContext();
   const { settings } = useSettingsContext();
-  // Gate all GraphQL calls / subscriptions on a valid Cognito session being
-  // available. Without this, the component's onUpdateVirtualParticipant
-  // subscription fires before Amplify has been configured (or before the user
-  // is authenticated), producing `Not Authorized to access
-  // onUpdateVirtualParticipant on type Subscription` from AppSync.
   const isAuthenticated = !!(currentCredentials && currentSession && user);
 
   const initialName = params.meetingName || '';
@@ -137,8 +181,6 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
   const [errorMessage, setErrorMessage] = useState('');
   const [createdVp, setCreatedVp] = useState(null);
 
-  // Track the vpId across async callbacks & subscriptions without causing
-  // re-subscribes.
   const createdVpIdRef = useRef(null);
 
   const doCreate = useCallback(
@@ -159,7 +201,6 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
       }
 
       try {
-        // Resolve the current user identifier (email preferred)
         let email;
         try {
           const attrs = await fetchUserAttributes();
@@ -174,7 +215,6 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
           user?.username ||
           'embed-user@example.com';
 
-        // 1. Create the VP record via GraphQL
         const vpInput = {
           meetingName: effectiveName,
           meetingPlatform: effectivePlatform,
@@ -195,8 +235,19 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
         createdVpIdRef.current = vp.id;
         setCreatedVp(vp);
 
-        // 2. Kick the Step Function for immediate execution, mirroring
-        //    VirtualParticipantList.handleCreateParticipant.
+        try {
+          const fullResult = await client.graphql({
+            query: getVirtualParticipant,
+            variables: { id: vp.id },
+          });
+          const full = fullResult?.data?.getVirtualParticipant;
+          if (full?.id) {
+            setCreatedVp((prev) => ({ ...(prev || {}), ...full }));
+          }
+        } catch (err) {
+          logger.debug('getVirtualParticipant follow-up failed:', err);
+        }
+
         if (!settings.LMAVirtualParticipantSchedulerStateMachine) {
           throw new Error(
             'LMAVirtualParticipantSchedulerStateMachine is not configured in settings - VP service unavailable',
@@ -224,7 +275,7 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
               virtualParticipantId: vp.id,
               accessToken: authSession?.tokens?.accessToken?.toString() || '',
               idToken: authSession?.tokens?.idToken?.toString() || '',
-              rereshToken: '', // (sic: matches existing VP list implementation)
+              rereshToken: '',
             },
           }),
         };
@@ -280,17 +331,23 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
       try {
         await client.graphql({
           query: endVirtualParticipant,
-          variables: { input: { id } },
+          variables: {
+            input: {
+              id,
+              endReason: 'User requested termination',
+              endedBy: 'User',
+            },
+          },
         });
       } catch (err) {
         logger.error('Failed to end VP:', err);
-        sendToParent({ type: 'LMA_VP_ERROR', error: err?.message || 'Failed to end VP' });
+        const msg = err?.errors?.[0]?.message || err?.message || 'Failed to end VP';
+        sendToParent({ type: 'LMA_VP_ERROR', error: msg });
       }
     },
     [sendToParent],
   );
 
-  // Auto-start from URL params
   useEffect(() => {
     if (params.autoStart && initialName && initialId) {
       const t = setTimeout(() => doCreate(), 800);
@@ -300,41 +357,63 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
     // eslint-disable-next-line
   }, [params.autoStart]);
 
-  // Subscribe to VP status updates & forward the ones matching our vpId.
-  // Only subscribe once we (a) have a Cognito session (so AppSync will
-  // authorize the subscription) and (b) have actually created a VP — there's
-  // no reason to listen before then, and subscribing eagerly during page
-  // init causes "Not Authorized to access onUpdateVirtualParticipant" errors
-  // because Amplify hasn't finished configuring yet.
+  // AppSync auth errors (e.g. token refresh) deliver a terminal error to the
+  // Observable and end the subscription. Resubscribe with exponential backoff
+  // so LMA_VP_STATUS_CHANGED keeps flowing to the parent.
   useEffect(() => {
     if (!isAuthenticated) return undefined;
     if (!createdVp?.id) return undefined;
 
-    const subscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
-      next: (msg) => {
-        const upd = msg?.data?.onUpdateVirtualParticipant;
-        if (!upd?.id) return;
-        if (upd.id !== createdVpIdRef.current) return;
-        sendToParent({
-          type: 'LMA_VP_STATUS_CHANGED',
-          vpId: upd.id,
-          status: upd.status,
-          callId: upd.CallId || null,
-        });
-        setCreatedVp((prev) => ({ ...(prev || {}), ...upd }));
-      },
-      error: (err) => logger.error('VP status subscription error:', err),
-    });
+    let cancelled = false;
+    let activeSubscription = null;
+    let retryTimer = null;
+    let attempt = 0;
+
+    const subscribe = () => {
+      if (cancelled) return;
+      attempt += 1;
+      activeSubscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
+        next: (msg) => {
+          const upd = msg?.data?.onUpdateVirtualParticipant;
+          if (!upd?.id) return;
+          if (upd.id !== createdVpIdRef.current) return;
+          attempt = 0;
+          sendToParent({
+            type: 'LMA_VP_STATUS_CHANGED',
+            vpId: upd.id,
+            status: upd.status,
+            callId: upd.CallId || null,
+          });
+          setCreatedVp((prev) => {
+            const merged = { ...(prev || {}) };
+            Object.entries(upd).forEach(([k, v]) => {
+              if (v !== null && v !== undefined) merged[k] = v;
+            });
+            return merged;
+          });
+        },
+        error: (err) => {
+          logger.warn('VP status subscription error, will resubscribe:', err);
+          if (cancelled) return;
+          const delayMs = Math.min(1000 * 2 ** Math.min(attempt - 1, 4), 10000);
+          retryTimer = setTimeout(subscribe, delayMs);
+        },
+      });
+    };
+
+    subscribe();
+
     return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
       try {
-        subscription.unsubscribe();
+        if (activeSubscription) activeSubscription.unsubscribe();
       } catch (_err) {
         /* ignore */
       }
     };
   }, [isAuthenticated, createdVp?.id, sendToParent]);
 
-  // Listen for parent control messages
   useEffect(() => {
     const handleMessage = (event) => {
       const { data } = event;
@@ -366,7 +445,6 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
     return () => window.removeEventListener('message', handleMessage);
   }, [doCreate, doEnd, sendToParent]);
 
-  // Notify parent we're ready
   useEffect(() => {
     sendToParent({
       type: 'LMA_VP_LOADER_READY',
@@ -378,7 +456,6 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
     // eslint-disable-next-line
   }, []);
 
-  // ------------- Render -------------
   if (state === STATES.WAITING) {
     return (
       <Container>
@@ -417,56 +494,53 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
   }
 
   if (state === STATES.CREATED && createdVp) {
+    const canEnd = ['INITIALIZING', 'CONNECTING', 'JOINING', 'JOINED', 'ACTIVE', 'MANUAL_ACTION_REQUIRED'].includes(
+      createdVp.status,
+    );
+    const endButton = canEnd && (
+      <Button variant="normal" iconName="close" onClick={() => doEnd(createdVp.id)}>
+        End Virtual Participant
+      </Button>
+    );
+
+    if (params.simple) {
+      return (
+        <Container
+          header={
+            <Header variant="h3" actions={endButton}>
+              {createdVp.meetingName || 'Virtual Participant started'}
+            </Header>
+          }
+        >
+          <Box color="text-body-secondary" fontSize="body-s">
+            Status: <strong>{createdVp.status || 'INITIALIZING'}</strong>
+            {createdVp.id ? (
+              <>
+                {' — '}
+                <code>{createdVp.id}</code>
+              </>
+            ) : null}
+          </Box>
+        </Container>
+      );
+    }
+
     return (
-      <Container
-        header={
-          <Header
-            variant="h3"
-            actions={
-              <Button variant="primary" onClick={() => doEnd(createdVp.id)}>
-                End VP
-              </Button>
-            }
-          >
-            Virtual Participant Created
+      <SpaceBetween direction="vertical" size="l">
+        <Container>
+          <Header variant="h3" actions={endButton}>
+            {createdVp.meetingName}
           </Header>
-        }
-      >
-        <ColumnLayout columns={2} variant="text-grid">
-          <SpaceBetween size="xs">
-            <Box color="text-label" fontWeight="bold">
-              VP ID
-            </Box>
-            <div>
-              <code>{createdVp.id}</code>
-            </div>
-          </SpaceBetween>
-          <SpaceBetween size="xs">
-            <Box color="text-label" fontWeight="bold">
-              Status
-            </Box>
-            <div>{createdVp.status}</div>
-          </SpaceBetween>
-          <SpaceBetween size="xs">
-            <Box color="text-label" fontWeight="bold">
-              Meeting
-            </Box>
-            <div>{createdVp.meetingName}</div>
-          </SpaceBetween>
-          <SpaceBetween size="xs">
-            <Box color="text-label" fontWeight="bold">
-              Platform / ID
-            </Box>
-            <div>
-              {createdVp.meetingPlatform} / {createdVp.meetingId}
-            </div>
-          </SpaceBetween>
-        </ColumnLayout>
-        <Box margin={{ top: 'l' }} color="text-body-secondary" fontSize="body-s">
-          The parent page has been notified via <code>LMA_VP_CREATED</code>. Status updates will be sent via{' '}
-          <code>LMA_VP_STATUS_CHANGED</code> including the <code>callId</code> when it becomes available.
-        </Box>
-      </Container>
+        </Container>
+        <VPStatusDetails
+          status={createdVp.status}
+          updatedAt={createdVp.updatedAt || createdVp.createdAt || new Date().toISOString()}
+          scheduledFor={createdVp.scheduledFor}
+        />
+        <Container header={<Header variant="h3">Connection Details</Header>}>
+          <VPConnectionDetails vpDetails={createdVp} />
+        </Container>
+      </SpaceBetween>
     );
   }
 
@@ -483,7 +557,6 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
     );
   }
 
-  // IDLE — minimal form for users who want to drive it manually
   return (
     <form
       onSubmit={(e) => {
@@ -536,6 +609,7 @@ EmbedVpLoader.propTypes = {
     meetingId: PropTypes.string,
     meetingPassword: PropTypes.string,
     autoStart: PropTypes.bool,
+    simple: PropTypes.bool,
   }).isRequired,
   sendToParent: PropTypes.func.isRequired,
 };

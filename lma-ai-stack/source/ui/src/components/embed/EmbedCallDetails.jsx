@@ -510,7 +510,12 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
         const response = await getCallDetailsFromCallIds([callId]);
         logger.debug('Call detail response:', response);
 
-        const callsMap = mapCallsAttributes(response, settings);
+        const validResponses = (response || []).filter((r) => r && r.CallId);
+        if (!validResponses.length) {
+          return false;
+        }
+
+        const callsMap = mapCallsAttributes(validResponses, settings);
         const callDetails = callsMap[0];
 
         if (!callDetails) {
@@ -568,7 +573,17 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
           setWaitingForMeeting(true);
         }
       } catch (err) {
-        if (!cancelled) {
+        if (cancelled) return;
+        const msg = (err?.message || err?.errors?.[0]?.message || '').toLowerCase();
+        const isNotFound =
+          msg.includes('not found') ||
+          msg.includes('no call') ||
+          msg.includes('does not exist') ||
+          msg.includes('null') ||
+          msg.includes('unauthorized');
+        if (isNotFound) {
+          setWaitingForMeeting(true);
+        } else {
           setError('Failed to load meeting details. Please check the callId and try again.');
         }
       } finally {
