@@ -21,12 +21,19 @@ ALLOWED_FIELDS = {
     "modelId",
     "voiceId",
     "endpointingSensitivity",
-    "groupMeetingMode",
+    "groupMeetingMode",      # legacy; preserved for back-compat
+    "meetingMode",           # new canonical meeting-mode selector
+    "translatorLanguageA",   # only relevant when meetingMode='translator'
+    "translatorLanguageB",   # only relevant when meetingMode='translator'
 }
 
 # Valid values for enum-like fields
 VALID_PROMPT_MODES = {"base", "inject", "replace"}
 VALID_SENSITIVITY_LEVELS = {"LOW", "MEDIUM", "HIGH"}
+VALID_MEETING_MODES = {"normal", "group", "translator"}
+
+# Maximum length for translator language labels (prevents huge strings in config).
+MAX_LANGUAGE_LABEL_LEN = 64
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -66,20 +73,35 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         item = {"NovaSonicConfigId": config_id}
 
         for key, value in config_object.items():
-            if key in ALLOWED_FIELDS:
-                # Validate enum-like fields
-                if key == "promptMode" and value not in VALID_PROMPT_MODES:
-                    print(f"Invalid promptMode value: {value}, skipping")
-                    continue
-                if key == "endpointingSensitivity" and value not in VALID_SENSITIVITY_LEVELS:
-                    print(f"Invalid endpointingSensitivity value: {value}, skipping")
-                    continue
-                if key == "groupMeetingMode":
-                    # Ensure boolean
-                    value = bool(value)
-                item[key] = value
-            else:
+            if key not in ALLOWED_FIELDS:
                 print(f"Filtered out non-allowed field: {key}")
+                continue
+
+            # Validate enum-like fields
+            if key == "promptMode" and value not in VALID_PROMPT_MODES:
+                print(f"Invalid promptMode value: {value}, skipping")
+                continue
+            if key == "endpointingSensitivity" and value not in VALID_SENSITIVITY_LEVELS:
+                print(f"Invalid endpointingSensitivity value: {value}, skipping")
+                continue
+            if key == "meetingMode" and value not in VALID_MEETING_MODES:
+                print(f"Invalid meetingMode value: {value}, skipping")
+                continue
+            if key == "groupMeetingMode":
+                # Ensure boolean
+                value = bool(value)
+            if key in ("translatorLanguageA", "translatorLanguageB"):
+                if not isinstance(value, str):
+                    print(f"Invalid {key} (not a string): {value!r}, skipping")
+                    continue
+                value = value.strip()
+                if not value:
+                    print(f"Invalid {key} (empty string), skipping")
+                    continue
+                if len(value) > MAX_LANGUAGE_LABEL_LEN:
+                    print(f"Invalid {key} (length {len(value)} > {MAX_LANGUAGE_LABEL_LEN}), truncating")
+                    value = value[:MAX_LANGUAGE_LABEL_LEN]
+            item[key] = value
 
         # Store in DynamoDB
         table.put_item(Item=item)

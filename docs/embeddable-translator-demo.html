@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>Live Meeting Assistant — AI Translator Mode</title>
+<style>
+  :root {
+    --aws-squid:    #232f3e;
+    --aws-squid-lt: #2d3e50;
+    --aws-navy:     #1a2332;
+    --aws-orange:   #ff9900;
+    --aws-orange-dk:#e88a00;
+    --aws-smile:    #ff9900;
+    --aws-teal:     #00a1c9;
+    --aws-teal-dk:  #007fa3;
+    --aws-green:    #1d8102;
+    --aws-red:      #d13212;
+    --bg:           #f2f3f3;
+    --card:         #ffffff;
+    --border:       #d5dbdb;
+    --border-lt:    #eaeded;
+    --text:         #16191f;
+    --text-muted:   #545b64;
+    --text-light:   #879596;
+    --link:         #0073bb;
+    --link-hover:   #005276;
+    --radius:       4px;
+    --radius-lg:    8px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Amazon Ember", "Helvetica Neue", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+
+  /* ===== AWS-style top navigation ===== */
+  .aws-nav {
+    background: var(--aws-squid);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    height: 56px;
+    gap: 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  }
+  .aws-nav .nav-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    padding-right: 20px;
+    border-right: 1px solid rgba(255,255,255,0.15);
+    margin-right: 20px;
+  }
+  /* AWS smile SVG logo */
+  .aws-nav .nav-logo .aws-wordmark {
+    display: flex;
+    flex-direction: column;
+    line-height: 1;
+  }
+  .aws-nav .nav-logo .aws-wordmark .top {
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.5px;
+  }
+  .aws-nav .nav-logo .aws-wordmark .sub {
+    font-size: 9px;
+    color: var(--aws-orange);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-top: 1px;
+  }
+  .aws-nav .nav-product {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: -0.1px;
+  }
+  .aws-nav .nav-product span {
+    color: var(--aws-orange);
+  }
+  .aws-nav .spacer { flex: 1; }
+  .aws-nav .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .aws-nav .nav-links a {
+    color: rgba(255,255,255,0.85);
+    text-decoration: none;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: var(--radius);
+    transition: background 0.15s;
+  }
+  .aws-nav .nav-links a:hover {
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+  }
+  .aws-nav .nav-cta {
+    background: var(--aws-orange);
+    color: var(--aws-squid) !important;
+    font-weight: 700 !important;
+    border-radius: var(--radius) !important;
+    padding: 7px 16px !important;
+    margin-left: 8px;
+  }
+  .aws-nav .nav-cta:hover {
+    background: var(--aws-orange-dk) !important;
+    color: var(--aws-squid) !important;
+  }
+
+  /* ===== Hero banner (AWS dark) ===== */
+  .hero-banner {
+    background: var(--aws-squid);
+    background-image:
+      radial-gradient(ellipse 80% 60% at 70% 50%, rgba(0,161,201,0.12) 0%, transparent 70%),
+      radial-gradient(ellipse 50% 80% at 10% 80%, rgba(255,153,0,0.07) 0%, transparent 60%);
+    color: #fff;
+    padding: 64px 40px 56px;
+  }
+  .hero-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 56px;
+    align-items: center;
+  }
+  .hero-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,153,0,0.15);
+    border: 1px solid rgba(255,153,0,0.35);
+    color: var(--aws-orange);
+    border-radius: 2px;
+    padding: 4px 12px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .hero-banner h1 {
+    font-size: 42px;
+    line-height: 1.1;
+    margin: 0 0 16px;
+    letter-spacing: -0.8px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .hero-banner h1 em {
+    font-style: normal;
+    color: var(--aws-orange);
+  }
+  .hero-banner .hero-sub {
+    font-size: 16px;
+    line-height: 1.6;
+    color: rgba(255,255,255,0.72);
+    margin: 0 0 28px;
+    max-width: 520px;
+  }
+  .hero-ctas {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  /* AWS button styles */
+  .btn-aws-primary {
+    background: var(--aws-orange);
+    color: var(--aws-squid);
+    padding: 10px 20px;
+    border-radius: var(--radius);
+    font-weight: 700;
+    font-size: 14px;
+    border: 1px solid var(--aws-orange-dk);
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.15s, border-color 0.15s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .btn-aws-primary:hover {
+    background: var(--aws-orange-dk);
+    border-color: #c97a00;
+  }
+  .btn-aws-secondary {
+    background: transparent;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: var(--radius);
+    font-weight: 600;
+    font-size: 14px;
+    border: 1px solid rgba(255,255,255,0.45);
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .btn-aws-secondary:hover {
+    border-color: rgba(255,255,255,0.8);
+    background: rgba(255,255,255,0.07);
+  }
+  .powered-by {
+    margin-top: 22px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px 7px 10px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 3px;
+  }
+  .powered-by .nova-star {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    border-radius: 4px;
+  }
+  .powered-by .pb-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .powered-by .pb-brand {
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.9);
+    letter-spacing: -0.1px;
+  }
+
+  /* Hero visual */
+  .hero-visual {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    max-width: 420px;
+    justify-self: center;
+  }
+  .hero-visual .globe-svg {
+    position: absolute;
+    inset: 10%;
+    filter: drop-shadow(0 24px 48px rgba(0,161,201,0.4));
+  }
+  .hero-visual .globe-svg svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .hero-visual .flag {
+    position: absolute;
+    width: 60px;
+    height: 46px;
+    border-radius: var(--radius);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    background: var(--aws-squid-lt);
+    border: 1px solid rgba(255,255,255,0.12);
+  }
+  .hero-visual .flag.f1 { top: 0%;    left: 8%; }
+  .hero-visual .flag.f2 { top: 6%;    right: 6%; }
+  .hero-visual .flag.f3 { bottom: 2%; left: 4%; }
+  .hero-visual .flag.f4 { bottom: 8%; right: 4%; }
+  .hero-visual .flag.f5 { top: 46%;   right: -8%; }
+  .hero-visual .flag.f6 { top: 46%;   left: -8%; }
+
+  /* ===== Feature strip ===== */
+  .features-section {
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+  }
+  .features-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 40px 40px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+  }
+  .feature-item {
+    padding: 0 28px 0 0;
+    border-right: 1px solid var(--border-lt);
+  }
+  .feature-item:last-child { border-right: none; padding-right: 0; }
+  .feature-item:not(:first-child) { padding-left: 28px; }
+  .feature-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius);
+    background: #f2f3f3;
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    margin-bottom: 12px;
+  }
+  .feature-item h3 {
+    margin: 0 0 6px;
+    font-size: 14.5px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .feature-item p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  /* ===== Main content area ===== */
+  .main-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 40px 80px;
+  }
+
+  /* AWS-style section header */
+  .section-header {
+    margin-bottom: 20px;
+  }
+  .section-header h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0 0 4px;
+    color: var(--text);
+    letter-spacing: -0.2px;
+  }
+  .section-header p {
+    color: var(--text-muted);
+    margin: 0;
+    font-size: 13.5px;
+  }
+
+  /* AWS-style config bar */
+  .config-bar {
+    background: #fef9e7;
+    border: 1px solid #f0c040;
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px 14px;
+    align-items: center;
+  }
+  .config-bar label {
+    font-size: 12px;
+    color: #7d6608;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .config-bar input {
+    border: 1px solid #c8a415;
+    border-radius: var(--radius);
+    padding: 7px 10px;
+    font-size: 13px;
+    background: #fff;
+    width: 100%;
+    font-family: "Courier New", Courier, monospace;
+    color: var(--text);
+  }
+  .config-bar input:focus {
+    outline: none;
+    border-color: var(--aws-teal);
+    box-shadow: 0 0 0 2px rgba(0,161,201,0.2);
+  }
+  .config-bar .config-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .btn-sm {
+    padding: 6px 14px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid;
+    transition: background 0.12s;
+  }
+  .btn-sm-primary {
+    background: var(--aws-squid);
+    color: #fff;
+    border-color: var(--aws-squid);
+  }
+  .btn-sm-primary:hover { background: var(--aws-navy); }
+  .btn-sm-ghost {
+    background: transparent;
+    color: #7d6608;
+    border-color: #c8a415;
+  }
+  .btn-sm-ghost:hover { background: rgba(200,164,21,0.08); }
+  .config-bar.hidden { display: none; }
+  .reopen-config {
+    position: fixed;
+    top: 66px;
+    right: 16px;
+    z-index: 10;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 6px 12px;
+    font-size: 12.5px;
+    cursor: pointer;
+    color: var(--text-muted);
+    display: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  }
+
+  /* AWS-style card */
+  .aws-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    margin-bottom: 16px;
+  }
+  .aws-card-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border-lt);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fafafa;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+  .aws-card-header h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .aws-card-body {
+    padding: 20px;
+  }
+
+  /* Form grid */
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .form-grid .span2 { grid-column: span 2; }
+  .form-field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 5px;
+  }
+  .form-field label .req { color: var(--aws-red); margin-left: 2px; }
+  .form-field input,
+  .form-field select {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    font-size: 13.5px;
+    background: #fff;
+    color: var(--text);
+    font-family: inherit;
+    transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  .form-field input:focus,
+  .form-field select:focus {
+    outline: none;
+    border-color: var(--aws-teal);
+    box-shadow: 0 0 0 2px rgba(0,161,201,0.2);
+  }
+  .lang-pair-row {
+    display: grid;
+    grid-template-columns: 1fr 32px 1fr;
+    gap: 8px;
+    align-items: end;
+  }
+  .lang-pair-row .swap-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-bottom: 8px;
+    color: var(--aws-teal);
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .form-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    padding-top: 4px;
+    border-top: 1px solid var(--border-lt);
+    margin-top: 4px;
+  }
+  .btn-aws-action {
+    padding: 9px 20px;
+    border-radius: var(--radius);
+    font-size: 13.5px;
+    font-weight: 700;
+    cursor: pointer;
+    border: 1px solid;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    transition: background 0.12s;
+    font-family: inherit;
+  }
+  .btn-aws-action.primary {
+    background: var(--aws-squid);
+    color: #fff;
+    border-color: var(--aws-squid);
+  }
+  .btn-aws-action.primary:hover:not(:disabled) { background: var(--aws-navy); }
+  .btn-aws-action.secondary {
+    background: #fff;
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .btn-aws-action.secondary:hover:not(:disabled) { background: var(--bg); border-color: #aab7b8; }
+  .btn-aws-action:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Info callout */
+  .callout {
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .callout.info {
+    background: #e8f4f8;
+    border: 1px solid #a9d4e4;
+    color: #0a4a6e;
+  }
+  .callout .callout-icon { flex: 0 0 auto; font-size: 15px; margin-top: 1px; }
+  .callout code {
+    background: rgba(0,0,0,0.07);
+    padding: 1px 5px;
+    border-radius: 2px;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 12px;
+  }
+
+  /* Monitor grid */
+  .monitor-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 340px 400px;
+    gap: 12px;
+  }
+  .monitor-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+  .monitor-card .mc-head {
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border-lt);
+    background: #fafafa;
+  }
+  .monitor-card .mc-title {
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .monitor-card .mc-body {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+  }
+  .monitor-card iframe {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: #fff;
+  }
+  .placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f8f9fa;
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 20px;
+  }
+  .placeholder .ph-inner { max-width: 220px; }
+  .placeholder .ph-icon { font-size: 28px; margin-bottom: 8px; }
+  .placeholder strong { color: var(--text); display: block; margin-bottom: 4px; }
+
+  /* AWS-style badges */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 2px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+  .badge-aws { background: var(--aws-squid); color: #fff; }
+  .badge-orange { background: var(--aws-orange); color: var(--aws-squid); }
+  .badge-status {
+    background: #e8f4f8;
+    color: #0a4a6e;
+    border: 1px solid #a9d4e4;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+
+  /* Event log */
+  .log-section { margin-top: 16px; }
+  .log-controls {
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .log-controls .log-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .log-controls button {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .log-controls button:hover { background: var(--bg); }
+  .event-log {
+    font-family: "Courier New", Courier, monospace;
+    font-size: 12px;
+    background: var(--aws-navy);
+    color: #d4dada;
+    border-radius: var(--radius);
+    border: 1px solid #3a4a5c;
+    padding: 10px 14px;
+    max-height: 160px;
+    overflow: auto;
+  }
+  .event-log .line {
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    line-height: 1.45;
+    word-break: break-word;
+  }
+  .event-log .line .t { color: #5a7a8a; margin-right: 8px; }
+  .event-log .line .k { color: #56c8d8; }
+  .event-log .line .v { color: #f0a830; }
+  .event-log .empty { color: #5a7a8a; font-style: italic; }
+
+  /* Footer */
+  .aws-footer {
+    background: var(--aws-squid);
+    color: rgba(255,255,255,0.55);
+    padding: 24px 40px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .aws-footer a {
+    color: rgba(255,255,255,0.55);
+    text-decoration: none;
+  }
+  .aws-footer a:hover { color: #fff; }
+  .aws-footer .footer-links { display: flex; gap: 20px; }
+  .aws-footer .footer-copy { color: rgba(255,255,255,0.4); }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 960px) {
+    .hero-inner { grid-template-columns: 1fr; padding: 0; gap: 32px; }
+    .hero-banner { padding: 40px 24px; }
+    .hero-banner h1 { font-size: 30px; }
+    .features-inner { grid-template-columns: repeat(2, 1fr); gap: 20px; }
+    .feature-item { border-right: none; padding: 0; }
+    .main-content { padding: 24px 20px 60px; }
+    .form-grid { grid-template-columns: 1fr 1fr; }
+    .form-grid .span2 { grid-column: 1 / -1; }
+    .monitor-grid { grid-template-columns: 1fr; grid-template-rows: 320px 280px 340px 340px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== AWS Navigation ===== -->
+<nav class="aws-nav">
+  <a class="nav-logo" href="https://aws.amazon.com" target="_blank" rel="noopener">
+    <svg width="44" height="30" viewBox="0 0 44 30" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="AWS">
+      <!-- AWS text -->
+      <text x="1" y="17" font-family="Arial" font-weight="900" font-size="18" fill="white">AWS</text>
+      <!-- smile arc -->
+      <path d="M3 21 Q22 30 41 21" stroke="#FF9900" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      <!-- arrow tip -->
+      <path d="M38.5 19.5 L41 21 L38.5 23" stroke="#FF9900" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </a>
+  <span class="nav-product">Live Meeting Assistant &nbsp;<span>/ Translator Mode</span></span>
+  <div class="spacer"></div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#demo">Demo</a>
+    <a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" target="_blank" rel="noopener">GitHub</a>
+    <a href="#demo" class="nav-cta">Try the demo →</a>
+  </div>
+</nav>
+
+<!-- ===== Hero ===== -->
+<section class="hero-banner">
+  <div class="hero-inner">
+    <div>
+      <div class="hero-eyebrow">🌍 &nbsp;Open Source · Amazon Web Services</div>
+      <h1>Real-time AI translation<br/>for every meeting.</h1>
+      <p class="hero-sub">
+        Live Meeting Assistant's Translator Mode sends an AI participant to your Zoom, Teams,
+        Chime, or Webex call and interprets both sides of the conversation — live, in natural
+        voices — so language is never a barrier.
+      </p>
+      <div class="hero-ctas">
+        <button class="btn-aws-primary" onclick="document.getElementById('demo').scrollIntoView({behavior:'smooth'})">
+          ▶&nbsp; Try the live demo
+        </button>
+        <a class="btn-aws-secondary" href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" target="_blank" rel="noopener">
+          View on GitHub
+        </a>
+      </div>
+      <div class="powered-by">
+        <!-- Nova Sonic 8-point star -->
+        <svg class="nova-star" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+          <rect width="40" height="40" rx="6" fill="#0d2b1e"/>
+          <g fill="#00c896">
+            <!-- top arm -->
+            <path d="M17 20 L14 8 L20 14 L26 8 L23 20 Z"/>
+            <!-- bottom arm -->
+            <path d="M17 20 L14 32 L20 26 L26 32 L23 20 Z"/>
+            <!-- left arm -->
+            <path d="M20 17 L8 14 L14 20 L8 26 L20 23 Z"/>
+            <!-- right arm -->
+            <path d="M20 17 L32 14 L26 20 L32 26 L20 23 Z"/>
+          </g>
+        </svg>
+        <span class="pb-label">Powered by</span>
+        <span class="pb-brand">Amazon Nova Sonic</span>
+      </div>
+    </div>
+    <div class="hero-visual" aria-hidden="true">
+      <div class="globe-svg">
+        <svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <radialGradient id="orbFill" cx="35%" cy="30%" r="75%">
+              <stop offset="0%" stop-color="#1a3a5c" />
+              <stop offset="35%" stop-color="#0d6e8a" />
+              <stop offset="75%" stop-color="#00a1c9" />
+              <stop offset="100%" stop-color="#005f7a" />
+            </radialGradient>
+            <radialGradient id="orbHighlight" cx="30%" cy="22%" r="30%">
+              <stop offset="0%" stop-color="#ffffff" stop-opacity="0.5" />
+              <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+            </radialGradient>
+          </defs>
+          <!-- speech arcs both sides -->
+          <g fill="none" stroke="#ff9900" stroke-linecap="round" opacity="0.6">
+            <path d="M22 120 Q8 120 2 120" stroke-width="6" />
+            <path d="M34 94 Q18 86 6 82" stroke-width="5" opacity="0.7" />
+            <path d="M34 146 Q18 154 6 158" stroke-width="5" opacity="0.7" />
+            <path d="M218 120 Q232 120 238 120" stroke-width="6" />
+            <path d="M206 94 Q222 86 234 82" stroke-width="5" opacity="0.7" />
+            <path d="M206 146 Q222 154 234 158" stroke-width="5" opacity="0.7" />
+          </g>
+          <circle cx="120" cy="120" r="88" fill="url(#orbFill)" />
+          <!-- white meridians -->
+          <g fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="1.4">
+            <ellipse cx="120" cy="120" rx="88" ry="30" />
+            <ellipse cx="120" cy="120" rx="88" ry="58" />
+            <ellipse cx="120" cy="120" rx="30" ry="88" />
+            <ellipse cx="120" cy="120" rx="58" ry="88" />
+            <line x1="32" y1="120" x2="208" y2="120" />
+            <line x1="120" y1="32" x2="120" y2="208" />
+          </g>
+          <!-- continents -->
+          <g fill="rgba(255,255,255,0.65)">
+            <path d="M80 84 Q92 76 106 82 Q116 90 112 102 Q104 112 90 110 Q78 104 76 94 Z" />
+            <path d="M126 78 Q146 76 158 90 Q164 106 156 118 Q142 124 128 118 Q118 104 124 90 Z" />
+            <path d="M82 132 Q96 130 108 140 Q114 154 104 166 Q90 170 80 160 Q74 146 82 132 Z" />
+            <path d="M134 138 Q158 138 168 152 Q168 168 150 174 Q130 170 128 154 Z" />
+          </g>
+          <circle cx="120" cy="120" r="88" fill="url(#orbHighlight)" />
+          <circle cx="120" cy="120" r="88" fill="none" stroke="rgba(0,161,201,0.4)" stroke-width="2" />
+        </svg>
+      </div>
+      <div class="flag f1">🇺🇸</div>
+      <div class="flag f2">🇪🇸</div>
+      <div class="flag f3">🇫🇷</div>
+      <div class="flag f4">🇩🇪</div>
+      <div class="flag f5">🇯🇵</div>
+      <div class="flag f6">🇧🇷</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Feature strip ===== -->
+<section class="features-section" id="features">
+  <div class="features-inner">
+    <div class="feature-item">
+      <div class="feature-icon">⚡</div>
+      <h3>Real-time, both ways</h3>
+      <p>Listens to both parties and translates each utterance into the other language on the fly — no delay, no lag.</p>
+    </div>
+    <div class="feature-item">
+      <div class="feature-icon">🎙️</div>
+      <h3>Natural voices</h3>
+      <p>Powered by Amazon Nova Sonic polyglot voices — your words spoken back in a voice that sounds human.</p>
+    </div>
+    <div class="feature-item">
+      <div class="feature-icon">📝</div>
+      <h3>Live transcript</h3>
+      <p>Every line spoken and translated is captured in a searchable, shareable meeting transcript.</p>
+    </div>
+    <div class="feature-item">
+      <div class="feature-icon">📋</div>
+      <h3>AI summary</h3>
+      <p>After the call, get a clean summary with action items in your preferred language — automatically.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Demo workspace ===== -->
+<main class="main-content" id="demo">
+
+  <div class="section-header">
+    <h2>Live demo</h2>
+    <p>Connect to your LMA deployment, configure a meeting, and watch the AI translator join live.</p>
+  </div>
+
+  <!-- Config bar -->
+  <div class="config-bar" id="configBar">
+    <label>LMA Base URL</label>
+    <input id="lmaUrl" type="text" placeholder="https://dxxxxxxxxxx.cloudfront.net" />
+    <div class="config-actions">
+      <button class="btn-sm btn-sm-ghost" onclick="fillDemoDefaults()">Fill demo defaults</button>
+      <button class="btn-sm btn-sm-ghost" onclick="hideConfig()">Hide config</button>
+      <button class="btn-sm btn-sm-primary" onclick="applyConfig()">Apply</button>
+    </div>
+  </div>
+  <button class="reopen-config" id="reopenConfigBtn" onclick="showConfig()">⚙ Show config</button>
+
+  <!-- Meeting details card -->
+  <div class="aws-card">
+    <div class="aws-card-header">
+      <span style="font-size:16px;">📅</span>
+      <h3>Meeting details</h3>
+      <span class="badge badge-orange" style="margin-left:auto;">AI Translator will join</span>
+    </div>
+    <div class="aws-card-body">
+      <div class="form-grid">
+        <div class="form-field span2">
+          <label>Meeting name <span class="req">*</span></label>
+          <input id="meetingName" type="text" placeholder="Q4 Partner Sync with Globex" />
+        </div>
+        <div class="form-field">
+          <label>Platform <span class="req">*</span></label>
+          <select id="meetingPlatform">
+            <option value="ZOOM">Zoom</option>
+            <option value="TEAMS">Microsoft Teams</option>
+            <option value="CHIME">Amazon Chime</option>
+            <option value="WEBEX">Cisco Webex</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>Meeting ID <span class="req">*</span></label>
+          <input id="meetingId" type="text" placeholder="1234567890" />
+        </div>
+        <div class="form-field span2">
+          <label>Meeting password</label>
+          <input id="meetingPassword" type="text" placeholder="(optional)" />
+        </div>
+        <div class="form-field span2">
+          <label>Language pair <span class="req">*</span></label>
+          <div class="lang-pair-row">
+            <select id="languageA"></select>
+            <div class="swap-icon">⇄</div>
+            <select id="languageB"></select>
+          </div>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn-aws-action secondary" id="btn-end" onclick="endVp()" disabled>■ &nbsp;End translator</button>
+        <button class="btn-aws-action primary" id="btn-create" onclick="createVp()" disabled>▶ &nbsp;Send translator to meeting</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout info">
+    <span class="callout-icon">ℹ</span>
+    <span>
+      This demo uses LMA's embeddable VP loader. The language pair is saved to the translator's config
+      (<code>meetingMode = translator</code>) via the Nova Sonic Configuration page. The backend re-reads
+      config when the VP task starts, so the next meeting automatically uses your new language pair.
+    </span>
+  </div>
+
+  <!-- Monitor grid -->
+  <div class="monitor-grid">
+    <div class="monitor-card">
+      <div class="mc-head">
+        <div class="mc-title">
+          <span class="badge badge-aws">LMA</span>
+          Live view (translator in meeting)
+          <span class="badge badge-status" id="vp-status-badge">waiting</span>
+        </div>
+      </div>
+      <div class="mc-body">
+        <iframe id="iframe-vnc" title="Translator live view" src="about:blank"></iframe>
+        <div class="placeholder" id="placeholder-vnc">
+          <div class="ph-inner">
+            <div class="ph-icon">🎥</div>
+            <strong>Live view will appear here</strong>
+            once the translator joins the meeting.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="monitor-card">
+      <div class="mc-head">
+        <div class="mc-title">
+          <span class="badge badge-aws">LMA</span>
+          Translator meeting details
+        </div>
+      </div>
+      <div class="mc-body">
+        <iframe id="iframe-details" title="Translator details" src="about:blank"></iframe>
+        <div class="placeholder" id="placeholder-details">
+          <div class="ph-inner">
+            <div class="ph-icon">🤖</div>
+            <strong>Waiting for translator to connect…</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="monitor-card">
+      <div class="mc-head">
+        <div class="mc-title">
+          <span class="badge badge-aws">LMA</span>
+          Live transcript &amp; translations
+        </div>
+      </div>
+      <div class="mc-body">
+        <iframe id="iframe-transcript" title="Live transcript" src="about:blank"></iframe>
+        <div class="placeholder" id="placeholder-transcript">
+          <div class="ph-inner">
+            <div class="ph-icon">💬</div>
+            <strong>Every word spoken and translated, live.</strong>
+            Appears automatically once the meeting starts.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="monitor-card">
+      <div class="mc-head">
+        <div class="mc-title">
+          <span class="badge badge-aws">LMA</span>
+          Meeting summary &amp; action items
+        </div>
+      </div>
+      <div class="mc-body">
+        <iframe id="iframe-summary" title="Meeting summary" src="about:blank"></iframe>
+        <div class="placeholder" id="placeholder-summary">
+          <div class="ph-inner">
+            <div class="ph-icon">📋</div>
+            <strong>AI summary appears here</strong>
+            when the meeting ends.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Event log -->
+  <div class="log-section">
+    <div class="log-controls">
+      <span class="log-label">Event log</span>
+      <button onclick="clearLog()">Clear</button>
+    </div>
+    <div class="event-log" id="eventLog">
+      <div class="empty">Waiting for events from LMA iframes…</div>
+    </div>
+  </div>
+
+  <!-- Hidden VP loader iframe -->
+  <iframe id="iframe-vploader" title="LMA VP loader"
+          style="display:none; width:0; height:0; border:0;" src="about:blank"></iframe>
+</main>
+
+<!-- ===== Footer ===== -->
+<footer class="aws-footer">
+  <div>
+    <strong style="color:rgba(255,255,255,0.75);">Live Meeting Assistant</strong> &nbsp;—&nbsp;
+    An open-source project by Amazon Web Services
+  </div>
+  <div class="footer-links">
+    <a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://aws.amazon.com/transcribe/" target="_blank" rel="noopener">Amazon Transcribe</a>
+    <a href="https://aws.amazon.com/nova/" target="_blank" rel="noopener">Amazon Nova</a>
+    <a href="https://aws.amazon.com/privacy/" target="_blank" rel="noopener">Privacy</a>
+  </div>
+  <div class="footer-copy">© 2025 Amazon Web Services, Inc. or its affiliates. All rights reserved.</div>
+</footer>
+
+<script>
+/* ------------- Supported languages (Amazon Nova Sonic 2 voice coverage) ------------- */
+const LANGUAGES = [
+  { label: '🇺🇸 English',           value: 'English' },
+  { label: '🇬🇧 English (UK)',      value: 'British English' },
+  { label: '🇦🇺 English (Aus)',     value: 'Australian English' },
+  { label: '🇪🇸 Spanish',           value: 'Spanish' },
+  { label: '🇲🇽 Spanish (Latin)',   value: 'Latin American Spanish' },
+  { label: '🇫🇷 French',            value: 'French' },
+  { label: '🇩🇪 German',            value: 'German' },
+  { label: '🇮🇹 Italian',           value: 'Italian' },
+  { label: '🇧🇷 Portuguese (BR)',   value: 'Brazilian Portuguese' },
+  { label: '🇵🇹 Portuguese (PT)',   value: 'European Portuguese' },
+  { label: '🇮🇳 Hindi',             value: 'Hindi' },
+  { label: '🇯🇵 Japanese',          value: 'Japanese' },
+  { label: '🇰🇷 Korean',            value: 'Korean' },
+  { label: '🇨🇳 Mandarin Chinese',  value: 'Mandarin Chinese' },
+  { label: '🇹🇼 Cantonese',         value: 'Cantonese' },
+  { label: '🇸🇦 Arabic',            value: 'Arabic' },
+  { label: '🇳🇱 Dutch',             value: 'Dutch' },
+  { label: '🇵🇱 Polish',            value: 'Polish' },
+  { label: '🇷🇺 Russian',           value: 'Russian' },
+  { label: '🇹🇭 Thai',              value: 'Thai' },
+  { label: '🇹🇷 Turkish',           value: 'Turkish' },
+  { label: '🇻🇳 Vietnamese',        value: 'Vietnamese' },
+  { label: '🇮🇩 Indonesian',        value: 'Indonesian' },
+  { label: '🇸🇪 Swedish',           value: 'Swedish' },
+  { label: '🇳🇴 Norwegian',         value: 'Norwegian' },
+  { label: '🇩🇰 Danish',            value: 'Danish' },
+  { label: '🇫🇮 Finnish',           value: 'Finnish' },
+  { label: '🇨🇿 Czech',             value: 'Czech' },
+  { label: '🇭🇺 Hungarian',         value: 'Hungarian' },
+  { label: '🇬🇷 Greek',             value: 'Greek' },
+  { label: '🇮🇱 Hebrew',            value: 'Hebrew' },
+];
+
+function populateLanguages() {
+  const a = document.getElementById('languageA');
+  const b = document.getElementById('languageB');
+  LANGUAGES.forEach((lang) => {
+    const oa = document.createElement('option'); oa.value = lang.value; oa.textContent = lang.label;
+    const ob = document.createElement('option'); ob.value = lang.value; ob.textContent = lang.label;
+    a.appendChild(oa); b.appendChild(ob);
+  });
+  a.value = 'English';
+  b.value = 'Spanish';
+}
+
+/* ------------- Persisted config ------------- */
+const STORAGE_KEY = 'lma-translator-demo-config';
+function loadStoredConfig() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveStoredConfig(c) { localStorage.setItem(STORAGE_KEY, JSON.stringify(c)); }
+
+function currentBaseUrl() {
+  return (document.getElementById('lmaUrl').value || '').trim().replace(/\/+$/, '');
+}
+function currentFormValues() {
+  return {
+    meetingName: document.getElementById('meetingName').value.trim(),
+    meetingPlatform: document.getElementById('meetingPlatform').value,
+    meetingId: document.getElementById('meetingId').value.trim(),
+    meetingPassword: document.getElementById('meetingPassword').value,
+  };
+}
+
+function buildUrl(params) {
+  const base = currentBaseUrl();
+  if (!base) return '';
+  const finalParams = { ...params, allowedOrigins: window.location.origin };
+  const qs = Object.entries(finalParams)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+  return `${base}/#/embed?${qs}`;
+}
+
+function applyConfig() {
+  const cfg = {
+    lmaUrl: document.getElementById('lmaUrl').value.trim(),
+    meetingName: document.getElementById('meetingName').value.trim(),
+    meetingPlatform: document.getElementById('meetingPlatform').value,
+    meetingId: document.getElementById('meetingId').value.trim(),
+    meetingPassword: document.getElementById('meetingPassword').value,
+    languageA: document.getElementById('languageA').value,
+    languageB: document.getElementById('languageB').value,
+  };
+  saveStoredConfig(cfg);
+  refreshVpLoaderIframe();
+}
+
+function fillDemoDefaults() {
+  const el = (id) => document.getElementById(id);
+  if (!el('lmaUrl').value) el('lmaUrl').value = 'https://dxxxxxxxxxx.cloudfront.net';
+  if (!el('meetingName').value) el('meetingName').value = 'LMA Translator Demo';
+  if (!el('meetingId').value) el('meetingId').value = '1234567890';
+  applyConfig();
+}
+
+function hideConfig() {
+  document.getElementById('configBar').classList.add('hidden');
+  document.getElementById('reopenConfigBtn').style.display = 'block';
+}
+function showConfig() {
+  document.getElementById('configBar').classList.remove('hidden');
+  document.getElementById('reopenConfigBtn').style.display = 'none';
+}
+
+/* ------------- Iframe management ------------- */
+function refreshVpLoaderIframe() {
+  const base = currentBaseUrl();
+  const iframe = document.getElementById('iframe-vploader');
+  if (!base) {
+    iframe.src = 'about:blank';
+    document.getElementById('btn-create').disabled = true;
+    return;
+  }
+  iframe.src = buildUrl({ component: 'vp-loader' });
+  document.getElementById('btn-create').disabled = false;
+}
+
+function showMonitorIframes({ vpId, callId }) {
+  const base = currentBaseUrl();
+  if (!base) return;
+  const pairs = [
+    { iframeId: 'iframe-vnc',        placeholderId: 'placeholder-vnc',
+      params: vpId   ? { component: 'vnc',        vpId }   : null },
+    { iframeId: 'iframe-details',    placeholderId: 'placeholder-details',
+      params: vpId   ? { component: 'vp-details', vpId, show: 'details' } : null },
+    { iframeId: 'iframe-transcript', placeholderId: 'placeholder-transcript',
+      params: callId ? { component: 'transcript', callId } : null },
+    { iframeId: 'iframe-summary',    placeholderId: 'placeholder-summary',
+      params: callId ? { component: 'summary',    callId } : null },
+  ];
+  pairs.forEach(({ iframeId, placeholderId, params }) => {
+    const iframe = document.getElementById(iframeId);
+    const placeholder = document.getElementById(placeholderId);
+    if (params) {
+      const url = buildUrl(params);
+      if (iframe.src !== url) iframe.src = url;
+      iframe.style.display = 'block';
+      placeholder.style.display = 'none';
+    } else {
+      iframe.src = 'about:blank';
+      iframe.style.display = 'none';
+      placeholder.style.display = 'flex';
+    }
+  });
+}
+
+/* ------------- Event log ------------- */
+function log(type, data = {}) {
+  const logEl = document.getElementById('eventLog');
+  if (logEl.querySelector('.empty')) logEl.innerHTML = '';
+  const ts = new Date().toLocaleTimeString();
+  const pretty = Object.entries(data)
+    .filter(([k]) => k !== 'type')
+    .map(([k, v]) => `<span class="k">${k}</span>=<span class="v">${String(v).slice(0, 80)}</span>`)
+    .join(' ');
+  const line = document.createElement('div');
+  line.className = 'line';
+  line.innerHTML = `<span class="t">${ts}</span><strong>${type}</strong> ${pretty}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function clearLog() {
+  document.getElementById('eventLog').innerHTML =
+    '<div class="empty">Waiting for events from LMA iframes…</div>';
+}
+
+function targetOrigin() {
+  const base = currentBaseUrl();
+  if (!base) return '*';
+  try { return new URL(base).origin; } catch { return '*'; }
+}
+
+let currentVpId = null;
+let currentCallId = null;
+
+function createVp() {
+  const iframe = document.getElementById('iframe-vploader');
+  if (!iframe.contentWindow) return;
+  const form = currentFormValues();
+  if (!form.meetingName || !form.meetingId) {
+    log('! local error', { error: 'meetingName and meetingId are required' });
+    return;
+  }
+  const langA = document.getElementById('languageA').value;
+  const langB = document.getElementById('languageB').value;
+  if (langA === langB) {
+    log('! local error', { error: 'Choose two different languages' });
+    return;
+  }
+  const payload = {
+    type: 'LMA_CREATE_VP',
+    ...form,
+    translatorLanguageA: langA,
+    translatorLanguageB: langB,
+  };
+  iframe.contentWindow.postMessage(payload, targetOrigin());
+  log('→ LMA_CREATE_VP (sent)', payload);
+  document.getElementById('btn-create').disabled = true;
+}
+
+function endVp() {
+  const iframe = document.getElementById('iframe-vploader');
+  if (!iframe.contentWindow) return;
+  iframe.contentWindow.postMessage({ type: 'LMA_END_VP', vpId: currentVpId }, targetOrigin());
+  log('→ LMA_END_VP (sent)', { vpId: currentVpId });
+}
+
+function updateStatusBadge(status) {
+  const b = document.getElementById('vp-status-badge');
+  if (!b) return;
+  b.textContent = status || 'waiting';
+  const statusColors = {
+    JOINED:       ['#d5f5e3', '#1d8102'],
+    ACTIVE:       ['#d5f5e3', '#1d8102'],
+    JOINING:      ['#d6eaf8', '#1a5276'],
+    CONNECTING:   ['#d6eaf8', '#1a5276'],
+    INITIALIZING: ['#d6eaf8', '#1a5276'],
+    FAILED:       ['#fadbd8', '#d13212'],
+    ENDED:        ['#eaeded', '#545b64'],
+    COMPLETED:    ['#eaeded', '#545b64'],
+  };
+  const [bg, fg] = statusColors[status] || ['#e8f4f8', '#0a4a6e'];
+  b.style.background = bg;
+  b.style.color = fg;
+  b.style.border = `1px solid ${fg}44`;
+}
+
+window.addEventListener('message', (event) => {
+  const data = event.data || {};
+  if (!data.type || typeof data.type !== 'string') return;
+  if (!data.type.startsWith('LMA_')) return;
+  log('← ' + data.type, data);
+  switch (data.type) {
+    case 'LMA_VP_LOADER_READY':
+      document.getElementById('btn-create').disabled = false;
+      break;
+    case 'LMA_VP_CREATED':
+      currentVpId = data.vpId;
+      currentCallId = data.callId || null;
+      document.getElementById('btn-end').disabled = false;
+      updateStatusBadge(data.status);
+      showMonitorIframes({ vpId: currentVpId, callId: currentCallId });
+      break;
+    case 'LMA_VP_STATUS_CHANGED':
+      if (data.status) updateStatusBadge(data.status);
+      if (data.callId && data.callId !== currentCallId) {
+        currentCallId = data.callId;
+        showMonitorIframes({ vpId: currentVpId, callId: currentCallId });
+      }
+      break;
+    case 'LMA_VP_ERROR':
+      document.getElementById('btn-create').disabled = false;
+      break;
+    case 'LMA_CALL_LOADED':
+      if (data.callId && data.callId !== currentCallId && data.callId.indexOf('pending-') !== 0) {
+        currentCallId = data.callId;
+      }
+      break;
+    default:
+      break;
+  }
+});
+
+/* ------------- Init ------------- */
+(function init() {
+  populateLanguages();
+  const cfg = loadStoredConfig();
+  if (cfg.lmaUrl)          document.getElementById('lmaUrl').value = cfg.lmaUrl;
+  if (cfg.meetingName)     document.getElementById('meetingName').value = cfg.meetingName;
+  if (cfg.meetingPlatform) document.getElementById('meetingPlatform').value = cfg.meetingPlatform;
+  if (cfg.meetingId)       document.getElementById('meetingId').value = cfg.meetingId;
+  if (cfg.meetingPassword) document.getElementById('meetingPassword').value = cfg.meetingPassword;
+  if (cfg.languageA)       document.getElementById('languageA').value = cfg.languageA;
+  if (cfg.languageB)       document.getElementById('languageB').value = cfg.languageB;
+  refreshVpLoaderIframe();
+})();
+</script>
+</body>
+</html>

@@ -497,6 +497,18 @@ Parameters:
       Name of the EventBridge Schedule Group for Virtual Participants from the VP stack.
       This should match the schedule group name created by the Virtual Participant stack.
 
+  VoiceAssistantActivationMode:
+    Type: String
+    Default: "wake_phrase"
+    AllowedValues:
+      - "always_active"
+      - "wake_phrase"
+    Description: >-
+      (Informational) Activation mode used by the Virtual Participant voice assistant.
+      Forwarded from the main stack so the Nova Sonic Configuration admin UI can
+      indicate whether Meeting Mode settings (Group / Translator) are active.
+      These modes only take effect when this value is 'always_active'.
+
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -1011,6 +1023,8 @@ Resources:
               - ""
           - Name: VITE_OAUTH_CALLBACK_URL
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+          - Name: VITE_VOICE_ASSISTANT_ACTIVATION_MODE
+            Value: !Ref VoiceAssistantActivationMode
   # CodeBuild project for building MCP servers Lambda layer
   MCPLayerBuildProject:
     Type: AWS::CodeBuild::Project

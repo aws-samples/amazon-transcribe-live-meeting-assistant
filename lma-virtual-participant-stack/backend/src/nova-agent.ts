@@ -18,7 +18,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { NodeHttp2Handler } from '@smithy/node-http-handler';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { randomUUID } from 'crypto';
-import { loadNovaSonicConfig } from './nova-sonic-config-loader.js';
+import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
 
 export interface NovaAgentConfig {
   modelId: string;
@@ -30,7 +30,11 @@ export interface NovaAgentConfig {
   strandsLambdaArn?: string;
   voiceId?: string;
   endpointingSensitivity?: 'HIGH' | 'MEDIUM' | 'LOW';
+  /** @deprecated Use meetingMode instead. Kept for back-compat. */
   groupMeetingMode?: boolean;
+  meetingMode?: MeetingMode;
+  translatorLanguageA?: string;
+  translatorLanguageB?: string;
 }
 
 interface SessionData {
@@ -58,6 +62,9 @@ export class NovaAgent implements VoiceAssistantProvider {
   private knowledgeBaseId?: string;
   private activationMode: string;
   private groupMeetingMode: boolean;
+  private meetingMode: MeetingMode;
+  private translatorLanguageA: string;
+  private translatorLanguageB: string;
   private _isActivated: boolean = false;
   private _isActive: boolean = false;
   private _isSpeaking: boolean = false;
@@ -110,7 +117,12 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.endpointingSensitivity = config.endpointingSensitivity || 'MEDIUM'; // Default to MEDIUM
     this.knowledgeBaseId = config.knowledgeBaseId;
     this.activationMode = config.activationMode || 'wake_phrase';
-    this.groupMeetingMode = config.groupMeetingMode || false;
+    // meetingMode is the canonical selector; derive groupMeetingMode for back-compat
+    this.meetingMode = config.meetingMode
+      || (config.groupMeetingMode ? 'group' : 'normal');
+    this.groupMeetingMode = (this.meetingMode === 'group');
+    this.translatorLanguageA = (config.translatorLanguageA || 'English').trim() || 'English';
+    this.translatorLanguageB = (config.translatorLanguageB || 'Spanish').trim() || 'Spanish';
     this.defaultActivationDuration = config.activationDuration || 30;
     this.region = config.region || process.env.AWS_REGION || 'us-east-1';
     this.strandsLambdaArn = config.strandsLambdaArn || process.env.STRANDS_LAMBDA_ARN;
@@ -118,8 +130,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     // Set initial activation state based on mode
     this._isActivated = (this.activationMode === 'always_active');
     
-    // Set initial mute state based on group meeting mode
-    this._isMuted = this.groupMeetingMode;
+    // Set initial mute state based on meeting mode:
+    // - 'group'      -> start muted (unmute on wake phrase)
+    // - 'translator' -> always unmuted (speak every translation)
+    // - 'normal'     -> unmuted
+    this._isMuted = (this.meetingMode === 'group');
 
     console.log('✓ AWS Nova Sonic 2 agent initialized');
     console.log(`  Model: ${this.modelId}`);
@@ -127,7 +142,15 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log(`  Endpointing sensitivity: ${this.endpointingSensitivity}`);
     console.log(`  Region: ${this.region}`);
     console.log(`  Activation mode: ${this.activationMode}`);
-    console.log(`  Group meeting mode: ${this.groupMeetingMode ? 'enabled (starts muted)' : 'disabled'}`);
+    console.log(`  Meeting mode: ${this.meetingMode}`);
+    if (this.meetingMode === 'translator') {
+      console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+      if (this.activationMode !== 'always_active') {
+        console.warn(`  ⚠️  Translator mode requires activation mode 'always_active' to work end-to-end. Current: ${this.activationMode}`);
+      }
+    } else if (this.meetingMode === 'group') {
+      console.log('  Group meeting mode: enabled (starts muted)');
+    }
     if (this.strandsLambdaArn) {
       console.log(`  Strands agent tool: enabled`);
     }
@@ -149,7 +172,7 @@ export class NovaAgent implements VoiceAssistantProvider {
           const config = await loadNovaSonicConfig(dynamoDbClient, tableName);
           console.log('✓ Loaded Nova Sonic config from DynamoDB');
           
-          // Update system prompt, model ID, voice ID, endpointing sensitivity, and group meeting mode from config
+          // Update system prompt, model ID, voice ID, endpointing sensitivity, and meeting mode from config
           this.systemPrompt = config.systemPrompt;
           this.modelId = config.modelId;
           if (config.voiceId) {
@@ -158,15 +181,34 @@ export class NovaAgent implements VoiceAssistantProvider {
           if (config.endpointingSensitivity) {
             this.endpointingSensitivity = config.endpointingSensitivity;
           }
-          if (typeof config.groupMeetingMode === 'boolean') {
-            this.groupMeetingMode = config.groupMeetingMode;
-            this._isMuted = config.groupMeetingMode; // Update mute state based on group meeting mode
+          // Meeting mode is the canonical selector; fall back to legacy groupMeetingMode
+          if (config.meetingMode) {
+            this.meetingMode = config.meetingMode;
+          } else if (typeof config.groupMeetingMode === 'boolean') {
+            this.meetingMode = config.groupMeetingMode ? 'group' : 'normal';
           }
+          this.groupMeetingMode = (this.meetingMode === 'group');
+          // Mute state derives from meeting mode: group starts muted, translator/normal start unmuted
+          this._isMuted = (this.meetingMode === 'group');
+
+          if (config.translatorLanguageA && config.translatorLanguageA.trim() !== '') {
+            this.translatorLanguageA = config.translatorLanguageA.trim();
+          }
+          if (config.translatorLanguageB && config.translatorLanguageB.trim() !== '') {
+            this.translatorLanguageB = config.translatorLanguageB.trim();
+          }
+
           console.log(`  Updated system prompt (${config.systemPrompt.length} chars)`);
           console.log(`  Updated model ID: ${config.modelId}`);
           console.log(`  Updated voice ID: ${this.voiceId}`);
           console.log(`  Updated endpointing sensitivity: ${this.endpointingSensitivity}`);
-          console.log(`  Updated group meeting mode: ${this.groupMeetingMode ? 'enabled (starts muted)' : 'disabled'}`);
+          console.log(`  Updated meeting mode: ${this.meetingMode}`);
+          if (this.meetingMode === 'translator') {
+            console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+            if (this.activationMode !== 'always_active') {
+              console.warn(`  ⚠️  Translator mode requires activation mode 'always_active' to work end-to-end. Current: ${this.activationMode}`);
+            }
+          }
         } catch (error) {
           console.error('Failed to load Nova Sonic config from DynamoDB:', error);
           console.log('Using environment variable configuration as fallback');
@@ -343,8 +385,13 @@ export class NovaAgent implements VoiceAssistantProvider {
       },
     };
 
+    // In translator mode, register NO tools (zero chat/strands/mute). We want Nova
+    // to do nothing but translate — tool loops would derail the interpreter behavior.
+    const translatorMode = (this.meetingMode === 'translator');
+
     // Add tool configuration if Strands Lambda ARN is configured or group meeting mode is enabled
-    if (this.strandsLambdaArn || this.groupMeetingMode) {
+    // (but NOT in translator mode)
+    if (!translatorMode && (this.strandsLambdaArn || this.groupMeetingMode)) {
       promptStartEvent.event.promptStart.toolUseOutputConfiguration = {
         mediaType: 'application/json',
       };
@@ -483,6 +530,29 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private buildSystemPromptContent(): string {
+    // Translator mode fully REPLACES the system prompt — we don't want any chat,
+    // tool-use, or interruption-handling instructions to leak in and cause Nova
+    // to do anything other than translate.
+    if (this.meetingMode === 'translator') {
+      const a = this.translatorLanguageA;
+      const b = this.translatorLanguageB;
+      return [
+        'TRANSLATOR MODE:',
+        `You are a live bidirectional interpreter between ${a} and ${b}.`,
+        '',
+        'Rules (follow these strictly):',
+        `1. For every utterance you hear, detect whether it is in ${a} or ${b}.`,
+        '2. Translate it into the OTHER language and speak only the translation.',
+        `3. Speak the translation naturally in ${a} or ${b}, matching the speaker\'s tone.`,
+        '4. Do NOT greet, explain, summarize, answer questions, or add any commentary.',
+        '5. Preserve meaning, names, numbers, and dates. Keep output concise.',
+        `6. If an utterance is unclear or in a third language, translate it into ${a}.`,
+        '7. Never say anything on your own. Do not introduce yourself. Do not ask clarifying questions.',
+        '',
+        'Begin translating from the very next utterance you hear.',
+      ].join('\n');
+    }
+
     let systemPromptContent = '';
     
     // Add group meeting mode instructions (simplified - wake phrase detection handled by our code)

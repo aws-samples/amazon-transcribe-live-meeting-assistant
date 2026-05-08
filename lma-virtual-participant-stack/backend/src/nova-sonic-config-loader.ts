@@ -15,6 +15,17 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
 
 /**
+ * Supported meeting modes.
+ *
+ * - 'normal': Default behavior - agent speaks when activated.
+ * - 'group': Group meeting mode - agent starts muted and only speaks when a wake
+ *   phrase is detected in the transcripts (legacy 'groupMeetingMode: true').
+ * - 'translator': Translator mode - agent acts as a live bidirectional interpreter
+ *   between two configured languages; speaks on every completed utterance.
+ */
+export type MeetingMode = 'normal' | 'group' | 'translator';
+
+/**
  * Nova Sonic configuration interface
  */
 export interface NovaSonicConfig {
@@ -23,7 +34,17 @@ export interface NovaSonicConfig {
   modelId: string;
   voiceId?: string;
   endpointingSensitivity?: 'HIGH' | 'MEDIUM' | 'LOW';
+  /**
+   * Legacy boolean flag. Kept on the interface for back-compat so downstream
+   * consumers don't need to change. Derived from meetingMode when present.
+   */
   groupMeetingMode?: boolean;
+  /** New canonical meeting mode selector. */
+  meetingMode?: MeetingMode;
+  /** Language A for translator mode (defaults to 'English'). */
+  translatorLanguageA?: string;
+  /** Language B for translator mode (defaults to 'Spanish'). */
+  translatorLanguageB?: string;
 }
 
 /**
@@ -37,6 +58,9 @@ interface DynamoDBConfigItem {
   voiceId?: string;
   endpointingSensitivity?: string;
   groupMeetingMode?: boolean;
+  meetingMode?: string;
+  translatorLanguageA?: string;
+  translatorLanguageB?: string;
   description?: string;
   '*Information*'?: string;
 }
@@ -50,8 +74,24 @@ const DEFAULT_CONFIG: NovaSonicConfig = {
   modelId: 'amazon.nova-2-sonic-v1:0',
   voiceId: 'tiffany', // Default polyglot voice (English US, feminine)
   endpointingSensitivity: 'MEDIUM', // Default turn-taking sensitivity
-  groupMeetingMode: false, // Default to normal mode
+  groupMeetingMode: false, // Default to normal mode (legacy field)
+  meetingMode: 'normal',
+  translatorLanguageA: 'English',
+  translatorLanguageB: 'Spanish',
 };
+
+const VALID_MEETING_MODES: ReadonlySet<MeetingMode> = new Set<MeetingMode>([
+  'normal',
+  'group',
+  'translator',
+]);
+
+function parseMeetingMode(value: unknown): MeetingMode | undefined {
+  if (typeof value === 'string' && VALID_MEETING_MODES.has(value as MeetingMode)) {
+    return value as MeetingMode;
+  }
+  return undefined;
+}
 
 /**
  * Load Nova Sonic configuration from DynamoDB
@@ -85,6 +125,9 @@ export async function loadNovaSonicConfig(
       promptMode: mergedConfig.promptMode,
       modelId: mergedConfig.modelId,
       promptLength: mergedConfig.systemPrompt.length,
+      meetingMode: mergedConfig.meetingMode,
+      translatorLanguageA: mergedConfig.translatorLanguageA,
+      translatorLanguageB: mergedConfig.translatorLanguageB,
     });
     
     return mergedConfig;
@@ -165,11 +208,21 @@ function mergeConfigs(
     if (typeof defaultConfig.groupMeetingMode === 'boolean') {
       baseConfig.groupMeetingMode = defaultConfig.groupMeetingMode;
     }
+    const defaultMeetingMode = parseMeetingMode(defaultConfig.meetingMode);
+    if (defaultMeetingMode) {
+      baseConfig.meetingMode = defaultMeetingMode;
+    }
+    if (typeof defaultConfig.translatorLanguageA === 'string' && defaultConfig.translatorLanguageA.trim() !== '') {
+      baseConfig.translatorLanguageA = defaultConfig.translatorLanguageA.trim();
+    }
+    if (typeof defaultConfig.translatorLanguageB === 'string' && defaultConfig.translatorLanguageB.trim() !== '') {
+      baseConfig.translatorLanguageB = defaultConfig.translatorLanguageB.trim();
+    }
   }
   
-  // If no custom config, return base config
+  // If no custom config, apply back-compat (groupMeetingMode → meetingMode) and return
   if (!customConfig) {
-    return baseConfig;
+    return finalizeMeetingMode(baseConfig);
   }
   
   // Determine prompt mode (custom overrides default)
@@ -185,6 +238,27 @@ function mergeConfigs(
                                   customConfig.endpointingSensitivity === 'LOW')
     ? customConfig.endpointingSensitivity
     : baseConfig.endpointingSensitivity;
+
+  // Determine meeting mode (custom overrides default; fall back to legacy groupMeetingMode)
+  const customMeetingMode = parseMeetingMode(customConfig.meetingMode);
+  let meetingMode: MeetingMode;
+  if (customMeetingMode) {
+    meetingMode = customMeetingMode;
+  } else if (typeof customConfig.groupMeetingMode === 'boolean') {
+    meetingMode = customConfig.groupMeetingMode ? 'group' : 'normal';
+  } else {
+    meetingMode = baseConfig.meetingMode || 'normal';
+  }
+
+  // Translator languages: custom overrides default; trim + non-empty guard
+  const translatorLanguageA = (typeof customConfig.translatorLanguageA === 'string'
+    && customConfig.translatorLanguageA.trim() !== '')
+    ? customConfig.translatorLanguageA.trim()
+    : baseConfig.translatorLanguageA;
+  const translatorLanguageB = (typeof customConfig.translatorLanguageB === 'string'
+    && customConfig.translatorLanguageB.trim() !== '')
+    ? customConfig.translatorLanguageB.trim()
+    : baseConfig.translatorLanguageB;
   
   // Apply prompt mode logic
   console.log('🔧 Applying prompt mode logic:');
@@ -199,17 +273,34 @@ function mergeConfigs(
   );
   
   console.log(`   Final merged prompt length: ${finalPrompt.length} chars`);
+  console.log(`   Meeting mode: ${meetingMode}`);
+  if (meetingMode === 'translator') {
+    console.log(`   Translator languages: ${translatorLanguageA} ↔ ${translatorLanguageB}`);
+  }
   
   // Return merged configuration
-  return {
+  return finalizeMeetingMode({
     systemPrompt: finalPrompt,
     promptMode: promptMode,
     modelId: customConfig.modelId || baseConfig.modelId,
     voiceId: customConfig.voiceId || baseConfig.voiceId,
     endpointingSensitivity: endpointingSensitivity,
-    groupMeetingMode: typeof customConfig.groupMeetingMode === 'boolean'
-      ? customConfig.groupMeetingMode
-      : baseConfig.groupMeetingMode,
+    meetingMode,
+    translatorLanguageA,
+    translatorLanguageB,
+  });
+}
+
+/**
+ * Ensures the legacy `groupMeetingMode` boolean is kept in sync with `meetingMode`
+ * so downstream code that still reads `groupMeetingMode` keeps working.
+ */
+function finalizeMeetingMode(config: NovaSonicConfig): NovaSonicConfig {
+  const mode: MeetingMode = config.meetingMode || 'normal';
+  return {
+    ...config,
+    meetingMode: mode,
+    groupMeetingMode: mode === 'group',
   };
 }
 
