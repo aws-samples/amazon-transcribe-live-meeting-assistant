@@ -7,9 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Virtual Participant embed demo page** — New self-contained [`docs/embeddable-vp-demo.html`](docs/embeddable-vp-demo.html) demonstrates the Virtual Participant flow end-to-end inside a mock parent app: a `component=vp-loader` iframe creates the VP via `postMessage` / GraphQL / Step Function, emits `LMA_VP_CREATED` + streaming `LMA_VP_STATUS_CHANGED` events to the parent, which then drives a 2×2 grid of dependent iframes (`vnc`, `vp-details`, `transcript`, `summary`) that auto-refresh via AppSync subscriptions as the VP progresses through `INITIALIZING → CONNECTING → JOINING → JOINED → ACTIVE`. Also adds a `simple=true` query param on `component=vp-loader` that renders a compact "Meeting name / Status / vpId + End button" card after creation instead of the full status + connection details view (useful when a separate `component=vp-details` iframe is shown alongside, as the demo does, to avoid duplicating rich status information). See [Embeddable Components → Virtual Participant Demo](docs/embeddable-components.md#virtual-participant-demo-page).
+
 ### Fixed
 
 - **MCP API Gateway stage deployment failure in brand-new AWS accounts** — `MCPApiKeyStage` previously set `MethodSettings.LoggingLevel: INFO`, which requires the account/region-wide `AWS::ApiGateway::Account.CloudWatchRoleArn` singleton. In untouched accounts/regions, stack creation failed with `CloudWatch Logs role ARN must be set in account settings to enable logging`. Removed `LoggingLevel: INFO` from the stage; per-request access logs via `AccessLogSetting` and CloudWatch metrics are unchanged.
+
+- **`vp-loader` embed reliability and rendering** — Several fixes so the `component=vp-loader` iframe works reliably when used alongside the other VP embeds (as the new VP demo page shows):
+  - The `onUpdateVirtualParticipant` AppSync subscription now auto-resubscribes with 1s→10s capped exponential backoff after Amplify closes the WebSocket to refresh Cognito tokens (previously a terminal auth error ended the Observable permanently, so the parent stopped receiving `LMA_VP_STATUS_CHANGED` events and dependent transcript/summary/vnc iframes never loaded).
+  - Subscription merges now only overlay non-null / non-undefined fields into state, so DDB-stream updates that arrive with `null` for fields that weren't actually changed (common for pure status/vnc updates) no longer clobber previously-populated Platform / Meeting ID / Owner / Created fields.
+  - "End VP" now sends `endReason` + `endedBy` alongside `id` so the mutation no longer fails with `Variable 'input' has coerced Null value for NonNull type 'String!'`. GraphQL-level error messages (via `err.errors[0].message`) are now surfaced to the parent via `LMA_VP_ERROR`.
+  - `createVirtualParticipant` is followed immediately by a `getVirtualParticipant(id)` query so the shared `VPConnectionDetails` render has all server-populated fields (`createdAt`, `updatedAt`, `Owner`, etc.) from the first render instead of showing "N/A" or epoch-0 dates.
+  - Replaced the custom 2×2 "Virtual Participant Created" confirmation grid with the shared `StatusDetails` + `ConnectionDetails` components exported from `VirtualParticipantDetails.jsx`, matching the main VP Details page.
+
+- **Transcript / summary embeds showed "Error Loading Meeting" when loaded before the `callId` exists in DynamoDB** — `EmbedCallDetails.loadCall` calls `getCallDetailsFromCallIds([callId])`, which for a not-yet-created call returns `[null]` and then crashes inside `mapCallsAttributes` with `Cannot destructure property 'CallId' of 'a' as it is null`. That thrown exception triggered the hard-error branch, permanently masking the intended "Waiting for meeting to start..." state and preventing the AppSync `onCreateCall`/`onUpdateCall` auto-refresh from surfacing. Null entries are now filtered before `mapCallsAttributes`, and "not found / does not exist / null / unauthorized" errors are classified as expected races and fall through to the existing "waiting" spinner so the subscription auto-load path takes over.
 
 ## [0.3.2] - 2026-04-29
 
