@@ -4563,7 +4563,7 @@ Resources:
     Type: AWS::ApiGateway::Stage
     Condition: ShouldEnableMCPServer
     # checkov:skip=CKV_AWS_73: "X-Ray tracing not required for this API; operational cost consideration"
-    # checkov:skip=CKV2_AWS_4: "Access logging enabled via AccessLogSetting property"
+    # checkov:skip=CKV2_AWS_4: "Per-request access logging IS enabled via AccessLogSetting (structured JSON, routed to MCPApiKeyAccessLogGroup) — this provides the audit trail. Method-level LoggingLevel (execution/authorizer/integration traces) is intentionally omitted because enabling it requires the account/region-wide AWS::ApiGateway::Account.CloudWatchRoleArn singleton; LMA is deployed into customer accounts where that singleton may already be owned by another stack, so we do not take ownership of it. Customers needing execution traces can enable them manually."
     # checkov:skip=CKV2_AWS_29: "WAF protection is OPTIONAL via WAFAllowedIPv4Ranges parameter - customer configurable"
     # checkov:skip=CKV_AWS_120: "Caching disabled by design - this is the API Key auth endpoint; caching would serve stale authorization decisions after a user revokes their key. AuthorizerResultTtlInSeconds=0 ensures every request re-evaluates the key hash against DynamoDB."
     Properties:
@@ -4574,14 +4574,12 @@ Resources:
       AccessLogSetting:
         DestinationArn: !GetAtt MCPApiKeyAccessLogGroup.Arn
         Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationStatus":"$context.integrationStatus","integrationLatency":"$context.integrationLatency","authorizerError":"$context.authorizer.error"}'
-      # Execution logs (security-matrix API-GW-006): authorizer/integration telemetry
+      # Execution-level logging (security-matrix API-GW-006) intentionally NOT enabled here.
       MethodSettings:
         - HttpMethod: "*"
           ResourcePath: "/*"
           ThrottlingBurstLimit: 50
           ThrottlingRateLimit: 100
-          LoggingLevel: INFO
-          DataTraceEnabled: false  # avoid logging request/response bodies (may contain sensitive MCP data)
           MetricsEnabled: true
 
   MCPApiKeyLambdaPermission:
