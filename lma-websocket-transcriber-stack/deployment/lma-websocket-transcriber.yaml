@@ -115,36 +115,84 @@ Parameters:
     AllowedValues:
       - identify-language
       - identify-multiple-languages
-      - en-US
-      - es-US
+      - af-ZA
+      - ar-AE
+      - ar-SA
+      - ca-ES
+      - cs-CZ
+      - da-DK
+      - de-CH
+      - de-DE
+      - el-GR
+      - en-AB
+      - en-AU
       - en-GB
+      - en-IE
+      - en-IN
+      - en-NZ
+      - en-US
+      - en-WL
+      - en-ZA
+      - es-ES
+      - es-US
+      - eu-ES
+      - fa-IR
+      - fi-FI
       - fr-CA
       - fr-FR
-      - en-AU
+      - gl-ES
+      - he-IL
+      - hi-IN
+      - hr-HR
+      - id-ID
       - it-IT
-      - de-DE
-      - pt-BR
       - ja-JP
       - ko-KR
-      - zh-CN
-      - hi-IN
+      - lv-LV
+      - ms-MY
+      - nl-NL
+      - no-NO
+      - pl-PL
+      - pt-BR
+      - pt-PT
+      - ro-RO
+      - ru-RU
+      - sk-SK
+      - so-SO
+      - sr-RS
+      - sv-SE
+      - tl-PH
       - th-TH
+      - uk-UA
+      - vi-VN
+      - zh-CN
+      - zh-HK
+      - zh-TW
+      - zu-ZA
 
   TranscribeLanguageOptions:
     Type: String
     Default: "en-US, es-US"
-    AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*)*)?$'
+    AllowedPattern: '^(?:\s*(?:af-ZA|ar-AE|ar-SA|ca-ES|cs-CZ|da-DK|de-CH|de-DE|el-GR|en-AB|en-AU|en-GB|en-IE|en-IN|en-NZ|en-US|en-WL|en-ZA|es-ES|es-US|eu-ES|fa-IR|fi-FI|fr-CA|fr-FR|gl-ES|he-IL|hi-IN|hr-HR|id-ID|it-IT|ja-JP|ko-KR|lv-LV|ms-MY|nl-NL|no-NO|pl-PL|pt-BR|pt-PT|ro-RO|ru-RU|sk-SK|so-SO|sr-RS|sv-SE|tl-PH|th-TH|uk-UA|vi-VN|zh-CN|zh-HK|zh-TW|zu-ZA)\s*(?:,\s*(?:af-ZA|ar-AE|ar-SA|ca-ES|cs-CZ|da-DK|de-CH|de-DE|el-GR|en-AB|en-AU|en-GB|en-IE|en-IN|en-NZ|en-US|en-WL|en-ZA|es-ES|es-US|eu-ES|fa-IR|fi-FI|fr-CA|fr-FR|gl-ES|he-IL|hi-IN|hr-HR|id-ID|it-IT|ja-JP|ko-KR|lv-LV|ms-MY|nl-NL|no-NO|pl-PL|pt-BR|pt-PT|ro-RO|ru-RU|sk-SK|so-SO|sr-RS|sv-SE|tl-PH|th-TH|uk-UA|vi-VN|zh-CN|zh-HK|zh-TW|zu-ZA)\s*)*)?$'
     ConstraintDescription: >-
-      Unsupported language code. Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR,
-      en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+      Unsupported language code. Allowed values are: af-ZA, ar-AE, ar-SA, ca-ES, cs-CZ,
+      da-DK, de-CH, de-DE, el-GR, en-AB, en-AU, en-GB, en-IE, en-IN, en-NZ, en-US,
+      en-WL, en-ZA, es-ES, es-US, eu-ES, fa-IR, fi-FI, fr-CA, fr-FR, gl-ES, he-IL,
+      hi-IN, hr-HR, id-ID, it-IT, ja-JP, ko-KR, lv-LV, ms-MY, nl-NL, no-NO, pl-PL,
+      pt-BR, pt-PT, ro-RO, ru-RU, sk-SK, so-SO, sr-RS, sv-SE, tl-PH, th-TH, uk-UA,
+      vi-VN, zh-CN, zh-HK, zh-TW, zu-ZA
     Description: >-
       When TranscribeLanguageCode is set to 'identify-language' or 'identify-multiple-languages',   specify
       two or more comma separated language codes, e.g. "en-US,es-US" that represent
       the languages you  think may be used in your meeting. Including more than five
       is not recommended.  You can select only one language dialect per language per
       stream - i.e. you cannot select both en-US and en-AU as language options.
-      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE,
-      pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+      Allowed values are: af-ZA, ar-AE, ar-SA, ca-ES, cs-CZ, da-DK, de-CH, de-DE,
+      el-GR, en-AB, en-AU, en-GB, en-IE, en-IN, en-NZ, en-US, en-WL, en-ZA, es-ES,
+      es-US, eu-ES, fa-IR, fi-FI, fr-CA, fr-FR, gl-ES, he-IL, hi-IN, hr-HR, id-ID,
+      it-IT, ja-JP, ko-KR, lv-LV, ms-MY, nl-NL, no-NO, pl-PL, pt-BR, pt-PT, ro-RO,
+      ru-RU, sk-SK, so-SO, sr-RS, sv-SE, tl-PH, th-TH, uk-UA, vi-VN, zh-CN, zh-HK,
+      zh-TW, zu-ZA
 
   TranscribePreferredLanguage:
     Type: String
@@ -155,20 +203,60 @@ Parameters:
     Default: None
     AllowedValues:
       - None
-      - en-US
-      - es-US
+      - af-ZA
+      - ar-AE
+      - ar-SA
+      - ca-ES
+      - cs-CZ
+      - da-DK
+      - de-CH
+      - de-DE
+      - el-GR
+      - en-AB
+      - en-AU
       - en-GB
+      - en-IE
+      - en-IN
+      - en-NZ
+      - en-US
+      - en-WL
+      - en-ZA
+      - es-ES
+      - es-US
+      - eu-ES
+      - fa-IR
+      - fi-FI
       - fr-CA
       - fr-FR
-      - en-AU
+      - gl-ES
+      - he-IL
+      - hi-IN
+      - hr-HR
+      - id-ID
       - it-IT
-      - de-DE
-      - pt-BR
       - ja-JP
       - ko-KR
-      - zh-CN
-      - hi-IN
+      - lv-LV
+      - ms-MY
+      - nl-NL
+      - no-NO
+      - pl-PL
+      - pt-BR
+      - pt-PT
+      - ro-RO
+      - ru-RU
+      - sk-SK
+      - so-SO
+      - sr-RS
+      - sv-SE
+      - tl-PH
       - th-TH
+      - uk-UA
+      - vi-VN
+      - zh-CN
+      - zh-HK
+      - zh-TW
+      - zu-ZA
 
   TranscribePiiEntityTypes:
     Type: String

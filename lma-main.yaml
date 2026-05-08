@@ -235,8 +235,8 @@ Parameters:
     Default: "false"
     Description: >-
       Enable content redaction from Amazon Transcribe transcription output. This is
-      only used when
-      the 'en-US' language is selected in the TranscribeLanguageCode parameter.
+      only used when one of the following languages is selected in the TranscribeLanguageCode
+      parameter: en-US, en-AU, en-GB, es-US.
     AllowedValues:
       - "true"
       - "false"
@@ -259,36 +259,83 @@ Parameters:
     AllowedValues:
       - identify-language
       - identify-multiple-languages
-      - en-US
-      - es-US
+      - af-ZA
+      - ar-AE
+      - ar-SA
+      - ca-ES
+      - cs-CZ
+      - da-DK
+      - de-CH
+      - de-DE
+      - el-GR
+      - en-AB
+      - en-AU
       - en-GB
+      - en-IE
+      - en-IN
+      - en-NZ
+      - en-US
+      - en-WL
+      - en-ZA
+      - es-ES
+      - es-US
+      - eu-ES
+      - fa-IR
+      - fi-FI
       - fr-CA
       - fr-FR
-      - en-AU
+      - gl-ES
+      - he-IL
+      - hi-IN
+      - hr-HR
+      - id-ID
       - it-IT
-      - de-DE
-      - pt-BR
       - ja-JP
       - ko-KR
-      - zh-CN
-      - hi-IN
+      - lv-LV
+      - ms-MY
+      - nl-NL
+      - no-NO
+      - pl-PL
+      - pt-BR
+      - pt-PT
+      - ro-RO
+      - ru-RU
+      - sk-SK
+      - so-SO
+      - sr-RS
+      - sv-SE
+      - tl-PH
       - th-TH
+      - uk-UA
+      - vi-VN
+      - zh-CN
+      - zh-HK
+      - zh-TW
+      - zu-ZA
 
   TranscribeLanguageOptions:
     Type: String
     Default: "en-US, es-US"
-    AllowedPattern: '^(?:\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*(?:,\s*(?:en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH)\s*)*)?$'
+    AllowedPattern: '^(?:\s*(?:af-ZA|ar-AE|ar-SA|ca-ES|cs-CZ|da-DK|de-CH|de-DE|el-GR|en-AB|en-AU|en-GB|en-IE|en-IN|en-NZ|en-US|en-WL|en-ZA|es-ES|es-US|eu-ES|fa-IR|fi-FI|fr-CA|fr-FR|gl-ES|he-IL|hi-IN|hr-HR|id-ID|it-IT|ja-JP|ko-KR|lv-LV|ms-MY|nl-NL|no-NO|pl-PL|pt-BR|pt-PT|ro-RO|ru-RU|sk-SK|so-SO|sr-RS|sv-SE|tl-PH|th-TH|uk-UA|vi-VN|zh-CN|zh-HK|zh-TW|zu-ZA)\s*(?:,\s*(?:af-ZA|ar-AE|ar-SA|ca-ES|cs-CZ|da-DK|de-CH|de-DE|el-GR|en-AB|en-AU|en-GB|en-IE|en-IN|en-NZ|en-US|en-WL|en-ZA|es-ES|es-US|eu-ES|fa-IR|fi-FI|fr-CA|fr-FR|gl-ES|he-IL|hi-IN|hr-HR|id-ID|it-IT|ja-JP|ko-KR|lv-LV|ms-MY|nl-NL|no-NO|pl-PL|pt-BR|pt-PT|ro-RO|ru-RU|sk-SK|so-SO|sr-RS|sv-SE|tl-PH|th-TH|uk-UA|vi-VN|zh-CN|zh-HK|zh-TW|zu-ZA)\s*)*)?$'
     ConstraintDescription: >-
-      Unsupported language code or invalid syntax. Allowed values are: en-US, es-US,
-      en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE, pt-BR, ja-JP, ko-KR, zh-CN, hi-IN,
-      th-TH
+      Unsupported language code or invalid syntax. Allowed values are: af-ZA, ar-AE,
+      ar-SA, ca-ES, cs-CZ, da-DK, de-CH, de-DE, el-GR, en-AB, en-AU, en-GB, en-IE,
+      en-IN, en-NZ, en-US, en-WL, en-ZA, es-ES, es-US, eu-ES, fa-IR, fi-FI, fr-CA,
+      fr-FR, gl-ES, he-IL, hi-IN, hr-HR, id-ID, it-IT, ja-JP, ko-KR, lv-LV, ms-MY,
+      nl-NL, no-NO, pl-PL, pt-BR, pt-PT, ro-RO, ru-RU, sk-SK, so-SO, sr-RS, sv-SE,
+      tl-PH, th-TH, uk-UA, vi-VN, zh-CN, zh-HK, zh-TW, zu-ZA
     Description: >-
       When using language identification, specify two or more language codes, e.g.
       "en-US, es-US" that represent the languages that may be  used in your meeting.
       Including more than five is not recommended.  Enter only one language dialect
       per language - e.g. 'en-US, en-AU' is not allowed.
-      Allowed values are: en-US, es-US, en-GB, fr-CA, fr-FR, en-AU, it-IT, de-DE,
-      pt-BR, ja-JP, ko-KR, zh-CN, hi-IN, th-TH
+      Allowed values are: af-ZA, ar-AE, ar-SA, ca-ES, cs-CZ, da-DK, de-CH, de-DE,
+      el-GR, en-AB, en-AU, en-GB, en-IE, en-IN, en-NZ, en-US, en-WL, en-ZA, es-ES,
+      es-US, eu-ES, fa-IR, fi-FI, fr-CA, fr-FR, gl-ES, he-IL, hi-IN, hr-HR, id-ID,
+      it-IT, ja-JP, ko-KR, lv-LV, ms-MY, nl-NL, no-NO, pl-PL, pt-BR, pt-PT, ro-RO,
+      ru-RU, sk-SK, so-SO, sr-RS, sv-SE, tl-PH, th-TH, uk-UA, vi-VN, zh-CN, zh-HK,
+      zh-TW, zu-ZA.
       NOTE: The identify-language feature has not yet been applied to the virtual participant. 
       If selected, the virtual participant will use the value of TranscribePreferredLanguage (if set) or 'en-US' (by default).
 
@@ -300,20 +347,60 @@ Parameters:
     Default: None
     AllowedValues:
       - None
-      - en-US
-      - es-US
+      - af-ZA
+      - ar-AE
+      - ar-SA
+      - ca-ES
+      - cs-CZ
+      - da-DK
+      - de-CH
+      - de-DE
+      - el-GR
+      - en-AB
+      - en-AU
       - en-GB
+      - en-IE
+      - en-IN
+      - en-NZ
+      - en-US
+      - en-WL
+      - en-ZA
+      - es-ES
+      - es-US
+      - eu-ES
+      - fa-IR
+      - fi-FI
       - fr-CA
       - fr-FR
-      - en-AU
+      - gl-ES
+      - he-IL
+      - hi-IN
+      - hr-HR
+      - id-ID
       - it-IT
-      - de-DE
-      - pt-BR
       - ja-JP
       - ko-KR
-      - zh-CN
-      - hi-IN
+      - lv-LV
+      - ms-MY
+      - nl-NL
+      - no-NO
+      - pl-PL
+      - pt-BR
+      - pt-PT
+      - ro-RO
+      - ru-RU
+      - sk-SK
+      - so-SO
+      - sr-RS
+      - sv-SE
+      - tl-PH
       - th-TH
+      - uk-UA
+      - vi-VN
+      - zh-CN
+      - zh-HK
+      - zh-TW
+      - zu-ZA
 
   TranscribePiiEntityTypes:
     Type: String
