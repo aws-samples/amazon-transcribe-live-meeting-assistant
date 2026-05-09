@@ -1076,7 +1076,9 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
 
   if (import.meta.env.VITE_ENABLE_AGENT_ASSIST === 'true') {
     // Use STRANDS chat UI
-    const iframeSrc = `/strands-chat.html?callId=${item.callId}`;
+    // Note: encodeURIComponent is required because callId may contain characters like '+'
+    // which URLSearchParams.get() would otherwise decode as a space.
+    const iframeSrc = `/strands-chat.html?callId=${encodeURIComponent(item.callId)}`;
 
     console.log(`DEBUG: Agent Assist Mode: ${import.meta.env.VITE_AGENT_ASSIST_MODE}, Using iframe: ${iframeSrc}`);
 
