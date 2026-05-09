@@ -4550,31 +4550,19 @@ Resources:
     Properties:
       RestApiId: !Ref MCPApiKeyRestApi
 
-  # CloudWatch Log Group for API Gateway access logs (security-matrix API-GW-001)
-  MCPApiKeyAccessLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: ShouldEnableMCPServer
-    Properties:
-      LogGroupName: !Sub "/aws/apigateway/${LMAStackName}-MCP-ApiKey/access"
-      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
   MCPApiKeyStage:
     Type: AWS::ApiGateway::Stage
     Condition: ShouldEnableMCPServer
     # checkov:skip=CKV_AWS_73: "X-Ray tracing not required for this API; operational cost consideration"
-    # checkov:skip=CKV2_AWS_4: "Per-request access logging IS enabled via AccessLogSetting (structured JSON, routed to MCPApiKeyAccessLogGroup) — this provides the audit trail. Method-level LoggingLevel (execution/authorizer/integration traces) is intentionally omitted because enabling it requires the account/region-wide AWS::ApiGateway::Account.CloudWatchRoleArn singleton; LMA is deployed into customer accounts where that singleton may already be owned by another stack, so we do not take ownership of it. Customers needing execution traces can enable them manually."
+    # checkov:skip=CKV2_AWS_4: "CloudWatch access logging (AccessLogSetting) and method-level execution logging (MethodSettings.LoggingLevel) are intentionally NOT configured on this stage. Both require the account/region-wide AWS::ApiGateway::Account.CloudWatchRoleArn singleton to be set; in brand-new AWS accounts/regions this singleton is unset and stack creation fails with 'CloudWatch Logs role ARN must be set in account settings to enable logging'. LMA is deployed into customer accounts where that singleton may already be owned by another stack, so LMA does not take ownership of it. Customers who want per-request MCP access logs can enable them manually after deployment: (1) create an IAM role trusted by apigateway.amazonaws.com with the AmazonAPIGatewayPushToCloudWatchLogs managed policy; (2) call apigateway:UpdateAccount --cloud-watch-role-arn <role-arn> once per region; (3) re-add AccessLogSetting on the MCP stage. CloudTrail data-event logging on the Lambda integration (MCPServerAnalyticsFunction) and CloudWatch metrics on this stage (MetricsEnabled: true) remain available without any account-level prerequisite."
     # checkov:skip=CKV2_AWS_29: "WAF protection is OPTIONAL via WAFAllowedIPv4Ranges parameter - customer configurable"
     # checkov:skip=CKV_AWS_120: "Caching disabled by design - this is the API Key auth endpoint; caching would serve stale authorization decisions after a user revokes their key. AuthorizerResultTtlInSeconds=0 ensures every request re-evaluates the key hash against DynamoDB."
     Properties:
       RestApiId: !Ref MCPApiKeyRestApi
       DeploymentId: !Ref MCPApiKeyDeployment
       StageName: mcp
-      # Access logging (security-matrix API-GW-001): per-request structured JSON logs
-      AccessLogSetting:
-        DestinationArn: !GetAtt MCPApiKeyAccessLogGroup.Arn
-        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationStatus":"$context.integrationStatus","integrationLatency":"$context.integrationLatency","authorizerError":"$context.authorizer.error"}'
-      # Execution-level logging (security-matrix API-GW-006) intentionally NOT enabled here.
+      # NOTE: AccessLogSetting and MethodSettings.LoggingLevel are intentionally
+      # omitted — see the CKV2_AWS_4 skip comment above for the full rationale.
       MethodSettings:
         - HttpMethod: "*"
           ResourcePath: "/*"
