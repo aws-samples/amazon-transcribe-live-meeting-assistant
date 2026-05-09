@@ -5,12 +5,11 @@
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useAppContext from '../contexts/app';
 
-import listCallDateShard from '../graphql/queries/listCallDateShard';
-import listCallDateHour from '../graphql/queries/listCallDateHour';
-import listCalls from '../graphql/queries/listCalls';
+import listCallsDateRange from '../graphql/queries/listCallsDateRange';
+import getCallCount from '../graphql/queries/getCallCount';
 import getCall from '../graphql/queries/getCall';
 
 import onCreateCall from '../graphql/queries/onCreateCall';
@@ -21,18 +20,51 @@ import onDeleteCall from '../graphql/queries/onDeleteCall';
 import onUnshareCall from '../graphql/queries/onUnshareCall';
 import getTranscriptSegments from '../graphql/queries/getTranscriptSegments';
 
-import { CALL_LIST_SHARDS_PER_DAY } from '../components/call-list/calls-table-config';
+import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
 
 const client = generateClient();
 const logger = new ConsoleLogger('useCallsGraphQlApi');
 
-const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 2 } = {}) => {
-  const [periodsToLoad, setPeriodsToLoad] = useState(initialPeriodsToLoad);
+// Matches the `limit` used server-side by the ListCallsGsiResolver.  One
+// round-trip of 100 meeting rows covers the typical preset windows; we
+// then paginate via nextToken in the background until the server returns
+// a null token or MAX_PAGES_PER_LOAD is hit.
+const LIST_PAGE_SIZE = 100;
+const MAX_PAGES_PER_LOAD = 20;
+
+const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
+  // dateRange is { startDateIso, endDateIso } — the active meeting-list window.
+  const [dateRange, setDateRange] = useState(initialDateRange || hoursToDateRange(DEFAULT_DATE_RANGE_HOURS));
+  // Mirror of dateRange held in a ref so subscription callbacks (which close
+  // over an old dateRange otherwise) always see the latest value.
+  const dateRangeRef = useRef(dateRange);
+  useEffect(() => {
+    dateRangeRef.current = dateRange;
+  }, [dateRange]);
+
   const [isCallsListLoading, setIsCallsListLoading] = useState(false);
   const [calls, setCalls] = useState([]);
   const [liveTranscriptCallId, setLiveTranscriptCallId] = useState();
   const [callTranscriptPerCallId, setCallTranscriptPerCallId] = useState({});
+  // Server-side total matching the active dateRange + caller's RBAC scope.
+  // `null` = not yet loaded; number = known count.  Used by the UI to
+  // display e.g. "5 loaded of 27 total" in the list header.
+  const [totalCallCount, setTotalCallCount] = useState(null);
+  const [totalCallCountTruncated, setTotalCallCountTruncated] = useState(false);
   const { setErrorMessage } = useAppContext();
+
+  /**
+   * Returns true iff a call (identified by CreatedAt) falls within the
+   * currently active dateRange.  Used by subscription handlers to drop
+   * out-of-range events so the UI list stays consistent.
+   */
+  const isWithinActiveRange = (createdAtIso) => {
+    if (!createdAtIso) return true; // permissive on missing data
+    const { startDateIso, endDateIso } = dateRangeRef.current || {};
+    if (!startDateIso || !endDateIso) return true;
+    const t = new Date(createdAtIso).getTime();
+    return t >= new Date(startDateIso).getTime() && t <= new Date(endDateIso).getTime();
+  };
 
   const setCallsDeduped = (callValues) => {
     setCalls((currentCalls) => {
@@ -49,19 +81,14 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
   };
 
   const getCallDetailsFromCallIds = async (callIds) => {
-    // prettier-ignore
-    const getCallPromises = callIds.map((callId) => (
-      client.graphql({ query: getCall, variables: { callId } })
-    ));
+    const getCallPromises = callIds.map((callId) => client.graphql({ query: getCall, variables: { callId } }));
     const getCallResolutions = await Promise.allSettled(getCallPromises);
     const getCallRejected = getCallResolutions.filter((r) => r.status === 'rejected');
     if (getCallRejected.length) {
       setErrorMessage('failed to get call details - please try again later');
       logger.error('get call promises rejected', getCallRejected);
     }
-    const callValues = getCallResolutions.filter((r) => r.status === 'fulfilled').map((r) => r.value?.data?.getCall);
-
-    return callValues;
+    return getCallResolutions.filter((r) => r.status === 'fulfilled').map((r) => r.value?.data?.getCall);
   };
 
   useEffect(() => {
@@ -70,17 +97,18 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
       next: async (message) => {
         logger.debug('call list subscription update', message);
         const callId = message.data?.onCreateCall?.CallId || '';
-        if (callId) {
-          const callValues = await getCallDetailsFromCallIds([callId]);
-          setCallsDeduped(callValues);
-        }
+        if (!callId) return;
+        const callValues = await getCallDetailsFromCallIds([callId]);
+        // Filter out calls whose CreatedAt falls outside the currently
+        // active date range (stale-closure safe via useRef).
+        const inRange = callValues.filter((c) => isWithinActiveRange(c?.CreatedAt));
+        if (inRange.length) setCallsDeduped(inRange);
       },
       error: (error) => {
         logger.error(error);
         setErrorMessage('call list network subscription failed - please reload the page');
       },
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
@@ -90,16 +118,15 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
       next: async (message) => {
         logger.debug('call update', message);
         const callUpdateEvent = message.data?.onUpdateCall;
-        if (callUpdateEvent?.CallId) {
-          setCallsDeduped([callUpdateEvent]);
-        }
+        if (!callUpdateEvent?.CallId) return;
+        if (!isWithinActiveRange(callUpdateEvent?.CreatedAt)) return;
+        setCallsDeduped([callUpdateEvent]);
       },
       error: (error) => {
         logger.error(error);
         setErrorMessage('call update network request failed - please reload the page');
       },
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
@@ -111,7 +138,8 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
         const sharedCalls = message.data?.onShareMeetings?.Calls || '';
         if (sharedCalls && sharedCalls.length > 0) {
           const callValues = await getCallDetailsFromCallIds(sharedCalls);
-          setCallsDeduped(callValues);
+          const inRange = callValues.filter((c) => isWithinActiveRange(c?.CreatedAt));
+          if (inRange.length) setCallsDeduped(inRange);
         }
       },
       error: (error) => {
@@ -119,7 +147,6 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
         setErrorMessage('share meetings subscription failed - please reload the page');
       },
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
@@ -138,7 +165,6 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
         setErrorMessage('call delete subscription failed - please reload the page');
       },
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
@@ -157,7 +183,6 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
         setErrorMessage('call delete subscription failed - please reload the page');
       },
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
@@ -165,21 +190,16 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
     const { callId, transcript, isPartial, channel } = transcriptSegment;
 
     setCallTranscriptPerCallId((current) => {
-      logger.debug('setCallTrancriptPerCallId current: ', current);
-
       const currentContactEntry = current[callId] || {};
       const currentChannelEntry = currentContactEntry[channel] || {};
-
       const currentBase = currentChannelEntry?.base || '';
       const currentSegments = currentChannelEntry?.segments || [];
-      logger.debug('setCallTrancriptPerCallId current segments: ', currentSegments);
       const lastSameSegmentId = currentSegments.filter((s) => s.segmentId === transcriptSegment.segmentId).pop();
       const dedupedSegments = currentSegments.filter((s) => s.segmentId !== transcriptSegment.segmentId);
 
       const segments = [
         ...dedupedSegments,
         // prettier-ignore
-        // avoid overwriting a final segment or one with sentiment with a late arriving segment
         (lastSameSegmentId?.isPartial === false && transcriptSegment?.isPartial === true)
         || (lastSameSegmentId?.isPartial === false && lastSameSegmentId?.sentiment)
           ? lastSameSegmentId
@@ -194,12 +214,7 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
           segments,
         },
       };
-      logger.debug('setCallTrancriptPerCallId new contact id entry: ', entry);
-
-      return {
-        ...current,
-        [callId]: { ...entry },
-      };
+      return { ...current, [callId]: { ...entry } };
     });
   };
 
@@ -240,29 +255,21 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
     logger.debug('onAddTranscriptSegment effect');
 
     if (!liveTranscriptCallId) {
-      // the component should set the live transcript contact id to null to unsubscribe
       if (subscription?.unsubscribe) {
-        logger.debug('onAddTranscriptSegment null contact unsubscribing');
         subscription.unsubscribe();
       }
       return () => {};
     }
-    logger.debug('setting up onAddTranscriptSegment subscription');
 
     subscription = client
       .graphql({ query: onAddTranscriptSegment, variables: { callId: liveTranscriptCallId } })
       .subscribe({
         next: async (message) => {
-          logger.debug('call transcript subscription update', message);
           const transcriptSegmentValue = message.data?.onAddTranscriptSegment;
-          if (!transcriptSegmentValue) {
-            return;
-          }
+          if (!transcriptSegmentValue) return;
           const transcriptSegment = mapTranscriptSegmentValue(transcriptSegmentValue);
           const { callId, transcript, segmentId } = transcriptSegment;
-          if (callId !== liveTranscriptCallId) {
-            return;
-          }
+          if (callId !== liveTranscriptCallId) return;
           if (transcript && segmentId) {
             handleCallTranscriptSegmentMessage(transcriptSegment);
           }
@@ -273,189 +280,121 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
         },
       });
 
-    return () => {
-      logger.debug('unsubscribed from transcript segments');
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, [liveTranscriptCallId]);
 
-  const listCallIdsByDateShards = async ({ date, shards }) => {
-    const listCallDateShardPromises = shards.map((i) => {
-      logger.debug('sending list call date shard', date, i);
-      return client.graphql({ query: listCallDateShard, variables: { date, shard: i } });
-    });
-    const listCallDateShardResolutions = await Promise.allSettled(listCallDateShardPromises);
-
-    const listRejected = listCallDateShardResolutions.filter((r) => r.status === 'rejected');
-    if (listRejected.length) {
-      setErrorMessage('failed to list calls - please try again later');
-      logger.error('list call promises rejected', listRejected);
-    }
-    const callData = listCallDateShardResolutions
-      .filter((r) => r.status === 'fulfilled')
-      .map((r) => r.value?.data?.listCallsDateShard?.Calls || [])
-      .reduce((pv, cv) => [...cv, ...pv], []);
-
-    return callData;
-  };
-
-  const listCallIdsByDateHours = async ({ date, hours }) => {
-    const listCallDateHourPromises = hours.map((i) => {
-      logger.debug('sending list call date hour', date, i);
-      return client.graphql({ query: listCallDateHour, variables: { date, hour: i } });
-    });
-    const listCallDateHourResolutions = await Promise.allSettled(listCallDateHourPromises);
-
-    const listRejected = listCallDateHourResolutions.filter((r) => r.status === 'rejected');
-    if (listRejected.length) {
-      setErrorMessage('failed to list calls - please try again later');
-      logger.error('list call promises rejected', listRejected);
-    }
-
-    const callData = listCallDateHourResolutions
-      .filter((r) => r.status === 'fulfilled')
-      .map((r) => r.value?.data?.listCallsDateHour?.Calls || [])
-      .reduce((pv, cv) => [...cv, ...pv], []);
-
-    return callData;
-  };
-
-  // eslint-disable-next-line no-unused-vars
-  const listCallIds = async () => {
-    // this uses a Scan of dynamoDB - prefer using the shard based queries
-    const listCallsPromise = client.graphql({ query: listCalls });
-    const listCallsResolutions = await Promise.allSettled([listCallsPromise]);
-
-    const listRejected = listCallsResolutions.filter((r) => r.status === 'rejected');
-    if (listRejected.length) {
-      setErrorMessage('failed to list calls - please try again later');
-      logger.error('list call promises rejected', listRejected);
-    }
-
-    const callIds = listCallsResolutions
-      .filter((r) => r.status === 'fulfilled')
-      .map((r) => r.value?.data?.listCalls?.Calls || [])
-      .map((items) => items.map((item) => item?.CallId))
-      .reduce((pv, cv) => [...cv, ...pv], []);
-
-    return callIds;
-  };
-
-  const sendSetCallsForPeriod = async () => {
-    // XXX this logic should be moved to the API
+  /**
+   * Load all calls whose CreatedAt falls within the active dateRange by
+   * calling listCallsDateRange and following the server-provided nextToken
+   * until exhausted or we hit the MAX_PAGES_PER_LOAD safety limit.
+   *
+   * Calls returned by the GSI resolver are already fully hydrated (the
+   * resolver BatchGetItems the `c#<CallId>` detail rows internally) so we
+   * don't need to follow up with per-call getCall requests.
+   */
+  /**
+   * Load the total server-side count of calls matching the active range
+   * (RBAC-filtered server-side).  Runs in parallel with loadCallsForDateRange
+   * so the header can show the total even before the full list is paginated.
+   */
+  const loadCallCountForDateRange = async (activeRange) => {
+    const { startDateIso, endDateIso } = activeRange || {};
+    if (!startDateIso || !endDateIso) return;
     try {
-      const now = new Date();
-
-      // array of arrays containing date / shard pairs relative to current UTC time
-      // e.g. 2 periods to on load 2021-01-01T:20:00:00.000Z ->
-      // [ [ '2021-01-01', 3 ], [ '2021-01-01', 4 ] ]
-      const hoursInShard = 24 / CALL_LIST_SHARDS_PER_DAY;
-      const dateShardPairs = [...Array(parseInt(periodsToLoad, 10)).keys()].map((p) => {
-        const deltaInHours = p * hoursInShard;
-        const relativeDate = new Date(now - deltaInHours * 3600 * 1000);
-
-        const relativeDateString = relativeDate.toISOString().split('T')[0];
-        const shard = Math.floor(relativeDate.getUTCHours() / hoursInShard);
-
-        return [relativeDateString, shard];
+      const response = await client.graphql({
+        query: getCallCount,
+        variables: { startDateTime: startDateIso, endDateTime: endDateIso },
       });
-
-      // reduce array of date/shard pairs into object of shards by date
-      // e.g. [ [ '2021-01-01', 3 ], [ '2021-01-01', 4 ] ] -> { '2021-01-01': [ 3, 4 ] }
-      const dateShards = dateShardPairs.reduce((p, c) => ({ ...p, [c[0]]: [...(p[c[0]] || []), c[1]] }), {});
-      logger.debug('call list date shards', dateShards);
-
-      // parallelizes listCalls and getCallDetails
-      // alternatively we could implement it by sending multiple graphql queries in 1 request
-      const callDataDateShardPromises = Object.keys(dateShards).map(
-        // pretttier-ignore
-        async (d) => listCallIdsByDateShards({ date: d, shards: dateShards[d] }),
-      );
-
-      // get contact Ids by hour on residual hours outside of the lower shard date/hour boundary
-      // or just last n hours when periodsToLoad is less than 1 shard period
-      let baseDate;
-      let residualHours;
-      if (periodsToLoad < 1) {
-        baseDate = new Date(now);
-        const numHours = parseInt(periodsToLoad * hoursInShard, 10);
-        residualHours = [...Array(numHours).keys()].map((h) => baseDate.getUTCHours() - h);
-      } else {
-        baseDate = new Date(now - periodsToLoad * hoursInShard * 3600 * 1000);
-        const residualBaseHour = baseDate.getUTCHours() % hoursInShard;
-        residualHours = [...Array(hoursInShard - residualBaseHour).keys()].map((h) => baseDate.getUTCHours() + h);
+      // Abort if the user changed the range while we were waiting
+      if (
+        dateRangeRef.current !== activeRange &&
+        JSON.stringify(dateRangeRef.current) !== JSON.stringify(activeRange)
+      ) {
+        return;
       }
-      residualHours = residualHours.filter((h) => h >= 0 && h <= 23);
-      const baseDateString = baseDate.toISOString().split('T')[0];
-
-      const residualDateHours = { date: baseDateString, hours: residualHours };
-      logger.debug('call list date hours', residualDateHours);
-
-      const callDataDateHourPromise = listCallIdsByDateHours(residualDateHours);
-
-      const callDataPromises = [...callDataDateShardPromises, callDataDateHourPromise];
-      const callDetailsPromises = callDataPromises.map(async (callDataPromise) => {
-        const callData = await callDataPromise;
-        const callIds = callData.map((item) => item.CallId);
-        const callDetails = await getCallDetailsFromCallIds(callIds);
-        // Merge call details with PK and SK
-        return callDetails.map((detail) => {
-          const matchingData = callData.find((item) => item.CallId === detail.CallId);
-          return { ...detail, ListPK: matchingData.PK, ListSK: matchingData.SK };
-        });
-      });
-
-      const callValuesPromises = callDetailsPromises.map(async (callValuesPromise) => {
-        const callValues = await callValuesPromise;
-        logger.debug('callValues', callValues);
-        return callValues;
-      });
-
-      const getCallsPromiseResolutions = await Promise.allSettled(callValuesPromises);
-      logger.debug('getCallsPromiseResolutions', getCallsPromiseResolutions);
-      const callValuesReduced = getCallsPromiseResolutions
-        .filter((r) => r.status === 'fulfilled')
-        .map((r) => r.value)
-        .reduce((previous, current) => [...previous, ...current], []);
-      logger.debug('callValuesReduced', callValuesReduced);
-      setCallsDeduped(callValuesReduced);
-      setIsCallsListLoading(false);
-      const getCallsRejected = getCallsPromiseResolutions.filter((r) => r.status === 'rejected');
-      if (getCallsRejected.length) {
-        setErrorMessage('failed to get call details - please try again later');
-        logger.error('get call promises rejected', getCallsRejected);
-      }
+      const count = response?.data?.getCallCount?.count;
+      const truncated = !!response?.data?.getCallCount?.truncated;
+      setTotalCallCount(typeof count === 'number' ? count : null);
+      setTotalCallCountTruncated(truncated);
     } catch (error) {
+      // Non-fatal — just leave the counter unset.
+      logger.warn('getCallCount failed (header counter will be hidden)', error);
+      setTotalCallCount(null);
+      setTotalCallCountTruncated(false);
+    }
+  };
+
+  const loadCallsForDateRange = async () => {
+    const { startDateIso, endDateIso } = dateRange || {};
+    if (!startDateIso || !endDateIso) {
       setIsCallsListLoading(false);
+      return;
+    }
+    try {
+      setCalls([]);
+      setTotalCallCount(null);
+      setTotalCallCountTruncated(false);
+      let nextToken = null;
+      let pages = 0;
+      const collected = [];
+      // Snapshot the range we started this load with. If the user changes
+      // the range while we're still paginating, stop early so we don't
+      // populate the list with calls from a stale window.
+      const activeRange = dateRange;
+      // Fire-and-forget the count query in parallel with the list query.
+      loadCallCountForDateRange(activeRange);
+      do {
+        // eslint-disable-next-line no-await-in-loop
+        const response = await client.graphql({
+          query: listCallsDateRange,
+          variables: {
+            startDateTime: activeRange.startDateIso,
+            endDateTime: activeRange.endDateIso,
+            limit: LIST_PAGE_SIZE,
+            nextToken,
+          },
+        });
+        const page = response?.data?.listCallsDateRange?.Calls || [];
+        // Early-out if the range changed under us.
+        if (
+          dateRangeRef.current !== activeRange &&
+          JSON.stringify(dateRangeRef.current) !== JSON.stringify(activeRange)
+        ) {
+          logger.debug('date range changed during pagination — aborting');
+          return;
+        }
+        page.forEach((c) => collected.push({ ...c, ListPK: c.PK, ListSK: c.SK }));
+        setCallsDeduped(page.map((c) => ({ ...c, ListPK: c.PK, ListSK: c.SK })));
+        nextToken = response?.data?.listCallsDateRange?.nextToken || null;
+        pages += 1;
+      } while (nextToken && pages < MAX_PAGES_PER_LOAD);
+      logger.debug(`loaded ${collected.length} calls across ${pages} page(s)`);
+    } catch (error) {
       setErrorMessage('failed to list calls - please try again later');
-      logger.error('error obtaining call list', error);
+      logger.error('loadCallsForDateRange failed', error);
+    } finally {
+      setIsCallsListLoading(false);
     }
   };
 
   useEffect(() => {
     if (isCallsListLoading) {
-      logger.debug('call list is loading');
-      // send in a timeout to avoid blocking rendering
+      // defer so we don't block rendering
       setTimeout(() => {
-        setCalls([]);
-        sendSetCallsForPeriod();
+        loadCallsForDateRange();
       }, 1);
     }
   }, [isCallsListLoading]);
 
   useEffect(() => {
-    logger.debug('list period changed', periodsToLoad);
+    logger.debug('date range changed', dateRange);
     setIsCallsListLoading(true);
-  }, [periodsToLoad]);
+  }, [dateRange]);
 
   const sendGetTranscriptSegmentsRequest = async (callId) => {
     try {
-      const response = await client.graphql({
-        query: getTranscriptSegments,
-        variables: { callId },
-      });
+      const response = await client.graphql({ query: getTranscriptSegments, variables: { callId } });
       const transcriptSegments = response?.data?.getTranscriptSegments?.TranscriptSegments;
-      logger.debug('transcript segments response', transcriptSegments);
       if (transcriptSegments?.length > 0) {
         const transcriptSegmentsReduced = transcriptSegments
           .map((t) => mapTranscriptSegmentValue(t))
@@ -463,22 +402,14 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
             const previousSegments = p[c.channel]?.segments || [];
             const lastSameSegmentId = previousSegments.filter((s) => s?.segmentId === c?.segmentId).pop();
             const dedupedSegments = previousSegments.filter((s) => s.segmentId !== c.segmentId);
-
-            // prettier-ignore
-            const segment = !lastSameSegmentId?.sentiment && c?.sentiment
-              ? c
-              : lastSameSegmentId || c;
-
+            const segment = !lastSameSegmentId?.sentiment && c?.sentiment ? c : lastSameSegmentId || c;
             return { ...p, [c.channel]: { segments: [...dedupedSegments, segment] } };
           }, {});
 
-        setCallTranscriptPerCallId((current) => {
-          logger.debug('updating callTranscriptPerCallId', current, transcriptSegmentsReduced);
-          return {
-            ...current,
-            [callId]: transcriptSegmentsReduced,
-          };
-        });
+        setCallTranscriptPerCallId((current) => ({
+          ...current,
+          [callId]: transcriptSegmentsReduced,
+        }));
       }
     } catch (error) {
       setErrorMessage('failed to get transcript - please try again later');
@@ -494,8 +425,12 @@ const useCallsGraphQlApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY * 
     sendGetTranscriptSegmentsRequest,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
-    setPeriodsToLoad,
-    periodsToLoad,
+    // New date-range-based API (replaces setPeriodsToLoad/periodsToLoad)
+    setDateRange,
+    dateRange,
+    // Server-side total for the current range (null until loaded)
+    totalCallCount,
+    totalCallCountTruncated,
   };
 };
 

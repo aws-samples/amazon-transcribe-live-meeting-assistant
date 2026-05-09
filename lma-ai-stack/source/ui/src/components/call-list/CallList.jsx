@@ -39,11 +39,13 @@ const CallList = () => {
     calls,
     isCallsListLoading,
     setIsCallsListLoading,
-    setPeriodsToLoad,
+    setDateRange,
     setSelectedItems,
     setToolsOpen,
-    periodsToLoad,
+    dateRange,
     getCallDetailsFromCallIds,
+    totalCallCount,
+    totalCallCountTruncated,
   } = useCallsContext();
 
   const [preferences, setPreferences] = useLocalStorage('call-list-preferences', DEFAULT_PREFERENCES);
@@ -91,9 +93,12 @@ const CallList = () => {
           updateTools={() => setToolsOpen(true)}
           loading={isCallsListLoading}
           setIsLoading={setIsCallsListLoading}
-          periodsToLoad={periodsToLoad}
-          setPeriodsToLoad={setPeriodsToLoad}
+          dateRange={dateRange}
+          setDateRange={setDateRange}
           getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+          totalCallCount={totalCallCount}
+          totalCallCountTruncated={totalCallCountTruncated}
+          loadedCallCount={calls.length}
           downloadToExcel={() => exportToExcel(callList, 'Meeting-List')}
           // eslint-disable-next-line max-len, prettier/prettier
         />
