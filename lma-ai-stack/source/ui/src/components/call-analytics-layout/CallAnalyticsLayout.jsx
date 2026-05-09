@@ -3,7 +3,6 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { AppLayout, Flashbar } from '@cloudscape-design/components';
@@ -24,11 +23,9 @@ import Breadcrumbs from './breadcrumbs';
 import ToolsPanel from './tools-panel';
 import SplitPanel from './calls-split-panel';
 
-import { CALL_LIST_SHARDS_PER_DAY, PERIODS_TO_LOAD_STORAGE_KEY } from '../call-list/calls-table-config';
+import { loadCachedDateRange } from '../call-list/calls-table-config';
 
 import useAppContext from '../../contexts/app';
-
-const logger = new ConsoleLogger('CallAnalyticsLayout');
 
 const CallAnalyticsLayout = () => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
@@ -37,34 +34,23 @@ const CallAnalyticsLayout = () => {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
 
-  const getInitialPeriodsToLoad = () => {
-    let periods = 0.5;
-    try {
-      const periodsFromStorage = Math.abs(JSON.parse(localStorage.getItem(PERIODS_TO_LOAD_STORAGE_KEY)));
-      if (!Number.isSafeInteger(periodsFromStorage) || periodsFromStorage > CALL_LIST_SHARDS_PER_DAY * 30) {
-        logger.warn('invalid initialPeriodsToLoad value from local storage');
-      } else {
-        periods = periodsFromStorage > 0 ? periodsFromStorage : periods;
-        localStorage.setItem(PERIODS_TO_LOAD_STORAGE_KEY, JSON.stringify(periods));
-      }
-    } catch {
-      logger.warn('failed to parse initialPeriodsToLoad from local storage');
-    }
-    return periods;
-  };
-  const initialPeriodsToLoad = getInitialPeriodsToLoad();
+  // Seed the meeting-list window from any persisted value so a reload
+  // honours the user's previous "Last N hours" / custom selection.
+  const initialDateRange = loadCachedDateRange();
 
   const {
     calls,
     callTranscriptPerCallId,
     getCallDetailsFromCallIds,
     isCallsListLoading,
-    periodsToLoad,
+    dateRange,
     setLiveTranscriptCallId,
     setIsCallsListLoading,
-    setPeriodsToLoad,
+    setDateRange,
     sendGetTranscriptSegmentsRequest,
-  } = useCallsGraphQlApi({ initialPeriodsToLoad });
+    totalCallCount,
+    totalCallCountTruncated,
+  } = useCallsGraphQlApi({ initialDateRange });
 
   const { splitPanelOpen, onSplitPanelToggle, splitPanelSize, onSplitPanelResize } = useSplitPanel(selectedItems);
 
@@ -78,11 +64,13 @@ const CallAnalyticsLayout = () => {
     sendGetTranscriptSegmentsRequest,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
-    setPeriodsToLoad,
+    setDateRange,
     setToolsOpen,
     setSelectedItems,
-    periodsToLoad,
+    dateRange,
     toolsOpen,
+    totalCallCount,
+    totalCallCountTruncated,
   };
 
   return (

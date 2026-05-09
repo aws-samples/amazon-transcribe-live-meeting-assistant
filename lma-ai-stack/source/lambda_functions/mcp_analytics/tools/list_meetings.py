@@ -100,61 +100,72 @@ def execute(
 
 def query_by_date_range(table, start_date: str, end_date: str, limit: int) -> List[Dict]:
     """
-    Query meetings by date range using date-sharded list items.
-    LMA uses cls#YYYY-MM-DD#s#NN pattern for efficient queries.
+    Query meetings by date range using the TypeDateIndex GSI.
+
+    The GSI is keyed by ItemType (HASH, always "call") and SK (RANGE, format
+    "ts#<ISO8601>#id#<CallId>").  A single query covers the whole date range
+    and paginates via LastEvaluatedKey — no shard fan-out.
     """
     from datetime import timedelta
 
-    meetings = []
-    meeting_ids = set()  # Track unique meetings
+    from boto3.dynamodb.conditions import Key
 
-    # Parse dates
-    start = (
-        datetime.fromisoformat(start_date[:10])
-        if start_date
-        else datetime.utcnow() - timedelta(days=7)
+    meetings: List[Dict] = []
+    meeting_ids = set()
+
+    # Parse dates — fall back to "last 7 days" / "now" when unset.
+    start_iso = (
+        start_date if start_date else (datetime.utcnow() - timedelta(days=7)).isoformat() + "Z"
     )
-    end = datetime.fromisoformat(end_date[:10]) if end_date else datetime.utcnow()
+    end_iso = end_date if end_date else datetime.utcnow().isoformat() + "Z"
 
-    # Query each date in range
-    current = start
-    while current <= end and len(meetings) < limit:
-        date_str = current.strftime("%Y-%m-%d")
+    # SK format is `ts#<ISO8601>#id#<CallId>`; bounding the SK range with
+    # "ts#<iso>" (lower) and "ts#<iso>#~" (upper) gives us the inclusive
+    # date-range slice on the GSI.
+    sk_lo = f"ts#{start_iso}"
+    sk_hi = f"ts#{end_iso}#~"
 
-        # LMA uses 6 shards per day (00-05)
-        for shard in range(6):
+    query_kwargs = {
+        "IndexName": "TypeDateIndex",
+        "KeyConditionExpression": (Key("ItemType").eq("call") & Key("SK").between(sk_lo, sk_hi)),
+        "ScanIndexForward": False,  # newest first
+        "Limit": min(limit, 100),
+    }
+
+    # Bound pagination so a very sparse / restrictive caller filter can't
+    # force an unbounded scan of the GSI.  Matches the resolver's MAX_PAGES.
+    max_pages = 10
+    pages = 0
+    last_key = None
+    while len(meetings) < limit and pages < max_pages:
+        if last_key:
+            query_kwargs["ExclusiveStartKey"] = last_key
+        try:
+            response = table.query(**query_kwargs)
+        except Exception as e:
+            logger.warning("GSI query failed: %s", e)
+            break
+
+        for item in response.get("Items", []):
+            call_id = item.get("CallId")
+            if not call_id or call_id in meeting_ids:
+                continue
+            meeting_ids.add(call_id)
+            meeting = get_meeting_by_id(table, call_id)
+            if meeting:
+                meetings.append(meeting)
             if len(meetings) >= limit:
                 break
 
-            shard_pad = f"{shard:02d}"
-            pk = f"cls#{date_str}#s#{shard_pad}"
+        last_key = response.get("LastEvaluatedKey")
+        pages += 1
+        if not last_key:
+            break
 
-            try:
-                logger.info(f"Querying list items: {pk}")
-                response = table.query(
-                    KeyConditionExpression="PK = :pk",
-                    ExpressionAttributeValues={":pk": pk},
-                    Limit=limit,
-                )
-
-                # Extract CallIds from list items
-                for item in response.get("Items", []):
-                    call_id = item.get("CallId")
-                    if call_id and call_id not in meeting_ids:
-                        meeting_ids.add(call_id)
-                        # Get full meeting data
-                        meeting = get_meeting_by_id(table, call_id)
-                        if meeting:
-                            meetings.append(meeting)
-
-                logger.info(f"Found {len(meetings)} meetings so far")
-
-            except Exception as e:
-                logger.warning(f"Error querying {pk}: {e}")
-                continue
-
-        current += timedelta(days=1)
-
+    if last_key and pages >= max_pages:
+        logger.info(
+            "query_by_date_range: hit MAX_PAGES=%d cap (collected=%d)", max_pages, len(meetings)
+        )
     return meetings[:limit]
 
 
@@ -168,32 +179,9 @@ def get_meeting_by_id(table, call_id: str) -> Optional[Dict]:
         return None
 
 
-def scan_recent_meetings(table, limit: int) -> List[Dict]:
-    """
-    Scan for recent meetings.
-    Used when no date filter specified.
-    """
-    try:
-        # LMA stores meeting metadata with PK = SK = "c#{CallId}"
-        logger.info(f"Scanning for meetings with limit {limit}")
-        response = table.scan(
-            FilterExpression="begins_with(PK, :prefix)",
-            ExpressionAttributeValues={":prefix": "c#"},
-            Limit=limit * 10,  # Get more items since we'll filter
-        )
-
-        all_items = response.get("Items", [])
-        logger.info(f"Scan returned {len(all_items)} items total")
-
-        # Filter to only meeting metadata items (where PK = SK)
-        meetings = [item for item in all_items if item.get("PK") == item.get("SK")]
-        logger.info(f"Found {len(meetings)} meeting items after filtering")
-
-        return meetings[:limit]
-
-    except Exception as e:
-        logger.error(f"Error scanning meetings: {e}", exc_info=True)
-        return []
+# NOTE: `scan_recent_meetings` was removed.  The callers that used it now go
+# through `query_by_date_range` (GSI-backed, O(matched items)); direct scans
+# don't scale and are no longer acceptable once the tracking table grows.
 
 
 def participant_in_meeting(meeting: Dict[str, Any], participant_name: str) -> bool:

@@ -58,20 +58,17 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 
 type CallList @aws_cognito_user_pools
 @aws_iam {
-	Calls: [CallListItem]
+	Calls: [Call]
 	nextToken: String
 }
 
-type CallListItem implements DynamoDbBase @aws_cognito_user_pools
+type CallCount @aws_cognito_user_pools
 @aws_iam {
-	PK: ID!
-	SK: ID!
-	CreatedAt: AWSDateTime!
-	UpdatedAt: AWSDateTime!
-	ExpiresAfter: AWSTimestamp
-	CallId: ID!
-	Owner: String
-	SharedWith: String
+	count: Int
+	# true when the server stopped counting before the full range was
+	# scanned (caller's RBAC-filtered pass hit its page cap). Clients
+	# should display the count as "N+" in that case.
+	truncated: Boolean
 }
 
 enum CallStatus {
@@ -235,9 +232,8 @@ type Query @aws_cognito_user_pools
 	getCall(CallId: ID!): Call
 	getTranscriptSegments(callId: ID!, isPartial: Boolean): TranscriptSegmentList
 	getTranscriptSegmentsWithSentiment(callId: ID!): TranscriptSegmentsWithSentimentList
-	listCalls(endDateTime: AWSDateTime, startDateTime: AWSDateTime): CallList
-	listCallsDateHour(date: AWSDate, hour: Int): CallList
-	listCallsDateShard(date: AWSDate, shard: Int): CallList
+	listCallsDateRange(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!, limit: Int, nextToken: String): CallList
+	getCallCount(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!): CallCount
     queryKnowledgeBase(input: String!, sessionId: String): String
 	listVirtualParticipants: [VirtualParticipant] @aws_cognito_user_pools @aws_iam
 	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools @aws_iam

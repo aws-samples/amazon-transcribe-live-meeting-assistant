@@ -127,9 +127,9 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     setLiveTranscriptCallId,
     isCallsListLoading,
     setIsCallsListLoading,
-    setPeriodsToLoad,
-    periodsToLoad,
-  } = useCallsGraphQlApi({ initialPeriodsToLoad: 0.5 });
+    setDateRange,
+    dateRange,
+  } = useCallsGraphQlApi();
 
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
@@ -295,10 +295,10 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     sendGetTranscriptSegmentsRequest,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
-    setPeriodsToLoad,
+    setDateRange,
     setToolsOpen,
     setSelectedItems,
-    periodsToLoad,
+    dateRange,
     toolsOpen,
   };
 
