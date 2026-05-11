@@ -5,14 +5,10 @@
  */
 
 export default /* GraphQL */ `
-  query Query($date: AWSDate, $shard: Int) {
-    listCallsDateShard(date: $date, shard: $shard) {
-      Calls {
-        CallId
-        PK
-        SK
-      }
-      nextToken
+  query GetCallCount($startDateTime: AWSDateTime!, $endDateTime: AWSDateTime!) {
+    getCallCount(startDateTime: $startDateTime, endDateTime: $endDateTime) {
+      count
+      truncated
     }
   }
 `;

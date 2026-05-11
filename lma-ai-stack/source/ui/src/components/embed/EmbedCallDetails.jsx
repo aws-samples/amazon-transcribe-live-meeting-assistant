@@ -75,7 +75,9 @@ EmbedSummaryPanel.propTypes = {
  * Standalone chat panel - renders just the Meeting Assist Bot iframe.
  */
 const EmbedChatPanel = ({ item }) => {
-  const iframeSrc = `/strands-chat.html?callId=${item.callId}`;
+  // Note: encodeURIComponent is required because callId may contain characters like '+'
+  // which URLSearchParams.get() would otherwise decode as a space.
+  const iframeSrc = `/strands-chat.html?callId=${encodeURIComponent(item.callId)}`;
 
   if (import.meta.env.VITE_ENABLE_AGENT_ASSIST !== 'true') {
     return (
@@ -485,9 +487,9 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
     setLiveTranscriptCallId,
     isCallsListLoading,
     setIsCallsListLoading,
-    setPeriodsToLoad,
-    periodsToLoad,
-  } = useCallsGraphQlApi({ initialPeriodsToLoad: 0.5 });
+    setDateRange,
+    dateRange,
+  } = useCallsGraphQlApi();
 
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
@@ -692,10 +694,10 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
     sendGetTranscriptSegmentsRequest,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
-    setPeriodsToLoad,
+    setDateRange,
     setToolsOpen,
     setSelectedItems,
-    periodsToLoad,
+    dateRange,
     toolsOpen,
   };
 
