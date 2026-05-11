@@ -13,6 +13,7 @@
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { details } from './details.js';
 
 /**
  * Supported meeting modes.
@@ -129,7 +130,9 @@ export async function loadNovaSonicConfig(
       translatorLanguageA: mergedConfig.translatorLanguageA,
       translatorLanguageB: mergedConfig.translatorLanguageB,
     });
-    
+
+    details.meetingMode = mergedConfig.meetingMode;
+
     return mergedConfig;
   } catch (error) {
     console.error('Failed to load Nova Sonic config from DynamoDB:', error);

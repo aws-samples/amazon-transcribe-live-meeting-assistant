@@ -68,7 +68,7 @@ export interface MeetingDetails {
   // Recording Configuration
   enableAudioRecording: boolean;
   tmpRecordingFilename: string;
-  
+  meetingMode?: string;
 }
 
 class DetailsManager {

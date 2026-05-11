@@ -8,6 +8,7 @@ import { createWriteStream } from 'fs';
 import { details } from './details.js';
 import { sendAddTranscriptSegment, sendStartMeeting, sendEndMeeting } from './kinesis-stream.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { agentSpeakingDetector } from './agent-speaking-detector.js';
 
 // Global current speaker (matching Python)
 let currentSpeaker = "none";
@@ -612,15 +613,28 @@ export class TranscriptionService {
                     break;
                 }
                 for (const result of event.TranscriptEvent?.Transcript?.Results ?? []) {
-                    // Send all results to Kinesis
-                    try {
-                        await sendAddTranscriptSegment(currentSpeaker, result);
-                    } catch (error) {
-                        console.error('Failed to send transcript to Kinesis:', error);
-                    }
+                    const suppressAgentTranscript =
+                        details.meetingMode === 'translator' &&
+                        agentSpeakingDetector.isSpeaking();
 
-                    // Process all results (partial + final) for wake phrase pre-connect and activation
-                    this.processTranscriptResult(result);
+                    if (suppressAgentTranscript) {
+                        if (!result.IsPartial) {
+                            const text = result.Alternatives?.[0]?.Transcript || '';
+                            if (text) {
+                                console.log(`🌐 Translator mode: suppressing agent-origin transcript segment: "${text}"`);
+                            }
+                        }
+                    } else {
+                        // Send all results to Kinesis
+                        try {
+                            await sendAddTranscriptSegment(currentSpeaker, result);
+                        } catch (error) {
+                            console.error('Failed to send transcript to Kinesis:', error);
+                        }
+
+                        // Process all results (partial + final) for wake phrase pre-connect and activation
+                        this.processTranscriptResult(result);
+                    }
                 }
             }
         } catch (error: any) {
