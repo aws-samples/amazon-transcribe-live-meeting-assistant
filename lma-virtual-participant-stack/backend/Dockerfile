@@ -39,8 +39,8 @@ RUN apk update && \
     libstdc++
 
 # Install noVNC and websockify for browser-based VNC access
-RUN git clone https://github.com/novnc/noVNC.git /usr/share/novnc && \
-    git clone https://github.com/novnc/websockify /usr/share/novnc/utils/websockify && \
+RUN git clone --branch v1.7.0 --depth 1 https://github.com/novnc/noVNC.git /usr/share/novnc && \
+    git clone --branch v0.13.0 --depth 1 https://github.com/novnc/websockify /usr/share/novnc/utils/websockify && \
     ln -s /usr/share/novnc/vnc.html /usr/share/novnc/index.html
 
 # Create Chromium managed policies for protocol handling
