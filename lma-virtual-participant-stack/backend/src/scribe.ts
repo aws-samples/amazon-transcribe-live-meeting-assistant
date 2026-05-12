@@ -6,7 +6,7 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { spawn, ChildProcess } from 'child_process';
 import { createWriteStream } from 'fs';
 import { details } from './details.js';
-import { sendAddTranscriptSegment, sendStartMeeting, sendEndMeeting } from './kinesis-stream.js';
+import { sendAddTranscriptSegment, sendStartMeeting, sendEndMeeting, kinesisStreamManager } from './kinesis-stream.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 
@@ -623,6 +623,11 @@ export class TranscriptionService {
                             if (text) {
                                 console.log(`🌐 Translator mode: suppressing agent-origin transcript segment: "${text}"`);
                             }
+                        }
+                        try {
+                            kinesisStreamManager.syncTranscriptSegmentState(currentSpeaker, result);
+                        } catch (error) {
+                            console.error('Failed to sync transcript segment state during suppression:', error);
                         }
                     } else {
                         // Send all results to Kinesis
