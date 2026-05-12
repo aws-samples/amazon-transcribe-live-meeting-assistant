@@ -20,6 +20,77 @@ global_settings:
       reason: "ASH's own output directory — avoid scanning previous run artifacts."
     - path: ".ash/**"
       reason: "ASH output (recursive)."
+    - path: ".aws-sam/"
+      reason: "SAM build output — vendored third-party Python packages (phonenumbers, etc.) not LMA source."
+    - path: ".aws-sam/**"
+      reason: "SAM build output (recursive). Already in .gitignore; excluded here so bandit doesn't hang on ~300k lines of vendored geodata."
+    - path: "**/.aws-sam/"
+      reason: "Per-substack SAM build output."
+    - path: "**/.aws-sam/**"
+      reason: "Per-substack SAM build output (recursive)."
+
+    # SAM-packaged output (`sam package` / `publish.sh` artifacts): packaged YAML
+    # templates where Lambda code URIs have been rewritten to S3 URIs plus zipped
+    # source bundles.  These are byte-for-byte copies of templates already in
+    # scope at `deployment/*.yaml`, so ASH would double-count every finding.
+    - path: "**/out/"
+      reason: "SAM-packaged template + zipped source output. Double-counts findings from deployment/ templates."
+    - path: "**/out/**"
+      reason: "SAM-packaged output (recursive)."
+
+    # Vendored third-party Python packages shipped as Lambda Layers (boto3,
+    # strands, cryptography, opensearchpy, etc.).  These are pip-installed
+    # dependencies, not LMA-authored code; upgrades are tracked separately
+    # via the Lambda Layer requirements.txt / pyproject.toml files which DO
+    # remain in scope.
+    - path: "**/boto3_layer/python/**"
+      reason: "Vendored pip deps for the boto3 Lambda Layer; scan the requirements file, not the installed tree."
+    - path: "**/strands_layer/python/**"
+      reason: "Vendored pip deps for the strands agents Lambda Layer."
+    - path: "**/opensearchpy_layer/python/**"
+      reason: "Vendored pip deps for the OpenSearch Python Lambda Layer."
+    - path: "**/transcript_enrichment_layer/python/**"
+      reason: "Vendored pip deps for the transcript enrichment Lambda Layer."
+
+    # Lockfiles: list third-party dependency versions verbatim.  Actual package
+    # vulnerabilities are already covered by grype/npm-audit; duplicating those
+    # findings on every line of the lockfile is pure noise.
+    - path: "**/package-lock.json"
+      reason: "NPM lockfile. Vulns are caught by npm-audit + grype; scanning the lockfile duplicates every finding 10x."
+
+    # Compiled / bundled TypeScript / build outputs.
+    - path: "**/dist/"
+      reason: "Compiled TypeScript / webpack bundles. Scan the TS source, not the compiled JS."
+    - path: "**/dist/**"
+      reason: "Compiled TypeScript / webpack bundles (recursive)."
+    - path: "**/build/"
+      reason: "Generic build output."
+    - path: "**/build/**"
+      reason: "Generic build output (recursive)."
+
+    # Local Python virtual environment.
+    - path: ".venv/"
+      reason: "Local Python virtual environment. Installed deps only, not project source."
+    - path: ".venv/**"
+      reason: "Local Python virtual environment (recursive)."
+    - path: "**/.venv/"
+      reason: "Per-subdir Python virtual environment."
+    - path: "**/.venv/**"
+      reason: "Per-subdir Python virtual environment (recursive)."
+
+    # NPM node_modules directories.  Bandit excludes these via its own CLI
+    # flag, but other ASH scanners (checkov, semgrep, grype, etc.) do not —
+    # so we exclude explicitly here.  node_modules appears per-package under
+    # lma-ai-stack/source/ui, lma-virtual-participant-stack/backend,
+    # lma-browser-extension-stack, docs-site, and others after `npm install`.
+    - path: "node_modules/"
+      reason: "NPM installed deps; not LMA source. Actual vulns covered by npm-audit + grype."
+    - path: "node_modules/**"
+      reason: "NPM installed deps (recursive)."
+    - path: "**/node_modules/"
+      reason: "Per-package NPM installed deps."
+    - path: "**/node_modules/**"
+      reason: "Per-package NPM installed deps (recursive)."
 
   # Documented false positives for detect-secrets. Each item has been reviewed
   # by a human and confirmed NOT to be a secret. See review notes in each entry.
@@ -50,3 +121,43 @@ global_settings:
       reason: >-
         Firefox extension manifest `key` field. PEM-encoded PUBLIC key (same
         key as the Chrome manifest for identity parity). Not a secret.
+
+    # Semgrep python-logger-credential-disclosure FPs. Both findings are in
+    # list_calls_gsi_resolver — the rule fires on the literal word "token"
+    # appearing in a format string.  In both cases the log payload is either a
+    # boto3 exception message or the string "yes"/"no" indicating whether a
+    # nextToken was issued.  The actual token value is never logged.
+    - rule_id: "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure"
+      path: "lma-ai-stack/source/lambda_functions/list_calls_gsi_resolver/index.py"
+      line_start: 75
+      line_end: 75
+      reason: >-
+        logger.warning("Invalid nextToken %r: %s", token, e) — the rule
+        flags the word "nextToken" in the format string.  The token value
+        never reaches the logger; `token` is the *client-supplied*
+        pagination cursor and `e` is a boto3 decode-exception message.
+        Logging this is required to diagnose malformed paginator input.
+
+    - rule_id: "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure"
+      path: "lma-ai-stack/source/lambda_functions/list_calls_gsi_resolver/index.py"
+      line_start: 279
+      line_end: 279
+      reason: >-
+        logger.info("Returning %d calls, nextToken=%s, pages=%d", ...,
+        "yes" if result["nextToken"] else "no", ...) — the nextToken value
+        is *deliberately* replaced with the literal string "yes" or "no"
+        before logging so operators can see whether the page was short-
+        paginated, without exposing the cursor itself.
+
+    # Documentation example placeholder in a postMessage JSON-payload
+    # code example, not a real credential. See docs/embeddable-components.md
+    # for the LMA_CREATE_VP payload shape.
+    - rule_id: "SECRET-SECRET-KEYWORD"
+      path: "docs/embeddable-components.md"
+      line_start: 366
+      line_end: 366
+      reason: >-
+        Illustrative placeholder value in an API docs code example showing
+        the shape of an LMA_CREATE_VP postMessage payload. The flagged line
+        declares an optional field and uses the literal placeholder string
+        (the word "optional") as its value. Not a credential.
