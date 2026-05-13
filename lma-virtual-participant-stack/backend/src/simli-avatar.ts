@@ -327,49 +327,85 @@ export class SimliAvatar {
         let simliVideoTrack: MediaStreamTrack | null = null;
         let simliStreamReady = false;
 
-        navigator.mediaDevices.getUserMedia = async function(constraints?: MediaStreamConstraints): Promise<MediaStream> {
-          console.log('[LMA-Simli] getUserMedia called with constraints:', JSON.stringify(constraints));
-          
-          // If video is requested, try to return the Simli avatar track
-          if (constraints?.video) {
-            // If track is live, return it immediately
-            if (simliStreamReady && simliVideoTrack && simliVideoTrack.readyState === 'live') {
-              console.log(`[LMA-Simli] Returning Simli avatar video stream - track: readyState=${simliVideoTrack.readyState}, enabled=${simliVideoTrack.enabled}, muted=${simliVideoTrack.muted}, kind=${simliVideoTrack.kind}`);
-              try {
-                const settings = simliVideoTrack.getSettings();
-                console.log(`[LMA-Simli] Track settings: width=${settings.width}, height=${settings.height}, frameRate=${settings.frameRate}`);
-              } catch(e) { console.log('[LMA-Simli] Could not get track settings:', e); }
-              if (constraints.audio) {
-                const audioStream = await originalGetUserMedia({ audio: constraints.audio });
-                const combinedStream = new MediaStream();
-                combinedStream.addTrack(simliVideoTrack);
-                audioStream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
-                return combinedStream;
-              } else {
-                return new MediaStream([simliVideoTrack]);
-              }
-            }
-            
-            // Track is dead or missing — wait briefly for the poll to reconnect it
-            console.log('[LMA-Simli] ⏳ Simli track not ready - waiting up to 2s for reconnection...');
-            for (let i = 0; i < 20; i++) {
-              await new Promise(r => setTimeout(r, 100));
-              if (simliStreamReady && simliVideoTrack && simliVideoTrack.readyState === 'live') {
-                console.log(`[LMA-Simli] ✓ Simli track recovered after ${(i+1)*100}ms`);
-                if (constraints.audio) {
-                  const audioStream = await originalGetUserMedia({ audio: constraints.audio });
-                  const combinedStream = new MediaStream();
-                  combinedStream.addTrack(simliVideoTrack);
-                  audioStream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
-                  return combinedStream;
-                } else {
-                  return new MediaStream([simliVideoTrack]);
-                }
-              }
-            }
-            console.log('[LMA-Simli] ⚠️ Simli track did not recover in 2s - falling through');
+        const isSimliTrackLive = () =>
+          simliVideoTrack !== null &&
+          simliVideoTrack.readyState === 'live' &&
+          simliVideoTrack.muted === false;
+
+        const buildSimliStream = async (
+          constraints: MediaStreamConstraints,
+        ): Promise<MediaStream> => {
+          const trackClone = simliVideoTrack!.clone();
+          console.log(
+            `[LMA-Simli] Returning Simli avatar video stream - track: readyState=${trackClone.readyState}, ` +
+              `enabled=${trackClone.enabled}, muted=${trackClone.muted}, kind=${trackClone.kind}`,
+          );
+          try {
+            const settings = trackClone.getSettings();
+            console.log(
+              `[LMA-Simli] Track settings: width=${settings.width}, height=${settings.height}, frameRate=${settings.frameRate}`,
+            );
+          } catch (e) {
+            console.log('[LMA-Simli] Could not get track settings:', e);
           }
-          
+          if (constraints.audio) {
+            const audioStream = await originalGetUserMedia({ audio: constraints.audio });
+            const combinedStream = new MediaStream();
+            combinedStream.addTrack(trackClone);
+            audioStream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
+            return combinedStream;
+          }
+          return new MediaStream([trackClone]);
+        };
+
+        let reconnectRequestInFlight = false;
+        const requestReconnectOnce = async (): Promise<void> => {
+          if (reconnectRequestInFlight) return;
+          // @ts-ignore
+          if (typeof window.__simliRequestReconnect !== 'function') return;
+          reconnectRequestInFlight = true;
+          try {
+            // @ts-ignore
+            await window.__simliRequestReconnect();
+          } catch (e) {
+            console.log('[LMA-Simli] __simliRequestReconnect threw:', e);
+          } finally {
+            reconnectRequestInFlight = false;
+          }
+        };
+
+        navigator.mediaDevices.getUserMedia = async function(
+          constraints?: MediaStreamConstraints,
+        ): Promise<MediaStream> {
+          console.log(
+            '[LMA-Simli] getUserMedia called with constraints:',
+            JSON.stringify(constraints),
+          );
+
+          if (constraints?.video) {
+            if (isSimliTrackLive()) {
+              return buildSimliStream(constraints);
+            }
+
+            console.log(
+              '[LMA-Simli] Simli track not live/unmuted — requesting on-demand reconnect...',
+            );
+            requestReconnectOnce();
+
+            const startTs = Date.now();
+            const budgetMs = 8000;
+            while (Date.now() - startTs < budgetMs) {
+              await new Promise(r => setTimeout(r, 50));
+              if (isSimliTrackLive()) {
+                console.log(
+                  `[LMA-Simli] ✓ Simli track live after ${Date.now() - startTs}ms`,
+                );
+                return buildSimliStream(constraints);
+              }
+            }
+            console.log('[LMA-Simli] ⚠️ Simli track still not live after 8s — falling through');
+          }
+
           console.log('[LMA-Simli] Falling through to original getUserMedia');
           return originalGetUserMedia(constraints);
         };
@@ -442,6 +478,15 @@ export class SimliAvatar {
 
     try {
       console.log('Connecting Simli video stream to meeting page...');
+
+      try {
+        await meetingPage.evaluate(() => {
+          // @ts-ignore
+          window.__simliReconnectInFlight = true;
+        });
+      } catch (e) {
+        /* meeting page may not be ready yet; poll will just see null as usual */
+      }
 
       const offer = await this.simliPage.evaluate(async () => {
         // Try to get video track directly from Simli's video element srcObject
@@ -537,6 +582,15 @@ export class SimliAvatar {
       console.log(connected ? '✓ Simli video stream connected to meeting page' : '⚠️  Simli stream connection could not be verified');
     } catch (error) {
       console.error('Failed to connect Simli stream to meeting page:', error);
+    } finally {
+      try {
+        await meetingPage.evaluate(() => {
+          // @ts-ignore
+          window.__simliReconnectInFlight = false;
+        });
+      } catch (e) {
+        /* ignore */
+      }
     }
   }
 

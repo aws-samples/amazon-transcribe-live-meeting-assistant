@@ -61,6 +61,8 @@ export interface MeetingDetails {
   
   // Transcription Configuration
   transcribeLanguageCode: string;
+  transcribeLanguageOptions: string;
+  transcribePreferredLanguage: string;
   enableContentRedaction: boolean;
   transcribeContentRedactionType: string;
   customVocabularyName: string;
@@ -159,6 +161,8 @@ class DetailsManager {
 
       // Transcription Configuration
       transcribeLanguageCode: process.env.TRANSCRIBE_LANGUAGE_CODE || 'en-US',
+      transcribeLanguageOptions: process.env.TRANSCRIBE_LANGUAGE_OPTIONS || '',
+      transcribePreferredLanguage: process.env.TRANSCRIBE_PREFERRED_LANGUAGE || '',
       enableContentRedaction: process.env.ENABLE_CONTENT_REDACTION === 'true',
       transcribeContentRedactionType: process.env.TRANSCRIBE_CONTENT_REDACTION_TYPE || 'PII',
       customVocabularyName: process.env.CUSTOM_VOCABULARY_NAME || '',

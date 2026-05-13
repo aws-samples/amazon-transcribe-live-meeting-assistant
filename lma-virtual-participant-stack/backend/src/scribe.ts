@@ -113,6 +113,10 @@ export class TranscriptionService {
             }
         } catch (error: any) {
             const msg = `Audio stream error: ${error.message}`;
+            if (error.code === 'ERR_STREAM_PREMATURE_CLOSE' || !this.isTranscribing) {
+                console.log(msg + ' (expected during transcription teardown, non-fatal)');
+                return;
+            }
             if (isLocalTest) {
                 console.log(msg + ' (non-fatal in local test)');
             } else {
@@ -171,29 +175,60 @@ export class TranscriptionService {
 
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
-                // Build transcription parameters
                 const transcriptionParams: any = {
                     AudioStream: this.audioStream(),
                     MediaSampleRateHertz: this.sampleRate,
                     MediaEncoding: 'pcm',
-                    LanguageCode: details.transcribeLanguageCode,
                     ShowSpeakerLabel: true,
                 };
 
-                // Add optional parameters
+                const langCode = details.transcribeLanguageCode;
+                const langOptions = (details.transcribeLanguageOptions || '')
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter((s) => s.length > 0)
+                    .join(',');
+                const preferredLang = (details.transcribePreferredLanguage || '').trim();
+
+                if (langCode === 'identify-language' || langCode === 'identify-multiple-languages') {
+                    if (!langOptions) {
+                        throw new Error(
+                            `TRANSCRIBE_LANGUAGE_CODE='${langCode}' requires TRANSCRIBE_LANGUAGE_OPTIONS ` +
+                            `(at least two comma-separated language codes, e.g. 'en-US,hi-IN').`,
+                        );
+                    }
+                    if (langCode === 'identify-multiple-languages') {
+                        transcriptionParams.IdentifyMultipleLanguages = true;
+                    } else {
+                        transcriptionParams.IdentifyLanguage = true;
+                    }
+                    transcriptionParams.LanguageOptions = langOptions;
+                    if (preferredLang) {
+                        transcriptionParams.PreferredLanguage = preferredLang;
+                    }
+                } else {
+                    transcriptionParams.LanguageCode = langCode;
+                }
+
                 if (details.customVocabularyName) {
                     transcriptionParams.VocabularyName = details.customVocabularyName;
                 }
 
-                if (details.enableContentRedaction && details.transcribeLanguageCode === 'en-US') {
+                if (details.enableContentRedaction && langCode === 'en-US') {
                     transcriptionParams.ContentRedactionType = details.transcribeContentRedactionType;
                 }
 
                 if (sessionId) {
                     transcriptionParams.SessionId = sessionId;
                     console.log(`Resuming transcription session: ${sessionId}`);
+                } else if (transcriptionParams.IdentifyMultipleLanguages || transcriptionParams.IdentifyLanguage) {
+                    const mode = transcriptionParams.IdentifyMultipleLanguages ? 'multi' : 'single';
+                    console.log(
+                        `Starting new transcription session with language identification (${mode}) ` +
+                        `options=[${langOptions}]${preferredLang ? ` preferred=${preferredLang}` : ''}`,
+                    );
                 } else {
-                    console.log(`Starting new transcription session with language: ${details.transcribeLanguageCode}`);
+                    console.log(`Starting new transcription session with language: ${langCode}`);
                 }
 
                 const command = new StartStreamTranscriptionCommand(transcriptionParams);
@@ -250,7 +285,15 @@ export class TranscriptionService {
             } catch (error: any) {
                 // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
                 console.error(`Transcription error (attempt ${attempt + 1}/${maxRetries}):`, error.message);
-                
+
+                const isNonRetryable =
+                    error.name === 'BadRequestException' ||
+                    error.name === 'ValidationException' ||
+                    error.name === 'InvalidParameterException' ||
+                    error.$metadata?.httpStatusCode === 400 ||
+                    error.message?.includes('validation error') ||
+                    error.message?.includes('non-retryable streaming request');
+
                 // If the session has expired, clear the session ID so next retry starts fresh
                 if (error.message?.includes('has expired')) {
                     console.log('Transcribe session expired - will start a new session on retry');
@@ -276,7 +319,15 @@ export class TranscriptionService {
                     } catch (_) { /* ignore */ }
                     this.meetingToCombinedPipe = null;
                 }
-                
+
+                if (isNonRetryable) {
+                    console.error(
+                        'Non-retryable Transcribe configuration error — aborting without further retries. ' +
+                        'Check TRANSCRIBE_LANGUAGE_CODE / TRANSCRIBE_LANGUAGE_OPTIONS / TRANSCRIBE_PREFERRED_LANGUAGE.',
+                    );
+                    break;
+                }
+
                 if (attempt < maxRetries - 1) {
                     console.log(`Retrying in ${retryDelay / 1000} seconds...`);
                     await new Promise(resolve => setTimeout(resolve, retryDelay));
@@ -542,12 +593,12 @@ export class TranscriptionService {
                 if (details.start && this.isTranscribing) {
                     try {
                         recordingStream.write(chunk);
-                        
+
                         // Forward meeting audio to combined_audio sink for Transcribe
                         if (this.meetingToCombinedPipe && this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
                             this.meetingToCombinedPipe.stdin.write(chunk);
                         }
-                        
+
                         if (voiceAssistant.isEnabled() && voiceAssistant.isActive() && voiceAssistant.isActivated()) {
                             voiceAssistant.sendAudioChunk(chunk);
                         }
@@ -613,9 +664,17 @@ export class TranscriptionService {
                     break;
                 }
                 for (const result of event.TranscriptEvent?.Transcript?.Results ?? []) {
+                    const lmaIdentity = (details.lmaIdentity || '').trim();
+                    const scribeIdentity = (details.scribeIdentity || '').trim();
+                    const speakerIsVp =
+                        !!currentSpeaker &&
+                        currentSpeaker !== 'none' &&
+                        ((lmaIdentity.length > 0 && currentSpeaker === lmaIdentity) ||
+                            (scribeIdentity.length > 0 && currentSpeaker === scribeIdentity));
+
                     const suppressAgentTranscript =
                         details.meetingMode === 'translator' &&
-                        agentSpeakingDetector.isSpeaking();
+                        (agentSpeakingDetector.isSpeaking() || speakerIsVp);
 
                     if (suppressAgentTranscript) {
                         if (!result.IsPartial) {
@@ -643,13 +702,14 @@ export class TranscriptionService {
                 }
             }
         } catch (error: any) {
-            // Classify errors as retryable (transient) vs fatal
-            const isRetryableError = 
+            // Classify errors as retryable (transient) vs fatal.
+            // NOTE: 'non-retryable streaming request' means the Transcribe service explicitly
+            // told us not to retry — it must NOT be listed here as retryable.
+            const isRetryableError =
                 error.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
                 error.message?.includes('stream is too big') ||
                 error.message?.includes('has expired') ||
-                error.message?.includes('http2 request did not get a response') ||
-                error.message?.includes('non-retryable streaming request');
+                error.message?.includes('http2 request did not get a response');
 
             if (isLocalTest) {
                 if (error.code === 'ERR_STREAM_PREMATURE_CLOSE') {
