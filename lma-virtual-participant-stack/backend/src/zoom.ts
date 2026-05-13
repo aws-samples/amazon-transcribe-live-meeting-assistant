@@ -554,7 +554,8 @@ export default class Zoom {
                                 if (text.includes('meeting has been ended') ||
                                     text.includes('meeting has ended') ||
                                     text.includes('meeting is end') ||
-                                    text.includes('removed from the meeting')) {
+                                    text.includes('removed from the meeting') ||
+                                    text.includes('have been removed')) {
                                     return true;
                                 }
                                 // Skip consent/info popups (handled by auto-dismiss)
