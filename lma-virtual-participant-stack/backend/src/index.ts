@@ -298,8 +298,8 @@ const main = async (): Promise<void> => {
             await simliAvatar.injectGetUserMediaOverride(page);
             console.log('✓ Simli getUserMedia override injected into meeting page');
             
-            // 3. Start background stream connection + polling (runs concurrently with meeting)
             let isReconnecting = false;
+            let reconnectInFlight: Promise<void> | null = null;
             const connectSimliStream = async () => {
                 try {
                     await simliAvatar.connectStreamToMeetingPage(page);
@@ -308,32 +308,21 @@ const main = async (): Promise<void> => {
                     console.error('Failed to connect Simli stream (non-critical):', error);
                 }
             };
-            
-            // Poll for dead video track and re-connect when needed
-            const simliPollInterval = setInterval(async () => {
-                if (isReconnecting) return;
-                try {
-                    const needsReconnect = await page.evaluate(() => {
-                        // @ts-ignore
-                        if (!window.__simliOverrideInstalled) return true;
-                        // @ts-ignore
-                        const track = window.__simliCurrentTrack;
-                        if (!track) return true;
-                        return track.readyState !== 'live';
-                    }).catch(() => true);
-                    
-                    if (needsReconnect) {
-                        isReconnecting = true;
-                        console.log('Simli video track needs re-connection...');
-                        await connectSimliStream();
-                        isReconnecting = false;
-                    }
-                } catch (e) {
-                    isReconnecting = false;
+
+            await page.exposeFunction('__simliRequestReconnect', async () => {
+                if (reconnectInFlight) {
+                    await reconnectInFlight;
+                    return;
                 }
-            }, 1000);
-            
-            // Initial connection (will be re-established by poll after page navigates)
+                isReconnecting = true;
+                console.log('Simli avatar: on-demand reconnect requested from meeting page');
+                reconnectInFlight = connectSimliStream().finally(() => {
+                    reconnectInFlight = null;
+                    isReconnecting = false;
+                });
+                await reconnectInFlight;
+            });
+
             await connectSimliStream();
             
         } catch (error) {

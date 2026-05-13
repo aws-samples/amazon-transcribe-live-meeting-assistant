@@ -283,6 +283,10 @@ class KinesisStreamManager {
     console.log(`Sent call recording event to Kinesis.`);
   }
 
+  syncTranscriptSegmentState(speaker: string, transcriptResult: any): void {
+    this.processTranscriptionResults(speaker, transcriptResult);
+  }
+
   async sendTranscriptSegment(speaker: string, transcriptResult: any): Promise<void> {
     console.log("Process speaker changes to identify segments within result");
     const segments = this.processTranscriptionResults(speaker, transcriptResult);

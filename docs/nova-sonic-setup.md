@@ -123,7 +123,9 @@ You can customize these settings in the `CustomNovaSonicConfig` item:
 | `voiceId` | String | Nova Sonic voice ID (see available voices below) | `tiffany` |
 | `modelId` | String | Bedrock model ID | `amazon.nova-sonic-v1:0` |
 | `endpointingSensitivity` | String | Turn-taking sensitivity: `HIGH`, `MEDIUM`, or `LOW` | `MEDIUM` |
-| `groupMeetingMode` | Boolean | Enable passive mode for group meetings (default: `false`) | `true` |
+| `meetingMode` | String | Meeting behavior mode: `normal`, `group`, or `translator` (default: `normal`) | `group` |
+| `translatorLanguageA` | String | First language for Translator Mode (default: `English`) | `English` |
+| `translatorLanguageB` | String | Second language for Translator Mode (default: `Spanish`) | `Spanish` |
 
 ### 4.3 Prompt Modes Explained
 
@@ -164,48 +166,91 @@ The `endpointingSensitivity` parameter controls how quickly Nova Sonic detects t
 - Use `MEDIUM` (default) for balanced, natural conversations
 - Use `LOW` when users need more time to formulate thoughts or have speech patterns with longer pauses
 
-### 4.5 Group Meeting Mode (Passive Listening)
+### 4.5 Meeting Modes
 
-The `groupMeetingMode` parameter enables Nova to listen passively in group meetings and only respond when directly addressed. This is ideal for multi-participant meetings where you want the assistant available but not interrupting conversations between other participants.
+The `meetingMode` field controls how the voice assistant behaves in a meeting. There are three modes:
+
+| Mode | Value | Description |
+|------|-------|-------------|
+| **Normal** | `normal` (default) | Standard assistant — responds to wake phrase or always-active |
+| **Group Meeting** | `group` | Passive listening; only speaks when "Alex" is mentioned |
+| **Translator** | `translator` | Real-time bidirectional interpreter between two languages |
+
+> **Requires `VoiceAssistantActivationMode = always_active`** for `group` and `translator` modes to take effect. The Meeting Mode selector in the Nova Sonic Configuration UI is disabled when the deployment uses `wake_phrase` mode.
+
+---
+
+#### Group Meeting Mode (Passive Listening)
+
+Group Meeting Mode enables Nova to listen passively and only respond when directly addressed. This is ideal for multi-participant meetings where you want the assistant available but not interrupting conversations.
 
 **How It Works:**
 - Nova starts **muted** (audio output disabled)
 - Listens to all conversation silently
 - Only responds when someone mentions "Alex" in their speech
-- Automatically calls `unmute` tool before speaking
-- Auto-mutes after finishing response
+- Automatically unmutes before speaking, re-mutes after
 
 **Configuration:**
 ```json
 {
-  "groupMeetingMode": true,
+  "meetingMode": "group",
   "endpointingSensitivity": "LOW"
 }
 ```
 
 **Benefits:**
-- ✅ **Non-intrusive** - Won't interrupt conversations between participants
-- ✅ **Always available** - Listening and ready when needed
-- ✅ **Natural interaction** - Just say "Alex" to get attention
-- ✅ **Barge-in support** - Can interrupt Nova mid-sentence if needed
-- ✅ **No feedback loops** - Separate audio routing prevents echo
+- ✅ **Non-intrusive** — Won't interrupt conversations between participants
+- ✅ **Always available** — Listening and ready when needed
+- ✅ **Natural interaction** — Just say "Alex" to get attention
+- ✅ **Barge-in support** — Can interrupt Nova mid-sentence if needed
 
 **When to Use:**
 - Multi-participant meetings (3+ people)
 - Team discussions where assistant is optional
-- Meetings where you want assistant available but not active
 - Scenarios where interruptions would be disruptive
 
-**Comparison with Wake Phrase Mode:**
+---
 
-| Feature | Group Meeting Mode | Wake Phrase Mode |
-|---------|-------------------|------------------|
-| **Session** | Always connected | Connects on wake phrase |
-| **Listening** | Continuous | Only when activated |
-| **Response** | When "Alex" mentioned | After wake phrase + timeout |
-| **Cost** | Higher (always connected) | Lower (connects on demand) |
-| **Use Case** | Group meetings | 1-on-1 or cost-sensitive |
-| **Barge-in** | Supported | Not applicable |
+#### Translator Mode (Real-Time Bidirectional Interpretation)
+
+Translator Mode turns the voice assistant into a live interpreter. It listens to both parties in a meeting and speaks each utterance back in the other language — no human interpreter required.
+
+**How It Works:**
+- Nova listens continuously (always unmuted, no wake-phrase gate)
+- Detects the language of each utterance
+- Translates and speaks the response in the other language
+- Tools are disabled — the assistant focuses entirely on interpretation
+
+**Configuration:**
+```json
+{
+  "meetingMode": "translator",
+  "translatorLanguageA": "English",
+  "translatorLanguageB": "Spanish"
+}
+```
+
+**Supported Languages:** Any language supported by Amazon Nova Sonic polyglot voices, including English, Spanish, French, German, Italian, Portuguese, Hindi, Japanese, Korean, Mandarin Chinese, Arabic, and more.
+
+**Benefits:**
+- ✅ **No human interpreter needed** — AI handles both directions live
+- ✅ **Natural voices** — Nova Sonic polyglot voices sound human
+- ✅ **Live transcript** — Every utterance and translation is captured
+- ✅ **AI summary** — Post-meeting summary in your preferred language
+
+**When to Use:**
+- Meetings with participants who speak different languages
+- International partner calls, customer support, cross-border negotiations
+- Any scenario where a live interpreter would otherwise be required
+
+**Comparison of all modes:**
+
+| Feature | Normal | Group Meeting | Translator |
+|---------|--------|---------------|------------|
+| **Activation** | Wake phrase / always-active | Always-active required | Always-active required |
+| **Mute behavior** | Per activation mode | Starts muted, unmutes on "Alex" | Always unmuted |
+| **Tools** | Full Strands tools | Full Strands tools | Disabled |
+| **Use case** | 1-on-1 assistant | Multi-person meetings | Multilingual meetings |
 
 ### 4.6 Available Voice IDs
 
@@ -276,11 +321,22 @@ Amazon Nova Sonic supports 16 different voices:
   "promptMode": "base",
   "voiceId": "tiffany",
   "endpointingSensitivity": "LOW",
-  "groupMeetingMode": true
+  "meetingMode": "group"
 }
 ```
 
-**Example 5: Accessibility-Focused (Maximum Patience)**
+**Example 5: Live Translator (English ↔ Spanish)**
+```json
+{
+  "NovaSonicConfigId": "CustomNovaSonicConfig",
+  "meetingMode": "translator",
+  "translatorLanguageA": "English",
+  "translatorLanguageB": "Spanish",
+  "voiceId": "tiffany"
+}
+```
+
+**Example 6: Accessibility-Focused (Maximum Patience)**
 ```json
 {
   "NovaSonicConfigId": "CustomNovaSonicConfig",
@@ -589,9 +645,9 @@ For issues specific to:
 - 3 prompt modes (base, inject, replace)
 - 16 voice IDs to choose from
 - 3 turn-taking sensitivity levels (HIGH, MEDIUM, LOW)
-- Group meeting mode for passive listening
+- **3 meeting modes**: Normal, Group Meeting (passive), Translator (live interpreter)
 - Barge-in support (interrupt Nova mid-sentence)
-- Edit via DynamoDB console
+- Edit via the Nova Sonic Configuration page in the LMA UI or directly in DynamoDB
 - Changes apply immediately (no redeployment)
 
-That's it! Your meetings now have an AI voice assistant powered by AWS Nova Sonic 2 with access to your organization's knowledge and systems, fully customizable to match your needs - from active 1-on-1 conversations to passive group meeting support!
+That's it! Your meetings now have an AI voice assistant powered by AWS Nova Sonic 2 — from active 1-on-1 conversations, to passive group meeting support, to real-time multilingual interpretation.

@@ -497,6 +497,18 @@ Parameters:
       Name of the EventBridge Schedule Group for Virtual Participants from the VP stack.
       This should match the schedule group name created by the Virtual Participant stack.
 
+  VoiceAssistantActivationMode:
+    Type: String
+    Default: "wake_phrase"
+    AllowedValues:
+      - "always_active"
+      - "wake_phrase"
+    Description: >-
+      (Informational) Activation mode used by the Virtual Participant voice assistant.
+      Forwarded from the main stack so the Nova Sonic Configuration admin UI can
+      indicate whether Meeting Mode settings (Group / Translator) are active.
+      These modes only take effect when this value is 'always_active'.
+
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -1197,6 +1209,8 @@ Resources:
               - ""
           - Name: VITE_OAUTH_CALLBACK_URL
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+          - Name: VITE_VOICE_ASSISTANT_ACTIVATION_MODE
+            Value: !Ref VoiceAssistantActivationMode
   # CodeBuild project for building MCP servers Lambda layer
   MCPLayerBuildProject:
     Type: AWS::CodeBuild::Project
@@ -4825,6 +4839,7 @@ Resources:
     Type: AWS::ApiGateway::Stage
     Condition: ShouldEnableMCPServer
     # checkov:skip=CKV_AWS_73: "X-Ray tracing not required for this API; operational cost consideration"
+    # checkov:skip=CKV_AWS_76: "API Gateway access logging (AccessLogSetting) intentionally not configured — same rationale as CKV2_AWS_4 below (requires account-wide AWS::ApiGateway::Account.CloudWatchRoleArn singleton that LMA does not take ownership of). Customers who want per-request MCP access logs can enable them manually after deployment by following the steps in the CKV2_AWS_4 skip comment."
     # checkov:skip=CKV2_AWS_4: "CloudWatch access logging (AccessLogSetting) and method-level execution logging (MethodSettings.LoggingLevel) are intentionally NOT configured on this stage. Both require the account/region-wide AWS::ApiGateway::Account.CloudWatchRoleArn singleton to be set; in brand-new AWS accounts/regions this singleton is unset and stack creation fails with 'CloudWatch Logs role ARN must be set in account settings to enable logging'. LMA is deployed into customer accounts where that singleton may already be owned by another stack, so LMA does not take ownership of it. Customers who want per-request MCP access logs can enable them manually after deployment: (1) create an IAM role trusted by apigateway.amazonaws.com with the AmazonAPIGatewayPushToCloudWatchLogs managed policy; (2) call apigateway:UpdateAccount --cloud-watch-role-arn <role-arn> once per region; (3) re-add AccessLogSetting on the MCP stage. CloudTrail data-event logging on the Lambda integration (MCPServerAnalyticsFunction) and CloudWatch metrics on this stage (MetricsEnabled: true) remain available without any account-level prerequisite."
     # checkov:skip=CKV2_AWS_29: "WAF protection is OPTIONAL via WAFAllowedIPv4Ranges parameter - customer configurable"
     # checkov:skip=CKV_AWS_120: "Caching disabled by design - this is the API Key auth endpoint; caching would serve stale authorization decisions after a user revokes their key. AuthorizerResultTtlInSeconds=0 ensures every request re-evaluates the key hash against DynamoDB."

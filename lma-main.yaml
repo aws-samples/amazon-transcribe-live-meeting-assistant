@@ -2349,6 +2349,7 @@ Resources:
         EnableMCPServer: !Ref EnableMCP
         MCPServerCallbackURLs: !Ref MCPServerCallbackURLs
         CognitoUserPoolDomain: !GetAtt COGNITOSTACK.Outputs.CognitoUserPoolDomain
+        VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack

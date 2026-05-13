@@ -12,7 +12,7 @@ title: "Voice Assistant"
 - [Wake Phrase Configuration](#wake-phrase-configuration)
 - [Session Management](#session-management)
 - [Barge-In](#barge-in)
-- [Group Meeting Mode](#group-meeting-mode)
+- [Meeting Mode](#meeting-mode)
 - [Turn-Taking Sensitivity](#turn-taking-sensitivity)
 - [Custom System Prompts](#custom-system-prompts)
 - [Voice ID](#voice-id)
@@ -30,7 +30,7 @@ LMA can optionally add a voice assistant to the Virtual Participant, allowing it
 | Provider | AWS (Amazon) | Third-party |
 | Latency | Low (native AWS) | Moderate (external API) |
 | Session duration | Unlimited (auto-refresh every 5 min) | 8-minute sessions (auto-refresh) |
-| Group meeting mode | Yes | No |
+| Meeting modes | `normal`, `group`, `translator` | `normal`, `group`, `translator` |
 | Barge-in support | Yes | Yes |
 | Custom system prompts | Yes (base/inject/replace modes) | Yes (via ElevenLabs agent config) |
 | Voice selection | Multiple AWS voice IDs | Multiple ElevenLabs voice IDs |
@@ -71,16 +71,60 @@ ElevenLabs session timeout is configured within the ElevenLabs platform. Auto-re
 
 The voice assistant supports barge-in, allowing meeting participants to interrupt the assistant mid-sentence. This is implemented through separate audio routing for VP meeting audio versus agent output, ensuring that the assistant can detect incoming speech even while it is speaking and stop its current response to listen.
 
-## Group Meeting Mode
+## Meeting Mode
 
-*Nova Sonic only.*
+The voice assistant supports three meeting modes, configured via the **Meeting Mode** selector on the Nova Sonic Configuration page (admin-only). All three modes require the stack to be deployed with `VoiceAssistantActivationMode = always_active` — in `wake_phrase` mode, `group` and `translator` have no effect and the UI will surface a warning.
 
-Group meeting mode enables passive listening where the assistant monitors the full meeting conversation but only responds when directly addressed. The assistant uses mute/unmute tools to control its participation:
+| Mode | Starts muted? | Speaks when… | Typical use |
+|---|---|---|---|
+| `normal` (default) | No | Activated by wake phrase or always-active session | Standard assistant behavior |
+| `group` | Yes | A configured wake phrase (e.g. "hey Alex") is detected in the transcript | Multi-participant meetings where the assistant should remain unobtrusive until addressed |
+| `translator` | No | Every completed utterance | Live bidirectional interpreter between two languages |
 
-- **Muted**: The assistant listens to the transcript but does not respond
-- **Unmuted**: The assistant actively participates in the conversation
+### Group Meeting Mode
 
-This mode is ideal for multi-participant meetings where the assistant should remain unobtrusive until needed.
+Group meeting mode enables passive listening where the assistant monitors the full meeting conversation but only speaks when directly addressed. The assistant starts muted and unmutes when a wake phrase is detected in a participant's transcript; after `VoiceAssistantActivationDuration` seconds without further wake-phrase mentions it automatically mutes again.
+
+- **Nova Sonic:** Wake-phrase detection is performed by LMA on Nova's FINAL USER transcripts, and a `mute` tool is registered so the assistant can re-mute when asked (e.g. "stop talking").
+- **ElevenLabs:** Wake-phrase detection is performed by LMA on ElevenLabs `user_transcript` messages. The ElevenLabs agent's persona (system prompt, first message, tools, voice, language) is configured in the ElevenLabs dashboard — LMA does not override it. Configure your ElevenLabs agent normally and set LMA's Meeting Mode to `group`; LMA will drop the agent's audio output until a wake phrase is detected.
+
+### Translator Mode
+
+Translator mode turns the voice assistant into a live bidirectional interpreter between two configured languages. The assistant listens continuously, automatically detects which of the two languages each utterance is in, and speaks the translation in the other language.
+
+Configuration attributes (set on the Nova Sonic Configuration page or directly in the `CustomNovaSonicConfig` DynamoDB item):
+
+- `meetingMode`: `translator`
+- `translatorLanguageA`: the first language (default `English`)
+- `translatorLanguageB`: the second language (default `Spanish`)
+
+#### Nova Sonic
+
+LMA replaces the agent's system prompt with a translator-specific prompt parameterized on `translatorLanguageA` / `translatorLanguageB`, and registers no tools (no `strands_agent`, no `mute`). Nova Sonic speaks the translation directly using the configured `voiceId`. A polyglot voice such as `tiffany` (feminine) or `matthew` (masculine) is recommended so the same voice can render both languages.
+
+Example:
+
+- English speaker: "Hi, how are you today?"
+- Assistant (in French): "Salut, comment vas-tu aujourd'hui ?"
+- French speaker: "Très bien, merci, et toi ?"
+- Assistant (in English): "Very well, thank you, and you?"
+
+#### ElevenLabs
+
+The ElevenLabs agent's persona is configured in the ElevenLabs dashboard — LMA does not override it. To use translator mode with ElevenLabs:
+
+1. In the ElevenLabs dashboard, create or edit the agent and configure it as a bidirectional interpreter between your two languages. For example, set the agent's system prompt to something like:
+   > "You are a live bidirectional interpreter between English and Spanish. For every utterance you hear, detect which of these two languages it is in and translate it into the other language. Speak only the translation, in the target language. Do not greet, explain, or add commentary. Preserve names, numbers, and meaning. If an utterance is unclear or in a third language, translate it into English."
+2. Set the agent's first message to empty.
+3. Choose a voice that can render both languages naturally (an ElevenLabs multilingual voice).
+4. In LMA, set Meeting Mode to `translator` and set `translatorLanguageA` / `translatorLanguageB` to match your agent's configured languages. LMA reads these to keep its own state and docs consistent, but does not push them to ElevenLabs.
+5. Deploy the main stack with `VoiceAssistantActivationMode = always_active` so LMA keeps the WebSocket open and the agent can translate every utterance without a wake phrase.
+
+#### Limitations
+
+- A single agent voice is used for both translation directions. For different voices per direction, two concurrent agents would be required (not supported today).
+- Meeting Mode settings only take effect when the stack is deployed with `VoiceAssistantActivationMode = always_active`.
+- If an utterance is in a language other than the two configured, Nova Sonic falls back to translating it into `translatorLanguageA` per the system prompt.
 
 ## Turn-Taking Sensitivity
 
