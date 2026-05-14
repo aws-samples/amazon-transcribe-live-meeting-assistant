@@ -184,7 +184,94 @@ List all publishable LMA sub-stacks with their package types.
 lma list-stacks
 ```
 
+### `lma vp` — Virtual Participant Operations
+
+Create, fetch, end, and list Virtual Participants directly from the CLI. These commands talk to the LMA AppSync API and the VP scheduler Step Function via SigV4-signed AWS calls (no Cognito login required — your AWS credentials are used).
+
+```bash
+# Create + launch a VP, waiting until it leaves INITIALIZING
+lma vp create --name "Weekly sync" --platform ZOOM --id 1234567890
+
+# Create with a password and a custom display name; emit JSON
+lma vp create --name "Standup" --platform TEAMS --id 99999 \
+              --password "abc" --user-name "lma-bot" --json
+
+# Get a single VP row
+lma vp get --id <vp-id>
+
+# End a running VP
+lma vp end --id <vp-id> --reason "Manual cleanup"
+
+# List all VPs visible to the calling IAM principal
+lma vp list
+lma vp list --json
+```
+
+**Common options for every `lma vp` subcommand:**
+
+| Option | Description |
+|--------|-------------|
+| `--stack-name TEXT` | CloudFormation stack name (env: `LMA_STACK_NAME`) |
+| `--region TEXT` | AWS region (env: `AWS_DEFAULT_REGION`) |
+| `--json` | Emit JSON instead of formatted text |
+
+**`lma vp create` extra options:**
+
+| Option | Description |
+|--------|-------------|
+| `--name TEXT` | Meeting name (required) |
+| `--platform [ZOOM\|TEAMS\|CHIME\|WEBEX]` | Meeting platform (required, case-insensitive) |
+| `--id TEXT` | Meeting ID (required) |
+| `--password TEXT` | Meeting password (default: empty) |
+| `--user-name TEXT` | Display name the scribe reports (default: `lma-cli@lma`) |
+| `--wait / --no-wait` | Poll until the VP leaves `INITIALIZING` (default: `--wait`) |
+| `--timeout FLOAT` | Max seconds to wait for launch (default: 120) |
+
+> The underlying SDK methods are documented under [`client.vp`](lma-sdk.md#clientvp--virtual-participant-operations).
+
+### `lma load` — Load Simulator (plugin)
+
+The `lma load` subcommand tree is provided by the **LMA Load Simulator** package (`utilities/load-simulator/`). It registers itself with the `lma` CLI through the `lma_cli.plugins` entry-point group, so once both packages are installed alongside each other it appears as a first-class subcommand of `lma`.
+
+```bash
+# Install the load simulator (in addition to lma-sdk + lma-cli)
+pip install -e utilities/load-simulator
+
+# Or with optional driver extras (websocket audio resampling, upload pipeline)
+pip install -e 'utilities/load-simulator[all]'
+
+# Verify
+lma load --help
+```
+
+Available scenarios (each tagged with a `--run-id` for deterministic teardown):
+
+| Subcommand | Purpose |
+|------------|---------|
+| `lma load concurrent` | Drive N simultaneous meetings via `--driver kinesis\|upload\|websocket\|vp` |
+| `lma load backfill` | Fabricate N historical meetings spread over the last Y days (synthetic or real Cognito users for RBAC-at-scale testing) |
+| `lma load rbac` | Provision N synthetic Cognito users + latency-sweep `listCalls` / `getCallCount` |
+| `lma load cleanup` | Delete every synthetic resource (meetings, VPs, users, S3 orphans) for a given `--target-run-id` (or `*`) |
+| `lma load stack-info` | Print the CloudFormation resources the simulator resolved — handy for debugging |
+
+The simulator can also be invoked standalone as `lma-load <subcommand>` if you have not installed `lma-cli`.
+
+For the full reference (driver matrix, cost/quota guardrails, observability dashboard, synthetic-user provisioning, safety rails, and example fixtures), see the [LMA Load Simulator README](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/main/utilities/load-simulator/README.md).
+
+## CLI Plugins
+
+The `lma` CLI auto-discovers any installed Python package that declares a Click command under the `lma_cli.plugins` entry-point group. This is how `lma load ...` is contributed by the Load Simulator package; the same mechanism can be used for any third-party command tree.
+
+```toml
+# pyproject.toml of your plugin package
+[project.entry-points."lma_cli.plugins"]
+mything = "my_pkg.cli:my_command"   # registers `lma mything ...`
+```
+
+Plugin failures are logged but never crash the CLI — if a plugin fails to import, its commands simply don't appear under `lma --help`.
+
 ## Global Options
+
 
 ```bash
 lma --region us-west-2 status                  # Override AWS region
@@ -254,10 +341,10 @@ lma deploy --stack-name MyLMA --wait
 | `lma meetings list` | List meetings | 2 |
 | `lma meetings get <id>` | Get meeting details | 2 |
 | `lma transcript get <id>` | Get transcript | 2 |
-| `lma join <meeting-url>` | Join meeting via Virtual Participant | 3 |
-| `lma leave <meeting-id>` | Leave meeting | 3 |
 | `lma ask "<question>"` | Ask meeting assistant | 4 |
 | `lma stream start` | Stream audio | 4 |
+
+> Virtual Participant join/leave/list is already shipped — see [`lma vp`](#lma-vp--virtual-participant-operations). Load testing is provided by the [`lma load`](#lma-load--load-simulator-plugin) plugin.
 
 ## Architecture
 
@@ -265,11 +352,15 @@ The CLI is built with [Click](https://click.palletsprojects.com/) and [Rich](htt
 
 ```
 lma_cli/
-├── cli.py           # Main entry point, Click group
+├── cli.py           # Main entry point, Click group + plugin loader
 ├── formatters.py    # Rich output helpers (tables, panels, colours)
 └── commands/
     ├── publish.py   # publish, check-prereqs, list-stacks
-    └── stack.py     # status, outputs, deploy, delete, logs
+    ├── stack.py     # status, outputs, deploy, delete, logs
+    └── vp.py        # vp create / get / end / list
 ```
 
+External plugins (e.g. `utilities/load-simulator/lma_load/cli.py`, which contributes `lma load ...`) are auto-registered via the `lma_cli.plugins` entry-point group — see [CLI Plugins](#cli-plugins).
+
 All AWS operations go through the LMA SDK — the CLI only handles UX/formatting.
+

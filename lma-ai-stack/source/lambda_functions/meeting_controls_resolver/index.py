@@ -6,6 +6,7 @@
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from os import environ
 
@@ -15,6 +16,16 @@ from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import ClientError
 from gql import gql  # noqa: F401
 from gql.dsl import DSLMutation, DSLQuery, DSLSchema, dsl_gql
+
+# Concurrency tuning.  AppSync + DynamoDB easily absorb dozens of in-flight
+# requests per meeting, but we cap both dials so a huge bulk delete can't
+# saturate the default requests connection pool (~10 connections) or DynamoDB
+# per-partition WCU on-demand limits.
+MEETING_CONCURRENCY = int(environ.get("DELETE_MEETING_CONCURRENCY", "8"))
+SEGMENT_CONCURRENCY = int(environ.get("DELETE_SEGMENT_CONCURRENCY", "16"))
+# S3 DeleteObjects hard-caps at 1000 keys per request.
+S3_BATCH_DELETE_LIMIT = 1000
+
 
 APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
 appsync_client = AppsyncRequestsGqlClient(url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
@@ -48,25 +59,51 @@ def posixify_filename(filename: str) -> str:
     return posix_filename
 
 
+def _batch_delete_prefix(bucket: str, prefix: str) -> int:
+    """List every key under ``prefix`` and delete them in ``DeleteObjects``
+    batches of up to 1000 keys.  Returns the number of keys deleted.
+
+    This is ~1 round-trip per 1000 keys versus the old 1 request per key,
+    so a meeting with dozens of recording chunks / transcript files goes
+    from dozens of round-trips to one.
+    """
+    deleted = 0
+    paginator = s3_client.get_paginator("list_objects_v2")
+    batch: list[dict] = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []) or []:
+            batch.append({"Key": obj["Key"]})
+            if len(batch) >= S3_BATCH_DELETE_LIMIT:
+                s3_client.delete_objects(Bucket=bucket, Delete={"Objects": batch, "Quiet": True})
+                deleted += len(batch)
+                batch = []
+    if batch:
+        s3_client.delete_objects(Bucket=bucket, Delete={"Objects": batch, "Quiet": True})
+        deleted += len(batch)
+    return deleted
+
+
 def delete_recordings_transcripts(callid):
     filename = posixify_filename(f"{callid}")
-    prefix = f"{S3_RECORDINGS_PREFIX}{filename}"
+    recordings_prefix = f"{S3_RECORDINGS_PREFIX}{filename}"
+    transcripts_prefix = f"{S3_TRANSCRIPTS_PREFIX}{filename}"
 
-    response = s3_client.list_objects_v2(Bucket=S3_BUCKET_NAME, Prefix=prefix)
-    if "Contents" in response:
-        for object in response["Contents"]:
-            print("Deleting ", object["Key"])
-            response = s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=object["Key"])
-
-    prefix = f"{S3_TRANSCRIPTS_PREFIX}{filename}"
-    response = s3_client.list_objects_v2(Bucket=S3_BUCKET_NAME, Prefix=prefix)
-
-    if "Contents" in response:
-        for object in response["Contents"]:
-            print("Deleting ", object["Key"])
-            response = s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=object["Key"])
-
-    return
+    # Run the two prefix-scans in parallel: they hit different key spaces
+    # (recordings vs transcripts) so there's no contention.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {
+            pool.submit(_batch_delete_prefix, S3_BUCKET_NAME, recordings_prefix): "recordings",
+            pool.submit(_batch_delete_prefix, S3_BUCKET_NAME, transcripts_prefix): "transcripts",
+        }
+        for fut in as_completed(futures):
+            kind = futures[fut]
+            try:
+                n = fut.result()
+                if n:
+                    logger.info("Deleted %d %s objects for %s", n, kind, callid)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Error deleting %s for %s: %s", kind, callid, exc)
+                raise
 
 
 def get_call_details(appsync_session, schema, callid):
@@ -296,38 +333,117 @@ def update_transcript_segment(appsync_session, schema, PK, SK, new_recipients):
 # Delete Meetings
 
 
+def _tune_requests_pool(appsync_session, size: int) -> None:
+    """Expand the underlying urllib3 connection pool so concurrent GraphQL
+    requests don't serialise on the default 10-connection cap.  Safe no-op
+    if the transport internals change in a future gql version.
+    """
+    try:
+        from requests.adapters import HTTPAdapter
+
+        rs = appsync_session.transport.session  # type: ignore[attr-defined]
+        adapter = HTTPAdapter(pool_connections=size, pool_maxsize=size, max_retries=0)
+        rs.mount("https://", adapter)
+        rs.mount("http://", adapter)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not tune requests pool: %s", exc)
+
+
 def delete_meetings(calls, owner):
+    """Delete multiple meetings in parallel.
+
+    We open a single AppSync session (schema fetch is ~200 ms; amortised
+    across the batch) and fan the per-meeting work across a ThreadPoolExecutor.
+    gql's SyncClientSession.execute() ultimately calls requests.Session.send()
+    which is thread-safe for concurrent callers, so sharing the session across
+    workers is OK at our cap of ``MEETING_CONCURRENCY`` threads.
+
+    Failures in any single meeting propagate (after waiting for in-flight
+    futures) so the overall response still reports the failure rather than
+    silently swallowing it.
+    """
+    if not calls:
+        return {"Result": "No meetings to delete"}
+
     with appsync_client as appsync_session:
         if not appsync_session.client.schema:
             raise ValueError("invalid AppSync schema")
         schema = DSLSchema(appsync_session.client.schema)
 
-        for call in calls:
-            callid = call["CallId"]
-            listPK = call["ListPK"]
-            listSK = call["ListSK"]
-            delete_meeting(appsync_session, schema, callid, listPK, listSK, owner)
+        # Expand the underlying requests pool so MEETING_CONCURRENCY *
+        # SEGMENT_CONCURRENCY concurrent calls don't serialise on the default
+        # 10-connection limit.
+        _tune_requests_pool(appsync_session, MEETING_CONCURRENCY * SEGMENT_CONCURRENCY + 4)
+
+        # Single meeting: skip the thread pool so we don't pay the pool
+        # overhead for the common delete-one-meeting-from-detail-page path.
+        if len(calls) == 1:
+            call = calls[0]
+            delete_meeting(
+                appsync_session,
+                schema,
+                call["CallId"],
+                call["ListPK"],
+                call["ListSK"],
+                owner,
+            )
+            return {"Result": "Meetings deleted successfully"}
+
+        first_exc = None
+        workers = max(1, min(MEETING_CONCURRENCY, len(calls)))
+        logger.info("Deleting %d meetings with concurrency=%d", len(calls), workers)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(
+                    delete_meeting,
+                    appsync_session,
+                    schema,
+                    call["CallId"],
+                    call["ListPK"],
+                    call["ListSK"],
+                    owner,
+                ): call["CallId"]
+                for call in calls
+            }
+            for fut in as_completed(futures):
+                cid = futures[fut]
+                try:
+                    fut.result()
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Error deleting meeting %s: %s", cid, exc)
+                    if first_exc is None:
+                        first_exc = exc
+        if first_exc is not None:
+            raise first_exc
 
     return {"Result": "Meetings deleted successfully"}
 
 
 def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
     try:
-        # First check and cleanup any associated Virtual Participants
-        cleanup_virtual_participants(callid)
-
-        # Delete the transcript segments
-        result = get_transcript_segments(appsync_session, schema, callid)
-
-        for transcript_segment in result.get("getTranscriptSegments").get("TranscriptSegments"):
-            delete_transcript_segment(
-                appsync_session, schema, transcript_segment["PK"], transcript_segment["SK"]
+        # Run the three independent preparation steps in parallel:
+        #  1. Virtual Participant cleanup (scan + ECS/DDB writes)
+        #  2. Fetch + bulk-delete transcript segments via AppSync
+        #  3. Fetch call details (needed to preserve SharedWith on deleteCall)
+        # Plus start S3 prefix deletion as soon as we kick off steps 1-3.
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            vp_future = pool.submit(cleanup_virtual_participants, callid)
+            segments_future = pool.submit(
+                _delete_all_transcript_segments, appsync_session, schema, callid
             )
+            details_future = pool.submit(get_call_details, appsync_session, schema, callid)
+            # S3 cleanup is independent of AppSync/DDB state, so start it now.
+            s3_future = pool.submit(delete_recordings_transcripts, callid)
 
-        result = get_call_details(appsync_session, schema, callid)
-        shared_with = result.get("getCall").get("SharedWith")
+            # Surface any exception from the parallel preparation steps.
+            vp_future.result()
+            segments_future.result()
+            details_result = details_future.result()
+            s3_future.result()
 
-        delete_recordings_transcripts(callid)
+        shared_with = (
+            details_result.get("getCall", {}).get("SharedWith") if details_result else None
+        )
 
         input = {
             "CallId": callid,
@@ -337,7 +453,9 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             "SharedWith": shared_with,
         }
 
-        # Now delete the call records (PK that begins with c# and cls#)
+        # Finally delete the call records (PK that begins with c# and cls#).
+        # We do this *after* the parallel prep so an error above doesn't leave
+        # the DDB call rows orphaned.
         mutation = dsl_gql(
             DSLMutation(
                 schema.Mutation.deleteCall.args(input=input).select(
@@ -347,8 +465,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
                 )
             )
         )
-
-        result = appsync_session.execute(mutation)
+        appsync_session.execute(mutation)
     except ClientError as err:
         logger.error(
             "Error deleting meetings %s: %s",
@@ -358,6 +475,39 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         raise
     else:
         return
+
+
+def _delete_all_transcript_segments(appsync_session, schema, callid):
+    """Fetch every transcript segment for the meeting and delete them in
+    parallel via ``deleteTranscriptSegment`` mutations.
+    """
+    result = get_transcript_segments(appsync_session, schema, callid)
+    segments = (result or {}).get("getTranscriptSegments", {}).get("TranscriptSegments") or []
+    if not segments:
+        return
+
+    workers = max(1, min(SEGMENT_CONCURRENCY, len(segments)))
+    first_exc = None
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [
+            pool.submit(
+                delete_transcript_segment,
+                appsync_session,
+                schema,
+                seg["PK"],
+                seg["SK"],
+            )
+            for seg in segments
+        ]
+        for fut in as_completed(futures):
+            try:
+                fut.result()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Error deleting a transcript segment for %s: %s", callid, exc)
+                if first_exc is None:
+                    first_exc = exc
+    if first_exc is not None:
+        raise first_exc
 
 
 def cleanup_virtual_participants(callid):

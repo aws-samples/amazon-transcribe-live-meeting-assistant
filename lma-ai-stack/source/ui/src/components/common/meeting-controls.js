@@ -287,6 +287,7 @@ export const deleteModal = (props) => {
   const [visible, setVisible] = useState(false);
   const [deleteDisabled, setDeleteDisabled] = useState(false);
   const [deleteResult, setDeleteResult] = useState(null);
+  const [deleteError, setDeleteError] = useState(null);
   const [deletedCallIds, setDeletedCallIds] = useState([]);
 
   const navigate = useNavigate();
@@ -305,6 +306,7 @@ export const deleteModal = (props) => {
   const openDeleteSettings = async () => {
     setVisible(true);
     setDeleteResult(null);
+    setDeleteError(null);
     setDeletedCallIds([]);
   };
 
@@ -312,19 +314,44 @@ export const deleteModal = (props) => {
     setDeleteDisabled(false);
     setVisible(false);
     setDeleteResult(null);
+    setDeleteError(null);
     setDeletedCallIds([]);
     if (callId) {
       navigate(-1);
     }
   };
 
+  // Extract a human-readable message from an AppSync/GraphQL error so the modal
+  // surfaces failures instead of hanging silently (e.g. when the server rejects
+  // the delete due to an invalid payload or permission error).
+  const extractErrorMessage = (err) => {
+    if (!err) return 'Unknown error';
+    if (typeof err === 'string') return err;
+    if (Array.isArray(err?.errors) && err.errors.length > 0) {
+      return err.errors.map((e) => e.message || String(e)).join('; ');
+    }
+    if (err?.message) return err.message;
+    try {
+      return JSON.stringify(err);
+    } catch (_) {
+      return String(err);
+    }
+  };
+
   const handleDelete = async (e) => {
-    console.log('callID', callId);
     e.preventDefault();
     setDeleteDisabled(true);
+    setDeleteError(null);
     setDeletedCallIds(props.selectedItems.map((c) => c.callId));
-    const result = await invokeDeleteMeetings(props);
-    setDeleteResult(result);
+    try {
+      const result = await invokeDeleteMeetings(props);
+      setDeleteResult(result);
+    } catch (err) {
+      console.error('Delete meeting failed', err);
+      setDeleteError(extractErrorMessage(err));
+      // Re-enable the Delete button so the user can close the modal or retry.
+      setDeleteDisabled(false);
+    }
   };
 
   const handleDeleteSubmit = (event) => {
@@ -407,6 +434,9 @@ export const deleteModal = (props) => {
                   <Alert type="success" visible={deleteResult}>
                     {deleteResult}
                   </Alert>
+                  <Alert type="error" visible={!!deleteError} header="Delete failed">
+                    {deleteError}
+                  </Alert>
                 </ColumnLayout>
               </FormField>
             </form>
@@ -440,9 +470,14 @@ export const deleteModal = (props) => {
             </Box>
           }
         >
-          <Alert type="success" visible={deleteResult}>
-            {deleteResult}
-          </Alert>
+          <SpaceBetween size="s">
+            <Alert type="success" visible={deleteResult}>
+              {deleteResult}
+            </Alert>
+            <Alert type="error" visible={!!deleteError} header="Delete failed">
+              {deleteError}
+            </Alert>
+          </SpaceBetween>
         </Modal>
       )}
     </SpaceBetween>
