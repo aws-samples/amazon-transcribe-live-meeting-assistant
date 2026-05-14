@@ -385,21 +385,27 @@ export class NovaAgent implements VoiceAssistantProvider {
       },
     };
 
-    // In translator mode, register NO tools (zero chat/strands/mute). We want Nova
-    // to do nothing but translate — tool loops would derail the interpreter behavior.
     const translatorMode = (this.meetingMode === 'translator');
 
-    // Add tool configuration if Strands Lambda ARN is configured or group meeting mode is enabled
-    // (but NOT in translator mode)
-    if (!translatorMode && (this.strandsLambdaArn || this.groupMeetingMode)) {
+    // Tool configuration:
+    //   - Strands agent: only in non-translator modes when Strands ARN is configured.
+    //   - Group-mode mute (legacy): only in group meeting mode.
+    //   - Translator mute/unmute: only in translator mode — exposes `mute` and
+    //     `unmute` so the speaker can pause/resume translations with a strict
+    //     trigger phrase ("translator mute" / "translator unmute").
+    const wantStrands = (this.strandsLambdaArn && !translatorMode);
+    const wantGroupMute = this.groupMeetingMode;
+    const wantTranslatorMuteUnmute = translatorMode;
+
+    if (wantStrands || wantGroupMute || wantTranslatorMuteUnmute) {
       promptStartEvent.event.promptStart.toolUseOutputConfiguration = {
         mediaType: 'application/json',
       };
-      
+
       const tools: any[] = [];
-      
+
       // Add Strands agent tool if configured
-      if (this.strandsLambdaArn) {
+      if (wantStrands) {
         tools.push({
           toolSpec: {
             name: 'strands_agent',
@@ -419,11 +425,9 @@ export class NovaAgent implements VoiceAssistantProvider {
           },
         });
       }
-      
-      // Add mute tool if group meeting mode is enabled
-      // Wake phrase detection is handled by our code watching Nova's USER FINAL transcripts
-      // (no check_if_addressed tool needed - eliminates infinite tool-call loops)
-      if (this.groupMeetingMode) {
+
+      // Group-mode mute tool (legacy behavior — natural-language "be quiet" matching)
+      if (wantGroupMute) {
         tools.push({
           toolSpec: {
             name: 'mute',
@@ -437,19 +441,52 @@ export class NovaAgent implements VoiceAssistantProvider {
           },
         });
       }
-      
+
+      // Translator-mode mute/unmute tools — strict trigger phrases. The
+      // tool descriptions intentionally repeat the trigger phrase verbatim so
+      // the model has a single, unambiguous condition for each tool.
+      if (wantTranslatorMuteUnmute) {
+        tools.push({
+          toolSpec: {
+            name: 'mute',
+            description: 'Mute yourself. Call this tool if and only if you hear the exact phrase "translator mute" or "alex mute". Do not call this tool for any other reason.',
+            inputSchema: {
+              json: JSON.stringify({
+                type: 'object',
+                properties: {},
+              }),
+            },
+          },
+        });
+        tools.push({
+          toolSpec: {
+            name: 'unmute',
+            description: 'Unmute yourself. Call this tool if and only if you hear the exact phrase "translator unmute" or "alex unmute". Do not call this tool for any other reason.',
+            inputSchema: {
+              json: JSON.stringify({
+                type: 'object',
+                properties: {},
+              }),
+            },
+          },
+        });
+      }
+
       promptStartEvent.event.promptStart.toolConfiguration = {
         tools: tools,
         toolChoice: {
           auto: {},
         },
       };
-      
-      if (this.strandsLambdaArn) {
+
+      if (wantStrands) {
         console.log('✓ Strands agent tool configured in promptStart');
       }
-      if (this.groupMeetingMode) {
-        console.log('✓ Mute/unmute tools configured in promptStart');
+      if (wantGroupMute) {
+        console.log('✓ Group-mode mute tool configured in promptStart');
+      }
+      if (wantTranslatorMuteUnmute) {
+        console.log('✓ Translator-mode mute/unmute tools configured in promptStart');
       }
     }
 
@@ -550,6 +587,39 @@ export class NovaAgent implements VoiceAssistantProvider {
         '7. Never say anything on your own. Do not introduce yourself. Do not ask clarifying questions.',
         '',
         'Begin translating from the very next utterance you hear.',
+        '',
+        '---',
+        '',
+        'MUTE STATE — INDEPENDENT INSTRUCTION (this rule stands alone and tells you whether you are currently allowed to speak):',
+        'You have two possible states: UNMUTED and MUTED.',
+        'You start in the UNMUTED state.',
+        'You transition to MUTED only when you call the `mute` tool.',
+        'You transition back to UNMUTED only when you call the `unmute` tool.',
+        'Each tool call returns a tool result confirming your new state — trust that confirmation.',
+        '',
+        'While in the UNMUTED state: follow the translation rules above. Translate every utterance you hear.',
+        '',
+        'While in the MUTED state: do NOT translate ANY utterance. Do NOT speak ANY response. Stay completely silent. The only thing you act on while muted is the unmute trigger phrase below.',
+        '',
+        '---',
+        '',
+        'MUTE TOOL — INDEPENDENT INSTRUCTION (this rule stands alone and overrides translation behavior for the matching utterance):',
+        'If, and only if, you hear the exact phrase "translator mute" or "alex mute", do the following:',
+        '  - Call the `mute` tool.',
+        '  - Say only the single word "ok" in response, or nothing at all.',
+        '  - Do NOT translate the phrase. Do NOT say anything else.',
+        'Otherwise, never call the `mute` tool.',
+        '',
+        '---',
+        '',
+        'UNMUTE TOOL — INDEPENDENT INSTRUCTION (this rule stands alone and overrides translation behavior for the matching utterance):',
+        'If, and only if, you hear the exact phrase "translator unmute" or "alex unmute", do the following:',
+        '  - Call the `unmute` tool.',
+        '  - Say only the single word "ok" in response, or nothing at all.',
+        '  - Do NOT translate the phrase. Do NOT say anything else.',
+        'Otherwise, never call the `unmute` tool.',
+        '',
+        'IMPORTANT: While in the MUTED state, you must continue to listen for, and act on, the unmute trigger phrase above. That is the only utterance that can take you out of the MUTED state.',
       ].join('\n');
     }
 
@@ -1102,6 +1172,11 @@ export class NovaAgent implements VoiceAssistantProvider {
                 this.handleMuteTool(toolUseId).catch(error => {
                   console.error('Error handling mute tool:', error);
                 });
+              } else if (toolName === 'unmute') {
+                // Handle unmute tool call (translator-mode only)
+                this.handleUnmuteTool(toolUseId).catch(error => {
+                  console.error('Error handling unmute tool:', error);
+                });
               }
             } else if (jsonResponse.event?.contentEnd) {
               console.log('Content end:', jsonResponse.event.contentEnd.type);
@@ -1319,15 +1394,43 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   private async handleMuteTool(toolUseId: string): Promise<void> {
     console.log('🔇 Mute tool called - muting agent');
-    this._isMuted = true;
-    
-    // Stop the pacat stream to flush any buffered audio immediately
-    this.stopPacatStream();
-    
-    // Send tool result back to Nova
+    // Delegate to public mute() so buffered playback is flushed and conversationActive
+    // is reset; mute() is idempotent.
+    this.mute('tool');
+
+    // Send tool result back to Nova. The instruction text is verbose on purpose:
+    // it re-asserts the MUTED-state contract from the system prompt so that
+    // even many turns later the model still knows it must stay silent.
     if (this.session && this.session.isActive) {
-      await this.sendToolResult(toolUseId, { status: 'muted', message: 'You are now muted.' });
+      const muteInstruction = (this.meetingMode === 'translator')
+        ? 'You are now in the MUTED state. Do NOT translate any utterance. Do NOT speak. Stay completely silent. The only utterance you may act on is the unmute trigger phrase ("translator unmute" or "alex unmute").'
+        : 'You are now muted.';
+      await this.sendToolResult(toolUseId, {
+        status: 'muted',
+        state: 'MUTED',
+        instruction: muteInstruction,
+      });
       console.log('✓ Agent muted successfully');
+    }
+  }
+
+  private async handleUnmuteTool(toolUseId: string): Promise<void> {
+    console.log('🔓 Unmute tool called - unmuting agent');
+    // Delegate to public unmute(); idempotent.
+    this.unmute('tool');
+
+    // Send tool result back to Nova. The instruction text re-asserts the
+    // UNMUTED-state contract so the model resumes translation.
+    if (this.session && this.session.isActive) {
+      const unmuteInstruction = (this.meetingMode === 'translator')
+        ? 'You are now in the UNMUTED state. Resume translating every utterance per your translator-mode rules. Do NOT comment on the state change.'
+        : 'You are now unmuted.';
+      await this.sendToolResult(toolUseId, {
+        status: 'unmuted',
+        state: 'UNMUTED',
+        instruction: unmuteInstruction,
+      });
+      console.log('✓ Agent unmuted successfully');
     }
   }
 
@@ -1797,5 +1900,42 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   isSpeaking(): boolean {
     return this._isSpeaking;
+  }
+
+  /**
+   * Public mute — drops all outgoing audio (voice + avatar) until unmuted.
+   * Idempotent. Flushes any buffered playback so the agent stops mid-utterance.
+   */
+  mute(reason?: string): void {
+    if (this._isMuted) {
+      return;
+    }
+    console.log(`🔇 Nova agent muted${reason ? ` (${reason})` : ''}`);
+    this._isMuted = true;
+    this.conversationActive = false;
+    // Flush any buffered audio so playback stops immediately
+    try {
+      this.stopPacatStream();
+    } catch (err) {
+      console.warn('stopPacatStream during mute() failed (non-fatal):', err);
+    }
+  }
+
+  /**
+   * Public unmute — resumes outgoing audio.
+   * Idempotent.
+   */
+  unmute(reason?: string): void {
+    if (!this._isMuted) {
+      return;
+    }
+    console.log(`🔓 Nova agent unmuted${reason ? ` (${reason})` : ''}`);
+    this._isMuted = false;
+    // Mark conversation active for group-mode auto-mute timer parity
+    this.conversationActive = true;
+  }
+
+  isMuted(): boolean {
+    return this._isMuted;
   }
 }
