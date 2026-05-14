@@ -1,0 +1,85 @@
+{
+  "_comment": "Template CloudWatch dashboard for LMA Load Simulator observability. Substitute ${region}, ${stack} and ${call_data_stream} before posting with put-dashboard.",
+  "widgets": [
+    {
+      "type": "metric",
+      "properties": {
+        "title": "Transcribe concurrent streaming sessions",
+        "region": "${region}",
+        "metrics": [
+          ["AWS/Transcribe", "ActiveStreamingSessions"]
+        ],
+        "stat": "Maximum",
+        "period": 60
+      }
+    },
+    {
+      "type": "metric",
+      "properties": {
+        "title": "Kinesis CallDataStream throughput",
+        "region": "${region}",
+        "metrics": [
+          ["AWS/Kinesis", "IncomingRecords", "StreamName", "${call_data_stream}"],
+          [".",           "WriteProvisionedThroughputExceeded", ".", "."]
+        ],
+        "stat": "Sum",
+        "period": 60
+      }
+    },
+    {
+      "type": "metric",
+      "properties": {
+        "title": "call_event_processor Lambda",
+        "region": "${region}",
+        "metrics": [
+          ["AWS/Lambda", "ConcurrentExecutions", "FunctionName", "${stack}-CallEventProcessor"],
+          [".",          "Duration",              ".", "."],
+          [".",          "Errors",                ".", "."],
+          [".",          "Throttles",             ".", "."]
+        ],
+        "stat": "Sum",
+        "period": 60
+      }
+    },
+    {
+      "type": "metric",
+      "properties": {
+        "title": "Bedrock invocations / throttles",
+        "region": "${region}",
+        "metrics": [
+          ["AWS/Bedrock", "Invocations"],
+          [".",           "InvocationThrottles"],
+          [".",           "InvocationClientErrors"]
+        ],
+        "stat": "Sum",
+        "period": 60
+      }
+    },
+    {
+      "type": "metric",
+      "properties": {
+        "title": "ECS VP cluster task count",
+        "region": "${region}",
+        "metrics": [
+          ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "${stack}-VirtualParticipantCluster"]
+        ],
+        "stat": "Maximum",
+        "period": 60
+      }
+    },
+    {
+      "type": "metric",
+      "properties": {
+        "title": "AppSync 4xx/5xx",
+        "region": "${region}",
+        "metrics": [
+          ["AWS/AppSync", "4XXError", "GraphQLAPIId", "${appsync_api_id}"],
+          [".",           "5XXError", ".", "."],
+          [".",           "Latency",  ".", "."]
+        ],
+        "stat": "Sum",
+        "period": 60
+      }
+    }
+  ]
+}

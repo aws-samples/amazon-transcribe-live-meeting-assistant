@@ -1,0 +1,30 @@
+# Example YAML file consumed by `lma load concurrent --driver vp --meeting-ids-file`.
+#
+# Provide one or more real, operator-provisioned meetings that your
+# Virtual Participant load test can join. The driver round-robins across
+# this list — for high concurrency, the cheapest setup is a single long-
+# lived Zoom / Chime meeting with waiting-room disabled so hundreds of
+# VPs can join the same room at once.
+#
+# Supported platforms: ZOOM, TEAMS, CHIME, WEBEX
+
+meetings:
+  - name: "LoadSim Sandbox — Zoom A"
+    platform: ZOOM
+    id: "1234567890"
+    password: ""               # optional
+
+  - name: "LoadSim Sandbox — Chime"
+    platform: CHIME
+    id: "9988776655"
+
+  # For Teams, paste the full meetup-join URL as the id. The Virtual
+  # Participant handles URL-style ids transparently.
+  - name: "LoadSim Sandbox — Teams"
+    platform: TEAMS
+    id: "https://teams.microsoft.com/l/meetup-join/19%3ameeting_REPLACE%40thread.v2/0?context=%7b%22Tid%22%3a%22TENANT%22%2c%22Oid%22%3a%22OWNER%22%7d"
+
+  - name: "LoadSim Sandbox — Webex"
+    platform: WEBEX
+    id: "5551234567"
+    password: "passw0rd123"

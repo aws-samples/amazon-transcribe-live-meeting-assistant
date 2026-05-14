@@ -84,6 +84,8 @@ class LMAClient:
         # Lazily initialised operation namespaces
         self._stack_ops = None
         self._publish_ops = None
+        self._appsync_ops = None
+        self._vp_ops = None
 
         logger.debug(
             "LMAClient initialised (stack=%s, region=%s)",
@@ -125,6 +127,34 @@ class LMAClient:
 
             self._publish_ops = PublishOperations(self)
         return self._publish_ops
+
+    @property
+    def appsync(self):
+        """AppSync GraphQL operations (SigV4-signed ``graphql()`` helper).
+
+        Returns:
+            AppSyncOperations instance.
+        """
+        if self._appsync_ops is None:
+            from lma_sdk.operations.appsync import AppSyncOperations
+
+            self._appsync_ops = AppSyncOperations(self)
+        return self._appsync_ops
+
+    @property
+    def vp(self):
+        """Virtual Participant operations (``create``, ``get``, ``end``, ``list``).
+
+        Returns:
+            VirtualParticipantOperations instance.
+        """
+        if self._vp_ops is None:
+            from lma_sdk.operations.virtual_participant import (
+                VirtualParticipantOperations,
+            )
+
+            self._vp_ops = VirtualParticipantOperations(self)
+        return self._vp_ops
 
     # ── Helpers ───────────────────────────────────────────────
 

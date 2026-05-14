@@ -151,14 +151,37 @@ def _batch_get_call_details(table, call_ids):
 def _merge_list_into_call(list_item, detail):
     """Overlay the call-detail item onto the GSI list-item, filling any
     gaps (e.g. if a detail row is missing) from the GSI projection.
+
+    IMPORTANT: the ``Call`` type in schema.graphql exposes ``PK`` / ``SK`` but
+    NOT ``ListPK`` / ``ListSK``.  The legacy ``listCalls`` VTL returned rows
+    directly from the list-tracking table so ``PK`` was ``cls#<date>#s#<shard>``
+    and ``SK`` was ``ts#<iso>#id#<CallId>``.  The UI's
+    ``use-calls-graphql-api.js`` relies on this and builds the delete / share
+    payload as ``{ListPK: c.PK, ListSK: c.SK, ...}``.
+
+    If we let ``detail`` overwrite ``PK`` / ``SK`` here, the UI would submit
+    ``ListPK = ListSK = c#<CallId>`` and the ``deleteCall`` VTL would issue a
+    ``TransactWriteItems`` with two items targeting the same key, which
+    DynamoDB rejects (``TransactionCanceledException``) — the net effect users
+    see is that the Delete confirmation modal hangs silently.  We therefore
+    always restore the list-row coordinates onto ``PK`` / ``SK`` after the
+    merge, and also expose them as ``ListPK`` / ``ListSK`` for any future
+    consumer that adds those fields to the schema.
     """
     merged = dict(list_item) if list_item else {}
     if detail:
         merged.update(detail)
-    # Ensure list keys (ListPK / ListSK) are exposed so the UI can call
-    # shareCall / deleteCall which require the list-row coordinates.
-    merged["ListPK"] = list_item.get("PK")
-    merged["ListSK"] = list_item.get("SK")
+    if list_item:
+        # Restore list-row coordinates clobbered by the detail overlay so the
+        # UI continues to derive ListPK / ListSK correctly from PK / SK.
+        list_pk = list_item.get("PK")
+        list_sk = list_item.get("SK")
+        if list_pk is not None:
+            merged["PK"] = list_pk
+        if list_sk is not None:
+            merged["SK"] = list_sk
+        merged["ListPK"] = list_pk
+        merged["ListSK"] = list_sk
     return merged
 
 
