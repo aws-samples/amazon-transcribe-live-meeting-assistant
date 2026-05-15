@@ -86,6 +86,8 @@ const NovaSonicConfigPage = () => {
   const [meetingMode, setMeetingMode] = useState(MEETING_MODE_OPTIONS[0]);
   const [translatorLanguageA, setTranslatorLanguageA] = useState('');
   const [translatorLanguageB, setTranslatorLanguageB] = useState('');
+  const [translatorMutePhrases, setTranslatorMutePhrases] = useState('');
+  const [translatorUnmutePhrases, setTranslatorUnmutePhrases] = useState('');
 
   const loadConfig = useCallback(async () => {
     setLoading(true);
@@ -118,6 +120,8 @@ const NovaSonicConfigPage = () => {
         setMeetingMode(MEETING_MODE_OPTIONS.find((o) => o.value === modeValue) || MEETING_MODE_OPTIONS[0]);
         setTranslatorLanguageA(customData.translatorLanguageA || '');
         setTranslatorLanguageB(customData.translatorLanguageB || '');
+        setTranslatorMutePhrases(customData.translatorMutePhrases || '');
+        setTranslatorUnmutePhrases(customData.translatorUnmutePhrases || '');
       }
     } catch (err) {
       console.error('Error loading Nova Sonic config:', err);
@@ -147,6 +151,8 @@ const NovaSonicConfigPage = () => {
       if (modeValue === 'translator') {
         if (translatorLanguageA.trim()) configData.translatorLanguageA = translatorLanguageA.trim();
         if (translatorLanguageB.trim()) configData.translatorLanguageB = translatorLanguageB.trim();
+        if (translatorMutePhrases.trim()) configData.translatorMutePhrases = translatorMutePhrases.trim();
+        if (translatorUnmutePhrases.trim()) configData.translatorUnmutePhrases = translatorUnmutePhrases.trim();
       }
 
       await client.graphql({
@@ -192,6 +198,8 @@ const NovaSonicConfigPage = () => {
       setMeetingMode(MEETING_MODE_OPTIONS[0]);
       setTranslatorLanguageA('');
       setTranslatorLanguageB('');
+      setTranslatorMutePhrases('');
+      setTranslatorUnmutePhrases('');
       setSuccess('Custom overrides cleared. Default configuration will be used.');
       await loadConfig();
     } catch (err) {
@@ -327,30 +335,62 @@ const NovaSonicConfigPage = () => {
           </FormField>
 
           {showTranslatorFields && (
-            <ColumnLayout columns={2}>
-              <FormField
-                label="Translator Language A"
-                description={`Default: ${defaultConfig.translatorLanguageA || 'English'}`}
-              >
-                <Input
-                  value={translatorLanguageA}
-                  onChange={({ detail }) => setTranslatorLanguageA(detail.value)}
-                  placeholder={defaultConfig.translatorLanguageA || 'English'}
-                  disabled={!IS_ALWAYS_ACTIVE}
-                />
-              </FormField>
-              <FormField
-                label="Translator Language B"
-                description={`Default: ${defaultConfig.translatorLanguageB || 'Spanish'}`}
-              >
-                <Input
-                  value={translatorLanguageB}
-                  onChange={({ detail }) => setTranslatorLanguageB(detail.value)}
-                  placeholder={defaultConfig.translatorLanguageB || 'Spanish'}
-                  disabled={!IS_ALWAYS_ACTIVE}
-                />
-              </FormField>
-            </ColumnLayout>
+            <SpaceBetween size="l">
+              <ColumnLayout columns={2}>
+                <FormField
+                  label="Translator Language A"
+                  description={`Default: ${defaultConfig.translatorLanguageA || 'English'}`}
+                >
+                  <Input
+                    value={translatorLanguageA}
+                    onChange={({ detail }) => setTranslatorLanguageA(detail.value)}
+                    placeholder={defaultConfig.translatorLanguageA || 'English'}
+                    disabled={!IS_ALWAYS_ACTIVE}
+                  />
+                </FormField>
+                <FormField
+                  label="Translator Language B"
+                  description={`Default: ${defaultConfig.translatorLanguageB || 'Spanish'}`}
+                >
+                  <Input
+                    value={translatorLanguageB}
+                    onChange={({ detail }) => setTranslatorLanguageB(detail.value)}
+                    placeholder={defaultConfig.translatorLanguageB || 'Spanish'}
+                    disabled={!IS_ALWAYS_ACTIVE}
+                  />
+                </FormField>
+              </ColumnLayout>
+              <ColumnLayout columns={2}>
+                <FormField
+                  label="Mute Trigger Phrases"
+                  description={
+                    'Comma-separated phrases that pause translator mode when spoken. ' +
+                    `Default: "${defaultConfig.translatorMutePhrases || 'translator mute, alex mute'}"`
+                  }
+                >
+                  <Input
+                    value={translatorMutePhrases}
+                    onChange={({ detail }) => setTranslatorMutePhrases(detail.value)}
+                    placeholder={defaultConfig.translatorMutePhrases || 'translator mute, alex mute'}
+                    disabled={!IS_ALWAYS_ACTIVE}
+                  />
+                </FormField>
+                <FormField
+                  label="Unmute Trigger Phrases"
+                  description={
+                    'Comma-separated phrases that resume translator mode when spoken. ' +
+                    `Default: "${defaultConfig.translatorUnmutePhrases || 'translator unmute, alex unmute'}"`
+                  }
+                >
+                  <Input
+                    value={translatorUnmutePhrases}
+                    onChange={({ detail }) => setTranslatorUnmutePhrases(detail.value)}
+                    placeholder={defaultConfig.translatorUnmutePhrases || 'translator unmute, alex unmute'}
+                    disabled={!IS_ALWAYS_ACTIVE}
+                  />
+                </FormField>
+              </ColumnLayout>
+            </SpaceBetween>
           )}
         </SpaceBetween>
       </Container>
