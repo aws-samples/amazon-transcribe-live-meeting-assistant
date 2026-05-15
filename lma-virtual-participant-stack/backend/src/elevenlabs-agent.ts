@@ -821,8 +821,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   }
 
   /**
-   * Public mute — drops all outgoing audio (voice + avatar) until unmuted.
-   * Idempotent. Drains the playback queue so any pending chunks are not played.
+   * Mute the agent — drops all outgoing audio until unmuted. Idempotent.
+   * Drains the playback queue so pending chunks are not played.
    */
   mute(reason?: string): void {
     if (this._isMuted) {
@@ -831,7 +831,6 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     console.log(`🔇 ElevenLabs agent muted${reason ? ` (${reason})` : ''}`);
     this._isMuted = true;
     this.conversationActive = false;
-    // Drop any queued audio so it doesn't play once unmuted
     if (this.audioQueue.length > 0) {
       console.log(`🔇 Dropping ${this.audioQueue.length} queued audio chunks on mute`);
       this.audioQueue = [];
@@ -839,8 +838,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   }
 
   /**
-   * Public unmute — resumes outgoing audio.
-   * Idempotent.
+   * Unmute the agent — resumes outgoing audio. Idempotent.
    */
   unmute(reason?: string): void {
     if (!this._isMuted) {

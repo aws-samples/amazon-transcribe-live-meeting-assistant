@@ -107,18 +107,14 @@ export interface VoiceAssistantProvider {
   isSpeaking(): boolean;
 
   /**
-   * Mute the voice assistant — drops all outgoing audio (voice + avatar) until unmuted.
-   * Idempotent. Used for phrase-triggered mute ("alex mute") in always_active modes,
-   * the Strands mute tool, and group-mode auto-mute on conversation end.
-   * @param reason Optional log tag identifying the source of the mute call.
+   * Mute the voice assistant — drops all outgoing audio. Idempotent.
+   * @param reason Optional log tag identifying the source of the call.
    */
   mute(reason?: string): void;
 
   /**
-   * Unmute the voice assistant — resumes outgoing audio.
-   * Idempotent. Used for phrase-triggered unmute ("alex unmute") and the existing
-   * group-mode wake-phrase unmute path.
-   * @param reason Optional log tag identifying the source of the unmute call.
+   * Unmute the voice assistant — resumes outgoing audio. Idempotent.
+   * @param reason Optional log tag identifying the source of the call.
    */
   unmute(reason?: string): void;
 
