@@ -70,6 +70,10 @@ export class NovaAgent implements VoiceAssistantProvider {
   private _isSpeaking: boolean = false;
   private _isProcessingTool: boolean = false;
   private _isMuted: boolean = false;
+  // Translator-mode state-machine flag. Drives which prompt and which tools are
+  // registered on the Nova session. Transitions only via the mute/unmute tools
+  // (which trigger a session refresh into the other state).
+  private _translatorState: 'UNMUTED' | 'MUTED' = 'UNMUTED';
   private _isInterrupted: boolean = false; // Gate: drops all audio (voice + avatar) after barge-in until next turn
   private activationTimeout: NodeJS.Timeout | null = null;
   private defaultActivationDuration: number;
@@ -442,34 +446,39 @@ export class NovaAgent implements VoiceAssistantProvider {
         });
       }
 
-      // Translator-mode mute/unmute tools — strict trigger phrases. The
-      // tool descriptions intentionally repeat the trigger phrase verbatim so
-      // the model has a single, unambiguous condition for each tool.
+      // Translator-mode mute/unmute tools — STATE-DEPENDENT registration.
+      // We expose ONLY the tool relevant to the current `_translatorState` so
+      // the model literally cannot call the wrong one (e.g. cannot self-unmute
+      // while in MUTED state because the unmute tool is not registered).
+      // Trigger-phrase strictness is repeated in the tool description.
       if (wantTranslatorMuteUnmute) {
-        tools.push({
-          toolSpec: {
-            name: 'mute',
-            description: 'Mute yourself. Call this tool if and only if you hear the exact phrase "translator mute" or "alex mute". Do not call this tool for any other reason.',
-            inputSchema: {
-              json: JSON.stringify({
-                type: 'object',
-                properties: {},
-              }),
+        if (this._translatorState === 'UNMUTED') {
+          tools.push({
+            toolSpec: {
+              name: 'mute',
+              description: 'Mute yourself. Call this tool if and only if you hear the exact phrase "translator mute" or "alex mute". Do not call this tool for any other reason.',
+              inputSchema: {
+                json: JSON.stringify({
+                  type: 'object',
+                  properties: {},
+                }),
+              },
             },
-          },
-        });
-        tools.push({
-          toolSpec: {
-            name: 'unmute',
-            description: 'Unmute yourself. Call this tool if and only if you hear the exact phrase "translator unmute" or "alex unmute". Do not call this tool for any other reason.',
-            inputSchema: {
-              json: JSON.stringify({
-                type: 'object',
-                properties: {},
-              }),
+          });
+        } else {
+          tools.push({
+            toolSpec: {
+              name: 'unmute',
+              description: 'Unmute yourself. Call this tool if and only if you hear the exact phrase "translator unmute" or "alex unmute". Do not call this tool for any other reason.',
+              inputSchema: {
+                json: JSON.stringify({
+                  type: 'object',
+                  properties: {},
+                }),
+              },
             },
-          },
-        });
+          });
+        }
       }
 
       promptStartEvent.event.promptStart.toolConfiguration = {
@@ -570,56 +579,70 @@ export class NovaAgent implements VoiceAssistantProvider {
     // Translator mode fully REPLACES the system prompt — we don't want any chat,
     // tool-use, or interruption-handling instructions to leak in and cause Nova
     // to do anything other than translate.
+    //
+    // We use TWO STATE-SPECIFIC PROMPTS instead of one prompt with a state-machine
+    // description. Each prompt describes only the current state, with no mention
+    // of the opposite state. Combined with state-conditional tool registration
+    // (only `mute` exposed in UNMUTED, only `unmute` exposed in MUTED), this
+    // makes it impossible for the model to spontaneously transition states.
     if (this.meetingMode === 'translator') {
       const a = this.translatorLanguageA;
       const b = this.translatorLanguageB;
+
+      if (this._translatorState === 'UNMUTED') {
+        // UNMUTED prompt: full translator rules + ONE tool rule (mute only).
+        // No mention of UNMUTED/MUTED states, no description of the unmute tool.
+        return [
+          'TRANSLATOR MODE:',
+          `You are a live bidirectional interpreter between ${a} and ${b}.`,
+          '',
+          'Rules (follow these strictly):',
+          `1. For every utterance you hear, detect whether it is in ${a} or ${b}.`,
+          '2. Translate it into the OTHER language and speak only the translation.',
+          `3. Speak the translation naturally in ${a} or ${b}, matching the speaker\'s tone.`,
+          '4. Do NOT greet, explain, summarize, answer questions, or add any commentary.',
+          '5. Preserve meaning, names, numbers, and dates. Keep output concise.',
+          `6. If an utterance is unclear or in a third language, translate it into ${a}.`,
+          '7. Never say anything on your own. Do not introduce yourself. Do not ask clarifying questions.',
+          '',
+          'Begin translating from the very next utterance you hear.',
+          '',
+          '---',
+          '',
+          'PAUSE TRIGGER — INDEPENDENT INSTRUCTION:',
+          'If, and only if, you hear the exact phrase "translator mute" or "alex mute", do the following:',
+          '  - Call the `mute` tool.',
+          '  - Do NOT translate the phrase. Do NOT speak any response. Do NOT say anything else.',
+          'Otherwise, never call the `mute` tool.',
+          'You have only one tool available: `mute`. There are no other tools.',
+        ].join('\n');
+      }
+
+      // MUTED prompt: a single, focused instruction. No translator rules at all
+      // — the model is paused. The ONLY thing it should do is listen for the
+      // unmute trigger. No translation, no responses, no commentary.
       return [
-        'TRANSLATOR MODE:',
-        `You are a live bidirectional interpreter between ${a} and ${b}.`,
+        'TRANSLATOR MODE — PAUSED:',
+        'You are currently paused. Your job right now is to stay completely silent and listen for one specific trigger phrase.',
         '',
         'Rules (follow these strictly):',
-        `1. For every utterance you hear, detect whether it is in ${a} or ${b}.`,
-        '2. Translate it into the OTHER language and speak only the translation.',
-        `3. Speak the translation naturally in ${a} or ${b}, matching the speaker\'s tone.`,
-        '4. Do NOT greet, explain, summarize, answer questions, or add any commentary.',
-        '5. Preserve meaning, names, numbers, and dates. Keep output concise.',
-        `6. If an utterance is unclear or in a third language, translate it into ${a}.`,
-        '7. Never say anything on your own. Do not introduce yourself. Do not ask clarifying questions.',
+        '1. Do NOT translate ANY utterance, in any language, for any reason.',
+        '2. Do NOT speak any response.',
+        '3. Do NOT generate any audio output.',
+        '4. Do NOT call any tool other than the one described below.',
+        '5. Do NOT comment on, acknowledge, or react to anything you hear.',
+        '6. Stay completely silent until the resume trigger phrase below is heard.',
         '',
-        'Begin translating from the very next utterance you hear.',
-        '',
-        '---',
-        '',
-        'MUTE STATE — INDEPENDENT INSTRUCTION (this rule stands alone and tells you whether you are currently allowed to speak):',
-        'You have two possible states: UNMUTED and MUTED.',
-        'You start in the UNMUTED state.',
-        'You transition to MUTED only when you call the `mute` tool.',
-        'You transition back to UNMUTED only when you call the `unmute` tool.',
-        'Each tool call returns a tool result confirming your new state — trust that confirmation.',
-        '',
-        'While in the UNMUTED state: follow the translation rules above. Translate every utterance you hear.',
-        '',
-        'While in the MUTED state: do NOT translate ANY utterance. Do NOT speak ANY response. Stay completely silent. The only thing you act on while muted is the unmute trigger phrase below.',
+        'Even if you hear urgent-sounding speech, questions, names being called, or many utterances accumulating — you remain paused. Translation does not resume on its own. It only resumes when you hear the exact resume trigger below and call the `unmute` tool.',
         '',
         '---',
         '',
-        'MUTE TOOL — INDEPENDENT INSTRUCTION (this rule stands alone and overrides translation behavior for the matching utterance):',
-        'If, and only if, you hear the exact phrase "translator mute" or "alex mute", do the following:',
-        '  - Call the `mute` tool.',
-        '  - Say only the single word "ok" in response, or nothing at all.',
-        '  - Do NOT translate the phrase. Do NOT say anything else.',
-        'Otherwise, never call the `mute` tool.',
-        '',
-        '---',
-        '',
-        'UNMUTE TOOL — INDEPENDENT INSTRUCTION (this rule stands alone and overrides translation behavior for the matching utterance):',
+        'RESUME TRIGGER — INDEPENDENT INSTRUCTION:',
         'If, and only if, you hear the exact phrase "translator unmute" or "alex unmute", do the following:',
         '  - Call the `unmute` tool.',
-        '  - Say only the single word "ok" in response, or nothing at all.',
-        '  - Do NOT translate the phrase. Do NOT say anything else.',
+        '  - Do NOT speak any response. Do NOT say anything else.',
         'Otherwise, never call the `unmute` tool.',
-        '',
-        'IMPORTANT: While in the MUTED state, you must continue to listen for, and act on, the unmute trigger phrase above. That is the only utterance that can take you out of the MUTED state.',
+        'You have only one tool available: `unmute`. There are no other tools.',
       ].join('\n');
     }
 
@@ -1181,8 +1204,21 @@ export class NovaAgent implements VoiceAssistantProvider {
             } else if (jsonResponse.event?.contentEnd) {
               console.log('Content end:', jsonResponse.event.contentEnd.type);
               
-              // Save completed turn to conversation history
-              if (currentTurn.role && currentTurn.isFinal && currentTurn.content.trim()) {
+              // Save completed turn to conversation history.
+              //
+              // SKIP appending while in translator MUTED state — utterances heard
+              // during a paused window are NOT part of the live translation
+              // conversation, and replaying them on the next UNMUTED session
+              // would create backlog pressure (the model would feel obligated
+              // to translate them once it has the tools to). Translator
+              // ASSISTANT turns while muted shouldn't happen anyway because
+              // the MUTED-state session has no translation rules.
+              const skipForTranslatorMuted = (
+                this.meetingMode === 'translator' &&
+                this._translatorState === 'MUTED'
+              );
+
+              if (currentTurn.role && currentTurn.isFinal && currentTurn.content.trim() && !skipForTranslatorMuted) {
                 this.addToConversationHistory(currentTurn.role, currentTurn.content.trim());
                 console.log(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
                 
@@ -1394,43 +1430,75 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   private async handleMuteTool(toolUseId: string): Promise<void> {
     console.log('🔇 Mute tool called - muting agent');
-    // Delegate to public mute() so buffered playback is flushed and conversationActive
-    // is reset; mute() is idempotent.
+    // Hard audio gate first — drops any in-flight Nova audio (e.g. the "ok"
+    // it might generate alongside the tool call) before it can play.
     this.mute('tool');
 
-    // Send tool result back to Nova. The instruction text is verbose on purpose:
-    // it re-asserts the MUTED-state contract from the system prompt so that
-    // even many turns later the model still knows it must stay silent.
+    // Acknowledge the tool call on the CURRENT session so Nova doesn't error
+    // out, then trigger a refresh into the MUTED-state session (which has the
+    // MUTED-state prompt and ONLY the `unmute` tool registered).
     if (this.session && this.session.isActive) {
       const muteInstruction = (this.meetingMode === 'translator')
-        ? 'You are now in the MUTED state. Do NOT translate any utterance. Do NOT speak. Stay completely silent. The only utterance you may act on is the unmute trigger phrase ("translator unmute" or "alex unmute").'
+        ? 'You are now paused. The session is being refreshed.'
         : 'You are now muted.';
-      await this.sendToolResult(toolUseId, {
-        status: 'muted',
-        state: 'MUTED',
-        instruction: muteInstruction,
-      });
+      try {
+        await this.sendToolResult(toolUseId, {
+          status: 'muted',
+          state: 'MUTED',
+          instruction: muteInstruction,
+        });
+      } catch (err) {
+        console.warn('Failed to send mute tool result (non-fatal):', err);
+      }
       console.log('✓ Agent muted successfully');
+    }
+
+    // In translator mode, transition the session into the MUTED-state prompt /
+    // tool set. The new session will have NO `mute` tool registered (only the
+    // `unmute` tool) so spurious self-mute is impossible.
+    if (this.meetingMode === 'translator') {
+      this._translatorState = 'MUTED';
+      console.log('🔄 Translator state -> MUTED, refreshing session into paused-prompt mode...');
+      // Fire-and-forget — _isMuted gates audio output during the refresh window.
+      this.refreshSession().catch(error => {
+        console.error('Error refreshing session for translator MUTE transition:', error);
+      });
     }
   }
 
   private async handleUnmuteTool(toolUseId: string): Promise<void> {
     console.log('🔓 Unmute tool called - unmuting agent');
-    // Delegate to public unmute(); idempotent.
+    // Lift the audio gate. Note: in translator mode the new (UNMUTED-state)
+    // session will start fresh and translate utterances received AFTER the
+    // session boots — there's no pent-up backlog to spew because we don't
+    // append to conversationHistory while muted.
     this.unmute('tool');
 
-    // Send tool result back to Nova. The instruction text re-asserts the
-    // UNMUTED-state contract so the model resumes translation.
     if (this.session && this.session.isActive) {
       const unmuteInstruction = (this.meetingMode === 'translator')
-        ? 'You are now in the UNMUTED state. Resume translating every utterance per your translator-mode rules. Do NOT comment on the state change.'
+        ? 'You are now resuming. The session is being refreshed.'
         : 'You are now unmuted.';
-      await this.sendToolResult(toolUseId, {
-        status: 'unmuted',
-        state: 'UNMUTED',
-        instruction: unmuteInstruction,
-      });
+      try {
+        await this.sendToolResult(toolUseId, {
+          status: 'unmuted',
+          state: 'UNMUTED',
+          instruction: unmuteInstruction,
+        });
+      } catch (err) {
+        console.warn('Failed to send unmute tool result (non-fatal):', err);
+      }
       console.log('✓ Agent unmuted successfully');
+    }
+
+    // In translator mode, transition the session into the UNMUTED-state prompt /
+    // tool set. The new session will have NO `unmute` tool registered (only
+    // the `mute` tool) so spurious self-unmute is impossible.
+    if (this.meetingMode === 'translator') {
+      this._translatorState = 'UNMUTED';
+      console.log('🔄 Translator state -> UNMUTED, refreshing session into translating-prompt mode...');
+      this.refreshSession().catch(error => {
+        console.error('Error refreshing session for translator UNMUTE transition:', error);
+      });
     }
   }
 
