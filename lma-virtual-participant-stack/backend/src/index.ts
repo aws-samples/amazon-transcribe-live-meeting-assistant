@@ -14,6 +14,8 @@ import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { simliAvatar } from './simli-avatar.js';
+import { voiceAssistant } from './voice-assistant.js';
+import { agentSpeakingDetector } from './agent-speaking-detector.js';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
@@ -188,6 +190,16 @@ const main = async (): Promise<void> => {
         console.log(`VP ${vpId} status: CONNECTING`);
     }
 
+    // Start the platform-agnostic agent-speaking detector (listens to
+    // agent_output.monitor for voice agent PCM output).
+    if (voiceAssistant.isEnabled()) {
+        try {
+            agentSpeakingDetector.start();
+        } catch (error) {
+            console.error('Failed to start AgentSpeakingDetector (non-critical):', error);
+        }
+    }
+
     // Launch Puppeteer browser with stealth plugin for all platforms
     console.log('Launching browser with stealth plugin...');
     puppeteerExtra.use(StealthPlugin());
@@ -286,8 +298,8 @@ const main = async (): Promise<void> => {
             await simliAvatar.injectGetUserMediaOverride(page);
             console.log('✓ Simli getUserMedia override injected into meeting page');
             
-            // 3. Start background stream connection + polling (runs concurrently with meeting)
             let isReconnecting = false;
+            let reconnectInFlight: Promise<void> | null = null;
             const connectSimliStream = async () => {
                 try {
                     await simliAvatar.connectStreamToMeetingPage(page);
@@ -296,32 +308,21 @@ const main = async (): Promise<void> => {
                     console.error('Failed to connect Simli stream (non-critical):', error);
                 }
             };
-            
-            // Poll for dead video track and re-connect when needed
-            const simliPollInterval = setInterval(async () => {
-                if (isReconnecting) return;
-                try {
-                    const needsReconnect = await page.evaluate(() => {
-                        // @ts-ignore
-                        if (!window.__simliOverrideInstalled) return true;
-                        // @ts-ignore
-                        const track = window.__simliCurrentTrack;
-                        if (!track) return true;
-                        return track.readyState !== 'live';
-                    }).catch(() => true);
-                    
-                    if (needsReconnect) {
-                        isReconnecting = true;
-                        console.log('Simli video track needs re-connection...');
-                        await connectSimliStream();
-                        isReconnecting = false;
-                    }
-                } catch (e) {
-                    isReconnecting = false;
+
+            await page.exposeFunction('__simliRequestReconnect', async () => {
+                if (reconnectInFlight) {
+                    await reconnectInFlight;
+                    return;
                 }
-            }, 1000);
-            
-            // Initial connection (will be re-established by poll after page navigates)
+                isReconnecting = true;
+                console.log('Simli avatar: on-demand reconnect requested from meeting page');
+                reconnectInFlight = connectSimliStream().finally(() => {
+                    reconnectInFlight = null;
+                    isReconnecting = false;
+                });
+                await reconnectInFlight;
+            });
+
             await connectSimliStream();
             
         } catch (error) {
@@ -449,6 +450,13 @@ const main = async (): Promise<void> => {
             console.log('✓ Simli Avatar stopped');
         } catch (error) {
             console.error('Error stopping Simli Avatar:', error);
+        }
+
+        // Stop agent speaking detector
+        try {
+            agentSpeakingDetector.stop();
+        } catch (error) {
+            console.error('Error stopping AgentSpeakingDetector:', error);
         }
 
         try {

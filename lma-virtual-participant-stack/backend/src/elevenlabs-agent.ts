@@ -2,8 +2,10 @@ import { spawn, ChildProcess } from 'child_process';
 import WebSocket from 'ws';
 import { VoiceAssistantProvider } from './voice-assistant-interface.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { simliAvatar } from './simli-avatar.js';
+import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
 
 export interface ElevenLabsAgentConfig {
   apiKey: string;
@@ -12,6 +14,9 @@ export interface ElevenLabsAgentConfig {
   activationDuration?: number;
   region?: string;
   strandsLambdaArn?: string;
+  meetingMode?: MeetingMode;
+  translatorLanguageA?: string;
+  translatorLanguageB?: string;
 }
 
 export class ElevenLabsAgent implements VoiceAssistantProvider {
@@ -27,10 +32,20 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   private isPlayingQueue: boolean = false; // Track if queue is being processed
   private activationMode: string;
   private _isActivated: boolean = false;
+  private _isMuted: boolean = false;
   private activationTimeout: NodeJS.Timeout | null = null;
   private defaultActivationDuration: number;
   private region: string;
-  
+
+  // Meeting-mode configuration (parity with Nova Sonic)
+  private meetingMode: MeetingMode = 'normal';
+  private translatorLanguageA: string = 'English';
+  private translatorLanguageB: string = 'Spanish';
+
+  // Group meeting mode: conversation session tracking (mirrors Nova)
+  private conversationActive: boolean = false;
+  private conversationTimeout: NodeJS.Timeout | null = null;
+
   // Lambda client and Strands agent configuration
   private lambdaClient: LambdaClient | null = null;
   private strandsLambdaArn?: string;
@@ -43,13 +58,24 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     this.defaultActivationDuration = config.activationDuration || 30;
     this.region = config.region || process.env.AWS_REGION || 'us-east-1';
     this.strandsLambdaArn = config.strandsLambdaArn || process.env.STRANDS_LAMBDA_ARN;
+    if (config.meetingMode) this.meetingMode = config.meetingMode;
+    if (config.translatorLanguageA) this.translatorLanguageA = config.translatorLanguageA;
+    if (config.translatorLanguageB) this.translatorLanguageB = config.translatorLanguageB;
     
     // Set initial activation state based on mode
     this._isActivated = (this.activationMode === 'always_active');
+    // Group mode starts muted; translator/normal start unmuted
+    this._isMuted = (this.meetingMode === 'group');
 
     if (this.enabled) {
       console.log('✓ ElevenLabs Conversational AI agent enabled');
       console.log(`  Activation mode: ${this.activationMode}`);
+      console.log(`  Meeting mode: ${this.meetingMode}`);
+      if (this.meetingMode === 'translator') {
+        console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+      } else if (this.meetingMode === 'group') {
+        console.log('  Group meeting mode: enabled (starts muted)');
+      }
       if (this.strandsLambdaArn) {
         console.log(`  Strands agent tool: enabled`);
       }
@@ -70,6 +96,45 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       console.log('Starting ElevenLabs Conversational AI agent...');
       console.log(`Agent ID: ${this.agentId || '(using default agent)'}`);
       console.log(`Activation mode: ${this.activationMode}`);
+
+      // Load shared voice-assistant configuration from DynamoDB (Nova Sonic config
+      // table is shared across providers for meeting-mode / translator settings).
+      const tableName = process.env.NOVA_SONIC_CONFIG_TABLE_NAME;
+      if (tableName) {
+        try {
+          const dynamoDbClient = new DynamoDBClient({
+            region: this.region,
+            credentials: defaultProvider(),
+          });
+          const config = await loadNovaSonicConfig(dynamoDbClient, tableName);
+          console.log('✓ Loaded voice-assistant config from DynamoDB');
+
+          if (config.meetingMode) {
+            this.meetingMode = config.meetingMode;
+          } else if (typeof config.groupMeetingMode === 'boolean') {
+            this.meetingMode = config.groupMeetingMode ? 'group' : 'normal';
+          }
+          this._isMuted = (this.meetingMode === 'group');
+
+          if (config.translatorLanguageA && config.translatorLanguageA.trim() !== '') {
+            this.translatorLanguageA = config.translatorLanguageA.trim();
+          }
+          if (config.translatorLanguageB && config.translatorLanguageB.trim() !== '') {
+            this.translatorLanguageB = config.translatorLanguageB.trim();
+          }
+
+          console.log(`  Meeting mode: ${this.meetingMode}`);
+          if (this.meetingMode === 'translator') {
+            console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+            if (this.activationMode !== 'always_active') {
+              console.warn(`  ⚠️  Translator mode requires activation mode 'always_active' to work end-to-end. Current: ${this.activationMode}`);
+            }
+          }
+        } catch (error) {
+          console.error('Failed to load voice-assistant config from DynamoDB:', error);
+          console.log('Using constructor configuration as fallback');
+        }
+      }
 
       // Initialize Lambda client if Strands Lambda ARN is configured
       if (this.strandsLambdaArn) {
@@ -121,7 +186,18 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
           console.log('✓ Connected to ElevenLabs Conversational AI');
           this.isConnected = true;
 
-          // Send initial configuration (no overrides - use agent's configured settings)
+          // Send initial configuration. The ElevenLabs agent's persona (system
+          // prompt, first message, tools, language, voice) is configured in the
+          // ElevenLabs dashboard — LMA does NOT override the prompt here.
+          //
+          // For 'translator' mode, users should configure their ElevenLabs agent
+          // as a bidirectional interpreter between their two languages in the
+          // ElevenLabs dashboard, and set LMA's Meeting Mode to 'translator' +
+          // Activation Mode to 'always_active' so LMA keeps the connection open
+          // and doesn't apply group-mode mute gating.
+          //
+          // For 'group' mode, the agent stays muted until a wake phrase is
+          // detected in the user transcript (handled below in user_transcript).
           this.ws?.send(
             JSON.stringify({
               type: 'conversation_initiation_client_data',
@@ -192,9 +268,22 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         console.log('📝 Agent text response:', message.agent_response_event?.agent_response);
         break;
 
-      case 'user_transcript':
-        console.log('👤 Agent heard:', message.user_transcription_event?.user_transcript);
+      case 'user_transcript': {
+        const userText: string = message.user_transcription_event?.user_transcript || '';
+        console.log('👤 Agent heard:', userText);
+        // Group-meeting wake-phrase handling for ElevenLabs (parity with Nova).
+        // In translator mode we don't gate on wake phrases — every utterance
+        // triggers a translation.
+        if (this.meetingMode === 'group' && userText && this.containsWakePhrase(userText)) {
+          if (this._isMuted) {
+            console.log('🔓 Wake phrase detected in user transcript - proactively unmuting agent');
+            this._isMuted = false;
+            if (!this.conversationActive) this.startConversationSession();
+          }
+          this.resetConversationTimeout();
+        }
         break;
+      }
 
       case 'interruption':
         console.log('⚠️  Agent interrupted');
@@ -346,8 +435,12 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       return;
     }
     
-    // Don't send audio to agent when agent is speaking (prevent feedback loop)
-    if (this._isSpeaking) {
+    // Don't send audio to agent when agent is speaking (prevent feedback loop).
+    // Exception: in translator mode we still send audio while speaking, so that
+    // the interpreter can pick up the reply from the other party immediately.
+    // Audio feedback is prevented by PulseAudio routing (agent_output sink is
+    // separate from the default mic source), not by this gate.
+    if (this._isSpeaking && this.meetingMode !== 'translator') {
       return;
     }
     
@@ -394,6 +487,13 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   }
 
   private async playAudio(audioBuffer: Buffer): Promise<void> {
+    // Group-meeting mode: drop audio from the agent while muted. This mirrors
+    // the Nova agent and gives us wake-phrase-gated speech for ElevenLabs too.
+    if (this._isMuted) {
+      console.log('🔇 Audio dropped - agent is muted (group meeting mode)');
+      return;
+    }
+
     // Add audio to queue
     this.audioQueue.push(audioBuffer);
     console.log(`🎵 Audio chunk queued (${audioBuffer.length} bytes) - Queue size: ${this.audioQueue.length}`);
@@ -654,6 +754,56 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     }
   }
 
+  // ---- Group-meeting wake-phrase helpers (parity with Nova agent) ----
+
+  private containsWakePhrase(text: string): boolean {
+    const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
+    const wakePhrases = wakePhraseEnv.split(',').map((p: string) => p.trim().toLowerCase());
+    const normalized = text.toLowerCase()
+      .replace(/[,.\?!;:'"]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return wakePhrases.some((phrase: string) => {
+      const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+      // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- Inputs are regex-escaped above; escaped wake-phrase cannot produce catastrophic backtracking
+      const regex = new RegExp(`\\b${escapedPhrase}\\b`, 'i');
+      return regex.test(normalized);
+    });
+  }
+
+  private startConversationSession(): void {
+    if (this.meetingMode !== 'group') return;
+    console.log('💬 Starting conversation session (group mode)');
+    this.conversationActive = true;
+    this.clearConversationTimeout();
+    const timeoutMs = this.defaultActivationDuration * 1000;
+    this.conversationTimeout = setTimeout(() => {
+      console.log(`⏰ Conversation timeout (${this.defaultActivationDuration}s) - re-muting agent`);
+      this._isMuted = true;
+      this.conversationActive = false;
+      this.clearConversationTimeout();
+    }, timeoutMs);
+  }
+
+  private resetConversationTimeout(): void {
+    if (this.meetingMode !== 'group' || !this.conversationActive) return;
+    this.clearConversationTimeout();
+    const timeoutMs = this.defaultActivationDuration * 1000;
+    this.conversationTimeout = setTimeout(() => {
+      console.log(`⏰ Conversation timeout (${this.defaultActivationDuration}s) - re-muting agent`);
+      this._isMuted = true;
+      this.conversationActive = false;
+      this.clearConversationTimeout();
+    }, timeoutMs);
+  }
+
+  private clearConversationTimeout(): void {
+    if (this.conversationTimeout) {
+      clearTimeout(this.conversationTimeout);
+      this.conversationTimeout = null;
+    }
+  }
+
   isEnabled(): boolean {
     return this.enabled;
   }
@@ -668,5 +818,40 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
 
   isSpeaking(): boolean {
     return this._isSpeaking;
+  }
+
+  /**
+   * Mute the agent — drops all outgoing audio until unmuted. Idempotent.
+   * Drains the playback queue so pending chunks are not played.
+   */
+  mute(reason?: string): void {
+    if (this._isMuted) {
+      return;
+    }
+    console.log(`🔇 ElevenLabs agent muted${reason ? ` (${reason})` : ''}`);
+    this._isMuted = true;
+    this.conversationActive = false;
+    if (this.audioQueue.length > 0) {
+      console.log(`🔇 Dropping ${this.audioQueue.length} queued audio chunks on mute`);
+      this.audioQueue = [];
+    }
+  }
+
+  /**
+   * Unmute the agent — resumes outgoing audio. Idempotent.
+   */
+  unmute(reason?: string): void {
+    if (!this._isMuted) {
+      return;
+    }
+    console.log(`🔓 ElevenLabs agent unmuted${reason ? ` (${reason})` : ''}`);
+    this._isMuted = false;
+    if (!this.conversationActive) {
+      this.conversationActive = true;
+    }
+  }
+
+  isMuted(): boolean {
+    return this._isMuted;
   }
 }

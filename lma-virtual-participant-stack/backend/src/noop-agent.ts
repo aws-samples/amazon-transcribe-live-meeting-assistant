@@ -50,4 +50,16 @@ export class NoOpAgent implements VoiceAssistantProvider {
   isSpeaking(): boolean {
     return false;
   }
+
+  mute(_reason?: string): void {
+    // No-op
+  }
+
+  unmute(_reason?: string): void {
+    // No-op
+  }
+
+  isMuted(): boolean {
+    return false;
+  }
 }

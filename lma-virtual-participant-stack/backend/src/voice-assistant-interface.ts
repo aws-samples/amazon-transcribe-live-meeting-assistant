@@ -105,4 +105,21 @@ export interface VoiceAssistantProvider {
    * Check if voice assistant is currently speaking
    */
   isSpeaking(): boolean;
+
+  /**
+   * Mute the voice assistant — drops all outgoing audio. Idempotent.
+   * @param reason Optional log tag identifying the source of the call.
+   */
+  mute(reason?: string): void;
+
+  /**
+   * Unmute the voice assistant — resumes outgoing audio. Idempotent.
+   * @param reason Optional log tag identifying the source of the call.
+   */
+  unmute(reason?: string): void;
+
+  /**
+   * Whether the voice assistant is currently muted.
+   */
+  isMuted(): boolean;
 }

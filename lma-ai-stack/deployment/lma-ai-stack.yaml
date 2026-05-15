@@ -497,6 +497,18 @@ Parameters:
       Name of the EventBridge Schedule Group for Virtual Participants from the VP stack.
       This should match the schedule group name created by the Virtual Participant stack.
 
+  VoiceAssistantActivationMode:
+    Type: String
+    Default: "wake_phrase"
+    AllowedValues:
+      - "always_active"
+      - "wake_phrase"
+    Description: >-
+      (Informational) Activation mode used by the Virtual Participant voice assistant.
+      Forwarded from the main stack so the Nova Sonic Configuration admin UI can
+      indicate whether Meeting Mode settings (Group / Translator) are active.
+      These modes only take effect when this value is 'always_active'.
+
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -755,11 +767,40 @@ Resources:
           AttributeType: S
         - AttributeName: SK
           AttributeType: S
+        # GSI attribute — stamped on `cls#…` meeting-list rows only.  Enables the
+        # TypeDateIndex GSI used by listCallsDateRange / getCallCount resolvers
+        # for efficient date-range meeting-list queries without scanning.
+        - AttributeName: ItemType
+          AttributeType: S
       KeySchema:
         - AttributeName: PK
           KeyType: HASH
         - AttributeName: SK
           KeyType: RANGE
+      GlobalSecondaryIndexes:
+        # TypeDateIndex — one hot partition keyed by ItemType, range-sorted by
+        # the tracking row's SK (format `ts#<ISO8601>#id#<CallId>`, so it's
+        # chronological).  Items are tiny (~200B) and on-demand scales RCUs
+        # elastically; meets target of 1000 concurrent users at realistic QPS
+        # well below DDB per-partition limits.  Projection is INCLUDE with
+        # CallId, CreatedAt, UpdatedAt, ExpiresAfter, Owner, SharedWith — the
+        # resolver can enforce RBAC (Owner/SharedWith) from the projection and
+        # then BatchGetItem the `c#<CallId>` detail rows in one round-trip.
+        - IndexName: TypeDateIndex
+          KeySchema:
+            - AttributeName: ItemType
+              KeyType: HASH
+            - AttributeName: SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - CallId
+              - CreatedAt
+              - UpdatedAt
+              - ExpiresAfter
+              - Owner
+              - SharedWith
       BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
@@ -774,8 +815,165 @@ Resources:
         StreamViewType: NEW_IMAGE
 
   ##########################################################################
+  # TypeDateIndex GSI Backfill — populates the ItemType attribute on any
+  # pre-existing `cls#…` list-tracking rows so they show up in the GSI.
+  # New items created after this stack update already have ItemType set by
+  # the createCall mutation, so this Custom Resource is only meaningful on
+  # the first deploy against a pre-existing stack.  On fresh stacks and on
+  # subsequent updates the handler detects "already done" and no-ops.
+  ##########################################################################
+
+  BackfillWorkerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/BackfillWorkerFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  BackfillWorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with DynamoDB"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - Step Functions handles retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-BackfillWorker"
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/backfill_gsi_attributes
+      Description: Worker for Step Functions Distributed Map that stamps ItemType on existing cls# list rows
+      Timeout: 900
+      MemorySize: 512
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+      LoggingConfig:
+        LogGroup: !Ref BackfillWorkerFunctionLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventSourcingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+    DependsOn:
+      - BackfillWorkerFunctionLogGroup
+
+  BackfillStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "states.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: BackfillStateMachinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt BackfillWorkerFunction.Arn
+
+  BackfillStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "${AWS::StackName}-GSIBackfill"
+      DefinitionUri: ../source/lambda_functions/backfill_gsi_attributes/statemachine.asl.json
+      DefinitionSubstitutions:
+        BackfillWorkerFunctionArn: !GetAtt BackfillWorkerFunction.Arn
+      Role: !GetAtt BackfillStateMachineRole.Arn
+
+  BackfillTriggerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/BackfillTriggerFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  BackfillTriggerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-BackfillTrigger"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/backfill_gsi_attributes
+      Description: CloudFormation Custom Resource trigger that starts GSI backfill state machine
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+      LoggingConfig:
+        LogGroup: !Ref BackfillTriggerFunctionLogGroup
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventSourcingTable
+        - Statement:
+            - Effect: Allow
+              Action: states:StartExecution
+              Resource: !Ref BackfillStateMachine
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+    DependsOn:
+      - BackfillTriggerFunctionLogGroup
+
+  BackfillCustomResource:
+    Type: Custom::GSIBackfill
+    DependsOn:
+      - EventSourcingTable
+      - BackfillStateMachine
+    Properties:
+      ServiceToken: !GetAtt BackfillTriggerFunction.Arn
+      TrackingTableName: !Ref EventSourcingTable
+      BackfillStateMachineArn: !Ref BackfillStateMachine
+      TotalSegments: "10"
+      # Bump this value to force a re-run of the custom resource
+      # (e.g. if the backfill needs to be re-executed against a new ItemType).
+      # v1.1: Fixed trigger-handler short-circuit (v1.0 used
+      # `scan(FilterExpression=…, Limit=1)` which mis-applies Limit before the
+      # filter and skipped backfill on pre-existing stacks, leaving the GSI
+      # empty.  v1.1 always starts the state machine; the worker's conditional
+      # update makes repeat runs cheap no-ops).
+      BackfillVersion: "1.1"
+
+  ##########################################################################
   # ParameterStore
   ##########################################################################
+
 
   UpdateSettingsValues:
     Type: AWS::CloudFormation::CustomResource
@@ -1011,6 +1209,8 @@ Resources:
               - ""
           - Name: VITE_OAUTH_CALLBACK_URL
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+          - Name: VITE_VOICE_ASSISTANT_ACTIVATION_MODE
+            Value: !Ref VoiceAssistantActivationMode
   # CodeBuild project for building MCP servers Lambda layer
   MCPLayerBuildProject:
     Type: AWS::CodeBuild::Project
@@ -3492,9 +3692,14 @@ Resources:
                 "CreatedAt": $util.dynamodb.toDynamoDBJson($ctx.args.input.CreatedAt),
                 "UpdatedAt": $util.dynamodb.toDynamoDBJson($ctx.args.input.UpdatedAt),
                 "ExpiresAfter": $util.dynamodb.toDynamoDBJson($ctx.args.input.ExpiresAfter),
-                "Owner": $util.dynamodb.toDynamoDBJson($ctx.args.input.Owner)
+                "Owner": $util.dynamodb.toDynamoDBJson($ctx.args.input.Owner),
+                ## ItemType flags this row for the TypeDateIndex GSI that
+                ## powers listCallsDateRange / getCallCount.  Only list-tracking
+                ## rows carry ItemType so the GSI stays tight.
+                "ItemType": $util.dynamodb.toDynamoDBJson("call")
               },
             },
+
           ],
         }
       ResponseMappingTemplateS3Location: ../source/appsync/createCall.response.vtl
@@ -3753,38 +3958,118 @@ Resources:
         }
       ResponseMappingTemplateS3Location: ../source/appsync/deleteCall.response.vtl
 
-  ListCallsDateHourAppSyncResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
-      TypeName: Query
-      FieldName: listCallsDateHour
-      RequestMappingTemplateS3Location: ../source/appsync/listCallsDateHour.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/listCalls.response.vtl
+  ##############################################################################
+  # GSI-backed meeting list resolvers (listCallsDateRange, getCallCount)
+  # Replace legacy shard/hour/scan VTL resolvers with a single Lambda that
+  # queries the TypeDateIndex GSI on EventSourcingTable, then enriches each
+  # matching list row with the corresponding call-detail item via
+  # BatchGetItem — so the client receives fully-hydrated Call records in
+  # one round-trip and we never scan.
+  ##############################################################################
 
-  ListCallsDateShardAppSyncResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: AppSyncSchema
+  ListCallsGsiResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
     Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
-      TypeName: Query
-      FieldName: listCallsDateShard
-      RequestMappingTemplateS3Location: ../source/appsync/listCallsDateShard.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/listCalls.response.vtl
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ListCallsGsiResolver"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
-  ListCallsAppSyncResolver:
+  ListCallsGsiResolverFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-ListCallsGsiResolver"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/list_calls_gsi_resolver
+      Description: AppSync resolver for listCallsDateRange / getCallCount — queries TypeDateIndex GSI and BatchGetItems call-detail rows
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE_NAME: !Ref EventSourcingTable
+          LOG_LEVEL: INFO
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventSourcingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource: !Sub "${EventSourcingTable.Arn}/index/*"
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+              Condition:
+                StringEquals:
+                  "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+      LoggingConfig:
+        LogGroup: !Ref ListCallsGsiResolverFunctionLogGroup
+    DependsOn:
+      - ListCallsGsiResolverFunctionLogGroup
+
+  AppSyncListCallsGsiLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt ListCallsGsiResolverFunction.Arn
+
+  ListCallsGsiDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ListCallsGsiResolver
+      Description: GSI-backed resolver for listCallsDateRange / getCallCount
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncListCallsGsiLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt ListCallsGsiResolverFunction.Arn
+
+  ListCallsDateRangeAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
+      DataSourceName: !GetAtt ListCallsGsiDataSource.Name
       TypeName: Query
-      FieldName: listCalls
-      RequestMappingTemplateS3Location: ../source/appsync/listCalls.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/listCalls.response.vtl
+      FieldName: listCallsDateRange
+
+  GetCallCountAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ListCallsGsiDataSource.Name
+      TypeName: Query
+      FieldName: getCallCount
 
   GetTranscriptSegmentsAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -4550,38 +4835,25 @@ Resources:
     Properties:
       RestApiId: !Ref MCPApiKeyRestApi
 
-  # CloudWatch Log Group for API Gateway access logs (security-matrix API-GW-001)
-  MCPApiKeyAccessLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: ShouldEnableMCPServer
-    Properties:
-      LogGroupName: !Sub "/aws/apigateway/${LMAStackName}-MCP-ApiKey/access"
-      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
-      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
-
   MCPApiKeyStage:
     Type: AWS::ApiGateway::Stage
     Condition: ShouldEnableMCPServer
     # checkov:skip=CKV_AWS_73: "X-Ray tracing not required for this API; operational cost consideration"
-    # checkov:skip=CKV2_AWS_4: "Access logging enabled via AccessLogSetting property"
+    # checkov:skip=CKV_AWS_76: "API Gateway access logging (AccessLogSetting) intentionally not configured — same rationale as CKV2_AWS_4 below (requires account-wide AWS::ApiGateway::Account.CloudWatchRoleArn singleton that LMA does not take ownership of). Customers who want per-request MCP access logs can enable them manually after deployment by following the steps in the CKV2_AWS_4 skip comment."
+    # checkov:skip=CKV2_AWS_4: "CloudWatch access logging (AccessLogSetting) and method-level execution logging (MethodSettings.LoggingLevel) are intentionally NOT configured on this stage. Both require the account/region-wide AWS::ApiGateway::Account.CloudWatchRoleArn singleton to be set; in brand-new AWS accounts/regions this singleton is unset and stack creation fails with 'CloudWatch Logs role ARN must be set in account settings to enable logging'. LMA is deployed into customer accounts where that singleton may already be owned by another stack, so LMA does not take ownership of it. Customers who want per-request MCP access logs can enable them manually after deployment: (1) create an IAM role trusted by apigateway.amazonaws.com with the AmazonAPIGatewayPushToCloudWatchLogs managed policy; (2) call apigateway:UpdateAccount --cloud-watch-role-arn <role-arn> once per region; (3) re-add AccessLogSetting on the MCP stage. CloudTrail data-event logging on the Lambda integration (MCPServerAnalyticsFunction) and CloudWatch metrics on this stage (MetricsEnabled: true) remain available without any account-level prerequisite."
     # checkov:skip=CKV2_AWS_29: "WAF protection is OPTIONAL via WAFAllowedIPv4Ranges parameter - customer configurable"
     # checkov:skip=CKV_AWS_120: "Caching disabled by design - this is the API Key auth endpoint; caching would serve stale authorization decisions after a user revokes their key. AuthorizerResultTtlInSeconds=0 ensures every request re-evaluates the key hash against DynamoDB."
     Properties:
       RestApiId: !Ref MCPApiKeyRestApi
       DeploymentId: !Ref MCPApiKeyDeployment
       StageName: mcp
-      # Access logging (security-matrix API-GW-001): per-request structured JSON logs
-      AccessLogSetting:
-        DestinationArn: !GetAtt MCPApiKeyAccessLogGroup.Arn
-        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationStatus":"$context.integrationStatus","integrationLatency":"$context.integrationLatency","authorizerError":"$context.authorizer.error"}'
-      # Execution logs (security-matrix API-GW-006): authorizer/integration telemetry
+      # NOTE: AccessLogSetting and MethodSettings.LoggingLevel are intentionally
+      # omitted — see the CKV2_AWS_4 skip comment above for the full rationale.
       MethodSettings:
         - HttpMethod: "*"
           ResourcePath: "/*"
           ThrottlingBurstLimit: 50
           ThrottlingRateLimit: 100
-          LoggingLevel: INFO
-          DataTraceEnabled: false  # avoid logging request/response bodies (may contain sensitive MCP data)
           MetricsEnabled: true
 
   MCPApiKeyLambdaPermission:

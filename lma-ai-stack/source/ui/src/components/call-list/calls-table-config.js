@@ -3,7 +3,7 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Button,
   ButtonDropdown,
@@ -25,6 +25,7 @@ import { CategoryAlertPill } from './CategoryAlertPill';
 import { CategoryPills } from './CategoryPills';
 import { getTextOnlySummary } from '../common/summary';
 import { shareModal, deleteModal } from '../common/meeting-controls';
+import CustomDateRangeModal from './CustomDateRangeModal';
 
 export const KEY_COLUMN_ID = 'callId';
 
@@ -240,63 +241,182 @@ export const CallsPreferences = ({
   />
 );
 
-// number of shards per day used by the list calls API
-export const CALL_LIST_SHARDS_PER_DAY = 6;
-const TIME_PERIOD_DROPDOWN_CONFIG = {
-  'refresh-2h': { count: 0.5, text: '2 hrs' },
-  'refresh-4h': { count: 1, text: '4 hrs' },
-  'refresh-8h': { count: CALL_LIST_SHARDS_PER_DAY / 3, text: '8 hrs' },
-  'refresh-1d': { count: CALL_LIST_SHARDS_PER_DAY, text: '1 day' },
-  'refresh-2d': { count: 2 * CALL_LIST_SHARDS_PER_DAY, text: '2 days' },
-  'refresh-1w': { count: 7 * CALL_LIST_SHARDS_PER_DAY, text: '1 week' },
-  'refresh-2w': { count: 14 * CALL_LIST_SHARDS_PER_DAY, text: '2 weeks' },
-  'refresh-1m': { count: 30 * CALL_LIST_SHARDS_PER_DAY, text: '30 days' },
-};
-const TIME_PERIOD_DROPDOWN_ITEMS = Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map((k) => ({
-  id: k,
-  ...TIME_PERIOD_DROPDOWN_CONFIG[k],
-}));
+/// ///////////////////////////////////////////////////////////////////////////
+// Date-range selector for the meeting list
+/// ///////////////////////////////////////////////////////////////////////////
+// The meeting list is now scoped by an ISO-8601 date range, queried via
+// `listCallsDateRange` backed by the TypeDateIndex GSI on EventSourcingTable.
+// We expose a set of relative presets (last N hours/days) plus a "Custom…"
+// option that opens a CloudScape DateRangePicker modal.
 
-// local storage key to persist the last periods to load
-export const PERIODS_TO_LOAD_STORAGE_KEY = 'periodsToLoad';
+export const DEFAULT_DATE_RANGE_HOURS = 8;
+export const DATE_RANGE_STORAGE_KEY = 'callListDateRange';
+
+// Preset presets used by the Load dropdown.  Each entry resolves to an
+// ISO-8601 start/end pair at click time (so "Last 2 hrs" is always
+// relative to now).
+const TIME_PERIOD_DROPDOWN_CONFIG = {
+  'refresh-2h': { hours: 2, text: '2 hrs' },
+  'refresh-4h': { hours: 4, text: '4 hrs' },
+  'refresh-8h': { hours: 8, text: '8 hrs' },
+  'refresh-1d': { hours: 24, text: '1 day' },
+  'refresh-2d': { hours: 48, text: '2 days' },
+  'refresh-1w': { hours: 24 * 7, text: '1 week' },
+  'refresh-2w': { hours: 24 * 14, text: '2 weeks' },
+  'refresh-1m': { hours: 24 * 30, text: '30 days' },
+};
+const TIME_PERIOD_DROPDOWN_ITEMS = [
+  ...Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map((k) => ({
+    id: k,
+    text: TIME_PERIOD_DROPDOWN_CONFIG[k].text,
+  })),
+  { id: 'refresh-custom', text: 'Custom…' },
+];
+
+/** Turn a number of hours into a {startDateIso, endDateIso, hours} window
+ *  ending at the current instant.
+ */
+export const hoursToDateRange = (hours) => {
+  const end = new Date();
+  const start = new Date(end.getTime() - hours * 3600 * 1000);
+  return {
+    startDateIso: start.toISOString(),
+    endDateIso: end.toISOString(),
+    hours,
+  };
+};
+
+/**
+ * Load + persist the last-used date range from localStorage.  Returns
+ * undefined if nothing is cached, so the hook falls back to DEFAULT_DATE_RANGE_HOURS.
+ * If the cache is a pure "relative" window (has an `hours` key) we recompute
+ * the absolute bounds on read so the user always sees up-to-the-second data
+ * on reload.
+ */
+export const loadCachedDateRange = () => {
+  try {
+    const raw = localStorage.getItem(DATE_RANGE_STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    if (parsed?.hours && typeof parsed.hours === 'number') {
+      return hoursToDateRange(parsed.hours);
+    }
+    if (parsed?.startDateIso && parsed?.endDateIso) {
+      return parsed;
+    }
+    return undefined;
+  } catch (e) {
+    return undefined;
+  }
+};
+
+export const persistDateRange = (range) => {
+  try {
+    // If it's a relative range we only persist the hours so reloads
+    // recompute a fresh absolute window.
+    if (range?.hours) {
+      localStorage.setItem(DATE_RANGE_STORAGE_KEY, JSON.stringify({ hours: range.hours }));
+    } else if (range?.startDateIso && range?.endDateIso) {
+      localStorage.setItem(DATE_RANGE_STORAGE_KEY, JSON.stringify(range));
+    }
+  } catch (e) {
+    // ignore quota/privacy-mode errors
+  }
+};
+
+const formatShortLabel = (range) => {
+  if (!range) return '';
+  if (range.hours) {
+    const preset = Object.values(TIME_PERIOD_DROPDOWN_CONFIG).find((c) => c.hours === range.hours);
+    if (preset) return preset.text;
+    return `${range.hours} hr${range.hours === 1 ? '' : 's'}`;
+  }
+  const start = new Date(range.startDateIso);
+  const end = new Date(range.endDateIso);
+  const fmt = (d) => `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  return `Custom: ${fmt(start)} – ${fmt(end)}`;
+};
 
 export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
+  const [customModalVisible, setCustomModalVisible] = useState(false);
+
   const onPeriodToLoadChange = ({ detail }) => {
     const { id } = detail;
-    const shardCount = TIME_PERIOD_DROPDOWN_CONFIG[id].count;
-    props.setPeriodsToLoad(shardCount);
-    localStorage.setItem(PERIODS_TO_LOAD_STORAGE_KEY, JSON.stringify(shardCount));
+    if (id === 'refresh-custom') {
+      setCustomModalVisible(true);
+      return;
+    }
+    const cfg = TIME_PERIOD_DROPDOWN_CONFIG[id];
+    if (!cfg) return;
+    const range = hoursToDateRange(cfg.hours);
+    props.setDateRange(range);
+    persistDateRange(range);
   };
 
-  // eslint-disable-next-line
-  const periodText =
-    TIME_PERIOD_DROPDOWN_ITEMS.filter((i) => i.count === props.periodsToLoad)[0]?.text || '';
+  const onCustomApply = ({ startDateIso, endDateIso }) => {
+    const range = { startDateIso, endDateIso };
+    props.setDateRange(range);
+    persistDateRange(range);
+    setCustomModalVisible(false);
+  };
+
+  const rangeLabel = formatShortLabel(props.dateRange);
+
+  // Header counter: show "(loaded / total)" when we know the server-side
+  // total and it exceeds what we've materialised client-side.  Otherwise
+  // fall back to the default "(loaded)" / "(loaded / selected)" rendered
+  // by TableHeader from totalItems + selectedItems.
+  const loadedCount = props.loadedCallCount ?? (props.calls ? props.calls.length : undefined);
+  const selectedCount = props.selectedItems?.length || 0;
+  let counter;
+  if (typeof props.totalCallCount === 'number' && typeof loadedCount === 'number') {
+    const totalLabel = props.totalCallCountTruncated ? `${props.totalCallCount}+` : `${props.totalCallCount}`;
+    if (props.totalCallCount > loadedCount) {
+      counter = selectedCount
+        ? `(${selectedCount}/${loadedCount} loaded of ${totalLabel})`
+        : `(${loadedCount} loaded of ${totalLabel})`;
+    } else {
+      counter = selectedCount ? `(${selectedCount}/${totalLabel})` : `(${totalLabel})`;
+    }
+  }
 
   return (
-    <TableHeader
-      title={resourceName}
-      actionButtons={
-        <SpaceBetween size="xxs" direction="horizontal">
-          <ButtonDropdown loading={props.loading} onItemClick={onPeriodToLoadChange} items={TIME_PERIOD_DROPDOWN_ITEMS}>
-            {`Load: ${periodText}`}
-          </ButtonDropdown>
-          <Button
-            iconName="refresh"
-            variant="normal"
-            loading={props.loading}
-            onClick={() => props.setIsLoading(true)}
-          />
-          <Button
-            iconName="download"
-            variant="normal"
-            loading={props.loading}
-            onClick={() => props.downloadToExcel()}
-          />
-          {shareModal(props)}
-          {deleteModal(props)}
-        </SpaceBetween>
-      }
-      {...props}
-    />
+    <>
+      <TableHeader
+        title={resourceName}
+        counter={counter}
+        actionButtons={
+          <SpaceBetween size="xxs" direction="horizontal">
+            <ButtonDropdown
+              loading={props.loading}
+              onItemClick={onPeriodToLoadChange}
+              items={TIME_PERIOD_DROPDOWN_ITEMS}
+            >
+              {`Load: ${rangeLabel}`}
+            </ButtonDropdown>
+            <Button
+              iconName="refresh"
+              variant="normal"
+              loading={props.loading}
+              onClick={() => props.setIsLoading(true)}
+            />
+            <Button
+              iconName="download"
+              variant="normal"
+              loading={props.loading}
+              onClick={() => props.downloadToExcel()}
+            />
+            {shareModal(props)}
+            {deleteModal(props)}
+          </SpaceBetween>
+        }
+        {...props}
+      />
+      <CustomDateRangeModal
+        visible={customModalVisible}
+        onDismiss={() => setCustomModalVisible(false)}
+        onApply={onCustomApply}
+      />
+    </>
   );
 };

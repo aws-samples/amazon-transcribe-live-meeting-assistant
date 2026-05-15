@@ -1,13 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import { Page } from "puppeteer";
+
 import { details } from "./details.js";
 import { transcriptionService } from "./scribe.js";
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
-
-// const bedrockClient = new BedrockRuntimeClient();
+import { agentSpeakingDetector } from './agent-speaking-detector.js';
 
 export default class Teams {
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
@@ -181,12 +180,51 @@ export default class Teams {
             }
         });
 
-        await page.exposeFunction("speakerChange", async (speaker: string) => {
-            console.log(`DEBUG: Speaker detected: "${speaker}"`);
+        // Speaker attribution combines two signals:
+        //   1) Page-side DOM MutationObserver — identifies human speakers via
+        //      Teams' voice-level-stream-outline + vdi-frame-occlusion classes.
+        //   2) AgentSpeakingDetector — emits started/stopped events based on
+        //      RMS of the voice agent's PCM output on agent_output.monitor.
+        //
+        // When the detector says the agent is speaking we attribute to LMA;
+        // otherwise we report the last human DOM speaker.
+
+        let lastMeetingSpeaker: string | null = null;
+        let lastReportedSpeaker: string | null = null;
+
+        const reportSpeaker = async (speaker: string) => {
+            if (!speaker || speaker === lastReportedSpeaker) return;
+            lastReportedSpeaker = speaker;
             await transcriptionService.speakerChange(speaker);
+        };
+
+        await page.exposeFunction("speakerChange", async (speaker: string) => {
+            if (!speaker) return;
+            lastMeetingSpeaker = speaker;
+            await reportSpeaker(speaker);
         });
-        
+
+        if (voiceAssistant.isEnabled()) {
+            const onAgentStart = () => {
+                reportSpeaker(details.scribeIdentity).catch(() => {});
+            };
+            const onAgentStop = () => {
+                if (lastMeetingSpeaker) {
+                    reportSpeaker(lastMeetingSpeaker).catch(() => {});
+                }
+            };
+            agentSpeakingDetector.on('started', onAgentStart);
+            agentSpeakingDetector.on('stopped', onAgentStop);
+            if (agentSpeakingDetector.isSpeaking()) onAgentStart();
+
+            page.once('close', () => {
+                agentSpeakingDetector.off('started', onAgentStart);
+                agentSpeakingDetector.off('stopped', onAgentStop);
+            });
+        }
+
         console.log("Listening for speaker changes.");
+
         await page.evaluate(() => {
             console.log('DEBUG: Setting up speaker detection for both normal and screen sharing modes...');
             
@@ -235,35 +273,14 @@ export default class Teams {
                     }
                 }
                 
-                // Method 3: Normal mode - check SpeakerStage-wrapper
-                const speakerStage = document.querySelector('[data-tid="SpeakerStage-wrapper"]');
-                if (speakerStage) {
-                    const speakerElement = speakerStage.querySelector('[data-tid]:not([data-tid*="wrapper"]):not([data-tid*="button"]):not([data-tid*="avatar"])');
-                    if (speakerElement) {
-                        const name = speakerElement.getAttribute('data-tid');
-                        if (name && name.length > 0) {
-                            console.log(`DEBUG: Normal mode - speaker: "${name}"`);
-                            return name;
-                        }
-                    }
-                }
-                
-                // Method 4: Fallback - look for any prominent participant
-                const allParticipants = document.querySelectorAll('[data-tid]:not([data-tid*="wrapper"]):not([data-tid*="button"]):not([data-tid*="avatar"]):not([data-tid*="LMA"])');
-                console.log(`DEBUG: Fallback - found ${allParticipants.length} total participants`);
-                
-                for (const participant of allParticipants) {
-                    const name = participant.getAttribute('data-tid');
-                    if (name && name.length > 0 && name.length < 100) {
-                        console.log(`DEBUG: Fallback mode - speaker: "${name}"`);
-                        return name;
-                    }
-                }
-                
-                console.log('DEBUG: No speaker found in any mode');
+                // No active speaking indicator and no screen share — return
+                // empty so the caller leaves the current speaker unchanged.
+                // Avoid returning any "first participant tile" fallback here,
+                // which would emit meaningless data-tid values (e.g. the
+                // meeting-branding wrapper) while the agent is talking.
                 return '';
             };
-            
+
             const targetNode = document.querySelector('[data-tid="modern-stage-wrapper"]');
             const config = { 
                 childList: true,

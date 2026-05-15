@@ -16,12 +16,17 @@ To customize the voice assistant, edit the custom config item: {CUSTOM_CONFIG_PK
 
 CUSTOM_CONFIG_INFO = f"""Custom Nova Sonic voice assistant configuration. Attribute values here override the default config in item: {DEFAULT_CONFIG_PK}.
 Changes are preserved during stack updates. Available attributes:
-- systemPrompt (String): The system prompt text for the voice assistant
+- systemPrompt (String): The system prompt text for the voice assistant (Nova Sonic only; ElevenLabs agents are configured in the ElevenLabs dashboard)
 - promptMode (String): How to apply custom prompt - 'base' (use as-is), 'inject' (append to default), or 'replace' (fully replace default)
 - modelId (String): Override the Nova model ID (optional)
 - voiceId (String): Voice ID for speech output - Options: tiffany (US feminine, polyglot), matthew (US masculine, polyglot), amy (UK feminine), olivia (AU feminine), kiara (IN feminine), arjun (IN masculine), ambre (FR feminine), florian (FR masculine), beatrice (IT feminine), lorenzo (IT masculine), tina (DE feminine), lennart (DE masculine), lupe (US Spanish feminine), carlos (US Spanish masculine), carolina (BR Portuguese feminine), leo (BR Portuguese masculine)
 - endpointingSensitivity (String): Turn-taking sensitivity - 'HIGH' (1.5s pause, fastest), 'MEDIUM' (1.75s pause, balanced), or 'LOW' (2.0s pause, most patient)
-- groupMeetingMode (Boolean): Enable group meeting mode - Nova starts muted and only speaks when directly addressed via unmute tool (default: false)
+- meetingMode (String): Meeting mode - 'normal' (default), 'group' (starts muted; unmutes on wake phrase), or 'translator' (live bidirectional interpreter). Supersedes the legacy 'groupMeetingMode' boolean. Requires Activation Mode = 'always_active'.
+- translatorLanguageA (String): Language A for translator mode (default 'English'). Ignored unless meetingMode='translator'.
+- translatorLanguageB (String): Language B for translator mode (default 'Spanish'). Ignored unless meetingMode='translator'.
+- translatorMutePhrases (String): Comma-separated phrases that pause translator mode when spoken in the meeting (default 'translator mute, alex mute'). Ignored unless meetingMode='translator'.
+- translatorUnmutePhrases (String): Comma-separated phrases that resume translator mode when spoken in the meeting (default 'translator unmute, alex unmute'). Ignored unless meetingMode='translator'.
+- groupMeetingMode (Boolean, DEPRECATED): Legacy flag. Use 'meetingMode' instead. If set to true and 'meetingMode' is unset, it is treated as meetingMode='group'.
 """
 
 def get_default_config():
@@ -34,6 +39,12 @@ def get_default_config():
         'modelId': 'amazon.nova-2-sonic-v1:0',
         'voiceId': 'tiffany',
         'endpointingSensitivity': 'MEDIUM',
+        'meetingMode': 'normal',
+        'translatorLanguageA': 'English',
+        'translatorLanguageB': 'Spanish',
+        'translatorMutePhrases': 'translator mute, alex mute',
+        'translatorUnmutePhrases': 'translator unmute, alex unmute',
+        # Legacy field kept in sync with meetingMode for back-compat readers.
         'groupMeetingMode': False,
         'description': 'Default Nova Sonic configuration. Do not edit - changes will be overwritten on stack updates.'
     }

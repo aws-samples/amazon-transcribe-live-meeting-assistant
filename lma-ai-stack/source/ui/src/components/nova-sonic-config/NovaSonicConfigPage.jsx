@@ -13,7 +13,6 @@ import {
   Input,
   Textarea,
   Select,
-  Toggle,
   Button,
   Alert,
   Spinner,
@@ -35,6 +34,15 @@ const SENSITIVITY_OPTIONS = [
   { label: 'HIGH', value: 'HIGH' },
 ];
 
+const MEETING_MODE_OPTIONS = [
+  { label: 'Normal', value: 'normal' },
+  { label: 'Group Meeting', value: 'group' },
+  { label: 'Translator', value: 'translator' },
+];
+
+const VOICE_ASSISTANT_ACTIVATION_MODE = import.meta.env.VITE_VOICE_ASSISTANT_ACTIVATION_MODE || 'wake_phrase';
+const IS_ALWAYS_ACTIVE = VOICE_ASSISTANT_ACTIVATION_MODE === 'always_active';
+
 const getNovaSonicConfigQuery = `
   query GetNovaSonicConfig($NovaSonicConfigId: ID!) {
     getNovaSonicConfig(NovaSonicConfigId: $NovaSonicConfigId) {
@@ -52,6 +60,15 @@ const updateNovaSonicConfigMutation = `
   }
 `;
 
+const meetingModeFromData = (data) => {
+  if (!data) return 'normal';
+  if (data.meetingMode === 'normal' || data.meetingMode === 'group' || data.meetingMode === 'translator') {
+    return data.meetingMode;
+  }
+  if (data.groupMeetingMode === true) return 'group';
+  return 'normal';
+};
+
 const NovaSonicConfigPage = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -61,13 +78,16 @@ const NovaSonicConfigPage = () => {
   // eslint-disable-next-line no-unused-vars
   const [customConfig, setCustomConfig] = useState({});
 
-  // Form state
   const [systemPrompt, setSystemPrompt] = useState('');
   const [promptMode, setPromptMode] = useState(null);
   const [modelId, setModelId] = useState('');
   const [voiceId, setVoiceId] = useState('');
   const [endpointingSensitivity, setEndpointingSensitivity] = useState(null);
-  const [groupMeetingMode, setGroupMeetingMode] = useState(false);
+  const [meetingMode, setMeetingMode] = useState(MEETING_MODE_OPTIONS[0]);
+  const [translatorLanguageA, setTranslatorLanguageA] = useState('');
+  const [translatorLanguageB, setTranslatorLanguageB] = useState('');
+  const [translatorMutePhrases, setTranslatorMutePhrases] = useState('');
+  const [translatorUnmutePhrases, setTranslatorUnmutePhrases] = useState('');
 
   const loadConfig = useCallback(async () => {
     setLoading(true);
@@ -84,7 +104,6 @@ const NovaSonicConfigPage = () => {
       setDefaultConfig(defaultData || {});
       setCustomConfig(customData || {});
 
-      // Populate form with custom values (if set), otherwise leave empty to show defaults
       if (customData) {
         setSystemPrompt(customData.systemPrompt || '');
         setPromptMode(
@@ -97,7 +116,12 @@ const NovaSonicConfigPage = () => {
             ? SENSITIVITY_OPTIONS.find((o) => o.value === customData.endpointingSensitivity)
             : null,
         );
-        setGroupMeetingMode(customData.groupMeetingMode === true);
+        const modeValue = meetingModeFromData(customData);
+        setMeetingMode(MEETING_MODE_OPTIONS.find((o) => o.value === modeValue) || MEETING_MODE_OPTIONS[0]);
+        setTranslatorLanguageA(customData.translatorLanguageA || '');
+        setTranslatorLanguageB(customData.translatorLanguageB || '');
+        setTranslatorMutePhrases(customData.translatorMutePhrases || '');
+        setTranslatorUnmutePhrases(customData.translatorUnmutePhrases || '');
       }
     } catch (err) {
       console.error('Error loading Nova Sonic config:', err);
@@ -122,7 +146,14 @@ const NovaSonicConfigPage = () => {
       if (modelId) configData.modelId = modelId;
       if (voiceId) configData.voiceId = voiceId;
       if (endpointingSensitivity) configData.endpointingSensitivity = endpointingSensitivity.value;
-      configData.groupMeetingMode = groupMeetingMode;
+      const modeValue = meetingMode?.value || 'normal';
+      configData.meetingMode = modeValue;
+      if (modeValue === 'translator') {
+        if (translatorLanguageA.trim()) configData.translatorLanguageA = translatorLanguageA.trim();
+        if (translatorLanguageB.trim()) configData.translatorLanguageB = translatorLanguageB.trim();
+        if (translatorMutePhrases.trim()) configData.translatorMutePhrases = translatorMutePhrases.trim();
+        if (translatorUnmutePhrases.trim()) configData.translatorUnmutePhrases = translatorUnmutePhrases.trim();
+      }
 
       await client.graphql({
         query: updateNovaSonicConfigMutation,
@@ -164,7 +195,11 @@ const NovaSonicConfigPage = () => {
       setModelId('');
       setVoiceId('');
       setEndpointingSensitivity(null);
-      setGroupMeetingMode(false);
+      setMeetingMode(MEETING_MODE_OPTIONS[0]);
+      setTranslatorLanguageA('');
+      setTranslatorLanguageB('');
+      setTranslatorMutePhrases('');
+      setTranslatorUnmutePhrases('');
       setSuccess('Custom overrides cleared. Default configuration will be used.');
       await loadConfig();
     } catch (err) {
@@ -184,6 +219,12 @@ const NovaSonicConfigPage = () => {
       </Container>
     );
   }
+
+  const meetingModeValue = meetingMode?.value || 'normal';
+  const meetingModeDisabled = !IS_ALWAYS_ACTIVE && meetingModeValue !== 'normal' ? false : !IS_ALWAYS_ACTIVE;
+  const showTranslatorFields = meetingModeValue === 'translator';
+  const defaultMeetingModeLabel =
+    defaultConfig.meetingMode || (defaultConfig.groupMeetingMode === true ? 'group' : 'normal');
 
   return (
     <SpaceBetween size="l">
@@ -219,6 +260,14 @@ const NovaSonicConfigPage = () => {
           {success && (
             <Alert type="success" dismissible onDismiss={() => setSuccess(null)}>
               {success}
+            </Alert>
+          )}
+
+          {!IS_ALWAYS_ACTIVE && (
+            <Alert type="info">
+              Meeting Mode settings (Group Meeting, Translator) only take effect when the virtual participant is
+              deployed with Activation Mode set to <b>always_active</b>. Your current deployment uses{' '}
+              <b>{VOICE_ASSISTANT_ACTIVATION_MODE}</b>, so these modes will be ignored until the main stack is updated.
             </Alert>
           )}
 
@@ -274,15 +323,75 @@ const NovaSonicConfigPage = () => {
           </ColumnLayout>
 
           <FormField
-            label="Group Meeting Mode"
-            description={`Default: ${
-              defaultConfig.groupMeetingMode !== undefined ? String(defaultConfig.groupMeetingMode) : 'N/A'
-            }`}
+            label="Meeting Mode"
+            description={`Default: ${defaultMeetingModeLabel}. Requires Activation Mode = always_active for 'group' and 'translator' to take effect.`}
           >
-            <Toggle checked={groupMeetingMode} onChange={({ detail }) => setGroupMeetingMode(detail.checked)}>
-              {groupMeetingMode ? 'Enabled' : 'Disabled'}
-            </Toggle>
+            <Select
+              selectedOption={meetingMode}
+              onChange={({ detail }) => setMeetingMode(detail.selectedOption)}
+              options={MEETING_MODE_OPTIONS}
+              disabled={meetingModeDisabled}
+            />
           </FormField>
+
+          {showTranslatorFields && (
+            <SpaceBetween size="l">
+              <ColumnLayout columns={2}>
+                <FormField
+                  label="Translator Language A"
+                  description={`Default: ${defaultConfig.translatorLanguageA || 'English'}`}
+                >
+                  <Input
+                    value={translatorLanguageA}
+                    onChange={({ detail }) => setTranslatorLanguageA(detail.value)}
+                    placeholder={defaultConfig.translatorLanguageA || 'English'}
+                    disabled={!IS_ALWAYS_ACTIVE}
+                  />
+                </FormField>
+                <FormField
+                  label="Translator Language B"
+                  description={`Default: ${defaultConfig.translatorLanguageB || 'Spanish'}`}
+                >
+                  <Input
+                    value={translatorLanguageB}
+                    onChange={({ detail }) => setTranslatorLanguageB(detail.value)}
+                    placeholder={defaultConfig.translatorLanguageB || 'Spanish'}
+                    disabled={!IS_ALWAYS_ACTIVE}
+                  />
+                </FormField>
+              </ColumnLayout>
+              <ColumnLayout columns={2}>
+                <FormField
+                  label="Mute Trigger Phrases"
+                  description={
+                    'Comma-separated phrases that pause translator mode when spoken. ' +
+                    `Default: "${defaultConfig.translatorMutePhrases || 'translator mute, alex mute'}"`
+                  }
+                >
+                  <Input
+                    value={translatorMutePhrases}
+                    onChange={({ detail }) => setTranslatorMutePhrases(detail.value)}
+                    placeholder={defaultConfig.translatorMutePhrases || 'translator mute, alex mute'}
+                    disabled={!IS_ALWAYS_ACTIVE}
+                  />
+                </FormField>
+                <FormField
+                  label="Unmute Trigger Phrases"
+                  description={
+                    'Comma-separated phrases that resume translator mode when spoken. ' +
+                    `Default: "${defaultConfig.translatorUnmutePhrases || 'translator unmute, alex unmute'}"`
+                  }
+                >
+                  <Input
+                    value={translatorUnmutePhrases}
+                    onChange={({ detail }) => setTranslatorUnmutePhrases(detail.value)}
+                    placeholder={defaultConfig.translatorUnmutePhrases || 'translator unmute, alex unmute'}
+                    disabled={!IS_ALWAYS_ACTIVE}
+                  />
+                </FormField>
+              </ColumnLayout>
+            </SpaceBetween>
+          )}
         </SpaceBetween>
       </Container>
 

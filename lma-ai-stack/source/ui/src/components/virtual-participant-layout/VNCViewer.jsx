@@ -2,10 +2,31 @@
  * Copyright (c) 2025 Amazon.com
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
+ *
+ * ---------------------------------------------------------------------------
+ * Third-party notice (MPL 2.0 Section 3.2(a)):
+ *
+ * This component imports and distributes (as part of the bundled/minified
+ * JavaScript served to end-user browsers) the noVNC library
+ * (@novnc/novnc), which is licensed under the Mozilla Public License,
+ * v. 2.0 (MPL-2.0).
+ *
+ * The Source Code Form of the noVNC covered files can be obtained from
+ * the upstream project at:
+ *
+ *     https://github.com/novnc/noVNC
+ *
+ * A copy of the MPL-2.0 license text is included in the THIRD-PARTY-LICENSES.txt
+ * file at the root of this project, and is also available at
+ * https://www.mozilla.org/MPL/2.0/. This project does not modify any
+ * noVNC source files; noVNC is consumed as an unmodified library dependency.
+ * ---------------------------------------------------------------------------
  */
 import { fetchAuthSession } from 'aws-amplify/auth';
 import React, { useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
+// noVNC (@novnc/novnc) is distributed under the Mozilla Public License, v. 2.0.
+// Source: https://github.com/novnc/noVNC. See THIRD-PARTY-LICENSES.txt.
 import RFB from '@novnc/novnc/lib/rfb';
 import {
   Container,
@@ -324,6 +345,17 @@ const VNCViewer = ({
                 <li>Use &quot;Scale to Fit&quot; to adjust the display size</li>
                 <li>Click &quot;Fullscreen&quot; for a larger view</li>
               </ul>
+              <Box fontSize="body-s" color="text-body-secondary">
+                This viewer uses the{' '}
+                <a href="https://github.com/novnc/noVNC" target="_blank" rel="noopener noreferrer">
+                  noVNC
+                </a>{' '}
+                library, distributed under the{' '}
+                <a href="https://www.mozilla.org/MPL/2.0/" target="_blank" rel="noopener noreferrer">
+                  Mozilla Public License 2.0
+                </a>
+                . Source code for noVNC is available at the link above.
+              </Box>
             </SpaceBetween>
           </Alert>
         )}

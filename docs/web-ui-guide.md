@@ -51,7 +51,7 @@ The meeting list provides a searchable dashboard of all meetings you have access
 - **Columns**: Meeting Topic, Date/Time, Duration, Status, Owner, Shared With
 - **Status indicators**: In Progress, Ended
 - **Multi-select**: Check multiple meetings for batch operations (share, delete)
-- **Configurable time period**: Adjust the time range for loading meetings to manage performance with large meeting histories
+- **Configurable time range**: Use the **Load** dropdown to choose a preset window (2 hrs, 4 hrs, 8 hrs, 1 day, 2 days, 1 week, 2 weeks, 30 days) or pick **Custom…** to open a modal with explicit Start date + Start time (UTC) + End date + End time (UTC) inputs (±365-day window). The selected range is persisted in `localStorage` and the list header shows both the number of loaded meetings and the RBAC-filtered server-side total (e.g. `42 loaded of 127` or `500+` when the count is truncated). The meeting list is served by a DynamoDB GSI (`TypeDateIndex`) and a Lambda resolver that paginates a single date-range query, so performance scales to thousands of meetings without scans.
 
 Use the search bar to filter meetings by topic or other attributes.
 
