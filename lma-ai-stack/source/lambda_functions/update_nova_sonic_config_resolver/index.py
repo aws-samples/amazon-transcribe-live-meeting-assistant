@@ -23,8 +23,10 @@ ALLOWED_FIELDS = {
     "endpointingSensitivity",
     "groupMeetingMode",      # legacy; preserved for back-compat
     "meetingMode",           # new canonical meeting-mode selector
-    "translatorLanguageA",   # only relevant when meetingMode='translator'
-    "translatorLanguageB",   # only relevant when meetingMode='translator'
+    "translatorLanguageA",     # only relevant when meetingMode='translator'
+    "translatorLanguageB",     # only relevant when meetingMode='translator'
+    "translatorMutePhrases",   # comma-separated; translator-mode pause triggers
+    "translatorUnmutePhrases", # comma-separated; translator-mode resume triggers
 }
 
 # Valid values for enum-like fields
@@ -34,6 +36,9 @@ VALID_MEETING_MODES = {"normal", "group", "translator"}
 
 # Maximum length for translator language labels (prevents huge strings in config).
 MAX_LANGUAGE_LABEL_LEN = 64
+
+# Maximum length for the comma-separated translator trigger-phrase strings.
+MAX_TRIGGER_PHRASES_LEN = 256
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -101,6 +106,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 if len(value) > MAX_LANGUAGE_LABEL_LEN:
                     print(f"Invalid {key} (length {len(value)} > {MAX_LANGUAGE_LABEL_LEN}), truncating")
                     value = value[:MAX_LANGUAGE_LABEL_LEN]
+            if key in ("translatorMutePhrases", "translatorUnmutePhrases"):
+                if not isinstance(value, str):
+                    print(f"Invalid {key} (not a string): {value!r}, skipping")
+                    continue
+                value = value.strip()
+                if not value:
+                    print(f"Invalid {key} (empty string), skipping")
+                    continue
+                if len(value) > MAX_TRIGGER_PHRASES_LEN:
+                    print(f"Invalid {key} (length {len(value)} > {MAX_TRIGGER_PHRASES_LEN}), truncating")
+                    value = value[:MAX_TRIGGER_PHRASES_LEN]
             item[key] = value
 
         # Store in DynamoDB

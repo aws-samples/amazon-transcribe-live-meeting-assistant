@@ -35,6 +35,17 @@ export interface NovaAgentConfig {
   meetingMode?: MeetingMode;
   translatorLanguageA?: string;
   translatorLanguageB?: string;
+  translatorMutePhrases?: string[];
+  translatorUnmutePhrases?: string[];
+}
+
+const DEFAULT_TRANSLATOR_MUTE_PHRASES = ['translator mute', 'alex mute'];
+const DEFAULT_TRANSLATOR_UNMUTE_PHRASES = ['translator unmute', 'alex unmute'];
+
+/** Lowercases, collapses whitespace, and strips trailing punctuation so that
+ *  speech-recognized text and configured trigger phrases can be compared. */
+function normalizeForTrigger(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').replace(/[.,!?;:]+$/g, '').trim();
 }
 
 interface SessionData {
@@ -65,11 +76,16 @@ export class NovaAgent implements VoiceAssistantProvider {
   private meetingMode: MeetingMode;
   private translatorLanguageA: string;
   private translatorLanguageB: string;
+  private translatorMutePhrases: string[];
+  private translatorUnmutePhrases: string[];
   private _isActivated: boolean = false;
   private _isActive: boolean = false;
   private _isSpeaking: boolean = false;
   private _isProcessingTool: boolean = false;
   private _isMuted: boolean = false;
+  // Translator-mode state. Drives the prompt and tool set used on the
+  // Nova session; transitions trigger a session refresh.
+  private _translatorState: 'UNMUTED' | 'MUTED' = 'UNMUTED';
   private _isInterrupted: boolean = false; // Gate: drops all audio (voice + avatar) after barge-in until next turn
   private activationTimeout: NodeJS.Timeout | null = null;
   private defaultActivationDuration: number;
@@ -123,6 +139,12 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.groupMeetingMode = (this.meetingMode === 'group');
     this.translatorLanguageA = (config.translatorLanguageA || 'English').trim() || 'English';
     this.translatorLanguageB = (config.translatorLanguageB || 'Spanish').trim() || 'Spanish';
+    this.translatorMutePhrases = (config.translatorMutePhrases && config.translatorMutePhrases.length > 0)
+      ? config.translatorMutePhrases.map(normalizeForTrigger).filter(p => p.length > 0)
+      : [...DEFAULT_TRANSLATOR_MUTE_PHRASES];
+    this.translatorUnmutePhrases = (config.translatorUnmutePhrases && config.translatorUnmutePhrases.length > 0)
+      ? config.translatorUnmutePhrases.map(normalizeForTrigger).filter(p => p.length > 0)
+      : [...DEFAULT_TRANSLATOR_UNMUTE_PHRASES];
     this.defaultActivationDuration = config.activationDuration || 30;
     this.region = config.region || process.env.AWS_REGION || 'us-east-1';
     this.strandsLambdaArn = config.strandsLambdaArn || process.env.STRANDS_LAMBDA_ARN;
@@ -197,6 +219,16 @@ export class NovaAgent implements VoiceAssistantProvider {
           if (config.translatorLanguageB && config.translatorLanguageB.trim() !== '') {
             this.translatorLanguageB = config.translatorLanguageB.trim();
           }
+          if (config.translatorMutePhrases && config.translatorMutePhrases.length > 0) {
+            this.translatorMutePhrases = config.translatorMutePhrases
+              .map(normalizeForTrigger)
+              .filter(p => p.length > 0);
+          }
+          if (config.translatorUnmutePhrases && config.translatorUnmutePhrases.length > 0) {
+            this.translatorUnmutePhrases = config.translatorUnmutePhrases
+              .map(normalizeForTrigger)
+              .filter(p => p.length > 0);
+          }
 
           console.log(`  Updated system prompt (${config.systemPrompt.length} chars)`);
           console.log(`  Updated model ID: ${config.modelId}`);
@@ -205,6 +237,8 @@ export class NovaAgent implements VoiceAssistantProvider {
           console.log(`  Updated meeting mode: ${this.meetingMode}`);
           if (this.meetingMode === 'translator') {
             console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+            console.log(`  🔇 Mute trigger phrases: ${this.translatorMutePhrases.map(p => `"${p}"`).join(', ')}`);
+            console.log(`  🔓 Unmute trigger phrases: ${this.translatorUnmutePhrases.map(p => `"${p}"`).join(', ')}`);
             if (this.activationMode !== 'always_active') {
               console.warn(`  ⚠️  Translator mode requires activation mode 'always_active' to work end-to-end. Current: ${this.activationMode}`);
             }
@@ -385,21 +419,27 @@ export class NovaAgent implements VoiceAssistantProvider {
       },
     };
 
-    // In translator mode, register NO tools (zero chat/strands/mute). We want Nova
-    // to do nothing but translate — tool loops would derail the interpreter behavior.
     const translatorMode = (this.meetingMode === 'translator');
 
-    // Add tool configuration if Strands Lambda ARN is configured or group meeting mode is enabled
-    // (but NOT in translator mode)
-    if (!translatorMode && (this.strandsLambdaArn || this.groupMeetingMode)) {
+    // Tool configuration:
+    //   - Strands agent: only in non-translator modes when Strands ARN is configured.
+    //   - Group-mode mute (legacy): only in group meeting mode.
+    //   - Translator mute/unmute: only in translator mode — exposes `mute` and
+    //     `unmute` so the speaker can pause/resume translations with a strict
+    //     trigger phrase ("translator mute" / "translator unmute").
+    const wantStrands = (this.strandsLambdaArn && !translatorMode);
+    const wantGroupMute = this.groupMeetingMode;
+    const wantTranslatorMuteUnmute = translatorMode;
+
+    if (wantStrands || wantGroupMute || wantTranslatorMuteUnmute) {
       promptStartEvent.event.promptStart.toolUseOutputConfiguration = {
         mediaType: 'application/json',
       };
-      
+
       const tools: any[] = [];
-      
+
       // Add Strands agent tool if configured
-      if (this.strandsLambdaArn) {
+      if (wantStrands) {
         tools.push({
           toolSpec: {
             name: 'strands_agent',
@@ -419,11 +459,9 @@ export class NovaAgent implements VoiceAssistantProvider {
           },
         });
       }
-      
-      // Add mute tool if group meeting mode is enabled
-      // Wake phrase detection is handled by our code watching Nova's USER FINAL transcripts
-      // (no check_if_addressed tool needed - eliminates infinite tool-call loops)
-      if (this.groupMeetingMode) {
+
+      // Group-mode mute tool (legacy behavior — natural-language "be quiet" matching)
+      if (wantGroupMute) {
         tools.push({
           toolSpec: {
             name: 'mute',
@@ -437,19 +475,57 @@ export class NovaAgent implements VoiceAssistantProvider {
           },
         });
       }
-      
+
+      // Translator mode: register only the tool relevant to the current state.
+      // Exposing only one tool prevents the model from spontaneously calling
+      // the opposite transition (e.g. self-unmuting while paused).
+      if (wantTranslatorMuteUnmute) {
+        const mutePhraseList = this.translatorMutePhrases.map(p => `"${p}"`).join(' or ');
+        const unmutePhraseList = this.translatorUnmutePhrases.map(p => `"${p}"`).join(' or ');
+        if (this._translatorState === 'UNMUTED') {
+          tools.push({
+            toolSpec: {
+              name: 'mute',
+              description: `Mute yourself. Call this tool if and only if you hear the exact phrase ${mutePhraseList}. Do not call this tool for any other reason.`,
+              inputSchema: {
+                json: JSON.stringify({
+                  type: 'object',
+                  properties: {},
+                }),
+              },
+            },
+          });
+        } else {
+          tools.push({
+            toolSpec: {
+              name: 'unmute',
+              description: `Unmute yourself. Call this tool if and only if you hear the exact phrase ${unmutePhraseList}. Do not call this tool for any other reason.`,
+              inputSchema: {
+                json: JSON.stringify({
+                  type: 'object',
+                  properties: {},
+                }),
+              },
+            },
+          });
+        }
+      }
+
       promptStartEvent.event.promptStart.toolConfiguration = {
         tools: tools,
         toolChoice: {
           auto: {},
         },
       };
-      
-      if (this.strandsLambdaArn) {
+
+      if (wantStrands) {
         console.log('✓ Strands agent tool configured in promptStart');
       }
-      if (this.groupMeetingMode) {
-        console.log('✓ Mute/unmute tools configured in promptStart');
+      if (wantGroupMute) {
+        console.log('✓ Group-mode mute tool configured in promptStart');
+      }
+      if (wantTranslatorMuteUnmute) {
+        console.log('✓ Translator-mode mute/unmute tools configured in promptStart');
       }
     }
 
@@ -530,26 +606,65 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private buildSystemPromptContent(): string {
-    // Translator mode fully REPLACES the system prompt — we don't want any chat,
-    // tool-use, or interruption-handling instructions to leak in and cause Nova
-    // to do anything other than translate.
+    // Translator mode REPLACES the base system prompt. Each translator state
+    // (UNMUTED / MUTED) gets its own focused prompt with no mention of the
+    // opposite state — this, combined with state-conditional tool registration
+    // in setupInitialEvents(), prevents spontaneous state transitions.
     if (this.meetingMode === 'translator') {
       const a = this.translatorLanguageA;
       const b = this.translatorLanguageB;
+      const mutePhraseList = this.translatorMutePhrases.map(p => `"${p}"`).join(' or ');
+      const unmutePhraseList = this.translatorUnmutePhrases.map(p => `"${p}"`).join(' or ');
+
+      if (this._translatorState === 'UNMUTED') {
+        return [
+          'TRANSLATOR MODE:',
+          `You are a live bidirectional interpreter between ${a} and ${b}.`,
+          '',
+          'Rules (follow these strictly):',
+          `1. For every utterance you hear, detect whether it is in ${a} or ${b}.`,
+          '2. Translate it into the OTHER language and speak only the translation.',
+          `3. Speak the translation naturally in ${a} or ${b}, matching the speaker\'s tone.`,
+          '4. Do NOT greet, explain, summarize, answer questions, or add any commentary.',
+          '5. Preserve meaning, names, numbers, and dates. Keep output concise.',
+          `6. If an utterance is unclear or in a third language, translate it into ${a}.`,
+          '7. Never say anything on your own. Do not introduce yourself. Do not ask clarifying questions.',
+          '',
+          'Begin translating from the very next utterance you hear.',
+          '',
+          '---',
+          '',
+          'PAUSE TRIGGER — INDEPENDENT INSTRUCTION:',
+          `If, and only if, you hear the exact phrase ${mutePhraseList}, do the following:`,
+          '  - Call the `mute` tool.',
+          '  - Do NOT translate the phrase. Do NOT speak any response. Do NOT say anything else.',
+          'Otherwise, never call the `mute` tool.',
+          'You have only one tool available: `mute`. There are no other tools.',
+        ].join('\n');
+      }
+
       return [
-        'TRANSLATOR MODE:',
-        `You are a live bidirectional interpreter between ${a} and ${b}.`,
+        'TRANSLATOR MODE — PAUSED:',
+        'You are currently paused. Your job right now is to stay completely silent and listen for one specific trigger phrase.',
         '',
         'Rules (follow these strictly):',
-        `1. For every utterance you hear, detect whether it is in ${a} or ${b}.`,
-        '2. Translate it into the OTHER language and speak only the translation.',
-        `3. Speak the translation naturally in ${a} or ${b}, matching the speaker\'s tone.`,
-        '4. Do NOT greet, explain, summarize, answer questions, or add any commentary.',
-        '5. Preserve meaning, names, numbers, and dates. Keep output concise.',
-        `6. If an utterance is unclear or in a third language, translate it into ${a}.`,
-        '7. Never say anything on your own. Do not introduce yourself. Do not ask clarifying questions.',
+        '1. Do NOT translate ANY utterance, in any language, for any reason.',
+        '2. Do NOT speak any response.',
+        '3. Do NOT generate any audio output.',
+        '4. Do NOT call any tool other than the one described below.',
+        '5. Do NOT comment on, acknowledge, or react to anything you hear.',
+        '6. Stay completely silent until the resume trigger phrase below is heard.',
         '',
-        'Begin translating from the very next utterance you hear.',
+        'Even if you hear urgent-sounding speech, questions, names being called, or many utterances accumulating — you remain paused. Translation does not resume on its own. It only resumes when you hear the exact resume trigger below and call the `unmute` tool.',
+        '',
+        '---',
+        '',
+        'RESUME TRIGGER — INDEPENDENT INSTRUCTION:',
+        `If, and only if, you hear the exact phrase ${unmutePhraseList}, do the following:`,
+        '  - Call the `unmute` tool.',
+        '  - Do NOT speak any response. Do NOT say anything else.',
+        'Otherwise, never call the `unmute` tool.',
+        'You have only one tool available: `unmute`. There are no other tools.',
       ].join('\n');
     }
 
@@ -600,15 +715,30 @@ export class NovaAgent implements VoiceAssistantProvider {
     return systemPromptContent;
   }
 
+  /** Whether `text` contains any configured translator mute or unmute trigger phrase
+   *  (after normalization). Used to keep the trigger utterance itself out of replayed
+   *  history, since lexical proximity to the opposite trigger can cause the new
+   *  session to immediately call the opposite tool. */
+  private isTranslatorTriggerUtterance(text: string): boolean {
+    if (this.meetingMode !== 'translator') return false;
+    const normalized = normalizeForTrigger(text);
+    if (!normalized) return false;
+    return this.translatorMutePhrases.some(p => normalized.includes(p))
+      || this.translatorUnmutePhrases.some(p => normalized.includes(p));
+  }
+
   private addToConversationHistory(role: 'USER' | 'ASSISTANT', content: string): void {
-    // Add to history
+    if (role === 'USER' && this.isTranslatorTriggerUtterance(content)) {
+      console.log(`💬 Skipping translator trigger utterance from history: "${content.substring(0, 60)}..."`);
+      return;
+    }
+
     this.conversationHistory.push({
       role,
       content,
       timestamp: Date.now(),
     });
 
-    // Keep only last N turns
     if (this.conversationHistory.length > this.MAX_HISTORY_TURNS) {
       this.conversationHistory = this.conversationHistory.slice(-this.MAX_HISTORY_TURNS);
     }
@@ -1102,12 +1232,24 @@ export class NovaAgent implements VoiceAssistantProvider {
                 this.handleMuteTool(toolUseId).catch(error => {
                   console.error('Error handling mute tool:', error);
                 });
+              } else if (toolName === 'unmute') {
+                // Handle unmute tool call (translator-mode only)
+                this.handleUnmuteTool(toolUseId).catch(error => {
+                  console.error('Error handling unmute tool:', error);
+                });
               }
             } else if (jsonResponse.event?.contentEnd) {
               console.log('Content end:', jsonResponse.event.contentEnd.type);
               
-              // Save completed turn to conversation history
-              if (currentTurn.role && currentTurn.isFinal && currentTurn.content.trim()) {
+              // Skip appending while paused in translator mode — replaying
+              // muted-period utterances on the next UNMUTED session would
+              // pressure the model to translate them as backlog.
+              const skipForTranslatorMuted = (
+                this.meetingMode === 'translator' &&
+                this._translatorState === 'MUTED'
+              );
+
+              if (currentTurn.role && currentTurn.isFinal && currentTurn.content.trim() && !skipForTranslatorMuted) {
                 this.addToConversationHistory(currentTurn.role, currentTurn.content.trim());
                 console.log(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
                 
@@ -1319,15 +1461,71 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   private async handleMuteTool(toolUseId: string): Promise<void> {
     console.log('🔇 Mute tool called - muting agent');
-    this._isMuted = true;
-    
-    // Stop the pacat stream to flush any buffered audio immediately
-    this.stopPacatStream();
-    
-    // Send tool result back to Nova
+    // Play the mute confirmation tone BEFORE engaging the audio gate, so the
+    // beep itself isn't dropped and is heard by the meeting before silence.
+    this.playConfirmationTone('mute');
+    // Give pacat a moment to flush the beep before we tear the stream down.
+    await new Promise(resolve => setTimeout(resolve, 280));
+    this.mute('tool');
+
+    // Acknowledge the tool result on the current session before refreshing.
     if (this.session && this.session.isActive) {
-      await this.sendToolResult(toolUseId, { status: 'muted', message: 'You are now muted.' });
+      const muteInstruction = (this.meetingMode === 'translator')
+        ? 'You are now paused. The session is being refreshed.'
+        : 'You are now muted.';
+      try {
+        await this.sendToolResult(toolUseId, {
+          status: 'muted',
+          state: 'MUTED',
+          instruction: muteInstruction,
+        });
+      } catch (err) {
+        console.warn('Failed to send mute tool result (non-fatal):', err);
+      }
       console.log('✓ Agent muted successfully');
+    }
+
+    // In translator mode, swap into the MUTED-state session (paused prompt,
+    // only the `unmute` tool registered).
+    if (this.meetingMode === 'translator') {
+      this._translatorState = 'MUTED';
+      console.log('🔄 Translator state -> MUTED, refreshing session...');
+      this.refreshSession().catch(error => {
+        console.error('Error refreshing session for translator MUTE transition:', error);
+      });
+    }
+  }
+
+  private async handleUnmuteTool(toolUseId: string): Promise<void> {
+    console.log('🔓 Unmute tool called - unmuting agent');
+    this.unmute('tool');
+    // Audio gate is now off; play the unmute confirmation tone directly.
+    this.playConfirmationTone('unmute');
+
+    if (this.session && this.session.isActive) {
+      const unmuteInstruction = (this.meetingMode === 'translator')
+        ? 'You are now resuming. The session is being refreshed.'
+        : 'You are now unmuted.';
+      try {
+        await this.sendToolResult(toolUseId, {
+          status: 'unmuted',
+          state: 'UNMUTED',
+          instruction: unmuteInstruction,
+        });
+      } catch (err) {
+        console.warn('Failed to send unmute tool result (non-fatal):', err);
+      }
+      console.log('✓ Agent unmuted successfully');
+    }
+
+    // In translator mode, swap into the UNMUTED-state session (translator
+    // prompt, only the `mute` tool registered).
+    if (this.meetingMode === 'translator') {
+      this._translatorState = 'UNMUTED';
+      console.log('🔄 Translator state -> UNMUTED, refreshing session...');
+      this.refreshSession().catch(error => {
+        console.error('Error refreshing session for translator UNMUTE transition:', error);
+      });
     }
   }
 
@@ -1418,6 +1616,49 @@ export class NovaAgent implements VoiceAssistantProvider {
     });
   }
 
+  /** Generate a sine-wave PCM tone (16-bit signed LE, mono) at the given
+   *  sample rate, with a short attack/release envelope to prevent clicks.
+   *  Returns a Buffer ready to write to the pacat playback stream. */
+  private generateTonePcm(frequencyHz: number, durationMs: number, sampleRate: number, amplitude = 0.25): Buffer {
+    const totalSamples = Math.floor((durationMs / 1000) * sampleRate);
+    const buf = Buffer.alloc(totalSamples * 2);
+    const fadeSamples = Math.min(Math.floor(0.01 * sampleRate), Math.floor(totalSamples / 4)); // 10ms or 1/4 of the tone, whichever is smaller
+    const twoPiF = 2 * Math.PI * frequencyHz;
+    for (let i = 0; i < totalSamples; i++) {
+      let envelope = 1;
+      if (i < fadeSamples) envelope = i / fadeSamples;
+      else if (i > totalSamples - fadeSamples) envelope = (totalSamples - i) / fadeSamples;
+      const sample = Math.sin(twoPiF * (i / sampleRate)) * amplitude * envelope;
+      const intSample = Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
+      buf.writeInt16LE(intSample, i * 2);
+    }
+    return buf;
+  }
+
+  /** Plays a confirmation tone directly to the meeting audio sink, bypassing
+   *  Nova entirely. Used for translator-mode mute/unmute audible cues. */
+  private playConfirmationTone(kind: 'mute' | 'unmute'): void {
+    const sampleRate = parseInt(process.env.NOVA_PLAYBACK_RATE || '16000');
+    let pcm: Buffer;
+    if (kind === 'mute') {
+      // Single low descending-feeling tone.
+      pcm = this.generateTonePcm(420, 220, sampleRate);
+    } else {
+      // Two-tone rising chirp.
+      const a = this.generateTonePcm(620, 130, sampleRate);
+      const gap = Buffer.alloc(Math.floor(0.03 * sampleRate) * 2); // 30ms gap
+      const b = this.generateTonePcm(880, 150, sampleRate);
+      pcm = Buffer.concat([a, gap, b]);
+    }
+    const pacat = this.ensurePacatStream();
+    if (pacat?.stdin && !pacat.stdin.destroyed) {
+      pacat.stdin.write(pcm);
+      console.log(`🔔 Played ${kind} confirmation tone (${pcm.length} bytes)`);
+    } else {
+      console.warn(`⚠️  Could not play ${kind} confirmation tone — pacat stream unavailable`);
+    }
+  }
+
   private ensurePacatStream(): ChildProcess | null {
     if (this.pacatProcess && !this.pacatProcess.killed) {
       return this.pacatProcess;
@@ -1491,10 +1732,10 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
     
-    // CRITICAL: Enforce mute state in group meeting mode
-    // This prevents Nova from speaking when muted (no wake phrase detected)
+    // Mute gate: drops outgoing audio while the agent is muted (group-mode
+    // auto-mute, mute-tool, or translator-mode pause).
     if (this._isMuted) {
-      console.log('🔇 Audio dropped - agent is muted (group meeting mode)');
+      console.log('🔇 Audio dropped - agent is muted');
       return;
     }
     
@@ -1797,5 +2038,39 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   isSpeaking(): boolean {
     return this._isSpeaking;
+  }
+
+  /**
+   * Mute the agent — drops all outgoing audio until unmuted. Idempotent.
+   * Flushes any buffered playback so the agent stops mid-utterance.
+   */
+  mute(reason?: string): void {
+    if (this._isMuted) {
+      return;
+    }
+    console.log(`🔇 Nova agent muted${reason ? ` (${reason})` : ''}`);
+    this._isMuted = true;
+    this.conversationActive = false;
+    try {
+      this.stopPacatStream();
+    } catch (err) {
+      console.warn('stopPacatStream during mute() failed (non-fatal):', err);
+    }
+  }
+
+  /**
+   * Unmute the agent — resumes outgoing audio. Idempotent.
+   */
+  unmute(reason?: string): void {
+    if (!this._isMuted) {
+      return;
+    }
+    console.log(`🔓 Nova agent unmuted${reason ? ` (${reason})` : ''}`);
+    this._isMuted = false;
+    this.conversationActive = true;
+  }
+
+  isMuted(): boolean {
+    return this._isMuted;
   }
 }

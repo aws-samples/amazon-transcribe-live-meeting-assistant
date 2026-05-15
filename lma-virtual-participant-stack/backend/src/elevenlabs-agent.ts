@@ -819,4 +819,39 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   isSpeaking(): boolean {
     return this._isSpeaking;
   }
+
+  /**
+   * Mute the agent — drops all outgoing audio until unmuted. Idempotent.
+   * Drains the playback queue so pending chunks are not played.
+   */
+  mute(reason?: string): void {
+    if (this._isMuted) {
+      return;
+    }
+    console.log(`🔇 ElevenLabs agent muted${reason ? ` (${reason})` : ''}`);
+    this._isMuted = true;
+    this.conversationActive = false;
+    if (this.audioQueue.length > 0) {
+      console.log(`🔇 Dropping ${this.audioQueue.length} queued audio chunks on mute`);
+      this.audioQueue = [];
+    }
+  }
+
+  /**
+   * Unmute the agent — resumes outgoing audio. Idempotent.
+   */
+  unmute(reason?: string): void {
+    if (!this._isMuted) {
+      return;
+    }
+    console.log(`🔓 ElevenLabs agent unmuted${reason ? ` (${reason})` : ''}`);
+    this._isMuted = false;
+    if (!this.conversationActive) {
+      this.conversationActive = true;
+    }
+  }
+
+  isMuted(): boolean {
+    return this._isMuted;
+  }
 }

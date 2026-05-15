@@ -24,6 +24,8 @@ Changes are preserved during stack updates. Available attributes:
 - meetingMode (String): Meeting mode - 'normal' (default), 'group' (starts muted; unmutes on wake phrase), or 'translator' (live bidirectional interpreter). Supersedes the legacy 'groupMeetingMode' boolean. Requires Activation Mode = 'always_active'.
 - translatorLanguageA (String): Language A for translator mode (default 'English'). Ignored unless meetingMode='translator'.
 - translatorLanguageB (String): Language B for translator mode (default 'Spanish'). Ignored unless meetingMode='translator'.
+- translatorMutePhrases (String): Comma-separated phrases that pause translator mode when spoken in the meeting (default 'translator mute, alex mute'). Ignored unless meetingMode='translator'.
+- translatorUnmutePhrases (String): Comma-separated phrases that resume translator mode when spoken in the meeting (default 'translator unmute, alex unmute'). Ignored unless meetingMode='translator'.
 - groupMeetingMode (Boolean, DEPRECATED): Legacy flag. Use 'meetingMode' instead. If set to true and 'meetingMode' is unset, it is treated as meetingMode='group'.
 """
 
@@ -40,6 +42,8 @@ def get_default_config():
         'meetingMode': 'normal',
         'translatorLanguageA': 'English',
         'translatorLanguageB': 'Spanish',
+        'translatorMutePhrases': 'translator mute, alex mute',
+        'translatorUnmutePhrases': 'translator unmute, alex unmute',
         # Legacy field kept in sync with meetingMode for back-compat readers.
         'groupMeetingMode': False,
         'description': 'Default Nova Sonic configuration. Do not edit - changes will be overwritten on stack updates.'

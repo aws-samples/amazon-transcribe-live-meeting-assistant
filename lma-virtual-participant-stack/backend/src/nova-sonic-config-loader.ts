@@ -46,6 +46,10 @@ export interface NovaSonicConfig {
   translatorLanguageA?: string;
   /** Language B for translator mode (defaults to 'Spanish'). */
   translatorLanguageB?: string;
+  /** Comma-separated phrases that pause translator mode. */
+  translatorMutePhrases?: string[];
+  /** Comma-separated phrases that resume translator mode. */
+  translatorUnmutePhrases?: string[];
 }
 
 /**
@@ -62,6 +66,8 @@ interface DynamoDBConfigItem {
   meetingMode?: string;
   translatorLanguageA?: string;
   translatorLanguageB?: string;
+  translatorMutePhrases?: string;
+  translatorUnmutePhrases?: string;
   description?: string;
   '*Information*'?: string;
 }
@@ -79,7 +85,18 @@ const DEFAULT_CONFIG: NovaSonicConfig = {
   meetingMode: 'normal',
   translatorLanguageA: 'English',
   translatorLanguageB: 'Spanish',
+  translatorMutePhrases: ['translator mute', 'alex mute'],
+  translatorUnmutePhrases: ['translator unmute', 'alex unmute'],
 };
+
+function parsePhraseList(value: unknown): string[] | undefined {
+  if (typeof value !== 'string') return undefined;
+  const phrases = value
+    .split(',')
+    .map(p => p.trim().toLowerCase().replace(/\s+/g, ' '))
+    .filter(p => p.length > 0);
+  return phrases.length > 0 ? phrases : undefined;
+}
 
 const VALID_MEETING_MODES: ReadonlySet<MeetingMode> = new Set<MeetingMode>([
   'normal',
@@ -221,6 +238,14 @@ function mergeConfigs(
     if (typeof defaultConfig.translatorLanguageB === 'string' && defaultConfig.translatorLanguageB.trim() !== '') {
       baseConfig.translatorLanguageB = defaultConfig.translatorLanguageB.trim();
     }
+    const defaultMutePhrases = parsePhraseList(defaultConfig.translatorMutePhrases);
+    if (defaultMutePhrases) {
+      baseConfig.translatorMutePhrases = defaultMutePhrases;
+    }
+    const defaultUnmutePhrases = parsePhraseList(defaultConfig.translatorUnmutePhrases);
+    if (defaultUnmutePhrases) {
+      baseConfig.translatorUnmutePhrases = defaultUnmutePhrases;
+    }
   }
   
   // If no custom config, apply back-compat (groupMeetingMode → meetingMode) and return
@@ -262,6 +287,10 @@ function mergeConfigs(
     && customConfig.translatorLanguageB.trim() !== '')
     ? customConfig.translatorLanguageB.trim()
     : baseConfig.translatorLanguageB;
+  const translatorMutePhrases = parsePhraseList(customConfig.translatorMutePhrases)
+    || baseConfig.translatorMutePhrases;
+  const translatorUnmutePhrases = parsePhraseList(customConfig.translatorUnmutePhrases)
+    || baseConfig.translatorUnmutePhrases;
   
   // Apply prompt mode logic
   console.log('🔧 Applying prompt mode logic:');
@@ -291,6 +320,8 @@ function mergeConfigs(
     meetingMode,
     translatorLanguageA,
     translatorLanguageB,
+    translatorMutePhrases,
+    translatorUnmutePhrases,
   });
 }
 
