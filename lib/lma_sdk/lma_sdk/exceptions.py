@@ -38,3 +38,11 @@ class LMAAuthError(LMAError):
 
 class LMATimeoutError(LMAError):
     """Raised when an operation times out."""
+
+
+class LMAAppSyncError(LMAError):
+    """Raised when an AppSync GraphQL call returns errors."""
+
+
+class LMAVirtualParticipantError(LMAError):
+    """Raised when a Virtual Participant operation fails."""

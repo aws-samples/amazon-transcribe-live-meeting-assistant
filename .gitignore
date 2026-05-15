@@ -37,6 +37,14 @@ __pycache__/
 # Deprecated QnABot submodule (removed)
 submodule-aws-qnabot/
 
+# Load-simulator per-run artifacts (created by `lma load <cmd>` — see
+# utilities/load-simulator). Each run produces ./results/<runId>/ with
+# machine-specific JSON output, a summary.md, and optionally token
+# caches. These are logs, not source code.
+results/
+**/results/
+
+
 # VP testing generated .env.local
 lma-virtual-participant-stack/backend/.env.local
 lma-virtual-participant-stack/backend/dist/
@@ -53,3 +61,5 @@ docs-site/public/*.html
 
 # scatch dir
 scratch
+
+utilities/load-simulator/examples/bobmeetings.yaml

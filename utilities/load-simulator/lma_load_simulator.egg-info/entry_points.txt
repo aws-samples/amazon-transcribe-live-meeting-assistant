@@ -1,0 +1,5 @@
+[console_scripts]
+lma-load = lma_load.entry:safe_main
+
+[lma_cli.plugins]
+load = lma_load.cli:load_command
