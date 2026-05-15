@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lma-load-simulator"
+version = "0.1.0"
+description = "Load / scale simulator for AWS Live Meeting Assistant (LMA)"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Amazon Web Services"},
+]
+dependencies = [
+    # Core AWS + data deps. These keep the simulator importable even
+    # when optional extras (upload, websocket) aren't installed.
+    "boto3>=1.34",
+    "botocore>=1.34",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+    # Used by the synthetic-user provisioning code (websocket driver
+    # only) to decode JWTs and verify AdminSetUserPassword worked. Kept
+    # as a core dep because Cognito-user provisioning still lives under
+    # ``lma_load.auth`` and the CLI imports it at top level.
+    "pyjwt>=2.8",
+    # SRP-based authentication against LMA's UserPoolClient, which
+    # typically enables ALLOW_USER_SRP_AUTH only (not USER_PASSWORD_AUTH).
+    # Required by the websocket driver's SyntheticUserPool.
+    "pycognito>=2024.5",
+    # lma-sdk provides the IAM-signed AppSync + VP helpers used by the
+    # vp driver (``client.vp.create(...)``).
+    "lma-sdk>=0.3.0",
+    # `websocket` is the primary concurrent driver for LMA load tests, so
+    # we require a modern-enough ``websockets`` in core deps. ``>=12``
+    # introduced the ``additional_headers=`` kwarg the driver relies on;
+    # older releases silently forward it into ``asyncio.create_connection``
+    # and fail with a cryptic TypeError. Keeping this core avoids the
+    # trap where a pre-existing ``websockets<12`` (e.g. pulled in by
+    # ``pyppeteer``) satisfies a fresh install.
+    "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-mock>=3.11",
+]
+# ``pip install lma-load-simulator[websocket]`` now only pulls in the
+# audio-processing extras the WS driver can optionally use (for
+# resampling / non-WAV fixtures). The websocket client itself is a core
+# dep above so ``--driver websocket`` works out of the box.
+websocket = [
+    "aiohttp>=3.9",
+    "soundfile>=0.12",
+    "numpy>=1.26",
+]
+
+# `pip install lma-load-simulator[upload]` pulls in what's needed for presigned
+# S3 PUT uploads of fixture WAVs.
+upload = [
+    "aiohttp>=3.9",
+    "gql[aiohttp]>=3.5",
+]
+# The `vp` driver no longer needs extras — it talks to AppSync and Step
+# Functions directly using boto3/SigV4 (via ``lma-sdk``). Kept for
+# backward-compatibility of ``pip install 'lma-load-simulator[vp]'``.
+vp = []
+# Convenience: everything.
+all = [
+    "lma-load-simulator[websocket,upload]",
+]
+
+[project.scripts]
+lma-load = "lma_load.entry:safe_main"
+
+# Plug-in registration: when lma_cli_pkg is installed alongside this package,
+# the `lma_cli.plugins` entry-point makes us show up as `lma load ...`.
+[project.entry-points."lma_cli.plugins"]
+load = "lma_load.cli:load_command"
+
+[tool.setuptools.packages.find]
+include = ["lma_load*"]
+
+[tool.setuptools.package-data]
+lma_load = ["fixtures/*.wav", "fixtures/*.jsonl", "observability/*.json"]

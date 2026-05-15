@@ -86,6 +86,7 @@ def main(ctx, region, profile, stack_name, verbose):
 
 from lma_cli.commands.publish import check_prereqs_cmd, publish_cmd
 from lma_cli.commands.stack import delete_cmd, deploy_cmd, logs_cmd, outputs_cmd, status_cmd
+from lma_cli.commands.vp import vp_cmd
 
 main.add_command(publish_cmd)
 main.add_command(deploy_cmd)
@@ -94,6 +95,38 @@ main.add_command(outputs_cmd)
 main.add_command(delete_cmd)
 main.add_command(logs_cmd)
 main.add_command(check_prereqs_cmd)
+main.add_command(vp_cmd)
+
+
+# ── Optional plugins (entry-point group "lma_cli.plugins") ──────
+# Any package that declares ``[project.entry-points."lma_cli.plugins"]``
+# with a click-command target is auto-registered under the ``lma`` group.
+# This is how ``utilities/load-simulator`` adds ``lma load ...`` when
+# installed alongside this CLI.
+def _load_plugins() -> None:
+    """Discover and register all CLI plugins via entry points."""
+    try:
+        from importlib.metadata import entry_points
+    except ImportError:  # pragma: no cover — Python <3.10 fallback
+        return
+    try:
+        eps = entry_points(group="lma_cli.plugins")
+    except TypeError:
+        # Older importlib.metadata returns dict-like; fall back.
+        eps = entry_points().get("lma_cli.plugins", [])  # type: ignore[assignment]
+    for ep in eps:
+        try:
+            cmd = ep.load()
+            if cmd is not None:
+                main.add_command(cmd, name=ep.name)
+        except Exception as exc:  # noqa: BLE001 — never kill CLI on plugin error
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to load CLI plugin '%s': %s", ep.name, exc
+            )
+
+
+_load_plugins()
 
 
 if __name__ == "__main__":

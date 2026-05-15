@@ -6,12 +6,16 @@ __version__ = "0.3.2.10"
 
 from lma_sdk.client import LMAClient
 from lma_sdk.exceptions import (
-    LMAError,
+    LMAAppSyncError,
+    LMAAuthError,
     LMAConfigurationError,
-    LMAStackError,
+    LMAError,
     LMAPublishError,
     LMAResourceNotFoundError,
+    LMAStackError,
+    LMATimeoutError,
     LMAValidationError,
+    LMAVirtualParticipantError,
 )
 
 __all__ = [
@@ -22,4 +26,8 @@ __all__ = [
     "LMAPublishError",
     "LMAResourceNotFoundError",
     "LMAValidationError",
+    "LMAAuthError",
+    "LMATimeoutError",
+    "LMAAppSyncError",
+    "LMAVirtualParticipantError",
 ]
