@@ -70,6 +70,7 @@ title: "LMA Documentation"
 
 - [CloudFormation Parameters Reference](cloudformation-parameters.md) — Complete reference of all stack parameters by category
 - [Stack Updates & Upgrades](stack-updates-and-upgrades.md) — Updating existing stacks, template URLs, version migration notes
+- [Well-Architected Framework Assessment](well-architected.md) — Assessment of LMA against the six pillars of the AWS Well-Architected Framework
 - [Troubleshooting](troubleshooting.md) — Monitoring, CloudWatch logs, common issues, cost assessment
 - [Cleanup](cleanup.md) — Deleting stacks and retained resources
 

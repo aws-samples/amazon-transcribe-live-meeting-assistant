@@ -6751,6 +6751,39 @@ Resources:
               Bool:
                 "aws:SecureTransport": false
 
+  SecurityHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${AWS::StackName}-security-headers-policy"
+        Comment: "Security headers policy for LMA web application"
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            Override: true
+            # Tightened CSP for LMA SPA:
+            #   - connect-src: restricted to AWS service hostnames (AppSync, Cognito,
+            #     S3, API Gateway) plus wss for realtime subscriptions and ws://localhost
+            #     for dev mode.
+            #   - script-src/style-src: 'unsafe-inline' and 'unsafe-eval' retained
+            #     for React SPA compatibility.
+            #   - object-src: 'none' (no plugins needed).
+            #   - base-uri: 'none' (prevent base tag injection).
+            #   - frame-ancestors: 'self' (prevent clickjacking).
+            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://cognito-idp.*.amazonaws.com https://cognito-identity.*.amazonaws.com https://*.appsync-api.*.amazonaws.com https://*.execute-api.*.amazonaws.com https://*.s3.*.amazonaws.com https://*.s3-accelerate.amazonaws.com wss://*.amazonaws.com wss://*.appsync-realtime-api.*.amazonaws.com wss://*.execute-api.*.amazonaws.com ws://localhost:*;"
+          StrictTransportSecurity:
+            Override: true
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Preload: false
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            Override: true
+            FrameOption: DENY
+          ReferrerPolicy:
+            Override: true
+            ReferrerPolicy: strict-origin-when-cross-origin
+
   CloudFrontOriginAccessIdentity:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
     Properties:
@@ -6794,6 +6827,7 @@ Resources:
               Forward: none
           TargetOriginId: webapp-s3-bucket
           ViewerProtocolPolicy: redirect-to-https
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
           DefaultTTL: 600
           MinTTL: 300
           MaxTTL: 900

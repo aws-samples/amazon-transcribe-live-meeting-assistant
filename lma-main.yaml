@@ -694,6 +694,18 @@ Parameters:
       When false: All resources deleted for clean stack removal.
       Enterprise customers with compliance requirements should set to true.
 
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Description: >-
+      Default logging level for all Lambda functions. Set to DEBUG for
+      troubleshooting, INFO for normal operation.
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -1173,13 +1185,17 @@ Resources:
       Timeout: 60
       MemorySize: 128
       Description: "Lambda function to process KMS key events for monitoring and compliance"
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
       InlineCode: |
         import json
+        import os
         import boto3
         import logging
 
         logger = logging.getLogger()
-        logger.setLevel(logging.INFO)
+        logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
 
         def handler(event, context):
             """
@@ -1697,6 +1713,7 @@ Resources:
         Mode: Active
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           LOGGING_BUCKET_NAME: !Ref LoggingBucket
           RECORDINGS_BUCKET_NAME: !If
             - ShouldCreateRecordingBucket
@@ -1704,12 +1721,13 @@ Resources:
             - ""
       Code:
         ZipFile: |
+          import os
           import boto3
           import cfnresponse
           import logging
           
           logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
           
           s3 = boto3.client('s3')
           
@@ -2092,6 +2110,9 @@ Resources:
       Role: !GetAtt RecordingsBucketNotificationFunctionRole.Arn
       TracingConfig:
         Mode: Active
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
       Code:
         ZipFile: |
           """Installs (or removes on Delete) an S3 ObjectCreated notification
@@ -2099,12 +2120,13 @@ Resources:
           Implemented as a custom resource to break the AISTACK ↔
           RecordingsBucket CloudFormation cycle."""
           import json
+          import os
           import logging
           import boto3
           import cfnresponse
 
           log = logging.getLogger()
-          log.setLevel(logging.INFO)
+          log.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
           s3 = boto3.client("s3")
 
           def handler(event, context):

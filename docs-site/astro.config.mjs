@@ -139,6 +139,10 @@ export default defineConfig({
               label: "Stack Updates & Upgrades",
               slug: "stack-updates-and-upgrades",
             },
+            {
+              label: "Well-Architected Assessment",
+              slug: "well-architected",
+            },
             { label: "Troubleshooting", slug: "troubleshooting" },
             { label: "Cleanup", slug: "cleanup" },
           ],
