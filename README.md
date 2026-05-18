@@ -27,6 +27,7 @@ https://github.com/user-attachments/assets/7642f659-ed9e-4abf-8baf-2f6fb27b08cb
 - **On-demand and automatic summaries** — Generate summaries, action items, and insights during and after meetings
 - **Virtual Participant** — Headless Chrome bot joins Zoom, Teams, Chime, Google Meet, and WebEx meetings
 - **Voice assistant** — Nova Sonic 2 or ElevenLabs voice responses with optional Simli animated avatar
+- **Translator Mode** — Real-time bidirectional AI interpreter that joins meetings via the Virtual Participant and speaks each utterance in the other language
 - **Meetings Query Tool** — Semantic search across all past meeting transcripts via Bedrock Knowledge Base
 - **Embeddable components** — iframe integration for embedding LMA in external applications
 - **Meeting recording** — Optional stereo audio recordings stored in S3
