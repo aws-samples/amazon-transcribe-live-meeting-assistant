@@ -21,12 +21,12 @@ ALLOWED_FIELDS = {
     "modelId",
     "voiceId",
     "endpointingSensitivity",
-    "groupMeetingMode",      # legacy; preserved for back-compat
-    "meetingMode",           # new canonical meeting-mode selector
-    "translatorLanguageA",     # only relevant when meetingMode='translator'
-    "translatorLanguageB",     # only relevant when meetingMode='translator'
-    "translatorMutePhrases",   # comma-separated; translator-mode pause triggers
-    "translatorUnmutePhrases", # comma-separated; translator-mode resume triggers
+    "groupMeetingMode",  # legacy; preserved for back-compat
+    "meetingMode",  # new canonical meeting-mode selector
+    "translatorLanguageA",  # only relevant when meetingMode='translator'
+    "translatorLanguageB",  # only relevant when meetingMode='translator'
+    "translatorMutePhrases",  # comma-separated; translator-mode pause triggers
+    "translatorUnmutePhrases",  # comma-separated; translator-mode resume triggers
 }
 
 # Valid values for enum-like fields
@@ -104,7 +104,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     print(f"Invalid {key} (empty string), skipping")
                     continue
                 if len(value) > MAX_LANGUAGE_LABEL_LEN:
-                    print(f"Invalid {key} (length {len(value)} > {MAX_LANGUAGE_LABEL_LEN}), truncating")
+                    print(
+                        f"Invalid {key} (length {len(value)} > {MAX_LANGUAGE_LABEL_LEN}), truncating"
+                    )
                     value = value[:MAX_LANGUAGE_LABEL_LEN]
             if key in ("translatorMutePhrases", "translatorUnmutePhrases"):
                 if not isinstance(value, str):
@@ -115,7 +117,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     print(f"Invalid {key} (empty string), skipping")
                     continue
                 if len(value) > MAX_TRIGGER_PHRASES_LEN:
-                    print(f"Invalid {key} (length {len(value)} > {MAX_TRIGGER_PHRASES_LEN}), truncating")
+                    print(
+                        f"Invalid {key} (length {len(value)} > {MAX_TRIGGER_PHRASES_LEN}), truncating"
+                    )
                     value = value[:MAX_TRIGGER_PHRASES_LEN]
             item[key] = value
 
