@@ -90,6 +90,12 @@ Group meeting mode enables passive listening where the assistant monitors the fu
 
 ### Translator Mode
 
+Demo:
+
+
+https://github.com/user-attachments/assets/160be5d7-010e-446c-82b3-f496ba2c5969
+
+
 Translator mode turns the voice assistant into a live bidirectional interpreter between two configured languages. The assistant listens continuously, automatically detects which of the two languages each utterance is in, and speaks the translation in the other language.
 
 Configuration attributes (set on the Nova Sonic Configuration page or directly in the `CustomNovaSonicConfig` DynamoDB item):
