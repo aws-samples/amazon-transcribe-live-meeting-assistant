@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **CloudFront security headers** — Added a `ResponseHeadersPolicy` to the CloudFront distribution with Content-Security-Policy (restricted `connect-src` to AWS service origins), Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options (DENY), and Referrer-Policy (strict-origin-when-cross-origin).
+
+- **Unified LOG_LEVEL propagation** — The `LogLevel` CloudFormation parameter now propagates from the main stack to all nested stacks (AI, WebSocket Transcriber, Virtual Participant), all Lambda functions (via SAM Globals), and all ECS task definitions. Replaces previously hardcoded or missing log level configuration across 27 Lambda functions and 2 ECS services.
+
 ## [0.3.3] - 2026-05-15
 
 ### Added
