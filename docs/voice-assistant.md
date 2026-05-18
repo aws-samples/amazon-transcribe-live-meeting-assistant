@@ -9,12 +9,21 @@ title: "Voice Assistant"
 - [Overview](#overview)
 - [Provider Comparison](#provider-comparison)
 - [Activation Modes](#activation-modes)
+  - [always_active](#always_active)
+  - [wake_phrase](#wake_phrase)
 - [Wake Phrase Configuration](#wake-phrase-configuration)
 - [Session Management](#session-management)
+  - [Nova Sonic 2](#nova-sonic-2)
+  - [ElevenLabs](#elevenlabs)
 - [Barge-In](#barge-in)
 - [Meeting Mode](#meeting-mode)
+  - [Group Meeting Mode](#group-meeting-mode)
+  - [Translator Mode](#translator-mode)
 - [Turn-Taking Sensitivity](#turn-taking-sensitivity)
 - [Custom System Prompts](#custom-system-prompts)
+  - [base](#base)
+  - [inject](#inject)
+  - [replace](#replace)
 - [Voice ID](#voice-id)
 - [CloudFormation Parameters](#cloudformation-parameters)
 - [See Also](#see-also)
@@ -89,6 +98,12 @@ Group meeting mode enables passive listening where the assistant monitors the fu
 - **ElevenLabs:** Wake-phrase detection is performed by LMA on ElevenLabs `user_transcript` messages. The ElevenLabs agent's persona (system prompt, first message, tools, voice, language) is configured in the ElevenLabs dashboard — LMA does not override it. Configure your ElevenLabs agent normally and set LMA's Meeting Mode to `group`; LMA will drop the agent's audio output until a wake phrase is detected.
 
 ### Translator Mode
+
+Demo:
+
+
+https://github.com/user-attachments/assets/160be5d7-010e-446c-82b3-f496ba2c5969
+
 
 Translator mode turns the voice assistant into a live bidirectional interpreter between two configured languages. The assistant listens continuously, automatically detects which of the two languages each utterance is in, and speaks the translation in the other language.
 
