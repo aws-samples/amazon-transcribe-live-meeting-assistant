@@ -509,6 +509,23 @@ Parameters:
       indicate whether Meeting Mode settings (Group / Translator) are active.
       These modes only take effect when this value is 'always_active'.
 
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Description: >-
+      Logging level for Lambda functions. Set to DEBUG for troubleshooting,
+      INFO for normal operation.
+
+Globals:
+  Function:
+    Environment:
+      Variables:
+        LOG_LEVEL: !Ref LogLevel
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -851,9 +868,6 @@ Resources:
       Description: Worker for Step Functions Distributed Map that stamps ItemType on existing cls# list rows
       Timeout: 900
       MemorySize: 512
-      Environment:
-        Variables:
-          LOG_LEVEL: INFO
       LoggingConfig:
         LogGroup: !Ref BackfillWorkerFunctionLogGroup
       Policies:
@@ -931,9 +945,6 @@ Resources:
       Description: CloudFormation Custom Resource trigger that starts GSI backfill state machine
       Timeout: 60
       MemorySize: 256
-      Environment:
-        Variables:
-          LOG_LEVEL: INFO
       LoggingConfig:
         LogGroup: !Ref BackfillTriggerFunctionLogGroup
       Policies:
@@ -2090,8 +2101,6 @@ Resources:
       Timeout: 900
       Environment:
         Variables:
-          # XXX add log level parameter or map
-          LOG_LEVEL: DEBUG
           POWERTOOLS_METRICS_NAMESPACE: !Sub "TranscriptProcessor-${AWS::StackName}"
           POWERTOOLS_SERVICE_NAME: TranscriptProcessor
           # Used by transcript_enrichment_layer's get_owner_from_jwt to validate
@@ -2550,7 +2559,6 @@ Resources:
           UPLOAD_URL_TTL_SECONDS: "900"
           UPLOAD_JOB_TTL_DAYS: "14"
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
-          LOG_LEVEL: INFO
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingInitiatorFunction
@@ -2666,7 +2674,6 @@ Resources:
           UPLOADS_PENDING_PREFIX: lma-uploads-pending/
           TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
           DEFAULT_LANGUAGE_CODE: "en-US"
-          LOG_LEVEL: INFO
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingProcessorFunction
@@ -2792,7 +2799,6 @@ Resources:
           UPLOADS_PENDING_PREFIX: lma-uploads-pending/
           RECORDINGS_PREFIX: !Ref AudioFilePrefix
           TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
-          LOG_LEVEL: INFO
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingFinalizerFunction
@@ -3998,7 +4004,6 @@ Resources:
       Environment:
         Variables:
           EVENT_SOURCING_TABLE_NAME: !Ref EventSourcingTable
-          LOG_LEVEL: INFO
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref EventSourcingTable
@@ -4692,7 +4697,6 @@ Resources:
       Environment:
         Variables:
           MCP_API_KEYS_TABLE: !Ref MCPApiKeysTable
-          LOG_LEVEL: INFO
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref MCPApiKeysTable
@@ -4740,7 +4744,6 @@ Resources:
       Environment:
         Variables:
           MCP_API_KEYS_TABLE: !Ref MCPApiKeysTable
-          LOG_LEVEL: INFO
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref MCPApiKeysTable
@@ -5250,7 +5253,6 @@ Resources:
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
           VP_SCHEDULE_GROUP_NAME: !Ref VPScheduleGroupName
           ALB_LISTENER_ARN: !Ref VNCALBListener
-          LOG_LEVEL: DEBUG
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref VirtualParticipantTable
@@ -5855,7 +5857,6 @@ Resources:
       MemorySize: 1024
       Environment:
         Variables:
-          LOG_LEVEL: INFO
           CALLS_TABLE: !Ref EventSourcingTable
           RECORDINGS_BUCKET: !Ref S3BucketName
           TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix

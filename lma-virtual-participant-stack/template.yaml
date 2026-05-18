@@ -425,6 +425,18 @@ Parameters:
     MaxValue: 100
     Description: Maximum EC2 instances (only used if VPLaunchType=EC2)
 
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Description: >-
+      Logging level for ECS containers and Lambda functions. Set to DEBUG for
+      troubleshooting, INFO for normal operation.
+
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -1471,6 +1483,8 @@ Resources:
               Value: !Ref NovaSonicConfigTableName
             - Name: STRANDS_LAMBDA_ARN
               Value: !Ref StrandsLambdaArn
+            - Name: LOG_LEVEL
+              Value: !Ref LogLevel
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:
@@ -2120,9 +2134,9 @@ Resources:
           import boto3
           import logging
           from datetime import datetime, timezone
-          
+
           logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
           
           scheduler_client = boto3.client('scheduler')
           ecs_client = boto3.client('ecs')
@@ -2247,6 +2261,7 @@ Resources:
           SCHEDULE_GROUP_NAME: !Ref VPScheduleGroup
           SCHEDULER_ROLE_ARN: !GetAtt VPSchedulerExecutionRole.Arn
           VP_LAUNCH_TYPE: !Ref VPLaunchType
+          LOG_LEVEL: !Ref LogLevel
   # DynamoDB Event Source Mapping for Scheduler Lambda
   VirtualParticipantSchedulerEventSourceMapping:
     Type: AWS::Lambda::EventSourceMapping
