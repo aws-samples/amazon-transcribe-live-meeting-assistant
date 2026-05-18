@@ -45,7 +45,7 @@ const CPU_HEALTH_THRESHOLD = parseInt(
     10
 );
 const LOCAL_TEMP_DIR = process.env['LOCAL_TEMP_DIR'] || '/tmp/';
-const WS_LOG_LEVEL = process.env['WS_LOG_LEVEL'] || 'debug';
+const WS_LOG_LEVEL = (process.env['WS_LOG_LEVEL'] || 'debug').toLowerCase();
 const WS_LOG_INTERVAL = parseInt(process.env['WS_LOG_INTERVAL'] || '120', 10);
 const SHOULD_RECORD_CALL = (process.env['SHOULD_RECORD_CALL'] || '') === 'true';
 

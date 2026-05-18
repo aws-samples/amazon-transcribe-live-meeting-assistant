@@ -2372,6 +2372,7 @@ Resources:
         MCPServerCallbackURLs: !Ref MCPServerCallbackURLs
         CognitoUserPoolDomain: !GetAtt COGNITOSTACK.Outputs.CognitoUserPoolDomain
         VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
+        LogLevel: !Ref LogLevel
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -2525,6 +2526,7 @@ Resources:
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.PrivateSubnet2
           - !Ref PrivateSubnet2
+        LogLevel: !Ref LogLevel
 
   VIRTUALPARTICIPANTSTACK:
     Type: AWS::CloudFormation::Stack
@@ -2607,6 +2609,7 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         ShowSpeakerLabel: "false"
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        LogLevel: !Ref LogLevel
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack
