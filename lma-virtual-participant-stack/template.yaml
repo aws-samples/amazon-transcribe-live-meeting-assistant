@@ -1334,19 +1334,6 @@ Resources:
     Condition: UseEC2LaunchType
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
-    UpdatePolicy:
-      AutoScalingRollingUpdate:
-        MinInstancesInService: 0
-        MaxBatchSize: 1
-        PauseTime: PT10M
-        WaitOnResourceSignals: false
-        MinSuccessfulInstancesPercent: 100
-        SuspendProcesses:
-          - HealthCheck
-          - ReplaceUnhealthy
-          - AZRebalance
-          - AlarmNotification
-          - ScheduledActions
     Properties:
       AutoScalingGroupName: !Sub "${AWS::StackName}-VP-ASG"
       MinSize: !Ref VPMinInstances
