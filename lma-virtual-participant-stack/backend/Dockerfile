@@ -56,7 +56,8 @@ ENV DISPLAY=:99
 ENV CHROME_BIN=/usr/bin/chromium
 
 RUN npm ci && \
-    npm run build
+    npm run build && \
+    npx esbuild node_modules/simli-client/dist/index.js --bundle --format=esm --platform=browser --outfile=dist/simli-client.bundle.mjs
 
 # Expose VNC port (5900) and WebSocket port (5901)
 EXPOSE 5900 5901
