@@ -109,6 +109,10 @@ export default defineConfig({
               label: "Infrastructure & Security",
               slug: "infrastructure-and-security",
             },
+            {
+              label: "Security Scanning (SRT)",
+              slug: "security-scanning",
+            },
           ],
         },
         {

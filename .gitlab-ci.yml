@@ -1,0 +1,56 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# LMA GitLab CI/CD pipeline. See docs/security-scanning.md.
+
+image: public.ecr.aws/docker/library/python:3.13-bookworm
+
+default:
+  timeout: 1h
+
+stages:
+  - security_review
+
+# SRT (Sample Security Review Tool) — runs on MRs targeting `develop` only.
+# Suppression decisions are read from the committed .srt/issues.json.
+srt_security_review:
+  stage: security_review
+  timeout: 30m
+  tags:
+    - size:large  # SRT needs ~16 GB RAM for the full scan toolchain
+
+  rules:
+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
+      when: on_success
+    - when: never
+
+  before_script:
+    - apt-get update -y
+    - apt-get install -y curl make git
+    - pip install --upgrade pip
+
+  script:
+    - make srt-setup
+    - make srt-scan
+
+  after_script:
+    - |
+      if [ -d ".srt" ]; then
+        [ -f ".srt/issues.json" ]          && cp .srt/issues.json          srt-issues.json
+        [ -f ".srt/dashboard.html" ]       && cp .srt/dashboard.html       srt-dashboard.html
+        [ -f ".srt/bandit-summary.json" ]  && cp .srt/bandit-summary.json  srt-bandit-summary.json
+        [ -f ".srt/semgrep-summary.json" ] && cp .srt/semgrep-summary.json srt-semgrep-summary.json
+        [ -f ".srt/syft-summary.json" ]    && cp .srt/syft-summary.json    srt-syft-summary.json
+        [ -f ".srt/project-summary.md" ]   && cp .srt/project-summary.md   srt-project-summary.md
+      fi
+
+  artifacts:
+    when: always
+    paths:
+      - srt-issues.json
+      - srt-dashboard.html
+      - srt-bandit-summary.json
+      - srt-semgrep-summary.json
+      - srt-syft-summary.json
+      - srt-project-summary.md
+    expire_in: 1 week
