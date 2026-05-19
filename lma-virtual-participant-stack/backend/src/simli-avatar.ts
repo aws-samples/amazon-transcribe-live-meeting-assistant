@@ -20,8 +20,13 @@
  *   2. AudioContext.connect() patch to block connections to AudioDestinationNode
  */
 
-import { Browser, Page } from 'puppeteer';
+import { Browser, Page, HTTPRequest } from 'puppeteer';
 import { WebSocketServer, WebSocket } from 'ws';
+import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface SimliAvatarConfig {
   apiKey: string;
@@ -94,7 +99,27 @@ export class SimliAvatar {
         } as any;
         console.log('[Simli-AudioBlock] AudioContext patch installed');
       });
-      
+
+      // Intercept requests for the simli-client bundle (pre-built ESM via esbuild in Dockerfile).
+      const simliBundlePath = path.resolve(__dirname, 'simli-client.bundle.mjs');
+      await this.simliPage.setRequestInterception(true);
+      this.simliPage.on('request', (request: HTTPRequest) => {
+        if (request.url().includes('/simli-client.bundle.mjs')) {
+          const body = fs.readFileSync(simliBundlePath, 'utf-8');
+          request.respond({
+            status: 200,
+            contentType: 'application/javascript',
+            headers: {
+              'Access-Control-Allow-Origin': 'null',
+              'Vary': 'Origin',
+            },
+            body,
+          });
+        } else {
+          request.continue();
+        }
+      });
+
       await this.simliPage.setContent(simliPageHtml, { waitUntil: 'networkidle0' });
       
       // Prevent background tab throttling - Chromium throttles timers and
@@ -110,9 +135,19 @@ export class SimliAvatar {
       
       const initResult = await this.simliPage.evaluate(async (config: { apiKey: string; faceId: string; maxSessionLength: number; maxIdleTime: number; transportMode: string }) => {
         try {
+          // simli-client v3.x exports SimliClient + generateSimliSessionToken.
           // @ts-ignore
           const { SimliClient, generateSimliSessionToken } = window.SimliModule;
-          
+
+          const videoElement = document.getElementById('simli-video') as HTMLVideoElement;
+          // Use in-DOM muted audio element (tested and confirmed to block audio)
+          const audioElement = document.getElementById('simli-audio') as HTMLAudioElement;
+
+          if (!videoElement || !audioElement) {
+            throw new Error('Video or audio elements not found');
+          }
+
+          // Step 1: get a session token from the Simli API.
           const sessionToken = await generateSimliSessionToken({
             apiKey: config.apiKey,
             config: {
@@ -123,14 +158,9 @@ export class SimliAvatar {
             },
           });
 
-          const videoElement = document.getElementById('simli-video') as HTMLVideoElement;
-          // Use in-DOM muted audio element (tested and confirmed to block audio)
-          const audioElement = document.getElementById('simli-audio') as HTMLAudioElement;
-
-          if (!videoElement || !audioElement) {
-            throw new Error('Video or audio elements not found');
-          }
-
+          // Step 2: construct SimliClient (v3.x signature):
+          //   new SimliClient(session_token, video, audio, iceServers|null, logLevel, transport_mode)
+          // For livekit transport, iceServers should be null. For p2p, pass STUN/TURN config.
           const simliClient = new SimliClient(
             sessionToken.session_token,
             videoElement,
@@ -143,17 +173,25 @@ export class SimliAvatar {
           // @ts-ignore
           window.__simliClient = simliClient;
 
+          // simli-client v3.x events: start | stop | error | speaking | silent | startup_error
           simliClient.on('start', () => {
             console.log('[Simli] Avatar connected and visible');
             // @ts-ignore
             window.__simliReady = true;
           });
-          simliClient.on('stop', () => {
-            console.log('[Simli] Connection stopped');
+          simliClient.on('stop', (reason: string) => {
+            console.log('[Simli] Connection stopped:', reason);
             // @ts-ignore
             window.__simliReady = false;
           });
-          simliClient.on('error', (err: any) => console.error('[Simli] Error:', err));
+          simliClient.on('error', (reason: string) => {
+            console.error('[Simli] Error:', reason);
+          });
+          simliClient.on('startup_error', (reason: string) => {
+            console.error('[Simli] Startup error:', reason);
+            // @ts-ignore
+            window.__simliReady = false;
+          });
           simliClient.on('speaking', () => console.log('[Simli] Avatar speaking'));
           simliClient.on('silent', () => console.log('[Simli] Avatar silent'));
 
@@ -728,7 +766,12 @@ export class SimliAvatar {
             // @ts-ignore
             if (window.__simliAudioWs) window.__simliAudioWs.close();
             // @ts-ignore
-            if (window.__simliClient) window.__simliClient.stop();
+            if (window.__simliClient) {
+              // @ts-ignore - v3.x uses stop(); some legacy versions used close()
+              const c = window.__simliClient;
+              if (typeof c.stop === 'function') c.stop();
+              else if (typeof c.close === 'function') c.close();
+            }
             // @ts-ignore
             if (window.__simliPC) window.__simliPC.close();
           } catch (e) {
@@ -775,20 +818,13 @@ export class SimliAvatar {
   <script type="module">
     async function loadSimliClient() {
       try {
-        const module = await import('https://esm.sh/simli-client');
-        window.SimliModule = module;
+        const module = await import('http://local.simli/simli-client.bundle.mjs');
+        window.SimliModule = module.default || module;
         document.getElementById('status').textContent = 'Simli Avatar: SDK Loaded';
         console.log('[Simli] SDK loaded successfully');
       } catch (error) {
-        console.error('[Simli] Failed to load SDK from CDN:', error);
-        try {
-          const module = await import('https://unpkg.com/simli-client/dist/index.mjs');
-          window.SimliModule = module;
-          document.getElementById('status').textContent = 'Simli Avatar: SDK Loaded (fallback)';
-        } catch (error2) {
-          console.error('[Simli] Failed to load SDK from fallback CDN:', error2);
-          document.getElementById('status').textContent = 'Simli Avatar: SDK Load Failed';
-        }
+        console.error('[Simli] Failed to load SDK:', error);
+        document.getElementById('status').textContent = 'Simli Avatar: SDK Load Failed';
       }
     }
     loadSimliClient();
