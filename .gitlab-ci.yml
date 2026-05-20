@@ -27,7 +27,7 @@ srt_security_review:
   before_script:
     - apt-get update -y
     - apt-get install -y curl make git
-    - pip install --upgrade pip
+    - pip install --upgrade pip pexpect
 
   script:
     - make srt-setup

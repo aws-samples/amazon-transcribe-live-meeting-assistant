@@ -111,6 +111,77 @@ def get_installed_version(srt_dir):
     return None
 
 
+def _run_srt_config_with_pexpect(srt_dir, timeout=900):
+    """Run ``srt config`` under a pty and answer its inquirer prompts.
+
+    SRT's config flow uses interactive prompts that ignore plain stdin pipes.
+    pexpect drives a real pty so the prompts complete and the scanner toolchain
+    (Checkov, Semgrep, Syft, Bandit, Jupyter) gets installed into ``.srt/.venv``.
+
+    Returns True if ``Configuration saved!`` was printed and ``.venv/bin/python``
+    exists; False otherwise. The full output is printed on failure for debugging.
+    """
+    try:
+        import pexpect
+    except ImportError:
+        print("❌ pexpect is required for CI setup. Install it with: pip install pexpect")
+        return False
+
+    binary = srt_dir / "srt"
+    captured = []
+    child = pexpect.spawn(
+        str(binary), ["config"], cwd=str(srt_dir), timeout=timeout, encoding="utf-8"
+    )
+
+    try:
+        while True:
+            idx = child.expect(
+                [
+                    r"Select AWS Profile",
+                    r"Allow anonymous usage telemetry",
+                    r"\(Y/n\)",
+                    r"\(y/N\)",
+                    r"Configuration saved",
+                    r"Configuration failed",
+                    pexpect.EOF,
+                    pexpect.TIMEOUT,
+                ],
+                timeout=180,
+            )
+            captured.append(child.before or "")
+            captured.append(child.after or "")
+            if idx == 0:  # Select AWS Profile (arrow-key list)
+                child.sendline("")
+            elif idx == 1:  # Allow telemetry — decline
+                child.sendline("n")
+            elif idx == 2:  # generic (Y/n) — accept default Yes
+                child.sendline("y")
+            elif idx == 3:  # generic (y/N) — accept default No
+                child.sendline("")
+            elif idx == 4:  # Configuration saved
+                break
+            elif idx == 5:  # Configuration failed
+                print("=== srt config failed ===")
+                print("".join(captured)[-2000:])
+                return False
+            elif idx == 6:  # EOF
+                break
+            elif idx == 7:  # TIMEOUT
+                print("=== srt config timed out ===")
+                print("".join(captured)[-2000:])
+                return False
+    finally:
+        if child.isalive():
+            child.close(force=True)
+
+    venv_python = srt_dir / ".venv" / "bin" / "python"
+    if venv_python.exists():
+        return True
+    print("=== srt config completed but .venv was not created ===")
+    print("".join(captured)[-2000:])
+    return False
+
+
 def main():
     project_root = Path(__file__).parent.parent.parent
     srt_dir = project_root / ".srt"
@@ -147,18 +218,18 @@ def main():
 
     config_file = srt_dir / "srtconfig.json"
     if is_ci:
-        # Non-interactive config for CI
+        # Pre-write the AWS config so `srt config` skips its profile/telemetry prompts.
         config_file.write_text(json.dumps({
             "AWS_PROFILE": os.getenv("AWS_PROFILE", "default"),
             "AWS_REGION": os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
             "TELEMETRY_ENABLED": False,
             "INSTALLATION_ID": os.getenv("CI_COMMIT_SHORT_SHA", "ci-build"),
         }, indent=2))
-        # Install scanner prerequisites (semgrep, syft, etc.) non-interactively
-        subprocess.run(  # nosec B602 B607 - hardcoded shell pipeline
-            "yes '' | timeout 180 ./srt config",
-            shell=True, cwd=srt_dir, capture_output=True, text=True, check=False,
-        )
+        # Run `srt config` under a pty (via pexpect) to answer the inquirer
+        # prompts for AWS profile / telemetry / prerequisite install.
+        if not _run_srt_config_with_pexpect(srt_dir):
+            print("❌ Failed to install SRT scanner prerequisites in CI")
+            sys.exit(1)
         print("✅ SRT configured for CI")
     elif not config_file.exists():
         print("Configuring SRT (follow the prompts)...")
