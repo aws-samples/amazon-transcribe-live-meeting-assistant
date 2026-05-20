@@ -44,6 +44,8 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
 - **MCP API Key Security**: API keys are stored as SHA-256 hashes in DynamoDB — never in plaintext. A custom Lambda authorizer validates keys via hash lookup with rate limiting (100 req/sec, burst 50).
 - **WAF Integration**: Optional WAFv2 Web Application Firewall with IP-based allow-listing for regional resources (API Gateway, ALB).
 - **Network Isolation**: VPC with public/private subnets, NAT gateway, and security groups for network-level access control between Fargate tasks and other components.
+- **Automated Security Scanning in CI/CD**: The repository integrates the AWS [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool) — a multi-scanner harness covering Bandit (Python), Semgrep (multi-language SAST), Checkov (CloudFormation IaC), Syft (SBOM/dependency inventory), and an AWS-resource security-matrix. SRT runs locally via `make srt` and automatically in GitLab CI on merge requests targeting `develop` ([`.gitlab-ci.yml`](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/develop/.gitlab-ci.yml) — see [Security Scanning](./security-scanning.md)). Suppression decisions live in `.srt/issues.json` (tracked in git via negative-gitignore), so the pipeline shares the team's curated suppressions and fails the merge request when new HIGH-priority findings appear.
+- **Documented Threat Model & Feature Security Reviews**: The repository includes structured [feature-by-feature security reviews](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/develop/.dsr/feature-security-review-v0.1.0-to-v0.3.2.md) covering every release from v0.1.0 → v0.3.2, plus a dedicated `threat-modeling/` directory with architecture, threat-analysis, and risk-assessment artifacts.
 
 ### Recommendations
 
@@ -74,7 +76,8 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
   - Consider WAF association with the AppSync API for additional API-layer protection
 - **Bedrock Guardrails**: Ensure Guardrails are configured for all production deployments to prevent the meeting assistant from generating harmful content, leaking sensitive meeting data in responses, or being manipulated via prompt injection in meeting transcripts.
 - Consider implementing VPC endpoints for enhanced network isolation of Bedrock, DynamoDB, and S3 access.
-- Add automated security scanning (bandit, Snyk) in the CI/CD pipeline.
+- **Extend automated scanning coverage**: SRT covers Python, CloudFormation, and SBOM analysis well, but consider also adding (a) JavaScript/TypeScript SAST against the React UI bundle and Lambda code, (b) `npm audit` / Snyk against the UI and Virtual Participant lockfiles, and (c) container scanning (e.g., Trivy or ECR enhanced scanning) against the Virtual Participant Docker image.
+- **Triage the current SRT backlog**: A first scan against v0.3.2 reports ~65 HIGH-priority open findings (53 from Bandit + Semgrep, 12 from the AWS security-matrix). These should be reviewed and either fixed or explicitly suppressed with a written rationale before the `srt_security_review` job becomes a hard merge gate.
 - Consider adding CloudTrail integration for comprehensive API activity monitoring.
 
 ## 3. Reliability

@@ -15,11 +15,17 @@ samconfig.toml
 .ui-test-checksum
 .ui-lint-checksum
 
-# DSR
+# DSR (legacy) — keep historical artifacts; new scans use .srt/
 .dsr/*
 !.dsr/issues.json
 !.dsr/settings.json
 !.dsr/feature-security-review-v0.1.0-to-v0.3.2.md
+
+# SRT (https://github.com/aws-samples/sample-security-review-tool)
+# Track only the suppression DB; everything else is machine-specific or ephemeral.
+.srt/*
+!.srt/issues.json
+
 .ash/
 
 # Node

@@ -58,6 +58,7 @@ title: "LMA Documentation"
 - [User Management](user-management.md) — Admin-only UI to create and delete LMA users (Admin or User roles)
 - [User-Based Access Control](user-based-access-control.md) — Admin vs non-admin users, meeting sharing, meeting deletion
 - [Infrastructure & Security](infrastructure-and-security.md) — Architecture overview, VPC, Cognito, KMS encryption, CloudFront, IAM, data retention
+- [Security Scanning (SRT)](security-scanning.md) — Automated security scanning via the AWS Sample Security Review Tool, suppression workflow, GitLab CI integration, DSR → SRT migration
 - [CloudFormation Service Role](cloudformation-service-role.md) — Delegated IAM role for non-admin LMA deployment and management
 
 ### Integration & API
