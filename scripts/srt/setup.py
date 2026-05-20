@@ -148,8 +148,8 @@ def _run_srt_config_with_pexpect(srt_dir, timeout=900):
                 ],
                 timeout=180,
             )
-            captured.append(child.before or "")
-            captured.append(child.after or "")
+            captured.append(str(child.before or ""))
+            captured.append(str(child.after or ""))
             if idx == 0:  # Select AWS Profile (arrow-key list)
                 child.sendline("")
             elif idx == 1:  # Allow telemetry — decline
@@ -162,13 +162,13 @@ def _run_srt_config_with_pexpect(srt_dir, timeout=900):
                 break
             elif idx == 5:  # Configuration failed
                 print("=== srt config failed ===")
-                print("".join(captured)[-2000:])
+                print("".join(captured)[-3000:])
                 return False
             elif idx == 6:  # EOF
                 break
             elif idx == 7:  # TIMEOUT
                 print("=== srt config timed out ===")
-                print("".join(captured)[-2000:])
+                print("".join(captured)[-3000:])
                 return False
     finally:
         if child.isalive():
@@ -218,15 +218,26 @@ def main():
 
     config_file = srt_dir / "srtconfig.json"
     if is_ci:
-        # Pre-write the AWS config so `srt config` skips its profile/telemetry prompts.
+        # SRT requires an AWS profile before it will install scanner prerequisites.
+        # CI runners typically have no ~/.aws/config; write a placeholder default.
+        aws_dir = Path.home() / ".aws"
+        aws_dir.mkdir(exist_ok=True)
+        aws_config = aws_dir / "config"
+        if not aws_config.exists():
+            aws_config.write_text("[default]\nregion = us-east-1\noutput = json\n")
+        aws_creds = aws_dir / "credentials"
+        if not aws_creds.exists():
+            aws_creds.write_text(
+                "[default]\n"
+                "aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n"
+                "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n"
+            )
         config_file.write_text(json.dumps({
             "AWS_PROFILE": os.getenv("AWS_PROFILE", "default"),
             "AWS_REGION": os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
             "TELEMETRY_ENABLED": False,
             "INSTALLATION_ID": os.getenv("CI_COMMIT_SHORT_SHA", "ci-build"),
         }, indent=2))
-        # Run `srt config` under a pty (via pexpect) to answer the inquirer
-        # prompts for AWS profile / telemetry / prerequisite install.
         if not _run_srt_config_with_pexpect(srt_dir):
             print("❌ Failed to install SRT scanner prerequisites in CI")
             sys.exit(1)
