@@ -15,6 +15,7 @@ os.environ["LOG_LEVEL"] = "WARNING"
 os.environ.setdefault("GRAPHQL_API_ENDPOINT", "https://test.appsync.amazonaws.com/graphql")
 os.environ.setdefault("MEETINGS_TABLE_NAME", "test-meetings")
 os.environ.setdefault("APPSYNC_GRAPHQL_URL", "https://test.appsync.amazonaws.com/graphql")
+os.environ.setdefault("LMA_WEB_APP_URL", "https://test-lma.example.com")
 
 # Mock tool imports before importing index
 for mod_name in [
@@ -290,6 +291,41 @@ class TestAPIGatewayUserContext(unittest.TestCase):
         # is_admin should be True
         if call_kwargs[1]:
             self.assertTrue(call_kwargs[1].get("is_admin"))
+
+
+class TestReadOnlyHintAnnotations(unittest.TestCase):
+    """Verify read-only tools advertise readOnlyHint=True annotations."""
+
+    READ_ONLY_TOOLS = {
+        "search_lma_meetings",
+        "get_meeting_transcript",
+        "get_meeting_summary",
+        "list_meetings",
+    }
+    WRITE_TOOLS = {"schedule_meeting", "start_meeting_now"}
+
+    def _get_tools(self):
+        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+        result = index.lambda_handler(api_gw_event(body), None)
+        return json.loads(result["body"])["result"]["tools"]
+
+    def test_read_only_tools_have_annotation(self):
+        for tool in self._get_tools():
+            if tool["name"] in self.READ_ONLY_TOOLS:
+                self.assertEqual(
+                    tool.get("annotations", {}).get("readOnlyHint"),
+                    True,
+                    f"{tool['name']} must declare readOnlyHint=True",
+                )
+
+    def test_write_tools_do_not_have_annotation(self):
+        for tool in self._get_tools():
+            if tool["name"] in self.WRITE_TOOLS:
+                self.assertNotEqual(
+                    tool.get("annotations", {}).get("readOnlyHint"),
+                    True,
+                    f"{tool['name']} must NOT declare readOnlyHint=True",
+                )
 
 
 class TestJSONRPCResponseFormat(unittest.TestCase):

@@ -519,7 +519,39 @@ $(SAM_INVOKE_TARGETS): local-invoke-%: $(LAMBDA_FUNCTIONS_DIR)/% | $(OUT_DIR) $(
 test-local-invoke-default: $(SAM_INVOKE_TARGETS)
 .PHONY: test-local-invoke-default
 
-test: test-local-invoke-default
+####
+# Lambda function unit tests
+####
+# Discover top-level Lambda function directories that contain test_*.py files
+# anywhere in their tree, then run `python -m unittest discover` in each
+# (unittest discover recurses, so nested test files like tools/test_*.py are
+# included). Uses the dev virtualenv so boto3 and other runtime deps are
+# available.
+LAMBDA_TEST_DIRS := $(sort $(foreach f,$(wildcard \
+	$(LAMBDA_FUNCTIONS_DIR)/*/test_*.py \
+	$(LAMBDA_FUNCTIONS_DIR)/*/*/test_*.py \
+),$(word 1,$(subst /, ,$(patsubst $(LAMBDA_FUNCTIONS_DIR)/%,%,$(f))))))
+LAMBDA_TEST_DIRS := $(addprefix $(LAMBDA_FUNCTIONS_DIR)/,$(LAMBDA_TEST_DIRS))
+
+test-lambda-unit:
+	@if [ -z "$(LAMBDA_TEST_DIRS)" ]; then \
+		echo "[INFO] no Lambda unit tests found"; \
+		exit 0; \
+	fi
+	@if [ ! -x '$(VIRTUALENV_DEV_BIN_DIR)/python' ]; then \
+		echo "[ERROR] dev virtualenv not found at $(VIRTUALENV_DEV_BIN_DIR)." >&2; \
+		echo "[ERROR] run 'make install' first." >&2; \
+		exit 1; \
+	fi
+	@FAILED=0; \
+	for d in $(LAMBDA_TEST_DIRS); do \
+		echo "[INFO] running unit tests in $$d"; \
+		(cd "$$d" && '$(realpath .)/$(VIRTUALENV_DEV_BIN_DIR)/python' -m unittest discover -v) || FAILED=1; \
+	done; \
+	exit $$FAILED
+.PHONY: test-lambda-unit
+
+test: test-lambda-unit test-local-invoke-default
 .PHONY: test
 
 ##########################################################################

@@ -13,6 +13,8 @@ from typing import Any, Dict, Optional
 
 import boto3
 
+from tools.url_helper import get_meeting_url
+
 logger = logging.getLogger()
 
 # Bedrock inference profile prefixes (cross-region routing).
@@ -144,6 +146,7 @@ def execute(
                         "excerpt": ref.get("content", {}).get("text", ""),
                         "score": ref.get("metadata", {}).get("score", 0),
                         "uri": uri,
+                        "meetingUrl": get_meeting_url(meeting_id),
                     }
                 )
 

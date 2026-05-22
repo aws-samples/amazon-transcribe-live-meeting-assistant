@@ -5865,6 +5865,7 @@ Resources:
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           LMA_SETTINGS_PARAMETER: !Ref LMASettingsParameterName
+          LMA_WEB_APP_URL: !Sub "https://${WebAppCloudFrontDistribution.DomainName}"
       LoggingConfig:
         LogGroup: !Ref MCPServerAnalyticsLogGroup
       Policies:

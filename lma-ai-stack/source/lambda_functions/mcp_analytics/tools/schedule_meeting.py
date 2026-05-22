@@ -16,6 +16,8 @@ from typing import Any, Dict, Optional
 
 import boto3
 
+from tools.url_helper import get_meeting_url, get_virtual_participant_url
+
 logger = logging.getLogger()
 
 
@@ -145,14 +147,18 @@ def execute(
 
         vp_data = result["data"]["createVirtualParticipant"]
 
+        vp_id = vp_data["id"]
+        call_id = vp_data.get("CallId")
         return {
-            "virtualParticipantId": vp_data["id"],
+            "virtualParticipantId": vp_id,
             "meetingName": vp_data["meetingName"],
             "meetingPlatform": vp_data["meetingPlatform"],
             "meetingId": vp_data["meetingId"],
             "scheduledFor": scheduled_time,
             "status": vp_data["status"],
             "owner": vp_data.get("owner", user_id),
+            "meetingUrl": get_meeting_url(call_id) if call_id else None,
+            "virtualParticipantUrl": get_virtual_participant_url(vp_id),
             "message": f"Meeting scheduled successfully for {scheduled_time}. Virtual participant will join automatically.",
         }
 
