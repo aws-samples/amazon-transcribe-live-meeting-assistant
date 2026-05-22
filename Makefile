@@ -481,6 +481,8 @@ docs-setup: ## One-time docs site setup (symlinks + npm install)
 	@echo -e "$(GREEN)✅ Docs site setup complete!$(NC)"
 
 docs-build: docs-setup ## Build documentation site (no serve)
+	@echo "Ensuring docs have frontmatter..."
+	cd docs-site && bash add-frontmatter.sh
 	@echo "Syncing sidebar with new docs..."
 	cd docs-site && node sync-sidebar.mjs
 	@echo "Building documentation site..."

@@ -1,3 +1,7 @@
+---
+title: "Amazon Quick Desktop × LMA Integration Proposal"
+---
+
 # Amazon Quick Desktop × LMA Integration Proposal
 
 ## Amazon Quick Desktop at a Glance
