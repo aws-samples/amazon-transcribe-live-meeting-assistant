@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MCP server returns LMA Web UI deep-links for every meeting** — All MCP tools that return meetings (`list_meetings`, `search_meetings`, `get_meeting_transcript`, `get_meeting_summary`, `start_meeting_now`, `schedule_meeting`) now include `meetingUrl` and `virtualParticipantUrl` fields pointing at the LMA Web UI's `#/calls/<id>` and `#/virtual-participant/<id>` routes, with the meeting ID URL-encoded so IDs containing spaces, `+`, or `:` resolve correctly. Powered by a new shared `tools/url_helper.py` that derives the base URL from the `LMA_WEB_APP_URL` env var (wired in via `lma-ai-stack.yaml`). Lets MCP clients (Claude/Quick Desktop/etc.) hand users one-click links straight into the Web UI instead of bare IDs.
+
+- **`readOnlyHint` annotations on read-only MCP tools** — `search_lma_meetings`, `get_meeting_transcript`, `get_meeting_summary`, and `list_meetings` are now advertised with `annotations.readOnlyHint: true` per the MCP spec, so MCP clients can confidently invoke them without user confirmation prompts and surface them as safe/read-only in their UIs.
+
+- **Amazon Quick Desktop Skills Pack** — New top-level `quick-desktop-skills-pack/` directory ships an LMA-for-Quick-Desktop integration bundle: two scheduled agents (`pre-meeting-brief` — runs every 5 min, builds AI briefs 15 min before calendar meetings using prior LMA meeting context and action items; `action-items` — hourly extraction of commitments from completed meetings) and two skills (`lma-meeting-catchup` — "catch me up on [meeting]" pulls the LMA summary + transcript and cross-references Slack; `lma-live-coach` — "coach me on this call" launches the LMA Virtual Participant and a background agent that polls the live transcript every 60s and posts MEDDPICC/SPIN/Challenger coaching cards). Includes a README with the bearer-token MCP setup flow and customization tips. Companion docs `docs/quick-desktop-integration.md` and `docs/quick-desktop-lma-integration-proposal.md` cover end-to-end install/troubleshooting and the design rationale.
+
 ### Security
+
 
 - **CloudFront security headers** — Added a `ResponseHeadersPolicy` to the CloudFront distribution with Content-Security-Policy (restricted `connect-src` to AWS service origins), Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options (DENY), and Referrer-Policy (strict-origin-when-cross-origin).
 
