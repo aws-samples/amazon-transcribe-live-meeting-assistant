@@ -14,6 +14,8 @@ from typing import Any, Dict, Optional
 
 import boto3
 
+from tools.url_helper import get_meeting_url, get_virtual_participant_url
+
 logger = logging.getLogger()
 
 
@@ -175,14 +177,18 @@ def execute(
         }
 
         # Add CallId if available
-        if vp_data.get("CallId"):
-            response_data["callId"] = vp_data["CallId"]
+        call_id = vp_data.get("CallId")
+        if call_id:
+            response_data["callId"] = call_id
 
         # Add VNC details if available
         if vp_data.get("vncEndpoint"):
             response_data["vncEndpoint"] = vp_data["vncEndpoint"]
             response_data["vncPort"] = vp_data.get("vncPort")
             response_data["vncInfo"] = "VNC preview available - check LMA UI for live view"
+
+        response_data["meetingUrl"] = get_meeting_url(call_id) if call_id else None
+        response_data["virtualParticipantUrl"] = get_virtual_participant_url(vp_id)
 
         return response_data
 

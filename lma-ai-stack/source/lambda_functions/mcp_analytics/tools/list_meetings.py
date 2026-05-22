@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional
 
 import boto3
 
+from tools.url_helper import get_meeting_url, get_virtual_participant_url
+
 logger = logging.getLogger()
 
 
@@ -206,8 +208,9 @@ def participant_in_meeting(meeting: Dict[str, Any], participant_name: str) -> bo
 
 def format_meeting(meeting: Dict[str, Any]) -> Dict[str, Any]:
     """Format meeting data for response"""
+    meeting_id = meeting.get("CallId", meeting.get("PK", "").replace("c#", ""))
     return {
-        "meetingId": meeting.get("CallId", meeting.get("PK", "").replace("c#", "")),
+        "meetingId": meeting_id,
         "meetingName": meeting.get("MeetingTopic", ""),
         "startTime": meeting.get("CreatedAt", ""),
         "endTime": meeting.get("UpdatedAt", ""),
@@ -217,4 +220,6 @@ def format_meeting(meeting: Dict[str, Any]) -> Dict[str, Any]:
         "owner": meeting.get("Owner", meeting.get("AgentId", "")),
         "hasSummary": bool(meeting.get("Summary")),
         "hasTranscript": bool(meeting.get("TranscriptUri") or meeting.get("RecordingUrl")),
+        "meetingUrl": get_meeting_url(meeting_id),
+        "virtualParticipantUrl": get_virtual_participant_url(meeting_id),
     }

@@ -196,6 +196,7 @@ MCP_TOOLS = [
             },
             "required": ["query"],
         },
+        "annotations": {"readOnlyHint": True},
     },
     {
         "name": "get_meeting_transcript",
@@ -208,6 +209,7 @@ MCP_TOOLS = [
             },
             "required": ["meetingId"],
         },
+        "annotations": {"readOnlyHint": True},
     },
     {
         "name": "get_meeting_summary",
@@ -221,6 +223,7 @@ MCP_TOOLS = [
             },
             "required": ["meetingId"],
         },
+        "annotations": {"readOnlyHint": True},
     },
     {
         "name": "list_meetings",
@@ -235,6 +238,7 @@ MCP_TOOLS = [
                 "limit": {"type": "number", "description": "Maximum number of meetings to return"},
             },
         },
+        "annotations": {"readOnlyHint": True},
     },
     {
         "name": "schedule_meeting",

@@ -14,6 +14,8 @@ from typing import Any, Dict
 
 import boto3
 
+from tools.url_helper import get_meeting_url
+
 logger = logging.getLogger()
 
 
@@ -88,21 +90,24 @@ def execute(
 
     # Format based on requested format
     if format == "json":
-        return {"meetingId": meeting_id, "format": "json", "transcript": transcript_data}
+        result = {"meetingId": meeting_id, "format": "json", "transcript": transcript_data}
     elif format == "text":
-        return {
+        result = {
             "meetingId": meeting_id,
             "format": "text",
             "transcript": format_as_text(transcript_data),
         }
     elif format == "srt":
-        return {
+        result = {
             "meetingId": meeting_id,
             "format": "srt",
             "transcript": format_as_srt(transcript_data),
         }
     else:
         raise ValueError(f"Invalid format: {format}. Must be 'json', 'text', or 'srt'")
+
+    result["meetingUrl"] = get_meeting_url(meeting_id)
+    return result
 
 
 def can_access_meeting(meeting_id: str, user_id: str, is_admin: bool) -> bool:
