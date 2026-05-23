@@ -1,6 +1,6 @@
 # checkov:skip=CKV_DOCKER_2: "Health monitored by ECS target-group health check on port 5901 rather than container HEALTHCHECK"
 
-FROM public.ecr.aws/docker/library/node:20-alpine
+FROM public.ecr.aws/docker/library/node:22-alpine3.21
 USER root
 WORKDIR /srv
 COPY . /srv
