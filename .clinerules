@@ -1,0 +1,85 @@
+# LMA Project Rules for Cline
+
+I am Cline working in the **Live Meeting Assistant (LMA)** repository — an
+AWS-based solution for real-time meeting transcription, AI-powered meeting
+assistance, and virtual meeting participation, built on Amazon Transcribe,
+Amazon Bedrock, and the Strands Agents SDK.
+
+## Project Context
+
+The canonical project overview lives in `CLAUDE.md` at the repo root —
+build/publish commands, stack architecture, linting, and git workflow are
+all documented there. **Read `CLAUDE.md` first** when starting a task; do
+not duplicate or contradict it.
+
+Key facts to anchor on:
+- Default PR target branch: `develop` (NOT `main`)
+- Feature branches: `feature/` prefix; releases: `release/` prefix
+- AWS profile for build/deploy/test: always `AWS_PROFILE=default`
+- Full deployment is via `./publish.sh` from the repo root, ~35-40 minutes
+  end-to-end through CloudFormation
+- Master documentation entry point: `docs/INDEX.md`
+
+## Domain-Specific Skills
+
+Detailed coding patterns, conventions, and checklists for each area of the
+project live in `.cline/skills/`. Consult the relevant skill file when a
+task touches that domain — these conventions take precedence over generic
+patterns.
+
+| Skill File | When to Use |
+|------------|-------------|
+| `.cline/skills/backend-lambda.md` | Writing Python Lambda handlers in `lma-ai-stack/source/lambda_functions/` (Powertools logger, boto3 retry config, Strands Agents SDK, layer reuse) |
+| `.cline/skills/frontend-ui.md` | React / Cloudscape UI changes in `lma-ai-stack/source/ui/` (arrow components, Amplify v6 auth, AppSync clients) |
+| `.cline/skills/infrastructure.md` | CloudFormation / SAM templates (GovCloud `${AWS::Partition}`, dedicated KMS-encrypted LogGroups, PermissionsBoundary, cfn-nag suppressions) |
+| `.cline/skills/code-review.md` | Pre-commit self-review checklist before returning a change |
+| `.cline/skills/pr-review.md` | Reviewing a GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
+
+### How to Use Skills
+
+1. At the start of a task, identify which domain(s) the task touches.
+2. Read the relevant skill file(s) from `.cline/skills/`.
+3. Follow the patterns, templates, and conventions described there.
+4. Run the pre-commit checks listed in `code-review.md` before declaring a
+   change complete.
+5. When the user types `review <PR or MR URL>`, follow `pr-review.md`
+   exactly — detect host from URL (`github.com` → `gh` CLI;
+   `gitlab.aws.dev` → fetch the MR ref over SSH with `git fetch origin
+   refs/merge-requests/<NN>/head` and `curl` the GitLab API for metadata,
+   since `glab` is not reliably available here), then produce the
+   structured six-question review.
+
+## Quick Reference — Things That Will Bite You
+
+These come up often enough to surface here, even though they're also in
+the skill files:
+
+- **Hardcoded `arn:aws:`** in CloudFormation breaks GovCloud — use
+  `!Sub "arn:${AWS::Partition}:..."`. (Existing `AllowedPattern` regex
+  literals like `^(|arn:aws:lambda:.*)$` are exempt.)
+- **Hardcoded `amazonaws.com`** breaks China regions — use
+  `${AWS::URLSuffix}`.
+- **New Lambda without a dedicated `AWS::Logs::LogGroup`** (referenced via
+  `LoggingConfig.LogGroup` and a `DependsOn`) will collide with the
+  auto-created group on first deploy.
+- **New IAM role without the `PermissionsBoundary` `!If` conditional**
+  will fail in environments that require boundaries.
+- **`print()` for Lambda logging** is wrong — use
+  `aws_lambda_powertools.Logger`.
+- **`function MyComponent()`** in the UI is an ESLint error — must be an
+  arrow function.
+- **Hand-edits to `lma-ai-stack/source/ui/src/graphql/mutations.js`** will
+  be overwritten — that file is auto-generated. Per-operation files under
+  `graphql/queries/` are hand-maintained.
+- **`lma deploy --from-code` silently no-ops on untracked files** — make
+  sure new files are tracked before relying on it.
+
+## Repository Hosts
+
+LMA is mirrored to two remotes:
+- **GitHub** (public): `github.com/aws-samples/amazon-transcribe-live-meeting-assistant`
+- **GitLab** (AWS internal): `gitlab.aws.dev/strahanr/LMA`
+
+When reviewing a PR/MR URL, detect which host from the URL — `github.com`
+uses `gh`; `gitlab.aws.dev` uses `git fetch` over SSH plus `curl` against
+the GitLab REST API. See `pr-review.md` for the exact commands.

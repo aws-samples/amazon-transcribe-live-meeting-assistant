@@ -96,3 +96,22 @@ Full documentation lives in `./docs/` with the master entry point at `docs/INDEX
 - `develop` branch: active development (default PR target)
 - Feature branches: `feature/` prefix
 - Release branches: `release/` prefix
+
+## Skill Files
+
+Project-specific coding patterns, checklists, and review workflows live in
+`.claude/skills/`. Consult the relevant skill file whenever a task touches
+the corresponding domain — these conventions take precedence over generic
+patterns.
+
+| Skill File | When to Use |
+|------------|-------------|
+| `.claude/skills/backend-lambda.md` | Writing Python Lambda handlers in `lma-ai-stack/source/lambda_functions/` |
+| `.claude/skills/frontend-ui.md` | React / Cloudscape UI changes in `lma-ai-stack/source/ui/` |
+| `.claude/skills/infrastructure.md` | CloudFormation / SAM templates, nested stacks, GovCloud rules |
+| `.claude/skills/code-review.md` | Pre-commit self-review checklist for your own changes |
+| `.claude/skills/pr-review.md` | Reviewing a GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
+
+When asked to `review <PR/MR URL>`, follow `.claude/skills/pr-review.md` and
+produce a structured review answering the six questions (good PR / safe /
+good UX / no security issues / well documented / safe to merge).
