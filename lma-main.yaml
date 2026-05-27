@@ -170,26 +170,6 @@ Parameters:
       If MeetingAssistService is 'STRANDS_BEDROCK_WITH_KB (Create)', provide comma separated list of optional S3 prefixes 
       with the paths to your source documents e.g. "prefix1/, prefix2/". If you leave blank, all documents in your S3 bucket will be scanned.
 
-  BedrockKnowledgeBaseWebCrawlerURLs:
-    Type: String
-    Default: https://en.wikipedia.org/wiki/Life_insurance, https://en.wikipedia.org/wiki/Mortgage_loan
-    Description: >-
-      If MeetingAssistService is 'STRANDS_BEDROCK_WITH_KB (Create)', provide comma separated list of public web sites to crawl,
-      or leave blank if you don't need a Web data source.
-
-  BedrockKnowledgeBaseWebCrawlerScope:
-    Type: String
-    AllowedValues:
-      - "DEFAULT"
-      - "HOST_ONLY"
-      - "SUBDOMAINS"
-    Default: DEFAULT
-    Description: >-
-      If MeetingAssistService is 'STRANDS_BEDROCK_WITH_KB (Create)', specify the scope of what is crawled for your URLs.
-      Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
-      Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
-      Choose SUBDOMAINS to include sub domains in addition to the host or primary domain.
-
   AssistantWakePhraseRegEx:
     Type: String
     Default: "(OK|Okay)[.,! ]*[Aa]ssistant"
@@ -753,8 +733,6 @@ Metadata:
           - BedrockKnowledgeBaseId
           - BedrockKnowledgeBaseS3BucketName
           - BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
-          - BedrockKnowledgeBaseWebCrawlerURLs
-          - BedrockKnowledgeBaseWebCrawlerScope
       - Label:
           default: Transcript Knowledge Base Configuration
         Parameters:
@@ -867,10 +845,6 @@ Metadata:
         default: S3 bucket with knowledge base source documents (optional).
       BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
         default: S3 prefix(es) for your content (optional)
-      BedrockKnowledgeBaseWebCrawlerURLs:
-        default: Publicly accessible URLs for web crawling (optional)
-      BedrockKnowledgeBaseWebCrawlerScope:
-        default: Web crawling sync scope
       TranscriptKnowledgeBase:
         default: Transcript Knowledge Base
       EnableMCP:
@@ -993,8 +967,6 @@ Conditions:
   ShouldCreateTranscriptKnowledgeBase:
     !Equals [!Ref TranscriptKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)"]
   ShouldUseTranscriptKnowledgeBase: !Condition ShouldCreateTranscriptKnowledgeBase
-  IsS3VectorsForTranscript: !Equals ["S3_VECTORS", "S3_VECTORS"]
-  IsS3VectorsForMeetingAssist: !Equals ["S3_VECTORS", "S3_VECTORS"]
   ShouldEnableMCP: !Equals [!Ref EnableMCP, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
@@ -1118,22 +1090,19 @@ Resources:
             Condition:
               StringEquals:
                 "aws:SourceAccount": !Ref "AWS::AccountId"
-          - !If
-            - IsS3VectorsForTranscript
-            - Sid: Allow S3 Vectors indexing service
-              Effect: Allow
-              Principal:
-                Service: indexing.s3vectors.amazonaws.com
-              Action:
-                - kms:Encrypt
-                - kms:Decrypt
-                - kms:GenerateDataKey*
-                - kms:DescribeKey
-              Resource: "*"
-              Condition:
-                StringEquals:
-                  "aws:SourceAccount": !Ref "AWS::AccountId"
-            - !Ref AWS::NoValue
+          - Sid: Allow S3 Vectors indexing service
+            Effect: Allow
+            Principal:
+              Service: indexing.s3vectors.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
 
   CustomerManagedEncryptionKeyAlias:
     Type: AWS::KMS::Alias
@@ -2386,13 +2355,9 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
       Parameters:
-        pVectorStoreType: "S3_VECTORS"
         pKnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
         pInputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
         pS3SyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
-        pWebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
-        pWebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
-        pWebSyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
@@ -2405,7 +2370,6 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
       Parameters:
-        pVectorStoreType: "S3_VECTORS"
         pKnowledgeBaseBucketName: !Ref RecordingsBucket
         pInputDocumentUploadFolderPrefix: "lma-transcripts/"
         pS3SyncScheduleExpression: "cron(0/15 * ? * * *)"  # default is to sync transcripts every 15 minutes

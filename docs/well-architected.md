@@ -50,7 +50,7 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
 ### Recommendations
 
 - **Privacy Controls**:
-  - Document and maintain a formal data inventory covering: live audio streams (in-transit), stereo audio recordings (S3), meeting transcripts (DynamoDB), AI-generated summaries (DynamoDB), Knowledge Base vectors (OpenSearch Serverless), and MCP API keys (DynamoDB, hashed)
+  - Document and maintain a formal data inventory covering: live audio streams (in-transit), stereo audio recordings (S3), meeting transcripts (DynamoDB), AI-generated summaries (DynamoDB), Knowledge Base vectors (S3 Vectors), and MCP API keys (DynamoDB, hashed)
   - Enforce data classification labels: Customer Confidential (audio, transcripts, summaries), Restricted (credentials, API keys), Internal (metadata, logs, prompt templates)
   - Document retention policies: DynamoDB TTL default 90 days (`MeetingRecordExpirationInDays`), S3 lifecycle policies for audio recordings, configurable CloudWatch log retention
   - Implement and document deletion capabilities: meeting-level deletion via AppSync mutations, bulk TTL-based expiration, S3 object lifecycle transitions

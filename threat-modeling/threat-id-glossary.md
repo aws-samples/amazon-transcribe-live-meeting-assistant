@@ -20,7 +20,7 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | **VP** | Virtual Participant | Headless Chrome, meeting platform interaction, credentials | [virtual-participant.md](feature-threats/virtual-participant.md) |
 | **VOICE** | Voice Assistant | Nova Sonic, ElevenLabs, Simli, wake phrase, vocalization | [voice-assistant.md](feature-threats/voice-assistant.md) |
 | **MCP** | MCP Integration | API Gateway, external tools, data exfiltration | [mcp-integration.md](feature-threats/mcp-integration.md) |
-| **KB** | Knowledge Base | Bedrock KB, RAG, cross-meeting search, OpenSearch | [knowledge-base.md](feature-threats/knowledge-base.md) |
+| **KB** | Knowledge Base | Bedrock KB, RAG, cross-meeting search, S3 Vectors | [knowledge-base.md](feature-threats/knowledge-base.md) |
 | **AUTH** | Authentication | Cognito, JWT, RBAC, meeting access control, WAF | [authentication-access.md](feature-threats/authentication-access.md) |
 | **UI** | Web UI | React, CloudFront, AppSync, iframe, subscriptions | [web-ui.md](feature-threats/web-ui.md) |
 | **REC** | Recording/Storage | S3 audio, DynamoDB, retention, consent, sharing | [recording-storage.md](feature-threats/recording-storage.md) |
@@ -88,7 +88,7 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | KB.T01 | Cross-meeting data leakage via Knowledge Base | ID | 9 (Very High) |
 | KB.T02 | Knowledge Base poisoning via transcript | Tampering | 6 (High) |
 | KB.T03 | RAG context injection (indirect prompt injection) | Tampering, EoP | 6 (High) |
-| KB.T04 | OpenSearch Serverless data exposure | ID | 3 (Medium) |
+| KB.T04 | S3 Vectors data exposure | ID | 3 (Medium) |
 | KB.T05 | Knowledge Base denial of service | DoS | 1 (Low) |
 
 ### AUTH — Authentication & Access Control (6 threats)

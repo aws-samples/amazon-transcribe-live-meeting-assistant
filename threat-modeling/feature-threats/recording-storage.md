@@ -81,7 +81,7 @@ flowchart TD
 | **Likelihood** | Medium (2) |
 | **Severity** | High (3) |
 | **Risk Score** | **6 (High)** |
-| **Affected Components** | S3 recording bucket, DynamoDB (multiple tables), OpenSearch Serverless (KB vectors), Bedrock KB |
+| **Affected Components** | S3 recording bucket, DynamoDB (multiple tables), S3 Vectors (KB vectors), Bedrock KB |
 | **Existing Mitigations** | DynamoDB TTL (configurable, default 90 days), S3 lifecycle policies (configurable) |
 | **Status** | Partially Mitigated |
 | **Recommendations** | Implement unified data deletion across all stores (S3 + DynamoDB + KB vectors), add meeting deletion API that purges from all locations, document data retention architecture, align TTL across all data stores, add retention compliance reporting |

@@ -52,8 +52,6 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | BedrockKnowledgeBaseId | Existing Bedrock Knowledge Base ID (for Use Existing mode) | (none) | Valid KB ID |
 | BedrockKnowledgeBaseS3BucketName | S3 bucket containing documents for the Knowledge Base (for Create mode) | (none) | Valid S3 bucket name |
 | BedrockKnowledgeBaseS3Prefix | S3 key prefixes for Knowledge Base documents | (none) | Comma-separated prefixes |
-| BedrockKnowledgeBaseWebCrawlerUrls | URLs for the Knowledge Base web crawler data source | (none) | Comma-separated URLs |
-| BedrockKnowledgeBaseWebCrawlerScope | Scope of web crawling | DEFAULT | DEFAULT, HOST_ONLY, SUBDOMAINS |
 | TranscriptKnowledgeBaseService | Whether to create a Knowledge Base from meeting transcripts | DISABLED | BEDROCK_KNOWLEDGE_BASE (Create), DISABLED |
 
 ## Transcription

@@ -21,7 +21,7 @@ The Live Meeting Assistant captures and processes live meeting audio through mul
 
 | Metric | Value |
 |--------|-------|
-| **AWS Services Used** | 15+ (Transcribe, Bedrock, ECS Fargate, Lambda, DynamoDB, AppSync, Cognito, S3, Kinesis, OpenSearch, CloudFront, KMS, Translate, API Gateway, CloudWatch) |
+| **AWS Services Used** | 15+ (Transcribe, Bedrock, ECS Fargate, Lambda, DynamoDB, AppSync, Cognito, S3, S3 Vectors, Kinesis, CloudFront, KMS, Translate, API Gateway, CloudWatch) |
 | **CloudFormation Stacks** | 11 nested stacks |
 | **Lambda Functions** | 19 |
 | **AppSync Resolvers** | 39 |
