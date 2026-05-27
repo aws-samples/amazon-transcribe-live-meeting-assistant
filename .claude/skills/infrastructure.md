@@ -64,8 +64,8 @@ Every template change MUST follow these rules:
 
 ## Canonical Lambda Resource Pattern
 
-Reference: `lma-ai-stack/deployment/lma-ai-stack.yaml:849-892`
-(`BackfillWorkerFunction`).
+Reference: `lma-ai-stack/deployment/lma-ai-stack.yaml:849-893`
+(`BackfillWorkerFunctionLogGroup` at 849, `BackfillWorkerFunction` at 856).
 
 ```yaml
 MyFunctionLogGroup:
@@ -206,7 +206,7 @@ make lint-cfn                   # all of the above + cfn_nag
 - Umbrella stack: `lma-main.yaml` (parameters at lines ~474–640;
   `HasPermissionsBoundary` condition at 999)
 - Canonical Lambda example:
-  `lma-ai-stack/deployment/lma-ai-stack.yaml:849-892`
+  `lma-ai-stack/deployment/lma-ai-stack.yaml:849-893`
 - Canonical IAM role with PermissionsBoundary:
   `lma-ai-stack/deployment/lma-ai-stack.yaml:894-907`
 - Build/deploy entry: `publish.sh` at repo root; per-stack `Makefile`

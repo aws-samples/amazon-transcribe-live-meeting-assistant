@@ -30,7 +30,7 @@ This validates dependencies, builds all stacks (SAM + npm), uploads artifacts to
 ```bash
 npm install && npm start    # local dev server
 npm run build               # production build
-npm test                    # jest/react-scripts tests
+npm test                    # vitest tests
 ```
 
 **WebSocket server** (in `lma-websocket-transcriber-stack/source/app/`):
