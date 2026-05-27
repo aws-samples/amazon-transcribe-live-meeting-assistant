@@ -57,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Stale Chromium `Singleton*` lockfiles blocking re-launch** — The persistent S3 profile feature means a fresh container hydrates a `userDataDir` that was last written by a different container. If the previous container exited uncleanly (OOM, deploy mid-meeting), Chromium's `SingletonSocket` / `SingletonLock` / `SingletonCookie` symlinks plus IndexedDB / leveldb `LOCK` files persist in the profile and block the next launch with cryptic errors like *"Failed to create /tmp/.../SingletonSocket: File exists"*. The VP now removes these stale locks at startup right after profile hydration (best-effort, errors are non-fatal), so an unclean exit no longer leaves the next user's profile permanently broken.
 
+- **`list_meetings` MCP tool returned no rows for current-day meetings** — The DynamoDB GSI sort-key upper bound in `query_by_date_range` (`mcp_analytics/tools/list_meetings.py`) was built as `"ts#<end_iso>#~"`. Real SKs have the form `ts#<ISO8601>#id#<CallId>` (e.g. `ts#2026-05-27T17:34:…`), and `T` (0x54) sorts after `#` (0x23), so the `between(...)` query silently excluded every meeting whose SK had a `T` immediately after the date — which is *every* meeting whenever the caller didn't pass an explicit `end_date` past midnight (the default code path used a date-only end of `today.strftime("%Y-%m-%d")`). The upper bound is now `"ts#<end_iso>~"`; `~` (0x7E) sorts after every byte that can legally follow the date in the SK. Added a regression unit test (`tests/test_list_meetings_date_range.py`) that pins the exact `between` bounds via `botocore.stub.Stubber` so the bug can't silently return.
+
 ### Security
 
 
