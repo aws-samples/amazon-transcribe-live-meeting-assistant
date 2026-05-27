@@ -275,6 +275,14 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	owner: String
 	Owner: String
 	SharedWith: String
+	# Persisted on the VP row only for SCHEDULED meetings: the launching
+	# user's Cognito sub (so the VPScheduler Lambda can pass LMA_USER_SUB to
+	# the eventually-launched ECS task) and a flag/duplicate sub indicating
+	# whether to fetch the user's Zoom credentials at launch time. Immediate
+	# meetings carry these via the Step Functions state-machine input rather
+	# than persisting them.
+	userSub: String
+	userZoomSub: String
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
 	CallId: ID
@@ -304,6 +312,13 @@ input CreateVirtualParticipantInput {
 	# When the caller is a Cognito user the resolver ignores this field and
 	# trusts $ctx.identity.username as before.
 	owner: String
+	# Persisted on the VP row for SCHEDULED meetings only, so the
+	# VPScheduler Lambda can pass LMA_USER_SUB / ZOOM_CREDENTIALS_SECRET_NAME
+	# to the launched ECS task at meeting time. Immediate (non-scheduled)
+	# meetings plumb these through the Step Functions input directly and
+	# don't need to persist them on the row.
+	userSub: String
+	userZoomSub: String
 }
 
 input UpdateVirtualParticipantInput {

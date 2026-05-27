@@ -12,7 +12,6 @@
  */
 /* eslint-disable react/jsx-props-no-spreading */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import PropTypes from 'prop-types';
 import { useNavigate } from 'react-router-dom';
 import { generateClient } from 'aws-amplify/api';
 import { Flashbar } from '@cloudscape-design/components';
@@ -105,7 +104,9 @@ const isPermPromptDismissed = () => {
 const markPermPromptDismissed = () => {
   try {
     window.localStorage.setItem(PERM_PROMPT_DISMISSED_KEY, '1');
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 };
 
 // 15-second debounce on the desktop-Notification + chime path: many MANUAL
@@ -127,7 +128,11 @@ const playAlertChime = async () => {
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
     if (ctx.state === 'suspended') {
-      try { await ctx.resume(); } catch { /* still suspended — beep won't be audible but Notification visual still shows */ }
+      try {
+        await ctx.resume();
+      } catch {
+        /* still suspended — beep won't be audible but Notification visual still shows */
+      }
     }
     const now = ctx.currentTime;
     const gain = ctx.createGain();
@@ -207,38 +212,40 @@ const ManualActionAlerts = () => {
     }
   }, []);
 
-  const fireBrowserNotification = useCallback((vp, kind) => {
-    if (typeof Notification === 'undefined') return;
-    if (Notification.permission !== 'granted') return;
-    const key = `${vp.id}#${kind}`;
-    // Schedule with debounce; if a later VP update cancels it, we suppress.
-    cancelPendingNotification(vp.id, kind);
-    const handle = setTimeout(() => {
-      pendingNotificationsRef.current.delete(key);
-      const titlePrefix =
-        kind === ALERT_KIND.MANUAL ? 'LMA needs your help' : 'LMA virtual participant failed';
-      const body =
-        kind === ALERT_KIND.MANUAL
-          ? `${vp.manualActionType || 'Manual action'} required: ${vp.manualActionMessage || 'Open the LMA viewer'}`
-          : vp.errorMessage || 'See LMA for details.';
-      try {
-        const note = new Notification(`${titlePrefix} — ${vp.meetingName || vp.meetingPlatform}`, {
-          body,
-          tag: `lma-vp-${vp.id}-${kind}`, // collapses duplicates per VP+kind
-          requireInteraction: kind === ALERT_KIND.MANUAL,
-        });
-        note.onclick = () => {
-          window.focus();
-          openVPViewer(vp.id);
-          note.close();
-        };
-        playAlertChime();
-      } catch {
-        // Notification API rarely throws; ignore.
-      }
-    }, NOTIFICATION_DEBOUNCE_MS);
-    pendingNotificationsRef.current.set(key, handle);
-  }, [cancelPendingNotification, openVPViewer]);
+  const fireBrowserNotification = useCallback(
+    (vp, kind) => {
+      if (typeof Notification === 'undefined') return;
+      if (Notification.permission !== 'granted') return;
+      const key = `${vp.id}#${kind}`;
+      // Schedule with debounce; if a later VP update cancels it, we suppress.
+      cancelPendingNotification(vp.id, kind);
+      const handle = setTimeout(() => {
+        pendingNotificationsRef.current.delete(key);
+        const titlePrefix = kind === ALERT_KIND.MANUAL ? 'LMA needs your help' : 'LMA virtual participant failed';
+        const body =
+          kind === ALERT_KIND.MANUAL
+            ? `${vp.manualActionType || 'Manual action'} required: ${vp.manualActionMessage || 'Open the LMA viewer'}`
+            : vp.errorMessage || 'See LMA for details.';
+        try {
+          const note = new Notification(`${titlePrefix} — ${vp.meetingName || vp.meetingPlatform}`, {
+            body,
+            tag: `lma-vp-${vp.id}-${kind}`, // collapses duplicates per VP+kind
+            requireInteraction: kind === ALERT_KIND.MANUAL,
+          });
+          note.onclick = () => {
+            window.focus();
+            openVPViewer(vp.id);
+            note.close();
+          };
+          playAlertChime();
+        } catch {
+          // Notification API rarely throws; ignore.
+        }
+      }, NOTIFICATION_DEBOUNCE_MS);
+      pendingNotificationsRef.current.set(key, handle);
+    },
+    [cancelPendingNotification, openVPViewer],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -261,12 +268,9 @@ const ManualActionAlerts = () => {
           return false;
         });
         // eslint-disable-next-line no-console
-        console.debug(
-          `[ManualActionAlerts] backfill: ${vps.length} VPs total, ${fresh.length} need an alert`,
-        );
-        for (const vp of fresh) {
-          handleVPUpdate(vp);
-        }
+        console.debug(`[ManualActionAlerts] backfill: ${vps.length} VPs total, ${fresh.length} need an alert`);
+        // eslint-disable-next-line no-use-before-define
+        fresh.forEach((vp) => handleVPUpdate(vp));
       } catch (e) {
         // eslint-disable-next-line no-console
         console.warn('[ManualActionAlerts] backfill failed:', e);
@@ -276,7 +280,6 @@ const ManualActionAlerts = () => {
       cancelled = true;
     };
     // handleVPUpdate is stable (useCallback below).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // NOTE: we intentionally do NOT call Notification.requestPermission()
@@ -393,9 +396,7 @@ const ManualActionAlerts = () => {
           // Shown only when the browser supports Notifications, permission
           // hasn't been granted *or* denied (default = "not asked yet"),
           // and the user hasn't dismissed it on this device.
-          ...(typeof Notification !== 'undefined' &&
-          notificationPermission === 'default' &&
-          !permPromptDismissed
+          ...(typeof Notification !== 'undefined' && notificationPermission === 'default' && !permPromptDismissed
             ? [
                 {
                   id: 'lma-vp-notif-permission',
@@ -407,7 +408,8 @@ const ManualActionAlerts = () => {
                   },
                   header: 'Enable desktop notifications for VP alerts',
                   content:
-                    "When a Virtual Participant needs your help (CAPTCHA, 2FA, sign-in challenge), LMA can show a desktop notification + audio chime so you don't miss it while in another tab.",
+                    'When a Virtual Participant needs your help (CAPTCHA, 2FA, sign-in challenge), ' +
+                    "LMA can show a desktop notification + audio chime so you don't miss it while in another tab.",
                   buttonText: 'Enable notifications',
                   onButtonClick: requestNotificationPermission,
                 },
@@ -420,7 +422,5 @@ const ManualActionAlerts = () => {
     </div>
   );
 };
-
-ManualActionAlerts.propTypes = {};
 
 export default ManualActionAlerts;

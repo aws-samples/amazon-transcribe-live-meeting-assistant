@@ -5096,7 +5096,17 @@ Resources:
         #if(!$util.isNullOrBlank($ctx.args.input.isScheduled))
           $util.qr($input.put("isScheduled", $ctx.args.input.isScheduled))
         #end
-        
+
+        ## userSub / userZoomSub are persisted on the row for SCHEDULED
+        ## meetings so the VPScheduler Lambda can plumb LMA_USER_SUB and
+        ## ZOOM_CREDENTIALS_SECRET_NAME to the eventually-launched ECS task.
+        #if(!$util.isNullOrBlank($ctx.args.input.userSub))
+          $util.qr($input.put("userSub", $ctx.args.input.userSub))
+        #end
+        #if(!$util.isNullOrBlank($ctx.args.input.userZoomSub))
+          $util.qr($input.put("userZoomSub", $ctx.args.input.userZoomSub))
+        #end
+
         {
           "version": "2018-05-29",
           "operation": "PutItem",
