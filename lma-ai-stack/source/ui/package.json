@@ -30,7 +30,7 @@
     "@testing-library/react": "^14.3.1",
     "@testing-library/user-event": "^14.5.2",
     "aws-amplify": "^6.16.2",
-    "axios": "^1.15.0",
+    "axios": "^1.15.2",
     "docx": "^9.5.1",
     "prop-types": "^15.8.1",
     "react": "^18.3.1",
