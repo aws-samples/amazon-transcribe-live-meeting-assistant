@@ -121,11 +121,23 @@ def query_by_date_range(table, start_date: str, end_date: str, limit: int) -> Li
     )
     end_iso = end_date if end_date else datetime.utcnow().isoformat() + "Z"
 
-    # SK format is `ts#<ISO8601>#id#<CallId>`; bounding the SK range with
-    # "ts#<iso>" (lower) and "ts#<iso>#~" (upper) gives us the inclusive
-    # date-range slice on the GSI.
+    # SK format is `ts#<ISO8601>#id#<CallId>`. To get an inclusive
+    # date-range slice on the GSI we use:
+    #   lower bound: "ts#<start_iso>"   (any SK starting with this date sorts
+    #                                    at or after this point)
+    #   upper bound: "ts#<end_iso>~"    ("~" / 0x7E sorts *after* every char
+    #                                    that can legally follow the date in
+    #                                    the SK — including "T" (0x54), which
+    #                                    is the literal that appears in real
+    #                                    SKs like "ts#2026-05-27T17:34:..." )
+    #
+    # Earlier code used "ts#<end_iso>#~" (an extra "#"), which silently
+    # excluded every meeting whose SK contained a "T" right after the date,
+    # because "T" (0x54) > "#" (0x23). That caused list_meetings to return
+    # zero rows for any caller that didn't pass an explicit end_date past
+    # midnight. Do not re-introduce the stray "#".
     sk_lo = f"ts#{start_iso}"
-    sk_hi = f"ts#{end_iso}#~"
+    sk_hi = f"ts#{end_iso}~"
 
     query_kwargs = {
         "IndexName": "TypeDateIndex",
