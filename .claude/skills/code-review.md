@@ -151,7 +151,7 @@ unrelated accounts and will fail with `AccessDenied`.
 - [ ] `make lint-validate` (SAM validate) passes
 
 ### Lambda Resource Pattern (canonical example:
-`lma-ai-stack/deployment/lma-ai-stack.yaml:849-892`)
+`lma-ai-stack/deployment/lma-ai-stack.yaml:849-893`)
 - [ ] Dedicated `AWS::Logs::LogGroup` named
       `!Sub "/${AWS::StackName}/lambda/<FunctionName>"` with KMS encryption
       (`KmsKeyId: !Ref CustomerManagedEncryptionKeyArn`)
