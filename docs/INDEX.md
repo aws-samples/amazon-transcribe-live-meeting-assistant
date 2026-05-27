@@ -33,6 +33,7 @@ title: "LMA Documentation"
 - [Upload Audio](upload-audio.md) — Upload a pre-recorded audio/video file for batch transcription and summary
 - [Browser Extension](browser-extension.md) — Chrome extension for capturing browser tab audio from any meeting platform
 - [Virtual Participant](virtual-participant.md) — Headless Chrome bot that joins Zoom, Teams, Chime, Google Meet, and WebEx meetings
+- [Zoom Sign-in & Bot-Detection Hardening](zoom-credentials-and-bot-detection.md) — Per-user Zoom credentials, AI-driven sign-in loop, persistent Chromium profiles, AI DOM resolver fallback
 
 ### Voice Assistant & Avatar
 

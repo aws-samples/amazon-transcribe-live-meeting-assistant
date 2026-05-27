@@ -10,6 +10,8 @@ Live Meeting Assistant (LMA) -- an AWS-based solution for real-time meeting tran
 
 **Prerequisites:** bash, node v18/v20/v22, npm, docker (running), zip, python3, pip3, virtualenv, aws cli, sam cli (>=1.118.0).
 
+**AWS profile:** Always use `AWS_PROFILE=default` for build/deploy/test commands in this repo unless the user explicitly tells you otherwise. Other profiles (e.g. `bedrock`) point at unrelated accounts and will fail with `AccessDenied` on S3/CloudFormation.
+
 **Full build and publish to S3:**
 ```bash
 ./publish.sh <cfn_bucket_basename> <cfn_prefix> <region> [public]

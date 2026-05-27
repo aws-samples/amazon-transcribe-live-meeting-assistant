@@ -2,6 +2,26 @@
 
 echo "=== LMA Virtual Participant Startup ==="
 
+# Push an early "BOOTING" status to the VP DynamoDB row so the UI shows
+# something other than the bare INITIALIZING badge during the ~30s Fargate
+# cold-start + container boot. We use AWS CLI directly (no boto3 / node
+# overhead) so this fires within the first second of container start.
+# Best-effort — failure is silent so we don't slow startup if IAM is off.
+push_booting_status() {
+    if [ -z "$VIRTUAL_PARTICIPANT_ID" ] || [ -z "$VP_TABLE_NAME" ]; then
+        return 0
+    fi
+    aws dynamodb update-item \
+        --table-name "$VP_TABLE_NAME" \
+        --key "{\"id\":{\"S\":\"$VIRTUAL_PARTICIPANT_ID\"}}" \
+        --update-expression "SET #s = :s, updatedAt = :u" \
+        --expression-attribute-names '{"#s":"status"}' \
+        --expression-attribute-values "{\":s\":{\"S\":\"BOOTING\"},\":u\":{\"S\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"}}" \
+        --region "${AWS_REGION:-us-west-2}" \
+        > /dev/null 2>&1 || true
+}
+push_booting_status &  # background — don't block container boot
+
 echo "Starting D-Bus..."
 dbus-daemon --system --fork 2>/dev/null || echo "D-Bus already running or not needed"
 

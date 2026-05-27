@@ -270,6 +270,27 @@ export class VirtualParticipantStatusManager {
     }
   }
 
+  // Read just the current status of this VP.
+  async getCurrentStatus(): Promise<string | null> {
+    try {
+      const query = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            status
+          }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(query, {
+        id: this.participantId,
+      });
+      return result?.getVirtualParticipant?.status || null;
+    } catch (error) {
+      console.error('Error reading VP status:', error);
+      return null;
+    }
+  }
+
   // Method to get CallId from VP record
   async getCallId(): Promise<string | null> {
     try {
@@ -347,6 +368,21 @@ export class VirtualParticipantStatusManager {
 
   async setInitializing(): Promise<boolean> {
     return this.updateStatus('INITIALIZING');
+  }
+
+  // Granular sub-states inside the INITIALIZING phase. Each maps to a
+  // different long-running setup step so the UI can show progress
+  // instead of staying on a generic "Setting up..." for ~60s.
+  async setRegisteringNetwork(): Promise<boolean> {
+    return this.updateStatus('REGISTERING_NETWORK');
+  }
+
+  async setLaunchingBrowser(): Promise<boolean> {
+    return this.updateStatus('LAUNCHING_BROWSER');
+  }
+
+  async setHydratingProfile(): Promise<boolean> {
+    return this.updateStatus('HYDRATING_PROFILE');
   }
 
   async setConnecting(): Promise<boolean> {

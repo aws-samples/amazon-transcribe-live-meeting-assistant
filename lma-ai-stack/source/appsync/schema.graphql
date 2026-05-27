@@ -210,6 +210,8 @@ type Mutation @aws_iam {
 	revokeMCPApiKey(keyPrefix: String!): Boolean @aws_cognito_user_pools
 	createUser(input: CreateUserInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	deleteUser(input: DeleteUserInput!): DeleteUserOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	setMyZoomCredentials(input: SetZoomCredentialsInput!): ZoomCredentialsStatus @aws_cognito_user_pools
+	deleteMyZoomCredentials: Boolean @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -245,6 +247,18 @@ type Query @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
 	listUsers: UserList @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools
+}
+
+type ZoomCredentialsStatus @aws_cognito_user_pools {
+	present: Boolean!
+	username: String
+	lastUpdatedAt: AWSDateTime
+}
+
+input SetZoomCredentialsInput {
+	username: String!
+	password: String!
 }
 
 type VirtualParticipant @aws_cognito_user_pools @aws_iam {
@@ -273,6 +287,7 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	manualActionMessage: String
 	manualActionTimeoutSeconds: Int
 	manualActionStartTime: AWSDateTime
+	errorMessage: String
 }
 
 input CreateVirtualParticipantInput {
@@ -283,6 +298,12 @@ input CreateVirtualParticipantInput {
 	meetingTime: AWSTimestamp
 	isScheduled: Boolean
 	status: String!
+	# Optional override for the Owner field — used by IAM-authenticated callers
+	# (e.g. the MCP analytics Lambda) so the row is owned by the LMA user
+	# rather than the calling Lambda's IAM role session.
+	# When the caller is a Cognito user the resolver ignores this field and
+	# trusts $ctx.identity.username as before.
+	owner: String
 }
 
 input UpdateVirtualParticipantInput {
@@ -298,6 +319,7 @@ input UpdateVirtualParticipantInput {
 	manualActionMessage: String
 	manualActionTimeoutSeconds: Int
 	manualActionStartTime: AWSDateTime
+	errorMessage: String
 }
 
 input EndVirtualParticipantInput {
@@ -423,6 +445,8 @@ type Subscription {
 		@aws_subscribe(mutations: ["deleteCall"])
 	onUnshareCall: UnshareCallOutput
 		@aws_subscribe(mutations: ["unshareCall"])
+	onCreateVirtualParticipant: VirtualParticipant
+		@aws_subscribe(mutations: ["createVirtualParticipant"])
 	onUpdateVirtualParticipant: VirtualParticipant
 		@aws_subscribe(mutations: ["updateVirtualParticipant", "endVirtualParticipant"])
 	onVNCPreviewToggle(CallId: ID!): VNCPreviewControl

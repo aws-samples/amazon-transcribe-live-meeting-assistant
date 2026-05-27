@@ -1,25 +1,49 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page } from "puppeteer";
+import { Page } from 'rebrowser-puppeteer';
 
-import { details } from "./details.js";
+import { details, matchesEndCommand, exitMessagesFor } from "./details.js";
 import { transcriptionService } from "./scribe.js";
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
+import { findElementWithFallback } from './ai-dom-resolver.js';
+import { startDialogWatchdog } from './dialog-watchdog.js';
 
 export default class Teams {
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
-        const messageElement = await page.waitForSelector(".ck-placeholder");
+        const found = await findElementWithFallback(
+            page,
+            ['.ck-placeholder'],
+            {
+                intent: 'Microsoft Teams in-meeting chat compose input area',
+                platform: 'TEAMS',
+                step: 'teams.chat.input',
+            },
+            { maxRetries: 10, delayMs: 500 },
+        );
+        if (!found) {
+            console.log('Could not locate Teams chat input — aborting sendMessages');
+            return;
+        }
         for (const message of messages) {
-            await messageElement?.click();
+            await found.element.click();
             await new Promise((resolve) => setTimeout(resolve, 500));
-            await messageElement?.type(message);
-            await messageElement?.press("Enter");
+            await found.element.type(message);
+            await found.element.press("Enter");
         }
     }
 
     public async initialize(page: Page): Promise<void> {
+        // AI-driven dialog watchdog runs for the entire meeting lifecycle —
+        // sign-in pages, pre-join, waiting-room, and in-meeting. Catches
+        // recording-consent / language-interpretation / bot-detection /
+        // CAPTCHA / SSO / "stay signed in?" / etc. dialogs that the
+        // hardcoded selector list can't classify. CONSENT-class dialogs
+        // are auto-dismissed; CAPTCHA/BLOCKED/LOGIN_REQUIRED escalates to
+        // MANUAL_ACTION_REQUIRED so the user can clear it via VNC.
+        startDialogWatchdog(page, { platform: 'TEAMS' });
+
         try {
             console.log("Getting meeting link.");
             await page.goto(
@@ -31,18 +55,38 @@ export default class Teams {
         }
 
         console.log("Entering name.");
-        const nameTextElement = await page.waitForSelector(
-            '[data-tid="prejoin-display-name-input"]'
+        const nameRes = await findElementWithFallback(
+            page,
+            ['[data-tid="prejoin-display-name-input"]'],
+            {
+                intent: 'Teams pre-join screen display-name input field',
+                platform: 'TEAMS',
+                step: 'teams.join.name',
+            },
+            { maxRetries: 10, delayMs: 500 },
         );
-        await nameTextElement?.type(details.scribeIdentity, { delay: 100 });
-        await nameTextElement?.press("Enter");
+        if (!nameRes) {
+            console.log('Could not locate Teams display-name input — aborting join');
+            return;
+        }
+        await nameRes.element.type(details.scribeIdentity, { delay: 100 });
+        await nameRes.element.press("Enter");
 
         // Only click mute button if voice assistant is NOT enabled
         if (!voiceAssistant.isEnabled()) {
             await new Promise((resolve) => setTimeout(resolve, 250));
             console.log("Clicking mute button.");
-            const muteButtonElement = await page.waitForSelector('[data-tid="toggle-mute"]');
-            await muteButtonElement?.click();
+            const muteRes = await findElementWithFallback(
+                page,
+                ['[data-tid="toggle-mute"]'],
+                {
+                    intent: 'Teams pre-join screen microphone mute toggle',
+                    platform: 'TEAMS',
+                    step: 'teams.join.muteToggle',
+                },
+                { maxRetries: 10, delayMs: 500 },
+            );
+            await muteRes?.element.click();
         } else {
             console.log('Voice assistant enabled - skipping mute button for agent audio');
         }
@@ -53,14 +97,36 @@ export default class Teams {
             // Don't click the video toggle - leave it on so Simli avatar shows
         } else {
             console.log("Clicking video button to turn off.");
-            const videoButtonElement = await page.waitForSelector('[data-tid="toggle-video"]');
-            await videoButtonElement?.click();
+            const videoRes = await findElementWithFallback(
+                page,
+                ['[data-tid="toggle-video"]'],
+                {
+                    intent: 'Teams pre-join screen camera/video toggle',
+                    platform: 'TEAMS',
+                    step: 'teams.join.videoToggle',
+                },
+                { maxRetries: 10, delayMs: 500 },
+            );
+            await videoRes?.element.click();
         }
 
         await new Promise((resolve) => setTimeout(resolve, 250));
         console.log("Clicking join button.");
-        const joinButtonElement = await page.waitForSelector('[data-tid="prejoin-join-button"]');
-        await joinButtonElement?.click();
+        const joinRes = await findElementWithFallback(
+            page,
+            ['[data-tid="prejoin-join-button"]'],
+            {
+                intent: 'Teams pre-join screen primary "Join now" button',
+                platform: 'TEAMS',
+                step: 'teams.join.joinButton',
+            },
+            { maxRetries: 10, delayMs: 500 },
+        );
+        if (!joinRes) {
+            console.log('Could not locate Teams Join button — aborting');
+            return;
+        }
+        await joinRes.element.click();
 
         // Wait for potential CAPTCHA with longer timeout
         console.log("Checking for CAPTCHA...");
@@ -312,8 +378,18 @@ export default class Teams {
         });
 
         await page.exposeFunction("messageChange", async (message: string) => {
-            if (message.includes(details.endCommand)) {
-                console.log("Your scribe has been removed from the meeting.");
+            // Teams chat-message text doesn't expose sender on the same node;
+            // best-effort sender extraction would require additional DOM
+            // wiring. For now we use the lenient matcher and a generic
+            // farewell.
+            if (matchesEndCommand(message)) {
+                console.log("LMA Virtual Participant has been asked to leave the meeting.");
+                try {
+                    await this.sendMessages(page, exitMessagesFor(null));
+                } catch (e) {
+                    // Best effort — fall through to closing the browser
+                    console.warn('Could not send goodbye message:', e);
+                }
                 await page.browser().close();
             } else if (
                 details.start &&

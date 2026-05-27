@@ -13,10 +13,72 @@ import os
 from typing import Any, Dict, Optional
 
 import boto3
+from botocore.exceptions import ClientError
 
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 
 logger = logging.getLogger()
+
+
+def _resolve_user_sub(email_or_username: str) -> Optional[str]:
+    """Resolve a Cognito user identifier (email or username) to its sub.
+
+    Returns None when the user pool isn't configured or the user isn't found.
+    Best-effort — failures here only mean the MCP-launched VP joins as a
+    guest instead of using stored Zoom credentials, so they should never
+    block the join itself.
+    """
+    pool_id = os.environ.get("USER_POOL_ID")
+    if not pool_id or not email_or_username:
+        return None
+    cognito = boto3.client("cognito-idp")
+    try:
+        # Fast path: if the identifier is already a username
+        resp = cognito.admin_get_user(UserPoolId=pool_id, Username=email_or_username)
+        for attr in resp.get("UserAttributes", []):
+            if attr.get("Name") == "sub":
+                return attr.get("Value")
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code != "UserNotFoundException":
+            logger.warning("admin_get_user failed for %s: %s", email_or_username, exc)
+    # Slow path: search by email attribute
+    try:
+        resp = cognito.list_users(
+            UserPoolId=pool_id,
+            Filter=f'email = "{email_or_username}"',
+            Limit=1,
+        )
+        users = resp.get("Users", [])
+        if users:
+            for attr in users[0].get("Attributes", []):
+                if attr.get("Name") == "sub":
+                    return attr.get("Value")
+    except ClientError as exc:
+        logger.warning("list_users failed for %s: %s", email_or_username, exc)
+    return None
+
+
+def _has_zoom_credentials(cognito_sub: str) -> bool:
+    """Check whether the user has stored Zoom credentials.
+
+    Returns False on any error so we always fall back to guest join.
+    """
+    if not cognito_sub:
+        return False
+    stack_name = os.environ.get("LMA_STACK_NAME")
+    if not stack_name:
+        return False
+    secret_name = f"{stack_name}/zoom-credentials/{cognito_sub}"
+    sm = boto3.client("secretsmanager")
+    try:
+        described = sm.describe_secret(SecretId=secret_name)
+        return not described.get("DeletedDate")
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code not in ("ResourceNotFoundException", "InvalidRequestException"):
+            logger.warning("describe_secret failed for %s: %s", secret_name, exc)
+        return False
 
 
 def execute(
@@ -26,6 +88,7 @@ def execute(
     meeting_password: Optional[str] = None,
     user_id: str = None,
     is_admin: bool = False,
+    use_stored_zoom_credentials: bool = True,
 ) -> Dict[str, Any]:
     """
     Start a meeting immediately with virtual participant.
@@ -37,6 +100,11 @@ def execute(
         meeting_password: Optional meeting password
         user_id: User ID for access control
         is_admin: Whether user is admin
+        use_stored_zoom_credentials: When the user has stored Zoom
+            credentials in LMA, sign in to Zoom with them before joining
+            the meeting (recommended; avoids most bot-detection blocks
+            and meetings that disallow guests). Set to False to force
+            a guest join. Has no effect on non-Zoom platforms.
 
     Returns:
         Dict with virtual participant details and status
@@ -81,6 +149,23 @@ def execute(
     }
     """
 
+    # Resolve the Cognito sub for the LMA user on whose behalf the MCP
+    # client is calling. We use the sub to:
+    #   1. Override the createVirtualParticipant Owner field (so the row
+    #      isn't owned by the MCP Lambda role's session ARN).
+    #   2. Pass userZoomSub/userSub to the state machine so the launched VP
+    #      can use the user's stored Zoom credentials and persistent profile.
+    cognito_sub = _resolve_user_sub(user_id) if user_id else None
+    has_zoom_creds = _has_zoom_credentials(cognito_sub) if cognito_sub else False
+    use_zoom_creds = bool(use_stored_zoom_credentials and has_zoom_creds)
+    logger.info(
+        "MCP user resolution: user_id=%s sub=%s has_zoom_creds=%s use_zoom_creds=%s",
+        user_id,
+        cognito_sub,
+        has_zoom_creds,
+        use_zoom_creds,
+    )
+
     variables = {
         "input": {
             "meetingName": meeting_name,
@@ -88,6 +173,10 @@ def execute(
             "meetingId": meeting_id,
             "meetingPassword": meeting_password or "",
             "status": "INITIALIZING",
+            # owner override — only honored by the resolver when the caller
+            # is IAM (ours is, the MCP Lambda role). Cognito-authenticated
+            # callers from the React UI ignore this and use their own identity.
+            **({"owner": user_id} if user_id else {}),
         }
     }
 
@@ -154,6 +243,12 @@ def execute(
                 "meetingTime": "",  # Empty string triggers immediate RunTask path
                 "userName": user_id or "mcp-server-user",
                 "virtualParticipantId": vp_id,
+                # Always populate userSub when we know it so the persistent
+                # Chromium profile (Phase C4) is keyed correctly. userZoomSub
+                # is only set when the user has actually stored Zoom creds —
+                # an empty string means the VP joins as a guest.
+                "userSub": cognito_sub or "",
+                "userZoomSub": cognito_sub if use_zoom_creds else "",
                 "accessToken": "",
                 "idToken": "",
                 "refreshToken": "",
@@ -161,9 +256,41 @@ def execute(
             },
         }
 
-        logger.info(f"Invoking state machine: {state_machine_arn}")
-        sfn.start_execution(stateMachineArn=state_machine_arn, input=json.dumps(sfn_input))
-        logger.info(f"State machine execution started for VP {vp_id}")
+        logger.info(f"Invoking state machine (sync): {state_machine_arn}")
+        # Express SM supports synchronous execution — use it so we can
+        # surface RunTask failures (image pull, ECS capacity, IAM, etc.)
+        # back to the MCP caller as an actionable error message instead
+        # of leaving the VP record stuck at INITIALIZING. Falls back to
+        # async on any error so a missing IAM permission doesn't break
+        # the launch path entirely.
+        try:
+            sync_resp = sfn.start_sync_execution(
+                stateMachineArn=state_machine_arn,
+                input=json.dumps(sfn_input),
+            )
+            logger.info(
+                "Sync execution finished for VP %s: status=%s",
+                vp_id,
+                sync_resp.get("status"),
+            )
+            sm_status = sync_resp.get("status", "")
+            sm_error = sync_resp.get("error", "") or ""
+            sm_cause = sync_resp.get("cause", "") or ""
+            if sm_status not in ("SUCCEEDED",):
+                # MarkVPFailed inside the state machine has already updated the
+                # DDB row, but raise so the MCP caller gets a clear error and
+                # doesn't think the launch silently succeeded.
+                detail = f"{sm_status}: {sm_error}"
+                if sm_cause:
+                    detail = f"{detail} — {sm_cause}"
+                raise ValueError(f"Failed to launch virtual participant ({detail})")
+        except sfn.exceptions.ClientError as exc:  # type: ignore[attr-defined]
+            logger.warning(
+                "start_sync_execution failed (%s); falling back to async start_execution",
+                exc,
+            )
+            sfn.start_execution(stateMachineArn=state_machine_arn, input=json.dumps(sfn_input))
+            logger.info(f"Async state machine execution started for VP {vp_id}")
 
         # Build response
         response_data = {

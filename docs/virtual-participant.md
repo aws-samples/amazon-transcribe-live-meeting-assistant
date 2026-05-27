@@ -10,6 +10,10 @@ title: "Virtual Participant"
 - [When to use Virtual Participant](#when-to-use-virtual-participant)
 - [Supported Platforms](#supported-platforms)
 - [Joining a Meeting](#joining-a-meeting)
+- [Status Lifecycle](#status-lifecycle)
+- [Manual Action Required (CAPTCHA, 2FA, SSO)](#manual-action-required-captcha-2fa-sso)
+- [AI-driven self-healing](#ai-driven-self-healing)
+- [Zoom Sign-in](#zoom-sign-in)
 - [Meeting Scheduling](#meeting-scheduling)
 - [Meeting Invitation Parsing](#meeting-invitation-parsing)
 - [VNC Preview](#vnc-preview)
@@ -17,6 +21,7 @@ title: "Virtual Participant"
 - [EC2 Instance Types](#ec2-instance-types)
 - [Auto-Scaling](#auto-scaling)
 - [Chat Introduction Message](#chat-introduction-message)
+- [In-meeting Chat Commands](#in-meeting-chat-commands)
 - [Troubleshooting](#troubleshooting)
 - [Developer Testing](#developer-testing)
 - [See Also](#see-also)
@@ -51,11 +56,65 @@ See [Meeting Sources](meeting-sources.md) for the full comparison.
 3. Click **Join Now**.
 4. The VP starts in approximately 30-60 seconds (EC2) or 1-2 minutes (Fargate).
 5. Once joined, the VP posts an introduction message in the meeting chat.
-6. View VP status in the UI as it progresses through its lifecycle:
-   - **INITIALIZING** -- ECS task is starting and the browser is launching
-   - **JOINING** -- VP is navigating to the meeting and attempting to join
-   - **JOINED** -- VP has successfully joined the meeting and is capturing audio
-   - **ENDED** -- The meeting has ended or the VP has been disconnected
+6. View VP status in the UI as it progresses through its lifecycle (see [Status Lifecycle](#status-lifecycle)).
+
+## Status Lifecycle
+
+The VP reports a granular status as it boots, joins, and runs. The UI uses these to give a precise picture of where in the startup sequence the VP is:
+
+| Status | What's happening |
+| --- | --- |
+| `INITIALIZING` | Step Functions has submitted the ECS RunTask request; container is being scheduled |
+| `WAITING_FOR_CAPACITY` | All current EC2 hosts are full; the capacity-provider auto-scaler is launching a new t3.large host (typically 60-90 seconds). See [Auto-Scaling](#auto-scaling) |
+| `BOOTING` | Container started; pulling Chrome image, starting Xvfb / VNC / PulseAudio |
+| `REGISTERING_NETWORK` | Registering the task with the live-view ALB (typically 30-60 seconds) |
+| `HYDRATING_PROFILE` | Restoring the per-user Chromium profile (cookies, "trusted device" markers) from S3 |
+| `LAUNCHING_BROWSER` | Launching Chromium via `rebrowser-puppeteer` with bot-detection patches at the CDP layer |
+| `VNC_READY` | Browser is up; live-view viewer can connect |
+| `CONNECTING` | Initializing audio/video pipelines (Nova Sonic, Simli avatar, agent mic) |
+| `JOINING` | Navigating to the meeting URL; signing in to Zoom if credentials are stored |
+| `MANUAL_ACTION_REQUIRED` | A CAPTCHA, 2FA, SSO, consent dialog, or Zoom bot-detection challenge needs human input — see [Manual Action Required](#manual-action-required-captcha-2fa-sso) |
+| `ACTIVE` / `JOINED` | VP is in the meeting and capturing audio |
+| `COMPLETED` / `ENDED` | Meeting ended cleanly (host removed the VP, all attendees left, or the VP got "lonely") |
+| `FAILED` | The VP could not join. The DDB record carries an `errorMessage` describing what went wrong (e.g. *"Meeting join failed: …"*, *"Zoom login failed: invalid credentials"*, *"ECS RunTask soft-failure: agent not connected"*) |
+
+When ECS reports a "soft failure" on RunTask (returns HTTP 200 with a non-empty `failures` array — typically the container instance agent is briefly disconnected), the state machine catches it explicitly and writes `FAILED` plus the original failure reason to the VP record, instead of leaving the VP stuck in `INITIALIZING` indefinitely.
+
+## Manual Action Required (CAPTCHA, 2FA, SSO)
+
+When the VP can't proceed without a human (Zoom 2FA passcode, reCAPTCHA, SSO redirect, an unknown consent dialog the auto-dismiss handler can't classify), it sets status to `MANUAL_ACTION_REQUIRED` and surfaces:
+
+- A persistent **Flashbar alert** at the top of the LMA UI with the action type and a link to the meeting detail page.
+- An **action banner** on the Virtual Participant detail page above the live VNC viewer.
+- A **browser notification + audio chime** if you've granted notification permission, so you can be tabbed-away or in another window.
+
+Open the live VNC viewer for the affected VP, complete the challenge (type the passcode, solve the CAPTCHA, sign in via SSO, click the consent button — whatever the banner says), and the VP picks up automatically. The default timeout is 3 minutes; if no human response arrives, the VP fails the meeting cleanly.
+
+The banner is dismissible — dismissed alerts are remembered in `localStorage` (per VP id) so the banner doesn't reappear on every page refresh after you've dealt with it.
+
+## AI-driven self-healing
+
+Every platform handler (Zoom, Teams, Webex, Chime) wraps its hard-coded CSS selectors in an AI fallback resolver. When a primary selector misses (because the meeting platform shipped a UI change), the resolver asks Claude (Bedrock, vision-capable) to find the right element by reading a compact DOM summary plus a screenshot of the current page. Successful resolutions are cached in a shared `DomSelectorCache` DynamoDB table (30-day TTL on `lastUsedAt`) so the cost is paid only once per platform UI change.
+
+The same resolver classifies unknown popup dialogs:
+- `CONSENT` / `RECORDING_NOTICE` → auto-clicked by the VP.
+- `CAPTCHA` / `LOGIN_REQUIRED` / `SSO_REDIRECT` / `BLOCKED` → escalated to `MANUAL_ACTION_REQUIRED` (see above) so a human can solve it via the live VNC viewer.
+
+Disable the AI fallback by setting `BedrockDomResolverModelId` to an empty string at deploy time — the VP reverts to hardcoded-selector-only behavior.
+
+For full details on the AI resolver and its interaction with the Zoom sign-in flow, see [Zoom Sign-in & Bot-Detection Hardening](zoom-credentials-and-bot-detection.md).
+
+## Zoom Sign-in
+
+LMA can sign the VP in to Zoom using **per-user stored credentials** before navigating to the meeting URL. A signed-in session avoids most bot-detection blocks ("We detected you may be a bot…") and allows the VP to join meetings that disallow guests.
+
+- Each user adds their own credentials via the **Zoom account** card in the Create Virtual Participant modal. Credentials live in AWS Secrets Manager keyed by Cognito sub, and the plaintext password is never returned to the React UI.
+- The VP container reads the secret at runtime; it is never put on the task definition or in the Step Functions execution input.
+- The sign-in flow is **AI-driven** end-to-end. After submitting the username, Claude inspects each subsequent page (password entry, OTP, passkey-binding upsell, phone-binding upsell, dashboard, etc.) and decides whether to fill, skip, click-through, wait, or escalate — so it tolerates Zoom's frequent post-login interstitials without code changes.
+- **2FA / CAPTCHA / SSO challenges** that need human input fall through to `MANUAL_ACTION_REQUIRED` (see above).
+- **Per-user persistent Chromium profile** in S3 means cookies and "trusted device" markers survive across meetings — after the first manual sign-in, subsequent VPs reuse the session and skip both the reCAPTCHA *and* the bot-detection dialog.
+
+For setup, caveats, and the bot-detection mitigation stack, see [Zoom Sign-in & Bot-Detection Hardening](zoom-credentials-and-bot-detection.md).
 
 ## Meeting Scheduling
 
@@ -99,34 +158,56 @@ Fargate launch type is serverless and uses SOCI (Seekable OCI) for faster contai
 
 ## EC2 Instance Types
 
-Choose an instance type based on your workload requirements:
+Each VP container is capped at 2500 MB (~1.85× observed peak memory of ~1348 MB during concurrent Chrome + Simli + Nova Sonic startup). Pick an instance whose host memory accommodates your expected concurrent VPs per host plus ~600 MB for the OS / ECS agent:
 
 **General Purpose:**
-- `t3.medium` (default) -- Suitable for basic transcription without voice assistant
-- `t3.large` -- Additional headroom for busier meetings
-- `t3.xlarge` -- High-throughput scenarios
+- `t3.medium` (default) -- 3867 MB host → 1 concurrent VP. The capacity-provider auto-scaler launches additional hosts when concurrent demand exceeds capacity, so users running one meeting at a time pay the baseline (~$30/month per host) and only scale up while multiple VPs are active.
+- `t3.large` -- 7857 MB host → 3 concurrent VPs. Pick this if you regularly run 2-3 concurrent meetings and want fewer scale-outs.
+- `t3.xlarge` -- 15.7 GB host → 6 concurrent VPs.
 
 **Compute-Optimized (recommended for voice + avatar):**
-- `c5.large` -- Good balance for voice assistant workloads
-- `c5.xlarge` -- Recommended for voice assistant with avatar
-- `c5.2xlarge` -- Heavy voice and avatar processing
+- `c5.large` -- Voice assistant workloads, 1 concurrent VP
+- `c5.xlarge` -- Voice assistant with avatar, 3 concurrent VPs (no burstable throttling)
+- `c5.2xlarge` -- Heavy voice and avatar processing, 6 concurrent VPs
 
-**Memory-Optimized (recommended for voice + avatar):**
-- `m5.large` -- Voice assistant workloads with higher memory needs
-- `m5.xlarge` -- Recommended for voice assistant with avatar and large meeting context
+**Memory-Optimized (recommended for voice + avatar with large meeting context):**
+- `m5.large` -- Voice assistant workloads with higher memory needs, 1 concurrent VP
+- `m5.xlarge` -- Recommended for voice assistant with avatar and large meeting context, 3-4 concurrent VPs
+
+`t3` instances are burstable and may cause audio glitches under sustained load — prefer `c5.*` or `m5.*` for the voice-assistant + avatar combination.
 
 ## Auto-Scaling
 
-Configure auto-scaling for EC2 launch type:
+The VP cluster uses an **ECS capacity provider with managed scaling**:
 
-- **Minimum instances**: 0 to 10 (set to 0 to scale down completely when idle)
-- **Maximum instances**: 1 to 100 (set based on expected concurrent meeting load)
+- **`VPMinInstances`** (default `1`) -- Minimum warm hosts always running. Set to `0` to fully scale down when idle and pay only when a VP is requested (cold-start adds ~60-90s to the first VP).
+- **`VPMaxInstances`** (default `10`) -- Hard ceiling on concurrent hosts. With the `t3.large` default each host fits 3 VPs, so 10 hosts × 3 VPs = 30 concurrent meetings.
 
-The auto-scaler adjusts the number of warm EC2 instances based on demand, ensuring fast VP startup while controlling costs.
+When concurrent demand exceeds the current cluster's capacity, ECS automatically launches new hosts (`TargetCapacity=100`, step size 1-2, instance warmup 90s). The launching VP shows status `WAITING_FOR_CAPACITY` while the auto-scaler provisions a new host — typically 60-90 seconds — then transitions to `BOOTING`. Scale-down to `VPMinInstances` happens automatically when reservation drops.
+
+`ManagedTerminationProtection` is enabled, so a host running an active VP will never be killed by scale-in until the VP exits.
 
 ## Chat Introduction Message
 
 The VP posts a customizable introduction message in the meeting chat when it joins. This message informs meeting participants that the VP is present and recording. You can configure the message content to suit your organization's requirements and compliance policies.
+
+## In-meeting Chat Commands
+
+Anyone in the meeting can control the VP by typing one of these commands in the meeting chat. Commands work across Zoom, Microsoft Teams, Webex, and Chime.
+
+| Command (typed in chat) | What it does |
+| --- | --- |
+| `LMA end`, `LMA leave`, `LMA stop`, `LMA quit`, `LMA exit` | The VP says goodbye and leaves the meeting. |
+| `Goodbye LMA`, `bye LMA` | Same as above. |
+| `PAUSE` | Stops transcription and recording without leaving the meeting. |
+| `START` | Resumes a paused session. |
+
+Notes:
+
+- Dismissal commands always require the literal token `LMA` somewhere in the message — bare words like `END` or `LEAVE` are ignored so that prose like *"the meeting will end at 3pm"* or *"I'll leave at 3"* never trips a false dismissal. The `LMA` and verb tokens are matched case-insensitively and word-bounded (so `endless` or `ENDPOINT` don't match either).
+- When the chat platform exposes the sender name (Zoom, Chime, Webex), the goodbye message acknowledges who asked the VP to leave: *"Thanks Alice — I'll head out now."*
+- The default introduction message advertises the `LMA leave` / `LMA end` commands so participants always have a way to dismiss the bot. Customize via the `IntroMessage` CloudFormation parameter or the `INTRO_MESSAGE` env var.
+- `PAUSE` and `START` are still keyword-matched on the literal token (case-sensitive) for backwards compatibility.
 
 ## Troubleshooting
 
