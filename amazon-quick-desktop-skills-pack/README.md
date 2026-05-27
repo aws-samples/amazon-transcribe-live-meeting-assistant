@@ -101,7 +101,10 @@ Each agent's prompt can be modified to match your workflow:
 
 ## Troubleshooting
 
-See [docs/quick-desktop-integration.md](../docs/quick-desktop-integration.md#troubleshooting) for common issues.
+- For setup / connection issues, see
+  [docs/amazon-quick-mcp-setup.md](../docs/amazon-quick-mcp-setup.md#troubleshooting).
+- For agent-specific issues (triggers, write-tool prompts, KG access), see
+  [docs/amazon-quick-desktop-integration.md](../docs/amazon-quick-desktop-integration.md#troubleshooting).
 
 ## License
 
