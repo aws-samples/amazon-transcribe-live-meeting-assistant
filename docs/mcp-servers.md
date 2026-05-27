@@ -94,7 +94,7 @@ These callback URLs are used during the OAuth authorization flow to redirect the
 LMA provides setup guides for several popular MCP server integrations:
 
 - [Salesforce MCP Setup](salesforce-mcp-setup.md) — Full CRUD operations on Salesforce objects (accounts, contacts, opportunities, leads, and more)
-- [Amazon Quick Suite MCP Setup](quicksuite-mcp-setup.md) — Search, retrieval, and scheduling capabilities across Amazon Quick Suite services
+- [Amazon Quick MCP Setup](amazon-quick-mcp-setup.md) — Connect LMA to Amazon Quick Suite (web, OAuth) or Quick Desktop (native, API key)
 - [DeepWiki MCP Setup](deepwiki-mcp-setup.md) — Repository documentation search for accessing code documentation during meetings
 - **Custom MCP servers** — Install from the public registry or configure a custom endpoint
 
