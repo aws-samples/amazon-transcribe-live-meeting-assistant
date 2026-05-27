@@ -77,7 +77,18 @@ def _put_secret(secret_name: str, payload: Dict[str, Any]) -> None:
         return
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
-        if code != "ResourceNotFoundException":
+        if code == "ResourceNotFoundException":
+            pass  # fall through to create_secret
+        elif code == "InvalidRequestException":
+            # Likely a legacy secret left in scheduled-deletion state by an
+            # earlier delete_my_zoom_credentials call. Restore and retry.
+            described = secrets.describe_secret(SecretId=secret_name)
+            if not described.get("DeletedDate"):
+                raise
+            secrets.restore_secret(SecretId=secret_name)
+            secrets.put_secret_value(SecretId=secret_name, SecretString=body)
+            return
+        else:
             raise
 
     create_kwargs: Dict[str, Any] = {
@@ -181,14 +192,14 @@ def delete_my_zoom_credentials(event: Dict[str, Any]) -> bool:
         return False
     secret_name = _secret_name(sub)
     try:
-        secrets.delete_secret(SecretId=secret_name, RecoveryWindowInDays=7)
+        # Force-delete: "Remove" in the UI means gone, and a 7-day recovery
+        # window blocks the user from re-adding credentials under the same
+        # secret name (PutSecretValue / CreateSecret both fail with
+        # InvalidRequestException while the secret is scheduled for deletion).
+        secrets.delete_secret(SecretId=secret_name, ForceDeleteWithoutRecovery=True)
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
-        # ResourceNotFoundException — already gone, treat as success.
-        # InvalidRequestException — typically thrown when the secret is
-        # already marked for scheduled deletion. Idempotent: also treat
-        # as success.
-        if code not in ("ResourceNotFoundException", "InvalidRequestException"):
+        if code != "ResourceNotFoundException":
             logger.error("Failed to delete secret %s: %s", secret_name, exc)
             raise
     # Wipe persisted Chromium profile (cookies, "trusted device" markers).
