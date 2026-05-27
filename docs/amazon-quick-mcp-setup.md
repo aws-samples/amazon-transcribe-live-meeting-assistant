@@ -16,10 +16,12 @@ Both expose the same seven LMA tools (search, transcript, summary, list,
 schedule, start-now, VP status). Pick the path below that matches the product
 you're connecting.
 
-> **Looking for Quick Desktop scheduled agents (pre-meeting briefings, action
-> item tracking, live coaching)?** Once you've completed the Quick Desktop
-> setup below, see [Quick Desktop Agent Recipes](amazon-quick-desktop-integration.md)
-> for ready-to-use agent configurations and prompts.
+> **Looking for ways to use LMA from Quick Desktop?** Once you've completed
+> the Quick Desktop setup below, see
+> [Quick Desktop: LMA Workflows](amazon-quick-desktop-integration.md) for
+> conversational workflows (joining meetings, posting recaps to Slack,
+> querying past transcripts), pre-built scheduled agents, and the skills
+> pack.
 
 ---
 
@@ -258,13 +260,15 @@ Quick should call `search_lma_meetings` and return results.
 | "Schedule LMA to join my 2pm Zoom tomorrow" | `schedule_meeting` |
 | "Catch me up on the standup I missed this morning" | `list_meetings` → `get_meeting_summary` (often combined with Slack/calendar lookups) |
 
-### Next: scheduled agents and skills
+### Next: workflows, agents, and skills
 
-For pre-built scheduled agents (pre-meeting briefings, action item tracking)
-and skills (live call coaching, async catch-up), see:
+For end-to-end LMA workflows in Quick Desktop — conversational prompts
+(*"join my next meeting"*, *"post the action items to Slack"*,
+*"find what we agreed about X in past meetings"*), pre-built scheduled
+agents, and packaged skills (live coaching, async catch-up) — see:
 
-- [Quick Desktop Agent Recipes](amazon-quick-desktop-integration.md) — agent
-  configurations, prompts, and trigger logic
+- [Quick Desktop: LMA Workflows](amazon-quick-desktop-integration.md) —
+  conversational workflows, scheduled agent recipes, and the skills pack
 - [`amazon-quick-desktop-skills-pack/`](../amazon-quick-desktop-skills-pack/) — installable
   bundle of agents and skills
 
@@ -466,8 +470,8 @@ headers.
 - [MCP Servers Overview](mcp-servers.md)
 - [MCP API Key Authentication](mcp-api-key-auth.md) — full architecture for
   the API-key path
-- [Quick Desktop Agent Recipes](amazon-quick-desktop-integration.md) — pre-built
-  agent configurations for Quick Desktop
+- [Quick Desktop: LMA Workflows](amazon-quick-desktop-integration.md) —
+  conversational workflows and scheduled agent recipes for Quick Desktop
 - [User-Based Access Control](user-based-access-control.md)
 - [Model Context Protocol Specification](https://modelcontextprotocol.io/)
 - [Amazon Quick Suite MCP Documentation](https://docs.aws.amazon.com/quicksuite/latest/userguide/mcp-integration.html)

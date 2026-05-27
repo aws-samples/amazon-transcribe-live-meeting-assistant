@@ -48,7 +48,7 @@ title: "LMA Documentation"
 - [MCP API Key Authentication](mcp-api-key-auth.md) — Per-user API key auth for programmatic MCP clients, JSON-RPC 2.0 protocol support
 - [Salesforce MCP Setup](salesforce-mcp-setup.md) — Salesforce Connected App with OAuth 2.1
 - [Amazon Quick MCP Setup](amazon-quick-mcp-setup.md) — Connect LMA to Amazon Quick Suite (web, OAuth) or Quick Desktop (native, API key)
-- [Amazon Quick Desktop: Agent Recipes](amazon-quick-desktop-integration.md) — Pre-built scheduled agents and skills for Quick Desktop
+- [Amazon Quick Desktop: LMA Workflows](amazon-quick-desktop-integration.md) — Conversational workflows, scheduled agent recipes, and the skills pack for Quick Desktop
 - [DeepWiki MCP Setup](deepwiki-mcp-setup.md) — DeepWiki repository documentation search
 
 ### Web UI
