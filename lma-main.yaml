@@ -81,16 +81,19 @@ Parameters:
     NoEcho: true
     Default: ""
     Description: >-
-      (Optional) API key for Simli avatar. When provided with a Face ID,
-      enables an animated lip-synced avatar as the Virtual Participant's camera feed.
+      (Optional) API key for Simli avatar. The avatar feature requires BOTH
+      SimliApiKey and SimliFaceId — leave both blank to disable the avatar,
+      or set both to enable an animated lip-synced avatar as the Virtual
+      Participant's camera feed.
       Get your API key from https://simli.com. Leave blank to disable avatar.
 
   SimliFaceId:
     Type: String
     Default: ""
     Description: >-
-      (Optional) Simli Face ID for the avatar appearance.
-      Get this from your Simli dashboard at https://simli.com.
+      (Optional) Simli Face ID for the avatar appearance. Required when
+      SimliApiKey is set — the avatar is enabled only when BOTH parameters
+      are non-empty. Get this from your Simli dashboard at https://simli.com.
 
   VoiceAssistantProvider:
     Type: String
@@ -2576,6 +2579,8 @@ Resources:
         AppSyncEventApiUrl: !GetAtt AISTACK.Outputs.AppSyncEventApiUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         VPTaskRegistryTableName: !GetAtt AISTACK.Outputs.VPTaskRegistryTableName
+        DomSelectorCacheTableName: !GetAtt AISTACK.Outputs.DomSelectorCacheTableName
+        VPProfilesBucketName: !GetAtt AISTACK.Outputs.VPProfilesBucketName
         EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
         VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
         VNCALBListenerArn: !GetAtt AISTACK.Outputs.VNCALBListenerArn

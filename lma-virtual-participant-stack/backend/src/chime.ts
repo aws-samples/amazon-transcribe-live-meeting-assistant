@@ -1,52 +1,99 @@
-import { Page } from 'puppeteer';
-import { details } from './details.js';
+import { Page } from 'rebrowser-puppeteer';
+import { details, matchesEndCommand, exitMessagesFor } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { findElementWithFallback } from './ai-dom-resolver.js';
+import { startDialogWatchdog } from './dialog-watchdog.js';
 
 export default class Chime {
     private prevSender: string = '';
 
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
-        const messageElement = await page.waitForSelector(
-            'textarea[placeholder="Message all attendees"]'
+        const found = await findElementWithFallback(
+            page,
+            ['textarea[placeholder="Message all attendees"]'],
+            {
+                intent: 'Chime in-meeting chat panel message compose textarea',
+                platform: 'CHIME',
+                step: 'chime.chat.input',
+            },
+            { maxRetries: 10, delayMs: 500 },
         );
+        if (!found) {
+            console.log('Could not locate Chime chat input — aborting sendMessages');
+            return;
+        }
         for (const message of messages) {
-            await messageElement?.type(message);
-            await messageElement?.press('Enter');
+            await found.element.type(message);
+            await found.element.press('Enter');
             await new Promise(resolve => setTimeout(resolve, 100));
         }
     }
 
     public async initialize(page: Page): Promise<void> {
+        // AI-driven dialog watchdog runs for the entire meeting lifecycle.
+        // See dialog-watchdog.ts. Catches sign-in / pre-join / waiting-room /
+        // in-meeting dialogs (consent, recording notice, etc.) and either
+        // auto-dismisses (CONSENT-class) or escalates to MANUAL_ACTION_REQUIRED
+        // so the user can clear it via VNC.
+        startDialogWatchdog(page, { platform: 'CHIME' });
+
         console.log('Getting Chime meeting link.');
         await page.goto(`https://app.chime.aws/meetings/${details.invite.meetingId}`);
 
         console.log('Entering name.');
-        try {
-            const nameTextElement = await page.waitForSelector('#name');
-            await nameTextElement?.type(details.scribeIdentity);
-            await page.type("#name", details.scribeIdentity, { delay: 100 });
-            await nameTextElement?.press('Tab');
-            await page.keyboard.press('Enter');
-        } catch (error) {
+        const nameRes = await findElementWithFallback(
+            page,
+            ['#name'],
+            {
+                intent: 'Chime pre-join screen display-name input field',
+                platform: 'CHIME',
+                step: 'chime.join.name',
+            },
+            { maxRetries: 10, delayMs: 500 },
+        );
+        if (!nameRes) {
             console.log('LMA Virtual Participant was unable to join the meeting.');
             throw new Error('Meeting not found or invalid meeting ID');
         }
+        await nameRes.element.type(details.scribeIdentity, { delay: 100 });
+        await nameRes.element.press('Tab');
+        await page.keyboard.press('Enter');
 
         // Only click mute button if voice assistant is NOT enabled
         if (!voiceAssistant.isEnabled()) {
             console.log('Clicking mute button.');
-            const muteCheckboxElement = await page.waitForSelector('text/Join muted');
-            await muteCheckboxElement?.click();
+            const muteRes = await findElementWithFallback(
+                page,
+                ['text/Join muted'],
+                {
+                    intent: 'Chime pre-join "Join muted" checkbox/control',
+                    platform: 'CHIME',
+                    step: 'chime.join.muteToggle',
+                },
+                { maxRetries: 10, delayMs: 500 },
+            );
+            await muteRes?.element.click();
         } else {
             console.log('Voice assistant enabled - skipping mute button for agent audio');
         }
 
         console.log('Clicking join button.');
-        const joinButtonElement = await page.waitForSelector(
-            'button[data-testid="button"][aria-label="Join"]'
+        const joinRes = await findElementWithFallback(
+            page,
+            ['button[data-testid="button"][aria-label="Join"]'],
+            {
+                intent: 'Chime pre-join primary "Join" button',
+                platform: 'CHIME',
+                step: 'chime.join.joinButton',
+            },
+            { maxRetries: 10, delayMs: 500 },
         );
-        await joinButtonElement?.click();
+        if (!joinRes) {
+            console.log('Could not locate Chime Join button — aborting');
+            return;
+        }
+        await joinRes.element.click();
 
         console.log('Opening chat panel.');
         try {
@@ -148,9 +195,9 @@ export default class Chime {
                 this.prevSender = sender;
 
                 // Handle LMA commands
-                if (text === details.endCommand) {
-                    console.log('LMA Virtual Participant has been removed from the meeting.');
-                    await this.sendMessages(page, details.exitMessages);
+                if (text && matchesEndCommand(text)) {
+                    console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}.`);
+                    await this.sendMessages(page, exitMessagesFor(sender));
                     details.start = false;
                     await page.goto('about:blank');
                 } else if (details.start && text === details.pauseCommand) {

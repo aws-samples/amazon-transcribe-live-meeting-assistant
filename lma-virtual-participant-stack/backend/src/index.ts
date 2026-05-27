@@ -1,6 +1,8 @@
-import puppeteer from 'puppeteer';
-import puppeteerExtra from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+// rebrowser-puppeteer is a drop-in replacement for puppeteer that patches
+// CDP at the runtime-binding level so pages can't detect Runtime.Evaluate /
+// chrome.runtime.connect shims that puppeteer-extra-plugin-stealth had to
+// add on top of vanilla Puppeteer. Strictly fewer fingerprint signals.
+import puppeteer from 'rebrowser-puppeteer';
 import { promises as fs } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
@@ -16,18 +18,23 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { simliAvatar } from './simli-avatar.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
+import { acquireProfile, persistProfile, releaseProfile } from './profile-store.js';
 
 // Window dimensions configuration
 const WINDOW_WIDTH = 1920;
 const WINDOW_HEIGHT = 1000;
 
-// Shared Puppeteer configuration
-const getPuppeteerConfig = () => ({
+// Shared Puppeteer configuration. userDataDir is set per-launch so that
+// a user-specific persisted profile (Phase C4) can be plumbed in when
+// available. Cookies and "trusted device" markers persist across meetings
+// and skip Zoom's bot-detection / reCAPTCHA on subsequent joins.
+const getPuppeteerConfig = (userDataDir?: string) => ({
     headless: false, // Changed to false to show browser window in VNC
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
     protocolTimeout: details.meetingTimeout,
     timeout: details.meetingTimeout,
+    userDataDir: userDataDir || undefined,
     args: [
         `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT+80}`,
         "--use-fake-ui-for-media-stream",
@@ -45,6 +52,16 @@ const getPuppeteerConfig = () => ({
         "--enable-logging=stderr",
         "--log-level=0",
         "--remote-debugging-port=9222", // Enable remote debugging for MCP
+        // Suppress Chrome's "Save password?" / autofill bubbles that
+        // would otherwise overlay Zoom's skip-for-now links and break
+        // automation. Backed up by the managed policies in the
+        // Dockerfile, but adding the launch flags too in case the
+        // policies dir isn't picked up on some runtime configurations.
+        "--disable-features=PasswordManagerOnboarding,AutofillEnableAccountWalletStorage,PasswordImport,PasswordsAccountStorage,Translate",
+        "--password-store=basic",
+        "--use-mock-keychain",
+        "--no-first-run",
+        "--no-default-browser-check",
     ],
 });
 
@@ -145,6 +162,7 @@ const main = async (): Promise<void> => {
     // Register with ALB target group and wait for healthy (skip in local test mode)
     if (statusManager && !isLocalTest) {
         try {
+            await statusManager.setRegisteringNetwork();
             console.log('Registering task with ALB target group...');
             const registered = await statusManager.registerWithTargetGroup();
             if (!registered) {
@@ -200,10 +218,59 @@ const main = async (): Promise<void> => {
         }
     }
 
+    // Acquire per-user persistent Chromium profile (Phase C4) when a
+    // Cognito sub is available. Falls back to a fresh profile if the
+    // bucket env var isn't set or the profile is locked by another task.
+    if (statusManager) {
+        await statusManager.setHydratingProfile();
+    }
+    const profileHandle = await acquireProfile({
+        cognitoSub: process.env.LMA_USER_SUB || '',
+        platform: details.invite.meetingPlatform,
+    });
+
     // Launch Puppeteer browser with stealth plugin for all platforms
-    console.log('Launching browser with stealth plugin...');
-    puppeteerExtra.use(StealthPlugin());
-    const browser = await puppeteerExtra.launch(getPuppeteerConfig());
+    if (statusManager) {
+        await statusManager.setLaunchingBrowser();
+    }
+
+    // Stale Singleton* symlinks (and IndexedDB / leveldb LOCK files) from a
+    // previous unclean exit will block re-launch with errors like:
+    //   "Failed to create /tmp/...-Default/SingletonSocket: File exists"
+    //   "[8081:0:1234567890] LOCK: Resource temporarily unavailable"
+    // The persistent S3 profile makes this much more likely (we hydrate a
+    // user-data dir that was last written by a different container) so we
+    // proactively unlink the lock files at startup.
+    if (profileHandle.enabled && profileHandle.localDir) {
+        try {
+            const profileDir = profileHandle.localDir;
+            const stale = await fs.readdir(profileDir);
+            const lockNames = stale.filter((n: string) => n.startsWith('Singleton'));
+            for (const name of lockNames) {
+                try {
+                    await fs.unlink(`${profileDir}/${name}`);
+                    console.log(`[profile-store] Removed stale Chrome lock: ${name}`);
+                } catch { /* best-effort */ }
+            }
+            for (const sub of ['Default/Local Storage/leveldb', 'Default/IndexedDB']) {
+                try {
+                    const items = await fs.readdir(`${profileDir}/${sub}`, { recursive: true } as any);
+                    for (const it of items as string[]) {
+                        if (typeof it === 'string' && it.endsWith('LOCK')) {
+                            try { await fs.unlink(`${profileDir}/${sub}/${it}`); } catch { /* best-effort */ }
+                        }
+                    }
+                } catch { /* may not exist */ }
+            }
+        } catch (lockErr) {
+            console.warn('[profile-store] Stale Chrome lock cleanup failed (continuing):', lockErr);
+        }
+    }
+
+    console.log('Launching browser (rebrowser-puppeteer)...');
+    const browser = await puppeteer.launch(
+        getPuppeteerConfig(profileHandle.enabled ? profileHandle.localDir : undefined),
+    );
 
     // Wait for Chrome DevTools to be fully ready
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -221,7 +288,45 @@ const main = async (): Promise<void> => {
         }
     }
 
-    // Initialize MCP command handler AFTER browser is launched
+    // Create the meeting page BEFORE starting the MCP handler. The MCP
+    // handler spawns chrome-devtools-mcp as a child process which connects
+    // to Chrome's :9222 debug endpoint. With rebrowser-puppeteer, having
+    // an external CDP client attached at the moment we call
+    // browser.newPage() can deadlock the target-creation handshake. Also
+    // setting the user-agent here so the meeting page is fully prepared
+    // before the avatar / mcp / meeting-handler chain runs.
+    const page = await browser.newPage();
+    await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
+    page.setDefaultTimeout(20000);
+    await page.setUserAgent(
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    );
+
+    // Forward meeting-page console output to container logs IMMEDIATELY so
+    // logs from getUserMedia override / Simli bridge code (which runs before
+    // the platform handler attaches its own listener) are captured. Also
+    // forward any console.error so unhandled exceptions surface.
+    page.on('console', (msg) => {
+        const text = msg.text();
+        const type = msg.type();
+        if (
+            text.includes('[LMA-Simli]') ||
+            text.includes('[Simli]') ||
+            type === 'error' ||
+            type === 'warn'
+        ) {
+            console.log(`Browser ${type}: ${text}`);
+        }
+    });
+    page.on('pageerror', (err) => console.warn('MeetingPage error:', err?.message || err));
+    page.on('framenavigated', (frame) => {
+        if (frame === page.mainFrame()) {
+            console.log(`[meeting-page] navigated → ${frame.url()}`);
+        }
+    });
+
+    // Initialize MCP command handler AFTER browser is launched and the
+    // meeting page exists.
     if (statusManager && vpId) {
         try {
             const callId = process.env.VP_CALL_ID || '';
@@ -274,15 +379,6 @@ const main = async (): Promise<void> => {
         }
     }
 
-    const page = await browser.newPage();
-    await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
-    page.setDefaultTimeout(20000);
-
-    // Set user agent to avoid detection
-    await page.setUserAgent(
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
-
     // Simli Avatar: Inject getUserMedia override and set up stream connection
     // This must happen BEFORE the page navigates to the meeting URL
     if (simliAvatar.isConnected()) {
@@ -323,7 +419,31 @@ const main = async (): Promise<void> => {
                 await reconnectInFlight;
             });
 
-            await connectSimliStream();
+            // Eagerly (re)build the WebRTC bridge whenever the meeting page
+            // navigates to a meeting URL. The receiver PC + window.__setSimliVideoTrack
+            // are scoped to a single document — every navigation tears them
+            // down. Relying solely on the override's on-demand reconnect path
+            // is fragile because (a) page.exposeFunction's persistence across
+            // navigations is unreliable on rebrowser-puppeteer, and (b) Zoom
+            // may decide it can't access the camera on first probe and not
+            // call getUserMedia again. So we trigger the connect ourselves as
+            // soon as we land on /wc/<meetingId>/join (or other meeting URLs).
+            const isMeetingUrl = (u: string): boolean =>
+                /\/wc\/\d+\/(join|start|live)/.test(u) ||
+                /teams\.microsoft\.com\/.*meetup-join/.test(u) ||
+                /web\.webex\.com\/meeting/.test(u) ||
+                /chime\.aws\/meetings\//.test(u);
+            page.on('framenavigated', async (frame) => {
+                if (frame !== page.mainFrame()) return;
+                const url = frame.url();
+                if (!isMeetingUrl(url)) return;
+                if (reconnectInFlight) return;
+                console.log(`[simli-bridge] meeting URL detected (${url}) — building Simli WebRTC bridge`);
+                reconnectInFlight = connectSimliStream().finally(() => {
+                    reconnectInFlight = null;
+                });
+                await reconnectInFlight;
+            });
             
         } catch (error) {
             console.error('Failed to set up Simli avatar for meeting (non-critical):', error);
@@ -464,6 +584,19 @@ const main = async (): Promise<void> => {
             await browser.close();
         } catch (error) {
             console.error('Error closing browser:', error);
+        }
+
+        // Sync profile back to S3 and release the lock so the next launch
+        // for this user can resume the session.
+        try {
+            await persistProfile(profileHandle);
+        } catch (error) {
+            console.error('Error persisting Chromium profile:', error);
+        }
+        try {
+            await releaseProfile(profileHandle);
+        } catch (error) {
+            console.error('Error releasing Chromium profile:', error);
         }
 
         // Final status update

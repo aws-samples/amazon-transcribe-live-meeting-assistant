@@ -18,6 +18,7 @@ from typing import Any, Dict
 from tools import (
     get_summary,
     get_transcript,
+    get_virtual_participant_status,
     list_meetings,
     schedule_meeting,
     search_meetings,
@@ -79,7 +80,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(f"User: {username}, ID: {user_id}, Admin: {is_admin}")
 
         # Determine which tool based on input parameters
-        if "query" in tool_input and "maxResults" in tool_input:
+        if "virtualParticipantId" in tool_input and len(tool_input) <= 2:
+            tool_name = "get_virtual_participant_status"
+        elif "query" in tool_input and "maxResults" in tool_input:
             tool_name = "search_lma_meetings"
         elif "meetingId" in tool_input and "format" in tool_input:
             tool_name = "get_meeting_transcript"
@@ -159,6 +162,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 meeting_platform=tool_input.get("meetingPlatform"),
                 meeting_id=tool_input.get("meetingId"),
                 meeting_password=tool_input.get("meetingPassword"),
+                user_id=user_id,
+                is_admin=is_admin,
+                # Default ON; pass useStoredZoomCredentials=false to opt-out.
+                use_stored_zoom_credentials=tool_input.get("useStoredZoomCredentials", True),
+            )
+
+        elif tool_name == "get_virtual_participant_status":
+            result = get_virtual_participant_status.execute(
+                virtual_participant_id=tool_input.get("virtualParticipantId"),
                 user_id=user_id,
                 is_admin=is_admin,
             )
@@ -260,7 +272,17 @@ MCP_TOOLS = [
     },
     {
         "name": "start_meeting_now",
-        "description": "Start a meeting immediately with virtual participant",
+        "description": (
+            "Start a meeting immediately with a virtual participant. "
+            "When the user has stored Zoom credentials in LMA, the VP will "
+            "sign in to Zoom with them by default to avoid bot-detection "
+            "blocks; pass useStoredZoomCredentials=false to force a guest "
+            "join. Returns immediately with the virtualParticipantId; the "
+            "VP may take up to 60 seconds to fully join. Use "
+            "get_virtual_participant_status to poll progress, especially to "
+            "detect MANUAL_ACTION_REQUIRED states (CAPTCHA, 2FA, SSO) where "
+            "the human user must complete a challenge in the LMA viewer."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -271,9 +293,42 @@ MCP_TOOLS = [
                 },
                 "meetingId": {"type": "string", "description": "Meeting ID (numeric ID only)"},
                 "meetingPassword": {"type": "string", "description": "Optional meeting password"},
+                "useStoredZoomCredentials": {
+                    "type": "boolean",
+                    "description": (
+                        "Default true. When the user has stored Zoom credentials, "
+                        "the VP signs in to Zoom before joining the meeting. "
+                        "Set to false to force a guest join."
+                    ),
+                },
             },
             "required": ["meetingName", "meetingPlatform", "meetingId"],
         },
+    },
+    {
+        "name": "get_virtual_participant_status",
+        "description": (
+            "Get the current status of a virtual participant launched via "
+            "start_meeting_now. Returns status, a human-readable summary, "
+            "and — critically — manualActionRequired=true with a "
+            "manualActionMessage when the VP is blocked on a CAPTCHA / 2FA "
+            "/ SSO / consent challenge that the human user must complete "
+            "in the LMA viewer (virtualParticipantUrl). Poll this every "
+            "5–10 seconds for ~2 minutes after start_meeting_now if "
+            "you need to confirm the meeting was joined or surface a "
+            "manual-action prompt back to your user."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "virtualParticipantId": {
+                    "type": "string",
+                    "description": "VP id returned by start_meeting_now",
+                },
+            },
+            "required": ["virtualParticipantId"],
+        },
+        "annotations": {"readOnlyHint": True},
     },
 ]
 
@@ -367,6 +422,13 @@ def execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin)
                 meeting_platform=arguments.get("meetingPlatform"),
                 meeting_id=arguments.get("meetingId"),
                 meeting_password=arguments.get("meetingPassword"),
+                user_id=user_id,
+                is_admin=is_admin,
+                use_stored_zoom_credentials=arguments.get("useStoredZoomCredentials", True),
+            )
+        elif tool_name == "get_virtual_participant_status":
+            result = get_virtual_participant_status.execute(
+                virtual_participant_id=arguments.get("virtualParticipantId"),
                 user_id=user_id,
                 is_admin=is_admin,
             )

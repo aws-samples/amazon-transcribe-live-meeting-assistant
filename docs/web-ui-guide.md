@@ -9,6 +9,8 @@ title: "Web UI Guide"
 - [Overview](#overview)
 - [Navigation](#navigation)
 - [Meeting List / Dashboard](#meeting-list--dashboard)
+- [Manual Action Alerts](#manual-action-alerts)
+- [Virtual Participant Pages](#virtual-participant-pages)
 - [Meeting Detail Page](#meeting-detail-page)
 - [Sentiment Analysis](#sentiment-analysis)
 - [Transcript Downloads](#transcript-downloads)
@@ -54,6 +56,43 @@ The meeting list provides a searchable dashboard of all meetings you have access
 - **Configurable time range**: Use the **Load** dropdown to choose a preset window (2 hrs, 4 hrs, 8 hrs, 1 day, 2 days, 1 week, 2 weeks, 30 days) or pick **Custom…** to open a modal with explicit Start date + Start time (UTC) + End date + End time (UTC) inputs (±365-day window). The selected range is persisted in `localStorage` and the list header shows both the number of loaded meetings and the RBAC-filtered server-side total (e.g. `42 loaded of 127` or `500+` when the count is truncated). The meeting list is served by a DynamoDB GSI (`TypeDateIndex`) and a Lambda resolver that paginates a single date-range query, so performance scales to thousands of meetings without scans.
 
 Use the search bar to filter meetings by topic or other attributes.
+
+## Manual Action Alerts
+
+A **persistent Flashbar** at the top of the LMA UI surfaces any of your Virtual Participants currently in the `MANUAL_ACTION_REQUIRED` state — a CAPTCHA, 2FA prompt, SSO redirect, unknown consent dialog, or Zoom bot-detection challenge that needs human input. Each alert links directly to the affected meeting detail page where you can open the live VNC viewer and complete the challenge.
+
+- Alerts arrive in real time via an AppSync GraphQL subscription, with a one-time backfill on page load so anything fired while the tab was closed still shows up.
+- Each alert is **dismissible** — dismissed alerts are remembered in `localStorage` (per VP id) so they don't reappear on every refresh after you've dealt with them.
+- If you grant the **browser notification permission** in the LMA UI, you also get a desktop notification + audio chime when a new MANUAL_ACTION fires — useful when you're tabbed-away or in another window. Most browsers prompt for this permission on first sign-in; deny and it falls back to in-page alerts only.
+
+See [Troubleshooting › VP Stuck at MANUAL_ACTION_REQUIRED](troubleshooting.md#vp-stuck-at-manual_action_required) for how to resolve specific challenge types.
+
+## Virtual Participant Pages
+
+The Virtual Participant section of the UI has two views.
+
+### Virtual Participant List
+
+The **Virtual Participants** sidebar entry opens a list of your in-flight and recent VPs, with status, owner, meeting platform, and meeting name. New VPs appear in the list **without a page refresh** — the list subscribes to `onCreateVirtualParticipant` GraphQL events.
+
+### Create Virtual Participant modal
+
+The **Create Virtual Participant** button opens a modal where you enter meeting details and launch the VP. When **Zoom** is selected as the platform, the modal includes a **Zoom account** card:
+
+- ✅ **Signed in as user@example.com — [Update] [Remove]** — your stored Zoom credentials are present. Tick **"Sign in with my stored Zoom account when joining this meeting"** to use them; the VP signs in to Zoom before navigating to the meeting URL.
+- ⚠ **Not configured. The VP will join as a guest. [Add Zoom credentials]** — no credentials stored. Click to open a sub-modal with username + password fields. Credentials are stored in AWS Secrets Manager scoped to your Cognito sub; the plaintext password is never returned to the UI.
+
+For the full sign-in flow, bot-detection notes, and operational caveats, see [Zoom Sign-in & Bot-Detection Hardening](zoom-credentials-and-bot-detection.md).
+
+### Virtual Participant detail page
+
+Click a VP from the list to open its detail page. The page shows:
+
+- **Connection details** — platform, meeting ID, duration, status (with the granular status lifecycle described in [Virtual Participant › Status Lifecycle](virtual-participant.md#status-lifecycle)).
+- **Action banner** above the VNC viewer when the VP is in `MANUAL_ACTION_REQUIRED` — describes what challenge needs solving (CAPTCHA, 2FA, SSO, etc.).
+- **Live Virtual Participant View** — embedded noVNC viewer of the VP's Chrome window. Toggle **View Only** off to interact with the VP's browser (type a 2FA code, solve a CAPTCHA, click through SSO).
+- **Troubleshooting** card — when a VP fails, the human-readable `errorMessage` written by the VP backend is displayed here, along with common solutions for that error class.
+- **Status history** with timestamps for each state transition.
 
 ## Meeting Detail Page
 

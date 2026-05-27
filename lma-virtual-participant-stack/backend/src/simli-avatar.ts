@@ -20,7 +20,7 @@
  *   2. AudioContext.connect() patch to block connections to AudioDestinationNode
  */
 
-import { Browser, Page, HTTPRequest } from 'puppeteer';
+import { Browser, Page, HTTPRequest } from 'rebrowser-puppeteer';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -81,6 +81,22 @@ export class SimliAvatar {
       console.log('Initializing Simli Avatar...');
 
       this.simliPage = await browser.newPage();
+
+      // Forward browser-console output from the simli page to container logs
+      // so [Simli] / [LMA-Simli] traces show up in CloudWatch and we can
+      // diagnose stream / track issues end-to-end.
+      this.simliPage.on('console', (msg) => {
+        const text = msg.text();
+        if (
+          text.includes('[Simli]') ||
+          text.includes('[LMA-Simli]') ||
+          text.includes('[Simli-AudioBlock]')
+        ) {
+          console.log(`SimliPage ${msg.type()}: ${text}`);
+        }
+      });
+      this.simliPage.on('pageerror', (err) => console.warn('SimliPage error:', err?.message || err));
+
       const simliPageHtml = this.buildSimliPageHtml();
       
       // AUDIO ISOLATION: Patch AudioNode.connect() BEFORE any scripts load.
@@ -608,16 +624,131 @@ export class SimliAvatar {
         console.log('[Simli] Peer connection established with meeting page');
       }, answer);
 
+      // Verify the bridge actually connected by checking the receiver PC
+      // state and that a video track is live on the meeting side.
       let connected = false;
-      for (let i = 0; i < 10; i++) {
-        connected = await meetingPage.evaluate(() => {
+      let lastDiag = '';
+      for (let i = 0; i < 20; i++) {
+        const diag = await meetingPage.evaluate(() => {
           // @ts-ignore
-          return window.__simliOverrideInstalled === true;
+          const pc = window.__simliReceiverPC as RTCPeerConnection | undefined;
+          // @ts-ignore
+          const track = window.__simliCurrentTrack as MediaStreamTrack | undefined;
+          return {
+            pcState: pc?.connectionState ?? 'no-pc',
+            iceState: pc?.iceConnectionState ?? 'no-pc',
+            trackReady: track?.readyState ?? 'no-track',
+            trackMuted: track?.muted ?? null,
+          };
         });
-        if (connected) break;
+        lastDiag = JSON.stringify(diag);
+        if (
+          (diag.pcState === 'connected' || diag.iceState === 'connected' || diag.iceState === 'completed') &&
+          diag.trackReady === 'live'
+        ) {
+          connected = true;
+          break;
+        }
         await new Promise(resolve => setTimeout(resolve, 500));
       }
-      console.log(connected ? '✓ Simli video stream connected to meeting page' : '⚠️  Simli stream connection could not be verified');
+      console.log(
+        connected
+          ? `✓ Simli video stream connected to meeting page (${lastDiag})`
+          : `⚠️  Simli stream not connected after 10s: ${lastDiag}`,
+      );
+
+      if (!connected) {
+        // Dump deep state from both pages directly via evaluate() so we can
+        // see why pc.ontrack didn't fire, without relying on browser console
+        // forwarding (which has been unreliable on this image).
+        try {
+          const simliState = await this.simliPage.evaluate(() => {
+            // @ts-ignore
+            const pc: RTCPeerConnection | undefined = window.__simliPC;
+            // @ts-ignore
+            const canvasStream: MediaStream | undefined = window.__simliCanvasStream;
+            const videoEl = document.getElementById('simli-video') as HTMLVideoElement | null;
+            const canvasEl = document.getElementById('simli-canvas') as HTMLCanvasElement | null;
+            const videoStream = videoEl?.srcObject instanceof MediaStream ? videoEl.srcObject : null;
+            const senders = pc?.getSenders().map((s) => ({
+              trackKind: s.track?.kind,
+              trackReadyState: s.track?.readyState,
+              trackEnabled: s.track?.enabled,
+              trackMuted: s.track?.muted,
+              trackId: s.track?.id,
+            })) ?? [];
+            return {
+              pcExists: !!pc,
+              pcState: pc?.connectionState,
+              iceState: pc?.iceConnectionState,
+              senders,
+              video: videoEl
+                ? {
+                    width: videoEl.videoWidth,
+                    height: videoEl.videoHeight,
+                    readyState: videoEl.readyState,
+                    paused: videoEl.paused,
+                    currentTime: videoEl.currentTime,
+                    srcObject: !!videoEl.srcObject,
+                  }
+                : null,
+              canvas: canvasEl ? { width: canvasEl.width, height: canvasEl.height } : null,
+              videoTracks: videoStream?.getVideoTracks().map((t) => ({
+                readyState: t.readyState,
+                enabled: t.enabled,
+                muted: t.muted,
+                id: t.id,
+              })) ?? [],
+              canvasTracks: canvasStream?.getVideoTracks().map((t) => ({
+                readyState: t.readyState,
+                enabled: t.enabled,
+                muted: t.muted,
+                id: t.id,
+              })) ?? [],
+            };
+          });
+          console.log(`[Simli diag] simliPage state: ${JSON.stringify(simliState)}`);
+        } catch (e: any) {
+          console.warn('[Simli diag] could not read simliPage state:', e?.message || e);
+        }
+
+        try {
+          const meetingState = await meetingPage.evaluate(() => {
+            // @ts-ignore
+            const pc: RTCPeerConnection | undefined = window.__simliReceiverPC;
+            const receivers = pc?.getReceivers().map((r) => ({
+              trackKind: r.track?.kind,
+              trackReadyState: r.track?.readyState,
+              trackEnabled: r.track?.enabled,
+              trackMuted: r.track?.muted,
+              trackId: r.track?.id,
+            })) ?? [];
+            // @ts-ignore
+            const overrideInstalled = window.__simliOverrideInstalled === true;
+            // @ts-ignore
+            const currentTrack: MediaStreamTrack | null = window.__simliCurrentTrack ?? null;
+            return {
+              url: location.href,
+              pcExists: !!pc,
+              pcState: pc?.connectionState,
+              iceState: pc?.iceConnectionState,
+              signaling: pc?.signalingState,
+              receivers,
+              overrideInstalled,
+              currentTrack: currentTrack
+                ? {
+                    readyState: currentTrack.readyState,
+                    enabled: currentTrack.enabled,
+                    muted: currentTrack.muted,
+                  }
+                : null,
+            };
+          });
+          console.log(`[Simli diag] meetingPage state: ${JSON.stringify(meetingState)}`);
+        } catch (e: any) {
+          console.warn('[Simli diag] could not read meetingPage state:', e?.message || e);
+        }
+      }
     } catch (error) {
       console.error('Failed to connect Simli stream to meeting page:', error);
     } finally {

@@ -678,6 +678,12 @@ Outputs:
   VPTaskRegistryTableName:
     Description: Name of the VPTaskRegistry DynamoDB table
     Value: !Ref VPTaskRegistry
+  DomSelectorCacheTableName:
+    Description: Name of the DomSelectorCache DynamoDB table (shared by VP tasks for AI-discovered selectors)
+    Value: !Ref DomSelectorCache
+  VPProfilesBucketName:
+    Description: Name of the S3 bucket holding per-user persisted Chromium profiles
+    Value: !Ref VPProfilesBucket
   VirtualParticipantTableName:
     Description: Name of the VirtualParticipant DynamoDB table
     Value: !Ref VirtualParticipantTable
@@ -5051,7 +5057,17 @@ Resources:
       RequestMappingTemplate: |
         #set($id = $util.autoId())
         #set($now = $util.time.nowISO8601())
-        
+
+        ## Determine owner. For Cognito callers, $ctx.identity.username is the
+        ## user. For IAM callers (e.g. the MCP analytics Lambda) it's an IAM
+        ## ARN session string like AROA...:LMA-Bob-MCPServerAnalytics — in
+        ## that case allow the caller to pass an explicit owner override
+        ## representing the LMA user on whose behalf they are acting.
+        #set($owner = $ctx.identity.username)
+        #if($ctx.identity.userArn && !$util.isNullOrBlank($ctx.args.input.owner))
+          #set($owner = $ctx.args.input.owner)
+        #end
+
         ## Build input map for DynamoDB
         #set($input = {})
         $util.qr($input.put("id", $id))
@@ -5059,8 +5075,8 @@ Resources:
         $util.qr($input.put("meetingPlatform", $ctx.args.input.meetingPlatform))
         $util.qr($input.put("meetingId", $ctx.args.input.meetingId))
         $util.qr($input.put("status", $ctx.args.input.status))
-        $util.qr($input.put("owner", $ctx.identity.username))
-        $util.qr($input.put("Owner", $ctx.identity.username))
+        $util.qr($input.put("owner", $owner))
+        $util.qr($input.put("Owner", $owner))
         $util.qr($input.put("SharedWith", ""))
         $util.qr($input.put("createdAt", $now))
         $util.qr($input.put("updatedAt", $now))
@@ -5348,6 +5364,94 @@ Resources:
         AttributeName: expiresAt
         Enabled: true
 
+  # VP Profiles Bucket - per-user persisted Chromium userDataDir
+  # backed by S3. Each user's profile lives under profiles/{cognitoSub}/{platform}/.
+  # On launch the VP container hydrates the local userDataDir from this prefix
+  # and uploads it back at meeting end. Once a user has signed in once and
+  # solved any reCAPTCHA / 2FA, the session cookies persist here so subsequent
+  # meetings reuse them and skip Zoom's bot-detection dialog.
+  VPProfilesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      # No BucketName: let CloudFormation generate a globally-unique
+      # lowercase name. Avoids issues with stack names that contain
+      # uppercase characters (S3 bucket names must be all-lowercase) and
+      # avoids cross-account/region collisions on a fixed name.
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref CustomerManagedEncryptionKeyArn
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldNoncurrentVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+          - Id: ExpireIdleProfiles
+            Status: Enabled
+            ExpirationInDays: 365
+            Prefix: "profiles/"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: "Access logging would target the access logs bucket - profiles are scoped per-user via prefix"
+
+  VPProfilesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref VPProfilesBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "arn:aws:s3:::${VPProfilesBucket}"
+              - !Sub "arn:aws:s3:::${VPProfilesBucket}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
+  # DOM Selector Cache Table - shared across VP tasks. Stores AI-discovered
+  # CSS selectors for meeting-platform UI elements (e.g. Zoom join inputs)
+  # so subsequent meetings benefit from selectors discovered by earlier ones.
+  # Entries auto-expire 30 days after lastUsedAt via the expiresAt TTL attribute.
+  DomSelectorCache:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-DomSelectorCache"
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
   # Lambda data source for VP Manager
   VirtualParticipantLambdaDataSource:
     Type: AWS::AppSync::DataSource
@@ -5567,6 +5671,198 @@ Resources:
             "identity": $utils.toJson($context.identity),
             "info": {
               "fieldName": "getMCPServer"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  ##########################################################################
+  # Zoom Credentials Manager - per-user Zoom username/password storage
+  # in AWS Secrets Manager, keyed by Cognito sub. Used by the Virtual
+  # Participant when joining Zoom meetings that require sign-in (or to
+  # reduce bot-detection friction). Plaintext password is never returned
+  # to the React client; getMyZoomCredentialsStatus returns presence and
+  # username only.
+  ##########################################################################
+
+  ZoomCredentialsManagerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-ZoomCredentialsManager"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/zoom_credentials_manager
+      Description: Per-user Zoom credentials manager (Secrets Manager backed)
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          # NOTE: Uses LMAStackName (parent), not AWS::StackName (which would
+          # resolve to this nested AISTACK name and mismatch what the VP
+          # container reads). Must agree with the VP TaskRole policy and
+          # the runtime fetch path.
+          LMA_STACK_NAME: !Ref LMAStackName
+          CUSTOMER_MANAGED_KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
+          VP_PROFILES_BUCKET: !Ref VPProfilesBucket
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:CreateSecret
+                - secretsmanager:DescribeSecret
+                - secretsmanager:GetSecretValue
+                - secretsmanager:PutSecretValue
+                - secretsmanager:UpdateSecret
+                - secretsmanager:DeleteSecret
+              Resource:
+                - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${LMAStackName}/zoom-credentials/*"
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:Encrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+              Condition:
+                StringEquals:
+                  "kms:ViaService":
+                    - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+                    - !Sub "s3.${AWS::Region}.amazonaws.com"
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource: !Sub "arn:aws:s3:::${VPProfilesBucket}"
+            - Effect: Allow
+              Action:
+                - s3:DeleteObject
+                - s3:DeleteObjectVersion
+              Resource: !Sub "arn:aws:s3:::${VPProfilesBucket}/profiles/*"
+      LoggingConfig:
+        LogGroup: !Sub "/${AWS::StackName}/lambda/ZoomCredentialsManager"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Function does not require reserved concurrency
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - ZoomCredentialsManagerLogGroup
+
+  ZoomCredentialsManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ZoomCredentialsManager"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  ZoomCredentialsManagerDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ZoomCredentialsManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt ZoomCredentialsManagerDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt ZoomCredentialsManagerFunction.Arn
+
+  ZoomCredentialsManagerDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt ZoomCredentialsManagerFunction.Arn
+
+  SetMyZoomCredentialsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: setMyZoomCredentials
+      DataSourceName: !GetAtt ZoomCredentialsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "setMyZoomCredentials"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  DeleteMyZoomCredentialsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: deleteMyZoomCredentials
+      DataSourceName: !GetAtt ZoomCredentialsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "deleteMyZoomCredentials"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  GetMyZoomCredentialsStatusResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMyZoomCredentialsStatus
+      DataSourceName: !GetAtt ZoomCredentialsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "getMyZoomCredentialsStatus"
             }
           }
         }
@@ -5866,6 +6162,10 @@ Resources:
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           LMA_SETTINGS_PARAMETER: !Ref LMASettingsParameterName
           LMA_WEB_APP_URL: !Sub "https://${WebAppCloudFrontDistribution.DomainName}"
+          # Used by start_meeting_now to resolve user email → Cognito sub so
+          # the MCP-launched VP can use the user's stored Zoom credentials.
+          USER_POOL_ID: !Ref UserPoolId
+          LMA_STACK_NAME: !Ref LMAStackName
       LoggingConfig:
         LogGroup: !Ref MCPServerAnalyticsLogGroup
       Policies:
@@ -5900,10 +6200,13 @@ Resources:
                 - appsync:GraphQL
               Resource:
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Mutation/fields/createVirtualParticipant"
+                # Query/* covers getVirtualParticipant used by the new
+                # get_virtual_participant_status tool.
                 - !Sub "${AppSyncApiEncrypted.Arn}/types/Query/*"
             - Effect: Allow
               Action:
                 - states:StartExecution
+                - states:StartSyncExecution
               Resource:
                 - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
             - Effect: Allow
@@ -5911,6 +6214,22 @@ Resources:
                 - ssm:GetParameter
               Resource:
                 - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
+            # Used by start_meeting_now: email→sub lookup so the MCP-launched
+            # VP can use the user's stored Zoom credentials when present.
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminGetUser
+                - cognito-idp:ListUsers
+              Resource:
+                - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+            # Read-only: only check whether a user has a Zoom secret stored.
+            # We never need to read the secret value here — that happens in
+            # the VP container's own scoped IAM.
+            - Effect: Allow
+              Action:
+                - secretsmanager:DescribeSecret
+              Resource:
+                - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${LMAStackName}/zoom-credentials/*"
     DependsOn:
       - MCPServerAnalyticsLogGroup
 
@@ -6048,7 +6367,16 @@ Resources:
                       - meetingId
                       - scheduledTime
                 - Name: start_meeting_now
-                  Description: "Start a meeting immediately with virtual participant"
+                  Description: >-
+                    Start a meeting immediately with a virtual participant.
+                    When the user has stored Zoom credentials in LMA, the VP
+                    signs in to Zoom with them by default to avoid bot-detection
+                    blocks; pass useStoredZoomCredentials=false to force a guest
+                    join. Returns immediately with virtualParticipantId; the VP
+                    may take up to 60s to fully join. Use
+                    get_virtual_participant_status to poll progress, especially
+                    to detect MANUAL_ACTION_REQUIRED (CAPTCHA, 2FA, SSO) where
+                    the human user must complete a challenge in the LMA viewer.
                   InputSchema:
                     Type: object
                     Properties:
@@ -6064,10 +6392,35 @@ Resources:
                       meetingPassword:
                         Type: string
                         Description: "Optional meeting password"
+                      useStoredZoomCredentials:
+                        Type: boolean
+                        Description: >-
+                          Default true. When the user has stored Zoom
+                          credentials, the VP signs in to Zoom before joining
+                          the meeting. Set to false to force a guest join.
                     Required:
                       - meetingName
                       - meetingPlatform
                       - meetingId
+                - Name: get_virtual_participant_status
+                  Description: >-
+                    Get the current status of a virtual participant launched via
+                    start_meeting_now. Returns status, a human-readable summary,
+                    and — critically — manualActionRequired=true with a
+                    manualActionMessage when the VP is blocked on a CAPTCHA / 2FA
+                    / SSO / consent challenge that the human user must complete
+                    in the LMA viewer (virtualParticipantUrl). Poll this every
+                    5–10 seconds for ~2 minutes after start_meeting_now if you
+                    need to confirm the meeting was joined or surface a
+                    manual-action prompt back to your user.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      virtualParticipantId:
+                        Type: string
+                        Description: "VP id returned by start_meeting_now"
+                    Required:
+                      - virtualParticipantId
 
   VirtualParticipantLambdaDataSourceRole:
     Type: AWS::IAM::Role

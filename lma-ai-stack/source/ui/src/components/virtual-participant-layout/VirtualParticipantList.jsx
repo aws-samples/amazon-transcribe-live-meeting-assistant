@@ -6,7 +6,7 @@
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
 import { fetchAuthSession, fetchUserAttributes } from 'aws-amplify/auth';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Table,
   Box,
@@ -47,6 +47,7 @@ import {
   TIME_FILTER_STORAGE_KEY,
   filterVPsByTime,
 } from './vp-table-config';
+import ZoomCredentialsManager from './ZoomCredentialsManager';
 
 import '@cloudscape-design/global-styles/index.css';
 
@@ -114,6 +115,17 @@ const VirtualParticipantList = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [creatingType, setCreatingType] = useState(null);
   const [popupNotifications, setPopupNotifications] = useState([]);
+  const [zoomCredsStatus, setZoomCredsStatus] = useState({ present: false, username: null, lastUpdatedAt: null });
+  // Default ON when credentials are stored — flipped automatically by the
+  // ZoomCredentialsManager onChange callback. Users can untick per meeting.
+  const [useZoomLogin, setUseZoomLogin] = useState(false);
+
+  // Stable identity so ZoomCredentialsManager's refresh() useEffect doesn't
+  // re-run on every parent render and cause flicker.
+  const handleZoomCredsChange = useCallback((status) => {
+    setZoomCredsStatus(status);
+    if (status?.present) setUseZoomLogin(true);
+  }, []);
 
   // Meeting invitation parser state
   const [showPasteInviteModal, setShowPasteInviteModal] = useState(false);
@@ -175,19 +187,60 @@ const VirtualParticipantList = () => {
   }, []);
 
   useEffect(() => {
+    const onCreateVirtualParticipant = /* GraphQL */ `
+      subscription OnCreateVirtualParticipant {
+        onCreateVirtualParticipant {
+          id
+          meetingName
+          meetingPlatform
+          meetingId
+          meetingTime
+          scheduledFor
+          isScheduled
+          status
+          owner
+          Owner
+          SharedWith
+          createdAt
+          updatedAt
+        }
+      }
+    `;
     const onUpdateVirtualParticipant = /* GraphQL */ `
       subscription OnUpdateVirtualParticipant {
         onUpdateVirtualParticipant {
           id
-          status
-          updatedAt
           meetingName
+          meetingPlatform
+          meetingId
+          meetingTime
+          scheduledFor
+          isScheduled
+          status
           owner
           Owner
           SharedWith
+          createdAt
+          updatedAt
         }
       }
     `;
+
+    const createSubscription = client.graphql({ query: onCreateVirtualParticipant }).subscribe({
+      next: (subscriptionMessage) => {
+        const created = subscriptionMessage?.data?.onCreateVirtualParticipant;
+        if (!created || !created.id) return;
+        setParticipants((prev) => {
+          // Idempotent: don't double-add if already present (covers the
+          // case where loadParticipants raced with the subscription).
+          if (prev.some((p) => p.id === created.id)) return prev;
+          return [created, ...prev];
+        });
+      },
+      error: (error) => {
+        logger.error('Create subscription error:', error);
+      },
+    });
 
     const subscription = client.graphql({ query: onUpdateVirtualParticipant }).subscribe({
       next: (subscriptionMessage) => {
@@ -263,6 +316,30 @@ const VirtualParticipantList = () => {
             }, 8000);
           }
 
+          // If we don't already have this VP in the list, insert it
+          // (covers the case where the create-subscription event was
+          // dropped due to a reconnect / late mount). Better to show a
+          // partial row than silently leave it off the list.
+          if (!existingParticipant) {
+            return [
+              {
+                id: updatedParticipant.id,
+                status: updatedParticipant.status,
+                updatedAt: updatedParticipant.updatedAt,
+                meetingName: updatedParticipant.meetingName,
+                Owner: updatedParticipant.Owner,
+                owner: updatedParticipant.owner,
+                SharedWith: updatedParticipant.SharedWith,
+                meetingPlatform: updatedParticipant.meetingPlatform,
+                meetingId: updatedParticipant.meetingId,
+                meetingTime: updatedParticipant.meetingTime,
+                scheduledFor: updatedParticipant.scheduledFor,
+                isScheduled: updatedParticipant.isScheduled,
+                createdAt: updatedParticipant.createdAt,
+              },
+              ...prev,
+            ];
+          }
           return prev.map((p) => {
             if (p.id === updatedParticipant.id) {
               return {
@@ -286,7 +363,10 @@ const VirtualParticipantList = () => {
       },
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      try { createSubscription.unsubscribe(); } catch (_) { /* ignore */ }
+      try { subscription.unsubscribe(); } catch (_) { /* ignore */ }
+    };
   }, []);
 
   // Handle parsing meeting invitation
@@ -394,14 +474,29 @@ const VirtualParticipantList = () => {
 
     try {
       let email;
+      let cognitoSub;
       try {
         const attrs = await fetchUserAttributes();
         email = attrs?.email;
+        cognitoSub = attrs?.sub;
       } catch (attrErr) {
         logger.debug('fetchUserAttributes failed, falling back to user identifier', attrErr);
       }
       const userName =
         email || user?.attributes?.email || user?.signInDetails?.loginId || user?.username || 'test-user@example.com';
+      // userSub is the Cognito sub of the launching user. The VP backend
+      // uses it for two things:
+      //   1. Persistent Chromium profile path (profiles/{sub}/{platform}/)
+      //      — always passed when present so cookies/trusted-device markers
+      //      survive across meetings on any platform.
+      //   2. Resolving ZOOM_CREDENTIALS_SECRET_NAME (the state machine
+      //      prepends `${LMAStackName}/zoom-credentials/`) — only when the
+      //      user explicitly opted into Zoom login for this meeting.
+      const userSub = cognitoSub || '';
+      const userZoomSub =
+        createForm.meetingPlatform === 'ZOOM' && useZoomLogin && zoomCredsStatus.present && cognitoSub
+          ? cognitoSub
+          : '';
 
       // Calculate meeting time for scheduling
       let meetingTimestamp = null;
@@ -454,6 +549,8 @@ const VirtualParticipantList = () => {
               meetingTime: '',
               userName,
               virtualParticipantId,
+              userSub,
+              userZoomSub,
               accessToken: (await fetchAuthSession()).tokens?.accessToken?.toString() || '',
               idToken: (await fetchAuthSession()).tokens?.idToken?.toString() || '',
               rereshToken: '', // Amplify v6 does not expose refresh tokens directly
@@ -710,6 +807,26 @@ const VirtualParticipantList = () => {
                 placeholder="Enter meeting password if required"
               />
             </FormField>
+
+            {createForm.meetingPlatform === 'ZOOM' && (
+              <FormField
+                label="Zoom account (Optional)"
+                description="Stored Zoom credentials let LMA join meetings that block guests and reduce bot-detection blocks. Two-factor and CAPTCHA challenges still require manual action via the LMA viewer."
+                stretch
+              >
+                <SpaceBetween direction="vertical" size="s">
+                  <ZoomCredentialsManager onChange={handleZoomCredsChange} />
+                  {zoomCredsStatus.present && (
+                    <Checkbox
+                      checked={useZoomLogin}
+                      onChange={({ detail }) => setUseZoomLogin(detail.checked)}
+                    >
+                      Use my stored Zoom account when joining this meeting (recommended)
+                    </Checkbox>
+                  )}
+                </SpaceBetween>
+              </FormField>
+            )}
 
             <FormField
               label="Meeting Time (Optional)"

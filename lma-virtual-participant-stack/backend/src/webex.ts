@@ -1,9 +1,11 @@
-import { Page, Frame } from 'puppeteer';
-import { details } from './details.js';
+import { Page, Frame } from 'rebrowser-puppeteer';
+import { details, matchesEndCommand, exitMessagesFor } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
+import { findElementWithFallback } from './ai-dom-resolver.js';
+import { startDialogWatchdog } from './dialog-watchdog.js';
 
 export default class Webex {
     private readonly iframe = '#unified-webclient-iframe';
@@ -21,12 +23,31 @@ export default class Webex {
     }
 
     public async initialize(page: Page): Promise<void> {
+        // AI-driven dialog watchdog runs for the entire meeting lifecycle.
+        // See dialog-watchdog.ts. Catches sign-in / pre-join / waiting-room /
+        // in-meeting dialogs (consent, recording notice, captcha, SSO, etc.)
+        // and either auto-dismisses (CONSENT-class) or escalates to
+        // MANUAL_ACTION_REQUIRED so the user can clear it via VNC.
+        startDialogWatchdog(page, { platform: 'WEBEX' });
+
         console.log('Getting Webex meeting link.');
         await page.goto('https://signin.webex.com/join');
         console.log('Entering meeting ID.');
-        const meetingTextElement = await page.waitForSelector('#join-meeting-form');
-        await meetingTextElement?.type(details.invite.meetingId);
-        await meetingTextElement?.press('Enter');
+        const meetingIdRes = await findElementWithFallback(
+            page,
+            ['#join-meeting-form'],
+            {
+                intent: 'Webex landing page meeting-ID input field',
+                platform: 'WEBEX',
+                step: 'webex.join.meetingIdInput',
+            },
+            { maxRetries: 10, delayMs: 500 },
+        );
+        if (!meetingIdRes) {
+            throw new Error('Webex meeting-ID input not found');
+        }
+        await meetingIdRes.element.type(details.invite.meetingId);
+        await meetingIdRes.element.press('Enter');
         
         // Wait a moment for the page to stabilize after entering meeting ID
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -396,11 +417,16 @@ export default class Webex {
                 clearInterval(interval);
               };
             });
-        // Set up message monitoring with LMA features
-        await page.exposeFunction('messageChange', async (message: string) => {
-            if (message.includes(details.endCommand)) {
-                console.log('LMA Virtual Participant has been removed from the meeting.');
-                await this.sendMessages(frame, details.exitMessages);
+        // Set up message monitoring with LMA features. Webex exposes
+        // `sender:::body` to the node bridge in some contexts; we accept
+        // both shapes.
+        await page.exposeFunction('messageChange', async (raw: string) => {
+            const idx = raw.indexOf(':::');
+            const sender = idx > 0 ? raw.slice(0, idx).trim() : null;
+            const message = idx > 0 ? raw.slice(idx + 3) : raw;
+            if (matchesEndCommand(message)) {
+                console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}.`);
+                await this.sendMessages(frame, exitMessagesFor(sender));
                 details.start = false;
                 await page.goto('about:blank');
             } else if (

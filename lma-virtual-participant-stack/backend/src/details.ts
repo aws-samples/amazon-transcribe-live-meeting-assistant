@@ -58,6 +58,8 @@ export interface MeetingDetails {
   recordingsKeyPrefix: string;
   graphqlEndpoint: string;
   vpTaskRegistryTableName: string;
+  domSelectorCacheTableName: string;
+  bedrockDomResolverModelId: string;
   
   // Transcription Configuration
   transcribeLanguageCode: string;
@@ -97,8 +99,10 @@ class DetailsManager {
 
     // Messages Configuration
     const introMessage = replacePlaceholders(
-      process.env.INTRO_MESSAGE || 
-      'Hello. I am an AI Live Meeting Assistant (LMA). I was invited by {LMA_USER} to join this call. To learn more about me please visit: https://amazon.com/live-meeting-assistant.'
+      process.env.INTRO_MESSAGE ||
+      'Hello. I am an AI Live Meeting Assistant (LMA). I was invited by {LMA_USER} to join this call. ' +
+      'Anyone here can ask me to leave at any time by typing "LMA leave" (or "LMA end") in chat. ' +
+      'To learn more please visit: https://amazon.com/live-meeting-assistant.'
     );
     const startRecordingMessage = replacePlaceholders(
       process.env.START_RECORDING_MESSAGE || 'Live Meeting Assistant started.'
@@ -139,7 +143,12 @@ class DetailsManager {
       pauseMessages: [stopRecordingMessage],
       exitMessages: [exitMessage],
 
-      // Commands
+      // Commands. The end-command matcher (matchesEndCommand below)
+      // requires an explicit "LMA" prefix on every dismissal phrase
+      // ("LMA END", "LMA LEAVE", "LMA STOP", "LMA QUIT", "Goodbye LMA",
+      // etc., case-insensitive, word-bounded) so that prose like
+      // "the meeting will end at 3pm" or "I'll leave at 3" never trips
+      // a false dismissal.
       startCommand: 'START',
       pauseCommand: 'PAUSE',
       endCommand: 'END',
@@ -158,6 +167,8 @@ class DetailsManager {
       recordingsKeyPrefix: process.env.RECORDINGS_KEY_PREFIX || 'lma-audio-recordings/',
       graphqlEndpoint: process.env.GRAPHQL_ENDPOINT || '',
       vpTaskRegistryTableName: process.env.VP_TASK_REGISTRY_TABLE_NAME || '',
+      domSelectorCacheTableName: process.env.DOM_SELECTOR_CACHE_TABLE_NAME || '',
+      bedrockDomResolverModelId: process.env.BEDROCK_DOM_RESOLVER_MODEL_ID || '',
 
       // Transcription Configuration
       transcribeLanguageCode: process.env.TRANSCRIBE_LANGUAGE_CODE || 'en-US',
@@ -193,3 +204,40 @@ class DetailsManager {
 // Export singleton instance
 export const detailsManager = new DetailsManager();
 export const details = detailsManager.details;
+
+/**
+ * Returns true when a chat message is a direct request for LMA to leave
+ * the meeting. To avoid false positives in normal conversation, the
+ * matcher requires both:
+ *   - the literal token "LMA" (case-insensitive, word-bounded), AND
+ *   - one of the dismissal verbs / nouns in the same message.
+ *
+ * Recognised verbs (case-insensitive, word-bounded):
+ *   end, leave, stop, quit, exit, goodbye, bye
+ *
+ * Examples that match:
+ *   "LMA END", "LMA, please leave", "lma stop", "Goodbye LMA"
+ *
+ * Examples that do NOT match:
+ *   "END", "the meeting will end at 3pm", "leave the door open",
+ *   "Hello LMA", "endpoint", "ending soon"
+ */
+export function matchesEndCommand(message: string): boolean {
+  if (!message) return false;
+  if (!/\blma\b/i.test(message)) return false;
+  return /\b(end|leave|stop|quit|exit|goodbye|bye)\b/i.test(message);
+}
+
+/**
+ * Build a personalised exit-message list. When we know who issued the
+ * dismissal, the goodbye acknowledges them so other participants understand
+ * what just happened.
+ */
+export function exitMessagesFor(requester?: string | null): string[] {
+  if (!requester) return details.exitMessages;
+  const safe = requester.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 80);
+  if (!safe) return details.exitMessages;
+  // Prepend an acknowledgement; keep the configured exit message as the
+  // farewell so users keeping a custom exit message still see it.
+  return [`Thanks ${safe} — I'll head out now.`, ...details.exitMessages];
+}

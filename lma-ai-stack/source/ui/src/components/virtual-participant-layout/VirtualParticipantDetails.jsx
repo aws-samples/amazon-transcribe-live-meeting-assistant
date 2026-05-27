@@ -98,14 +98,56 @@ const STATUS_CONFIG = {
     color: 'blue',
   },
   INITIALIZING: {
-    message: 'Setting up virtual participant...',
-    description: 'Preparing connection parameters and authentication',
+    message: 'Allocating compute…',
+    description: 'Starting Fargate task and waiting for the headless browser stack to come up',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  WAITING_FOR_CAPACITY: {
+    message: 'Waiting for compute capacity…',
+    description: 'Task is queued waiting for an EC2 host slot. If the cluster is full, the auto-scaler will launch a new host (~60-90s); otherwise the task is just waiting briefly for placement.',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  BOOTING: {
+    message: 'Booting container…',
+    description: 'Container started — pulling Chrome image, starting display, audio, and VNC server',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  REGISTERING_NETWORK: {
+    message: 'Registering network…',
+    description: 'Creating ALB target group and waiting for the live-view endpoint to become healthy (typically 30–60s)',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  VNC_READY: {
+    message: 'Live view ready',
+    description: 'About to navigate to the meeting URL',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  HYDRATING_PROFILE: {
+    message: 'Restoring browser profile…',
+    description: 'Downloading saved cookies / trusted-device markers from S3 (skips Zoom bot-detection on repeat joins)',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  LAUNCHING_BROWSER: {
+    message: 'Launching browser…',
+    description: 'Starting Chrome with stealth plugin and platform extensions',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
   },
   CONNECTING: {
-    message: 'Connecting to meeting platform...',
+    message: 'Connecting to meeting platform…',
     description: 'Establishing connection with meeting platform',
     icon: 'loading',
     type: 'in-progress',
@@ -182,7 +224,17 @@ StatusBadge.propTypes = {
 
 export const StatusDetails = ({ status, updatedAt, scheduledFor }) => {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.FAILED;
-  const isInProgress = ['INITIALIZING', 'CONNECTING', 'JOINING'].includes(status);
+  const isInProgress = [
+    'INITIALIZING',
+    'WAITING_FOR_CAPACITY',
+    'BOOTING',
+    'REGISTERING_NETWORK',
+    'VNC_READY',
+    'HYDRATING_PROFILE',
+    'LAUNCHING_BROWSER',
+    'CONNECTING',
+    'JOINING',
+  ].includes(status);
 
   return (
     <Container>
@@ -463,67 +515,128 @@ const VirtualParticipantDetails = () => {
     }
   }, [vpId, authState]);
 
-  // Set up real-time updates subscription - NO NOTIFICATIONS (handled by VirtualParticipantList)
+  // Set up real-time updates: AppSync subscription + retry-on-error +
+  // polling fallback. The subscription is the fast path; the poll is a
+  // 5s safety net that runs while the VP is still in any in-progress
+  // state (so a dropped websocket / expired auth token doesn't leave
+  // the page stuck on stale state until the user manually refreshes).
   useEffect(() => {
     if (!vpId) return undefined;
-
     if (authState !== 'authenticated') return undefined;
 
-    console.log('=== Setting up AppSync subscription for VP:', vpId);
-    const subscription = client.graphql({ query: onUpdateVirtualParticipantDetailed }).subscribe({
-      next: (message) => {
-        console.log('=== AppSync subscription received update ===');
-        console.log('Raw value:', JSON.stringify(message, null, 2));
+    let cancelled = false;
+    let subscription = null;
+    let pollTimer = null;
+    let retryTimer = null;
+    let retryAttempt = 0;
 
-        const updated = message?.data?.onUpdateVirtualParticipant;
-        console.log('Parsed update:', updated);
+    const pickNew = (next, prev) => (next != null ? next : prev);
+    const applyUpdate = (updated) => {
+      if (!updated || updated.id !== vpId) return;
+      setVpDetails((prev) => ({
+        ...prev,
+        ...updated,
+        // pickNew so a partial update with status=null doesn't blank it
+        status: pickNew(updated.status, prev?.status),
+        updatedAt: pickNew(updated.updatedAt, prev?.updatedAt),
+        CallId: pickNew(updated.CallId, prev?.CallId),
+        vncEndpoint: pickNew(updated.vncEndpoint, prev?.vncEndpoint),
+        vncPort: pickNew(updated.vncPort, prev?.vncPort),
+        // Latch vncReady=true so a later partial update can't unset it.
+        vncReady: prev?.vncReady === true ? true : pickNew(updated.vncReady, prev?.vncReady),
+        manualActionType: pickNew(updated.manualActionType, prev?.manualActionType),
+        manualActionMessage: pickNew(updated.manualActionMessage, prev?.manualActionMessage),
+        manualActionTimeoutSeconds: pickNew(updated.manualActionTimeoutSeconds, prev?.manualActionTimeoutSeconds),
+        manualActionStartTime: pickNew(updated.manualActionStartTime, prev?.manualActionStartTime),
+      }));
+    };
 
-        if (updated && updated.id === vpId) {
-          console.log('Update is for our VP:', vpId);
-          console.log('VNC fields in update:', {
-            vncEndpoint: updated.vncEndpoint,
-            vncPort: updated.vncPort,
-            vncReady: updated.vncReady,
-          });
-
-          // Update local state, no notifications (VirtualParticipantList handles notifications),
-          // including VNC and manual action fields
-          setVpDetails((prev) => {
-            const newState = {
-              ...prev,
-              status: updated.status,
-              updatedAt: updated.updatedAt,
-              CallId: updated.CallId || prev?.CallId,
-              vncEndpoint: updated.vncEndpoint || prev?.vncEndpoint,
-              vncPort: updated.vncPort || prev?.vncPort,
-              vncReady: updated.vncReady !== undefined ? updated.vncReady : prev?.vncReady,
-              manualActionType: updated.manualActionType || prev?.manualActionType,
-              manualActionMessage: updated.manualActionMessage || prev?.manualActionMessage,
-              manualActionTimeoutSeconds: updated.manualActionTimeoutSeconds || prev?.manualActionTimeoutSeconds,
-              manualActionStartTime: updated.manualActionStartTime || prev?.manualActionStartTime,
-            };
-            console.log('Updated VP state:', newState);
-            return newState;
-          });
-
-          // Log VNC updates
-          if (updated.vncReady && updated.vncEndpoint) {
-            console.log('✓ VNC is ready! Endpoint:', updated.vncEndpoint, 'Port:', updated.vncPort);
+    // Quiet poll fallback: only runs while we genuinely need it (status
+    // is in-progress AND vncReady is not yet true). Does NOT touch
+    // loading state, so the page never flickers — uses the same
+    // applyUpdate as the subscription so we merge fields rather than
+    // wholesale-replacing state. Once vncReady=true is latched, polling
+    // stops; the subscription remains the only update mechanism.
+    const POLL_INTERVAL_MS = 5000;
+    const startPolling = () => {
+      if (pollTimer || cancelled) return;
+      const tick = async () => {
+        pollTimer = null;
+        if (cancelled) return;
+        // Decide whether we still need to poll, based on freshest state.
+        let shouldKeepPolling = true;
+        setVpDetails((prev) => {
+          if (prev?.vncReady === true) shouldKeepPolling = false;
+          if (prev?.status && ['COMPLETED', 'FAILED', 'ENDED', 'CANCELLED'].includes(prev.status)) {
+            shouldKeepPolling = false;
           }
-        } else {
-          console.log('Update is NOT for our VP. Update ID:', updated?.id, 'Our ID:', vpId);
+          return prev;
+        });
+        if (!shouldKeepPolling) return;
+        // Quiet refetch — no setLoading, no full-replace, no notifications.
+        try {
+          const r = await client.graphql({
+            query: getVirtualParticipant,
+            variables: { id: vpId },
+          });
+          const fresh = r?.data?.getVirtualParticipant;
+          if (fresh && !cancelled) applyUpdate(fresh);
+        } catch (_) {
+          // ignore — keep polling
         }
-      },
-      error: (err) => {
-        console.error('=== AppSync subscription error ===', err);
-        logger.error('Subscription error:', err);
-        // Don't retry on subscription errors to avoid infinite loops
-      },
-    });
+        if (!cancelled) {
+          pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+        }
+      };
+      pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+    };
+
+    const subscribe = () => {
+      if (cancelled) return;
+      console.log('=== Setting up AppSync subscription for VP:', vpId);
+      subscription = client.graphql({ query: onUpdateVirtualParticipantDetailed }).subscribe({
+        next: (message) => {
+          retryAttempt = 0; // healthy subscription — reset backoff
+          const updated = message?.data?.onUpdateVirtualParticipant;
+          applyUpdate(updated);
+          if (updated?.vncReady && updated?.vncEndpoint) {
+            console.log('✓ VNC is ready! Endpoint:', updated.vncEndpoint);
+          }
+        },
+        error: (err) => {
+          console.error('=== AppSync subscription error ===', err);
+          logger.error('Subscription error:', err);
+          // Reconnect with exponential backoff (1s, 2s, 4s, … capped at 30s).
+          // Polling fallback below keeps the UI fresh while we wait.
+          if (cancelled) return;
+          const delay = Math.min(30_000, 1000 * 2 ** retryAttempt);
+          retryAttempt += 1;
+          console.log(`Retrying subscription in ${delay}ms (attempt ${retryAttempt})`);
+          retryTimer = setTimeout(() => {
+            try {
+              subscription?.unsubscribe?.();
+            } catch {
+              /* ignore */
+            }
+            subscribe();
+          }, delay);
+        },
+      });
+    };
+
+    subscribe();
+    startPolling();
 
     return () => {
       console.log('=== Unsubscribing from AppSync for VP:', vpId);
-      subscription.unsubscribe();
+      cancelled = true;
+      try {
+        subscription?.unsubscribe?.();
+      } catch {
+        /* ignore */
+      }
+      if (pollTimer) clearTimeout(pollTimer);
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [vpId, authState]);
 
@@ -692,7 +805,7 @@ const VirtualParticipantDetails = () => {
       {/* VNC Live View - Show when VNC is ready and VP is active */}
       {vpDetails.vncReady &&
         vpDetails.vncEndpoint &&
-        ['VNC_READY', 'CONNECTING', 'JOINING', 'JOINED', 'ACTIVE', 'MANUAL_ACTION_REQUIRED'].includes(
+        ['VNC_READY', 'HYDRATING_PROFILE', 'LAUNCHING_BROWSER', 'CONNECTING', 'JOINING', 'JOINED', 'ACTIVE', 'MANUAL_ACTION_REQUIRED'].includes(
           vpDetails.status,
         ) && (
           <VNCViewer
@@ -707,16 +820,32 @@ const VirtualParticipantDetails = () => {
           />
         )}
 
-      {/* VNC Preparing Message - Show while VNC is starting up */}
-      {!vpDetails.vncReady && ['INITIALIZING', 'CONNECTING', 'JOINING'].includes(vpDetails.status) && (
+      {/* VNC Preparing Message - Show while VNC is starting up. Headline +
+          subtext are pulled from STATUS_CONFIG so as the VP progresses
+          through INITIALIZING → REGISTERING_NETWORK → HYDRATING_PROFILE →
+          LAUNCHING_BROWSER → CONNECTING → JOINING, the user sees what's
+          actually happening rather than a static 'Preparing...' spinner. */}
+      {!vpDetails.vncReady && [
+          'INITIALIZING',
+          'WAITING_FOR_CAPACITY',
+          'BOOTING',
+          'REGISTERING_NETWORK',
+          'HYDRATING_PROFILE',
+          'LAUNCHING_BROWSER',
+          'CONNECTING',
+          'JOINING',
+        ].includes(vpDetails.status) && (
         <Container>
           <Box textAlign="center" padding="l">
             <Spinner size="large" />
             <Box margin={{ top: 's' }}>
-              <strong>Preparing live view...</strong>
+              <strong>
+                {STATUS_CONFIG[vpDetails.status]?.message || 'Preparing live view…'}
+              </strong>
             </Box>
             <Box margin={{ top: 'xs' }} color="text-body-secondary">
-              VNC viewer is waiting for the VP to start up. This may take ~60 seconds.
+              {STATUS_CONFIG[vpDetails.status]?.description ||
+                'VNC viewer is waiting for the VP to start up. This may take ~60 seconds.'}
             </Box>
           </Box>
         </Container>
