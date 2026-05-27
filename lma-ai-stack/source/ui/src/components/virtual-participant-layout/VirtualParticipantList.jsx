@@ -364,8 +364,16 @@ const VirtualParticipantList = () => {
     });
 
     return () => {
-      try { createSubscription.unsubscribe(); } catch (_) { /* ignore */ }
-      try { subscription.unsubscribe(); } catch (_) { /* ignore */ }
+      try {
+        createSubscription.unsubscribe();
+      } catch (_) {
+        /* ignore */
+      }
+      try {
+        subscription.unsubscribe();
+      } catch (_) {
+        /* ignore */
+      }
     };
   }, []);
 
@@ -519,6 +527,12 @@ const VirtualParticipantList = () => {
       if (isScheduled && meetingTimestamp) {
         vpInput.meetingTime = meetingTimestamp;
         vpInput.isScheduled = true;
+        // Persist userSub / userZoomSub on the row so the VPScheduler
+        // Lambda can plumb LMA_USER_SUB and ZOOM_CREDENTIALS_SECRET_NAME
+        // to the launched ECS task at meeting time. Immediate (non-scheduled)
+        // meetings carry these via the Step Functions input below.
+        if (userSub) vpInput.userSub = userSub;
+        if (userZoomSub) vpInput.userZoomSub = userZoomSub;
       }
 
       const vpResult = await client.graphql({
@@ -811,16 +825,17 @@ const VirtualParticipantList = () => {
             {createForm.meetingPlatform === 'ZOOM' && (
               <FormField
                 label="Zoom account (Optional)"
-                description="Stored Zoom credentials let LMA join meetings that block guests and reduce bot-detection blocks. Two-factor and CAPTCHA challenges still require manual action via the LMA viewer."
+                description={
+                  'Stored Zoom credentials let LMA join meetings that block guests and reduce ' +
+                  'bot-detection blocks. Two-factor and CAPTCHA challenges still require manual ' +
+                  'action via the LMA viewer.'
+                }
                 stretch
               >
                 <SpaceBetween direction="vertical" size="s">
                   <ZoomCredentialsManager onChange={handleZoomCredsChange} />
                   {zoomCredsStatus.present && (
-                    <Checkbox
-                      checked={useZoomLogin}
-                      onChange={({ detail }) => setUseZoomLogin(detail.checked)}
-                    >
+                    <Checkbox checked={useZoomLogin} onChange={({ detail }) => setUseZoomLogin(detail.checked)}>
                       Use my stored Zoom account when joining this meeting (recommended)
                     </Checkbox>
                   )}

@@ -12,4 +12,5 @@ lma_cli.egg-info/top_level.txt
 lma_cli/commands/__init__.py
 lma_cli/commands/publish.py
 lma_cli/commands/stack.py
+lma_cli/commands/vp.py
 tests/test_cli.py

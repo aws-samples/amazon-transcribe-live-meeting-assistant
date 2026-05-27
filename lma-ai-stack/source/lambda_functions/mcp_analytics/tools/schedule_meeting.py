@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional
 import boto3
 
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
+from tools.user_helper import has_zoom_credentials, resolve_user_sub
 
 logger = logging.getLogger()
 
@@ -29,6 +30,7 @@ def execute(
     meeting_password: Optional[str] = None,
     user_id: str = None,
     is_admin: bool = False,
+    use_stored_zoom_credentials: bool = True,
 ) -> Dict[str, Any]:
     """
     Schedule a future meeting with virtual participant.
@@ -41,6 +43,11 @@ def execute(
         meeting_password: Optional meeting password
         user_id: User ID for access control
         is_admin: Whether user is admin
+        use_stored_zoom_credentials: When the user has stored Zoom
+            credentials in LMA, sign in to Zoom with them before joining
+            the meeting (recommended; avoids most bot-detection blocks
+            and meetings that disallow guests). Set to False to force
+            a guest join. Has no effect on non-Zoom platforms.
 
     Returns:
         Dict with scheduled virtual participant details
@@ -101,6 +108,27 @@ def execute(
     }
     """
 
+    # Resolve the Cognito sub for the LMA user on whose behalf the MCP
+    # client is calling. We persist three things to the VP row so that the
+    # VPScheduler Lambda can plumb them into the launched ECS task at
+    # meeting time:
+    #   1. owner override — so the row is owned by the LMA user, not the
+    #      MCP Lambda's IAM session ARN.
+    #   2. userSub — keys the persistent Chromium profile (Phase C4).
+    #   3. userZoomSub — when the user has stored Zoom credentials AND
+    #      opted into using them, the launched VP signs in to Zoom rather
+    #      than joining as a guest.
+    cognito_sub = resolve_user_sub(user_id) if user_id else None
+    has_zoom_creds = has_zoom_credentials(cognito_sub) if cognito_sub else False
+    use_zoom_creds = bool(use_stored_zoom_credentials and has_zoom_creds)
+    logger.info(
+        "MCP schedule resolution: user_id=%s sub=%s has_zoom_creds=%s use_zoom_creds=%s",
+        user_id,
+        cognito_sub,
+        has_zoom_creds,
+        use_zoom_creds,
+    )
+
     variables = {
         "input": {
             "meetingName": meeting_name,
@@ -110,6 +138,12 @@ def execute(
             "meetingTime": scheduled_timestamp,
             "isScheduled": True,
             "status": "SCHEDULED",
+            # owner override — only honored by the resolver when the caller
+            # is IAM (ours is, the MCP Lambda role).
+            **({"owner": user_id} if user_id else {}),
+            # Persisted on the VP row so VPScheduler can read them later.
+            **({"userSub": cognito_sub} if cognito_sub else {}),
+            **({"userZoomSub": cognito_sub} if use_zoom_creds else {}),
         }
     }
 

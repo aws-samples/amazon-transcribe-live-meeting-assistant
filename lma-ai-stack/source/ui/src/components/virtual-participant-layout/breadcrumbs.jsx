@@ -18,9 +18,7 @@ export const vpListBreadcrumbItems = [
   { text: 'Virtual Participant', href: `#${VIRTUAL_PARTICIPANT_PATH}` },
 ];
 
-const VPListBreadcrumbs = () => (
-  <BreadcrumbGroup ariaLabel="Breadcrumbs" items={vpListBreadcrumbItems} />
-);
+const VPListBreadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={vpListBreadcrumbItems} />;
 
 const VPDetailsBreadcrumbs = () => {
   const { vpId } = useParams();

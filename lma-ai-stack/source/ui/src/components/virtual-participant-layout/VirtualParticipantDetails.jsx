@@ -106,7 +106,9 @@ const STATUS_CONFIG = {
   },
   WAITING_FOR_CAPACITY: {
     message: 'Waiting for compute capacity…',
-    description: 'Task is queued waiting for an EC2 host slot. If the cluster is full, the auto-scaler will launch a new host (~60-90s); otherwise the task is just waiting briefly for placement.',
+    description:
+      'Task is queued waiting for an EC2 host slot. If the cluster is full, the auto-scaler will ' +
+      'launch a new host (~60-90s); otherwise the task is just waiting briefly for placement.',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
@@ -120,7 +122,8 @@ const STATUS_CONFIG = {
   },
   REGISTERING_NETWORK: {
     message: 'Registering network…',
-    description: 'Creating ALB target group and waiting for the live-view endpoint to become healthy (typically 30–60s)',
+    description:
+      'Creating ALB target group and waiting for the live-view endpoint to become healthy (typically 30–60s)',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
@@ -134,7 +137,8 @@ const STATUS_CONFIG = {
   },
   HYDRATING_PROFILE: {
     message: 'Restoring browser profile…',
-    description: 'Downloading saved cookies / trusted-device markers from S3 (skips Zoom bot-detection on repeat joins)',
+    description:
+      'Downloading saved cookies / trusted-device markers from S3 (skips Zoom bot-detection on repeat joins)',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
@@ -805,9 +809,16 @@ const VirtualParticipantDetails = () => {
       {/* VNC Live View - Show when VNC is ready and VP is active */}
       {vpDetails.vncReady &&
         vpDetails.vncEndpoint &&
-        ['VNC_READY', 'HYDRATING_PROFILE', 'LAUNCHING_BROWSER', 'CONNECTING', 'JOINING', 'JOINED', 'ACTIVE', 'MANUAL_ACTION_REQUIRED'].includes(
-          vpDetails.status,
-        ) && (
+        [
+          'VNC_READY',
+          'HYDRATING_PROFILE',
+          'LAUNCHING_BROWSER',
+          'CONNECTING',
+          'JOINING',
+          'JOINED',
+          'ACTIVE',
+          'MANUAL_ACTION_REQUIRED',
+        ].includes(vpDetails.status) && (
           <VNCViewer
             vpId={vpId}
             vncEndpoint={vpDetails.vncEndpoint}
@@ -825,7 +836,8 @@ const VirtualParticipantDetails = () => {
           through INITIALIZING → REGISTERING_NETWORK → HYDRATING_PROFILE →
           LAUNCHING_BROWSER → CONNECTING → JOINING, the user sees what's
           actually happening rather than a static 'Preparing...' spinner. */}
-      {!vpDetails.vncReady && [
+      {!vpDetails.vncReady &&
+        [
           'INITIALIZING',
           'WAITING_FOR_CAPACITY',
           'BOOTING',
@@ -835,21 +847,19 @@ const VirtualParticipantDetails = () => {
           'CONNECTING',
           'JOINING',
         ].includes(vpDetails.status) && (
-        <Container>
-          <Box textAlign="center" padding="l">
-            <Spinner size="large" />
-            <Box margin={{ top: 's' }}>
-              <strong>
-                {STATUS_CONFIG[vpDetails.status]?.message || 'Preparing live view…'}
-              </strong>
+          <Container>
+            <Box textAlign="center" padding="l">
+              <Spinner size="large" />
+              <Box margin={{ top: 's' }}>
+                <strong>{STATUS_CONFIG[vpDetails.status]?.message || 'Preparing live view…'}</strong>
+              </Box>
+              <Box margin={{ top: 'xs' }} color="text-body-secondary">
+                {STATUS_CONFIG[vpDetails.status]?.description ||
+                  'VNC viewer is waiting for the VP to start up. This may take ~60 seconds.'}
+              </Box>
             </Box>
-            <Box margin={{ top: 'xs' }} color="text-body-secondary">
-              {STATUS_CONFIG[vpDetails.status]?.description ||
-                'VNC viewer is waiting for the VP to start up. This may take ~60 seconds.'}
-            </Box>
-          </Box>
-        </Container>
-      )}
+          </Container>
+        )}
 
       {/* Error Troubleshooting - Only show for failed status */}
       <ErrorTroubleshooting status={vpDetails.status} errorDetails={vpDetails.errorDetails} />

@@ -112,7 +112,9 @@ const ZoomCredentialsManager = ({ onChange }) => {
       if (onChange) onChange(s);
       setEditVisible(false);
       setInfo(
-        'Saved. Tip — sign in to Zoom on your laptop with this account at least once before relying on LMA. Brand-new accounts that only ever sign in from cloud IPs can still trigger Zoom\'s bot detection.',
+        'Saved. Tip — sign in to Zoom on your laptop with this account at least once before ' +
+          'relying on LMA. Brand-new accounts that only ever sign in from cloud IPs can still ' +
+          "trigger Zoom's bot detection.",
       );
     } catch (e) {
       setError(e?.errors?.[0]?.message || e?.message || 'Failed to save credentials');
@@ -137,6 +139,37 @@ const ZoomCredentialsManager = ({ onChange }) => {
     }
   };
 
+  let statusContent;
+  if (loading) {
+    statusContent = <StatusIndicator type="loading">Loading Zoom account status...</StatusIndicator>;
+  } else if (status.present) {
+    statusContent = (
+      <SpaceBetween direction="horizontal" size="s">
+        <StatusIndicator type="success">Zoom account: signed in as {status.username || '(unknown)'}</StatusIndicator>
+        <Button onClick={openEdit} disabled={submitting}>
+          Update
+        </Button>
+        <Button onClick={remove} disabled={submitting}>
+          Remove
+        </Button>
+      </SpaceBetween>
+    );
+  } else {
+    statusContent = (
+      <SpaceBetween direction="horizontal" size="s">
+        <StatusIndicator type="warning">
+          No Zoom account configured — VP will join as a guest (some meetings may block this).
+        </StatusIndicator>
+        <Button onClick={openEdit} disabled={submitting}>
+          Add Zoom credentials
+        </Button>
+        <Button variant="link" href="https://zoom.us/signup" target="_blank" external>
+          Create a Zoom account
+        </Button>
+      </SpaceBetween>
+    );
+  }
+
   return (
     <Box>
       <SpaceBetween direction="vertical" size="xs">
@@ -150,32 +183,7 @@ const ZoomCredentialsManager = ({ onChange }) => {
             {info}
           </Alert>
         )}
-        {loading ? (
-          <StatusIndicator type="loading">Loading Zoom account status...</StatusIndicator>
-        ) : status.present ? (
-          <SpaceBetween direction="horizontal" size="s">
-            <StatusIndicator type="success">
-              Zoom account: signed in as {status.username || '(unknown)'}
-            </StatusIndicator>
-            <Button onClick={openEdit} disabled={submitting}>Update</Button>
-            <Button onClick={remove} disabled={submitting}>Remove</Button>
-          </SpaceBetween>
-        ) : (
-          <SpaceBetween direction="horizontal" size="s">
-            <StatusIndicator type="warning">
-              No Zoom account configured — VP will join as a guest (some meetings may block this).
-            </StatusIndicator>
-            <Button onClick={openEdit} disabled={submitting}>Add Zoom credentials</Button>
-            <Button
-              variant="link"
-              href="https://zoom.us/signup"
-              target="_blank"
-              external
-            >
-              Create a Zoom account
-            </Button>
-          </SpaceBetween>
-        )}
+        {statusContent}
       </SpaceBetween>
       <Modal
         visible={editVisible}
@@ -184,8 +192,12 @@ const ZoomCredentialsManager = ({ onChange }) => {
         footer={
           <Box float="right">
             <SpaceBetween direction="horizontal" size="xs">
-              <Button onClick={() => setEditVisible(false)} disabled={submitting}>Cancel</Button>
-              <Button variant="primary" onClick={submit} loading={submitting}>Save</Button>
+              <Button onClick={() => setEditVisible(false)} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={submit} loading={submitting}>
+                Save
+              </Button>
             </SpaceBetween>
           </Box>
         }
@@ -193,9 +205,9 @@ const ZoomCredentialsManager = ({ onChange }) => {
         <Form>
           <SpaceBetween direction="vertical" size="m">
             <Box variant="small">
-              Stored securely in AWS Secrets Manager and used only when LMA joins a Zoom meeting on your
-              behalf. The password is never returned to your browser. Two-factor or CAPTCHA challenges
-              still require manual action via the LMA viewer.
+              Stored securely in AWS Secrets Manager and used only when LMA joins a Zoom meeting on your behalf. The
+              password is never returned to your browser. Two-factor or CAPTCHA challenges still require manual action
+              via the LMA viewer.
             </Box>
             <FormField label="Zoom email or username" stretch>
               <Input

@@ -13,72 +13,11 @@ import os
 from typing import Any, Dict, Optional
 
 import boto3
-from botocore.exceptions import ClientError
 
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
+from tools.user_helper import has_zoom_credentials, resolve_user_sub
 
 logger = logging.getLogger()
-
-
-def _resolve_user_sub(email_or_username: str) -> Optional[str]:
-    """Resolve a Cognito user identifier (email or username) to its sub.
-
-    Returns None when the user pool isn't configured or the user isn't found.
-    Best-effort — failures here only mean the MCP-launched VP joins as a
-    guest instead of using stored Zoom credentials, so they should never
-    block the join itself.
-    """
-    pool_id = os.environ.get("USER_POOL_ID")
-    if not pool_id or not email_or_username:
-        return None
-    cognito = boto3.client("cognito-idp")
-    try:
-        # Fast path: if the identifier is already a username
-        resp = cognito.admin_get_user(UserPoolId=pool_id, Username=email_or_username)
-        for attr in resp.get("UserAttributes", []):
-            if attr.get("Name") == "sub":
-                return attr.get("Value")
-    except ClientError as exc:
-        code = exc.response.get("Error", {}).get("Code", "")
-        if code != "UserNotFoundException":
-            logger.warning("admin_get_user failed for %s: %s", email_or_username, exc)
-    # Slow path: search by email attribute
-    try:
-        resp = cognito.list_users(
-            UserPoolId=pool_id,
-            Filter=f'email = "{email_or_username}"',
-            Limit=1,
-        )
-        users = resp.get("Users", [])
-        if users:
-            for attr in users[0].get("Attributes", []):
-                if attr.get("Name") == "sub":
-                    return attr.get("Value")
-    except ClientError as exc:
-        logger.warning("list_users failed for %s: %s", email_or_username, exc)
-    return None
-
-
-def _has_zoom_credentials(cognito_sub: str) -> bool:
-    """Check whether the user has stored Zoom credentials.
-
-    Returns False on any error so we always fall back to guest join.
-    """
-    if not cognito_sub:
-        return False
-    stack_name = os.environ.get("LMA_STACK_NAME")
-    if not stack_name:
-        return False
-    secret_name = f"{stack_name}/zoom-credentials/{cognito_sub}"
-    sm = boto3.client("secretsmanager")
-    try:
-        described = sm.describe_secret(SecretId=secret_name)
-        return not described.get("DeletedDate")
-    except ClientError as exc:
-        code = exc.response.get("Error", {}).get("Code", "")
-        if code not in ("ResourceNotFoundException", "InvalidRequestException"):
-            logger.warning("describe_secret failed for %s: %s", secret_name, exc)
-        return False
 
 
 def execute(
@@ -155,8 +94,8 @@ def execute(
     #      isn't owned by the MCP Lambda role's session ARN).
     #   2. Pass userZoomSub/userSub to the state machine so the launched VP
     #      can use the user's stored Zoom credentials and persistent profile.
-    cognito_sub = _resolve_user_sub(user_id) if user_id else None
-    has_zoom_creds = _has_zoom_credentials(cognito_sub) if cognito_sub else False
+    cognito_sub = resolve_user_sub(user_id) if user_id else None
+    has_zoom_creds = has_zoom_credentials(cognito_sub) if cognito_sub else False
     use_zoom_creds = bool(use_stored_zoom_credentials and has_zoom_creds)
     logger.info(
         "MCP user resolution: user_id=%s sub=%s has_zoom_creds=%s use_zoom_creds=%s",
