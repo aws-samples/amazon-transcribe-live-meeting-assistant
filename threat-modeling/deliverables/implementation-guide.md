@@ -107,7 +107,7 @@ This guide details the security controls implemented in the Live Meeting Assista
 | S3 UI assets | SSE-S3 | AWS-managed |
 | Kinesis Data Stream | KMS | Customer-managed key |
 | CloudWatch Logs | KMS | Customer-managed key |
-| OpenSearch Serverless | Encryption at rest | AWS-managed |
+| S3 Vectors (KB index) | Encryption at rest | AWS-managed |
 
 ### 4.2 Encryption in Transit
 
@@ -176,9 +176,8 @@ This guide details the security controls implemented in the Live Meeting Assista
 
 | Control | Implementation |
 |---------|---------------|
-| **OpenSearch encryption** | Encryption at rest for vector store |
-| **IAM data access policy** | Scoped to specific Lambda roles |
-| **Network policy** | Restrict access from specific VPCs |
+| **S3 Vectors encryption** | Encryption at rest for vector store |
+| **IAM access policy** | Scoped to KB service role only |
 | **Meeting metadata** | Source attribution on indexed content |
 | **Context isolation** | Retrieved content marked as reference in prompts |
 

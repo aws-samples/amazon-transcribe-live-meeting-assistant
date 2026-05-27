@@ -57,10 +57,6 @@ s3_template="s3://${BUCKET}/${PREFIX}/${NAME}/template.yaml"
 https_template="https://s3.${REGION}.amazonaws.com/${BUCKET}/${PREFIX}/${NAME}/template.yaml"
 
 echo "PACKAGING $NAME"
-echo "Packaging opensearchpy_layer"
-pushd opensearchpy_layer
-pip3 install --requirement ./requirements.txt --target=./python
-popd
 aws cloudformation package \
 --template-file ${template} \
 --output-template-file ${tmpdir}/${template} \

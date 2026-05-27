@@ -90,7 +90,7 @@
 | VOICE.T02 | Voice synthesis deepfake abuse | 1 | 4 | **4** | Voice Assistant | Mitigated |
 | VOICE.T03 | Third-party API key exposure (ElevenLabs/Simli) | 2 | 2 | **4** | Voice Assistant | Partially Mitigated |
 | MCP.T05 | Unauthorized MCP tool registration | 1 | 3 | **3** | MCP Integration | Mitigated |
-| KB.T04 | OpenSearch Serverless data exposure | 1 | 3 | **3** | Knowledge Base | Mitigated |
+| KB.T04 | S3 Vectors data exposure | 1 | 3 | **3** | Knowledge Base | Mitigated |
 | AUTH.T04 | Admin group privilege escalation | 1 | 4 | **4** | Authentication | Mitigated |
 | AUTH.T05 | WebSocket authentication weakness | 1 | 3 | **3** | Authentication | Mitigated |
 | UI.T01 | XSS via transcript content | 1 | 3 | **3** | Web UI | Mitigated |

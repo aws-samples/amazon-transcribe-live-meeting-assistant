@@ -55,7 +55,7 @@ flowchart TD
 
     subgraph Search[Knowledge & Search]
         BedrockKB[Bedrock Knowledge Base]
-        OpenSearch[OpenSearch Serverless]
+        S3Vectors[S3 Vectors]
         Tavily[Tavily Web Search]
     end
 
@@ -81,7 +81,7 @@ flowchart TD
     CF --> ReactUI
     ReactUI --> AppSync
     CEP --> BedrockKB
-    BedrockKB --> OpenSearch
+    BedrockKB --> S3Vectors
     CEP --> MCPGateway
     MCPGateway --> MCPServers
     CEP --> Tavily
@@ -116,7 +116,7 @@ flowchart TD
 | **Strands Agents SDK** | Agent orchestration with tool use for meeting processing |
 | **Amazon Transcribe** | Real-time streaming transcription with speaker attribution |
 | **Amazon Translate** | Live translation (75+ languages) |
-| **Amazon Bedrock Knowledge Bases** | Semantic search across meeting transcripts via OpenSearch Serverless |
+| **Amazon Bedrock Knowledge Bases** | Semantic search across meeting transcripts via S3 Vectors |
 | **Bedrock Guardrails** | Content filtering and safety controls for agent responses |
 | **Nova Sonic** | Voice-to-voice AI assistant for meeting interaction |
 
@@ -130,7 +130,7 @@ flowchart TD
 | **Virtual Participant** | Headless Chrome bot joins Zoom/Teams/Chime/Meet/WebEx | ECS Fargate, Puppeteer |
 | **Voice Assistant** | Natural voice interaction during meetings | Nova Sonic, ElevenLabs TTS |
 | **Animated Avatar** | Visual avatar for voice assistant | Simli API |
-| **Meeting Search** | Semantic search across all meeting transcripts | Bedrock KB, OpenSearch Serverless |
+| **Meeting Search** | Semantic search across all meeting transcripts | Bedrock KB, S3 Vectors |
 | **MCP Integration** | Extend assistant with external tools (Salesforce, etc.) | API Gateway, Lambda Authorizer |
 | **Audio Recording** | Stereo recording stored in S3 | Fargate, S3 |
 | **Meeting Inventory** | Browse, share, manage meetings with access control | AppSync, DynamoDB |
@@ -150,7 +150,7 @@ flowchart TD
 | **lma-vpc-stack** | VPC, subnets, NAT gateway, security groups |
 | **lma-cognito-stack** | Cognito User Pool, Identity Pool, admin group |
 | **lma-meetingassist-setup-stack** | Strands agent configuration and tools |
-| **lma-bedrockkb-stack** | Bedrock Knowledge Base, OpenSearch Serverless |
+| **lma-bedrockkb-stack** | Bedrock Knowledge Base, S3 Vectors |
 | **lma-llm-template-setup-stack** | LLM prompt templates in DynamoDB |
 | **lma-chat-button-config-stack** | Chat button UI configuration |
 | **lma-nova-sonic-config-stack** | Nova Sonic voice assistant configuration |
@@ -195,7 +195,7 @@ flowchart TD
     end
 
     subgraph TB5[Trust Boundary: Search & Analytics]
-        OpenSearch[OpenSearch Serverless]
+        S3Vectors[S3 Vectors]
         Tavily[Tavily Web Search API]
     end
 
@@ -231,7 +231,7 @@ flowchart TD
     Lambda --> S3
     Lambda --> AppSync
     Lambda --> HookLambda
-    BedrockKB --> OpenSearch
+    BedrockKB --> S3Vectors
     Lambda --> Tavily
     MCPAPIGw --> Lambda
     ExtMCP --> MCPAPIGw
@@ -249,7 +249,7 @@ flowchart TD
 | **TB2: AWS Edge** | CDN, identity, load balancing services | CloudFront OAC, Cognito JWT, WAF IP allowlist, ALB security groups |
 | **TB3: Application Layer** | Core application infrastructure in VPC | IAM roles, security groups, KMS encryption, least-privilege |
 | **TB4: Managed AI Services** | AWS-managed transcription, LLM, translation | Service-linked roles, TLS, data encryption |
-| **TB5: Search & Analytics** | Semantic search and web search | OpenSearch encryption, Tavily API key auth |
+| **TB5: Search & Analytics** | Semantic search and web search | S3 Vectors encryption + IAM, Tavily API key auth |
 | **TB6: External Services** | Third-party APIs (ElevenLabs, Simli, MCP) | API key authentication, TLS, egress controls |
 | **TB7: Customer Extensions** | Customer-provided Lambda hooks | Separate IAM roles, invocation-only permissions |
 | **TB8: Meeting Platforms** | Third-party meeting services | OAuth/API credentials, platform-specific auth |
@@ -267,7 +267,7 @@ flowchart TD
 | MCP API keys | Restricted | DynamoDB (SHA-256 hashed) | KMS encryption at rest |
 | Third-party API keys | Restricted | CloudFormation Parameters / Secrets | Encrypted parameters |
 | LLM prompt templates | Internal | DynamoDB | KMS encryption at rest |
-| Knowledge Base vectors | Customer Confidential | OpenSearch Serverless | Encryption at rest |
+| Knowledge Base vectors | Customer Confidential | S3 Vectors | Encryption at rest |
 | CloudWatch Logs | Internal | CloudWatch | KMS encryption |
 | Virtual Participant credentials | Restricted | ECS Task Environment | Task-level encryption |
 

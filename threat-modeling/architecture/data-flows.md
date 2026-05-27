@@ -308,18 +308,18 @@ sequenceDiagram
     participant Lambda as Processing Lambda
     participant S3 as S3 Transcript Bucket
     participant BedrockKB as Bedrock Knowledge Base
-    participant OpenSearch as OpenSearch Serverless
+    participant S3Vectors as S3 Vectors
     participant Agent as Meeting Assist Agent
 
     Lambda->>S3: Store meeting transcript document
     Lambda->>BedrockKB: Trigger data source sync
     BedrockKB->>S3: Read transcript documents
     BedrockKB->>BedrockKB: Chunk and embed text
-    BedrockKB->>OpenSearch: Store vector embeddings
+    BedrockKB->>S3Vectors: Store vector embeddings
 
     Agent->>BedrockKB: Semantic search query
-    BedrockKB->>OpenSearch: Vector similarity search
-    OpenSearch-->>BedrockKB: Matching transcript chunks
+    BedrockKB->>S3Vectors: Vector similarity search
+    S3Vectors-->>BedrockKB: Matching transcript chunks
     BedrockKB-->>Agent: Retrieved meeting context
 ```
 

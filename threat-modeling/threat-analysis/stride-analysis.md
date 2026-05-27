@@ -90,7 +90,7 @@ Information disclosure threats involve exposure of sensitive data to unauthorize
 | **VP meeting credential exposure** — leaked in logs/env vars | Virtual Participant | High (6) | KMS encryption, ephemeral containers, log scrubbing |
 | **Third-party API key exposure** — ElevenLabs/Simli/Tavily keys | Voice Assistant | Medium (4) | NoEcho params, env var encryption, Secrets Manager |
 | **DynamoDB over-access** — Lambda reads all meeting data | Recording/Storage | Medium (3) | Per-table IAM, KMS encryption |
-| **OpenSearch data exposure** — direct vector store access | Knowledge Base | Medium (3) | IAM policies, network policies, encryption |
+| **S3 Vectors data exposure** — direct vector store access | Knowledge Base | Medium (3) | IAM policies, encryption |
 | **AppSync subscription eavesdropping** — listen to other meetings | Web UI | High (6) | Subscription authorization, user-scoped filters |
 
 ### 5.2 Session/Configuration Exposure
@@ -112,7 +112,7 @@ Denial of service threats involve making the system unavailable.
 | **VP container resource exhaustion** — Chrome OOM | Virtual Participant | Low (2) | Task sizing, health checks, auto-recovery |
 | **Meeting platform API abuse** — rate limits / IP bans | Virtual Participant | Medium (4) | Per-platform rate limits, NAT IP management |
 | **MCP API DDoS** — overwhelming API Gateway | MCP Integration | Low (2) | Rate limiting, Lambda concurrency, WAF |
-| **KB query overload** — OpenSearch capacity exhaustion | Knowledge Base | Low (1) | Auto-scaling, query limits, circuit breaker |
+| **KB query overload** — S3 Vectors throttling / cost spike | Knowledge Base | Low (1) | Query limits, circuit breaker, throttle alarms |
 | **Hook failure cascade** — blocking real-time pipeline | Lambda Hooks | Medium (4) | Error handling, timeout, circuit breaker |
 | **GraphQL API abuse** — expensive queries | Web UI | Medium (4) | Rate limiting, query depth limits, auth |
 
