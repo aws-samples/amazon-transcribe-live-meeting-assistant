@@ -1,20 +1,32 @@
 ---
-title: "Amazon Quick Desktop: Agent Recipes"
+title: "Amazon Quick Desktop: LMA Workflows"
 ---
 
-# Amazon Quick Desktop: Agent Recipes
+# Amazon Quick Desktop: LMA Workflows
 
-Once LMA is connected to Amazon Quick Desktop as an MCP server, you can build
-**scheduled agents** that act on meeting data autonomously — pre-meeting
-briefings, action item extraction, knowledge graph enrichment, and more. This
-guide provides ready-to-use configurations and prompts for the most useful
-patterns.
+Once LMA is connected to Amazon Quick Desktop as an MCP server, the seven
+LMA tools become first-class capabilities that Quick can compose with
+**any other tool you've connected** — your calendar, Slack, task trackers,
+the knowledge graph, web search, and other MCP servers. That composability
+is what makes the integration powerful: it isn't a fixed feature set, it's
+a building block.
+
+This guide shows three layers of usage:
+
+1. **[Conversational workflows](#conversational-workflows)** — ad-hoc
+   prompts you can type into Quick Desktop chat *today*, with no setup
+   beyond the MCP connection. These are the easiest way to get value.
+2. **[Scheduled agent recipes](#scheduled-agent-recipes)** — agent
+   configurations that run autonomously on a schedule or trigger
+   (pre-meeting briefings, action-item extraction, KG enrichment).
+3. **[The skills pack](#the-skills-pack)** — a packaged bundle of the
+   most popular workflows, installable in one step.
 
 > **First time setting up?** Connect LMA to Quick Desktop first — see
 > [Amazon Quick MCP Setup → Path B](amazon-quick-mcp-setup.md#path-b-quick-desktop-api-key).
 > Or, for the fastest install, use the
 > [`amazon-quick-desktop-skills-pack/`](../amazon-quick-desktop-skills-pack/) bundle which
-> ships these agents and skills as a one-step install.
+> ships agents and skills as a one-step install.
 
 ## Prerequisites
 
@@ -41,14 +53,153 @@ back into the LMA UI.
 
 ---
 
-## Recipe 1: Pre-Meeting Briefing Agent
+## Conversational workflows
+
+Once LMA is connected, Quick Desktop will automatically pick the right tools
+to satisfy your request — including chaining LMA with your **calendar,
+Slack, task tracker, knowledge graph, web search,** and any other MCP
+servers you've installed. You don't need to write an agent or a skill;
+just ask.
+
+The examples below all work as plain chat prompts. Each one shows which
+tools Quick will typically reach for so you can see the composition.
+
+### Join my next meeting
+
+> "Send the LMA virtual participant to my next scheduled meeting."
+
+Quick reads the next event from your calendar (Outlook/Google), pulls the
+meeting URL from the invite body, and calls
+`live_meeting_assistant_lma__start_meeting_now` with the right name and
+URL — then polls `get_virtual_participant_status` until the VP is live and
+reports back with the [VNC viewer link](virtual-participant.md#status-lifecycle).
+
+Variants that work the same way:
+
+> "Join my 2pm with the design team — name the participant 'Design Sync
+> Notes'."
+>
+> "Schedule the LMA bot for every recurring 1:1 on my calendar this
+> week."  *(uses `schedule_meeting`)*
+>
+> "If my next call is on Zoom and I have stored Zoom credentials, sign
+> in — otherwise join as a guest."
+
+### Pull action items from the last meeting
+
+> "What did I commit to in my last meeting? Post the action items
+> assigned to me into #my-todos in Slack."
+
+Quick calls `list_meetings` to find the most recent one,
+`get_meeting_summary` with `includeActionItems=true`, filters for items
+owned by you, and posts to Slack with the LMA `meetingUrl` deep-link so
+your team can click through to the source transcript.
+
+Replace Slack with whatever you have connected:
+
+> "...create Asana tasks in the *Q3 Launch* project for each action item
+> assigned to me, with the meeting link in the description."
+>
+> "...add them as Jira tickets under epic LMA-42 and tag the owner."
+>
+> "...DM each owner in Slack with their items."
+
+### Answer questions from past transcripts
+
+LMA's transcripts are searchable knowledge in their own right.
+
+> "Did we ever decide on the database vendor for Project Atlas? Search
+> my LMA meetings and quote the relevant transcript line with the
+> meeting link."
+
+Quick calls `search_lma_meetings` with topical queries, then
+`get_meeting_transcript` on the top hits to find the literal quote, and
+returns a citation with `meetingUrl`.
+
+More examples:
+
+> "Find every meeting where Priya mentioned the budget cap and summarize
+> her position over time."
+>
+> "What was the timeline we agreed with the vendor in last Thursday's
+> review? Quote the transcript."
+>
+> "I'm about to email the customer — pull every commitment we've made to
+> them across our last five calls."
+
+### Post a recap to Slack / email / Confluence
+
+> "Summarize this morning's all-hands and post it to #general with the
+> top three decisions and any unresolved questions."
+
+Quick locates the meeting via `list_meetings`, calls `get_meeting_summary`,
+shapes the output for Slack, and posts. Works the same with email,
+Confluence, Notion, or any other connected destination.
+
+> "Email the recap of today's customer call to <person@example.com> with
+> action items as a checklist and the LMA recording link at the top."
+>
+> "Append the decisions from this week's design reviews to the *Design
+> Decisions* page in Confluence."
+
+### Pre-meeting prep on demand
+
+You don't need a scheduled agent to get a brief — just ask before the
+meeting:
+
+> "I have a call with Acme Corp in 30 minutes. Pull every prior LMA
+> meeting with anyone from acme.com, summarize what we last discussed,
+> and list any open action items."
+
+Quick uses your calendar to identify attendees, runs
+`search_lma_meetings`, calls `get_meeting_summary` on the top results,
+and produces a brief in the chat — with one-click `meetingUrl` links to
+each source meeting.
+
+### Cross-tool synthesis
+
+The real win is when LMA is just one source among many:
+
+> "Cross-reference the action items from yesterday's standup with the
+> open Jira tickets in sprint 42. Anything we committed to but haven't
+> ticketed yet?"
+>
+> "From the last four customer calls, extract every feature request and
+> match it against open issues in our GitHub repo. Report any gaps."
+>
+> "Look at the action items from this morning's exec sync and check
+> Slack #leadership for any follow-up discussion in the last 24h.
+> Summarize the current state of each item."
+
+These prompts blend `search_lma_meetings` /
+`get_meeting_summary` with Jira, GitHub, and Slack tools — Quick handles
+the orchestration.
+
+### Tip: use the deep-links
+
+Every LMA tool response includes a `meetingUrl` (and
+`virtualParticipantUrl` for VP launches). When you ask Quick to post,
+email, or DM, tell it to **include the link** — that turns every output
+into a clickable reference back into the LMA UI for the full transcript,
+recording, or live VP viewer.
+
+---
+
+## Scheduled agent recipes
+
+The patterns above are great for ad-hoc use. When you want LMA workflows
+to run *automatically* on a trigger or schedule — without you typing a
+prompt — define them as Quick Desktop **agents**. The recipes below are
+ready-to-paste configurations.
+
+### Recipe 1: Pre-Meeting Briefing Agent
 
 Runs every 5 minutes; fires 15 minutes before any calendar event. Searches
 LMA for prior meetings with the same attendees, pulls summaries and action
 items, cross-references the knowledge graph, and posts a concise brief to
 your activity feed.
 
-### Configuration
+#### Configuration
 
 ```
 Agent ID: lma-pre-meeting-brief
@@ -125,29 +276,32 @@ time). Your task:
 - Do NOT call schedule_meeting or start_meeting_now — you are read-only.
 ```
 
-### Test, then enable
+#### Test, then enable
 
-```
-Trigger the lma-pre-meeting-brief agent
-```
+After creating the agent, do a dry run before turning on the schedule.
+Quick Desktop accepts natural-language requests for agent management —
+ask it to run the agent once, review the output, then ask it to enable
+the schedule. For example:
 
-Once you're satisfied with the output:
+> "Run the lma-pre-meeting-brief agent now so I can see the output."
+>
+> *(once you're satisfied)*
+>
+> "Enable the lma-pre-meeting-brief agent on its schedule."
 
-```
-Enable the lma-pre-meeting-brief agent
-```
-
-The agent will now run every 5 minutes, checking for upcoming meetings and
-generating briefs when one is 15 minutes away.
+You can also drive these actions from the Quick Desktop **Agents** panel
+(Settings → Agents) if you prefer a UI gesture to a chat prompt. Once
+enabled, the agent runs every 5 minutes, checking for upcoming meetings
+and generating briefs when one is 15 minutes away.
 
 ---
 
-## Recipe 2: Action Item Tracker
+### Recipe 2: Action Item Tracker
 
 Runs hourly. Extracts action items from recently completed meetings and posts
 them to your activity feed (or optionally creates Asana/Jira tasks).
 
-### Configuration
+#### Configuration
 
 ```
 Agent ID: lma-action-items
@@ -201,101 +355,33 @@ meetings and extract actionable commitments.
 - Never fabricate action items — only report what's explicitly in the summary.
 ```
 
-### Optional: custom trigger to skip empty cycles
-
-For efficiency, add a custom code trigger that only fires when new meetings
-exist since the last check:
-
-```python
-def check(params, tools, state):
-    """Check for newly completed LMA meetings."""
-    from datetime import datetime, timedelta, timezone
-
-    list_meetings = tools.get("live_meeting_assistant_lma__list_meetings")
-    if not list_meetings:
-        return False
-
-    now = datetime.now(timezone.utc)
-    start = (now - timedelta(hours=2)).isoformat()
-    end = now.isoformat()
-
-    result = list_meetings(startDate=start, endDate=end)
-    if not result:
-        return False
-
-    meetings = result.get("meetings", []) if isinstance(result, dict) else []
-    if not meetings:
-        return False
-
-    seen_ids = set(state.get("processed_meeting_ids", []))
-    new_meetings = [m for m in meetings if m.get("CallId") not in seen_ids]
-
-    if not new_meetings:
-        return False
-
-    all_ids = list(seen_ids | {m.get("CallId") for m in new_meetings})
-    state["processed_meeting_ids"] = all_ids[-100:]
-
-    return {
-        "new_meetings": [
-            {"id": m.get("CallId"), "name": m.get("Subject", "Unknown")}
-            for m in new_meetings
-        ],
-        "count": len(new_meetings),
-    }
-```
 
 ---
 
-## Recipe 3: Async Meeting Catch-up (Chat-Based)
+## The skills pack
 
-This works immediately with the LMA MCP connection — no scheduled agent
-needed. Just ask:
+The [`amazon-quick-desktop-skills-pack/`](../amazon-quick-desktop-skills-pack/)
+bundle wraps the most popular workflows as installable Quick Desktop
+**skills** (one-line trigger phrases) and **agents** (the scheduled
+recipes above, pre-configured). Install the pack and you get:
 
-```
-Catch me up on the standup I missed this morning
-```
+- **`lma-meeting-catchup`** — *"catch me up on the standup I missed this
+  morning"*. Finds the meeting from your calendar, pulls the LMA summary
+  and transcript, optionally cross-references Slack threads from the same
+  window, and synthesizes a personalized catch-up with deep-links.
+- **`lma-live-coach`** — *"coach me on this call"*. Launches the LMA
+  virtual participant into your current meeting and spawns a background
+  agent that polls the live transcript and posts coaching cards
+  (MEDDPICC, SPIN, Challenger) to your activity feed in real time.
+  Inspired by [KenAI Live Call Coach](https://kenbeau.people.aws.dev/)
+  by Ken Beauvais.
+- **`lma-pre-meeting-brief`** and **`lma-action-items`** agents —
+  pre-configured versions of Recipes 1 and 2 above.
 
-Quick Desktop will:
-1. Find the meeting from your calendar
-2. Call `get_meeting_summary` and/or `get_meeting_transcript`
-3. Cross-reference Slack threads from the same time window for post-meeting
-   discussion
-4. Synthesize a personalized catch-up with the LMA `meetingUrl` so you can
-   drill into the full transcript or recording if you want
-
-Package this as a reusable skill via the
-[`amazon-quick-desktop-skills-pack/`](../amazon-quick-desktop-skills-pack/)
-(`lma-meeting-catchup`) for one-line invocation.
-
----
-
-## Recipe 4: Knowledge Graph Enrichment
-
-Ask Quick Desktop to enrich your knowledge graph from meetings:
-
-```
-Search my LMA meetings from the past week and update my knowledge graph
-with the people I met, topics discussed, and any commitments made.
-```
-
-This works ad-hoc; you can also wrap it into a scheduled agent that runs
-nightly to keep the graph current.
-
----
-
-## Recipe 5: Live Call Coaching
-
-Launches LMA's virtual participant into your active meeting and spawns a
-background agent that polls the live transcript and posts coaching cards
-(MEDDPICC, SPIN, Challenger) to your activity feed in real time.
-
-This pattern is shipped as the `lma-live-coach` skill in the
-[skills pack](../amazon-quick-desktop-skills-pack/). Trigger phrase:
-`coach me on this call`.
-
-Inspired by [KenAI Live Call Coach](https://kenbeau.people.aws.dev/) by
-Ken Beauvais.
+Skills are just packaged versions of conversational workflows. Anything
+in the skills pack you can also do ad-hoc with a chat prompt (see
+[Conversational workflows](#conversational-workflows)) — the pack just
+gives you a short trigger phrase and a curated prompt.
 
 ---
 
