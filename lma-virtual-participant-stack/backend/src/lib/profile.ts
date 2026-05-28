@@ -113,13 +113,14 @@ const WARMUP_MEETING_PLATFORMS = [
 ];
 
 /**
- * A profile is "fresh" if Chromium has never written its Cache subdir.
- * That dir appears on the first navigation that loads any resource, so it's
- * a reliable "have we ever launched here?" signal even after we've created
- * the userDataDir + Default/ ourselves.
+ * A profile is "fresh" if Chromium has never written its Cookies SQLite
+ * file. The Cookies file is created on the first navigation that sets or
+ * reads a cookie. We use it (not Default/Cache) because cache dirs are
+ * commonly excluded from profile tarballs to keep size down — Cookies is
+ * always preserved across save/restore.
  */
 export function profileIsFresh(userDataDir: string): boolean {
-    return !fs.existsSync(path.join(userDataDir, 'Default', 'Cache'));
+    return !fs.existsSync(path.join(userDataDir, 'Default', 'Cookies'));
 }
 
 interface WarmupPage {

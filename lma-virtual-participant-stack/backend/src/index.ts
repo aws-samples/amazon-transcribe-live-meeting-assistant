@@ -223,7 +223,6 @@ const main = async (): Promise<void> => {
     }
     const profileHandle = await acquireProfile({
         cognitoSub: process.env.LMA_USER_SUB || '',
-        platform: details.invite.meetingPlatform,
     });
 
     // Launch Puppeteer browser with stealth plugin for all platforms
@@ -320,9 +319,10 @@ const main = async (): Promise<void> => {
     const page = await browser.newPage();
     await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
     page.setDefaultTimeout(20000);
-    await page.setUserAgent(
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
+    // not needed with cloakbrowser
+    // await page.setUserAgent(
+    //     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    // );
 
     // Forward meeting-page console output to container logs IMMEDIATELY so
     // logs from getUserMedia override / Simli bridge code (which runs before
