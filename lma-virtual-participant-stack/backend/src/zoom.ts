@@ -1,6 +1,6 @@
 import { Page, ConsoleMessage, ElementHandle } from 'puppeteer-core';
 import { createCursor, GhostCursor } from 'ghost-cursor';
-import { details, matchesEndCommand, exitMessagesFor } from './details.js';
+import { details, matchesEndCommand, exitMessagesFor, ExitInfo } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
@@ -58,11 +58,11 @@ export default class Zoom {
     // in index.ts is ready to close the browser, which avoids orphaning the
     // exposed-function callback that initiated the end and lets profile-store
     // run to completion.
-    private endRequested: Promise<string>;
-    private requestEnd: (reason: string) => void = () => {};
+    private endRequested: Promise<ExitInfo>;
+    private requestEnd: (info: ExitInfo) => void = () => {};
 
     constructor() {
-        this.endRequested = new Promise<string>((resolve) => {
+        this.endRequested = new Promise<ExitInfo>((resolve) => {
             this.requestEnd = resolve;
         });
     }
@@ -126,7 +126,7 @@ export default class Zoom {
         }
     }
 
-    public async initialize(page: Page): Promise<void> {
+    public async initialize(page: Page): Promise<ExitInfo> {
 
         page.on('console', (message: ConsoleMessage) => {
             const type = message.type();
@@ -556,13 +556,13 @@ export default class Zoom {
             }
             if (Date.now() > baseDeadline && !extended) {
                 console.log('LMA Virtual Participant was not admitted into the meeting.');
-                return;
+                return { reason: 'unknown', trigger: 'pre-join:not-admitted' };
             }
             await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         }
         if (!admitted) {
             console.log('LMA Virtual Participant was not admitted into the meeting.');
-            return;
+            return { reason: 'unknown', trigger: 'pre-join:not-admitted' };
         }
 
         // Dismiss any Zoom popups (recording consent, language interpretation, etc.)
@@ -709,7 +709,7 @@ export default class Zoom {
             if (number <= 1) {
                 console.log('LMA Virtual Participant got lonely and left.');
                 details.start = false;
-                this.requestEnd('attendees-left');
+                this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
             }
         });
 
@@ -804,7 +804,10 @@ export default class Zoom {
                         );
                         clearInterval(watchdogTimer);
                         details.start = false;
-                        this.requestEnd(`participants-ui-${result.state.toLowerCase()}`);
+                        this.requestEnd({
+                            reason: 'removed-from-meeting',
+                            trigger: `participants-ui-${result.state.toLowerCase()}`,
+                        });
                     }
                 } else if ((result.count ?? 0) <= 1) {
                     consecutiveLonely += 1;
@@ -815,7 +818,10 @@ export default class Zoom {
                         );
                         clearInterval(watchdogTimer);
                         details.start = false;
-                        this.requestEnd('alone-in-meeting');
+                        this.requestEnd({
+                            reason: 'alone-in-meeting',
+                            trigger: 'participants-watchdog',
+                        });
                     }
                 } else {
                     consecutiveMissingCounter = 0;
@@ -1014,16 +1020,28 @@ export default class Zoom {
 
         // Set up message monitoring with LMA features
         await page.exposeFunction('messageChange', async (message: string) => {
-            // Zoom aria-label is typically "<sender> to <recipient>: <text>".
-            // Pull the sender out so we can acknowledge them by name on exit.
-            const senderMatch = message.match(/^([^:]+?)\s+to\s+[^:]+:\s*/i);
+            // Zoom's chat aria-label has two observed shapes:
+            //   colon form:     "<sender> to <recipient>: <text>"
+            //   timestamp form: "<sender> to <recipient>, HH:MM AM, <text>"
+            // (Zoom shipped the timestamp form during 2026; older clients
+            // still produce the colon form.) Match either, but always anchor
+            // on the literal "<sender> to <recipient>" prefix so we don't
+            // mistake punctuation inside the message for the boundary.
+            const senderMatch = message.match(
+                /^([^,:]+?)\s+to\s+[^,:]+?(?:\s*:\s*|,\s*\d{1,2}:\d{2}(?:\s*[AP]M)?\s*,\s*)/i,
+            );
             const sender = senderMatch?.[1]?.trim() || null;
             const body = senderMatch ? message.slice(senderMatch[0].length) : message;
             if (matchesEndCommand(body)) {
-                console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}.`);
+                console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
                 await this.sendMessages(page, exitMessagesFor(sender));
                 details.start = false;
-                this.requestEnd('end-command');
+                this.requestEnd({
+                    reason: 'end-command',
+                    trigger: 'chat',
+                    requestedBy: sender,
+                    matchedMessage: body,
+                });
             } else if (details.start && message.includes(details.pauseCommand)) {
                 details.start = false;
                 console.log(details.pauseMessages[0]);
@@ -1092,12 +1110,12 @@ export default class Zoom {
             transcriptionService.startTranscription();
         }
         console.log('Waiting for meeting end.');
+        let exitInfo: ExitInfo = { reason: 'unknown' };
         try {
-            const result = await Promise.race([
-                // In-process end signal from chat-end-command, lonely-VP, etc.
-                this.endRequested.then((reason) => `END_REQUESTED:${reason}`),
-                // Zoom's own meeting-end UI (host ended, or VP was removed).
-                page.waitForFunction(
+            // Detect Zoom's own meeting-end UI: host ended the meeting, or the
+            // VP was kicked. The dialog text differs between the two.
+            const zoomDialogPromise: Promise<ExitInfo> = page
+                .waitForFunction(
                     () => {
                         const buttons = document.querySelectorAll('button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue');
                         for (const btn of buttons) {
@@ -1109,27 +1127,40 @@ export default class Zoom {
                                     text.includes('meeting is end') ||
                                     text.includes('removed from the meeting') ||
                                     text.includes('have been removed')) {
-                                    return true;
+                                    // Hand the matched dialog text back so we
+                                    // can distinguish "host ended" from "you
+                                    // were removed" without re-querying the DOM.
+                                    return text;
                                 }
                                 continue;
                             }
-                            return true;
+                            return 'meeting ended';
                         }
                         return false;
                     },
                     { timeout: details.meetingTimeout }
                 )
-                    // Swallow Target-closed / timeout when this branch is the
-                    // race loser and the page goes away during cleanup —
-                    // otherwise it surfaces as an unhandled rejection.
-                    .then(() => 'ZOOM_END_DIALOG')
-                    .catch(() => 'ZOOM_END_DIALOG_ABORTED'),
-            ]);
-            console.log(`Meeting ended (${result}).`);
+                .then(async (handle) => {
+                    const dialogText = (await handle.jsonValue()) as string;
+                    const removed = dialogText.includes('removed');
+                    return {
+                        reason: removed ? 'removed-from-meeting' : 'host-ended',
+                        trigger: 'ZOOM_END_DIALOG',
+                    } as ExitInfo;
+                })
+                // Swallow Target-closed / timeout when this branch is the
+                // race loser and the page goes away during cleanup —
+                // otherwise it surfaces as an unhandled rejection.
+                .catch((): ExitInfo => ({ reason: 'page-closed', trigger: 'ZOOM_END_DIALOG_ABORTED' }));
+
+            exitInfo = await Promise.race([this.endRequested, zoomDialogPromise]);
         } catch (error) {
             console.log('Meeting timed out.');
+            exitInfo = { reason: 'meeting-timeout', trigger: 'meetingTimeout' };
         } finally {
             details.start = false;
         }
+        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+        return exitInfo;
     }
 }

@@ -1,5 +1,5 @@
 import { Page } from 'puppeteer-core';
-import { details, matchesEndCommand, exitMessagesFor } from './details.js';
+import { details, matchesEndCommand, exitMessagesFor, ExitInfo } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
@@ -7,6 +7,14 @@ import { startDialogWatchdog } from './dialog-watchdog.js';
 
 export default class Chime {
     private prevSender: string = '';
+    private endRequested: Promise<ExitInfo>;
+    private requestEnd: (info: ExitInfo) => void = () => {};
+
+    constructor() {
+        this.endRequested = new Promise<ExitInfo>((resolve) => {
+            this.requestEnd = resolve;
+        });
+    }
 
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
         const found = await findElementWithFallback(
@@ -30,7 +38,7 @@ export default class Chime {
         }
     }
 
-    public async initialize(page: Page): Promise<void> {
+    public async initialize(page: Page): Promise<ExitInfo> {
         // AI-driven dialog watchdog runs for the entire meeting lifecycle.
         // See dialog-watchdog.ts. Catches sign-in / pre-join / waiting-room /
         // in-meeting dialogs (consent, recording notice, etc.) and either
@@ -91,7 +99,7 @@ export default class Chime {
         );
         if (!joinRes) {
             console.log('Could not locate Chime Join button — aborting');
-            return;
+            return { reason: 'unknown', trigger: 'pre-join:no-join-button' };
         }
         await joinRes.element.click();
 
@@ -125,7 +133,7 @@ export default class Chime {
             if (number <= 1) {
                 console.log('LMA Virtual Participant got lonely and left.');
                 details.start = false;
-                await page.goto('about:blank');
+                this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
             }
         });
 
@@ -196,10 +204,15 @@ export default class Chime {
 
                 // Handle LMA commands
                 if (text && matchesEndCommand(text)) {
-                    console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}.`);
+                    console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(text)}`);
                     await this.sendMessages(page, exitMessagesFor(sender));
                     details.start = false;
-                    await page.goto('about:blank');
+                    this.requestEnd({
+                        reason: 'end-command',
+                        trigger: 'chat',
+                        requestedBy: sender,
+                        matchedMessage: text,
+                    });
                 } else if (details.start && text === details.pauseCommand) {
                     details.start = false;
                     console.log(details.pauseMessages[0]);
@@ -277,45 +290,43 @@ export default class Chime {
         }
 
         console.log('Waiting for meeting end.');
-        try {
-            await new Promise((resolve, reject) => {
-                const checkInterval = setInterval(async () => {
-                    try {
-                        // Check for "Your meeting has ended" text
-                        const meetingEndedElement = await page.$('text/Your meeting has ended');
-                        if (meetingEndedElement) {
-                            console.log('Meeting ended: "Your meeting has ended" text detected');
-                            clearInterval(checkInterval);
-                            resolve(undefined);
-                            return;
-                        }
-                        
-                        // Fallback: Check if page navigated away
-                        const currentUrl = await page.url();
-                        if (currentUrl === 'about:blank' || !currentUrl.includes('chime.aws')) {
-                            console.log('Meeting ended: Page navigated away');
-                            clearInterval(checkInterval);
-                            resolve(undefined);
-                            return;
-                        }
-                        
-                    } catch (error) {
-                        clearInterval(checkInterval);
-                        reject(error);
+        let exitInfo: ExitInfo = { reason: 'unknown' };
+        // Detect Chime's own meeting-end UI by polling for the host-ended text
+        // or for navigation away from the meeting page. The poll resolves with
+        // a structured ExitInfo so it composes with the in-process end signal.
+        const chimeEndDetected = new Promise<ExitInfo>((resolve) => {
+            const handle = setInterval(async () => {
+                try {
+                    const meetingEndedElement = await page.$('text/Your meeting has ended');
+                    if (meetingEndedElement) {
+                        clearInterval(handle);
+                        resolve({ reason: 'host-ended', trigger: 'meeting-ended-text' });
+                        return;
                     }
-                }, 2000); // Check every 2 seconds for better responsiveness
-                
-                // Set up timeout
-                setTimeout(() => {
-                    clearInterval(checkInterval);
-                    reject(new Error('Meeting timeout'));
-                }, details.meetingTimeout);
-            });
-            console.log("Meeting ended.");
-        } catch (error) {
-            console.log("Meeting timed out.");
+                    const currentUrl = await page.url();
+                    if (currentUrl === 'about:blank' || !currentUrl.includes('chime.aws')) {
+                        clearInterval(handle);
+                        resolve({ reason: 'page-closed', trigger: 'navigated-away' });
+                        return;
+                    }
+                } catch (error) {
+                    clearInterval(handle);
+                    resolve({
+                        reason: 'page-closed',
+                        trigger: `poll-error:${error instanceof Error ? error.message : String(error)}`,
+                    });
+                }
+            }, 2000);
+        });
+        const meetingTimeout = new Promise<ExitInfo>((resolve) =>
+            setTimeout(() => resolve({ reason: 'meeting-timeout', trigger: 'meetingTimeout' }), details.meetingTimeout),
+        );
+        try {
+            exitInfo = await Promise.race([this.endRequested, chimeEndDetected, meetingTimeout]);
         } finally {
             details.start = false;
         }
+        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+        return exitInfo;
     }
 }

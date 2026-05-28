@@ -206,26 +206,97 @@ export const detailsManager = new DetailsManager();
 export const details = detailsManager.details;
 
 /**
- * Returns true when a chat message is a direct request for LMA to leave
- * the meeting. To avoid false positives in normal conversation, the
- * matcher requires both:
- *   - the literal token "LMA" (case-insensitive, word-bounded), AND
- *   - one of the dismissal verbs / nouns in the same message.
+ * Returns true when a chat message is a direct, two-token dismissal of LMA.
+ * The matcher is deliberately strict — it accepts only messages that consist
+ * of exactly the addressee + verb (or verb + addressee), with optional
+ * lightweight punctuation. This prevents false positives from prose that
+ * happens to contain both "LMA" and a dismissal verb — most importantly
+ * the bot's own intro message (which itself reads
+ *   '...typing "LMA leave" (or "LMA end") in chat.'
+ * ), so a second LMA bot in the same meeting can no longer end the first
+ * one with its join announcement.
  *
- * Recognised verbs (case-insensitive, word-bounded):
- *   end, leave, stop, quit, exit, goodbye, bye
+ * Recognised verbs (case-insensitive): end, leave, stop, quit, exit, goodbye, bye.
+ * The addressee may be "LMA" or "@LMA".
  *
  * Examples that match:
- *   "LMA END", "LMA, please leave", "lma stop", "Goodbye LMA"
+ *   "LMA end", "LMA, leave!", "@LMA stop", "lma quit",
+ *   "Goodbye LMA", "bye, LMA!", "exit LMA"
  *
  * Examples that do NOT match:
- *   "END", "the meeting will end at 3pm", "leave the door open",
- *   "Hello LMA", "endpoint", "ending soon"
+ *   "the meeting will end at 3pm", "I have to leave, but LMA looks great",
+ *   any message that quotes the command in a longer sentence (including the
+ *   bot's own intro), "Hello LMA", "endpoint", "ending soon".
  */
 export function matchesEndCommand(message: string): boolean {
   if (!message) return false;
-  if (!/\blma\b/i.test(message)) return false;
-  return /\b(end|leave|stop|quit|exit|goodbye|bye)\b/i.test(message);
+  const trimmed = message.trim();
+  if (!trimmed) return false;
+  // Cheap belt-and-braces guard — every legitimate command fits comfortably
+  // under this. Real prose virtually never does.
+  if (trimmed.length > 40) return false;
+  const verb = '(?:end|leave|stop|quit|exit|goodbye|bye)';
+  const addressee = '@?lma';
+  // Allow optional inline punctuation between the two tokens (",", ":", "-",
+  // "!", "?", ".") and trailing terminators.
+  const sep = '[\\s,:!?.\\-]+';
+  const trail = '[\\s!?.]*';
+  const addresseeFirst = new RegExp(`^${addressee}${sep}${verb}${trail}$`, 'i');
+  const verbFirst = new RegExp(`^${verb}${sep}${addressee}${trail}$`, 'i');
+  return addresseeFirst.test(trimmed) || verbFirst.test(trimmed);
+}
+
+/**
+ * Canonical reason codes describing why the VP left a meeting. Each platform
+ * handler returns one of these; the orchestrator uses it to emit a canonical
+ * log line and to derive a human-readable status message persisted to the
+ * VP record (visible in the UI).
+ */
+export type ExitReasonCode =
+  | 'end-command'         // attendee typed "LMA leave"/"LMA end"/etc. in chat
+  | 'alone-in-meeting'    // VP is the only attendee left
+  | 'removed-from-meeting'// host kicked the VP, or VP removed by platform
+  | 'host-ended'          // host ended the meeting for everyone
+  | 'meeting-timeout'     // VP hit the configured maximum meeting duration
+  | 'page-closed'         // the browser/page went away unexpectedly
+  | 'unknown';            // fallback when no signal could be classified
+
+export interface ExitInfo {
+  reason: ExitReasonCode;
+  /** Platform-specific identifier of the exact branch (e.g. 'ZOOM_END_DIALOG',
+   *  'HANGUP_BUTTON_HIDDEN', 'attendees-left'). Logged but not displayed. */
+  trigger?: string;
+  /** When reason==='end-command', the parsed sender name (when available). */
+  requestedBy?: string | null;
+  /** When reason==='end-command', the chat-message body that matched. */
+  matchedMessage?: string;
+}
+
+/**
+ * Build the human-readable status detail shown in the UI alongside
+ * COMPLETED. Keep these short and user-facing — the canonical reason code
+ * and trigger live in the logs, not in this string.
+ */
+export function formatExitMessage(info: ExitInfo): string {
+  switch (info.reason) {
+    case 'end-command':
+      return info.requestedBy
+        ? `Asked to leave by ${info.requestedBy}.`
+        : 'Asked to leave by a participant.';
+    case 'alone-in-meeting':
+      return 'Everyone else left the meeting.';
+    case 'removed-from-meeting':
+      return 'Removed from the meeting.';
+    case 'host-ended':
+      return 'Meeting ended by host.';
+    case 'meeting-timeout':
+      return 'Meeting reached maximum duration.';
+    case 'page-closed':
+      return 'Meeting page closed unexpectedly.';
+    case 'unknown':
+    default:
+      return 'Meeting ended.';
+  }
 }
 
 /**

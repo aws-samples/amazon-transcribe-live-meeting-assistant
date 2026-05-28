@@ -131,24 +131,27 @@ TimelineEntry.propTypes = {
   isLast: PropTypes.bool.isRequired,
 };
 
-const StatusTimeline = ({ history, currentStatus, currentTimestamp }) => {
+const StatusTimeline = ({ history, currentStatus, currentTimestamp, currentStatusMessage }) => {
   // Create timeline entries from history and current status
   const timelineEntries = React.useMemo(() => {
     const entries = [...(history || [])];
 
-    // Add current status if not already in history
+    // Add current status if not already in history. When the VP backend has
+    // populated a status detail (e.g. "Asked to leave by Jeremy") we surface
+    // it as the description so the timeline shows WHY the meeting ended,
+    // not just that it ended.
     if (currentStatus && !entries.find((entry) => entry.status === currentStatus)) {
       entries.push({
         status: currentStatus,
         timestamp: currentTimestamp,
         message: STATUS_CONFIG[currentStatus]?.message,
-        description: STATUS_CONFIG[currentStatus]?.description,
+        description: currentStatusMessage || STATUS_CONFIG[currentStatus]?.description,
       });
     }
 
     // Sort by timestamp (oldest first)
     return entries.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-  }, [history, currentStatus, currentTimestamp]);
+  }, [history, currentStatus, currentTimestamp, currentStatusMessage]);
 
   if (!timelineEntries || timelineEntries.length === 0) {
     return (
@@ -187,11 +190,13 @@ StatusTimeline.propTypes = {
   ),
   currentStatus: PropTypes.string,
   currentTimestamp: PropTypes.string,
+  currentStatusMessage: PropTypes.string,
 };
 
 StatusTimeline.defaultProps = {
   history: [],
   currentStatus: null,
+  currentStatusMessage: null,
   currentTimestamp: null,
 };
 

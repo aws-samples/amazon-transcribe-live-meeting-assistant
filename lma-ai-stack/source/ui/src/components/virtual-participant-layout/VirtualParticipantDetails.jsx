@@ -41,6 +41,7 @@ const getVirtualParticipant = `
       isScheduled
       scheduleId
       status
+      errorMessage
       createdAt
       updatedAt
       owner
@@ -59,6 +60,7 @@ const onUpdateVirtualParticipantDetailed = `
     onUpdateVirtualParticipant {
       id
       status
+      errorMessage
       updatedAt
       meetingName
       owner
@@ -226,7 +228,7 @@ StatusBadge.propTypes = {
   status: PropTypes.string.isRequired,
 };
 
-export const StatusDetails = ({ status, updatedAt, scheduledFor }) => {
+export const StatusDetails = ({ status, updatedAt, scheduledFor, statusMessage }) => {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.FAILED;
   const isInProgress = [
     'INITIALIZING',
@@ -239,6 +241,11 @@ export const StatusDetails = ({ status, updatedAt, scheduledFor }) => {
     'CONNECTING',
     'JOINING',
   ].includes(status);
+
+  // The VP backend writes a human-readable exit detail to errorMessage on
+  // terminal states (e.g. "Asked to leave by Jeremy Feldman.") — show it
+  // instead of the generic per-status default when present.
+  const description = statusMessage || config.description;
 
   return (
     <Container>
@@ -253,7 +260,7 @@ export const StatusDetails = ({ status, updatedAt, scheduledFor }) => {
             {config.message}
           </Box>
         </div>
-        <Box color="text-body-secondary">{config.description}</Box>
+        <Box color="text-body-secondary">{description}</Box>
         {status === 'SCHEDULED' && scheduledFor && (
           <Box color="text-status-info" fontSize="body-m" fontWeight="bold">
             Scheduled for: {new Date(scheduledFor).toLocaleString()}
@@ -271,10 +278,12 @@ StatusDetails.propTypes = {
   status: PropTypes.string.isRequired,
   updatedAt: PropTypes.string.isRequired,
   scheduledFor: PropTypes.string,
+  statusMessage: PropTypes.string,
 };
 
 StatusDetails.defaultProps = {
   scheduledFor: null,
+  statusMessage: null,
 };
 
 export const ConnectionDetails = ({ vpDetails }) => {
@@ -790,7 +799,12 @@ const VirtualParticipantDetails = () => {
       </Container>
 
       {/* Current Status */}
-      <StatusDetails status={vpDetails.status} updatedAt={vpDetails.updatedAt} scheduledFor={vpDetails.scheduledFor} />
+      <StatusDetails
+        status={vpDetails.status}
+        updatedAt={vpDetails.updatedAt}
+        scheduledFor={vpDetails.scheduledFor}
+        statusMessage={vpDetails.status === 'COMPLETED' ? vpDetails.errorMessage : null}
+      />
 
       {/* Status Timeline - Only show if enhanced data available */}
       {vpDetails.statusHistory && (
@@ -798,6 +812,7 @@ const VirtualParticipantDetails = () => {
           history={vpDetails.statusHistory}
           currentStatus={vpDetails.status}
           currentTimestamp={vpDetails.updatedAt}
+          currentStatusMessage={vpDetails.status === 'COMPLETED' ? vpDetails.errorMessage : null}
         />
       )}
 
