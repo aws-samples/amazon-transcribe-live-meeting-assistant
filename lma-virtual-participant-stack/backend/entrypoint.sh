@@ -26,12 +26,33 @@ echo "Starting D-Bus..."
 dbus-daemon --system --fork 2>/dev/null || echo "D-Bus already running or not needed"
 
 echo "Starting virtual display (Xvfb)..."
-# Increased height to 1120 to account for window decorations and ensure full visibility
-Xvfb :99 -screen 0 1920x1120x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
+# 1920x1080 — fluxbox's bottom toolbar is suppressed below so we can use the
+# full vertical screen for Chromium without a gray gap or window clipping.
+Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
 export DISPLAY=:99
 
 echo "Waiting for display to initialize..."
 sleep 3
+
+# Suppress the fluxbox toolbar (the bottom-of-screen gray strip with
+# "Workspace 1 / clock / active window title"). Without this, fluxbox
+# reserves ~24px at the bottom and Chromium has to be sized smaller than
+# Xvfb to fit, leaving an unsightly gray gap below the meeting UI when a
+# user watches over noVNC. Verified in cloakbrowser-validation/.
+mkdir -p ~/.fluxbox
+cat > ~/.fluxbox/init <<'FLUXINIT'
+session.screen0.toolbar.visible:        false
+session.screen0.slit.autoHide:          true
+session.screen0.fullMaximization:       true
+session.screen0.workspaces:             1
+session.screen0.tabs.usePixmap:         false
+session.screen0.iconbar.usePixmap:      false
+session.screen0.toolbar.autoHide:       true
+session.screen0.toolbar.maxOver:        true
+session.screen0.workspaceNames:         one,
+session.screen0.titlebar.left:
+session.screen0.titlebar.right:         Close
+FLUXINIT
 
 echo "Starting window manager (Fluxbox)..."
 fluxbox > /dev/null 2>&1 &
@@ -85,9 +106,8 @@ if [ "$VNC_READY" = false ]; then
 fi
 
 echo "Starting WebSocket proxy (websockify)..."
-# Start websockify to proxy WebSocket connections from 5901 to VNC port 5900
-# Bind to 0.0.0.0 to accept external connections (not just localhost)
-/usr/share/novnc/utils/websockify/run \
+# Debian ships websockify as its own binary on PATH (Alpine had a bundled run script).
+websockify \
     --web /usr/share/novnc \
     0.0.0.0:5901 \
     localhost:5900 \

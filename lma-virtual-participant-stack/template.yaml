@@ -1240,11 +1240,7 @@ Resources:
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
-            # Don't use `set -e`. Recent ecs-optimized AMIs (May 2026+) ship
-            # without aws-cli pre-installed; failures in the optional warm-pull
-            # step below must not abort the script before `systemctl enable
-            # ecs` runs. The ECS task-launch-time pull is the source of truth
-            # — userdata's docker pull is just a warm-cache optimization.
+            # Best-effort warm-cache only; ECS task-launch is source of truth.
             (yum update -y --security || yum update -y --security --skip-broken || true) \
               >> /var/log/lma-vp-yum-security.log 2>&1
             echo "ECS_CLUSTER=${Cluster}" >> /etc/ecs/ecs.config
@@ -1252,9 +1248,7 @@ Resources:
             echo "ECS_ENABLE_CONTAINER_METADATA=true" >> /etc/ecs/ecs.config
             echo "ECS_ENABLE_TASK_IAM_ROLE=true" >> /etc/ecs/ecs.config
             echo "ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true" >> /etc/ecs/ecs.config
-            # Install AWS CLI if it isn't already (newer ECS-optimized AMIs
-            # don't ship with it). Best-effort — failure here only loses the
-            # warm-pull optimization below; ECS itself can pull the image.
+            # Newer ECS-optimized AMIs ship without aws-cli pre-installed.
             if ! command -v aws >/dev/null 2>&1; then
               yum install -y aws-cli >> /var/log/lma-vp-aws-cli-install.log 2>&1 || true
             fi
@@ -1262,7 +1256,9 @@ Resources:
               aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com >> /var/log/lma-vp-ecr-login.log 2>&1 || true
               docker pull ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest >> /var/log/lma-vp-docker-pull.log 2>&1 || true
             fi
-            systemctl enable --now ecs
+            # ecs.service is already enabled on the AMI; using --now would deadlock
+            # against cloud-final.service (ecs.service has After=cloud-final.service).
+            systemctl enable ecs || true
 
   # Custom Resource to handle ASG deletion gracefully
   ASGDeletionHandlerRole:

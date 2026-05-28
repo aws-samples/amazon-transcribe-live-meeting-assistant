@@ -20,7 +20,7 @@
  *   2. AudioContext.connect() patch to block connections to AudioDestinationNode
  */
 
-import { Browser, Page, HTTPRequest } from 'rebrowser-puppeteer';
+import { Browser, Page, HTTPRequest } from 'puppeteer-core';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as fs from 'fs';
 import * as path from 'path';

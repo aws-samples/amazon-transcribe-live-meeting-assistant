@@ -1,4 +1,4 @@
-import { Page, ConsoleMessage, ElementHandle } from 'rebrowser-puppeteer';
+import { Page, ConsoleMessage, ElementHandle } from 'puppeteer-core';
 import { createCursor, GhostCursor } from 'ghost-cursor';
 import { details, matchesEndCommand, exitMessagesFor } from './details.js';
 import { transcriptionService } from './scribe.js';
@@ -11,7 +11,6 @@ import {
 } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { fetchZoomCredentials, loginToZoom, dismissPostLoginInterstitials } from './zoom-login.js';
-import { persistProfileInterim } from './profile-store.js';
 
 // Zoom's audio/video toggles use SVG icons inside a clickable <button>.
 // SVGs aren't directly clickable in Puppeteer, so we walk up to the nearest
@@ -171,15 +170,8 @@ export default class Zoom {
                 const creds = await fetchZoomCredentials(zoomCredentialsSecretName);
                 const loginResult = await loginToZoom(page, creds);
                 if (loginResult.outcome === 'success') {
-                    console.log('[zoom] Sign-in succeeded — joining as authenticated user');
+                    console.log('[zoom] Sign-in succeeded — profile will persist at meeting end');
                     signedInToZoom = true;
-                    // Persist the profile NOW so the trusted-device cookie
-                    // (the expensive bit) is captured even if the meeting
-                    // crashes or the VP exits abnormally before persistProfile
-                    // runs at shutdown. Throttled internally to once a minute.
-                    persistProfileInterim('zoom-signin-success').catch((err) =>
-                        console.warn('[zoom] interim profile persist failed (non-critical):', err),
-                    );
                 } else if (loginResult.outcome === 'invalid-credentials') {
                     console.error('[zoom] Sign-in failed: invalid credentials');
                     throw new Error('Zoom login failed: invalid credentials');
@@ -237,13 +229,7 @@ export default class Zoom {
                         if (signInOK) {
                             signedInToZoom = true;
                             await statusManager.clearManualAction();
-                            console.log('[zoom] User completed sign-in via VNC — proceeding authenticated');
-                            // Persist the profile NOW — manual VNC sign-ins
-                            // are particularly expensive (user time + reCAPTCHA)
-                            // and we definitely don't want to lose them.
-                            persistProfileInterim('zoom-vnc-signin-success').catch((err) =>
-                                console.warn('[zoom] interim profile persist failed (non-critical):', err),
-                            );
+                            console.log('[zoom] User completed sign-in via VNC — profile will persist at meeting end');
                         } else {
                             // Don't auto-clear the manual-action banner — let
                             // the user see what happened. Mark as FAILED with
