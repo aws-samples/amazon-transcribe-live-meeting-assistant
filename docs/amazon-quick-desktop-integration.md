@@ -278,18 +278,21 @@ time). Your task:
 
 #### Test, then enable
 
-```
-Trigger the lma-pre-meeting-brief agent
-```
+After creating the agent, do a dry run before turning on the schedule.
+Quick Desktop accepts natural-language requests for agent management —
+ask it to run the agent once, review the output, then ask it to enable
+the schedule. For example:
 
-Once you're satisfied with the output:
+> "Run the lma-pre-meeting-brief agent now so I can see the output."
+>
+> *(once you're satisfied)*
+>
+> "Enable the lma-pre-meeting-brief agent on its schedule."
 
-```
-Enable the lma-pre-meeting-brief agent
-```
-
-The agent will now run every 5 minutes, checking for upcoming meetings and
-generating briefs when one is 15 minutes away.
+You can also drive these actions from the Quick Desktop **Agents** panel
+(Settings → Agents) if you prefer a UI gesture to a chat prompt. Once
+enabled, the agent runs every 5 minutes, checking for upcoming meetings
+and generating briefs when one is 15 minutes away.
 
 ---
 
