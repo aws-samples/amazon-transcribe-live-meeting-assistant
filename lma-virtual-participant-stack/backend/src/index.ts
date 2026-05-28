@@ -5,7 +5,7 @@ import Chime from './chime.js';
 import Zoom from './zoom.js';
 import Teams from './teams.js';
 import Webex from './webex.js';
-import { details } from './details.js';
+import { details, ExitInfo, formatExitMessage } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
@@ -466,6 +466,7 @@ const main = async (): Promise<void> => {
 
     let meeting: Chime | Zoom | Teams | Webex;
     let success = false;
+    let exitInfo: ExitInfo | null = null;
 
     try {
         // Set JOINING status before attempting to join meeting
@@ -499,9 +500,19 @@ const main = async (): Promise<void> => {
         // Start recording service
         recordingService.startRecording();
 
-        // Join the meeting and wait for it to end
-        await meeting.initialize(page);
-        
+        // Join the meeting and wait for it to end. The platform handler
+        // returns a structured ExitInfo describing WHY the meeting ended;
+        // we log it canonically and persist a human-readable form alongside
+        // the COMPLETED status for the UI.
+        exitInfo = await meeting.initialize(page);
+
+        const exitDetailParts = [
+            `reason=${exitInfo.reason}`,
+            `trigger=${exitInfo.trigger ?? 'n/a'}`,
+            exitInfo.requestedBy ? `requestedBy=${JSON.stringify(exitInfo.requestedBy)}` : null,
+            exitInfo.matchedMessage ? `message=${JSON.stringify(exitInfo.matchedMessage)}` : null,
+        ].filter(Boolean);
+        console.log(`VP exit: ${exitDetailParts.join(' ')}`);
         console.log('Meeting session completed successfully');
         success = true;
 
@@ -613,12 +624,20 @@ const main = async (): Promise<void> => {
             console.error('Error releasing Chromium profile:', error);
         }
 
-        // Final status update
+        // Final status update. Persist the human-readable exit detail
+        // (e.g. "Asked to leave by Jeremy") alongside COMPLETED so the UI
+        // can show why the meeting actually ended instead of a generic
+        // "Meeting ended normally" line.
         if (success) {
+            const completionMessage = exitInfo ? formatExitMessage(exitInfo) : undefined;
             if (statusManager) {
-                await statusManager.setCompleted();
+                await statusManager.setCompleted(completionMessage);
             }
-            console.log('LMA Virtual Participant completed successfully');
+            console.log(
+                completionMessage
+                    ? `LMA Virtual Participant completed: ${completionMessage}`
+                    : 'LMA Virtual Participant completed successfully',
+            );
             process.exit(0);
         } else {
             console.log('LMA Virtual Participant failed');

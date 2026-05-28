@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(node -e \"const cb=require\\('cloakbrowser/puppeteer'\\); console.log\\(Object.keys\\(cb\\)\\)\")",
-      "Bash(node --input-type=module -e \"import\\('cloakbrowser/puppeteer'\\).then\\(m => console.log\\('exports:', Object.keys\\(m\\)\\)\\)\")"
-    ]
-  }
-}

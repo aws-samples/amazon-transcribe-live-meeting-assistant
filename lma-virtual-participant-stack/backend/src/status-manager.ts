@@ -133,6 +133,7 @@ export class VirtualParticipantStatusManager {
             vncEndpoint
             vncPort
             vncReady
+            errorMessage
             updatedAt
             Owner
             SharedWith
@@ -159,6 +160,16 @@ export class VirtualParticipantStatusManager {
         variables.input.vncPort = current.vncPort;
         variables.input.vncReady = current.vncReady;
         console.log(`Preserving VNC fields: ${current.vncEndpoint}:${current.vncPort}, ready: ${current.vncReady}`);
+      }
+
+      // The schema's `errorMessage` field is the generic status detail —
+      // it's persisted on FAILED *and* on normal terminal states like
+      // COMPLETED so the UI can show why the meeting actually ended
+      // (e.g. "Asked to leave by Jeremy"). Without this assignment the
+      // mutation would only carry the status code itself and the detail
+      // string would be silently dropped.
+      if (errorMessage) {
+        variables.input.errorMessage = errorMessage;
       }
 
       if (status === 'FAILED' && errorMessage) {
@@ -405,8 +416,8 @@ export class VirtualParticipantStatusManager {
     return this.updateStatus('ACTIVE');
   }
 
-  async setCompleted(): Promise<boolean> {
-    return this.updateStatus('COMPLETED');
+  async setCompleted(statusMessage?: string): Promise<boolean> {
+    return this.updateStatus('COMPLETED', statusMessage);
   }
 
   async setFailed(errorMessage?: string): Promise<boolean> {

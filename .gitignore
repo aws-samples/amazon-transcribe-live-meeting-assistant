@@ -14,6 +14,7 @@ samconfig.toml
 .commit-hash
 .ui-test-checksum
 .ui-lint-checksum
+.claude/settings.json
 
 # DSR (legacy) — keep historical artifacts; new scans use .srt/
 .dsr/*

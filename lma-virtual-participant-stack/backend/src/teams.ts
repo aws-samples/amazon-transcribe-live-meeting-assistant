@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Page } from 'puppeteer-core';
 
-import { details, matchesEndCommand, exitMessagesFor } from "./details.js";
+import { details, matchesEndCommand, exitMessagesFor, ExitInfo } from "./details.js";
 import { transcriptionService } from "./scribe.js";
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
@@ -11,6 +11,15 @@ import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 
 export default class Teams {
+    private endRequested: Promise<ExitInfo>;
+    private requestEnd: (info: ExitInfo) => void = () => {};
+
+    constructor() {
+        this.endRequested = new Promise<ExitInfo>((resolve) => {
+            this.requestEnd = resolve;
+        });
+    }
+
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
         const found = await findElementWithFallback(
             page,
@@ -34,7 +43,7 @@ export default class Teams {
         }
     }
 
-    public async initialize(page: Page): Promise<void> {
+    public async initialize(page: Page): Promise<ExitInfo> {
         // AI-driven dialog watchdog runs for the entire meeting lifecycle —
         // sign-in pages, pre-join, waiting-room, and in-meeting. Catches
         // recording-consent / language-interpretation / bot-detection /
@@ -51,7 +60,7 @@ export default class Teams {
             );
         } catch {
             console.log("Your scribe was unable to join the meeting.");
-            return;
+            return { reason: 'unknown', trigger: 'pre-join:goto-failed' };
         }
 
         console.log("Entering name.");
@@ -67,7 +76,7 @@ export default class Teams {
         );
         if (!nameRes) {
             console.log('Could not locate Teams display-name input — aborting join');
-            return;
+            return { reason: 'unknown', trigger: 'pre-join:no-name-input' };
         }
         await nameRes.element.type(details.scribeIdentity, { delay: 100 });
         await nameRes.element.press("Enter");
@@ -124,7 +133,7 @@ export default class Teams {
         );
         if (!joinRes) {
             console.log('Could not locate Teams Join button — aborting');
-            return;
+            return { reason: 'unknown', trigger: 'pre-join:no-join-button' };
         }
         await joinRes.element.click();
 
@@ -186,7 +195,7 @@ export default class Teams {
             await chatPanelElement?.click();
         } catch {
             console.log("Your scribe was not admitted into the meeting.");
-            return;
+            return { reason: 'unknown', trigger: 'pre-join:not-admitted' };
         }
 
         // Update status to JOINED
@@ -215,7 +224,7 @@ export default class Teams {
             if (!hasOthers) {
                 console.log('LMA Virtual Participant got lonely and left.');
                 details.start = false;
-                await page.goto('about:blank');
+                this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
             }
         });
 
@@ -383,14 +392,22 @@ export default class Teams {
             // wiring. For now we use the lenient matcher and a generic
             // farewell.
             if (matchesEndCommand(message)) {
-                console.log("LMA Virtual Participant has been asked to leave the meeting.");
+                console.log(`LMA Virtual Participant has been asked to leave the meeting: ${JSON.stringify(message)}`);
                 try {
                     await this.sendMessages(page, exitMessagesFor(null));
                 } catch (e) {
-                    // Best effort — fall through to closing the browser
+                    // Best effort — fall through to ending the meeting.
                     console.warn('Could not send goodbye message:', e);
                 }
-                await page.browser().close();
+                details.start = false;
+                // Hand off to the wait-for-meeting-end race below; the
+                // orchestrator's cleanup chain in index.ts owns the browser
+                // close so we don't orphan the exposed-function callback.
+                this.requestEnd({
+                    reason: 'end-command',
+                    trigger: 'chat',
+                    matchedMessage: message,
+                });
             } else if (
                 details.start &&
                 message.includes(details.pauseCommand) &&
@@ -443,36 +460,31 @@ export default class Teams {
         }
 
         console.log("Waiting for meeting end.");
+        let exitInfo: ExitInfo = { reason: 'unknown' };
         try {
-            // Wait for multiple Teams meeting end indicators
-            const result = await Promise.race([
-                // Wait for hangup button to be hidden (original logic)
-                page.waitForSelector("#hangup-button", {
-                    hidden: true,
-                    timeout: details.meetingTimeout,
-                }).then(() => 'HANGUP_BUTTON_HIDDEN'),
-                // Wait for rejoin button to appear (when meeting ends)
-                page.waitForSelector('button[data-tid="anon-meeting-end-screen-rejoin-button"]', {
-                    timeout: details.meetingTimeout,
-                }).then(() => 'REJOIN_BUTTON_APPEARED'),
-                // Monitor for URL change to about:blank
-                page.waitForFunction(
-                    () => window.location.href === 'about:blank',
-                    { timeout: details.meetingTimeout }
-                ).then(() => 'URL_CHANGE_BLANK')
-            ]);
-            console.log(`DEBUG: Teams meeting ended via: ${result}`);
-            console.log("Meeting ended.");
+            // Race the in-process end signal (chat command, etc.) against
+            // multiple Teams meeting-end UI indicators. Each UI branch maps
+            // to a structured ExitInfo so the orchestrator can persist and
+            // log a single canonical reason.
+            const hangupHidden: Promise<ExitInfo> = page
+                .waitForSelector("#hangup-button", { hidden: true, timeout: details.meetingTimeout })
+                .then((): ExitInfo => ({ reason: 'host-ended', trigger: 'HANGUP_BUTTON_HIDDEN' }));
+            const rejoinAppeared: Promise<ExitInfo> = page
+                .waitForSelector('button[data-tid="anon-meeting-end-screen-rejoin-button"]', { timeout: details.meetingTimeout })
+                .then((): ExitInfo => ({ reason: 'host-ended', trigger: 'REJOIN_BUTTON_APPEARED' }));
+            const urlBlank: Promise<ExitInfo> = page
+                .waitForFunction(() => window.location.href === 'about:blank', { timeout: details.meetingTimeout })
+                .then((): ExitInfo => ({ reason: 'page-closed', trigger: 'URL_CHANGE_BLANK' }));
+
+            exitInfo = await Promise.race([this.endRequested, hangupHidden, rejoinAppeared, urlBlank]);
         } catch (error) {
             console.log(`DEBUG: Teams meeting timeout error: ${error instanceof Error ? error.message : String(error)}`);
             console.log("Meeting timed out.");
+            exitInfo = { reason: 'meeting-timeout', trigger: 'meetingTimeout' };
         } finally {
             details.start = false;
-            // Update status to COMPLETED
-            if (details.invite.virtualParticipantId) {
-                const statusManager = createStatusManager(details.invite.virtualParticipantId);
-                await statusManager.setCompleted();
-            }
         }
+        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+        return exitInfo;
     }
 }

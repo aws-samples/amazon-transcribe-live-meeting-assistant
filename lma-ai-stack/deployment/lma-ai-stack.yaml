@@ -5196,7 +5196,16 @@ Resources:
             $util.qr( $expNames.put("#manualActionStartTime", "manualActionStartTime") )
             $util.qr( $expValues.put(":manualActionStartTime", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionStartTime)) )
         #end
-        
+
+        ## Persist the human-readable status detail (e.g. "Asked to leave by Jeremy.") **
+        ## The VP backend writes this on terminal states so the UI can show why **
+        ## the meeting actually ended instead of a generic message. **
+        #if( !$util.isNullOrBlank($ctx.args.input.errorMessage) )
+            $util.qr( $expSet.put("#errorMessage", ":errorMessage") )
+            $util.qr( $expNames.put("#errorMessage", "errorMessage") )
+            $util.qr( $expValues.put(":errorMessage", $util.dynamodb.toDynamoDB($ctx.args.input.errorMessage)) )
+        #end
+
         ## Build the SET expression **
         #set( $expression = "SET" )
         #foreach( $entry in $expSet.entrySet() )
