@@ -252,6 +252,13 @@ if [ "$SKIP_ENV_GENERATION" = false ]; then
             --query "Stacks[0].Outputs[?OutputKey=='EventSourcingTableName'].OutputValue" \
             --output text 2>/dev/null)
         echo "Event Sourcing Table: $EVENT_SOURCING_TABLE_NAME"
+
+        # Persistent CloakBrowser profile bucket (per-user tar.gz profiles)
+        VP_PROFILES_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "$AI_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='VPProfilesBucketName'].OutputValue" \
+            --output text 2>/dev/null)
+        echo "VP Profiles Bucket: $VP_PROFILES_BUCKET"
         
         # Get AppSync API ID from AI stack
         APPSYNC_API_ARN=$(aws cloudformation list-stack-resources \
@@ -287,6 +294,8 @@ if [ "$SKIP_ENV_GENERATION" = false ]; then
     MEETING_NAME="LocalTest-$(date +%m%d%y_%H%M)"
     VIRTUAL_PARTICIPANT_ID=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)
     LMA_USER=$(aws sts get-caller-identity --query "Arn" --output text 2>/dev/null | sed 's/.*\///' || echo "local-tester")
+    # Stable per-user sub so repeated local runs reuse the same warmed profile.
+    LMA_USER_SUB="local-${LMA_USER}"
 
     echo ""
     echo -e "${GREEN}=== Environment Configuration ===${NC}"
@@ -355,7 +364,12 @@ SIMLI_TRANSPORT_MODE=${SIMLI_TRANSPORT_MODE:-livekit}
 
 # Display Configuration (for local testing)
 DISPLAY=:99
-PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Persistent CloakBrowser profile (per-user S3 tar.gz). Bucket is fetched
+# from the VP CFN stack; LMA_USER_SUB falls back to the local IAM user so
+# repeated local runs share the same warmed profile.
+VP_PROFILES_BUCKET=$VP_PROFILES_BUCKET
+LMA_USER_SUB=$LMA_USER_SUB
 EOF
 
     echo "Environment file created: $ENV_FILE"

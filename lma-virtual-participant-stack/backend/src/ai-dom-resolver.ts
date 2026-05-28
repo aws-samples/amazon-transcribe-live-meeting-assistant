@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page, ElementHandle } from 'rebrowser-puppeteer';
+import { Page, ElementHandle } from 'puppeteer-core';
 import {
   BedrockRuntimeClient,
   InvokeModelCommand,

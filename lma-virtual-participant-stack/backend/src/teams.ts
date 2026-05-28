@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page } from 'rebrowser-puppeteer';
+import { Page } from 'puppeteer-core';
 
 import { details, matchesEndCommand, exitMessagesFor } from "./details.js";
 import { transcriptionService } from "./scribe.js";

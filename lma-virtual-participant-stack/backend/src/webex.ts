@@ -1,4 +1,4 @@
-import { Page, Frame } from 'rebrowser-puppeteer';
+import { Page, Frame } from 'puppeteer-core';
 import { details, matchesEndCommand, exitMessagesFor } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { createStatusManager } from "./status-manager.js";

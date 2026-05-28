@@ -1,8 +1,5 @@
-// rebrowser-puppeteer is a drop-in replacement for puppeteer that patches
-// CDP at the runtime-binding level so pages can't detect Runtime.Evaluate /
-// chrome.runtime.connect shims that puppeteer-extra-plugin-stealth had to
-// add on top of vanilla Puppeteer. Strictly fewer fingerprint signals.
-import puppeteer from 'rebrowser-puppeteer';
+// launchPersistentContext (not launch) — only it forwards userDataDir.
+import { launchPersistentContext } from 'cloakbrowser/puppeteer';
 import { promises as fs } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
@@ -19,51 +16,51 @@ import { simliAvatar } from './simli-avatar.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { acquireProfile, persistProfile, releaseProfile } from './profile-store.js';
+import {
+    patchPreferencesFor3pCookies,
+    profileIsFresh,
+    initProfileDefaults,
+    cleanStaleLocks,
+    warmupNavigation,
+    fingerprintSeedForUser,
+    randomFingerprintSeed,
+} from './lib/profile.js';
 
-// Window dimensions configuration
+// Match the Xvfb screen size; fluxbox toolbar is suppressed in entrypoint.sh.
 const WINDOW_WIDTH = 1920;
-const WINDOW_HEIGHT = 1000;
+const WINDOW_HEIGHT = 1080;
 
-// Shared Puppeteer configuration. userDataDir is set per-launch so that
-// a user-specific persisted profile (Phase C4) can be plumbed in when
-// available. Cookies and "trusted device" markers persist across meetings
-// and skip Zoom's bot-detection / reCAPTCHA on subsequent joins.
-const getPuppeteerConfig = (userDataDir?: string) => ({
-    headless: false, // Changed to false to show browser window in VNC
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
-    protocolTimeout: details.meetingTimeout,
-    timeout: details.meetingTimeout,
-    userDataDir: userDataDir || undefined,
-    args: [
-        `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT+80}`,
-        "--use-fake-ui-for-media-stream",
-        // Use real PulseAudio device (agent_mic) instead of fake device
-        // This allows Chromium to use the virtual microphone we created
-        "--autoplay-policy=no-user-gesture-required",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-notifications",
-        "--disable-extensions",
-        "--disable-crash-reporter",
-        "--disable-dev-shm-usage",
-        "--no-sandbox",
-        "--enable-logging",
-        "--v=1",
-        "--enable-logging=stderr",
-        "--log-level=0",
-        "--remote-debugging-port=9222", // Enable remote debugging for MCP
-        // Suppress Chrome's "Save password?" / autofill bubbles that
-        // would otherwise overlay Zoom's skip-for-now links and break
-        // automation. Backed up by the managed policies in the
-        // Dockerfile, but adding the launch flags too in case the
-        // policies dir isn't picked up on some runtime configurations.
-        "--disable-features=PasswordManagerOnboarding,AutofillEnableAccountWalletStorage,PasswordImport,PasswordsAccountStorage,Translate",
-        "--password-store=basic",
-        "--use-mock-keychain",
-        "--no-first-run",
-        "--no-default-browser-check",
-    ],
-});
+const getCloakLaunchArgs = (fingerprintSeed: number): string[] => [
+    `--fingerprint=${fingerprintSeed}`,
+    `--fingerprint-screen-width=${WINDOW_WIDTH}`,
+    `--fingerprint-screen-height=${WINDOW_HEIGHT}`,
+    // Puppeteer doesn't resize the OS window via CDP — flags do.
+    `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT}`,
+    '--window-position=0,0',
+    '--use-fake-ui-for-media-stream',
+    '--autoplay-policy=no-user-gesture-required',
+    '--disable-blink-features=AutomationControlled',
+    '--disable-notifications',
+    '--disable-extensions',
+    '--disable-crash-reporter',
+    '--disable-dev-shm-usage',
+    '--enable-logging',
+    '--v=1',
+    '--enable-logging=stderr',
+    '--log-level=0',
+    '--remote-debugging-port=9222',
+    // Headed-in-container essentials.
+    '--use-angle=swiftshader',
+    '--ignore-gpu-blocklist',
+    '--disable-infobars',
+    '--test-type',
+    // Suppress password/autofill bubbles that overlay meeting UI buttons.
+    '--disable-features=PasswordManagerOnboarding,AutofillEnableAccountWalletStorage,PasswordImport,PasswordsAccountStorage,Translate',
+    '--password-store=basic',
+    '--use-mock-keychain',
+    '--no-first-run',
+    '--no-default-browser-check',
+];
 
 // Global variables for graceful shutdown
 let shutdownRequested = false;
@@ -234,47 +231,78 @@ const main = async (): Promise<void> => {
         await statusManager.setLaunchingBrowser();
     }
 
-    // Stale Singleton* symlinks (and IndexedDB / leveldb LOCK files) from a
-    // previous unclean exit will block re-launch with errors like:
-    //   "Failed to create /tmp/...-Default/SingletonSocket: File exists"
-    //   "[8081:0:1234567890] LOCK: Resource temporarily unavailable"
-    // The persistent S3 profile makes this much more likely (we hydrate a
-    // user-data dir that was last written by a different container) so we
-    // proactively unlink the lock files at startup.
-    if (profileHandle.enabled && profileHandle.localDir) {
-        try {
-            const profileDir = profileHandle.localDir;
-            const stale = await fs.readdir(profileDir);
-            const lockNames = stale.filter((n: string) => n.startsWith('Singleton'));
-            for (const name of lockNames) {
-                try {
-                    await fs.unlink(`${profileDir}/${name}`);
-                    console.log(`[profile-store] Removed stale Chrome lock: ${name}`);
-                } catch { /* best-effort */ }
-            }
-            for (const sub of ['Default/Local Storage/leveldb', 'Default/IndexedDB']) {
-                try {
-                    const items = await fs.readdir(`${profileDir}/${sub}`, { recursive: true } as any);
-                    for (const it of items as string[]) {
-                        if (typeof it === 'string' && it.endsWith('LOCK')) {
-                            try { await fs.unlink(`${profileDir}/${sub}/${it}`); } catch { /* best-effort */ }
-                        }
+    // Fall back to ephemeral dir so warmup/3p-cookie path still runs.
+    const userDataDir = profileHandle.enabled && profileHandle.localDir
+        ? profileHandle.localDir
+        : `/srv/cloakbrowser-profiles/ephemeral-${process.pid}`;
+    await fs.mkdir(userDataDir, { recursive: true });
+
+    // Stale Singleton/LOCK files from unclean exit block re-launch.
+    cleanStaleLocks(userDataDir);
+    try {
+        for (const sub of ['Default/Local Storage/leveldb', 'Default/IndexedDB']) {
+            try {
+                const items = await fs.readdir(`${userDataDir}/${sub}`, { recursive: true } as any);
+                for (const it of items as string[]) {
+                    if (typeof it === 'string' && it.endsWith('LOCK')) {
+                        try { await fs.unlink(`${userDataDir}/${sub}/${it}`); } catch { /* best-effort */ }
                     }
-                } catch { /* may not exist */ }
-            }
-        } catch (lockErr) {
-            console.warn('[profile-store] Stale Chrome lock cleanup failed (continuing):', lockErr);
+                }
+            } catch { /* may not exist */ }
         }
+    } catch (lockErr) {
+        console.warn('[profile-store] Stale Chrome lock cleanup failed (continuing):', lockErr);
     }
 
-    console.log('Launching browser (rebrowser-puppeteer)...');
-    const browser = await puppeteer.launch(
-        getPuppeteerConfig(profileHandle.enabled ? profileHandle.localDir : undefined),
-    );
+    // Snapshot freshness BEFORE our own writes flip the signal to false.
+    const isFresh = profileIsFresh(userDataDir);
 
-    // Wait for Chrome DevTools to be fully ready
+    initProfileDefaults(userDataDir);
+
+    // Chrome v123+ default-blocks 3p cookies; pre-write allows before launch.
+    const cookiePatchedCount = patchPreferencesFor3pCookies(userDataDir);
+    console.log(`[profile-store] Wrote 3p-cookie allow exceptions for ${cookiePatchedCount} meeting platforms`);
+
+    // Stable per-user seed = "returning visitor" fingerprint across launches.
+    const fingerprintSeed = process.env.LMA_USER_SUB
+        ? fingerprintSeedForUser(process.env.LMA_USER_SUB)
+        : randomFingerprintSeed();
+
+    console.log(`[browser] Launching CloakBrowser persistent context`);
+    console.log(`[browser]   userDataDir       = ${userDataDir}`);
+    console.log(`[browser]   fingerprint seed  = ${fingerprintSeed}`);
+    console.log(`[browser]   profile freshness = ${isFresh ? 'FRESH (warmup will run)' : 'EXISTING (skipping warmup)'}`);
+
+    const browser = await launchPersistentContext({
+        headless: false,
+        humanize: true,
+        humanPreset: 'default',
+        userDataDir,
+        ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
+        protocolTimeout: details.meetingTimeout,
+        timeout: details.meetingTimeout,
+        args: getCloakLaunchArgs(fingerprintSeed),
+        // QUIRK: top-level defaultViewport is dropped; must nest in launchOptions.
+        launchOptions: {
+            defaultViewport: null,
+        },
+    } as any);
+
     await new Promise(resolve => setTimeout(resolve, 2000));
     console.log('✓ Chrome launched with remote debugging on port 9222');
+
+    // Build cookies/SW/storage state on fresh profiles before meeting join.
+    if (isFresh) {
+        try {
+            console.log('[warmup] Profile is fresh — running 3-phase warmup before joining meeting');
+            await warmupNavigation(() => browser.newPage() as any, {
+                runMeetingPlatforms: true,
+                log: (m) => console.log(`[browser] ${m}`),
+            });
+        } catch (err) {
+            console.warn('[warmup] Warmup error (non-fatal, continuing to meeting):', err);
+        }
+    }
 
     // Initialize Simli Avatar AFTER browser is launched (background page for avatar rendering)
     if (simliAvatar.isSimliEnabled()) {
@@ -288,13 +316,7 @@ const main = async (): Promise<void> => {
         }
     }
 
-    // Create the meeting page BEFORE starting the MCP handler. The MCP
-    // handler spawns chrome-devtools-mcp as a child process which connects
-    // to Chrome's :9222 debug endpoint. With rebrowser-puppeteer, having
-    // an external CDP client attached at the moment we call
-    // browser.newPage() can deadlock the target-creation handshake. Also
-    // setting the user-agent here so the meeting page is fully prepared
-    // before the avatar / mcp / meeting-handler chain runs.
+    // Create page BEFORE MCP — external CDP client during newPage() deadlocks target handshake.
     const page = await browser.newPage();
     await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
     page.setDefaultTimeout(20000);
@@ -419,15 +441,7 @@ const main = async (): Promise<void> => {
                 await reconnectInFlight;
             });
 
-            // Eagerly (re)build the WebRTC bridge whenever the meeting page
-            // navigates to a meeting URL. The receiver PC + window.__setSimliVideoTrack
-            // are scoped to a single document — every navigation tears them
-            // down. Relying solely on the override's on-demand reconnect path
-            // is fragile because (a) page.exposeFunction's persistence across
-            // navigations is unreliable on rebrowser-puppeteer, and (b) Zoom
-            // may decide it can't access the camera on first probe and not
-            // call getUserMedia again. So we trigger the connect ourselves as
-            // soon as we land on /wc/<meetingId>/join (or other meeting URLs).
+            // Receiver PC is per-document; rebuild on every meeting-URL navigation.
             const isMeetingUrl = (u: string): boolean =>
                 /\/wc\/\d+\/(join|start|live)/.test(u) ||
                 /teams\.microsoft\.com\/.*meetup-join/.test(u) ||
