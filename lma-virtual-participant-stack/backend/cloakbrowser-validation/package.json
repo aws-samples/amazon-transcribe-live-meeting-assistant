@@ -1,0 +1,16 @@
+{
+  "name": "cloakbrowser-validation",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Minimal validation harness for the CloakBrowser stealth Chromium binary (Playwright + Puppeteer).",
+  "scripts": {
+    "validate:playwright": "node validate-playwright.mjs",
+    "validate:puppeteer": "node validate-puppeteer.mjs"
+  },
+  "dependencies": {
+    "cloakbrowser": "*",
+    "playwright-core": "*",
+    "puppeteer-core": "*"
+  }
+}
