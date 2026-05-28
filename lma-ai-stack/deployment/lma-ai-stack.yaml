@@ -1500,6 +1500,7 @@ Resources:
       EnableVoiceToneAnalysis: !Ref EnableVoiceToneAnalysis
       IsSentimentAnalysisEnabled: !Ref IsSentimentAnalysisEnabled
       LMASettingsParameterName: !Ref LMASettingsParameterName
+      VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
       # Makefile calculates and substitute code hash in the filename here during package build
       # to force codebuild to rerun when source code changes, and to correctly roll back to
       # previous version if build fails.
