@@ -5,20 +5,31 @@
 
 """Zoom Credentials Manager Lambda.
 
-AppSync direct-Lambda data source for the per-user Zoom credentials feature.
+AppSync direct-Lambda data source for the per-user Zoom credentials feature
+and the per-user persisted Chrome profile.
+
 Each LMA user can store one set of Zoom username/password in Secrets Manager
 keyed by their Cognito sub. The plaintext password is never returned to the
 client; getMyZoomCredentialsStatus returns only {present, username,
 lastUpdatedAt}.
 
+The user's persisted Chromium profile (cookies, saved-device markers) is
+managed independently of the credentials so a user can wipe one without
+the other.
+
 Operations:
 - setMyZoomCredentials(input: {username, password}) -> ZoomCredentialsStatus
 - getMyZoomCredentialsStatus -> ZoomCredentialsStatus
-- deleteMyZoomCredentials -> Boolean
+- deleteMyZoomCredentials -> Boolean (also deletes the saved profile)
+- getMyChromeProfileStatus -> ChromeProfileStatus
+- deleteMyChromeProfile -> Boolean (credentials kept)
 
 Secret name layout: ${LMA_STACK_NAME}/zoom-credentials/{cognito_sub}
+Profile S3 key:     profiles/{sha256(cognito_sub.lower())}/profile.tar.gz
+                    (must match lma-virtual-participant-stack profile-store.ts)
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -164,6 +175,15 @@ def get_my_zoom_credentials_status(event: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _user_profile_prefix(sub: str) -> str:
+    # Must match lma-virtual-participant-stack/backend/src/profile-store.ts
+    # which writes to profiles/{sha256(sub.lower())}/profile.tar.gz. The
+    # earlier version of this Lambda used the raw sub, leaving every saved
+    # profile orphaned in S3 when the user clicked Remove.
+    user_hash = hashlib.sha256(sub.lower().encode("utf-8")).hexdigest()
+    return f"profiles/{user_hash}/"
+
+
 def _delete_user_profiles(sub: str) -> int:
     """Delete the user's persisted Chromium profile prefix in S3.
 
@@ -171,7 +191,7 @@ def _delete_user_profiles(sub: str) -> int:
     """
     if not VP_PROFILES_BUCKET:
         return 0
-    prefix = f"profiles/{sub}/"
+    prefix = _user_profile_prefix(sub)
     deleted = 0
     paginator = s3.get_paginator("list_objects_v2")
     try:
@@ -184,6 +204,47 @@ def _delete_user_profiles(sub: str) -> int:
     except ClientError as exc:
         logger.warning("Failed to wipe profile prefix %s: %s", prefix, exc)
     return deleted
+
+
+def _describe_user_profile(sub: str) -> Dict[str, Any]:
+    """Return {present, sizeBytes, lastModified} for the user's profile tar."""
+    out: Dict[str, Any] = {"present": False, "sizeBytes": None, "lastModified": None}
+    if not VP_PROFILES_BUCKET:
+        return out
+    prefix = _user_profile_prefix(sub)
+    try:
+        resp = s3.list_objects_v2(Bucket=VP_PROFILES_BUCKET, Prefix=prefix, MaxKeys=10)
+    except ClientError as exc:
+        logger.warning("Failed to head profile prefix %s: %s", prefix, exc)
+        return out
+    contents = resp.get("Contents") or []
+    if not contents:
+        return out
+    out["present"] = True
+    # The store layout is one tar per user; sum sizes anyway in case future
+    # versions split the profile across multiple keys.
+    out["sizeBytes"] = sum(int(o.get("Size") or 0) for o in contents)
+    latest = max(contents, key=lambda o: o.get("LastModified") or datetime.min)
+    lm = latest.get("LastModified")
+    if lm:
+        out["lastModified"] = lm.isoformat() if hasattr(lm, "isoformat") else str(lm)
+    return out
+
+
+def get_my_chrome_profile_status(event: Dict[str, Any]) -> Dict[str, Any]:
+    sub = _get_cognito_sub(event)
+    if not sub:
+        return {"present": False, "sizeBytes": None, "lastModified": None}
+    return _describe_user_profile(sub)
+
+
+def delete_my_chrome_profile(event: Dict[str, Any]) -> bool:
+    sub = _get_cognito_sub(event)
+    if not sub:
+        return False
+    deleted = _delete_user_profiles(sub)
+    logger.info("Wiped %d Chromium profile object(s) for user sub=%s", deleted, sub)
+    return True
 
 
 def delete_my_zoom_credentials(event: Dict[str, Any]) -> bool:
@@ -220,5 +281,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Any:
         return get_my_zoom_credentials_status(event)
     if field_name == "deleteMyZoomCredentials":
         return delete_my_zoom_credentials(event)
+    if field_name == "getMyChromeProfileStatus":
+        return get_my_chrome_profile_status(event)
+    if field_name == "deleteMyChromeProfile":
+        return delete_my_chrome_profile(event)
     logger.error("Unknown field: %s", field_name)
     raise ValueError(f"Unknown operation: {field_name}")

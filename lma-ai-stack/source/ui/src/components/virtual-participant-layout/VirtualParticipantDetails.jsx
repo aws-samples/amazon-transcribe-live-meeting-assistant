@@ -51,6 +51,7 @@ const getVirtualParticipant = `
       vncEndpoint
       vncPort
       vncReady
+      userAcknowledgedFailure
     }
   }
 `;
@@ -74,6 +75,7 @@ const onUpdateVirtualParticipantDetailed = `
       manualActionMessage
       manualActionTimeoutSeconds
       manualActionStartTime
+      userAcknowledgedFailure
     }
   }
 `;
@@ -85,6 +87,12 @@ const endVirtualParticipant = `
       status
       updatedAt
     }
+  }
+`;
+
+const acknowledgeVPFailureMutation = `
+  mutation AcknowledgeVPFailure($virtualParticipantId: ID!) {
+    acknowledgeVPFailure(virtualParticipantId: $virtualParticipantId)
   }
 `;
 
@@ -370,8 +378,31 @@ ConnectionDetails.propTypes = {
   }).isRequired,
 };
 
-const ErrorTroubleshooting = ({ status, errorDetails }) => {
+const ErrorTroubleshooting = ({ status, errorDetails, vpId, vncReady, userAcknowledgedFailure }) => {
+  const [acking, setAcking] = useState(false);
+  const [ackError, setAckError] = useState(null);
+  const [ackedLocal, setAckedLocal] = useState(false);
+
   if (status !== 'FAILED') return null;
+
+  const acknowledged = !!userAcknowledgedFailure || ackedLocal;
+  const showAckButton = !!vpId && !!vncReady && !acknowledged;
+
+  const handleAcknowledge = async () => {
+    setAcking(true);
+    setAckError(null);
+    try {
+      await client.graphql({
+        query: acknowledgeVPFailureMutation,
+        variables: { virtualParticipantId: vpId },
+      });
+      setAckedLocal(true);
+    } catch (e) {
+      setAckError(e?.errors?.[0]?.message || e?.message || 'Failed to acknowledge');
+    } finally {
+      setAcking(false);
+    }
+  };
 
   const getErrorSolution = () => {
     // Use enhanced error details if available
@@ -418,19 +449,42 @@ const ErrorTroubleshooting = ({ status, errorDetails }) => {
 
   return (
     <Container header={<Header variant="h3">Troubleshooting</Header>}>
-      <Alert type="error">
-        <SpaceBetween direction="vertical" size="s">
-          <div>
-            <strong>Virtual Participant failed to join the meeting</strong>
-          </div>
-          {errorDetails && errorDetails.errorMessage && (
+      <SpaceBetween direction="vertical" size="s">
+        <Alert type="error">
+          <SpaceBetween direction="vertical" size="s">
             <div>
-              <strong>Error:</strong> {errorDetails.errorMessage}
+              <strong>Virtual Participant failed to join the meeting</strong>
             </div>
-          )}
-          {getErrorSolution()}
-        </SpaceBetween>
-      </Alert>
+            {errorDetails && errorDetails.errorMessage && (
+              <div>
+                <strong>Error:</strong> {errorDetails.errorMessage}
+              </div>
+            )}
+            {getErrorSolution()}
+          </SpaceBetween>
+        </Alert>
+        {showAckButton && (
+          <Alert type="info">
+            <SpaceBetween direction="vertical" size="s">
+              <div>
+                The live browser above is still available so you can inspect what tripped up the join (e.g. a CAPTCHA,
+                an unexpected dialog, or a stuck page).
+              </div>
+              <div>
+                Click <strong>Got it — close Virtual Participant session</strong> when you&apos;re done. The session
+                will close automatically after 10 minutes.
+              </div>
+              {ackError && <div style={{ color: '#d13212' }}>{ackError}</div>}
+              <Button onClick={handleAcknowledge} loading={acking} variant="primary">
+                Got it — close Virtual Participant session
+              </Button>
+            </SpaceBetween>
+          </Alert>
+        )}
+        {acknowledged && vncReady && (
+          <Alert type="success">Acknowledged. Virtual Participant session is closing.</Alert>
+        )}
+      </SpaceBetween>
     </Container>
   );
 };
@@ -445,10 +499,16 @@ ErrorTroubleshooting.propTypes = {
     lastErrorAt: PropTypes.string,
     errorCount: PropTypes.number,
   }),
+  vpId: PropTypes.string,
+  vncReady: PropTypes.bool,
+  userAcknowledgedFailure: PropTypes.bool,
 };
 
 ErrorTroubleshooting.defaultProps = {
   errorDetails: null,
+  vpId: null,
+  vncReady: false,
+  userAcknowledgedFailure: false,
 };
 
 const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule }) => {
@@ -829,7 +889,10 @@ const VirtualParticipantDetails = () => {
         <ConnectionDetails vpDetails={vpDetails} />
       </Container>
 
-      {/* VNC Live View - Show when VNC is ready and VP is active */}
+      {/* VNC Live View - Show when VNC is ready and VP is active.
+          FAILED is intentionally included: the VP container waits up to
+          10 min after FAILED before tearing down the ALB target so the
+          user can use the live browser to inspect what blocked the join. */}
       {vpDetails.vncReady &&
         vpDetails.vncEndpoint &&
         [
@@ -841,6 +904,7 @@ const VirtualParticipantDetails = () => {
           'JOINED',
           'ACTIVE',
           'MANUAL_ACTION_REQUIRED',
+          'FAILED',
         ].includes(vpDetails.status) && (
           <VNCViewer
             vpId={vpId}
@@ -886,7 +950,13 @@ const VirtualParticipantDetails = () => {
         )}
 
       {/* Error Troubleshooting - Only show for failed status */}
-      <ErrorTroubleshooting status={vpDetails.status} errorDetails={vpDetails.errorDetails} />
+      <ErrorTroubleshooting
+        status={vpDetails.status}
+        errorDetails={vpDetails.errorDetails}
+        vpId={vpId}
+        vncReady={vpDetails.vncReady}
+        userAcknowledgedFailure={vpDetails.userAcknowledgedFailure}
+      />
 
       {/* Basic Status Timeline for basic schema */}
       {!vpDetails.statusHistory && (
