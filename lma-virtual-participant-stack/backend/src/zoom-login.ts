@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page } from 'puppeteer-core';
+import { Page, ElementHandle } from 'puppeteer-core';
 import {
     SecretsManagerClient,
     GetSecretValueCommand,
@@ -60,6 +60,120 @@ const typeWithDelay = async (
 ): Promise<void> => {
     // 50–120ms per character with jitter to look human
     await elem.type(text, { delay: 50 + Math.floor(Math.random() * 70) });
+};
+
+/**
+ * Type into a credential field and verify the value landed. Zoom's sign-in
+ * page is a React SPA: after `domcontentloaded` it changes hash route
+ * (`/signin` → `/signin#/` → `/signin#/login`) and re-mounts the form. If
+ * we type into the pre-hydration `#email` element, the new input replaces
+ * it and we end up submitting an empty form (Zoom flags the field as
+ * `is-errored`, which the AI page-action analyzer then misreads as a
+ * bot-detection block and escalates to MANUAL_ACTION_REQUIRED).
+ *
+ * Strategy: type, read back `.value`, and if it doesn't match, re-locate
+ * via `relocate()` and try once more. After the second attempt we trust
+ * what's there — better to let the downstream AI loop see whatever state
+ * we ended up in than to loop forever.
+ */
+const typeAndVerify = async (
+    page: Page,
+    initialHandle: ElementHandle<Element>,
+    text: string,
+    relocate: () => Promise<ElementHandle<Element> | null>,
+    label: string,
+): Promise<{ ok: boolean; handle: ElementHandle<Element> }> => {
+    const readValue = async (h: ElementHandle<Element>): Promise<string> => {
+        try {
+            return await h.evaluate((el: Element) => (el as HTMLInputElement).value || '');
+        } catch {
+            return '';
+        }
+    };
+    const clearAndType = async (h: ElementHandle<Element>): Promise<void> => {
+        try {
+            await h.evaluate((el: Element) => {
+                const i = el as HTMLInputElement;
+                i.focus();
+                i.value = '';
+            });
+        } catch {
+            // best effort — if we can't clear, type() will append; the
+            // verify step below catches the resulting mismatch.
+        }
+        await typeWithDelay(h, text);
+    };
+
+    let handle = initialHandle;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        await clearAndType(handle);
+        await sleepJitter(150, 200);
+        const got = await readValue(handle);
+        if (got === text) {
+            return { ok: true, handle };
+        }
+        console.warn(
+            `[zoom-login] ${label} value mismatch after attempt ${attempt} ` +
+                `(expected "${text.length}" chars, got "${got.length}" chars) — ` +
+                `${attempt < 2 ? 're-locating and retrying' : 'giving up retry'}`,
+        );
+        if (attempt < 2) {
+            const fresh = await relocate();
+            if (!fresh) {
+                console.warn(`[zoom-login] ${label} could not be re-located for retry`);
+                return { ok: false, handle };
+            }
+            handle = fresh;
+        }
+    }
+    return { ok: false, handle };
+};
+
+/**
+ * Wait for Zoom's React SPA to finish initial route transitions before we
+ * touch the form. Polls until the URL has been stable for `stableMs` AND a
+ * visible email-shaped input is present. Bounded by `timeoutMs`.
+ */
+const waitForSignInFormReady = async (
+    page: Page,
+    opts: { timeoutMs?: number; stableMs?: number } = {},
+): Promise<void> => {
+    const timeoutMs = opts.timeoutMs ?? 8000;
+    const stableMs = opts.stableMs ?? 600;
+    const deadline = Date.now() + timeoutMs;
+    let lastUrl = page.url();
+    let lastChange = Date.now();
+    while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 150));
+        let url = lastUrl;
+        try {
+            url = page.url();
+        } catch {
+            continue;
+        }
+        if (url !== lastUrl) {
+            lastUrl = url;
+            lastChange = Date.now();
+            continue;
+        }
+        if (Date.now() - lastChange < stableMs) continue;
+        const hasInput = await page
+            .evaluate(() => {
+                const sels = ['#email', 'input[type="email"]', 'input[name="email"]'];
+                for (const s of sels) {
+                    const el = document.querySelector(s) as HTMLElement | null;
+                    if (!el) continue;
+                    const r = el.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) return true;
+                }
+                return false;
+            })
+            .catch(() => false);
+        if (hasInput) return;
+    }
+    console.warn(
+        `[zoom-login] waitForSignInFormReady timed out after ${timeoutMs}ms at ${page.url()}; proceeding anyway`,
+    );
 };
 
 /**
@@ -124,21 +238,50 @@ export async function loginToZoom(
     }
     console.log(`[zoom-login] At ${postLoadUrl} — proceeding with email/password flow`);
 
+    // Wait for Zoom's React SPA to finish its initial route transitions
+    // (/signin → /signin#/ → /signin#/login) and re-mount the email form
+    // before we try to interact with it. Without this, we'd grab the
+    // pre-hydration `#email` element, type into it, and have the typed
+    // text discarded when the SPA replaces the form a moment later.
+    await waitForSignInFormReady(page);
+
     // Step 1: email
+    const emailPrimaries = ['#email', 'input[type="email"]', 'input[name="email"]'];
+    const emailIntent = {
+        intent: 'Zoom sign-in page email/username input field',
+        platform: 'ZOOM' as const,
+        step: 'zoom.login.email',
+    };
     const emailRes = await findElementWithFallback(
         page,
-        ['#email', 'input[type="email"]', 'input[name="email"]'],
-        {
-            intent: 'Zoom sign-in page email/username input field',
-            platform: 'ZOOM',
-            step: 'zoom.login.email',
-        },
+        emailPrimaries,
+        emailIntent,
         { maxRetries: 6, delayMs: 500 },
     );
     if (!emailRes) {
         return { outcome: 'manual-required', detail: 'Could not locate Zoom sign-in email field' };
     }
-    await typeWithDelay(emailRes.element, creds.username);
+    const emailVerify = await typeAndVerify(
+        page,
+        emailRes.element,
+        creds.username,
+        async () => {
+            const r = await findElementWithFallback(
+                page,
+                emailPrimaries,
+                emailIntent,
+                { maxRetries: 3, delayMs: 400 },
+            );
+            return r?.element ?? null;
+        },
+        'email',
+    );
+    if (!emailVerify.ok) {
+        return {
+            outcome: 'manual-required',
+            detail: 'Could not reliably type email into Zoom sign-in field (form may be re-mounting).',
+        };
+    }
     await sleepJitter(150, 250);
 
     // After email is submitted, hand control to the AI navigator. It
@@ -380,13 +523,26 @@ async function aiDrivenLoginLoop(
             return { outcome: 'manual-required', detail: 'human did not complete sign-in within timeout' };
         }
         if (action.kind === 'fill_password' && !didFillPassword && action.selector) {
-            const handle = await page.$(action.selector);
+            const passwordSelector = action.selector;
+            const handle = await page.$(passwordSelector);
             if (handle) {
                 try {
                     await handle.evaluate((el: Element) => {
                         (el as HTMLElement).scrollIntoView({ block: 'center' });
                     });
-                    await typeWithDelay(handle as any, creds.password);
+                    const pwVerify = await typeAndVerify(
+                        page,
+                        handle as ElementHandle<Element>,
+                        creds.password,
+                        async () => page.$(passwordSelector),
+                        'password',
+                    );
+                    if (!pwVerify.ok) {
+                        return {
+                            outcome: 'manual-required',
+                            detail: 'Could not reliably type password into Zoom sign-in field (form may be re-mounting).',
+                        };
+                    }
                     didFillPassword = true;
                     await sleepJitter(150, 250);
                     // Submit the form. Prefer the AI's submitSelector; fall
@@ -410,7 +566,7 @@ async function aiDrivenLoginLoop(
                         }
                     }
                     if (!submitted) {
-                        await (handle as any).press('Enter').catch(() => null);
+                        await (pwVerify.handle as any).press('Enter').catch(() => null);
                     }
                     await page
                         .waitForNavigation({ timeout: 15_000, waitUntil: 'domcontentloaded' })
