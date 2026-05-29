@@ -260,11 +260,6 @@ const main = async (): Promise<void> => {
         humanPreset: 'default',
         userDataDir,
         args: getCloakLaunchArgs(fingerprintSeed),
-        // cloakbrowser/puppeteer only forwards options.launchOptions to
-        // puppeteer.launch — top-level protocolTimeout/timeout/defaultViewport
-        // are silently dropped. Default protocolTimeout=180s causes any
-        // long-running CDP call (e.g. our end-of-meeting waitForFunction) to
-        // throw at the 3-minute mark.
         launchOptions: {
             defaultViewport: null,
             protocolTimeout: details.meetingTimeout,
