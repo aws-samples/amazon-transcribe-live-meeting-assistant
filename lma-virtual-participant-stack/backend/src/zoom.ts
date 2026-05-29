@@ -352,24 +352,37 @@ export default class Zoom {
 
         // if they logged in with enterprise they won't need to put in name password etc so skip
         if (enterpriseLogin === false) {
-            // Handle meeting password if provided
+            // Handle meeting password if provided. NB: a non-empty
+            // `meetingPassword` from the invite does NOT guarantee that
+            // Zoom will render `#input-for-pwd` — Personal Meeting Rooms
+            // and meetings whose host disabled the passcode skip it
+            // entirely. Probe for the field with a short primary-only
+            // retry (no AI fallback — `#input-for-pwd` is a stable,
+            // well-known selector; if it's not there, AI just confirms
+            // that and burns ~10s of Bedrock latency). When the field is
+            // absent, log it and proceed; the prejoin Join button click
+            // below submits the form either way.
             if (details.invite.meetingPassword) {
-                console.log('Typing meeting password.');
-                const passwordResult = await findElementWithFallback(
-                    page,
-                    ['#input-for-pwd'],
-                    {
-                        intent: 'Zoom meeting passcode input field',
-                        platform: 'ZOOM',
-                        step: 'zoom.join.password',
-                    },
-                    { maxRetries: 10, delayMs: 500 },
-                );
-                if (!passwordResult) {
-                    console.log('LMA Virtual Participant was unable to join the meeting.');
-                    throw new Error('Meeting not found or invalid meeting ID');
+                const PASSWORD_PROBE_RETRIES = 6;
+                const PASSWORD_PROBE_DELAY_MS = 500;
+                let passwordHandle: ElementHandle<Element> | null = null;
+                for (let attempt = 1; attempt <= PASSWORD_PROBE_RETRIES; attempt++) {
+                    passwordHandle = await page.$('#input-for-pwd');
+                    if (passwordHandle) {
+                        const box = await passwordHandle.boundingBox().catch(() => null);
+                        if (box && box.width > 0 && box.height > 0) break;
+                        passwordHandle = null;
+                    }
+                    if (attempt < PASSWORD_PROBE_RETRIES) {
+                        await new Promise((r) => setTimeout(r, PASSWORD_PROBE_DELAY_MS));
+                    }
                 }
-                await passwordResult.element.type(details.invite.meetingPassword, { delay: 50 + Math.floor(Math.random() * 70) });
+                if (passwordHandle) {
+                    console.log('Typing meeting password.');
+                    await passwordHandle.type(details.invite.meetingPassword, { delay: 50 + Math.floor(Math.random() * 70) });
+                } else {
+                    console.log('Meeting does not require a password — skipping password entry.');
+                }
             }
 
             console.log('Checking audio button state with retry...');
@@ -426,19 +439,14 @@ export default class Zoom {
                 console.log('Warning: Could not find video button in either state after retries.');
             }
 
-            // Look for the prejoin name field and inspect its current value.
-            // Three possible states:
-            //   1. Field present + empty: Zoom's signed-in context didn't
-            //      auto-fill the name (happens on /wc/<id>/join?_x_zm_rtaid=...
-            //      redirects). Fill it ourselves.
-            //   2. Field present + already populated: signed-in account name
-            //      was carried over. Don't type into it (typing appends and
-            //      yields "Bob Strahan-LMALMA (user@…)"). Just click Join.
-            //   3. Field absent: not a prejoin step at all. Click Join /
-            //      press Enter to submit whatever form IS visible.
-            // Skipping name entry without checking led to an empty-name
-            // submission that Zoom silently rejected, leaving the VP stuck
-            // on the prejoin page until waitingTimeout.
+            // Always overwrite the prejoin display name with the LMA
+            // scribe identity (e.g. "LMA (user@example.com)") so it's
+            // unambiguous to other attendees who/why this participant is
+            // present, regardless of whether we're joining as a guest or
+            // signed in (in which case Zoom would otherwise pre-populate
+            // the field with the signed-in account's display name).
+            // Programmatically clear before typing — naive `.type()`
+            // appends, which would yield "Bob Strahan-LMALMA (user@…)".
             const nameResult = await findElementWithFallback(
                 page,
                 ['#input-for-name'],
@@ -447,17 +455,29 @@ export default class Zoom {
                     platform: 'ZOOM',
                     step: 'zoom.join.name',
                 },
-                { maxRetries: signedInToZoom ? 3 : 10, delayMs: 500 },
+                { maxRetries: 6, delayMs: 500 },
             );
             if (nameResult) {
-                const currentValue = await nameResult.element.evaluate(
+                await nameResult.element.evaluate((el: Element) => {
+                    const i = el as HTMLInputElement;
+                    i.focus();
+                    i.value = '';
+                });
+                console.log(`Setting display name to scribe identity ("${details.scribeIdentity}").`);
+                await nameResult.element.type(details.scribeIdentity, { delay: 50 + Math.floor(Math.random() * 70) });
+                const got = await nameResult.element.evaluate(
                     (el: Element) => (el as HTMLInputElement).value || '',
                 );
-                if (currentValue.trim().length === 0) {
-                    console.log('Name field is empty — filling with scribe identity.');
+                if (got !== details.scribeIdentity) {
+                    console.warn(
+                        `Display-name value mismatch (expected "${details.scribeIdentity}", got "${got}") — clearing and re-typing.`,
+                    );
+                    await nameResult.element.evaluate((el: Element) => {
+                        const i = el as HTMLInputElement;
+                        i.focus();
+                        i.value = '';
+                    });
                     await nameResult.element.type(details.scribeIdentity, { delay: 50 + Math.floor(Math.random() * 70) });
-                } else {
-                    console.log(`Name field already populated ("${currentValue}") — leaving as-is.`);
                 }
             } else if (!signedInToZoom) {
                 console.log('LMA Virtual Participant was unable to join the meeting.');
