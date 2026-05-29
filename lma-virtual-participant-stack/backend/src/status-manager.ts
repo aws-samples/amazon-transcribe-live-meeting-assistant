@@ -302,6 +302,29 @@ export class VirtualParticipantStatusManager {
     }
   }
 
+  // True if the user has clicked "Got it" on the FAILED banner. The cleanup
+  // path waits on this so the VNC viewer doesn't grey out the moment we
+  // mark the VP failed — letting the user actually read the error message.
+  async getUserAcknowledgedFailure(): Promise<boolean> {
+    try {
+      const query = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            userAcknowledgedFailure
+          }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(query, {
+        id: this.participantId,
+      });
+      return !!result?.getVirtualParticipant?.userAcknowledgedFailure;
+    } catch (error) {
+      console.error('Error reading userAcknowledgedFailure:', error);
+      return false;
+    }
+  }
+
   // Method to get CallId from VP record
   async getCallId(): Promise<string | null> {
     try {

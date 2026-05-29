@@ -562,6 +562,29 @@ const main = async (): Promise<void> => {
             console.error('Error handling recording cleanup:', error);
         }
 
+        // On the FAILED path, wait for the user to click "Got it" on the
+        // failure banner before tearing down the ALB/VNC mapping. Otherwise
+        // the VNC viewer goes black the instant we set FAILED and the user
+        // never gets to see why (or to use the browser to inspect the page
+        // that tripped us up). Capped at 10 min so a user who's walked away
+        // doesn't pay for an idle Fargate task indefinitely.
+        if (!success && statusManager) {
+            const HARD_CAP_MS = 600_000;
+            const POLL_MS = 3_000;
+            const deadline = Date.now() + HARD_CAP_MS;
+            console.log(`Waiting up to ${HARD_CAP_MS / 1000}s for user to acknowledge failure before tearing down VNC...`);
+            while (Date.now() < deadline) {
+                if (await statusManager.getUserAcknowledgedFailure()) {
+                    console.log('✓ User acknowledged failure — proceeding with tear-down');
+                    break;
+                }
+                await new Promise((r) => setTimeout(r, POLL_MS));
+            }
+            if (Date.now() >= deadline) {
+                console.log('Failure-ack hard cap reached — proceeding with tear-down');
+            }
+        }
+
         // Deregister from ALB target group
         if (statusManager) {
             try {

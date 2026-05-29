@@ -826,9 +826,8 @@ const VirtualParticipantList = () => {
               <FormField
                 label="Zoom account (Optional)"
                 description={
-                  'Stored Zoom credentials let LMA join meetings that block guests and reduce ' +
-                  'bot-detection blocks. Two-factor and CAPTCHA challenges still require manual ' +
-                  'action via the LMA viewer.'
+                  'Stored Zoom credentials let LMA join meetings as authenticated user. Two-factor and ' +
+                  'CAPTCHA challenges still require manual action via the LMA viewer.'
                 }
                 stretch
               >
