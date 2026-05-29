@@ -54,6 +54,39 @@ export async function fetchZoomCredentials(secretName: string): Promise<ZoomCred
 const sleepJitter = (base: number, jitter: number): Promise<void> =>
     new Promise((r) => setTimeout(r, base + Math.random() * jitter));
 
+/**
+ * Race a CDP-touching promise against a wall-clock timeout. Zoom's React SPA
+ * tears down and re-mounts page contexts during sign-in route transitions
+ * (`/signin → /signin#/ → /signin#/login`). Puppeteer's `page.evaluate`,
+ * `handle.evaluate`, and `page.screenshot` all go through CDP and have been
+ * observed to hang for 30+ seconds when the execution context is destroyed
+ * mid-call rather than rejecting promptly. Without this guard, a single
+ * stuck CDP call inside `findElementWithFallback` (which loops with
+ * AI-resolver fallbacks that each issue several evaluates) can wedge the
+ * sign-in flow for minutes. This helper converts the hang into a fast
+ * rejection so the surrounding retry/iteration loop can fire.
+ */
+const withTimeout = async <T>(
+    promise: Promise<T>,
+    ms: number,
+    label: string,
+): Promise<T> => {
+    let to: NodeJS.Timeout | undefined;
+    try {
+        return await Promise.race<T>([
+            promise,
+            new Promise<T>((_, reject) => {
+                to = setTimeout(
+                    () => reject(new Error(`[zoom-login] ${label} timed out after ${ms}ms`)),
+                    ms,
+                );
+            }),
+        ]);
+    } finally {
+        if (to) clearTimeout(to);
+    }
+};
+
 const typeWithDelay = async (
     elem: any,
     text: string,
@@ -85,18 +118,29 @@ const typeAndVerify = async (
 ): Promise<{ ok: boolean; handle: ElementHandle<Element> }> => {
     const readValue = async (h: ElementHandle<Element>): Promise<string> => {
         try {
-            return await h.evaluate((el: Element) => (el as HTMLInputElement).value || '');
+            return await withTimeout(
+                h.evaluate((el: Element) => (el as HTMLInputElement).value || ''),
+                3000,
+                `${label} readValue`,
+            );
         } catch {
+            // Either the evaluate threw (destroyed context) or it timed
+            // out. Either way the caller treats this as "verify failed"
+            // and re-locates + retries.
             return '';
         }
     };
     const clearAndType = async (h: ElementHandle<Element>): Promise<void> => {
         try {
-            await h.evaluate((el: Element) => {
-                const i = el as HTMLInputElement;
-                i.focus();
-                i.value = '';
-            });
+            await withTimeout(
+                h.evaluate((el: Element) => {
+                    const i = el as HTMLInputElement;
+                    i.focus();
+                    i.value = '';
+                }),
+                3000,
+                `${label} clear`,
+            );
         } catch {
             // best effort — if we can't clear, type() will append; the
             // verify step below catches the resulting mismatch.
@@ -157,8 +201,8 @@ const waitForSignInFormReady = async (
             continue;
         }
         if (Date.now() - lastChange < stableMs) continue;
-        const hasInput = await page
-            .evaluate(() => {
+        const hasInput = await withTimeout(
+            page.evaluate(() => {
                 const sels = ['#email', 'input[type="email"]', 'input[name="email"]'];
                 for (const s of sels) {
                     const el = document.querySelector(s) as HTMLElement | null;
@@ -167,8 +211,10 @@ const waitForSignInFormReady = async (
                     if (r.width > 0 && r.height > 0) return true;
                 }
                 return false;
-            })
-            .catch(() => false);
+            }),
+            2000,
+            'waitForSignInFormReady probe',
+        ).catch(() => false);
         if (hasInput) return;
     }
     console.warn(

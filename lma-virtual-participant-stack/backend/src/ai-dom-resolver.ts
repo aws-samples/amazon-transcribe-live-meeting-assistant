@@ -121,6 +121,38 @@ const TTL_DAYS = 30;
 
 const memoryCache = new Map<string, CacheEntry>();
 
+/**
+ * Race a CDP-touching promise against a wall-clock timeout. Puppeteer's
+ * `page.evaluate` / `page.screenshot` / `handle.boundingBox` go through
+ * CDP and have been observed to hang for tens of seconds (default CDP
+ * timeout is 30s) when the target page's V8 execution context is
+ * destroyed mid-call — common during React-SPA route transitions
+ * (Zoom's `/signin → /signin#/ → /signin#/login` re-mount). Without
+ * this guard, a single hung evaluate inside the AI-resolver loop can
+ * stall the surrounding sign-in / join flow for minutes. Convert the
+ * hang into a fast rejection so the outer retry can fire.
+ */
+const withCdpTimeout = async <T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> => {
+  let to: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race<T>([
+      promise,
+      new Promise<T>((_, reject) => {
+        to = setTimeout(
+          () => reject(new Error(`[ai-dom-resolver] ${label} timed out after ${ms}ms`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    if (to) clearTimeout(to);
+  }
+};
+
 let bedrockClient: BedrockRuntimeClient | null = null;
 let ddbClient: DynamoDBClient | null = null;
 
@@ -261,13 +293,18 @@ async function selectorMatches(
   page: Page,
   selector: string,
 ): Promise<ElementHandle<Element> | null> {
+  // Wrap boundingBox in a per-call timeout — the underlying CDP call has
+  // been observed to hang on destroyed execution contexts. See
+  // `withCdpTimeout` for context.
+  const safeBox = (h: ElementHandle<Element>) =>
+    withCdpTimeout(h.boundingBox(), 2000, 'boundingBox').catch(() => null);
   try {
     const handles = await querySelectorAllSafe(page, selector);
     if (handles.length !== 1) {
       // Allow multiple matches if exactly one is visible
       let visibleHandle: ElementHandle<Element> | null = null;
       for (const h of handles) {
-        const box = await h.boundingBox().catch(() => null);
+        const box = await safeBox(h);
         if (box && box.width > 0 && box.height > 0) {
           if (visibleHandle) {
             return null;
@@ -277,7 +314,7 @@ async function selectorMatches(
       }
       return visibleHandle;
     }
-    const box = await handles[0].boundingBox().catch(() => null);
+    const box = await safeBox(handles[0]);
     if (!box || box.width === 0 || box.height === 0) return null;
     return handles[0];
   } catch {
@@ -289,7 +326,8 @@ async function snapshotInteractiveElements(
   page: Page,
   maxElements = 80,
 ): Promise<InteractiveElement[]> {
-  return page.evaluate((max: number) => {
+  return withCdpTimeout(
+    page.evaluate((max: number) => {
     const out: any[] = [];
     const sels = [
       'button',
@@ -343,37 +381,48 @@ async function snapshotInteractiveElements(
       if (out.length >= max) break;
     }
     return out;
-  }, maxElements);
+  }, maxElements),
+    3000,
+    'snapshotInteractiveElements',
+  );
 }
 
 async function snapshotVisibleDialogs(page: Page): Promise<{ html: string }[]> {
-  return page.evaluate(() => {
-    const candidates = Array.from(
-      document.querySelectorAll(
-        '[role="dialog"],[role="alertdialog"],.zm-modal,.zm-modal-legacy,.ReactModal__Content',
-      ),
-    );
-    const out: { html: string }[] = [];
-    for (const el of candidates) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) continue;
-      const html = (el as HTMLElement).outerHTML
-        .replace(/\s+/g, ' ')
-        .slice(0, 4000);
-      out.push({ html });
-    }
-    return out;
-  });
+  return withCdpTimeout(
+    page.evaluate(() => {
+      const candidates = Array.from(
+        document.querySelectorAll(
+          '[role="dialog"],[role="alertdialog"],.zm-modal,.zm-modal-legacy,.ReactModal__Content',
+        ),
+      );
+      const out: { html: string }[] = [];
+      for (const el of candidates) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const html = (el as HTMLElement).outerHTML
+          .replace(/\s+/g, ' ')
+          .slice(0, 4000);
+        out.push({ html });
+      }
+      return out;
+    }),
+    3000,
+    'snapshotVisibleDialogs',
+  );
 }
 
 async function captureScreenshot(page: Page): Promise<string | null> {
   try {
-    const buf = await page.screenshot({
-      type: 'png',
-      fullPage: false,
-      clip: { x: 0, y: 0, width: 1024, height: 768 },
-      encoding: 'base64',
-    });
+    const buf = await withCdpTimeout(
+      page.screenshot({
+        type: 'png',
+        fullPage: false,
+        clip: { x: 0, y: 0, width: 1024, height: 768 },
+        encoding: 'base64',
+      }),
+      5000,
+      'captureScreenshot',
+    );
     return buf as unknown as string;
   } catch {
     return null;
