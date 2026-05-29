@@ -177,18 +177,9 @@ const main = async (): Promise<void> => {
         console.log('✓ Skipping ALB registration (local test mode)');
     }
 
-    // Publish VNC endpoint via AppSync (only after ALB registration and health check)
-    if (statusManager && !isLocalTest) {
-        try {
-            await statusManager.setVncReady();
-            console.log('✓ VNC endpoint published via AppSync');
-        } catch (error) {
-            console.error('Failed to publish VNC endpoint:', error);
-            // Non-critical - continue with meeting join
-        }
-    } else if (isLocalTest) {
-        console.log('✓ Skipping AppSync VNC ready update (local test mode)');
-    }
+    // VNC ready signal is deferred until AFTER fresh-profile warmup so the
+    // user doesn't see warmup navigation in their live view. Fired below
+    // once the browser is ready to navigate to the meeting URL.
 
     // Calculate sleep time if meeting is scheduled for future
     const currentTimestamp = Math.floor(Date.now() / 1000);
@@ -282,6 +273,9 @@ const main = async (): Promise<void> => {
     console.log('✓ Chrome launched with remote debugging on port 9222');
 
     if (isFresh) {
+        if (statusManager) {
+            await statusManager.setWarmingProfile();
+        }
         try {
             console.log('[warmup] Profile is fresh — running 3-phase warmup before joining meeting');
             await warmupNavigation(() => browser.newPage() as any, {
@@ -291,6 +285,19 @@ const main = async (): Promise<void> => {
         } catch (err) {
             console.warn('[warmup] Warmup error (non-fatal, continuing to meeting):', err);
         }
+    }
+
+    // Now that warmup (if any) is done, publish the VNC endpoint so the user's
+    // live view opens on the meeting page rather than warmup navigation.
+    if (statusManager && !isLocalTest) {
+        try {
+            await statusManager.setVncReady();
+            console.log('✓ VNC endpoint published via AppSync');
+        } catch (error) {
+            console.error('Failed to publish VNC endpoint:', error);
+        }
+    } else if (isLocalTest) {
+        console.log('✓ Skipping AppSync VNC ready update (local test mode)');
     }
 
     // Initialize Simli Avatar AFTER browser is launched (background page for avatar rendering)

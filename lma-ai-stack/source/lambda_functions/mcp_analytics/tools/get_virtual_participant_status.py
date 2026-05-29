@@ -132,6 +132,8 @@ def execute(
         summary = "Restoring saved browser cookies / trusted-device markers from S3."
     elif status == "LAUNCHING_BROWSER":
         summary = "Launching Chrome with stealth and platform extensions."
+    elif status == "WARMING_PROFILE":
+        summary = "Warming a new profile with first-launch browsing (one-time, ~15s)."
     elif status == "CONNECTING":
         summary = "Virtual participant is connecting to the meeting."
     elif status == "VNC_READY":
