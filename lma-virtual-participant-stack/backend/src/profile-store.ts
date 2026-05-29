@@ -1,23 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/**
- * Per-user persistent CloakBrowser userDataDir backed by S3 as a single
- * tar.gz blob. One profile per user — all meeting platforms share the same
- * profile dir so cross-platform cookies (e.g. an SSO sign-in to office.com
- * carries to teams.microsoft.com) work without separate warmups.
- *
- * Lifecycle:
- *   1. acquireProfile() — download+extract the tar into the local userDataDir.
- *      First run: no tar in S3 yet; returns an empty dir.
- *   2. persistProfile() — at meeting end, tar+gzip the userDataDir back to S3.
- *      Last-write-wins. We accept this because (a) one user rarely runs two
- *      VPs at once, (b) the tar is small enough that even a clobbered upload
- *      just costs the loser their session cookies — Zoom will challenge them
- *      on the next launch and re-establish state.
- *   3. releaseProfile() — kept for symmetry; currently a no-op.
- *
- * S3 layout:
- *   s3://${VP_PROFILES_BUCKET}/profiles/{sha256(sub)}/profile.tar.gz
- */
+// Per-user CloakBrowser userDataDir backed by S3 as profile.tar.gz.
+// Last-write-wins on concurrent VPs; one profile per user across platforms.
 
 import { spawn } from 'child_process';
 import { createHash } from 'crypto';
@@ -36,8 +19,7 @@ const REGION = process.env.AWS_REGION || 'us-east-1';
 const PROFILES_BUCKET = (process.env.VP_PROFILES_BUCKET || '').trim();
 const PROFILE_ROOT = process.env.VP_PROFILE_ROOT || '/srv/cloakbrowser-profiles';
 const TAR_NAME = 'profile.tar.gz';
-// Must match VPProfilesPolicy in template.yaml — the task IAM role only
-// allows reads/writes under profiles/*.
+// Must match VPProfilesPolicy in template.yaml.
 const S3_PREFIX = 'profiles/';
 
 let s3Client: S3Client | null = null;
@@ -84,11 +66,7 @@ export async function acquireProfile(opts: { cognitoSub: string }): Promise<Prof
     return handle;
 }
 
-/**
- * Tar+gzip the userDataDir and upload to S3, replacing whatever was there.
- * No-op when disabled. Must be called AFTER browser.close() so SQLite/IndexedDB
- * are flushed.
- */
+// Call AFTER browser.close() so SQLite/IndexedDB are flushed.
 export async function persistProfile(handle: ProfileHandle): Promise<void> {
     if (!handle.enabled) return;
     try {
@@ -127,16 +105,11 @@ export async function persistProfile(handle: ProfileHandle): Promise<void> {
     }
 }
 
-export async function releaseProfile(_handle: ProfileHandle): Promise<void> {
-    // No lock to release — last-write-wins. Kept for call-site symmetry.
-}
-
-// -----------------------------------------------------------------------------
-// internals
-// -----------------------------------------------------------------------------
+// Kept for call-site symmetry; no-op since there's no lock.
+export async function releaseProfile(_handle: ProfileHandle): Promise<void> {}
 
 async function downloadAndExtract(s3Key: string, localDir: string): Promise<void> {
-    // HEAD first so a missing tar doesn't log a noisy error from GetObject.
+    // HEAD first so a missing tar doesn't log a noisy GetObject error.
     try {
         await getS3().send(new HeadObjectCommand({ Bucket: PROFILES_BUCKET, Key: s3Key }));
     } catch (err: any) {
@@ -152,9 +125,7 @@ async function downloadAndExtract(s3Key: string, localDir: string): Promise<void
         throw err;
     }
 
-    // Wipe local dir so partial state from a previous tar can't mix with the
-    // newly-extracted one and produce a Frankenstein profile Chromium reads
-    // but Zoom doesn't trust.
+    // Mirror S3 exactly so partial leftover state can't pollute the new profile.
     await wipeDirContents(localDir);
 
     const tmpTar = join(tmpdir(), `vp-profile-load-${process.pid}.tar.gz`);
