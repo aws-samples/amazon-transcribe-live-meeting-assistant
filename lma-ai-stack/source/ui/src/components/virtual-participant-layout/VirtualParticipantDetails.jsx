@@ -160,6 +160,13 @@ const STATUS_CONFIG = {
     type: 'in-progress',
     color: 'blue',
   },
+  WARMING_PROFILE: {
+    message: 'Warming new profile…',
+    description: 'First-launch browsing pass to look like a returning visitor before joining (one-time, ~15s)',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
   CONNECTING: {
     message: 'Connecting to meeting platform…',
     description: 'Establishing connection with meeting platform',
@@ -246,6 +253,7 @@ export const StatusDetails = ({ status, updatedAt, scheduledFor, statusMessage }
     'VNC_READY',
     'HYDRATING_PROFILE',
     'LAUNCHING_BROWSER',
+    'WARMING_PROFILE',
     'CONNECTING',
     'JOINING',
   ].includes(status);
@@ -923,6 +931,7 @@ const VirtualParticipantDetails = () => {
           'REGISTERING_NETWORK',
           'HYDRATING_PROFILE',
           'LAUNCHING_BROWSER',
+          'WARMING_PROFILE',
           'CONNECTING',
           'JOINING',
         ].includes(vpDetails.status) && (

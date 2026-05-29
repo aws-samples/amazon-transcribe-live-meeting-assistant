@@ -419,6 +419,10 @@ export class VirtualParticipantStatusManager {
     return this.updateStatus('HYDRATING_PROFILE');
   }
 
+  async setWarmingProfile(): Promise<boolean> {
+    return this.updateStatus('WARMING_PROFILE');
+  }
+
   async setConnecting(): Promise<boolean> {
     return this.updateStatus('CONNECTING');
   }

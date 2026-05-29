@@ -1150,8 +1150,12 @@ export default class Zoom {
                 })
                 // Swallow Target-closed / timeout when this branch is the
                 // race loser and the page goes away during cleanup —
-                // otherwise it surfaces as an unhandled rejection.
-                .catch((): ExitInfo => ({ reason: 'page-closed', trigger: 'ZOOM_END_DIALOG_ABORTED' }));
+                // otherwise it surfaces as an unhandled rejection. Log the
+                // underlying error so unexpected mid-meeting aborts are diagnosable.
+                .catch((err): ExitInfo => {
+                    console.warn(`[zoom-end-watcher] waitForFunction rejected (page closed=${page.isClosed()}): ${err?.name ?? ''} ${err?.message ?? err}`);
+                    return { reason: 'page-closed', trigger: 'ZOOM_END_DIALOG_ABORTED' };
+                });
 
             exitInfo = await Promise.race([this.endRequested, zoomDialogPromise]);
         } catch (error) {
