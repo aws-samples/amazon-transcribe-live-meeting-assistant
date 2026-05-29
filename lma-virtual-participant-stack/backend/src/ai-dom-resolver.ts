@@ -264,29 +264,37 @@ async function querySelectorAllSafe(
   if (containsMatch) {
     const baseSelector = containsMatch[1].trim() || '*';
     const wantText = containsMatch[3].toLowerCase();
-    const handle = (await page.evaluateHandle(
-      (sel: string, text: string) => {
-        const candidates = Array.from(document.querySelectorAll(sel));
-        for (const el of candidates) {
-          const t = (el.textContent || '').trim().toLowerCase();
-          if (t.includes(text)) {
-            const rect = (el as HTMLElement).getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) return el;
+    const handle = (await withCdpTimeout(
+      page.evaluateHandle(
+        (sel: string, text: string) => {
+          const candidates = Array.from(document.querySelectorAll(sel));
+          for (const el of candidates) {
+            const t = (el.textContent || '').trim().toLowerCase();
+            if (t.includes(text)) {
+              const rect = (el as HTMLElement).getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) return el;
+            }
           }
-        }
-        return null;
-      },
-      baseSelector,
-      wantText,
+          return null;
+        },
+        baseSelector,
+        wantText,
+      ),
+      2000,
+      `evaluateHandle(${selector})`,
     )) as ElementHandle<Element> | null;
-    const isNull = await page.evaluate((h) => h === null, handle as any);
+    const isNull = await withCdpTimeout(
+      page.evaluate((h) => h === null, handle as any),
+      2000,
+      'evaluate(isNull)',
+    );
     if (isNull) {
       await (handle as any).dispose();
       return [];
     }
     return [handle as ElementHandle<Element>];
   }
-  return page.$$(selector);
+  return withCdpTimeout(page.$$(selector), 2000, `page.$$(${selector})`);
 }
 
 async function selectorMatches(

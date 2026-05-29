@@ -91,8 +91,18 @@ const typeWithDelay = async (
     elem: any,
     text: string,
 ): Promise<void> => {
-    // 50–120ms per character with jitter to look human
-    await elem.type(text, { delay: 50 + Math.floor(Math.random() * 70) });
+    // 50–120ms per character with jitter to look human. Wrap in a
+    // generous timeout — `.type()` is a CDP call that can hang
+    // indefinitely if the underlying ElementHandle's execution
+    // context is destroyed mid-typing (Zoom SPA re-mounting the
+    // form). Budget = per-char delay × text.length × 3 + 2s slack.
+    const perChar = 50 + Math.floor(Math.random() * 70);
+    const budget = perChar * Math.max(text.length, 1) * 3 + 2000;
+    await withTimeout(
+        elem.type(text, { delay: perChar }),
+        budget,
+        `type(${text.length} chars)`,
+    );
 };
 
 /**
@@ -289,7 +299,9 @@ export async function loginToZoom(
     // before we try to interact with it. Without this, we'd grab the
     // pre-hydration `#email` element, type into it, and have the typed
     // text discarded when the SPA replaces the form a moment later.
+    console.log('[zoom-login] step=waitForSignInFormReady BEGIN');
     await waitForSignInFormReady(page);
+    console.log(`[zoom-login] step=waitForSignInFormReady END at ${page.url()}`);
 
     // Step 1: email
     const emailPrimaries = ['#email', 'input[type="email"]', 'input[name="email"]'];
@@ -298,15 +310,18 @@ export async function loginToZoom(
         platform: 'ZOOM' as const,
         step: 'zoom.login.email',
     };
+    console.log('[zoom-login] step=findEmail BEGIN');
     const emailRes = await findElementWithFallback(
         page,
         emailPrimaries,
         emailIntent,
         { maxRetries: 6, delayMs: 500 },
     );
+    console.log(`[zoom-login] step=findEmail END (found=${!!emailRes}, source=${emailRes?.source ?? 'none'})`);
     if (!emailRes) {
         return { outcome: 'manual-required', detail: 'Could not locate Zoom sign-in email field' };
     }
+    console.log('[zoom-login] step=typeEmail BEGIN');
     const emailVerify = await typeAndVerify(
         page,
         emailRes.element,
@@ -322,6 +337,7 @@ export async function loginToZoom(
         },
         'email',
     );
+    console.log(`[zoom-login] step=typeEmail END (ok=${emailVerify.ok})`);
     if (!emailVerify.ok) {
         return {
             outcome: 'manual-required',
@@ -348,6 +364,7 @@ export async function loginToZoom(
 
     // First click "Next" to advance from email step. AI handles everything
     // afterwards including potentially filling password.
+    console.log('[zoom-login] step=findNext BEGIN');
     const nextRes = await findElementWithFallback(
         page,
         [
@@ -363,8 +380,13 @@ export async function loginToZoom(
         },
         { maxRetries: 6, delayMs: 500 },
     );
+    console.log(`[zoom-login] step=findNext END (found=${!!nextRes}, source=${nextRes?.source ?? 'none'})`);
     if (nextRes) {
-        await nextRes.element.click();
+        console.log('[zoom-login] step=clickNext BEGIN');
+        await withTimeout(nextRes.element.click(), 5000, 'Next button click').catch((err) => {
+            console.warn(`[zoom-login] Next button click failed/timed out: ${err?.message || err}`);
+        });
+        console.log('[zoom-login] step=clickNext END');
         await sleepJitter(800, 800);
     }
     // If there was no Next button, the page might already be showing the
