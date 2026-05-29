@@ -259,13 +259,17 @@ const main = async (): Promise<void> => {
         humanize: true,
         humanPreset: 'default',
         userDataDir,
-        ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
-        protocolTimeout: details.meetingTimeout,
-        timeout: details.meetingTimeout,
         args: getCloakLaunchArgs(fingerprintSeed),
-        // cloakbrowser/puppeteer drops top-level defaultViewport; nest it.
+        // cloakbrowser/puppeteer only forwards options.launchOptions to
+        // puppeteer.launch — top-level protocolTimeout/timeout/defaultViewport
+        // are silently dropped. Default protocolTimeout=180s causes any
+        // long-running CDP call (e.g. our end-of-meeting waitForFunction) to
+        // throw at the 3-minute mark.
         launchOptions: {
             defaultViewport: null,
+            protocolTimeout: details.meetingTimeout,
+            timeout: details.meetingTimeout,
+            ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
         },
     } as any);
 
@@ -336,7 +340,31 @@ const main = async (): Promise<void> => {
     page.on('framenavigated', (frame) => {
         if (frame === page.mainFrame()) {
             console.log(`[meeting-page] navigated → ${frame.url()}`);
+        } else {
+            console.log(`[meeting-page] subframe navigated → ${frame.url()}`);
         }
+    });
+    // Page-lifecycle diagnostics: surface anything that could cause the dialog
+    // watchdog's waitForFunction to abort with ZOOM_END_DIALOG_ABORTED.
+    page.on('close', () => {
+        console.warn('[page-lifecycle] page CLOSED event fired');
+    });
+    page.on('error', (err) => {
+        console.warn('[page-lifecycle] page ERROR (renderer crashed):', err?.message || err);
+    });
+    page.on('framedetached', (frame) => {
+        const isMain = frame === page.mainFrame();
+        console.log(`[meeting-page] frame detached (mainFrame=${isMain}) url=${frame.url()}`);
+    });
+    browser.on('targetdestroyed', (target) => {
+        try {
+            console.log(`[browser-lifecycle] target destroyed type=${target.type()} url=${target.url()}`);
+        } catch (e) {
+            console.log('[browser-lifecycle] target destroyed (could not read details)');
+        }
+    });
+    browser.on('disconnected', () => {
+        console.warn('[browser-lifecycle] browser DISCONNECTED');
     });
 
     // Initialize MCP command handler AFTER browser is launched and the
