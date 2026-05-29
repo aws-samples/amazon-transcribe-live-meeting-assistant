@@ -2627,6 +2627,344 @@ Resources:
       RetentionInDays: !Ref CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
+  # ----------------------------------------------------------------------
+  # VP Task Reaper
+  # ----------------------------------------------------------------------
+  # When the underlying ECS host (EC2) is terminated externally — by a
+  # deploy / ASG replacement / spot interruption / EC2 health check —
+  # the container is killed without a SIGTERM, so the VP process never
+  # runs its emergencyCleanup handler. The DDB row is left at whatever
+  # status it last wrote (typically JOINING / CONNECTING / etc.) and
+  # the UI shows an indefinite spinner.
+  #
+  # This reaper subscribes to ECS Task State Change events for our
+  # cluster and, when a task transitions to lastStatus=STOPPED while
+  # the matching VP DDB row is in a non-terminal status, flips the row
+  # to FAILED with a descriptive errorMessage. Conditional updates make
+  # this safe to fire alongside the normal happy-path cleanup — if the
+  # VP process already wrote ENDED/COMPLETED/FAILED, the conditional
+  # update is a no-op.
+  VPTaskReaperRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM4
+            reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
+          - id: AwsSolutions-IAM5
+            reason: 'Wildcards scoped by table/stream/log resources; standard CFN least-privilege pattern'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: ReaperPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
+
+  VPTaskReaperFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS'
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; EventBridge retries are sufficient"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; reaches AWS public APIs only"
+    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive table/stream names"
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-VPTaskReaper"
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 60
+      Role: !GetAtt VPTaskReaperRole.Arn
+      Environment:
+        Variables:
+          VP_TABLE_NAME: !Ref VirtualParticipantTableName
+          VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistryTableName
+          KINESIS_STREAM_NAME: !Ref CallDataStreamName
+          CLUSTER_ARN: !GetAtt Cluster.Arn
+          LOG_LEVEL: !Ref LogLevel
+      Code:
+        ZipFile: |
+          # ECS Task State Change reaper. Marks the VP DDB row FAILED
+          # when its task stops while the row is still in a non-terminal
+          # status — covers host EC2 termination, OOM kill, agent loss,
+          # and any other path where the container dies without running
+          # its own SIGTERM cleanup.
+          import json
+          import logging
+          import os
+          from datetime import datetime, timezone
+
+          import boto3
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
+
+          ddb = boto3.client('dynamodb')
+          kinesis = boto3.client('kinesis')
+
+          VP_TABLE = os.environ['VP_TABLE_NAME']
+          REGISTRY_TABLE = os.environ['VP_TASK_REGISTRY_TABLE_NAME']
+          KINESIS_STREAM = os.environ.get('KINESIS_STREAM_NAME', '')
+          CLUSTER_ARN = os.environ['CLUSTER_ARN']
+
+          # Statuses that indicate the VP is still active. If we see a
+          # task stop while the row is in one of these, we know the VP
+          # process didn't get a chance to clean up — flip to FAILED.
+          # FAILED/COMPLETED/ENDED/CANCELLED are terminal: the VP (or
+          # the manage-Lambda) already wrote them, so we leave alone.
+          TERMINAL_STATUSES = {'FAILED', 'COMPLETED', 'ENDED', 'CANCELLED'}
+
+          def _vpid_from_overrides(detail):
+              # ECS Task State Change events contain overrides under
+              # `detail.overrides.containerOverrides[].environment[]`
+              # (Title-cased on the ECS event, lower-cased on the SDK).
+              # Try both shapes.
+              overrides = detail.get('overrides') or detail.get('Overrides') or {}
+              container_overrides = (
+                  overrides.get('containerOverrides')
+                  or overrides.get('ContainerOverrides')
+                  or []
+              )
+              for co in container_overrides:
+                  env = co.get('environment') or co.get('Environment') or []
+                  for kv in env:
+                      name = kv.get('name') or kv.get('Name')
+                      value = kv.get('value') or kv.get('Value')
+                      if name == 'VIRTUAL_PARTICIPANT_ID' and value:
+                          return value
+              return None
+
+          def _vpid_from_registry(task_arn):
+              # Fallback: scan the VPTaskRegistry by taskArn. The registry
+              # is small (one row per active VP, TTL'd) so a scan is fine.
+              try:
+                  paginator = ddb.get_paginator('scan')
+                  for page in paginator.paginate(
+                      TableName=REGISTRY_TABLE,
+                      FilterExpression='taskArn = :ta',
+                      ExpressionAttributeValues={':ta': {'S': task_arn}},
+                      ProjectionExpression='vpId',
+                  ):
+                      for item in page.get('Items', []):
+                          vp_id = item.get('vpId', {}).get('S')
+                          if vp_id:
+                              return vp_id
+              except ClientError as e:
+                  logger.warning(f'Registry scan failed for taskArn={task_arn}: {e}')
+              return None
+
+          def _get_vp_callid(vp_id):
+              try:
+                  resp = ddb.get_item(
+                      TableName=VP_TABLE,
+                      Key={'id': {'S': vp_id}},
+                      ProjectionExpression='CallId',
+                  )
+                  return resp.get('Item', {}).get('CallId', {}).get('S')
+              except ClientError as e:
+                  logger.warning(f'GetItem on VP row failed for vp_id={vp_id}: {e}')
+                  return None
+
+          def _send_end_to_kinesis(call_id):
+              # Best-effort END to close the meeting transcript so the
+              # call_event_processor stops showing it as in-progress.
+              # Mirrors send_end_meeting_event in virtual_participant_manager.
+              if not (KINESIS_STREAM and call_id):
+                  return
+              try:
+                  kinesis.put_record(
+                      StreamName=KINESIS_STREAM,
+                      PartitionKey=call_id,
+                      Data=json.dumps({
+                          'EventType': 'END',
+                          'CallId': call_id,
+                          'CustomerPhoneNumber': 'Virtual Participant',
+                          'SystemPhoneNumber': 'LMA System',
+                          'CreatedAt': datetime.now(timezone.utc).isoformat(),
+                          'AgentId': 'VPTaskReaper',
+                          'AccessToken': '',
+                          'IdToken': '',
+                          'RefreshToken': '',
+                      }).encode('utf-8'),
+                  )
+                  logger.info(f'Sent END Kinesis event for CallId={call_id}')
+              except ClientError as e:
+                  logger.warning(f'Kinesis PutRecord failed for CallId={call_id}: {e}')
+
+          def _delete_registry_entry(vp_id):
+              try:
+                  ddb.delete_item(
+                      TableName=REGISTRY_TABLE,
+                      Key={'vpId': {'S': vp_id}},
+                  )
+              except ClientError as e:
+                  logger.warning(f'Registry delete failed for vp_id={vp_id}: {e}')
+
+          def _mark_failed(vp_id, error_message):
+              # Conditional update: only flip to FAILED if the row is
+              # still in a non-terminal status. This makes us safe to
+              # race against the VP's own emergencyCleanup and against
+              # the manage-Lambda's user-initiated end.
+              now = datetime.now(timezone.utc).isoformat()
+              try:
+                  ddb.update_item(
+                      TableName=VP_TABLE,
+                      Key={'id': {'S': vp_id}},
+                      UpdateExpression=(
+                          'SET #s = :failed, #e = :err, #ea = :now, #endedAt = :now'
+                      ),
+                      ConditionExpression=(
+                          'attribute_exists(id) AND NOT (#s IN '
+                          '(:failed, :completed, :ended, :cancelled))'
+                      ),
+                      ExpressionAttributeNames={
+                          '#s': 'status',
+                          '#e': 'errorMessage',
+                          '#ea': 'updatedAt',
+                          '#endedAt': 'endedAt',
+                      },
+                      ExpressionAttributeValues={
+                          ':failed': {'S': 'FAILED'},
+                          ':completed': {'S': 'COMPLETED'},
+                          ':ended': {'S': 'ENDED'},
+                          ':cancelled': {'S': 'CANCELLED'},
+                          ':err': {'S': error_message[:1000]},
+                          ':now': {'S': now},
+                      },
+                  )
+                  logger.info(
+                      f'VP {vp_id} flipped to FAILED by reaper: {error_message}'
+                  )
+                  return True
+              except ClientError as e:
+                  if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+                      logger.info(
+                          f'VP {vp_id} already in terminal state — reaper no-op'
+                      )
+                      return False
+                  logger.error(f'UpdateItem failed for vp_id={vp_id}: {e}')
+                  raise
+
+          def lambda_handler(event, context):
+              logger.debug(f'Event: {json.dumps(event, default=str)[:2000]}')
+              detail = event.get('detail', {}) or {}
+
+              # Only act on STOPPED transitions for our cluster. The
+              # EventBridge rule already filters on these but defense-
+              # in-depth is cheap and protects against rule changes.
+              if detail.get('lastStatus') != 'STOPPED':
+                  return {'skipped': 'not STOPPED'}
+              if detail.get('clusterArn') != CLUSTER_ARN:
+                  return {'skipped': 'wrong cluster'}
+
+              task_arn = detail.get('taskArn', '')
+              stop_code = detail.get('stopCode', '')
+              stopped_reason = detail.get('stoppedReason', '')
+
+              vp_id = _vpid_from_overrides(detail) or _vpid_from_registry(task_arn)
+              if not vp_id:
+                  logger.info(
+                      f'No vp_id resolved for taskArn={task_arn} '
+                      f'(stopCode={stop_code}, reason={stopped_reason!r}) — skipping'
+                  )
+                  return {'skipped': 'no vp_id'}
+
+              error_message = (
+                  f'Virtual Participant task stopped unexpectedly '
+                  f'(stopCode={stop_code or "unknown"}: '
+                  f'{stopped_reason or "no reason given"}).'
+              )
+
+              flipped = _mark_failed(vp_id, error_message)
+              if flipped:
+                  call_id = _get_vp_callid(vp_id)
+                  _send_end_to_kinesis(call_id)
+                  _delete_registry_entry(vp_id)
+              else:
+                  # Even if the VP row was already terminal, the registry
+                  # entry is now stale — its TTL will eventually clean up,
+                  # but explicit delete avoids a small window of confusion.
+                  _delete_registry_entry(vp_id)
+
+              return {
+                  'vpId': vp_id,
+                  'taskArn': task_arn,
+                  'flipped': flipped,
+              }
+
+  VPTaskReaperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/VPTaskReaper"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  VPTaskReaperRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${LMAStackName}-VPTaskReaper"
+      Description: >-
+        Invokes VPTaskReaper when an ECS task in the VP cluster transitions
+        to STOPPED, so the VP DDB row is flipped to FAILED if the VP
+        process didn't have a chance to update it itself.
+      EventPattern:
+        source:
+          - aws.ecs
+        detail-type:
+          - ECS Task State Change
+        detail:
+          clusterArn:
+            - !GetAtt Cluster.Arn
+          lastStatus:
+            - STOPPED
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt VPTaskReaperFunction.Arn
+          Id: VPTaskReaperFunctionTarget
+
+  VPTaskReaperPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt VPTaskReaperFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt VPTaskReaperRule.Arn
+
 Outputs:
   StepFunctions:
     Description: Step Functions State Machine ARN
