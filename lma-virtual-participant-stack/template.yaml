@@ -1659,7 +1659,7 @@ Resources:
                 Ref: AWS::Region
           Name: "scribe"
       Family: !Sub ${AWS::StackName}VirtualParticipantTaskDef
-      TaskRoleArn: !Ref TaskRole
+      TaskRoleArn: !GetAtt TaskRole.Arn
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       NetworkMode: "awsvpc"
       RequiresCompatibilities: !If
