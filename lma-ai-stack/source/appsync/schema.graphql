@@ -212,6 +212,8 @@ type Mutation @aws_iam {
 	deleteUser(input: DeleteUserInput!): DeleteUserOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	setMyZoomCredentials(input: SetZoomCredentialsInput!): ZoomCredentialsStatus @aws_cognito_user_pools
 	deleteMyZoomCredentials: Boolean @aws_cognito_user_pools
+	deleteMyChromeProfile: Boolean @aws_cognito_user_pools
+	acknowledgeVPFailure(virtualParticipantId: ID!): Boolean @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -248,12 +250,19 @@ type Query @aws_cognito_user_pools
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
 	listUsers: UserList @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools
+	getMyChromeProfileStatus: ChromeProfileStatus @aws_cognito_user_pools
 }
 
 type ZoomCredentialsStatus @aws_cognito_user_pools {
 	present: Boolean!
 	username: String
 	lastUpdatedAt: AWSDateTime
+}
+
+type ChromeProfileStatus @aws_cognito_user_pools {
+	present: Boolean!
+	sizeBytes: Float
+	lastModified: AWSDateTime
 }
 
 input SetZoomCredentialsInput {
@@ -296,6 +305,13 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	manualActionTimeoutSeconds: Int
 	manualActionStartTime: AWSDateTime
 	errorMessage: String
+	# Set to true by acknowledgeVPFailure when the user clicks "Got it" on
+	# the failure banner. The VP container polls this on the FAILED path
+	# and proceeds with ALB/VNC tear-down as soon as it flips (or after a
+	# hard cap). Lets the user actually read the error in the LMA viewer
+	# instead of having the VNC connection drop the moment the failure
+	# is set.
+	userAcknowledgedFailure: Boolean
 }
 
 input CreateVirtualParticipantInput {
@@ -335,6 +351,7 @@ input UpdateVirtualParticipantInput {
 	manualActionTimeoutSeconds: Int
 	manualActionStartTime: AWSDateTime
 	errorMessage: String
+	userAcknowledgedFailure: Boolean
 }
 
 input EndVirtualParticipantInput {

@@ -5233,6 +5233,42 @@ Resources:
         #end
         $util.toJson($ctx.result)
 
+  AcknowledgeVPFailureResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: acknowledgeVPFailure
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      RequestMappingTemplate: |
+        ## Sets userAcknowledgedFailure=true on the VP row so the running
+        ## container can short-circuit its post-FAILED grace-period wait
+        ## and tear down the ALB/VNC mapping immediately.
+        {
+          "version": "2018-05-29",
+          "operation": "UpdateItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.virtualParticipantId)
+          },
+          "update": {
+            "expression": "SET #uack = :uack, #updatedAt = :updatedAt",
+            "expressionNames": {
+              "#uack": "userAcknowledgedFailure",
+              "#updatedAt": "updatedAt"
+            },
+            "expressionValues": {
+              ":uack": $util.dynamodb.toDynamoDBJson(true),
+              ":updatedAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601())
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        true
+
   ListVirtualParticipantsResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -5884,6 +5920,58 @@ Resources:
             "identity": $utils.toJson($context.identity),
             "info": {
               "fieldName": "getMyZoomCredentialsStatus"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  GetMyChromeProfileStatusResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMyChromeProfileStatus
+      DataSourceName: !GetAtt ZoomCredentialsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "getMyChromeProfileStatus"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  DeleteMyChromeProfileResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: deleteMyChromeProfile
+      DataSourceName: !GetAtt ZoomCredentialsManagerDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "deleteMyChromeProfile"
             }
           }
         }
