@@ -184,33 +184,35 @@ const typeAndVerify = async (
 };
 
 /**
- * Wait for Zoom's React SPA to finish initial route transitions before we
- * touch the form. Polls until the URL has been stable for `stableMs` AND a
- * visible email-shaped input is present. Bounded by `timeoutMs`.
+ * Wait until Zoom's sign-in email input is actually present and visible.
+ * Returns true as soon as the field appears, false if we hit `timeoutMs`.
+ *
+ * The timeout is deliberately generous (30s default). The VP container
+ * runs Simli avatar + Nova Sonic + headless Chrome + a fresh-profile
+ * warmup, all on a CPU-constrained t3.medium (2 vCPU). During cold
+ * start the box is badly CPU-starved right when we navigate to Zoom
+ * sign-in, so Zoom's heavyweight React SPA can take 20-30s to hydrate
+ * and render the email field (observed: URL still at `/signin`, not
+ * `/signin#/login`, 8s in; a Strands warmup ping that normally takes
+ * <1s took 14.5s in the same window). This loop returns the instant
+ * the field appears, so there's zero added latency on a fast box — we
+ * only pay the wait when the machine is actually slow.
+ *
+ * We no longer gate on "URL stable for N ms" — that was a proxy for
+ * "SPA done routing", but under CPU starvation the URL can sit
+ * unchanged at `/signin` for the whole window while the bundle is
+ * still parsing. Polling directly for the visible input is the real
+ * signal.
  */
 const waitForSignInFormReady = async (
     page: Page,
-    opts: { timeoutMs?: number; stableMs?: number } = {},
-): Promise<void> => {
-    const timeoutMs = opts.timeoutMs ?? 8000;
-    const stableMs = opts.stableMs ?? 600;
+    opts: { timeoutMs?: number } = {},
+): Promise<boolean> => {
+    const timeoutMs = opts.timeoutMs ?? 30_000;
     const deadline = Date.now() + timeoutMs;
-    let lastUrl = page.url();
-    let lastChange = Date.now();
+    let polls = 0;
     while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 150));
-        let url = lastUrl;
-        try {
-            url = page.url();
-        } catch {
-            continue;
-        }
-        if (url !== lastUrl) {
-            lastUrl = url;
-            lastChange = Date.now();
-            continue;
-        }
-        if (Date.now() - lastChange < stableMs) continue;
+        await new Promise((r) => setTimeout(r, 250));
         const hasInput = await withTimeout(
             page.evaluate(() => {
                 const sels = ['#email', 'input[type="email"]', 'input[name="email"]'];
@@ -222,14 +224,21 @@ const waitForSignInFormReady = async (
                 }
                 return false;
             }),
-            2000,
+            2500,
             'waitForSignInFormReady probe',
         ).catch(() => false);
-        if (hasInput) return;
+        polls += 1;
+        if (hasInput) {
+            console.log(
+                `[zoom-login] sign-in email field ready after ${Date.now() - (deadline - timeoutMs)}ms (${polls} polls)`,
+            );
+            return true;
+        }
     }
     console.warn(
-        `[zoom-login] waitForSignInFormReady timed out after ${timeoutMs}ms at ${page.url()}; proceeding anyway`,
+        `[zoom-login] waitForSignInFormReady timed out after ${timeoutMs}ms at ${page.url()} (${polls} polls); proceeding anyway`,
     );
+    return false;
 };
 
 /**
@@ -294,14 +303,14 @@ export async function loginToZoom(
     }
     console.log(`[zoom-login] At ${postLoadUrl} — proceeding with email/password flow`);
 
-    // Wait for Zoom's React SPA to finish its initial route transitions
-    // (/signin → /signin#/ → /signin#/login) and re-mount the email form
-    // before we try to interact with it. Without this, we'd grab the
-    // pre-hydration `#email` element, type into it, and have the typed
-    // text discarded when the SPA replaces the form a moment later.
+    // Wait for Zoom's React SPA to hydrate and render the email field.
+    // On a CPU-starved cold start this can take 20-30s; the helper
+    // returns the instant the field appears so we add no latency when
+    // the box is fast. If it never shows, the page is genuinely broken
+    // (or blocked) and we escalate to manual.
     console.log('[zoom-login] step=waitForSignInFormReady BEGIN');
-    await waitForSignInFormReady(page);
-    console.log(`[zoom-login] step=waitForSignInFormReady END at ${page.url()}`);
+    const formReady = await waitForSignInFormReady(page);
+    console.log(`[zoom-login] step=waitForSignInFormReady END (ready=${formReady}) at ${page.url()}`);
 
     // Step 1: email
     const emailPrimaries = ['#email', 'input[type="email"]', 'input[name="email"]'];
@@ -310,12 +319,18 @@ export async function loginToZoom(
         platform: 'ZOOM' as const,
         step: 'zoom.login.email',
     };
+    // If waitForSignInFormReady already confirmed the field is present,
+    // a single short primary lookup will hit immediately — no need to
+    // burn the AI fallback (which runs 3 Bedrock round-trips, each
+    // doing a screenshot + DOM snapshot, ~40s total on a slow box).
+    // Only when the field is NOT confirmed do we give findElementWith-
+    // Fallback a longer budget + AI fallback as a last resort.
     console.log('[zoom-login] step=findEmail BEGIN');
     const emailRes = await findElementWithFallback(
         page,
         emailPrimaries,
         emailIntent,
-        { maxRetries: 6, delayMs: 500 },
+        formReady ? { maxRetries: 4, delayMs: 400 } : { maxRetries: 8, delayMs: 750 },
     );
     console.log(`[zoom-login] step=findEmail END (found=${!!emailRes}, source=${emailRes?.source ?? 'none'})`);
     if (!emailRes) {
