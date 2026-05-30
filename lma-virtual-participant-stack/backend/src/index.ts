@@ -1,5 +1,5 @@
-// Playwright wrapper: fewer CDP automation signals than the Puppeteer wrapper
-// (reCAPTCHA Enterprise on Zoom flags the latter). Returns a BrowserContext.
+// Playwright wrapper: more reliable Zoom joins than the Puppeteer wrapper,
+// whose CDP-automation inconsistencies could break the join. Returns a BrowserContext.
 import { launchPersistentContext } from 'cloakbrowser';
 import { promises as fs } from 'fs';
 import Chime from './chime.js';

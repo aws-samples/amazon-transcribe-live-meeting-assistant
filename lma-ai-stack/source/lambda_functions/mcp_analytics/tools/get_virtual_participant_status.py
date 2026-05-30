@@ -131,7 +131,7 @@ def execute(
     elif status == "HYDRATING_PROFILE":
         summary = "Restoring saved browser cookies / trusted-device markers from S3."
     elif status == "LAUNCHING_BROWSER":
-        summary = "Launching Chrome with stealth and platform extensions."
+        summary = "Launching the browser and platform extensions."
     elif status == "WARMING_PROFILE":
         summary = "Warming a new profile with first-launch browsing (one-time, ~15s)."
     elif status == "CONNECTING":

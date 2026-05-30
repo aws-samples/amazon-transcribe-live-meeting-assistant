@@ -148,14 +148,14 @@ const STATUS_CONFIG = {
   HYDRATING_PROFILE: {
     message: 'Restoring browser profile…',
     description:
-      'Downloading saved cookies / trusted-device markers from S3 (skips Zoom bot-detection on repeat joins)',
+      'Downloading saved cookies / trusted-device markers from S3 (signs in cleanly on repeat joins)',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
   },
   LAUNCHING_BROWSER: {
     message: 'Launching browser…',
-    description: 'Starting Chrome with stealth plugin and platform extensions',
+    description: 'Starting the browser and platform extensions',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',

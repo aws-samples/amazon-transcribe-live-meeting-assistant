@@ -88,7 +88,7 @@ The VP stack also creates these infrastructure resources used by the auto-scalin
 - **`DomSelectorCache`** DynamoDB table — caches AI-discovered selectors across all VP tasks (30-day TTL on `lastUsedAt`). KMS-encrypted, PAY_PER_REQUEST.
 - **`VPProfilesBucket`** S3 bucket — stores per-user persistent Chromium profiles (cookies, "trusted device" markers) keyed by Cognito sub. KMS-encrypted, public access blocked, versioned.
 
-None of these requires user configuration. The AI fallback resolver model is configured via the task-definition env var `BEDROCK_DOM_RESOLVER_MODEL_ID` (default `us.anthropic.claude-haiku-4-5-20251001-v1:0`); set to empty string in the task definition to disable the fallback. See [Virtual Participant → Auto-Scaling](virtual-participant.md#auto-scaling) and [Zoom Sign-in & Bot-Detection Hardening](zoom-credentials-and-bot-detection.md) for details.
+None of these requires user configuration. The AI fallback resolver model is configured via the task-definition env var `BEDROCK_DOM_RESOLVER_MODEL_ID` (default `us.anthropic.claude-haiku-4-5-20251001-v1:0`); set to empty string in the task definition to disable the fallback. See [Virtual Participant → Auto-Scaling](virtual-participant.md#auto-scaling) and [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md) for details.
 
 ## Voice Assistant
 

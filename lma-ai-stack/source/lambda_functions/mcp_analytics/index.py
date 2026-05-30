@@ -275,8 +275,8 @@ MCP_TOOLS = [
         "description": (
             "Start a meeting immediately with a virtual participant. "
             "When the user has stored Zoom credentials in LMA, the VP will "
-            "sign in to Zoom with them by default to avoid bot-detection "
-            "blocks; pass useStoredZoomCredentials=false to force a guest "
+            "sign in to Zoom with them by default for a more reliable "
+            "join; pass useStoredZoomCredentials=false to force a guest "
             "join. Returns immediately with the virtualParticipantId; the "
             "VP may take up to 60 seconds to fully join. Use "
             "get_virtual_participant_status to poll progress, especially to "

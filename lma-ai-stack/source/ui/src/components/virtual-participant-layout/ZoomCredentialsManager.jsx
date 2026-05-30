@@ -140,8 +140,8 @@ const ZoomCredentialsManager = ({ onChange }) => {
       setEditVisible(false);
       setInfo(
         'Saved. Tip — sign in to Zoom on your laptop with this account at least once before ' +
-          'relying on LMA. Brand-new accounts that only ever sign in from cloud IPs can still ' +
-          "trigger Zoom's bot detection.",
+          'relying on LMA. A brand-new account that only ever signs in from cloud IPs is more ' +
+          'likely to hit a Zoom verification step.',
       );
     } catch (e) {
       setError(e?.errors?.[0]?.message || e?.message || 'Failed to save credentials');

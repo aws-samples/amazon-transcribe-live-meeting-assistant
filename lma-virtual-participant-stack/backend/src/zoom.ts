@@ -102,7 +102,7 @@ export default class Zoom {
     // The AI-driven dialog watchdog logic is shared across all platform
     // handlers and lives in dialog-watchdog.ts. This thin wrapper preserves
     // the per-instance call signature and lets us also start the watchdog
-    // before the join completes (so bot-detection / consent dialogs that
+    // before the join completes (so verification / consent dialogs that
     // block the prejoin/waiting-room are caught and escalated to MANUAL).
     private startUnknownDialogWatchdog(page: Page): void {
         startDialogWatchdog(page, { platform: 'ZOOM' });
@@ -163,9 +163,9 @@ export default class Zoom {
         // Optional: sign in to Zoom first using user-provided credentials.
         // When the user has stored Zoom credentials in LMA Settings, the
         // launching state machine plumbs the secret name into this env var.
-        // A signed-in session avoids many bot-detection blocks ("We detected
-        // you may be a bot. ... sign in to join the meeting") and lets the
-        // VP join meetings that disallow guests.
+        // A signed-in session joins far more reliably (the "We detected
+        // you may be a bot. ... sign in to join the meeting" guest block
+        // becomes rare) and lets the VP join meetings that disallow guests.
         const zoomCredentialsSecretName = (process.env.ZOOM_CREDENTIALS_SECRET_NAME || '').trim();
         let signedInToZoom = false;
         if (zoomCredentialsSecretName) {
@@ -183,9 +183,9 @@ export default class Zoom {
                     // manual-required: user must finish sign-in (CAPTCHA, 2FA,
                     // SSO, or — when the resolver flat-out couldn't find the
                     // form — sign in by hand). Escalate to the UI so we don't
-                    // silently degrade to guest join (which would trip
-                    // bot-detection in many meetings, since the user
-                    // explicitly opted into credentialled login).
+                    // silently degrade to guest join (which joins far less
+                    // reliably, and the user explicitly opted into
+                    // credentialled login).
                     console.warn(`[zoom] Sign-in needs manual action: ${loginResult.detail || ''} — escalating to user via VNC`);
                     if (details.invite.virtualParticipantId) {
                         const { createStatusManager } = await import('./status-manager.js');
@@ -239,16 +239,16 @@ export default class Zoom {
                             // the user see what happened. Mark as FAILED with
                             // a clear errorMessage so the UI / MCP poller
                             // surfaces the reason instead of silently joining
-                            // as guest (which trips bot detection).
+                            // as guest (which joins far less reliably).
                             console.warn('[zoom] User did not complete sign-in within 5 min — failing rather than joining as guest');
                             await statusManager.setFailed(
                                 'Zoom sign-in not completed in time. Open the LMA viewer next time the VP starts and complete the sign-in there. Alternatively, sign in to Zoom on your laptop with this account at least once before launching LMA so the trusted-device cookie is established.',
                             );
                         }
                         if (!signInOK) {
-                            // Hard-stop: avoid the bot-detection dialog by
-                            // not navigating to the meeting URL at all.
-                            throw new Error('Zoom sign-in not completed; aborting join to avoid bot detection');
+                            // Hard-stop: don't navigate to the meeting URL at
+                            // all — a guest join here would be unreliable.
+                            throw new Error('Zoom sign-in not completed; aborting join');
                         }
                     }
                 }
@@ -263,12 +263,12 @@ export default class Zoom {
                     // the underlying reason already on it.
                     throw err;
                 }
-                // Any other unexpected error during sign-in (e.g. Puppeteer
+                // Any other unexpected error during sign-in (e.g.
                 // 'Execution context was destroyed' from a navigation racing
-                // a page.evaluate) used to fall back to guest, which then
-                // tripped Zoom's bot detection. The user explicitly opted
-                // into stored-credential login, so guest-fallback violates
-                // their intent. Mark FAILED and abort instead.
+                // a page.evaluate) used to fall back to guest, which joins
+                // far less reliably. The user explicitly opted into
+                // stored-credential login, so guest-fallback violates their
+                // intent. Mark FAILED and abort instead.
                 console.error('[zoom] Sign-in attempt threw unexpectedly — failing rather than joining as guest:', err);
                 if (details.invite.virtualParticipantId) {
                     const { createStatusManager } = await import('./status-manager.js');
@@ -513,7 +513,7 @@ export default class Zoom {
         // call so we can dynamically extend the timeout when the watchdog
         // has escalated to MANUAL_ACTION_REQUIRED. Otherwise the 5-min
         // waitingTimeout fires while the human is still trying to clear
-        // the bot-detection / captcha / sign-in challenge in VNC, and the
+        // the verification / sign-in challenge in VNC, and the
         // VP exits before they finish.
         const POLL_INTERVAL_MS = 1500;
         const baseDeadline = Date.now() + details.waitingTimeout;
@@ -680,8 +680,8 @@ export default class Zoom {
         console.log('Popup handler active, proceeding to open chat.');
 
         // (Note: the unknown-dialog watchdog is already running — started
-        // before the waiting-room poll above so it can catch bot-detection
-        // dialogs that appear on the prejoin page. It keeps running for
+        // before the waiting-room poll above so it can catch verification /
+        // blocking dialogs that appear on the prejoin page. It keeps running for
         // the rest of the meeting to catch consent/recording-notice/etc.
         // dialogs that may appear after the join.)
 
