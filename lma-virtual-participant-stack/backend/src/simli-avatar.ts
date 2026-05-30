@@ -59,6 +59,34 @@ export class SimliAvatar {
   private videoWsPort: number = 0;
   private latestFrame: Buffer | null = null;
 
+  // Video pipeline cost knobs. The avatar feed runs four serial per-frame
+  // costs on the 2-vCPU host — producer JPEG encode, relay forward, consumer
+  // JPEG decode, and Zoom's WebRTC re-encode of the captureStream — all
+  // scaling with fps × pixels. At the old 20fps producer / 30fps capture /
+  // native (~512²) / q0.6 the task pegged at ~98% CPU post-join, which froze
+  // the avatar and starved the meeting UI. These defaults cut that load and
+  // are env-overridable so they can be tuned without a code change.
+  //   SIMLI_VIDEO_FPS         producer capture+encode rate   (default 12)
+  //   SIMLI_CAPTURE_FPS       canvas→WebRTC captureStream fps (default 12)
+  //   SIMLI_VIDEO_MAX_DIM     max frame dimension in px       (default 384)
+  //   SIMLI_VIDEO_JPEG_QUALITY  0..1 JPEG quality             (default 0.5)
+  private videoFps: number = SimliAvatar.envInt('SIMLI_VIDEO_FPS', 12, 1, 30);
+  private captureFps: number = SimliAvatar.envInt('SIMLI_CAPTURE_FPS', 12, 1, 30);
+  private videoMaxDim: number = SimliAvatar.envInt('SIMLI_VIDEO_MAX_DIM', 384, 128, 1280);
+  private videoJpegQuality: number = SimliAvatar.envFloat('SIMLI_VIDEO_JPEG_QUALITY', 0.5, 0.2, 1.0);
+
+  private static envInt(name: string, def: number, min: number, max: number): number {
+    const v = parseInt(process.env[name] || '', 10);
+    if (Number.isNaN(v)) return def;
+    return Math.min(max, Math.max(min, v));
+  }
+
+  private static envFloat(name: string, def: number, min: number, max: number): number {
+    const v = parseFloat(process.env[name] || '');
+    if (Number.isNaN(v)) return def;
+    return Math.min(max, Math.max(min, v));
+  }
+
   constructor(config: SimliAvatarConfig) {
     this.apiKey = config.apiKey || '';
     this.faceId = config.faceId || '';
@@ -73,6 +101,10 @@ export class SimliAvatar {
       console.log(`  Transport mode: ${this.transportMode}`);
       console.log(`  Max session length: ${this.maxSessionLength}s`);
       console.log(`  Max idle time: ${this.maxIdleTime}s`);
+      console.log(
+        `  Video: ${this.videoFps}fps producer / ${this.captureFps}fps capture / ` +
+          `${this.videoMaxDim}px max / JPEG q${this.videoJpegQuality}`,
+      );
     } else {
       console.log('Simli Avatar disabled - no API key or Face ID provided');
     }
@@ -337,7 +369,8 @@ export class SimliAvatar {
       // Simli page → Node video frame push: draw the avatar video to a canvas
       // and stream JPEG frames up the video WS. Mirror of the audio bridge.
       if (this.videoWsPort > 0) {
-        await this.simliPage.evaluate((port: number) => {
+        await this.simliPage.evaluate(
+          ({ port, fps, maxDim, quality }: { port: number; fps: number; maxDim: number; quality: number }) => {
           const video = document.getElementById('simli-video') as HTMLVideoElement;
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
@@ -349,30 +382,39 @@ export class SimliAvatar {
           const ws = new WebSocket(`ws://127.0.0.1:${port}`);
           ws.binaryType = 'arraybuffer';
           let pushing = false;
+          let inFlight = false; // skip a tick if the previous encode/send hasn't finished
           ws.onopen = () => {
             console.log('[Simli-VideoWS] Connected to video relay');
             // @ts-ignore
             window.__simliVideoWs = ws;
             pushing = true;
-            // ~20 fps is plenty for a talking-head avatar and keeps the JPEG
-            // encode + WS send cost low.
+            const intervalMs = Math.round(1000 / fps);
+            // Downscale to maxDim (longest side) before JPEG-encoding: the
+            // dominant per-frame cost scales with pixel count, so a 512→384
+            // shrink is ~0.56× the work, and lower fps multiplies the saving.
             setInterval(() => {
               if (!pushing || ws.readyState !== 1) return;
               if (video.readyState < 2) return;
-              canvas.width = video.videoWidth || 512;
-              canvas.height = video.videoHeight || 512;
+              if (inFlight) return; // don't queue encodes faster than they drain
+              const vw = video.videoWidth || 512;
+              const vh = video.videoHeight || 512;
+              const scale = Math.min(1, maxDim / Math.max(vw, vh));
+              canvas.width = Math.max(1, Math.round(vw * scale));
+              canvas.height = Math.max(1, Math.round(vh * scale));
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              inFlight = true;
               canvas.toBlob(
                 (blob) => {
-                  if (!blob || ws.readyState !== 1) return;
+                  if (!blob || ws.readyState !== 1) { inFlight = false; return; }
                   blob.arrayBuffer().then((buf) => {
                     try { ws.send(buf); } catch (e) { /* ignore */ }
-                  });
+                    inFlight = false;
+                  }).catch(() => { inFlight = false; });
                 },
                 'image/jpeg',
-                0.6,
+                quality,
               );
-            }, 50);
+            }, intervalMs);
           };
           ws.onclose = () => {
             pushing = false;
@@ -382,7 +424,9 @@ export class SimliAvatar {
           };
           // @ts-ignore
           ws.onerror = () => console.error('[Simli-VideoWS] Video relay error');
-        }, this.videoWsPort);
+          },
+          { port: this.videoWsPort, fps: this.videoFps, maxDim: this.videoMaxDim, quality: this.videoJpegQuality },
+        );
         console.log('✓ Simli page connected to WebSocket video relay');
       }
 
@@ -406,7 +450,7 @@ export class SimliAvatar {
     try {
       console.log('Injecting getUserMedia override for Simli avatar...');
 
-      await meetingPage.addInitScript((videoWsPort: number) => {
+      await meetingPage.addInitScript(({ videoWsPort, captureFps }: { videoWsPort: number; captureFps: number }) => {
         // NOTE: this runs in EVERY frame (main doc + Zoom's about:blank /
         // reCAPTCHA iframes). Zoom captures the camera from a subframe, so the
         // override must be installed everywhere — but the relay connection and
@@ -508,9 +552,11 @@ export class SimliAvatar {
         // A fresh captureStream off the same canvas is independent — stopping
         // one track never affects the canvas or any other handed-out track.
         const mintVideoTrack = (): MediaStreamTrack | undefined => {
-          // 30fps captureStream off the avatar canvas. The canvas updates at
-          // the relay rate (~20fps); captureStream resamples to steady output.
-          const freshStream = avatarCanvas!.captureStream(30);
+          // captureStream at captureFps off the avatar canvas. This sets the
+          // rate Zoom's WebRTC encoder runs at — the single biggest video CPU
+          // cost — so keep it at/below the producer fps (no point capturing
+          // faster than the canvas updates).
+          const freshStream = avatarCanvas!.captureStream(captureFps);
           // @ts-ignore
           window.__simliCanvasStream = freshStream;
           return freshStream.getVideoTracks()[0];
@@ -598,7 +644,7 @@ export class SimliAvatar {
         // @ts-ignore
         window.__simliOverrideInstalled = true;
         console.log('[LMA-Simli] getUserMedia + enumerateDevices + permissions overrides installed');
-      }, this.videoWsPort);
+      }, { videoWsPort: this.videoWsPort, captureFps: this.captureFps });
 
       console.log('✓ getUserMedia override injected into meeting page');
     } catch (error) {
