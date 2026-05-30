@@ -2679,6 +2679,26 @@ Resources:
                   - kinesis:PutRecord
                 Resource:
                   - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
+              # The VirtualParticipant + VPTaskRegistry tables and the
+              # CallData Kinesis stream are encrypted with the customer-managed
+              # KMS key. Without these grants every UpdateItem/PutRecord the
+              # reaper attempts fails with an AccessDeniedException (KMS key
+              # access denied), so a row never flips to FAILED and the UI
+              # sticks at JOINING/WAITING_FOR_CAPACITY — the exact failure this
+              # reaper exists to prevent. Scoped by ViaService like the other
+              # roles in this stack.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                      - !Sub "kinesis.${AWS::Region}.amazonaws.com"
 
   VPTaskReaperFunction:
     Type: AWS::Lambda::Function
