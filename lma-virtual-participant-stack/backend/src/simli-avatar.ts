@@ -540,7 +540,10 @@ export class SimliAvatar {
       // Close any prior bridge PC before re-creating.
       // @ts-ignore
       if (window.__simliPC) { try { window.__simliPC.close(); } catch (e) { /* ignore */ } }
-      const pc = new RTCPeerConnection();
+      // No iceServers: this is same-browser loopback — host candidates only,
+      // no STUN/TURN. Pairing relies on local-IP candidates being exposed
+      // (see --force-webrtc-ip-handling-policy / disable mDNS in launch args).
+      const pc = new RTCPeerConnection({ iceServers: [] });
       // @ts-ignore
       window.__simliPC = pc;
       const track = sourceStream.getVideoTracks()[0];
@@ -563,7 +566,7 @@ export class SimliAvatar {
       const offer = JSON.parse(offerStr);
       // @ts-ignore
       if (window.__simliReceiverPC) { try { window.__simliReceiverPC.close(); } catch (e) { /* ignore */ } }
-      const pc = new RTCPeerConnection();
+      const pc = new RTCPeerConnection({ iceServers: [] });
       // @ts-ignore
       window.__simliReceiverPC = pc;
       pc.ontrack = (event: RTCTrackEvent) => {

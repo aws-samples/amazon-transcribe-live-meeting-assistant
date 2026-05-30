@@ -55,8 +55,18 @@ const getCloakLaunchArgs = (fingerprintSeed: number): string[] => [
     '--ignore-gpu-blocklist',
     '--disable-infobars',
     '--test-type',
+    // WebRTC loopback enablement for the Simli avatar bridge. The avatar's
+    // video reaches the meeting page over a same-browser loopback
+    // RTCPeerConnection. Headless Chromium (and cloakbrowser's WebRTC
+    // fingerprint patch) default to hiding local IPs behind mDNS .local
+    // hostnames, which don't resolve inside the container — so ICE can never
+    // pair the two loopback peers (symptom: track arrives live but iceState
+    // stays "new"). These flags expose real host candidates so loopback ICE
+    // completes. WebRtcHideLocalIpsWithMdns is merged into the password/
+    // autofill --disable-features list below.
+    '--force-webrtc-ip-handling-policy=default',
     // Suppress password/autofill bubbles that overlay meeting UI buttons.
-    '--disable-features=PasswordManagerOnboarding,AutofillEnableAccountWalletStorage,PasswordImport,PasswordsAccountStorage,Translate',
+    '--disable-features=PasswordManagerOnboarding,AutofillEnableAccountWalletStorage,PasswordImport,PasswordsAccountStorage,Translate,WebRtcHideLocalIpsWithMdns',
     '--password-store=basic',
     '--use-mock-keychain',
     '--no-first-run',
@@ -523,6 +533,15 @@ const main = async (): Promise<void> => {
             } catch (error) {
                 console.error('Failed to initialize Simli Avatar (non-critical):', error);
                 return; // No avatar — meeting proceeds without it.
+            }
+            // Initializing the Simli avatar opened a second tab (local.simli),
+            // which becomes the foreground tab and hides the meeting in the VNC
+            // viewer. Bring the meeting page back to the front so the human
+            // watching VNC sees the meeting by default.
+            try {
+                await page.bringToFront();
+            } catch (e) {
+                /* non-critical */
             }
             if (!simliAvatar.isConnected()) return;
             try {
