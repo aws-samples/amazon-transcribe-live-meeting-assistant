@@ -4,9 +4,17 @@
 #
 # Builds the VP backend Docker image locally and pushes it straight to the
 # stack's existing ECR repo as :latest, skipping the full CloudFormation
-# update + CodeBuild pipeline (~10-40 min) that `lma deploy` runs. The next
-# VP task you launch picks up the new image because the ECS task definition
-# references the :latest tag.
+# update + CodeBuild pipeline (~10-40 min) that `lma deploy` runs.
+#
+# IMPORTANT — why we recycle the EC2 host by default:
+#   The VP hosts run with ECS_IMAGE_PULL_BEHAVIOR=prefer-cached (see the
+#   host userdata in template.yaml). They pre-pull :latest ONCE at boot and
+#   every task afterwards reuses that cached image. So pushing a new :latest
+#   to ECR is NOT enough — a new task on an already-running host keeps
+#   running the stale cached image (silently: same tag, older digest). To
+#   actually deliver new code we terminate the host so the ASG launches a
+#   fresh one that pre-pulls the new :latest. Set RECYCLE_HOST=0 to skip
+#   (e.g. you know the host is fresh, or you're on FARGATE).
 #
 # USE THIS FOR: code-only changes under lma-virtual-participant-stack/backend
 #               (zoom-login.ts, ai-dom-resolver.ts, zoom.ts, etc.).
@@ -22,16 +30,17 @@
 #
 # Env:
 #   AWS_PROFILE   Honored as-is. Defaults to "default" per repo convention.
-#   FORCE_FRESH   If "1", terminates the VP cluster's EC2 host(s) after push
-#                 so the next launch pulls the new image on a clean instance.
-#                 Off by default — a fresh task already pulls :latest, and
-#                 EC2 churn costs ~60-90s of capacity-provider scale-up.
+#   RECYCLE_HOST  Default "1": after push, terminate the VP cluster's EC2
+#                 host(s) so the ASG launches a fresh host that pre-pulls the
+#                 new :latest. Set "0" to skip (FARGATE, or host known fresh).
+#                 NOTE: this will kill any in-progress VP task on that host —
+#                 don't run mid-meeting.
 #
 # Caveats:
 #   - Skips SOCI index generation, so cold-start lazy-loading isn't updated
 #     (a few seconds slower first pull; not a correctness issue).
-#   - A task already mid-meeting keeps the old code. End it and start a fresh
-#     VP to test new code.
+#   - Recycling adds ~60-90s (instance launch + ECS register + image pull)
+#     before the next VP can start.
 #
 set -euo pipefail
 
@@ -92,12 +101,18 @@ log "Pushing $ECR_URI:latest ..."
 docker push "$ECR_URI:latest"
 
 # ----------------------------------------------------------------------
-# 4. Optionally force a fresh EC2 host so the next launch pulls clean.
+# 4. Recycle the EC2 host(s) so the new :latest is actually pulled.
+#    Hosts run ECS_IMAGE_PULL_BEHAVIOR=prefer-cached, so a new task on an
+#    existing host would otherwise keep the stale cached image. ON by
+#    default; RECYCLE_HOST=0 to skip.
 # ----------------------------------------------------------------------
-if [ "${FORCE_FRESH:-0}" = "1" ] && [ -n "$CLUSTER_ARN" ] && [ "$CLUSTER_ARN" != "None" ]; then
-  log "FORCE_FRESH=1 — terminating VP cluster EC2 host(s) to force a clean pull..."
+if [ "${RECYCLE_HOST:-1}" = "1" ] && [ -n "$CLUSTER_ARN" ] && [ "$CLUSTER_ARN" != "None" ]; then
+  log "Recycling VP cluster EC2 host(s) so the new image is pulled (hosts are prefer-cached)..."
   CIS=$(aws ecs list-container-instances --cluster "$CLUSTER_ARN" --region "$REGION" \
         --query 'containerInstanceArns' --output text)
+  if [ -z "$CIS" ] || [ "$CIS" = "None" ]; then
+    log "  no container instances registered — the next VP launch boots a fresh host that pulls :latest."
+  fi
   for CI in $CIS; do
     [ -n "$CI" ] && [ "$CI" != "None" ] || continue
     EC2_ID=$(aws ecs describe-container-instances --cluster "$CLUSTER_ARN" \
@@ -116,7 +131,11 @@ if [ "${FORCE_FRESH:-0}" = "1" ] && [ -n "$CLUSTER_ARN" ] && [ "$CLUSTER_ARN" !=
       aws ec2 terminate-instances --instance-ids "$EC2_ID" --region "$REGION" >/dev/null
     fi
   done
+  log "Host recycle requested — wait ~60-90s for the fresh host to register before launching a VP."
 fi
 
-log "Done. Launch a new Virtual Participant to run the updated image."
-[ "${FORCE_FRESH:-0}" = "1" ] || log "(A freshly launched task pulls :latest automatically. Set FORCE_FRESH=1 to recycle the EC2 host instead.)"
+if [ "${RECYCLE_HOST:-1}" = "1" ]; then
+  log "Done. Wait for the fresh host, then launch a new Virtual Participant."
+else
+  log "Done (RECYCLE_HOST=0). NOTE: existing prefer-cached hosts will keep the OLD image; only a freshly-booted host pulls the new :latest."
+fi
