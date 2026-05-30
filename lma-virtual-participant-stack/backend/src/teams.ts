@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page } from 'puppeteer-core';
+import { Page } from 'playwright-core';
 
 import { details, matchesEndCommand, exitMessagesFor, ExitInfo } from "./details.js";
 import { transcriptionService } from "./scribe.js";
@@ -163,13 +163,13 @@ export default class Teams {
                 
                 // Wait for CAPTCHA to be solved (join button to disappear or chat to appear)
                 await Promise.race([
-                    page.waitForSelector('[data-tid="prejoin-join-button"]', { 
-                        hidden: true, 
+                    page.waitForSelector('[data-tid="prejoin-join-button"]', {
+                        state: 'hidden',
                         timeout: 120000 // 2 minutes for manual CAPTCHA solving
                     }),
-                    page.waitForSelector('#chat-button', { 
+                    page.waitForSelector('#chat-button', {
                         timeout: 120000,
-                        visible: true 
+                        state: 'visible'
                     })
                 ]);
                 
@@ -190,7 +190,7 @@ export default class Teams {
         try {
             const chatPanelElement = await page.waitForSelector("#chat-button", {
                 timeout: details.waitingTimeout,
-                visible: true,
+                state: 'visible',
             });
             await chatPanelElement?.click();
         } catch {
@@ -467,13 +467,13 @@ export default class Teams {
             // to a structured ExitInfo so the orchestrator can persist and
             // log a single canonical reason.
             const hangupHidden: Promise<ExitInfo> = page
-                .waitForSelector("#hangup-button", { hidden: true, timeout: details.meetingTimeout })
+                .waitForSelector("#hangup-button", { state: 'hidden', timeout: details.meetingTimeout })
                 .then((): ExitInfo => ({ reason: 'host-ended', trigger: 'HANGUP_BUTTON_HIDDEN' }));
             const rejoinAppeared: Promise<ExitInfo> = page
                 .waitForSelector('button[data-tid="anon-meeting-end-screen-rejoin-button"]', { timeout: details.meetingTimeout })
                 .then((): ExitInfo => ({ reason: 'host-ended', trigger: 'REJOIN_BUTTON_APPEARED' }));
             const urlBlank: Promise<ExitInfo> = page
-                .waitForFunction(() => window.location.href === 'about:blank', { timeout: details.meetingTimeout })
+                .waitForFunction(() => window.location.href === 'about:blank', undefined, { timeout: details.meetingTimeout })
                 .then((): ExitInfo => ({ reason: 'page-closed', trigger: 'URL_CHANGE_BLANK' }));
 
             exitInfo = await Promise.race([this.endRequested, hangupHidden, rejoinAppeared, urlBlank]);

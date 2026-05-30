@@ -97,7 +97,7 @@ Parameters:
 
   VPProfilesBucketName:
     Type: String
-    Description: Name of the S3 bucket holding per-user persisted Chromium profiles (Phase C4 bot-detection hardening)
+    Description: Name of the S3 bucket holding per-user persisted Chromium profiles
 
   EventSourcingTableName:
     Type: String
@@ -1064,10 +1064,7 @@ Resources:
           PolicyDocument:
             Version: 2012-10-17
             Statement:
-              # Per-task scoping: each launching session passes the user's
-              # cognito sub via the LMA_USER_SUB env override and the VP
-              # backend writes only to profiles/{sub}/{platform}/. The
-              # listing on the bucket root is needed to enumerate the prefix.
+              # VP backend writes only under profiles/.
               - Effect: Allow
                 Action:
                   - s3:ListBucket
@@ -1595,10 +1592,7 @@ Resources:
               Value: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
             - Name: VP_PROFILES_BUCKET
               Value: !Ref VPProfilesBucketName
-            # ZOOM_CREDENTIALS_SECRET_NAME and LMA_USER_SUB are left empty
-            # here and overridden at task launch via the Step Functions
-            # container override only when the user explicitly opted into
-            # Zoom login (sub is also used for the persisted profile path).
+            # Overridden at task launch by Step Functions when the user opts in.
             - Name: ZOOM_CREDENTIALS_SECRET_NAME
               Value: ""
             - Name: LMA_USER_SUB
@@ -2502,13 +2496,8 @@ Resources:
                               delay_seconds = 120  # 2 minutes before meeting
                               scheduled_time = datetime.fromtimestamp(meeting_time_int - delay_seconds, tz=timezone.utc)
 
-                              # Plumb through user identity so the launched VP can use the
-                              # persistent Chromium profile (LMA_USER_SUB) and stored Zoom
-                              # credentials (ZOOM_CREDENTIALS_SECRET_NAME). These were
-                              # persisted on the VP row at create time by the MCP
-                              # schedule_meeting tool / the React UI; if absent (older
-                              # rows or guest-only flows) the launched VP falls back to
-                              # the same behavior as before.
+                              # User identity for persistent profile + stored Zoom creds.
+                              # Absent on older rows / guest-only flows.
                               user_sub = new_image.get('userSub', {}).get('S', '')
                               user_zoom_sub = new_image.get('userZoomSub', {}).get('S', '')
                               stack_name = os.environ.get('LMA_STACK_NAME', '')

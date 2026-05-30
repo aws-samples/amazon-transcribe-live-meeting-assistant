@@ -1,5 +1,4 @@
-import { Page, ConsoleMessage, ElementHandle } from 'puppeteer-core';
-import { createCursor, GhostCursor } from 'ghost-cursor';
+import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
 import { details, matchesEndCommand, exitMessagesFor, ExitInfo } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
@@ -13,7 +12,7 @@ import { startDialogWatchdog } from './dialog-watchdog.js';
 import { fetchZoomCredentials, loginToZoom, dismissPostLoginInterstitials } from './zoom-login.js';
 
 // Zoom's audio/video toggles use SVG icons inside a clickable <button>.
-// SVGs aren't directly clickable in Puppeteer, so we walk up to the nearest
+// SVGs aren't reliable click targets, so we walk up to the nearest
 // clickable ancestor before clicking.
 async function clickClickableAncestor(element: ElementHandle<Element>): Promise<void> {
     await element.evaluate((el) => {
@@ -23,30 +22,35 @@ async function clickClickableAncestor(element: ElementHandle<Element>): Promise<
     });
 }
 
-// Prefer ghost-cursor for the meaningful UX-style clicks (Join, Sign In,
-// Skip-this-step) where cursor pathing is a bot-detection signal. Falls back
-// to a plain element click if ghost-cursor errors. Audio/video SVG toggles
-// stay on clickClickableAncestor since ghost-cursor expects a clickable
-// element directly under the cursor.
+// Meaningful UX-style clicks (Join, Sign In, Skip-this-step). cloakbrowser's
+// humanize patches the context so plain clicks already use human-like mouse
+// pathing — no separate cursor library needed. force:true skips Playwright's
+// "covered by another element" actionability check (Zoom often floats a
+// transient overlay over the Join/chat buttons); the old Puppeteer click
+// didn't do that check, so this preserves prior behavior.
 async function humanClick(
-    cursor: GhostCursor | null,
     page: Page,
     target: string | ElementHandle<Element>,
 ): Promise<void> {
-    if (cursor) {
-        try {
-            await cursor.click(target as any);
-            return;
-        } catch (err) {
-            console.warn('[zoom] ghost-cursor click failed, falling back:', err);
-        }
-    }
     if (typeof target === 'string') {
-        const handle = await page.$(target);
-        if (handle) await handle.click();
+        await page.click(target, { force: true });
     } else {
-        await target.click();
+        await target.click({ force: true });
     }
+}
+
+// Type into a (possibly overlay-covered) input. Playwright's ElementHandle
+// .type() runs an actionability/pointer check that fails when Zoom floats a
+// transient overlay over the prejoin form. Focus the element directly in the
+// DOM (no actionability check), then type via the keyboard so humanize still
+// applies per-keystroke timing.
+async function humanType(
+    page: Page,
+    element: ElementHandle<Element>,
+    text: string,
+): Promise<void> {
+    await element.evaluate((el) => (el as HTMLElement).focus());
+    await page.keyboard.type(text, { delay: 50 + Math.floor(Math.random() * 70) });
 }
 
 export default class Zoom {
@@ -121,8 +125,8 @@ export default class Zoom {
         }
         for (const message of messages) {
             await new Promise(resolve => setTimeout(resolve, 10));
-            await found.element.type(message);
-            await found.element.press('Enter');
+            await humanType(page, found.element, message);
+            await page.keyboard.press('Enter');
         }
     }
 
@@ -152,8 +156,8 @@ export default class Zoom {
             console.error('Page Error:', error);
         });
 
-        page.on('error', (error: unknown) => {
-            console.error('Browser Error:', error);
+        page.on('crash', () => {
+            console.error('Browser Error: page crashed');
         });
 
         // Optional: sign in to Zoom first using user-provided credentials.
@@ -213,7 +217,7 @@ export default class Zoom {
                                 const url = page.url();
                                 const onSignin = url.includes('/signin') || url.includes('/sso');
                                 if (!onSignin) {
-                                    const cookies = await page.cookies('https://zoom.us', 'https://app.zoom.us');
+                                    const cookies = await page.context().cookies(['https://zoom.us', 'https://app.zoom.us']);
                                     if (cookies.some((c) => wantedCookies.has(c.name) && c.value)) {
                                         signInOK = true;
                                         break;
@@ -281,19 +285,6 @@ export default class Zoom {
         console.log('Getting Zoom meeting link.');
         await page.goto(`https://zoom.us/wc/${details.invite.meetingId}/join`);
 
-        // Initialize ghost-cursor for human-like cursor pathing on the
-        // meaningful UX clicks below (Join, Sign-In, etc.). Bezier-curve
-        // movement reduces a bot-detection signal that simple page.click()
-        // misses. Audio/video SVG toggles stay on clickClickableAncestor
-        // (ghost-cursor expects a clickable element directly under the cursor).
-        let cursor: GhostCursor | null = null;
-        try {
-            cursor = createCursor(page as any, undefined, true);
-            console.log('[zoom] ghost-cursor initialized.');
-        } catch (err) {
-            console.warn('[zoom] ghost-cursor unavailable, falling back to plain clicks:', err);
-        }
-
         // After arriving at the meeting URL, Zoom may redirect to a
         // post-login binding/upsell page (passkey, phone, SMS, "stay
         // signed in?"). Dismiss any "Skip for now" link so the user
@@ -352,16 +343,10 @@ export default class Zoom {
 
         // if they logged in with enterprise they won't need to put in name password etc so skip
         if (enterpriseLogin === false) {
-            // Handle meeting password if provided. NB: a non-empty
-            // `meetingPassword` from the invite does NOT guarantee that
-            // Zoom will render `#input-for-pwd` — Personal Meeting Rooms
-            // and meetings whose host disabled the passcode skip it
-            // entirely. Probe for the field with a short primary-only
-            // retry (no AI fallback — `#input-for-pwd` is a stable,
-            // well-known selector; if it's not there, AI just confirms
-            // that and burns ~10s of Bedrock latency). When the field is
-            // absent, log it and proceed; the prejoin Join button click
-            // below submits the form either way.
+            // A non-empty meetingPassword doesn't guarantee Zoom renders
+            // #input-for-pwd — Personal Meeting Rooms and passcode-disabled
+            // meetings skip it. Probe (primary-only; the selector is
+            // stable) and proceed if absent rather than failing the join.
             if (details.invite.meetingPassword) {
                 const PASSWORD_PROBE_RETRIES = 6;
                 const PASSWORD_PROBE_DELAY_MS = 500;
@@ -379,7 +364,7 @@ export default class Zoom {
                 }
                 if (passwordHandle) {
                     console.log('Typing meeting password.');
-                    await passwordHandle.type(details.invite.meetingPassword, { delay: 50 + Math.floor(Math.random() * 70) });
+                    await humanType(page, passwordHandle, details.invite.meetingPassword);
                 } else {
                     console.log('Meeting does not require a password — skipping password entry.');
                 }
@@ -439,14 +424,10 @@ export default class Zoom {
                 console.log('Warning: Could not find video button in either state after retries.');
             }
 
-            // Always overwrite the prejoin display name with the LMA
-            // scribe identity (e.g. "LMA (user@example.com)") so it's
-            // unambiguous to other attendees who/why this participant is
-            // present, regardless of whether we're joining as a guest or
-            // signed in (in which case Zoom would otherwise pre-populate
-            // the field with the signed-in account's display name).
-            // Programmatically clear before typing — naive `.type()`
-            // appends, which would yield "Bob Strahan-LMALMA (user@…)".
+            // Always overwrite the prejoin display name with the scribe
+            // identity (a signed-in account otherwise pre-fills its own
+            // name). Clear before typing — typing alone appends, yielding
+            // e.g. "Bob Strahan-LMALMA (user@…)".
             const nameResult = await findElementWithFallback(
                 page,
                 ['#input-for-name'],
@@ -464,7 +445,7 @@ export default class Zoom {
                     i.value = '';
                 });
                 console.log(`Setting display name to scribe identity ("${details.scribeIdentity}").`);
-                await nameResult.element.type(details.scribeIdentity, { delay: 50 + Math.floor(Math.random() * 70) });
+                await humanType(page, nameResult.element, details.scribeIdentity);
                 const got = await nameResult.element.evaluate(
                     (el: Element) => (el as HTMLInputElement).value || '',
                 );
@@ -477,7 +458,7 @@ export default class Zoom {
                         i.focus();
                         i.value = '';
                     });
-                    await nameResult.element.type(details.scribeIdentity, { delay: 50 + Math.floor(Math.random() * 70) });
+                    await humanType(page, nameResult.element, details.scribeIdentity);
                 }
             } else if (!signedInToZoom) {
                 console.log('LMA Virtual Participant was unable to join the meeting.');
@@ -504,7 +485,7 @@ export default class Zoom {
             );
             if (joinButtonResult) {
                 console.log('Clicking Join button to enter the meeting.');
-                await humanClick(cursor, page, joinButtonResult.element);
+                await humanClick(page, joinButtonResult.element);
             } else if (nameResult) {
                 console.log('Could not locate Join button — pressing Enter on name field as fallback.');
                 await nameResult.element.press('Enter');
@@ -718,7 +699,7 @@ export default class Zoom {
         if (!chatButtonResult) {
             console.log('Could not locate chat panel button — continuing without chat');
         } else {
-            await humanClick(cursor, page, chatButtonResult.element);
+            await humanClick(page, chatButtonResult.element);
         }
 
         console.log('Sending introduction messages.');
@@ -1158,7 +1139,9 @@ export default class Zoom {
                         }
                         return false;
                     },
-                    { timeout: details.meetingTimeout }
+                    // Playwright: 2nd positional is the page-function arg, options are 3rd.
+                    undefined,
+                    { timeout: details.meetingTimeout, polling: 1000 }
                 )
                 .then(async (handle) => {
                     const dialogText = (await handle.jsonValue()) as string;
@@ -1170,8 +1153,12 @@ export default class Zoom {
                 })
                 // Swallow Target-closed / timeout when this branch is the
                 // race loser and the page goes away during cleanup —
-                // otherwise it surfaces as an unhandled rejection.
-                .catch((): ExitInfo => ({ reason: 'page-closed', trigger: 'ZOOM_END_DIALOG_ABORTED' }));
+                // otherwise it surfaces as an unhandled rejection. Log the
+                // underlying error so unexpected mid-meeting aborts are diagnosable.
+                .catch((err): ExitInfo => {
+                    console.warn(`[zoom-end-watcher] waitForFunction rejected (page closed=${page.isClosed()}): ${err?.name ?? ''} ${err?.message ?? err}`);
+                    return { reason: 'page-closed', trigger: 'ZOOM_END_DIALOG_ABORTED' };
+                });
 
             exitInfo = await Promise.race([this.endRequested, zoomDialogPromise]);
         } catch (error) {

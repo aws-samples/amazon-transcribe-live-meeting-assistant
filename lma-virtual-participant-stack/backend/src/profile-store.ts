@@ -1,29 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/**
- * Per-user persistent CloakBrowser userDataDir backed by S3 as a single
- * tar.gz blob. One profile per user — all meeting platforms share the same
- * profile dir so cross-platform cookies (e.g. an SSO sign-in to office.com
- * carries to teams.microsoft.com) work without separate warmups.
- *
- * Lifecycle:
- *   1. acquireProfile() — download+extract the tar into the local userDataDir.
- *      First run: no tar in S3 yet; returns an empty dir.
- *   2. persistProfile() — at meeting end, tar+gzip the userDataDir back to S3.
- *      Last-write-wins. We accept this because (a) one user rarely runs two
- *      VPs at once, (b) the tar is small enough that even a clobbered upload
- *      just costs the loser their session cookies — Zoom will challenge them
- *      on the next launch and re-establish state.
- *   3. releaseProfile() — kept for symmetry; currently a no-op.
- *
- * S3 layout:
- *   s3://${VP_PROFILES_BUCKET}/profiles/{sha256(sub)}/profile.tar.gz
- */
+// Per-user CloakBrowser userDataDir backed by S3 as profile.tar.gz.
+// Last-write-wins on concurrent VPs; one profile per user across platforms.
 
 import { spawn } from 'child_process';
 import { createHash } from 'crypto';
-import { promises as fs, createReadStream, createWriteStream } from 'fs';
+import { promises as fs, existsSync, createReadStream, createWriteStream } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { DatabaseSync } from 'node:sqlite';
 import {
     S3Client,
     GetObjectCommand,
@@ -36,9 +20,67 @@ const REGION = process.env.AWS_REGION || 'us-east-1';
 const PROFILES_BUCKET = (process.env.VP_PROFILES_BUCKET || '').trim();
 const PROFILE_ROOT = process.env.VP_PROFILE_ROOT || '/srv/cloakbrowser-profiles';
 const TAR_NAME = 'profile.tar.gz';
-// Must match VPProfilesPolicy in template.yaml — the task IAM role only
-// allows reads/writes under profiles/*.
+// Must match VPProfilesPolicy in template.yaml.
 const S3_PREFIX = 'profiles/';
+
+// Meeting platforms whose web login rides on SESSION cookies (is_persistent=0,
+// expires_utc=0). Chromium keeps those only in memory for the life of one
+// browser session and does NOT reload them from the on-disk Cookies DB on a
+// fresh launch — so a faithfully saved+restored profile still comes up logged
+// out. (The old rebrowser-puppeteer launch path happened to carry them over;
+// cloakbrowser's Playwright launchPersistentContext does a clean start that
+// drops them.) We promote these auth cookies to persistent with a future
+// expiry on the restored DB before launch, so the next session is recognized
+// as logged in. host_key is matched as a LIKE suffix (e.g. '%zoom.us').
+const SESSION_AUTH_COOKIE_HOSTS = ['zoom.us', 'zoom.com', 'chime.aws', 'webex.com', 'teams.microsoft.com'];
+// 30 days, expressed as Chrome's Win32 FILETIME (microseconds since 1601-01-01).
+const CHROME_EPOCH_OFFSET_US = 11_644_473_600 * 1_000_000;
+const PROMOTE_LIFETIME_US = 30 * 24 * 60 * 60 * 1_000_000;
+
+// Promote meeting-platform session auth cookies to persistent so the login
+// survives the next launch. Operates on whichever Cookies DB Chromium uses
+// (modern: Default/Network/Cookies, legacy: Default/Cookies). Best-effort:
+// any failure is logged and swallowed — a missing/locked DB must never block
+// profile restore.
+function promoteSessionAuthCookies(localDir: string): void {
+    const candidates = [
+        join(localDir, 'Default', 'Network', 'Cookies'),
+        join(localDir, 'Default', 'Cookies'),
+    ];
+    const cookiesPath = candidates.find((p) => existsSync(p));
+    if (!cookiesPath) {
+        console.log('[profile-store] No Cookies DB found — skipping session-auth promotion.');
+        return;
+    }
+
+    const expiresUtc = String(BigInt(Date.now()) * 1000n + BigInt(CHROME_EPOCH_OFFSET_US) + BigInt(PROMOTE_LIFETIME_US));
+    const hostClause = SESSION_AUTH_COOKIE_HOSTS.map(() => 'host_key LIKE ?').join(' OR ');
+    const params = SESSION_AUTH_COOKIE_HOSTS.map((h) => `%${h}`);
+
+    let db: DatabaseSync | null = null;
+    try {
+        db = new DatabaseSync(cookiesPath);
+        // Only touch session cookies (is_persistent=0); leave already-persistent
+        // cookies untouched so we don't extend tracker/analytics lifetimes.
+        const sel = db.prepare(
+            `SELECT count(*) AS n FROM cookies WHERE is_persistent = 0 AND (${hostClause})`,
+        );
+        const before = sel.get(...params) as { n: number };
+        if (!before || before.n === 0) {
+            console.log('[profile-store] No session auth cookies to promote.');
+            return;
+        }
+        const upd = db.prepare(
+            `UPDATE cookies SET is_persistent = 1, expires_utc = ? WHERE is_persistent = 0 AND (${hostClause})`,
+        );
+        const res = upd.run(expiresUtc, ...params);
+        console.log(`[profile-store] Promoted ${res.changes} session auth cookie(s) to persistent (meeting-platform login survival).`);
+    } catch (err) {
+        console.warn('[profile-store] Session-auth cookie promotion failed (non-fatal):', err);
+    } finally {
+        try { db?.close(); } catch { /* ignore */ }
+    }
+}
 
 let s3Client: S3Client | null = null;
 const getS3 = (): S3Client => {
@@ -77,6 +119,9 @@ export async function acquireProfile(opts: { cognitoSub: string }): Promise<Prof
 
     try {
         await downloadAndExtract(handle.s3Key, handle.localDir);
+        // Promote meeting-platform session auth cookies to persistent so the
+        // restored login is actually loaded by Chromium on this launch.
+        promoteSessionAuthCookies(handle.localDir);
     } catch (err) {
         console.warn('[profile-store] Restore failed (continuing with fresh profile):', err);
     }
@@ -84,11 +129,7 @@ export async function acquireProfile(opts: { cognitoSub: string }): Promise<Prof
     return handle;
 }
 
-/**
- * Tar+gzip the userDataDir and upload to S3, replacing whatever was there.
- * No-op when disabled. Must be called AFTER browser.close() so SQLite/IndexedDB
- * are flushed.
- */
+// Call AFTER browser.close() so SQLite/IndexedDB are flushed.
 export async function persistProfile(handle: ProfileHandle): Promise<void> {
     if (!handle.enabled) return;
     try {
@@ -127,16 +168,11 @@ export async function persistProfile(handle: ProfileHandle): Promise<void> {
     }
 }
 
-export async function releaseProfile(_handle: ProfileHandle): Promise<void> {
-    // No lock to release — last-write-wins. Kept for call-site symmetry.
-}
-
-// -----------------------------------------------------------------------------
-// internals
-// -----------------------------------------------------------------------------
+// Kept for call-site symmetry; no-op since there's no lock.
+export async function releaseProfile(_handle: ProfileHandle): Promise<void> {}
 
 async function downloadAndExtract(s3Key: string, localDir: string): Promise<void> {
-    // HEAD first so a missing tar doesn't log a noisy error from GetObject.
+    // HEAD first so a missing tar doesn't log a noisy GetObject error.
     try {
         await getS3().send(new HeadObjectCommand({ Bucket: PROFILES_BUCKET, Key: s3Key }));
     } catch (err: any) {
@@ -152,9 +188,7 @@ async function downloadAndExtract(s3Key: string, localDir: string): Promise<void
         throw err;
     }
 
-    // Wipe local dir so partial state from a previous tar can't mix with the
-    // newly-extracted one and produce a Frankenstein profile Chromium reads
-    // but Zoom doesn't trust.
+    // Mirror S3 exactly so partial leftover state can't pollute the new profile.
     await wipeDirContents(localDir);
 
     const tmpTar = join(tmpdir(), `vp-profile-load-${process.pid}.tar.gz`);

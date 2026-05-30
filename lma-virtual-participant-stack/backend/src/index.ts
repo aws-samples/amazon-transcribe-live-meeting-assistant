@@ -1,5 +1,6 @@
-// launchPersistentContext (not launch) — only it forwards userDataDir.
-import { launchPersistentContext } from 'cloakbrowser/puppeteer';
+// Playwright wrapper: fewer CDP automation signals than the Puppeteer wrapper
+// (reCAPTCHA Enterprise on Zoom flags the latter). Returns a BrowserContext.
+import { launchPersistentContext } from 'cloakbrowser';
 import { promises as fs } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
@@ -34,7 +35,7 @@ const getCloakLaunchArgs = (fingerprintSeed: number): string[] => [
     `--fingerprint=${fingerprintSeed}`,
     `--fingerprint-screen-width=${WINDOW_WIDTH}`,
     `--fingerprint-screen-height=${WINDOW_HEIGHT}`,
-    // Puppeteer doesn't resize the OS window via CDP — flags do.
+    // Size the headed OS window to fill the Xvfb display.
     `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT}`,
     '--window-position=0,0',
     '--use-fake-ui-for-media-stream',
@@ -69,6 +70,38 @@ let statusManager: VirtualParticipantStatusManager | null = null;
 let vpId: string | null = null;
 let mcpHandler: MCPCommandHandler | null = null;
 let strandsWarmupTimer: NodeJS.Timeout | null = null;
+// Hoisted to module scope so the signal/emergency shutdown paths can close the
+// browser and flush the profile to S3 — not just main()'s normal cleanup.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let browserContext: any = null;
+let activeProfileHandle: import('./profile-store.js').ProfileHandle | null = null;
+let profilePersisted = false;
+
+// Close the browser context (flushing Chromium's cookie/SQLite state to the
+// userDataDir) and upload the profile tar to S3. Guarded so it runs exactly
+// once across whichever shutdown path fires first (normal exit, SIGINT/SIGTERM
+// from nodemon/Ctrl-C, or an emergency crash).
+const closeAndPersistProfile = async (): Promise<void> => {
+    if (profilePersisted) return;
+    profilePersisted = true;
+    try {
+        if (browserContext) await browserContext.close();
+    } catch (error) {
+        console.error('Error closing browser:', error);
+    }
+    if (activeProfileHandle) {
+        try {
+            await persistProfile(activeProfileHandle);
+        } catch (error) {
+            console.error('Error persisting Chromium profile:', error);
+        }
+        try {
+            await releaseProfile(activeProfileHandle);
+        } catch (error) {
+            console.error('Error releasing Chromium profile:', error);
+        }
+    }
+};
 
 // Local testing mode - skip ALB registration and AppSync updates
 const isLocalTest = process.env.LOCAL_TEST === 'true';
@@ -177,18 +210,9 @@ const main = async (): Promise<void> => {
         console.log('✓ Skipping ALB registration (local test mode)');
     }
 
-    // Publish VNC endpoint via AppSync (only after ALB registration and health check)
-    if (statusManager && !isLocalTest) {
-        try {
-            await statusManager.setVncReady();
-            console.log('✓ VNC endpoint published via AppSync');
-        } catch (error) {
-            console.error('Failed to publish VNC endpoint:', error);
-            // Non-critical - continue with meeting join
-        }
-    } else if (isLocalTest) {
-        console.log('✓ Skipping AppSync VNC ready update (local test mode)');
-    }
+    // VNC ready signal is deferred until AFTER fresh-profile warmup so the
+    // user doesn't see warmup navigation in their live view. Fired below
+    // once the browser is ready to navigate to the meeting URL.
 
     // Calculate sleep time if meeting is scheduled for future
     const currentTimestamp = Math.floor(Date.now() / 1000);
@@ -215,28 +239,23 @@ const main = async (): Promise<void> => {
         }
     }
 
-    // Acquire per-user persistent Chromium profile (Phase C4) when a
-    // Cognito sub is available. Falls back to a fresh profile if the
-    // bucket env var isn't set or the profile is locked by another task.
     if (statusManager) {
         await statusManager.setHydratingProfile();
     }
     const profileHandle = await acquireProfile({
         cognitoSub: process.env.LMA_USER_SUB || '',
     });
+    activeProfileHandle = profileHandle;
 
-    // Launch Puppeteer browser with stealth plugin for all platforms
     if (statusManager) {
         await statusManager.setLaunchingBrowser();
     }
 
-    // Fall back to ephemeral dir so warmup/3p-cookie path still runs.
     const userDataDir = profileHandle.enabled && profileHandle.localDir
         ? profileHandle.localDir
         : `/srv/cloakbrowser-profiles/ephemeral-${process.pid}`;
     await fs.mkdir(userDataDir, { recursive: true });
 
-    // Stale Singleton/LOCK files from unclean exit block re-launch.
     cleanStaleLocks(userDataDir);
     try {
         for (const sub of ['Default/Local Storage/leveldb', 'Default/IndexedDB']) {
@@ -253,16 +272,13 @@ const main = async (): Promise<void> => {
         console.warn('[profile-store] Stale Chrome lock cleanup failed (continuing):', lockErr);
     }
 
-    // Snapshot freshness BEFORE our own writes flip the signal to false.
+    // Snapshot freshness before our own writes flip the signal.
     const isFresh = profileIsFresh(userDataDir);
 
     initProfileDefaults(userDataDir);
-
-    // Chrome v123+ default-blocks 3p cookies; pre-write allows before launch.
     const cookiePatchedCount = patchPreferencesFor3pCookies(userDataDir);
     console.log(`[profile-store] Wrote 3p-cookie allow exceptions for ${cookiePatchedCount} meeting platforms`);
 
-    // Stable per-user seed = "returning visitor" fingerprint across launches.
     const fingerprintSeed = process.env.LMA_USER_SUB
         ? fingerprintSeedForUser(process.env.LMA_USER_SUB)
         : randomFingerprintSeed();
@@ -272,29 +288,33 @@ const main = async (): Promise<void> => {
     console.log(`[browser]   fingerprint seed  = ${fingerprintSeed}`);
     console.log(`[browser]   profile freshness = ${isFresh ? 'FRESH (warmup will run)' : 'EXISTING (skipping warmup)'}`);
 
-    const browser = await launchPersistentContext({
+    const context = await launchPersistentContext({
         headless: false,
         humanize: true,
         humanPreset: 'default',
         userDataDir,
-        ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
-        protocolTimeout: details.meetingTimeout,
-        timeout: details.meetingTimeout,
+        viewport: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT },
         args: getCloakLaunchArgs(fingerprintSeed),
-        // QUIRK: top-level defaultViewport is dropped; must nest in launchOptions.
         launchOptions: {
-            defaultViewport: null,
+            ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
         },
     } as any);
+    browserContext = context;
+    // Sane default for actions; the one meeting-length wait (end-of-meeting
+    // watcher) passes its own explicit { timeout }. Do NOT set a multi-hour
+    // default here — it makes every transient wait hang instead of failing fast.
+    context.setDefaultTimeout(30_000);
 
     await new Promise(resolve => setTimeout(resolve, 2000));
     console.log('✓ Chrome launched with remote debugging on port 9222');
 
-    // Build cookies/SW/storage state on fresh profiles before meeting join.
     if (isFresh) {
+        if (statusManager) {
+            await statusManager.setWarmingProfile();
+        }
         try {
             console.log('[warmup] Profile is fresh — running 3-phase warmup before joining meeting');
-            await warmupNavigation(() => browser.newPage() as any, {
+            await warmupNavigation(() => context.newPage() as any, {
                 runMeetingPlatforms: true,
                 log: (m) => console.log(`[browser] ${m}`),
             });
@@ -303,11 +323,24 @@ const main = async (): Promise<void> => {
         }
     }
 
+    // Now that warmup (if any) is done, publish the VNC endpoint so the user's
+    // live view opens on the meeting page rather than warmup navigation.
+    if (statusManager && !isLocalTest) {
+        try {
+            await statusManager.setVncReady();
+            console.log('✓ VNC endpoint published via AppSync');
+        } catch (error) {
+            console.error('Failed to publish VNC endpoint:', error);
+        }
+    } else if (isLocalTest) {
+        console.log('✓ Skipping AppSync VNC ready update (local test mode)');
+    }
+
     // Initialize Simli Avatar AFTER browser is launched (background page for avatar rendering)
     if (simliAvatar.isSimliEnabled()) {
         try {
             console.log('Initializing Simli Avatar...');
-            await simliAvatar.initialize(browser);
+            await simliAvatar.initialize(context);
             console.log('✓ Simli Avatar initialized');
         } catch (error) {
             console.error('Failed to initialize Simli Avatar (non-critical):', error);
@@ -316,18 +349,13 @@ const main = async (): Promise<void> => {
     }
 
     // Create page BEFORE MCP — external CDP client during newPage() deadlocks target handshake.
-    const page = await browser.newPage();
-    await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
+    const page = await context.newPage();
     page.setDefaultTimeout(20000);
-    // not needed with cloakbrowser
-    // await page.setUserAgent(
-    //     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    // );
+    // No setUserAgent: cloakbrowser ships a coordinated UA fingerprint.
+    // Viewport is set at context launch.
 
-    // Forward meeting-page console output to container logs IMMEDIATELY so
-    // logs from getUserMedia override / Simli bridge code (which runs before
-    // the platform handler attaches its own listener) are captured. Also
-    // forward any console.error so unhandled exceptions surface.
+    // Forward early meeting-page console output (getUserMedia override,
+    // Simli bridge) to container logs before platform handlers attach.
     page.on('console', (msg) => {
         const text = msg.text();
         const type = msg.type();
@@ -335,7 +363,7 @@ const main = async (): Promise<void> => {
             text.includes('[LMA-Simli]') ||
             text.includes('[Simli]') ||
             type === 'error' ||
-            type === 'warn'
+            type === 'warning'
         ) {
             console.log(`Browser ${type}: ${text}`);
         }
@@ -344,7 +372,23 @@ const main = async (): Promise<void> => {
     page.on('framenavigated', (frame) => {
         if (frame === page.mainFrame()) {
             console.log(`[meeting-page] navigated → ${frame.url()}`);
+        } else {
+            console.log(`[meeting-page] subframe navigated → ${frame.url()}`);
         }
+    });
+    // Page-lifecycle diagnostics.
+    page.on('close', () => {
+        console.warn('[page-lifecycle] page CLOSED event fired');
+    });
+    page.on('crash', () => {
+        console.warn('[page-lifecycle] page CRASHED (renderer crash)');
+    });
+    page.on('framedetached', (frame) => {
+        const isMain = frame === page.mainFrame();
+        console.log(`[meeting-page] frame detached (mainFrame=${isMain}) url=${frame.url()}`);
+    });
+    context.on('close', () => {
+        console.warn('[browser-lifecycle] browser context CLOSED');
     });
 
     // Initialize MCP command handler AFTER browser is launched and the
@@ -405,10 +449,9 @@ const main = async (): Promise<void> => {
     // This must happen BEFORE the page navigates to the meeting URL
     if (simliAvatar.isConnected()) {
         try {
-            // 1. Grant camera+mic permissions at browser level for all meeting domains
-            const context = page.browser().defaultBrowserContext();
-            for (const domain of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com']) {
-                await context.overridePermissions(domain, ['camera', 'microphone']).catch(() => {});
+            // 1. Grant camera+mic permissions at context level for all meeting domains
+            for (const origin of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com']) {
+                await context.grantPermissions(['camera', 'microphone'], { origin }).catch(() => {});
             }
             console.log('✓ Camera and microphone permissions granted for meeting platforms');
             
@@ -441,7 +484,9 @@ const main = async (): Promise<void> => {
                 await reconnectInFlight;
             });
 
-            // Receiver PC is per-document; rebuild on every meeting-URL navigation.
+            // The getUserMedia override + frame relay are installed via
+            // evaluateOnNewDocument, so they survive meeting-URL navigations on
+            // their own. Confirm frames are flowing once per real meeting-URL load.
             const isMeetingUrl = (u: string): boolean =>
                 /\/wc\/\d+\/(join|start|live)/.test(u) ||
                 /teams\.microsoft\.com\/.*meetup-join/.test(u) ||
@@ -452,7 +497,7 @@ const main = async (): Promise<void> => {
                 const url = frame.url();
                 if (!isMeetingUrl(url)) return;
                 if (reconnectInFlight) return;
-                console.log(`[simli-bridge] meeting URL detected (${url}) — building Simli WebRTC bridge`);
+                console.log(`[simli-bridge] meeting URL detected — confirming avatar frames`);
                 reconnectInFlight = connectSimliStream().finally(() => {
                     reconnectInFlight = null;
                 });
@@ -627,25 +672,9 @@ const main = async (): Promise<void> => {
             console.error('Error stopping AgentSpeakingDetector:', error);
         }
 
-        try {
-            // Close browser
-            await browser.close();
-        } catch (error) {
-            console.error('Error closing browser:', error);
-        }
-
-        // Sync profile back to S3 and release the lock so the next launch
-        // for this user can resume the session.
-        try {
-            await persistProfile(profileHandle);
-        } catch (error) {
-            console.error('Error persisting Chromium profile:', error);
-        }
-        try {
-            await releaseProfile(profileHandle);
-        } catch (error) {
-            console.error('Error releasing Chromium profile:', error);
-        }
+        // Close the browser context (persistent context owns the browser) and
+        // sync the profile back to S3 so the next launch resumes the session.
+        await closeAndPersistProfile();
 
         // Final status update. Persist the human-readable exit detail
         // (e.g. "Asked to leave by Jeremy") alongside COMPLETED so the UI
@@ -738,7 +767,12 @@ const signalHandler = async (signal: string) => {
     } catch (error) {
         console.error('Error during service cleanup:', error);
     }
-    
+
+    // Close the browser and flush the profile to S3 so the session is
+    // remembered next launch. nodemon/Ctrl-C deliver SIGTERM/SIGINT here, so
+    // without this the latest session would never be persisted.
+    await closeAndPersistProfile();
+
     console.log('Graceful shutdown complete. Exiting...');
     process.exit(0);
 };
@@ -793,6 +827,10 @@ const emergencyCleanup = async (errorMessage: string): Promise<void> => {
         clearInterval(strandsWarmupTimer);
         strandsWarmupTimer = null;
     }
+
+    // Best-effort: flush the profile to S3 even on a crash so a partially
+    // established session isn't lost.
+    await closeAndPersistProfile();
 
     console.log('Emergency cleanup complete');
 };

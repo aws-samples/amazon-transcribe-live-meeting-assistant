@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page, ElementHandle } from 'puppeteer-core';
+import { Page, ElementHandle } from 'playwright-core';
 import {
     SecretsManagerClient,
     GetSecretValueCommand,
@@ -54,18 +54,10 @@ export async function fetchZoomCredentials(secretName: string): Promise<ZoomCred
 const sleepJitter = (base: number, jitter: number): Promise<void> =>
     new Promise((r) => setTimeout(r, base + Math.random() * jitter));
 
-/**
- * Race a CDP-touching promise against a wall-clock timeout. Zoom's React SPA
- * tears down and re-mounts page contexts during sign-in route transitions
- * (`/signin → /signin#/ → /signin#/login`). Puppeteer's `page.evaluate`,
- * `handle.evaluate`, and `page.screenshot` all go through CDP and have been
- * observed to hang for 30+ seconds when the execution context is destroyed
- * mid-call rather than rejecting promptly. Without this guard, a single
- * stuck CDP call inside `findElementWithFallback` (which loops with
- * AI-resolver fallbacks that each issue several evaluates) can wedge the
- * sign-in flow for minutes. This helper converts the hang into a fast
- * rejection so the surrounding retry/iteration loop can fire.
- */
+// Race a browser-call promise against a wall-clock timeout. evaluate /
+// type / click can hang for 30+ seconds when the page's execution context
+// is destroyed mid-call (Zoom SPA re-mount); this turns the hang into a
+// fast rejection so the surrounding retry/iteration loop can fire.
 const withTimeout = async <T>(
     promise: Promise<T>,
     ms: number,
@@ -88,37 +80,30 @@ const withTimeout = async <T>(
 };
 
 const typeWithDelay = async (
-    elem: any,
+    page: Page,
+    elem: ElementHandle<Element>,
     text: string,
 ): Promise<void> => {
-    // 50–120ms per character with jitter to look human. Wrap in a
-    // generous timeout — `.type()` is a CDP call that can hang
-    // indefinitely if the underlying ElementHandle's execution
-    // context is destroyed mid-typing (Zoom SPA re-mounting the
-    // form). Budget = per-char delay × text.length × 3 + 2s slack.
+    // Focus in the DOM then type via page.keyboard (mirrors humanType in
+    // zoom.ts): avoids Playwright's actionability check, which fails when
+    // Zoom floats a transient overlay over the form. Budget scales with
+    // text length so withTimeout doesn't abort legitimately-slow typing.
     const perChar = 50 + Math.floor(Math.random() * 70);
     const budget = perChar * Math.max(text.length, 1) * 3 + 2000;
     await withTimeout(
-        elem.type(text, { delay: perChar }),
+        (async () => {
+            await elem.evaluate((el) => (el as HTMLElement).focus());
+            await page.keyboard.type(text, { delay: perChar });
+        })(),
         budget,
         `type(${text.length} chars)`,
     );
 };
 
-/**
- * Type into a credential field and verify the value landed. Zoom's sign-in
- * page is a React SPA: after `domcontentloaded` it changes hash route
- * (`/signin` → `/signin#/` → `/signin#/login`) and re-mounts the form. If
- * we type into the pre-hydration `#email` element, the new input replaces
- * it and we end up submitting an empty form (Zoom flags the field as
- * `is-errored`, which the AI page-action analyzer then misreads as a
- * bot-detection block and escalates to MANUAL_ACTION_REQUIRED).
- *
- * Strategy: type, read back `.value`, and if it doesn't match, re-locate
- * via `relocate()` and try once more. After the second attempt we trust
- * what's there — better to let the downstream AI loop see whatever state
- * we ended up in than to loop forever.
- */
+// Type into a field, then read back .value to confirm it landed. Zoom's
+// SPA re-mounts the form mid-flow, so typing into a pre-hydration input
+// silently drops the text and submits empty. On mismatch, relocate() the
+// (re-mounted) element and retry once.
 const typeAndVerify = async (
     page: Page,
     initialHandle: ElementHandle<Element>,
@@ -155,7 +140,7 @@ const typeAndVerify = async (
             // best effort — if we can't clear, type() will append; the
             // verify step below catches the resulting mismatch.
         }
-        await typeWithDelay(h, text);
+        await typeWithDelay(page, h, text);
     };
 
     let handle = initialHandle;
@@ -183,27 +168,12 @@ const typeAndVerify = async (
     return { ok: false, handle };
 };
 
-/**
- * Wait until Zoom's sign-in email input is actually present and visible.
- * Returns true as soon as the field appears, false if we hit `timeoutMs`.
- *
- * The timeout is deliberately generous (30s default). The VP container
- * runs Simli avatar + Nova Sonic + headless Chrome + a fresh-profile
- * warmup, all on a CPU-constrained t3.medium (2 vCPU). During cold
- * start the box is badly CPU-starved right when we navigate to Zoom
- * sign-in, so Zoom's heavyweight React SPA can take 20-30s to hydrate
- * and render the email field (observed: URL still at `/signin`, not
- * `/signin#/login`, 8s in; a Strands warmup ping that normally takes
- * <1s took 14.5s in the same window). This loop returns the instant
- * the field appears, so there's zero added latency on a fast box — we
- * only pay the wait when the machine is actually slow.
- *
- * We no longer gate on "URL stable for N ms" — that was a proxy for
- * "SPA done routing", but under CPU starvation the URL can sit
- * unchanged at `/signin` for the whole window while the bundle is
- * still parsing. Polling directly for the visible input is the real
- * signal.
- */
+// Poll for the visible sign-in email input, returning the instant it
+// appears (so a fast box pays no latency) or false at timeoutMs. The 30s
+// default tolerates a CPU-starved cold start — Simli + Nova + Chrome +
+// warmup contend on a 2-vCPU t3.medium, and Zoom's SPA can take 20-30s to
+// hydrate. We poll the input directly rather than the URL, which can sit
+// at /signin the whole time while the bundle parses.
 const waitForSignInFormReady = async (
     page: Page,
     opts: { timeoutMs?: number } = {},
@@ -251,7 +221,7 @@ const waitForSignInFormReady = async (
  */
 const hasZoomAuthCookie = async (page: Page): Promise<boolean> => {
     // Zoom marks its session cookies as HttpOnly, so they're invisible to
-    // `document.cookie` from JavaScript. Use Puppeteer's `page.cookies()`
+    // `document.cookie` from JavaScript. Use the context's cookies() API
     // (CDP / Network.getCookies) which returns HttpOnly cookies.
     //
     // Only check cookies that are SET ONLY when authenticated. Verified
@@ -262,7 +232,7 @@ const hasZoomAuthCookie = async (page: Page): Promise<boolean> => {
     //   - `zm_aid` (account id) and `zm_haid` (host account id) are
     //     ONLY set after authentication completes
     try {
-        const cookies = await page.cookies('https://zoom.us', 'https://app.zoom.us');
+        const cookies = await page.context().cookies(['https://zoom.us', 'https://app.zoom.us']);
         const wanted = new Set(['zm_aid', 'zm_haid']);
         return cookies.some((c) => wanted.has(c.name) && !!c.value);
     } catch {
@@ -303,11 +273,6 @@ export async function loginToZoom(
     }
     console.log(`[zoom-login] At ${postLoadUrl} — proceeding with email/password flow`);
 
-    // Wait for Zoom's React SPA to hydrate and render the email field.
-    // On a CPU-starved cold start this can take 20-30s; the helper
-    // returns the instant the field appears so we add no latency when
-    // the box is fast. If it never shows, the page is genuinely broken
-    // (or blocked) and we escalate to manual.
     console.log('[zoom-login] step=waitForSignInFormReady BEGIN');
     const formReady = await waitForSignInFormReady(page);
     console.log(`[zoom-login] step=waitForSignInFormReady END (ready=${formReady}) at ${page.url()}`);
@@ -319,12 +284,9 @@ export async function loginToZoom(
         platform: 'ZOOM' as const,
         step: 'zoom.login.email',
     };
-    // If waitForSignInFormReady already confirmed the field is present,
-    // a single short primary lookup will hit immediately — no need to
-    // burn the AI fallback (which runs 3 Bedrock round-trips, each
-    // doing a screenshot + DOM snapshot, ~40s total on a slow box).
-    // Only when the field is NOT confirmed do we give findElementWith-
-    // Fallback a longer budget + AI fallback as a last resort.
+    // When the field is already confirmed present, a short primary lookup
+    // hits immediately; skip the AI fallback (3 Bedrock round-trips, ~40s
+    // on a slow box). Only give the longer budget + AI when unconfirmed.
     console.log('[zoom-login] step=findEmail BEGIN');
     const emailRes = await findElementWithFallback(
         page,

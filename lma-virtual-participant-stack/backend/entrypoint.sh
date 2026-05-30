@@ -2,11 +2,7 @@
 
 echo "=== LMA Virtual Participant Startup ==="
 
-# Push an early "BOOTING" status to the VP DynamoDB row so the UI shows
-# something other than the bare INITIALIZING badge during the ~30s Fargate
-# cold-start + container boot. We use AWS CLI directly (no boto3 / node
-# overhead) so this fires within the first second of container start.
-# Best-effort — failure is silent so we don't slow startup if IAM is off.
+# Push BOOTING status before Node starts so the UI shows progress during cold-start.
 push_booting_status() {
     if [ -z "$VIRTUAL_PARTICIPANT_ID" ] || [ -z "$VP_TABLE_NAME" ]; then
         return 0
@@ -20,25 +16,19 @@ push_booting_status() {
         --region "${AWS_REGION:-us-west-2}" \
         > /dev/null 2>&1 || true
 }
-push_booting_status &  # background — don't block container boot
+push_booting_status &
 
 echo "Starting D-Bus..."
 dbus-daemon --system --fork 2>/dev/null || echo "D-Bus already running or not needed"
 
 echo "Starting virtual display (Xvfb)..."
-# 1920x1080 — fluxbox's bottom toolbar is suppressed below so we can use the
-# full vertical screen for Chromium without a gray gap or window clipping.
 Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
 export DISPLAY=:99
 
 echo "Waiting for display to initialize..."
 sleep 3
 
-# Suppress the fluxbox toolbar (the bottom-of-screen gray strip with
-# "Workspace 1 / clock / active window title"). Without this, fluxbox
-# reserves ~24px at the bottom and Chromium has to be sized smaller than
-# Xvfb to fit, leaving an unsightly gray gap below the meeting UI when a
-# user watches over noVNC. Verified in cloakbrowser-validation/.
+# Suppress fluxbox toolbar so Chromium fills the full Xvfb screen.
 mkdir -p ~/.fluxbox
 cat > ~/.fluxbox/init <<'FLUXINIT'
 session.screen0.toolbar.visible:        false
@@ -106,7 +96,6 @@ if [ "$VNC_READY" = false ]; then
 fi
 
 echo "Starting WebSocket proxy (websockify)..."
-# Debian ships websockify as its own binary on PATH (Alpine had a bundled run script).
 websockify \
     --web /usr/share/novnc \
     0.0.0.0:5901 \
@@ -171,9 +160,7 @@ echo "Created agent_output sink (module $AGENT_SINK)"
 COMBINED_SINK=$(pactl load-module module-null-sink sink_name=combined_audio sink_properties=device.description="Combined_Audio_For_Transcription")
 echo "Created combined_audio sink (module $COMBINED_SINK)"
 
-# Route meeting_audio.monitor to combined_audio sink
-# Note: latency_msec=1 was too aggressive and caused buffer underruns on smaller instances.
-# 20ms provides a good balance between low latency and stability across instance sizes.
+# 20ms latency: 1ms caused underruns on smaller instances.
 pactl load-module module-loopback source=meeting_audio.monitor sink=combined_audio latency_msec=20
 echo "Routed meeting audio to combined sink"
 

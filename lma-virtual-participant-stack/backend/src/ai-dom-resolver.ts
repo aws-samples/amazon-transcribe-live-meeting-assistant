@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page, ElementHandle } from 'puppeteer-core';
+import { Page, ElementHandle } from 'playwright-core';
 import {
   BedrockRuntimeClient,
   InvokeModelCommand,
@@ -121,17 +121,10 @@ const TTL_DAYS = 30;
 
 const memoryCache = new Map<string, CacheEntry>();
 
-/**
- * Race a CDP-touching promise against a wall-clock timeout. Puppeteer's
- * `page.evaluate` / `page.screenshot` / `handle.boundingBox` go through
- * CDP and have been observed to hang for tens of seconds (default CDP
- * timeout is 30s) when the target page's V8 execution context is
- * destroyed mid-call — common during React-SPA route transitions
- * (Zoom's `/signin → /signin#/ → /signin#/login` re-mount). Without
- * this guard, a single hung evaluate inside the AI-resolver loop can
- * stall the surrounding sign-in / join flow for minutes. Convert the
- * hang into a fast rejection so the outer retry can fire.
- */
+// Race a browser-call promise against a wall-clock timeout. evaluate /
+// screenshot / boundingBox can hang for tens of seconds when the page's
+// execution context is destroyed mid-call (Zoom SPA re-mount); this turns
+// the hang into a fast rejection so the surrounding retry loop can fire.
 const withCdpTimeout = async <T>(
   promise: Promise<T>,
   ms: number,
@@ -251,7 +244,7 @@ async function evictCacheEntry(
 
 /**
  * Resolve a CSS selector to ElementHandles. Tolerates Claude (and human-doc)
- * habit of producing jQuery `:contains('text')` extensions, which Puppeteer
+ * habit of producing jQuery `:contains('text')` extensions, which the browser
  * doesn't understand — falls back to an in-page text scan with the prefix
  * selector. Returns at most one element when the `:contains()` form is used,
  * matching the jQuery semantics callers expect.
@@ -266,7 +259,7 @@ async function querySelectorAllSafe(
     const wantText = containsMatch[3].toLowerCase();
     const handle = (await withCdpTimeout(
       page.evaluateHandle(
-        (sel: string, text: string) => {
+        ({ sel, text }: { sel: string; text: string }) => {
           const candidates = Array.from(document.querySelectorAll(sel));
           for (const el of candidates) {
             const t = (el.textContent || '').trim().toLowerCase();
@@ -277,8 +270,7 @@ async function querySelectorAllSafe(
           }
           return null;
         },
-        baseSelector,
-        wantText,
+        { sel: baseSelector, text: wantText },
       ),
       2000,
       `evaluateHandle(${selector})`,
@@ -421,17 +413,17 @@ async function snapshotVisibleDialogs(page: Page): Promise<{ html: string }[]> {
 
 async function captureScreenshot(page: Page): Promise<string | null> {
   try {
+    // Playwright's screenshot() always returns a Buffer (no `encoding` option).
     const buf = await withCdpTimeout(
       page.screenshot({
         type: 'png',
         fullPage: false,
         clip: { x: 0, y: 0, width: 1024, height: 768 },
-        encoding: 'base64',
       }),
       5000,
       'captureScreenshot',
     );
-    return buf as unknown as string;
+    return buf.toString('base64');
   } catch {
     return null;
   }
@@ -892,7 +884,7 @@ export async function scrollIntoViewAndClick(
       return true;
     } catch {
       // fallback: dispatch a synthetic click on the element. Works even
-      // when puppeteer's positional click misses due to overlays.
+      // when the positional click misses due to overlays.
       try {
         await handle.evaluate((el: Element) => (el as HTMLElement).click());
         return true;

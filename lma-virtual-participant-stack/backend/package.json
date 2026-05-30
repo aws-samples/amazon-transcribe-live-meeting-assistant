@@ -31,12 +31,11 @@
     "aws-sigv4-fetch": "^4.3.0",
     "axios": "^1.15.0",
     "cloakbrowser": "0.3.29",
-    "ghost-cursor": "^1.4.2",
     "graphql": "^16.8.1",
     "graphql-tag": "^2.12.6",
     "jsonwebtoken": "^9.0.2",
     "nodemon": "^3.1.0",
-    "puppeteer-core": "^23.10.3",
+    "playwright-core": "^1.53.0",
     "simli-client": "^3.0.1",
     "uuid": "^14.0.0",
     "ws": "^8.18.0"

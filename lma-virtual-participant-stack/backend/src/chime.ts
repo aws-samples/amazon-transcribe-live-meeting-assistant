@@ -1,4 +1,4 @@
-import { Page } from 'puppeteer-core';
+import { Page } from 'playwright-core';
 import { details, matchesEndCommand, exitMessagesFor, ExitInfo } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
