@@ -6,7 +6,7 @@
  * the voice assistant (Nova Sonic or ElevenLabs).
  * 
  * Architecture:
- * - A background Puppeteer page loads the Simli JS SDK via CDN
+ * - A background Playwright page loads the Simli JS SDK via CDN
  * - Voice assistant audio (PCM16 16kHz) is forwarded to Simli via page.evaluate()
  * - Simli renders a lip-synced avatar video in a <video> element
  * - The meeting page's getUserMedia is overridden to return the Simli video stream
@@ -20,7 +20,7 @@
  *   2. AudioContext.connect() patch to block connections to AudioDestinationNode
  */
 
-import { Browser, Page, HTTPRequest } from 'puppeteer-core';
+import { BrowserContext, Page, Route } from 'playwright-core';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -52,6 +52,13 @@ export class SimliAvatar {
   private wsClient: any = null; // Active WebSocket connection from Simli page
   private wsPort: number = 0;
 
+  // Video frame relay (replaces the tab-to-tab WebRTC bridge, which cloakbrowser's
+  // WebRTC patches break). Simli page pushes JPEG frames up this WS; the meeting
+  // page pulls the latest frame via the __simliPullFrame exposed binding.
+  private videoWsServer: any = null;
+  private videoWsPort: number = 0;
+  private latestFrame: Buffer | null = null;
+
   constructor(config: SimliAvatarConfig) {
     this.apiKey = config.apiKey || '';
     this.faceId = config.faceId || '';
@@ -71,7 +78,7 @@ export class SimliAvatar {
     }
   }
 
-  async initialize(browser: Browser): Promise<void> {
+  async initialize(context: BrowserContext): Promise<void> {
     if (!this.enabled) {
       console.log('Simli Avatar disabled - skipping initialization');
       return;
@@ -80,7 +87,7 @@ export class SimliAvatar {
     try {
       console.log('Initializing Simli Avatar...');
 
-      this.simliPage = await browser.newPage();
+      this.simliPage = await context.newPage();
 
       // Forward browser-console output from the simli page to container logs
       // so [Simli] / [LMA-Simli] traces show up in CloudWatch and we can
@@ -102,8 +109,7 @@ export class SimliAvatar {
       // AUDIO ISOLATION: Patch AudioNode.connect() BEFORE any scripts load.
       // This blocks audio from reaching the speakers (AudioDestinationNode)
       // while keeping the WebRTC connection alive for video rendering.
-      // Tested and confirmed working in standalone browser test.
-      await this.simliPage.evaluateOnNewDocument(() => {
+      await this.simliPage.addInitScript(() => {
         const origConnect = AudioNode.prototype.connect;
         AudioNode.prototype.connect = function(this: AudioNode, ...args: any[]) {
           const dest = args[0];
@@ -116,32 +122,51 @@ export class SimliAvatar {
         console.log('[Simli-AudioBlock] AudioContext patch installed');
       });
 
-      // Intercept requests for the simli-client bundle (pre-built ESM via esbuild in Dockerfile).
+      // Serve both the page HTML and the simli-client bundle from a synthetic
+      // http://local.simli/ origin. We goto() that origin instead of using
+      // setContent(): Playwright's setContent() never resolves when the
+      // injected HTML runs a module script that dynamic-import()s another
+      // resource (the frame lifecycle waiter hangs). Routing + goto gives the
+      // page a real same-origin context and a reliable load lifecycle.
       const simliBundlePath = path.resolve(__dirname, 'simli-client.bundle.mjs');
-      await this.simliPage.setRequestInterception(true);
-      this.simliPage.on('request', (request: HTTPRequest) => {
-        if (request.url().includes('/simli-client.bundle.mjs')) {
-          const body = fs.readFileSync(simliBundlePath, 'utf-8');
-          request.respond({
-            status: 200,
-            contentType: 'application/javascript',
-            headers: {
-              'Access-Control-Allow-Origin': 'null',
-              'Vary': 'Origin',
-            },
-            body,
-          });
-        } else {
-          request.continue();
+      await this.simliPage.route('http://local.simli/**', (route: Route) => {
+        const url = route.request().url();
+        try {
+          if (url.endsWith('/simli-client.bundle.mjs')) {
+            route.fulfill({
+              status: 200,
+              contentType: 'application/javascript',
+              body: fs.readFileSync(simliBundlePath, 'utf-8'),
+            });
+          } else {
+            // The page itself.
+            route.fulfill({
+              status: 200,
+              contentType: 'text/html',
+              body: simliPageHtml,
+            });
+          }
+        } catch (e: any) {
+          console.error('[Simli] route fulfill failed:', e?.message || e);
+          route.abort();
         }
       });
 
-      await this.simliPage.setContent(simliPageHtml, { waitUntil: 'networkidle0' });
-      
+      await this.simliPage.goto('http://local.simli/', { waitUntil: 'domcontentloaded' });
+
+      // The page's module script dynamically imports the bundle into
+      // window.SimliModule. Wait for that to resolve before using it.
+      await this.simliPage.waitForFunction(
+        // @ts-ignore - browser context
+        () => (window as any).SimliModule !== undefined,
+        undefined,
+        { timeout: 30_000 },
+      );
+
       // Prevent background tab throttling - Chromium throttles timers and
       // pauses requestAnimationFrame in background tabs. We need the Simli
       // page to keep rendering video even when the meeting tab is active.
-      const cdpSession = await this.simliPage.createCDPSession();
+      const cdpSession = await context.newCDPSession(this.simliPage);
       await cdpSession.send('Page.setWebLifecycleState', { state: 'active' });
       // Disable timer throttling for background tabs
       await cdpSession.send('Emulation.setFocusEmulationEnabled', { enabled: true });
@@ -263,6 +288,10 @@ export class SimliAvatar {
 
       // Start WebSocket audio bridge for efficient audio delivery
       await this.startAudioWebSocket();
+
+      // Start video frame relay (Simli page → Node). The meeting page pulls
+      // frames from Node instead of receiving a WebRTC track.
+      await this.startVideoFrameRelay();
       
       // Connect the Simli page to the WebSocket audio bridge
       // Note: This code runs in the browser context where WebSocket is the native browser API,
@@ -305,9 +334,61 @@ export class SimliAvatar {
         console.log('✓ Simli page connected to WebSocket audio bridge');
       }
 
+      // Simli page → Node video frame push: draw the avatar video to a canvas
+      // and stream JPEG frames up the video WS. Mirror of the audio bridge.
+      if (this.videoWsPort > 0) {
+        await this.simliPage.evaluate((port: number) => {
+          const video = document.getElementById('simli-video') as HTMLVideoElement;
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          if (!video || !ctx) {
+            console.error('[Simli-VideoWS] cannot set up frame push — elements missing');
+            return;
+          }
+          // @ts-ignore - Browser WebSocket, not Node.js ws module
+          const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+          ws.binaryType = 'arraybuffer';
+          let pushing = false;
+          ws.onopen = () => {
+            console.log('[Simli-VideoWS] Connected to video relay');
+            // @ts-ignore
+            window.__simliVideoWs = ws;
+            pushing = true;
+            // ~20 fps is plenty for a talking-head avatar and keeps the JPEG
+            // encode + WS send cost low.
+            setInterval(() => {
+              if (!pushing || ws.readyState !== 1) return;
+              if (video.readyState < 2) return;
+              canvas.width = video.videoWidth || 512;
+              canvas.height = video.videoHeight || 512;
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              canvas.toBlob(
+                (blob) => {
+                  if (!blob || ws.readyState !== 1) return;
+                  blob.arrayBuffer().then((buf) => {
+                    try { ws.send(buf); } catch (e) { /* ignore */ }
+                  });
+                },
+                'image/jpeg',
+                0.6,
+              );
+            }, 50);
+          };
+          ws.onclose = () => {
+            pushing = false;
+            // @ts-ignore
+            window.__simliVideoWs = null;
+            console.log('[Simli-VideoWS] Video relay disconnected');
+          };
+          // @ts-ignore
+          ws.onerror = () => console.error('[Simli-VideoWS] Video relay error');
+        }, this.videoWsPort);
+        console.log('✓ Simli page connected to WebSocket video relay');
+      }
+
       this._isConnected = true;
       this._isReady = true;
-      console.log('✓ Simli Avatar initialized successfully (audio isolated, WebSocket audio bridge active)');
+      console.log('✓ Simli Avatar initialized successfully (audio isolated, WebSocket audio + video relay active)');
 
     } catch (error) {
       console.error('Failed to initialize Simli Avatar:', error);
@@ -325,107 +406,114 @@ export class SimliAvatar {
     try {
       console.log('Injecting getUserMedia override for Simli avatar...');
 
-      const client = await meetingPage.createCDPSession();
-      const simliClient = await this.simliPage.createCDPSession();
-      
-      await this.simliPage.evaluate(() => {
-        const video = document.getElementById('simli-video') as HTMLVideoElement;
-        const canvas = document.getElementById('simli-canvas') as HTMLCanvasElement;
-        const ctx = canvas.getContext('2d');
-        
-        if (!video || !canvas || !ctx) {
-          console.error('[Simli] Cannot set up canvas capture - elements missing');
+      await meetingPage.addInitScript((videoWsPort: number) => {
+        // NOTE: this runs in EVERY frame (main doc + Zoom's about:blank /
+        // reCAPTCHA iframes). Zoom captures the camera from a subframe, so the
+        // override must be installed everywhere — but the relay connection and
+        // canvas are set up LAZILY on the first getUserMedia({video}) call, so
+        // the throwaway frames that never request video never connect (avoids
+        // the connect/disconnect storm).
+        console.log(`[LMA-Simli] init script running in frame: ${location.href} (top=${window.top === window.self})`);
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          console.log('[LMA-Simli] navigator.mediaDevices.getUserMedia NOT available in this frame — override skipped');
           return;
         }
-
-        const updateCanvasSize = () => {
-          canvas.width = video.videoWidth || 640;
-          canvas.height = video.videoHeight || 480;
-        };
-        video.addEventListener('loadedmetadata', updateCanvasSize);
-        updateCanvasSize();
-
-        // Use setInterval instead of requestAnimationFrame because
-        // requestAnimationFrame stops when the tab is in the background.
-        // The Simli page runs in a background tab, so we need setInterval
-        // to keep drawing frames for the canvas capture stream.
-        let frameCount = 0;
-        setInterval(() => {
-          if (video.readyState >= 2) {
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            frameCount++;
-            if (frameCount % 300 === 0) { // Log every 10 seconds
-              console.log(`[Simli] Canvas drawing: frame=${frameCount}, video=${video.videoWidth}x${video.videoHeight}, canvas=${canvas.width}x${canvas.height}, readyState=${video.readyState}`);
-            }
-          } else if (frameCount % 300 === 0) {
-            console.log(`[Simli] Canvas NOT drawing: video.readyState=${video.readyState}, videoWidth=${video.videoWidth}, videoHeight=${video.videoHeight}`);
-          }
-        }, 33); // ~30 FPS
-
-        const canvasStream = canvas.captureStream(30);
-        // @ts-ignore
-        window.__simliCanvasStream = canvasStream;
-        
-        // Log stream details
-        const videoTracks = canvasStream.getVideoTracks();
-        console.log(`[Simli] Canvas capture stream created: ${videoTracks.length} video tracks`);
-        videoTracks.forEach((t: MediaStreamTrack, i: number) => {
-          console.log(`[Simli] Track ${i}: kind=${t.kind}, readyState=${t.readyState}, enabled=${t.enabled}, muted=${t.muted}, label=${t.label}`);
-          const settings = t.getSettings();
-          console.log(`[Simli] Track ${i} settings: ${JSON.stringify(settings)}`);
-        });
-      });
-
-      await meetingPage.evaluateOnNewDocument(() => {
         const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-        let simliVideoTrack: MediaStreamTrack | null = null;
-        let simliStreamReady = false;
 
-        const isSimliTrackLive = () =>
-          simliVideoTrack !== null &&
-          simliVideoTrack.readyState === 'live' &&
-          simliVideoTrack.muted === false;
+        let avatarCanvas: HTMLCanvasElement | null = null;
+        let avatarCtx: CanvasRenderingContext2D | null = null;
+        let framesDrawn = 0;
+        let relayStarted = false;
+        // @ts-ignore
+        window.__simliFramesDrawn = 0;
+
+        const drawFrame = (buf: ArrayBuffer) => {
+          if (!avatarCanvas || !avatarCtx) return;
+          const blob = new Blob([buf], { type: 'image/jpeg' });
+          createImageBitmap(blob)
+            .then((bmp) => {
+              if (bmp.width && (avatarCanvas!.width !== bmp.width || avatarCanvas!.height !== bmp.height)) {
+                avatarCanvas!.width = bmp.width;
+                avatarCanvas!.height = bmp.height;
+              }
+              avatarCtx!.drawImage(bmp, 0, 0, avatarCanvas!.width, avatarCanvas!.height);
+              bmp.close();
+              framesDrawn++;
+              // @ts-ignore
+              window.__simliFramesDrawn = framesDrawn;
+              if (framesDrawn % 200 === 0) {
+                console.log(`[LMA-Simli] avatar frames drawn: ${framesDrawn}`);
+              }
+            })
+            .catch(() => { /* drop bad frame */ });
+        };
+
+        const connectVideoWs = () => {
+          // @ts-ignore
+          const ws = new WebSocket(`ws://127.0.0.1:${videoWsPort}`);
+          ws.binaryType = 'arraybuffer';
+          ws.onopen = () => console.log('[LMA-Simli] Video relay connected');
+          // @ts-ignore
+          ws.onmessage = (event: any) => drawFrame(event.data as ArrayBuffer);
+          ws.onclose = () => {
+            console.log('[LMA-Simli] Video relay closed — retrying in 1s');
+            setTimeout(connectVideoWs, 1000);
+          };
+          // @ts-ignore
+          ws.onerror = () => { try { ws.close(); } catch (e) { /* ignore */ } };
+          // @ts-ignore
+          window.__simliVideoWs = ws;
+        };
+
+        // Set up the canvas + relay once, on demand. The canvas itself is
+        // long-lived — frames are continuously drawn onto it from the relay.
+        const startRelay = () => {
+          if (relayStarted) return;
+          relayStarted = true;
+          avatarCanvas = document.createElement('canvas');
+          avatarCanvas.width = 512;
+          avatarCanvas.height = 512;
+          avatarCtx = avatarCanvas.getContext('2d');
+          connectVideoWs();
+        };
+
+        const hasFrames = () => framesDrawn > 0;
+
+        // Mint a FRESH capture stream off the persistent canvas on every
+        // getUserMedia({video}) call rather than reusing one shared track.
+        // Zoom calls track.stop() on the preview video track when it
+        // transitions preview → meeting; if we hand out a single shared
+        // track, that stop() ends our only source, and every later
+        // getUserMedia returns an ended track. Zoom's virtual-background
+        // pipeline then throws "MediaStreamTrackProcessor: Input track cannot
+        // be ended" (USER_FORBIDDED_CAPTURE_VIDEO) and turns the camera off.
+        // A fresh captureStream off the same canvas is independent — stopping
+        // one track never affects the canvas or any other handed-out track.
+        const mintVideoTrack = (): MediaStreamTrack | undefined => {
+          // 30fps captureStream off the avatar canvas. The canvas updates at
+          // the relay rate (~20fps); captureStream resamples to steady output.
+          const freshStream = avatarCanvas!.captureStream(30);
+          // @ts-ignore
+          window.__simliCanvasStream = freshStream;
+          return freshStream.getVideoTracks()[0];
+        };
 
         const buildSimliStream = async (
           constraints: MediaStreamConstraints,
         ): Promise<MediaStream> => {
-          const trackClone = simliVideoTrack!.clone();
+          const videoTrack = mintVideoTrack();
           console.log(
-            `[LMA-Simli] Returning Simli avatar video stream - track: readyState=${trackClone.readyState}, ` +
-              `enabled=${trackClone.enabled}, muted=${trackClone.muted}, kind=${trackClone.kind}`,
+            `[LMA-Simli] Returning Simli avatar stream — framesDrawn=${framesDrawn}, ` +
+              `track readyState=${videoTrack?.readyState}`,
           );
-          try {
-            const settings = trackClone.getSettings();
-            console.log(
-              `[LMA-Simli] Track settings: width=${settings.width}, height=${settings.height}, frameRate=${settings.frameRate}`,
-            );
-          } catch (e) {
-            console.log('[LMA-Simli] Could not get track settings:', e);
-          }
           if (constraints.audio) {
             const audioStream = await originalGetUserMedia({ audio: constraints.audio });
             const combinedStream = new MediaStream();
-            combinedStream.addTrack(trackClone);
-            audioStream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
+            if (videoTrack) combinedStream.addTrack(videoTrack);
+            audioStream.getAudioTracks().forEach((track) => combinedStream.addTrack(track));
             return combinedStream;
           }
-          return new MediaStream([trackClone]);
-        };
-
-        let reconnectRequestInFlight = false;
-        const requestReconnectOnce = async (): Promise<void> => {
-          if (reconnectRequestInFlight) return;
-          // @ts-ignore
-          if (typeof window.__simliRequestReconnect !== 'function') return;
-          reconnectRequestInFlight = true;
-          try {
-            // @ts-ignore
-            await window.__simliRequestReconnect();
-          } catch (e) {
-            console.log('[LMA-Simli] __simliRequestReconnect threw:', e);
-          } finally {
-            reconnectRequestInFlight = false;
-          }
+          return new MediaStream(videoTrack ? [videoTrack] : []);
         };
 
         navigator.mediaDevices.getUserMedia = async function(
@@ -437,27 +525,21 @@ export class SimliAvatar {
           );
 
           if (constraints?.video) {
-            if (isSimliTrackLive()) {
-              return buildSimliStream(constraints);
-            }
-
-            console.log(
-              '[LMA-Simli] Simli track not live/unmuted — requesting on-demand reconnect...',
-            );
-            requestReconnectOnce();
-
+            // Lazily set up the relay + canvas in whichever frame actually
+            // requests the camera (Zoom uses a subframe).
+            startRelay();
+            // Wait for the first relayed frame so we never hand Zoom an empty
+            // canvas (which it renders as a black tile / camera-off).
             const startTs = Date.now();
             const budgetMs = 8000;
-            while (Date.now() - startTs < budgetMs) {
-              await new Promise(r => setTimeout(r, 50));
-              if (isSimliTrackLive()) {
-                console.log(
-                  `[LMA-Simli] ✓ Simli track live after ${Date.now() - startTs}ms`,
-                );
-                return buildSimliStream(constraints);
-              }
+            while (!hasFrames() && Date.now() - startTs < budgetMs) {
+              await new Promise((r) => setTimeout(r, 50));
             }
-            console.log('[LMA-Simli] ⚠️ Simli track still not live after 8s — falling through');
+            if (hasFrames()) {
+              console.log(`[LMA-Simli] ✓ First frame after ${Date.now() - startTs}ms`);
+              return buildSimliStream(constraints);
+            }
+            console.log('[LMA-Simli] ⚠️ No avatar frames after 8s — falling through');
           }
 
           console.log('[LMA-Simli] Falling through to original getUserMedia');
@@ -484,27 +566,6 @@ export class SimliAvatar {
           return devices;
         };
 
-        // @ts-ignore
-        window.__setSimliVideoTrack = (track: MediaStreamTrack) => {
-          simliVideoTrack = track;
-          simliStreamReady = true;
-          // Store for external polling
-          // @ts-ignore
-          window.__simliCurrentTrack = track;
-          console.log(`[LMA-Simli] Simli video track set - readyState=${track.readyState}, ${track.getSettings().width}x${track.getSettings().height}`);
-          
-          // Monitor track state - if it ends, clear refs so poll triggers re-connection
-          track.onended = () => {
-            console.log('[LMA-Simli] ⚠️ Video track ended!');
-            simliStreamReady = false;
-            simliVideoTrack = null;
-            // @ts-ignore
-            window.__simliCurrentTrack = null;
-          };
-          track.onmute = () => {
-            console.log('[LMA-Simli] ⚠️ Video track muted');
-          };
-        };
         // Override Permissions API to always report camera as 'granted'
         // Zoom checks navigator.permissions.query({name: 'camera'}) 
         const originalQuery = navigator.permissions.query.bind(navigator.permissions);
@@ -519,7 +580,7 @@ export class SimliAvatar {
         // @ts-ignore
         window.__simliOverrideInstalled = true;
         console.log('[LMA-Simli] getUserMedia + enumerateDevices + permissions overrides installed');
-      });
+      }, this.videoWsPort);
 
       console.log('✓ getUserMedia override injected into meeting page');
     } catch (error) {
@@ -527,239 +588,20 @@ export class SimliAvatar {
     }
   }
 
-  async connectStreamToMeetingPage(meetingPage: Page): Promise<void> {
+  /**
+   * The avatar feed is self-driving: the Simli page pushes JPEG frames to
+   * Node's video relay, and the getUserMedia override (installed in every
+   * frame) lazily connects to that relay when the page requests the camera.
+   * Whether frames are flowing is visible in the Node relay-connection logs
+   * and the in-page [LMA-Simli] frame-draw heartbeat, so there's nothing to
+   * actively wire up here. Kept for call-site compatibility.
+   */
+  async connectStreamToMeetingPage(_meetingPage: Page): Promise<void> {
     if (!this.enabled || !this._isReady || !this.simliPage) return;
-
     try {
-      console.log('Connecting Simli video stream to meeting page...');
-
-      try {
-        await meetingPage.evaluate(() => {
-          // @ts-ignore
-          window.__simliReconnectInFlight = true;
-        });
-      } catch (e) {
-        /* meeting page may not be ready yet; poll will just see null as usual */
-      }
-
-      const offer = await this.simliPage.evaluate(async () => {
-        // Try to get video track directly from Simli's video element srcObject
-        // This avoids the canvas capture which has background tab issues
-        const videoEl = document.getElementById('simli-video') as HTMLVideoElement;
-        let sourceStream: MediaStream | null = null;
-        
-        if (videoEl && videoEl.srcObject && videoEl.srcObject instanceof MediaStream) {
-          const videoTracks = videoEl.srcObject.getVideoTracks();
-          if (videoTracks.length > 0 && videoTracks[0].readyState === 'live') {
-            sourceStream = videoEl.srcObject;
-            console.log(`[Simli] Using video element srcObject directly: ${videoTracks[0].readyState}, ${videoTracks[0].getSettings().width}x${videoTracks[0].getSettings().height}`);
-          }
-        }
-        
-        // Fallback to canvas capture stream
-        if (!sourceStream) {
-          // @ts-ignore
-          sourceStream = window.__simliCanvasStream as MediaStream;
-          console.log('[Simli] Falling back to canvas capture stream');
-        }
-        
-        if (!sourceStream) throw new Error('No video stream available');
-
-        // Close any existing bridge PC before creating a new one
-        // @ts-ignore
-        if (window.__simliPC) {
-          try {
-            // @ts-ignore
-            window.__simliPC.close();
-          } catch(e) {}
-        }
-
-        const pc = new RTCPeerConnection();
-        // @ts-ignore
-        window.__simliPC = pc;
-        const videoTrack = sourceStream.getVideoTracks()[0];
-        if (videoTrack) {
-          pc.addTrack(videoTrack, sourceStream);
-          console.log(`[Simli] Added track to PC: ${videoTrack.readyState}, enabled=${videoTrack.enabled}, muted=${videoTrack.muted}`);
-        }
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        await new Promise<void>((resolve) => {
-          if (pc.iceGatheringState === 'complete') resolve();
-          else pc.addEventListener('icegatheringstatechange', () => {
-            if (pc.iceGatheringState === 'complete') resolve();
-          });
-        });
-        return JSON.stringify(pc.localDescription);
-      });
-
-      const answer = await meetingPage.evaluate(async (offerStr: string) => {
-        const offer = JSON.parse(offerStr);
-        const pc = new RTCPeerConnection();
-        // @ts-ignore
-        window.__simliReceiverPC = pc;
-        pc.ontrack = (event) => {
-          console.log('[LMA-Simli] Received video track from Simli page');
-          // @ts-ignore
-          if (window.__setSimliVideoTrack) window.__setSimliVideoTrack(event.track);
-        };
-        await pc.setRemoteDescription(offer);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await new Promise<void>((resolve) => {
-          if (pc.iceGatheringState === 'complete') resolve();
-          else pc.addEventListener('icegatheringstatechange', () => {
-            if (pc.iceGatheringState === 'complete') resolve();
-          });
-        });
-        return JSON.stringify(pc.localDescription);
-      }, offer);
-
-      await this.simliPage.evaluate(async (answerStr: string) => {
-        const answer = JSON.parse(answerStr);
-        // @ts-ignore
-        const pc = window.__simliPC as RTCPeerConnection;
-        await pc.setRemoteDescription(answer);
-        console.log('[Simli] Peer connection established with meeting page');
-      }, answer);
-
-      // Verify the bridge actually connected by checking the receiver PC
-      // state and that a video track is live on the meeting side.
-      let connected = false;
-      let lastDiag = '';
-      for (let i = 0; i < 20; i++) {
-        const diag = await meetingPage.evaluate(() => {
-          // @ts-ignore
-          const pc = window.__simliReceiverPC as RTCPeerConnection | undefined;
-          // @ts-ignore
-          const track = window.__simliCurrentTrack as MediaStreamTrack | undefined;
-          return {
-            pcState: pc?.connectionState ?? 'no-pc',
-            iceState: pc?.iceConnectionState ?? 'no-pc',
-            trackReady: track?.readyState ?? 'no-track',
-            trackMuted: track?.muted ?? null,
-          };
-        });
-        lastDiag = JSON.stringify(diag);
-        if (
-          (diag.pcState === 'connected' || diag.iceState === 'connected' || diag.iceState === 'completed') &&
-          diag.trackReady === 'live'
-        ) {
-          connected = true;
-          break;
-        }
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-      console.log(
-        connected
-          ? `✓ Simli video stream connected to meeting page (${lastDiag})`
-          : `⚠️  Simli stream not connected after 10s: ${lastDiag}`,
-      );
-
-      if (!connected) {
-        // Dump deep state from both pages directly via evaluate() so we can
-        // see why pc.ontrack didn't fire, without relying on browser console
-        // forwarding (which has been unreliable on this image).
-        try {
-          const simliState = await this.simliPage.evaluate(() => {
-            // @ts-ignore
-            const pc: RTCPeerConnection | undefined = window.__simliPC;
-            // @ts-ignore
-            const canvasStream: MediaStream | undefined = window.__simliCanvasStream;
-            const videoEl = document.getElementById('simli-video') as HTMLVideoElement | null;
-            const canvasEl = document.getElementById('simli-canvas') as HTMLCanvasElement | null;
-            const videoStream = videoEl?.srcObject instanceof MediaStream ? videoEl.srcObject : null;
-            const senders = pc?.getSenders().map((s) => ({
-              trackKind: s.track?.kind,
-              trackReadyState: s.track?.readyState,
-              trackEnabled: s.track?.enabled,
-              trackMuted: s.track?.muted,
-              trackId: s.track?.id,
-            })) ?? [];
-            return {
-              pcExists: !!pc,
-              pcState: pc?.connectionState,
-              iceState: pc?.iceConnectionState,
-              senders,
-              video: videoEl
-                ? {
-                    width: videoEl.videoWidth,
-                    height: videoEl.videoHeight,
-                    readyState: videoEl.readyState,
-                    paused: videoEl.paused,
-                    currentTime: videoEl.currentTime,
-                    srcObject: !!videoEl.srcObject,
-                  }
-                : null,
-              canvas: canvasEl ? { width: canvasEl.width, height: canvasEl.height } : null,
-              videoTracks: videoStream?.getVideoTracks().map((t) => ({
-                readyState: t.readyState,
-                enabled: t.enabled,
-                muted: t.muted,
-                id: t.id,
-              })) ?? [],
-              canvasTracks: canvasStream?.getVideoTracks().map((t) => ({
-                readyState: t.readyState,
-                enabled: t.enabled,
-                muted: t.muted,
-                id: t.id,
-              })) ?? [],
-            };
-          });
-          console.log(`[Simli diag] simliPage state: ${JSON.stringify(simliState)}`);
-        } catch (e: any) {
-          console.warn('[Simli diag] could not read simliPage state:', e?.message || e);
-        }
-
-        try {
-          const meetingState = await meetingPage.evaluate(() => {
-            // @ts-ignore
-            const pc: RTCPeerConnection | undefined = window.__simliReceiverPC;
-            const receivers = pc?.getReceivers().map((r) => ({
-              trackKind: r.track?.kind,
-              trackReadyState: r.track?.readyState,
-              trackEnabled: r.track?.enabled,
-              trackMuted: r.track?.muted,
-              trackId: r.track?.id,
-            })) ?? [];
-            // @ts-ignore
-            const overrideInstalled = window.__simliOverrideInstalled === true;
-            // @ts-ignore
-            const currentTrack: MediaStreamTrack | null = window.__simliCurrentTrack ?? null;
-            return {
-              url: location.href,
-              pcExists: !!pc,
-              pcState: pc?.connectionState,
-              iceState: pc?.iceConnectionState,
-              signaling: pc?.signalingState,
-              receivers,
-              overrideInstalled,
-              currentTrack: currentTrack
-                ? {
-                    readyState: currentTrack.readyState,
-                    enabled: currentTrack.enabled,
-                    muted: currentTrack.muted,
-                  }
-                : null,
-            };
-          });
-          console.log(`[Simli diag] meetingPage state: ${JSON.stringify(meetingState)}`);
-        } catch (e: any) {
-          console.warn('[Simli diag] could not read meetingPage state:', e?.message || e);
-        }
-      }
+      console.log('Simli avatar frame relay active — meeting page will pull frames on getUserMedia.');
     } catch (error) {
-      console.error('Failed to connect Simli stream to meeting page:', error);
-    } finally {
-      try {
-        await meetingPage.evaluate(() => {
-          // @ts-ignore
-          window.__simliReconnectInFlight = false;
-        });
-      } catch (e) {
-        /* ignore */
-      }
+      console.error('Failed to confirm Simli frame relay to meeting page:', error);
     }
   }
 
@@ -795,6 +637,65 @@ export class SimliAvatar {
         resolve(); // Don't block initialization
       });
     });
+  }
+
+  /**
+   * Video frame relay server. The Simli page connects and streams JPEG frames;
+   * we keep only the most recent one in memory for the meeting page to pull.
+   */
+  private async startVideoFrameRelay(): Promise<void> {
+    return new Promise((resolve) => {
+      this.videoWsServer = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+
+      this.videoWsServer.on('listening', () => {
+        const addr = this.videoWsServer.address();
+        this.videoWsPort = typeof addr === 'object' ? addr.port : 0;
+        console.log(`✓ Simli video relay listening on ws://127.0.0.1:${this.videoWsPort}`);
+        resolve();
+      });
+
+      // Both the Simli page (producer) and the meeting page (consumer) connect
+      // here. Forward every frame from the producer to all other clients, and
+      // replay the latest frame to a newly-connected consumer so it draws
+      // immediately rather than waiting for the next push.
+      this.videoWsServer.on('connection', (ws: WebSocket) => {
+        const clientCount = this.videoWsServer.clients.size;
+        console.log(`✓ Client connected to Simli video relay (total clients now: ${clientCount})`);
+        if (this.latestFrame) {
+          try { ws.send(this.latestFrame); } catch (e) { /* ignore */ }
+        }
+        let framesFromThisClient = 0;
+        let framesFwdThisClient = 0;
+        ws.on('message', (data: Buffer) => {
+          this.latestFrame = data;
+          framesFromThisClient++;
+          for (const client of this.videoWsServer.clients) {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              try { client.send(data); framesFwdThisClient++; } catch (e) { /* ignore */ }
+            }
+          }
+          if (framesFromThisClient % 100 === 0) {
+            console.log(`[Simli-DEBUG relay] producer sent ${framesFromThisClient} frames; forwarded ${framesFwdThisClient} to consumers (${this.videoWsServer.clients.size - 1} consumer(s))`);
+          }
+        });
+        ws.on('close', () => console.log(`🎥 Simli video relay client disconnected (received ${framesFromThisClient} frames from it)`));
+        ws.on('error', (err: Error) => console.error('❌ Simli video relay error:', err.message));
+      });
+
+      this.videoWsServer.on('error', (err: Error) => {
+        console.error('❌ Simli video relay server error:', err);
+        resolve();
+      });
+    });
+  }
+
+  private stopVideoFrameRelay(): void {
+    this.latestFrame = null;
+    if (this.videoWsServer) {
+      try { this.videoWsServer.close(); } catch (e) { /* ignore */ }
+      this.videoWsServer = null;
+      console.log('✓ Simli video relay stopped');
+    }
   }
 
   /**
@@ -887,8 +788,9 @@ export class SimliAvatar {
     if (!this.enabled) return;
     console.log('Stopping Simli Avatar...');
     
-    // Stop WebSocket audio bridge first
+    // Stop WebSocket audio bridge + video relay first
     this.stopAudioWebSocket();
+    this.stopVideoFrameRelay();
     
     try {
       if (this.simliPage) {

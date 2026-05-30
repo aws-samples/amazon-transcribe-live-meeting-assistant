@@ -78,9 +78,14 @@ const WARMUP_MEETING_PLATFORMS = [
 ];
 
 // Cookies file is created on first navigation; survives the profile tar
-// (Cache dirs are commonly excluded so aren't a reliable signal).
+// (Cache dirs are commonly excluded so aren't a reliable signal). Chromium
+// writes the DB at Default/Network/Cookies on modern builds and Default/Cookies
+// on older ones — check both so a restored profile isn't mis-flagged as fresh.
 export function profileIsFresh(userDataDir: string): boolean {
-    return !fs.existsSync(path.join(userDataDir, 'Default', 'Cookies'));
+    return !(
+        fs.existsSync(path.join(userDataDir, 'Default', 'Network', 'Cookies')) ||
+        fs.existsSync(path.join(userDataDir, 'Default', 'Cookies'))
+    );
 }
 
 interface WarmupPage {

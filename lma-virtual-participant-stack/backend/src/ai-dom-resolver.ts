@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page, ElementHandle } from 'puppeteer-core';
+import { Page, ElementHandle } from 'playwright-core';
 import {
   BedrockRuntimeClient,
   InvokeModelCommand,
@@ -219,7 +219,7 @@ async function evictCacheEntry(
 
 /**
  * Resolve a CSS selector to ElementHandles. Tolerates Claude (and human-doc)
- * habit of producing jQuery `:contains('text')` extensions, which Puppeteer
+ * habit of producing jQuery `:contains('text')` extensions, which the browser
  * doesn't understand — falls back to an in-page text scan with the prefix
  * selector. Returns at most one element when the `:contains()` form is used,
  * matching the jQuery semantics callers expect.
@@ -233,7 +233,7 @@ async function querySelectorAllSafe(
     const baseSelector = containsMatch[1].trim() || '*';
     const wantText = containsMatch[3].toLowerCase();
     const handle = (await page.evaluateHandle(
-      (sel: string, text: string) => {
+      ({ sel, text }: { sel: string; text: string }) => {
         const candidates = Array.from(document.querySelectorAll(sel));
         for (const el of candidates) {
           const t = (el.textContent || '').trim().toLowerCase();
@@ -244,8 +244,7 @@ async function querySelectorAllSafe(
         }
         return null;
       },
-      baseSelector,
-      wantText,
+      { sel: baseSelector, text: wantText },
     )) as ElementHandle<Element> | null;
     const isNull = await page.evaluate((h) => h === null, handle as any);
     if (isNull) {
@@ -368,13 +367,13 @@ async function snapshotVisibleDialogs(page: Page): Promise<{ html: string }[]> {
 
 async function captureScreenshot(page: Page): Promise<string | null> {
   try {
+    // Playwright's screenshot() always returns a Buffer (no `encoding` option).
     const buf = await page.screenshot({
       type: 'png',
       fullPage: false,
       clip: { x: 0, y: 0, width: 1024, height: 768 },
-      encoding: 'base64',
     });
-    return buf as unknown as string;
+    return buf.toString('base64');
   } catch {
     return null;
   }
@@ -835,7 +834,7 @@ export async function scrollIntoViewAndClick(
       return true;
     } catch {
       // fallback: dispatch a synthetic click on the element. Works even
-      // when puppeteer's positional click misses due to overlays.
+      // when the positional click misses due to overlays.
       try {
         await handle.evaluate((el: Element) => (el as HTMLElement).click());
         return true;

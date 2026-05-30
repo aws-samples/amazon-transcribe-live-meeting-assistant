@@ -1,5 +1,4 @@
-import { Page, ConsoleMessage, ElementHandle } from 'puppeteer-core';
-import { createCursor, GhostCursor } from 'ghost-cursor';
+import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
 import { details, matchesEndCommand, exitMessagesFor, ExitInfo } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
@@ -13,7 +12,7 @@ import { startDialogWatchdog } from './dialog-watchdog.js';
 import { fetchZoomCredentials, loginToZoom, dismissPostLoginInterstitials } from './zoom-login.js';
 
 // Zoom's audio/video toggles use SVG icons inside a clickable <button>.
-// SVGs aren't directly clickable in Puppeteer, so we walk up to the nearest
+// SVGs aren't reliable click targets, so we walk up to the nearest
 // clickable ancestor before clicking.
 async function clickClickableAncestor(element: ElementHandle<Element>): Promise<void> {
     await element.evaluate((el) => {
@@ -23,30 +22,35 @@ async function clickClickableAncestor(element: ElementHandle<Element>): Promise<
     });
 }
 
-// Prefer ghost-cursor for the meaningful UX-style clicks (Join, Sign In,
-// Skip-this-step) where cursor pathing is a bot-detection signal. Falls back
-// to a plain element click if ghost-cursor errors. Audio/video SVG toggles
-// stay on clickClickableAncestor since ghost-cursor expects a clickable
-// element directly under the cursor.
+// Meaningful UX-style clicks (Join, Sign In, Skip-this-step). cloakbrowser's
+// humanize patches the context so plain clicks already use human-like mouse
+// pathing — no separate cursor library needed. force:true skips Playwright's
+// "covered by another element" actionability check (Zoom often floats a
+// transient overlay over the Join/chat buttons); the old Puppeteer click
+// didn't do that check, so this preserves prior behavior.
 async function humanClick(
-    cursor: GhostCursor | null,
     page: Page,
     target: string | ElementHandle<Element>,
 ): Promise<void> {
-    if (cursor) {
-        try {
-            await cursor.click(target as any);
-            return;
-        } catch (err) {
-            console.warn('[zoom] ghost-cursor click failed, falling back:', err);
-        }
-    }
     if (typeof target === 'string') {
-        const handle = await page.$(target);
-        if (handle) await handle.click();
+        await page.click(target, { force: true });
     } else {
-        await target.click();
+        await target.click({ force: true });
     }
+}
+
+// Type into a (possibly overlay-covered) input. Playwright's ElementHandle
+// .type() runs an actionability/pointer check that fails when Zoom floats a
+// transient overlay over the prejoin form. Focus the element directly in the
+// DOM (no actionability check), then type via the keyboard so humanize still
+// applies per-keystroke timing.
+async function humanType(
+    page: Page,
+    element: ElementHandle<Element>,
+    text: string,
+): Promise<void> {
+    await element.evaluate((el) => (el as HTMLElement).focus());
+    await page.keyboard.type(text, { delay: 50 + Math.floor(Math.random() * 70) });
 }
 
 export default class Zoom {
@@ -121,8 +125,8 @@ export default class Zoom {
         }
         for (const message of messages) {
             await new Promise(resolve => setTimeout(resolve, 10));
-            await found.element.type(message);
-            await found.element.press('Enter');
+            await humanType(page, found.element, message);
+            await page.keyboard.press('Enter');
         }
     }
 
@@ -152,8 +156,8 @@ export default class Zoom {
             console.error('Page Error:', error);
         });
 
-        page.on('error', (error: unknown) => {
-            console.error('Browser Error:', error);
+        page.on('crash', () => {
+            console.error('Browser Error: page crashed');
         });
 
         // Optional: sign in to Zoom first using user-provided credentials.
@@ -213,7 +217,7 @@ export default class Zoom {
                                 const url = page.url();
                                 const onSignin = url.includes('/signin') || url.includes('/sso');
                                 if (!onSignin) {
-                                    const cookies = await page.cookies('https://zoom.us', 'https://app.zoom.us');
+                                    const cookies = await page.context().cookies(['https://zoom.us', 'https://app.zoom.us']);
                                     if (cookies.some((c) => wantedCookies.has(c.name) && c.value)) {
                                         signInOK = true;
                                         break;
@@ -280,19 +284,6 @@ export default class Zoom {
 
         console.log('Getting Zoom meeting link.');
         await page.goto(`https://zoom.us/wc/${details.invite.meetingId}/join`);
-
-        // Initialize ghost-cursor for human-like cursor pathing on the
-        // meaningful UX clicks below (Join, Sign-In, etc.). Bezier-curve
-        // movement reduces a bot-detection signal that simple page.click()
-        // misses. Audio/video SVG toggles stay on clickClickableAncestor
-        // (ghost-cursor expects a clickable element directly under the cursor).
-        let cursor: GhostCursor | null = null;
-        try {
-            cursor = createCursor(page as any, undefined, true);
-            console.log('[zoom] ghost-cursor initialized.');
-        } catch (err) {
-            console.warn('[zoom] ghost-cursor unavailable, falling back to plain clicks:', err);
-        }
 
         // After arriving at the meeting URL, Zoom may redirect to a
         // post-login binding/upsell page (passkey, phone, SMS, "stay
@@ -369,7 +360,7 @@ export default class Zoom {
                     console.log('LMA Virtual Participant was unable to join the meeting.');
                     throw new Error('Meeting not found or invalid meeting ID');
                 }
-                await passwordResult.element.type(details.invite.meetingPassword, { delay: 50 + Math.floor(Math.random() * 70) });
+                await humanType(page, passwordResult.element, details.invite.meetingPassword);
             }
 
             console.log('Checking audio button state with retry...');
@@ -455,7 +446,7 @@ export default class Zoom {
                 );
                 if (currentValue.trim().length === 0) {
                     console.log('Name field is empty — filling with scribe identity.');
-                    await nameResult.element.type(details.scribeIdentity, { delay: 50 + Math.floor(Math.random() * 70) });
+                    await humanType(page, nameResult.element, details.scribeIdentity);
                 } else {
                     console.log(`Name field already populated ("${currentValue}") — leaving as-is.`);
                 }
@@ -484,7 +475,7 @@ export default class Zoom {
             );
             if (joinButtonResult) {
                 console.log('Clicking Join button to enter the meeting.');
-                await humanClick(cursor, page, joinButtonResult.element);
+                await humanClick(page, joinButtonResult.element);
             } else if (nameResult) {
                 console.log('Could not locate Join button — pressing Enter on name field as fallback.');
                 await nameResult.element.press('Enter');
@@ -698,7 +689,7 @@ export default class Zoom {
         if (!chatButtonResult) {
             console.log('Could not locate chat panel button — continuing without chat');
         } else {
-            await humanClick(cursor, page, chatButtonResult.element);
+            await humanClick(page, chatButtonResult.element);
         }
 
         console.log('Sending introduction messages.');
@@ -1138,7 +1129,9 @@ export default class Zoom {
                         }
                         return false;
                     },
-                    { timeout: details.meetingTimeout }
+                    // Playwright: 2nd positional is the page-function arg, options are 3rd.
+                    undefined,
+                    { timeout: details.meetingTimeout, polling: 1000 }
                 )
                 .then(async (handle) => {
                     const dialogText = (await handle.jsonValue()) as string;

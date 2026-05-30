@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page } from 'puppeteer-core';
+import { Page } from 'playwright-core';
 import {
     SecretsManagerClient,
     GetSecretValueCommand,
@@ -72,7 +72,7 @@ const typeWithDelay = async (
  */
 const hasZoomAuthCookie = async (page: Page): Promise<boolean> => {
     // Zoom marks its session cookies as HttpOnly, so they're invisible to
-    // `document.cookie` from JavaScript. Use Puppeteer's `page.cookies()`
+    // `document.cookie` from JavaScript. Use the context's cookies() API
     // (CDP / Network.getCookies) which returns HttpOnly cookies.
     //
     // Only check cookies that are SET ONLY when authenticated. Verified
@@ -83,7 +83,7 @@ const hasZoomAuthCookie = async (page: Page): Promise<boolean> => {
     //   - `zm_aid` (account id) and `zm_haid` (host account id) are
     //     ONLY set after authentication completes
     try {
-        const cookies = await page.cookies('https://zoom.us', 'https://app.zoom.us');
+        const cookies = await page.context().cookies(['https://zoom.us', 'https://app.zoom.us']);
         const wanted = new Set(['zm_aid', 'zm_haid']);
         return cookies.some((c) => wanted.has(c.name) && !!c.value);
     } catch {

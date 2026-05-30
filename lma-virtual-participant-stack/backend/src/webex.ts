@@ -1,4 +1,4 @@
-import { Page, Frame } from 'puppeteer-core';
+import { Page, Frame } from 'playwright-core';
 import { details, matchesEndCommand, exitMessagesFor, ExitInfo } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { createStatusManager } from "./status-manager.js";
@@ -155,7 +155,7 @@ export default class Webex {
                     // Wait for name input to appear (successful CAPTCHA solve + Next click)
                     frame.waitForSelector('input[data-test="Name (required)"]', {
                         timeout: 120000,
-                        visible: true
+                        state: 'visible'
                     }),
                     // Or wait for the Next button to be clicked (we'll detect by it disappearing)
                     frame.waitForFunction(
@@ -163,6 +163,7 @@ export default class Webex {
                             const nextBtn = document.querySelector('mdc-button[type="submit"]');
                             return !nextBtn || nextBtn.getAttribute('disabled') === null;
                         },
+                        undefined,
                         { timeout: 120000 }
                     )
                 ]);

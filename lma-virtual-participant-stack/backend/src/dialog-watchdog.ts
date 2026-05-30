@@ -20,7 +20,7 @@
  * specific modal containers (`.zm-modal` for Zoom, `[data-tid="modal"]`
  * for Teams, etc.).
  */
-import { Page } from 'puppeteer-core';
+import { Page } from 'playwright-core';
 import {
     analyzeUnknownDialog,
     isResolverEnabled,
