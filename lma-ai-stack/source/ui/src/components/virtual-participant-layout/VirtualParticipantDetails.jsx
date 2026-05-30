@@ -162,7 +162,7 @@ const STATUS_CONFIG = {
   },
   WARMING_PROFILE: {
     message: 'Warming new profile…',
-    description: 'First-launch browsing pass to look like a returning visitor before joining (one-time, ~15s)',
+    description: 'First-launch browsing pass before joining (one-time, ~15s)',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',

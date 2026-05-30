@@ -1,5 +1,5 @@
 import { Page, Frame } from 'playwright-core';
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo } from './details.js';
+import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
@@ -31,7 +31,10 @@ export default class Webex {
         console.log('Sent messages:', messages);
     }
 
-    public async initialize(page: Page): Promise<ExitInfo> {
+    public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
+        // Webex has no heavy credentialled sign-in phase, so bring the Simli
+        // avatar up now (timing unchanged from before the deferral refactor).
+        if (opts.prepareAvatar) await opts.prepareAvatar();
         // AI-driven dialog watchdog runs for the entire meeting lifecycle.
         // See dialog-watchdog.ts. Catches sign-in / pre-join / waiting-room /
         // in-meeting dialogs (consent, recording notice, captcha, SSO, etc.)

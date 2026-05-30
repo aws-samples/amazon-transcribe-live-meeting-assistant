@@ -1,5 +1,5 @@
 import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo } from './details.js';
+import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
@@ -130,7 +130,8 @@ export default class Zoom {
         }
     }
 
-    public async initialize(page: Page): Promise<ExitInfo> {
+    public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
+        const prepareAvatar = opts.prepareAvatar ?? (async () => {});
 
         page.on('console', (message: ConsoleMessage) => {
             const type = message.type();
@@ -169,6 +170,11 @@ export default class Zoom {
         const zoomCredentialsSecretName = (process.env.ZOOM_CREDENTIALS_SECRET_NAME || '').trim();
         let signedInToZoom = false;
         if (zoomCredentialsSecretName) {
+            // Phase: SIGNING_IN. Kept distinct from JOINING (below) in the logs
+            // because it's the CPU-heavy phase (Bedrock + Zoom SPA hydration) and
+            // the one that historically stalls; the Simli avatar is deliberately
+            // NOT initialized yet so it doesn't contend for CPU here.
+            console.log('[phase] SIGNING_IN — authenticating to Zoom before join');
             console.log(`Zoom credentials provided (secret: ${zoomCredentialsSecretName}); signing in before join.`);
             try {
                 const creds = await fetchZoomCredentials(zoomCredentialsSecretName);
@@ -281,6 +287,13 @@ export default class Zoom {
                 throw new Error(`Zoom sign-in error: ${err?.message || String(err)}`);
             }
         }
+
+        // Phase: JOINING. Sign-in (the CPU-heavy phase) is done. NOW bring up
+        // the Simli avatar — its background render + ~20fps JPEG encode load
+        // (~1800/2048 CPU units) is acceptable here and the avatar must be
+        // ready before the prejoin camera toggle below captures the camera.
+        console.log('[phase] JOINING — navigating to the meeting and joining');
+        await prepareAvatar();
 
         console.log('Getting Zoom meeting link.');
         await page.goto(`https://zoom.us/wc/${details.invite.meetingId}/join`);
@@ -406,13 +419,40 @@ export default class Zoom {
             );
             
             if (videoResult && simliAvatar.isConnected()) {
-                // Simli avatar active - keep video ON so avatar shows as camera
+                // Simli avatar active - ensure video is ON, then force Zoom to
+                // (re-)acquire the camera so our getUserMedia override actually
+                // fires. The avatar reaches Zoom only when Zoom calls
+                // getUserMedia({video}); if the prejoin already shows video as
+                // "on", Zoom may never call it and the camera stays blank. A
+                // deliberate off→on toggle guarantees a fresh getUserMedia.
                 if (videoResult.selector === 'svg.SvgVideoOff') {
+                    // Currently off → single click turns it on (fresh getUserMedia).
                     console.log('Simli avatar active - clicking to turn video ON for avatar camera.');
                     await clickClickableAncestor(videoResult.element);
                 } else {
-                    console.log('Simli avatar active - video is already on, good.');
+                    // Currently on → toggle off then on to force a fresh
+                    // getUserMedia call that the override can intercept.
+                    console.log('Simli avatar active - video already on; toggling off→on to force camera (re)acquire.');
+                    await clickClickableAncestor(videoResult.element);
+                    await new Promise((r) => setTimeout(r, 800));
+                    const reVideo = await this.waitForButtonWithRetry(
+                        page,
+                        ['svg.SvgVideoOn', 'svg.SvgVideoOff'],
+                        'zoom.join.videoToggle',
+                        'Zoom join-screen camera toggle button (video on/off icon)',
+                        6,
+                        500,
+                    );
+                    if (reVideo && reVideo.selector === 'svg.SvgVideoOff') {
+                        await clickClickableAncestor(reVideo.element);
+                    } else if (reVideo) {
+                        // Already back on somehow — leave it on.
+                        console.log('Simli avatar active - video already back on after toggle.');
+                    }
                 }
+                // Eagerly connect the relay consumer + canvas in the meeting
+                // frames so the avatar feed is populated the moment Zoom pulls.
+                await simliAvatar.connectStreamToMeetingPage(page).catch(() => null);
             } else if (videoResult) {
                 if (videoResult.selector === 'svg.SvgVideoOn') {
                     console.log('Video is on, clicking to turn it off.');
@@ -675,8 +715,13 @@ export default class Zoom {
             };
         });
 
-        // Give a brief moment for any popup to appear and be dismissed
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Brief settle for an immediately-present popup. The auto-dismiss
+        // handler above is a self-running MutationObserver + poller, so we
+        // don't need to block long here — keep this short so the intro
+        // message posts ASAP after admission rather than a couple seconds
+        // later. (The dominant historical delay was CPU contention from the
+        // avatar during join, now removed by deferring Simli init.)
+        await new Promise(resolve => setTimeout(resolve, 500));
         console.log('Popup handler active, proceeding to open chat.');
 
         // (Note: the unknown-dialog watchdog is already running — started

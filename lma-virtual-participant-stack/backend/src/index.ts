@@ -336,17 +336,16 @@ const main = async (): Promise<void> => {
         console.log('✓ Skipping AppSync VNC ready update (local test mode)');
     }
 
-    // Initialize Simli Avatar AFTER browser is launched (background page for avatar rendering)
-    if (simliAvatar.isSimliEnabled()) {
-        try {
-            console.log('Initializing Simli Avatar...');
-            await simliAvatar.initialize(context);
-            console.log('✓ Simli Avatar initialized');
-        } catch (error) {
-            console.error('Failed to initialize Simli Avatar (non-critical):', error);
-            // Non-fatal - meeting can proceed without avatar
-        }
-    }
+    // NOTE: Simli Avatar is NOT initialized here anymore. Its background
+    // page renders the avatar and continuously JPEG-encodes ~20fps frames,
+    // which measures at ~1800/2048 CPU units sustained — and on a 2-vCPU
+    // host that contends directly with the CPU-heavy Zoom sign-in (Bedrock
+    // calls + SPA hydration), stalling sign-in until it escalates to
+    // MANUAL_ACTION. Avatar init is deferred into a `prepareAvatar()`
+    // callback (defined below) that each platform handler invokes at the
+    // right moment: for Zoom, AFTER sign-in completes but BEFORE the
+    // prejoin camera is enabled; for guest/other platforms, at the top of
+    // the join (unchanged timing, since they have no heavy sign-in phase).
 
     // Create page BEFORE MCP — external CDP client during newPage() deadlocks target handshake.
     const page = await context.newPage();
@@ -356,6 +355,14 @@ const main = async (): Promise<void> => {
 
     // Forward early meeting-page console output (getUserMedia override,
     // Simli bridge) to container logs before platform handlers attach.
+    //
+    // NOTE: cloakbrowser's patched Chromium does not reliably emit
+    // Runtime.consoleAPICalled over CDP, so Playwright's `page.on('console')`
+    // captures almost nothing on the meeting page. We keep it as a
+    // best-effort fallback, but the reliable path is the `__lmaLog` binding
+    // below: an init script patches console.* in every frame to forward
+    // matching lines through an exposed Node function, which bypasses the
+    // CDP console channel entirely.
     page.on('console', (msg) => {
         const text = msg.text();
         const type = msg.type();
@@ -368,6 +375,57 @@ const main = async (): Promise<void> => {
             console.log(`Browser ${type}: ${text}`);
         }
     });
+
+    // Reliable browser→container log bridge (see note above). Forward only
+    // lines we care about so Zoom's own chatty logging doesn't flood the
+    // container logs.
+    try {
+        await page.exposeFunction('__lmaLog', (level: string, text: string) => {
+            console.log(`Browser ${level}: ${text}`);
+        });
+        await page.addInitScript(() => {
+            // Runs at document start in every frame (main + subframes). Wrap
+            // console.* so matching messages reach the container via the
+            // __lmaLog binding even when CDP console forwarding is suppressed.
+            const wantsForward = (text: string, level: string): boolean =>
+                level === 'error' ||
+                level === 'warn' ||
+                text.includes('[LMA-Simli]') ||
+                text.includes('[Simli]');
+            const wrap = (level: string, orig: (...a: any[]) => void) =>
+                function (this: unknown, ...args: any[]) {
+                    try {
+                        const text = args
+                            .map((a) => {
+                                if (typeof a === 'string') return a;
+                                try {
+                                    return JSON.stringify(a);
+                                } catch {
+                                    return String(a);
+                                }
+                            })
+                            .join(' ');
+                        if (wantsForward(text, level)) {
+                            // @ts-ignore — binding installed by exposeFunction
+                            if (typeof window.__lmaLog === 'function') window.__lmaLog(level, text);
+                        }
+                    } catch {
+                        /* never let logging break the page */
+                    }
+                    return orig.apply(this, args);
+                };
+            try {
+                console.log = wrap('log', console.log.bind(console)) as any;
+                console.warn = wrap('warn', console.warn.bind(console)) as any;
+                console.error = wrap('error', console.error.bind(console)) as any;
+                console.info = wrap('info', console.info.bind(console)) as any;
+            } catch {
+                /* ignore */
+            }
+        });
+    } catch (err) {
+        console.warn('Failed to install __lmaLog browser-console bridge (non-critical):', err);
+    }
     page.on('pageerror', (err) => console.warn('MeetingPage error:', err?.message || err));
     page.on('framenavigated', (frame) => {
         if (frame === page.mainFrame()) {
@@ -445,69 +503,100 @@ const main = async (): Promise<void> => {
         }
     }
 
-    // Simli Avatar: Inject getUserMedia override and set up stream connection
-    // This must happen BEFORE the page navigates to the meeting URL
-    if (simliAvatar.isConnected()) {
-        try {
-            // 1. Grant camera+mic permissions at context level for all meeting domains
-            for (const origin of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com']) {
-                await context.grantPermissions(['camera', 'microphone'], { origin }).catch(() => {});
+    // Simli Avatar deferred setup. Each platform handler calls this via the
+    // `prepareAvatar` option at the right moment (Zoom: after sign-in, before
+    // the prejoin camera is enabled; others: at the top of the join). This
+    // both (a) brings the avatar up only when it's about to be needed as the
+    // camera, and (b) keeps its sustained ~1800-CPU-unit render+encode load
+    // off the CPU-heavy sign-in phase. Idempotent + concurrency-safe via the
+    // run-once guard, so multiple calls (e.g. framenavigated + handler) are
+    // cheap no-ops after the first.
+    let avatarPrepared: Promise<void> | null = null;
+    const prepareAvatar = async (): Promise<void> => {
+        if (!simliAvatar.isSimliEnabled()) return;
+        if (avatarPrepared) return avatarPrepared;
+        avatarPrepared = (async () => {
+            try {
+                console.log('Initializing Simli Avatar...');
+                await simliAvatar.initialize(context);
+                console.log('✓ Simli Avatar initialized');
+            } catch (error) {
+                console.error('Failed to initialize Simli Avatar (non-critical):', error);
+                return; // No avatar — meeting proceeds without it.
             }
-            console.log('✓ Camera and microphone permissions granted for meeting platforms');
-            
-            // 2. Inject getUserMedia/enumerateDevices/permissions overrides (evaluateOnNewDocument)
-            await simliAvatar.injectGetUserMediaOverride(page);
-            console.log('✓ Simli getUserMedia override injected into meeting page');
-            
-            let isReconnecting = false;
-            let reconnectInFlight: Promise<void> | null = null;
-            const connectSimliStream = async () => {
-                try {
-                    await simliAvatar.connectStreamToMeetingPage(page);
-                    console.log('✓ Simli video stream connected to meeting page');
-                } catch (error) {
-                    console.error('Failed to connect Simli stream (non-critical):', error);
+            if (!simliAvatar.isConnected()) return;
+            try {
+                // 1. Grant camera+mic permissions at context level for all meeting domains
+                for (const origin of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com']) {
+                    await context.grantPermissions(['camera', 'microphone'], { origin }).catch(() => {});
                 }
-            };
+                console.log('✓ Camera and microphone permissions granted for meeting platforms');
 
-            await page.exposeFunction('__simliRequestReconnect', async () => {
-                if (reconnectInFlight) {
+                // 2. Inject getUserMedia/enumerateDevices/permissions overrides.
+                // These run via addInitScript, so they apply to subsequent
+                // navigations/documents — installing them here (post-sign-in,
+                // pre-camera) is still ahead of when Zoom captures the camera.
+                await simliAvatar.injectGetUserMediaOverride(page);
+                console.log('✓ Simli getUserMedia override injected into meeting page');
+
+                let reconnectInFlight: Promise<void> | null = null;
+                const connectSimliStream = async () => {
+                    try {
+                        await simliAvatar.connectStreamToMeetingPage(page);
+                        console.log('✓ Simli video stream connected to meeting page');
+                    } catch (error) {
+                        console.error('Failed to connect Simli stream (non-critical):', error);
+                    }
+                };
+
+                await page.exposeFunction('__simliRequestReconnect', async () => {
+                    if (reconnectInFlight) {
+                        await reconnectInFlight;
+                        return;
+                    }
+                    console.log('Simli avatar: on-demand reconnect requested from meeting page');
+                    reconnectInFlight = connectSimliStream().finally(() => {
+                        reconnectInFlight = null;
+                    });
                     await reconnectInFlight;
-                    return;
-                }
-                isReconnecting = true;
-                console.log('Simli avatar: on-demand reconnect requested from meeting page');
-                reconnectInFlight = connectSimliStream().finally(() => {
-                    reconnectInFlight = null;
-                    isReconnecting = false;
                 });
-                await reconnectInFlight;
-            });
 
-            // The getUserMedia override + frame relay are installed via
-            // evaluateOnNewDocument, so they survive meeting-URL navigations on
-            // their own. Confirm frames are flowing once per real meeting-URL load.
-            const isMeetingUrl = (u: string): boolean =>
-                /\/wc\/\d+\/(join|start|live)/.test(u) ||
-                /teams\.microsoft\.com\/.*meetup-join/.test(u) ||
-                /web\.webex\.com\/meeting/.test(u) ||
-                /chime\.aws\/meetings\//.test(u);
-            page.on('framenavigated', async (frame) => {
-                if (frame !== page.mainFrame()) return;
-                const url = frame.url();
-                if (!isMeetingUrl(url)) return;
-                if (reconnectInFlight) return;
-                console.log(`[simli-bridge] meeting URL detected — confirming avatar frames`);
-                reconnectInFlight = connectSimliStream().finally(() => {
-                    reconnectInFlight = null;
+                // The getUserMedia override + frame relay survive meeting-URL
+                // navigations. Confirm frames are flowing once per real
+                // meeting-URL load.
+                const isMeetingUrl = (u: string): boolean =>
+                    /\/wc\/\d+\/(join|start|live)/.test(u) ||
+                    /teams\.microsoft\.com\/.*meetup-join/.test(u) ||
+                    /web\.webex\.com\/meeting/.test(u) ||
+                    /chime\.aws\/meetings\//.test(u);
+                page.on('framenavigated', async (frame) => {
+                    if (frame !== page.mainFrame()) return;
+                    const url = frame.url();
+                    if (!isMeetingUrl(url)) return;
+                    if (reconnectInFlight) return;
+                    console.log(`[simli-bridge] meeting URL detected — confirming avatar frames`);
+                    reconnectInFlight = connectSimliStream().finally(() => {
+                        reconnectInFlight = null;
+                    });
+                    await reconnectInFlight;
                 });
-                await reconnectInFlight;
-            });
-            
-        } catch (error) {
-            console.error('Failed to set up Simli avatar for meeting (non-critical):', error);
-        }
-    }
+
+                // If the meeting page is already on the meeting URL by the time
+                // we prepare the avatar (e.g. handler navigated before calling
+                // prepareAvatar), connect the consumer now — the framenavigated
+                // event won't re-fire for the current document.
+                if (isMeetingUrl(page.url())) {
+                    reconnectInFlight = connectSimliStream().finally(() => {
+                        reconnectInFlight = null;
+                    });
+                    await reconnectInFlight;
+                }
+            } catch (error) {
+                console.error('Failed to set up Simli avatar for meeting (non-critical):', error);
+            }
+        })();
+        return avatarPrepared;
+    };
 
     let meeting: Chime | Zoom | Teams | Webex;
     let success = false;
@@ -549,7 +638,7 @@ const main = async (): Promise<void> => {
         // returns a structured ExitInfo describing WHY the meeting ended;
         // we log it canonically and persist a human-readable form alongside
         // the COMPLETED status for the UI.
-        exitInfo = await meeting.initialize(page);
+        exitInfo = await meeting.initialize(page, { prepareAvatar });
 
         const exitDetailParts = [
             `reason=${exitInfo.reason}`,

@@ -18,6 +18,18 @@ export interface Speaker {
   timestamp: number;
 }
 
+/**
+ * Options passed to each platform handler's initialize(). `prepareAvatar`
+ * brings up the Simli avatar (background render page + getUserMedia override
+ * + relay wiring) on demand. Handlers call it at the point where the avatar
+ * is about to be needed as the camera — for Zoom that's after sign-in and
+ * before the prejoin camera toggle, keeping the avatar's CPU load off the
+ * sign-in phase. Idempotent; a no-op when Simli is disabled.
+ */
+export interface MeetingInitOptions {
+  prepareAvatar?: () => Promise<void>;
+}
+
 export interface MeetingDetails {
   // Meeting Configuration
   invite: MeetingInvite;

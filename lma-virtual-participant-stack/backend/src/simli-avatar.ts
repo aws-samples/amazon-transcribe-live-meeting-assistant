@@ -477,6 +477,24 @@ export class SimliAvatar {
           connectVideoWs();
         };
 
+        // Eagerly connect this frame as a relay consumer so frames are
+        // already flowing onto the canvas before Zoom asks for the camera.
+        // Node calls this (via the __simliEnsureConsumer binding) when the
+        // meeting URL loads, instead of waiting for Zoom to spontaneously
+        // call getUserMedia — which it may never do if the prejoin shows
+        // video as already "on". Safe to call repeatedly (startRelay guards).
+        // @ts-ignore
+        window.__simliEnsureConsumer = () => {
+          try {
+            startRelay();
+            console.log('[LMA-Simli] consumer pre-warmed via __simliEnsureConsumer');
+            return true;
+          } catch (e) {
+            console.log('[LMA-Simli] __simliEnsureConsumer failed: ' + (e as Error).message);
+            return false;
+          }
+        };
+
         const hasFrames = () => framesDrawn > 0;
 
         // Mint a FRESH capture stream off the persistent canvas on every
@@ -589,19 +607,42 @@ export class SimliAvatar {
   }
 
   /**
-   * The avatar feed is self-driving: the Simli page pushes JPEG frames to
-   * Node's video relay, and the getUserMedia override (installed in every
-   * frame) lazily connects to that relay when the page requests the camera.
-   * Whether frames are flowing is visible in the Node relay-connection logs
-   * and the in-page [LMA-Simli] frame-draw heartbeat, so there's nothing to
-   * actively wire up here. Kept for call-site compatibility.
+   * Eagerly connect the meeting page (and its subframes) to the video relay
+   * so avatar frames are already flowing onto the in-page canvas before Zoom
+   * requests the camera. Without this the consumer connection is purely
+   * lazy — it only happens if/when the platform calls getUserMedia({video}),
+   * which Zoom may never do when its prejoin shows video as already "on",
+   * leaving the relay with 0 consumers and the camera blank.
+   *
+   * Calls the __simliEnsureConsumer binding installed by the getUserMedia
+   * override. Idempotent (the override guards re-entry), so it's safe to
+   * call on every meeting-URL navigation and across all frames.
    */
-  async connectStreamToMeetingPage(_meetingPage: Page): Promise<void> {
+  async connectStreamToMeetingPage(meetingPage: Page): Promise<void> {
     if (!this.enabled || !this._isReady || !this.simliPage) return;
     try {
-      console.log('Simli avatar frame relay active — meeting page will pull frames on getUserMedia.');
+      const frames = meetingPage.frames();
+      let triggered = 0;
+      for (const frame of frames) {
+        try {
+          const ok = await frame.evaluate(() => {
+            // @ts-ignore — binding installed by the getUserMedia override
+            if (typeof window.__simliEnsureConsumer === 'function') {
+              // @ts-ignore
+              return !!window.__simliEnsureConsumer();
+            }
+            return false;
+          });
+          if (ok) triggered += 1;
+        } catch {
+          // Frame may be cross-origin / mid-navigation / detached — skip.
+        }
+      }
+      console.log(
+        `Simli avatar frame relay: pre-warmed consumer in ${triggered}/${frames.length} frame(s).`,
+      );
     } catch (error) {
-      console.error('Failed to confirm Simli frame relay to meeting page:', error);
+      console.error('Failed to connect Simli frame relay to meeting page:', error);
     }
   }
 
@@ -660,7 +701,13 @@ export class SimliAvatar {
       // immediately rather than waiting for the next push.
       this.videoWsServer.on('connection', (ws: WebSocket) => {
         const clientCount = this.videoWsServer.clients.size;
-        console.log(`✓ Client connected to Simli video relay (total clients now: ${clientCount})`);
+        // First client is the Simli page (producer); any later client is a
+        // meeting-page consumer. Surfacing this makes "0 consumer(s)" (avatar
+        // never reaches the meeting) vs "1+ consumer(s)" obvious in the logs.
+        const consumerCount = Math.max(0, clientCount - 1);
+        console.log(
+          `✓ Client connected to Simli video relay (total ${clientCount}, ${consumerCount} consumer(s))`,
+        );
         if (this.latestFrame) {
           try { ws.send(this.latestFrame); } catch (e) { /* ignore */ }
         }
