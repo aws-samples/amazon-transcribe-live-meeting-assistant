@@ -556,25 +556,28 @@ export class SimliAvatar {
           if (pc.iceGatheringState === 'complete') resolve();
         });
       });
-      // DIAGNOSTIC: dump the ICE candidate lines from the gathered SDP so we
-      // can see WHY loopback ICE fails (iceState stuck at "new"). Classify
-      // each candidate's type (host/srflx) and whether the connection-address
-      // is an mDNS .local hostname (unresolvable in the container → no
-      // pairing) vs a real IP.
-      const sdp = pc.localDescription?.sdp || '';
+      return JSON.stringify(pc.localDescription);
+    });
+
+    if (!offer) return false;
+
+    // DIAGNOSTIC (Node-side, since browser console isn't reliably captured):
+    // classify the offer's ICE candidates so we can see WHY loopback ICE
+    // fails (iceState stuck at "new"). mDNS .local addresses don't resolve in
+    // the container → no candidate pair forms. Real host IPs should pair.
+    try {
+      const sdp = (JSON.parse(offer)?.sdp as string) || '';
       const cands = sdp.split('\n').filter((l) => l.startsWith('a=candidate:'));
       const summary = cands.map((c) => {
         const parts = c.split(' ');
         const addr = parts[4] || '?';
         const typ = (c.match(/typ (\w+)/) || [])[1] || '?';
-        const mdns = /\.local/.test(addr);
-        return `${typ}:${mdns ? 'mdns' : addr}`;
+        return /\.local/.test(addr) ? `${typ}:mdns` : `${typ}:${addr}`;
       });
       console.log(`[Simli] bridge sender ICE candidates (${cands.length}): ${summary.join(', ') || 'NONE'}`);
-      return JSON.stringify(pc.localDescription);
-    });
-
-    if (!offer) return false;
+    } catch (e) {
+      console.warn('[Simli] could not parse sender ICE candidates:', e);
+    }
 
     // Receiver: answer in the main meeting frame, hand track to the override.
     const answer = await meetingPage.evaluate(async (offerStr: string) => {

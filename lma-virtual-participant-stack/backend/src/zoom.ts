@@ -53,6 +53,36 @@ async function humanType(
     await page.keyboard.type(text, { delay: 50 + Math.floor(Math.random() * 70) });
 }
 
+// Run a page.evaluate with a wall-clock timeout. A CDP evaluate can hang
+// indefinitely (page mid-navigation, execution context destroyed, renderer
+// under load) — observed freezing the whole join sequence at the post-join
+// popup-handler install, so the VP joined the room but never opened chat /
+// posted the intro / went ACTIVE. On timeout this resolves to `fallback`
+// (default undefined) and logs, so the join sequence keeps moving rather than
+// blocking forever. Use for non-critical setup evaluates in the join path.
+async function safeEvaluate<T>(
+    page: Page,
+    label: string,
+    fn: () => T | Promise<T>,
+    ms = 8000,
+    fallback?: T,
+): Promise<T | undefined> {
+    let to: NodeJS.Timeout | undefined;
+    try {
+        return await Promise.race<T>([
+            page.evaluate(fn),
+            new Promise<T>((_, reject) => {
+                to = setTimeout(() => reject(new Error(`evaluate "${label}" timed out after ${ms}ms`)), ms);
+            }),
+        ]);
+    } catch (e: any) {
+        console.warn(`[zoom] safeEvaluate(${label}) failed/timed out: ${e?.message || e}`);
+        return fallback;
+    } finally {
+        if (to) clearTimeout(to);
+    }
+}
+
 export default class Zoom {
     // Resolved by the message handler ("LMA END"), the attendee-change handler
     // ("only attendee left"), or anywhere else that wants to end the meeting
@@ -334,7 +364,7 @@ export default class Zoom {
                     const manualMessage = (() => {
                         switch (loginResult.manualReason) {
                             case 'captcha':
-                                return 'Zoom is asking for a CAPTCHA / human verification that the bot can\'t solve. Open the LMA viewer and complete the Zoom sign-in (solve the CAPTCHA) — the participant will join automatically once you\'re signed in.';
+                                return 'Zoom needs you to sign in manually. Open the LMA viewer and sign in to Zoom again (there is usually no puzzle — it just needs a human-driven sign-in). The participant will join automatically once you\'re signed in. If it keeps asking, open zoom.us/signin in your own browser and sign OUT first — being signed in to the same Zoom account in multiple places at once can cause this.';
                             case 'otp-2fa':
                                 return 'Zoom is asking for a one-time / 2FA verification code. Open the LMA viewer and enter the code to finish signing in — the participant will join automatically afterward.';
                             case 'sso':
@@ -883,8 +913,13 @@ export default class Zoom {
         }
 
         // Dismiss any Zoom popups (recording consent, language interpretation, etc.)
+        // Wrapped in safeEvaluate: this install observed hanging post-join
+        // (CDP evaluate never resolving), which froze the whole join sequence
+        // — the VP was in the room but never opened chat / posted intro / went
+        // ACTIVE. A timeout lets the sequence proceed even if the install
+        // stalls (the popup auto-dismiss is best-effort anyway).
         console.log('Setting up Zoom popup auto-dismiss handler.');
-        await page.evaluate(() => {
+        await safeEvaluate(page, 'popup-dismiss-install', () => {
             // Text patterns that indicate a dismissible consent/info popup.
             // Only modals whose text matches one of these will be auto-dismissed.
             const POPUP_TEXT_PATTERNS = [
