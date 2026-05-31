@@ -377,7 +377,7 @@ ConnectionDetails.propTypes = {
   }).isRequired,
 };
 
-const ErrorTroubleshooting = ({ status, errorDetails, vpId, vncReady, userAcknowledgedFailure }) => {
+const ErrorTroubleshooting = ({ status, errorDetails, errorMessage, vpId, vncReady, userAcknowledgedFailure }) => {
   const [acking, setAcking] = useState(false);
   const [ackError, setAckError] = useState(null);
   const [ackedLocal, setAckedLocal] = useState(false);
@@ -402,6 +402,12 @@ const ErrorTroubleshooting = ({ status, errorDetails, vpId, vncReady, userAcknow
       setAcking(false);
     }
   };
+
+  // The backend writes a specific, user-facing failure reason to the
+  // errorMessage field (e.g. "The meeting browser ran out of memory and
+  // crashed during join."). Prefer that over the structured errorDetails
+  // (which is only populated for a few categorised errors).
+  const specificMessage = (errorDetails && errorDetails.errorMessage) || errorMessage || null;
 
   const getErrorSolution = () => {
     // Use enhanced error details if available
@@ -430,7 +436,15 @@ const ErrorTroubleshooting = ({ status, errorDetails, vpId, vncReady, userAcknow
       );
     }
 
-    // Fallback to generic solutions
+    // When the backend gave us a specific reason, that's shown above as the
+    // "Error:" line — don't bury it under the generic checklist, which would
+    // be misleading (e.g. an out-of-memory crash has nothing to do with the
+    // meeting ID or password).
+    if (specificMessage) {
+      return null;
+    }
+
+    // Fallback to generic solutions only when we have no specific reason.
     return (
       <SpaceBetween direction="vertical" size="s">
         <div>
@@ -454,9 +468,9 @@ const ErrorTroubleshooting = ({ status, errorDetails, vpId, vncReady, userAcknow
             <div>
               <strong>Virtual Participant failed to join the meeting</strong>
             </div>
-            {errorDetails && errorDetails.errorMessage && (
+            {specificMessage && (
               <div>
-                <strong>Error:</strong> {errorDetails.errorMessage}
+                <strong>Error:</strong> {specificMessage}
               </div>
             )}
             {getErrorSolution()}
@@ -498,6 +512,7 @@ ErrorTroubleshooting.propTypes = {
     lastErrorAt: PropTypes.string,
     errorCount: PropTypes.number,
   }),
+  errorMessage: PropTypes.string,
   vpId: PropTypes.string,
   vncReady: PropTypes.bool,
   userAcknowledgedFailure: PropTypes.bool,
@@ -505,6 +520,7 @@ ErrorTroubleshooting.propTypes = {
 
 ErrorTroubleshooting.defaultProps = {
   errorDetails: null,
+  errorMessage: null,
   vpId: null,
   vncReady: false,
   userAcknowledgedFailure: false,
@@ -957,6 +973,7 @@ const VirtualParticipantDetails = () => {
       <ErrorTroubleshooting
         status={vpDetails.status}
         errorDetails={vpDetails.errorDetails}
+        errorMessage={vpDetails.errorMessage}
         vpId={vpId}
         vncReady={vpDetails.vncReady}
         userAcknowledgedFailure={vpDetails.userAcknowledgedFailure}
