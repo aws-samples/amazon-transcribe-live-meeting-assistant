@@ -257,7 +257,73 @@ export default class Zoom {
             .catch(() => false);
     }
 
+    /** True when the chat panel's message input is present and visible. */
+    private async chatInputVisible(page: Page): Promise<boolean> {
+        return page
+            .evaluate(() => {
+                const el = document.querySelector(
+                    'p[data-placeholder="Type message here ..."], div[contenteditable="true"][aria-label*="message" i]',
+                ) as HTMLElement | null;
+                if (!el) return false;
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && r.height > 0;
+            })
+            .catch(() => false);
+    }
+
+    /**
+     * Open the in-meeting chat panel and VERIFY the message input actually
+     * appeared. A single click on the chat toolbar button often no-ops right
+     * after admission (the meeting UI is still settling / the toolbar button
+     * isn't wired yet), so the panel never opens and the intro message is
+     * silently dropped. Click, poll for the input, and re-click up to a few
+     * times before giving up — mirrors the Join-button verify-and-retry.
+     */
+    private async openChatPanel(page: Page): Promise<boolean> {
+        for (let attempt = 1; attempt <= 4; attempt++) {
+            // Already open? Done.
+            if (await this.chatInputVisible(page)) {
+                console.log('Chat panel input is visible.');
+                return true;
+            }
+            const chatButtonResult = await findElementWithFallback(
+                page,
+                ['button[aria-label="open the chat panel"]'],
+                {
+                    intent: 'Zoom toolbar button that opens the in-meeting chat panel',
+                    platform: 'ZOOM',
+                    step: 'zoom.join.chatButton',
+                },
+                { maxRetries: attempt === 1 ? 10 : 3, delayMs: 500 },
+            );
+            if (!chatButtonResult) {
+                console.log(`Could not locate chat panel button (attempt ${attempt}).`);
+            } else {
+                console.log(`Clicking chat panel button (attempt ${attempt}).`);
+                await humanClick(page, chatButtonResult.element);
+            }
+            // Give the panel up to ~3s to render its input before re-checking.
+            const until = Date.now() + 3000;
+            while (Date.now() < until) {
+                if (await this.chatInputVisible(page)) {
+                    console.log(`Chat panel opened on attempt ${attempt}.`);
+                    return true;
+                }
+                await new Promise((r) => setTimeout(r, 300));
+            }
+            console.warn(`Chat input not visible after attempt ${attempt} — retrying.`);
+        }
+        console.warn('Chat panel did not open after retries — intro/messages may not post.');
+        return false;
+    }
+
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
+        // The panel can be closed when this is called for later messages
+        // (start/pause/exit) — re-open and verify the input before typing so
+        // messages aren't silently dropped.
+        if (!(await this.chatInputVisible(page))) {
+            await this.openChatPanel(page);
+        }
         const found = await findElementWithFallback(
             page,
             ['p[data-placeholder="Type message here ..."]'],
@@ -1077,21 +1143,7 @@ export default class Zoom {
         // dialogs that may appear after the join.)
 
         console.log('Opening chat panel.');
-        const chatButtonResult = await findElementWithFallback(
-            page,
-            ['button[aria-label="open the chat panel"]'],
-            {
-                intent: 'Zoom toolbar button that opens the in-meeting chat panel',
-                platform: 'ZOOM',
-                step: 'zoom.join.chatButton',
-            },
-            { maxRetries: 10, delayMs: 500 },
-        );
-        if (!chatButtonResult) {
-            console.log('Could not locate chat panel button — continuing without chat');
-        } else {
-            await humanClick(page, chatButtonResult.element);
-        }
+        await this.openChatPanel(page);
 
         await substep('In the meeting — posting introduction…');
         console.log('Sending introduction messages.');
