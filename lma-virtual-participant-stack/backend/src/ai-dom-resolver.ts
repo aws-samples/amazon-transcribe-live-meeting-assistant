@@ -817,35 +817,53 @@ export async function analyzePageAction(
   },
 ): Promise<PageAction | null> {
   if (RESOLVER_DISABLED) return null;
-  try {
-    const url = page.url();
-    const elems = await snapshotInteractiveElements(page);
-    const screenshot =
-      opts.useScreenshot !== false ? await captureScreenshot(page) : null;
-    const prompt = PAGE_ACTION_PROMPT(opts.platform, url, elems, {
-      allowFillPassword: !!opts.allowFillPassword,
-    });
-    const text = await invokeClaude(prompt, screenshot);
+
+  const decodeAction = (text: string): PageAction | null => {
     const json = extractJson(text);
     if (!json || !json.kind) return null;
     const kind = json.kind as PageActionKind;
     const valid = ['skip', 'continue', 'wait', 'needs_human', 'done'];
     if (opts.allowFillPassword) valid.push('fill_password');
-    if (!valid.includes(kind)) {
-      return null;
-    }
+    if (!valid.includes(kind)) return null;
     return {
       kind,
       selector:
-        typeof json.selector === 'string' && json.selector
-          ? json.selector
-          : undefined,
+        typeof json.selector === 'string' && json.selector ? json.selector : undefined,
       submitSelector:
         typeof json.submitSelector === 'string' && json.submitSelector
           ? json.submitSelector
           : undefined,
       reason: typeof json.reason === 'string' ? json.reason : '',
     };
+  };
+
+  try {
+    const url = page.url();
+    const elems = await snapshotInteractiveElements(page);
+    const prompt = PAGE_ACTION_PROMPT(opts.platform, url, elems, {
+      allowFillPassword: !!opts.allowFillPassword,
+    });
+
+    // DOM-first: the interactive-element snapshot (button text, aria-label,
+    // role, type) is enough to pick Skip/Continue/fill_password on almost
+    // every sign-in interstitial — no screenshot needed. Only when the
+    // DOM-only pass is inconclusive ('wait'/unparseable) AND the caller
+    // allows it do we spend a screenshot + vision tokens on a second pass.
+    // Saves CPU (PNG encode) and Bedrock cost on the common case.
+    const domText = await invokeClaude(prompt, null);
+    const domAction = decodeAction(domText);
+    if (domAction && domAction.kind !== 'wait') {
+      return domAction;
+    }
+    if (opts.useScreenshot) {
+      const screenshot = await captureScreenshot(page);
+      if (screenshot) {
+        const visionText = await invokeClaude(prompt, screenshot);
+        const visionAction = decodeAction(visionText);
+        if (visionAction) return visionAction;
+      }
+    }
+    return domAction;
   } catch (err) {
     console.error('[ai-dom-resolver] analyzePageAction failed:', err);
     return null;
@@ -977,8 +995,13 @@ export async function classifyJoinState(
   try {
     const url = page.url();
     const elems = await snapshotInteractiveElements(page);
-    const screenshot =
-      opts.useScreenshot !== false ? await captureScreenshot(page) : null;
+    // DOM-only by default. "Which join screen are we on?" is answerable from
+    // the interactive-element snapshot (an in-meeting toolbar with Leave/Mute/
+    // Participants is unmistakable in the DOM), so we skip the screenshot to
+    // save CPU (PNG encode in a headed browser) and Bedrock vision tokens —
+    // this runs every ~30s during the admission wait. Opt in explicitly when
+    // a caller genuinely needs pixels.
+    const screenshot = opts.useScreenshot ? await captureScreenshot(page) : null;
     const text = await invokeClaude(
       JOIN_STATE_PROMPT(opts.platform, url, elems),
       screenshot,

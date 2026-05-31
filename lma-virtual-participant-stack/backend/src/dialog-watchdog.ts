@@ -45,6 +45,12 @@ const AUTOCLICK_TYPES = new Set(['CONSENT', 'RECORDING_NOTICE']);
 interface WatchdogOpts {
     platform: 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME';
     checkIntervalMs?: number;
+    /** Slow cadence used once the page has been quiet (no new dialogs) for a
+     *  while. Defaults to 4× the fast interval. The watchdog snaps back to the
+     *  fast interval the moment a new dialog appears. */
+    idleCheckIntervalMs?: number;
+    /** Consecutive quiet checks before backing off to the slow cadence. */
+    quietChecksBeforeBackoff?: number;
     stableChecksRequired?: number;
     manualActionTimeoutSec?: number;
 }
@@ -53,12 +59,21 @@ interface WatchdogOpts {
  * Start the AI-driven dialog watchdog. Returns a stop function so callers
  * can cancel it on cleanup. Safe to call when the resolver is disabled —
  * it's a no-op in that case.
+ *
+ * Cadence is adaptive: the DOM scan runs at the fast interval (default 5s)
+ * while dialogs are appearing or just after start, then backs off to the
+ * idle interval (default 20s) once the page has been quiet for several
+ * checks — most of a meeting. It snaps back to fast the instant a new modal
+ * shows up. This keeps CAPTCHA/consent detection prompt while cutting the
+ * steady-state DOM-scan rate (and its CPU) ~4× during a normal meeting.
  */
 export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void {
     if (!isResolverEnabled()) {
         return () => {};
     }
     const checkIntervalMs = opts.checkIntervalMs ?? 5000;
+    const idleCheckIntervalMs = opts.idleCheckIntervalMs ?? checkIntervalMs * 4;
+    const quietChecksBeforeBackoff = opts.quietChecksBeforeBackoff ?? 3;
     const stableChecksRequired = opts.stableChecksRequired ?? 2;
     const manualActionTimeoutSec = opts.manualActionTimeoutSec ?? 180;
     const selectors = [
@@ -69,73 +84,100 @@ export function startDialogWatchdog(page: Page, opts: WatchdogOpts): () => void 
     let consecutive = 0;
     let lastHandledHtml = '';
     let escalated = false;
+    let quietChecks = 0;
+    let stopped = false;
+    let timer: NodeJS.Timeout | undefined;
 
-    const interval = setInterval(async () => {
-        try {
-            if (page.isClosed()) {
-                clearInterval(interval);
-                return;
+    // One scan iteration. Returns true if a dialog was present this tick
+    // (used to drive the adaptive cadence: any dialog → stay/return to fast).
+    const tick = async (): Promise<boolean> => {
+        const dialogs = await page.evaluate((sels: string[]) => {
+            const set = new Set<Element>();
+            for (const s of sels) document.querySelectorAll(s).forEach((e) => set.add(e));
+            const visible: { html: string }[] = [];
+            for (const el of Array.from(set)) {
+                const r = (el as HTMLElement).getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) continue;
+                visible.push({ html: ((el as HTMLElement).outerHTML || '').slice(0, 200) });
             }
-            const dialogs = await page.evaluate((sels: string[]) => {
-                const set = new Set<Element>();
-                for (const s of sels) document.querySelectorAll(s).forEach((e) => set.add(e));
-                const visible: { html: string }[] = [];
-                for (const el of Array.from(set)) {
-                    const r = (el as HTMLElement).getBoundingClientRect();
-                    if (r.width === 0 || r.height === 0) continue;
-                    visible.push({ html: ((el as HTMLElement).outerHTML || '').slice(0, 200) });
-                }
-                return visible;
-            }, selectors);
+            return visible;
+        }, selectors);
 
-            if (dialogs.length === 0) {
-                consecutive = 0;
-                if (escalated) {
-                    escalated = false;
-                    if (details.invite.virtualParticipantId) {
-                        const { createStatusManager } = await import('./status-manager.js');
-                        await createStatusManager(details.invite.virtualParticipantId).clearManualAction();
-                    }
-                }
-                return;
-            }
-            const fingerprint = dialogs.map((d) => d.html).join('|');
-            if (fingerprint === lastHandledHtml) {
-                return;
-            }
-            consecutive += 1;
-            if (consecutive < stableChecksRequired) return;
-
-            const analysis = await analyzeUnknownDialog(page, { platform: opts.platform });
-            lastHandledHtml = fingerprint;
+        if (dialogs.length === 0) {
             consecutive = 0;
-            if (!analysis) return;
-            console.log(`[dialog-watchdog ${opts.platform}] ${analysis.type}: ${analysis.message}`);
-
-            if (
-                !analysis.needsHuman &&
-                analysis.primaryActionSelector &&
-                AUTOCLICK_TYPES.has(analysis.type)
-            ) {
-                const ok = await scrollIntoViewAndClick(page, analysis.primaryActionSelector);
-                if (ok) {
-                    console.log(`[dialog-watchdog ${opts.platform}] auto-dismissed via ${analysis.primaryActionSelector}`);
-                } else {
-                    console.warn(`[dialog-watchdog ${opts.platform}] click failed on ${analysis.primaryActionSelector}`);
+            if (escalated) {
+                escalated = false;
+                if (details.invite.virtualParticipantId) {
+                    const { createStatusManager } = await import('./status-manager.js');
+                    await createStatusManager(details.invite.virtualParticipantId).clearManualAction();
                 }
-            } else if (analysis.needsHuman && details.invite.virtualParticipantId) {
-                const { createStatusManager } = await import('./status-manager.js');
-                await createStatusManager(details.invite.virtualParticipantId).setManualActionRequired(
-                    analysis.type,
-                    analysis.message || `Manual action required in the ${opts.platform} web client.`,
-                    manualActionTimeoutSec,
-                );
-                escalated = true;
             }
+            return false;
+        }
+        const fingerprint = dialogs.map((d) => d.html).join('|');
+        if (fingerprint === lastHandledHtml) {
+            return true;
+        }
+        consecutive += 1;
+        if (consecutive < stableChecksRequired) return true;
+
+        const analysis = await analyzeUnknownDialog(page, { platform: opts.platform });
+        lastHandledHtml = fingerprint;
+        consecutive = 0;
+        if (!analysis) return true;
+        console.log(`[dialog-watchdog ${opts.platform}] ${analysis.type}: ${analysis.message}`);
+
+        if (
+            !analysis.needsHuman &&
+            analysis.primaryActionSelector &&
+            AUTOCLICK_TYPES.has(analysis.type)
+        ) {
+            const ok = await scrollIntoViewAndClick(page, analysis.primaryActionSelector);
+            if (ok) {
+                console.log(`[dialog-watchdog ${opts.platform}] auto-dismissed via ${analysis.primaryActionSelector}`);
+            } else {
+                console.warn(`[dialog-watchdog ${opts.platform}] click failed on ${analysis.primaryActionSelector}`);
+            }
+        } else if (analysis.needsHuman && details.invite.virtualParticipantId) {
+            const { createStatusManager } = await import('./status-manager.js');
+            await createStatusManager(details.invite.virtualParticipantId).setManualActionRequired(
+                analysis.type,
+                analysis.message || `Manual action required in the ${opts.platform} web client.`,
+                manualActionTimeoutSec,
+            );
+            escalated = true;
+        }
+        return true;
+    };
+
+    const loop = async (): Promise<void> => {
+        if (stopped || page.isClosed()) return;
+        let hadDialog = false;
+        try {
+            hadDialog = await tick();
         } catch (err) {
             console.warn(`[dialog-watchdog ${opts.platform}] error:`, err);
         }
-    }, checkIntervalMs);
+        // Adaptive cadence: any dialog this tick resets to fast; otherwise
+        // count quiet ticks and back off to the idle interval once we've been
+        // quiet long enough. This keeps detection prompt when something pops
+        // up but cuts the steady-state scan rate during a normal meeting.
+        if (hadDialog) {
+            quietChecks = 0;
+        } else if (quietChecks < quietChecksBeforeBackoff) {
+            quietChecks += 1;
+        }
+        const nextDelay =
+            quietChecks >= quietChecksBeforeBackoff ? idleCheckIntervalMs : checkIntervalMs;
+        if (!stopped && !page.isClosed()) {
+            timer = setTimeout(loop, nextDelay);
+        }
+    };
 
-    return () => clearInterval(interval);
+    timer = setTimeout(loop, checkIntervalMs);
+
+    return () => {
+        stopped = true;
+        if (timer) clearTimeout(timer);
+    };
 }
