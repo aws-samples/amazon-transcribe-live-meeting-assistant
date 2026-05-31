@@ -897,6 +897,113 @@ export async function scrollIntoViewAndClick(
   }
 }
 
+/**
+ * Coarse classification of where the bot is in the join lifecycle. Used as a
+ * vision-backed second opinion when the brittle CSS-selector heuristics in the
+ * platform handler are ambiguous (Zoom renames its in-meeting classes across
+ * versions, which previously left the VP stuck at "Waiting." forever after it
+ * had actually been admitted). Claude looks at the screenshot + interactive
+ * elements and tells us which screen we're on.
+ *
+ *   - 'prejoin'      — still on the pre-join screen (name/passcode/Join button,
+ *                      device-preview, "Join" not yet clicked or not accepted).
+ *   - 'waiting-room' — admitted to the waiting room; host has not let us in yet
+ *                      ("Please wait, the host will let you in soon").
+ *   - 'in-meeting'   — we are inside the live meeting (toolbar with leave/audio/
+ *                      video/participants/chat, video tiles, gallery/speaker).
+ *   - 'error'        — an error / blocked / removed / meeting-ended screen.
+ *   - 'unknown'      — none of the above could be determined.
+ */
+export type JoinState =
+  | 'prejoin'
+  | 'waiting-room'
+  | 'in-meeting'
+  | 'error'
+  | 'unknown';
+
+export interface JoinStateResult {
+  state: JoinState;
+  reason: string;
+}
+
+const JOIN_STATE_PROMPT = (
+  platform: Platform,
+  url: string,
+  elems: InteractiveElement[],
+): string =>
+  [
+    `You are watching an automated meeting bot drive the ${platform} web client.`,
+    `Current URL: ${url}`,
+    'Decide which screen the bot is currently on. Use BOTH the screenshot and the',
+    'interactive-element JSON below — class names change across versions, so judge',
+    'by what the screen actually shows, not by any single selector.',
+    '',
+    'Screens:',
+    '- "prejoin": the pre-join / preview screen — a "Join" button, a display-name',
+    '  input, a meeting-passcode input, or camera/mic preview toggles, and we have',
+    '  NOT yet entered the meeting.',
+    '- "waiting-room": admitted to a waiting room; a message like "Please wait, the',
+    '  host will let you in soon" / "waiting for the host to start" is shown. No',
+    '  in-meeting toolbar yet.',
+    '- "in-meeting": we are INSIDE the live meeting. Signs: an in-meeting toolbar',
+    '  with Mute/Unmute, Start/Stop Video, Participants, Chat, Share, and a red',
+    '  Leave/End button; participant video tiles; gallery or speaker view.',
+    '- "error": an error, blocked, "removed from the meeting", "meeting has ended",',
+    '  "you have been removed", invalid-link, or sign-in-required screen.',
+    '- "unknown": a transient/loading screen or none of the above.',
+    '',
+    'Visible interactive elements (JSON):',
+    '```json',
+    JSON.stringify(elems),
+    '```',
+    '',
+    'Return ONLY a raw JSON object (no prose, no markdown fences):',
+    '{ "state": "prejoin" | "waiting-room" | "in-meeting" | "error" | "unknown",',
+    '  "reason": "<one short sentence>" }',
+  ].join('\n');
+
+/**
+ * Ask Claude which join-lifecycle screen the page is currently showing. This
+ * is a relatively expensive call (Bedrock + screenshot), so callers should use
+ * it only as a fallback when their fast CSS heuristics are inconclusive — not
+ * on every poll iteration. Returns null when the resolver is disabled or the
+ * model call fails, so callers can fall back to their heuristic verdict.
+ */
+export async function classifyJoinState(
+  page: Page,
+  opts: { platform: Platform; useScreenshot?: boolean },
+): Promise<JoinStateResult | null> {
+  if (RESOLVER_DISABLED) return null;
+  try {
+    const url = page.url();
+    const elems = await snapshotInteractiveElements(page);
+    const screenshot =
+      opts.useScreenshot !== false ? await captureScreenshot(page) : null;
+    const text = await invokeClaude(
+      JOIN_STATE_PROMPT(opts.platform, url, elems),
+      screenshot,
+    );
+    const json = extractJson(text);
+    if (!json || !json.state) return null;
+    const valid: JoinState[] = [
+      'prejoin',
+      'waiting-room',
+      'in-meeting',
+      'error',
+      'unknown',
+    ];
+    const state = json.state as JoinState;
+    if (!valid.includes(state)) return null;
+    return {
+      state,
+      reason: typeof json.reason === 'string' ? json.reason : '',
+    };
+  } catch (err) {
+    console.error('[ai-dom-resolver] classifyJoinState failed:', err);
+    return null;
+  }
+}
+
 export function isResolverEnabled(): boolean {
   return !RESOLVER_DISABLED;
 }

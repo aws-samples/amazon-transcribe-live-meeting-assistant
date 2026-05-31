@@ -1514,7 +1514,7 @@ Resources:
     # checkov:skip=ECS-002: RECORDINGS_KEY_PREFIX is a naming prefix for S3 objects, not sensitive data
     Properties:
       ContainerDefinitions:
-        - Memory: !If [UseEC2LaunchType, 2500, !Ref AWS::NoValue]
+        - Memory: !If [UseEC2LaunchType, 3000, !Ref AWS::NoValue]
           Environment:
             - Name: AWS_REGION
               Value: !Ref AWS::Region

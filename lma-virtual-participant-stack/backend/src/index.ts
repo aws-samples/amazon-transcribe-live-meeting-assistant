@@ -360,6 +360,24 @@ const main = async (): Promise<void> => {
     // Create page BEFORE MCP — external CDP client during newPage() deadlocks target handshake.
     const page = await context.newPage();
     page.setDefaultTimeout(20000);
+
+    // Renderer-crash latch. A renderer OOM crash leaves every page.evaluate
+    // hanging on "Target crashed", so meeting.initialize() never returns and
+    // the UI stays stuck on JOINING. We race initialize() against this latch
+    // (below) so a crash deterministically loses the race and drives the
+    // catch → FAILED path instead of an indefinite hang. Settled at most once.
+    let rejectOnPageCrash: (err: Error) => void = () => {};
+    let pageCrashSettled = false;
+    const pageCrashLatch = new Promise<never>((_, reject) => {
+        rejectOnPageCrash = (err: Error) => {
+            if (pageCrashSettled) return;
+            pageCrashSettled = true;
+            reject(err);
+        };
+    });
+    // Never let an unconsumed rejection crash the process; the race below is
+    // the real consumer.
+    pageCrashLatch.catch(() => {});
     // No setUserAgent: cloakbrowser ships a coordinated UA fingerprint.
     // Viewport is set at context launch.
 
@@ -449,7 +467,14 @@ const main = async (): Promise<void> => {
         console.warn('[page-lifecycle] page CLOSED event fired');
     });
     page.on('crash', () => {
-        console.warn('[page-lifecycle] page CRASHED (renderer crash)');
+        // A renderer crash (most commonly an OOM kill — "Aw, Snap! Error
+        // code 9" — when memory hits the task cap) leaves every subsequent
+        // page.evaluate hanging on "Target crashed". Without this, the join
+        // sequence stalls forever and the UI stays stuck on JOINING. Reject
+        // the crash latch so the meeting init loses the race below and the
+        // catch path drives a clean FAILED + task exit.
+        console.error('[page-lifecycle] page CRASHED (renderer crash) — aborting join');
+        rejectOnPageCrash(new Error('Renderer crashed (likely out of memory) — the meeting page died mid-join'));
     });
     page.on('framedetached', (frame) => {
         const isMain = frame === page.mainFrame();
@@ -657,7 +682,13 @@ const main = async (): Promise<void> => {
         // returns a structured ExitInfo describing WHY the meeting ended;
         // we log it canonically and persist a human-readable form alongside
         // the COMPLETED status for the UI.
-        exitInfo = await meeting.initialize(page, { prepareAvatar });
+        // Race against the renderer-crash latch so an OOM crash mid-join
+        // rejects here (→ catch → FAILED) instead of hanging forever on a
+        // dead "Target crashed" page.evaluate.
+        exitInfo = await Promise.race([
+            meeting.initialize(page, { prepareAvatar }),
+            pageCrashLatch,
+        ]);
 
         const exitDetailParts = [
             `reason=${exitInfo.reason}`,
@@ -675,7 +706,9 @@ const main = async (): Promise<void> => {
         
         if (statusManager) {
             const errorMsg = error.message.toLowerCase();
-            if (errorMsg.includes('password') || errorMsg.includes('passcode')) {
+            if (errorMsg.includes('renderer crashed') || errorMsg.includes('target crashed')) {
+                await statusManager.setFailed('The meeting browser ran out of memory and crashed during join. Please try again.');
+            } else if (errorMsg.includes('password') || errorMsg.includes('passcode')) {
                 await statusManager.setFailed('Wrong meeting password');
             } else if (errorMsg.includes('meeting not found') || errorMsg.includes('invalid meeting')) {
                 await statusManager.setFailed('Invalid meeting ID');

@@ -7,6 +7,7 @@ import {
     findElementWithFallback,
     isResolverEnabled,
     scrollIntoViewAndClick,
+    classifyJoinState,
 } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { fetchZoomCredentials, loginToZoom, dismissPostLoginInterstitials } from './zoom-login.js';
@@ -308,7 +309,12 @@ export default class Zoom {
         });
 
         page.on('crash', () => {
-            console.error('Browser Error: page crashed');
+            // Renderer crash (usually OOM). If this happens after we've joined
+            // and are sitting in the wait-for-meeting-end race, requestEnd
+            // unblocks it cleanly; before join, index.ts's crash latch wins the
+            // initialize() race. Either way we never hang on a dead page.
+            console.error('Browser Error: page crashed (renderer crash) — ending meeting');
+            this.requestEnd({ reason: 'page-closed', trigger: 'renderer-crash' });
         });
 
         // Push a human-readable sub-step into the JOINING status so the long
@@ -856,6 +862,15 @@ export default class Zoom {
         const MANUAL_ACTION_GRACE_MS = 5 * 60 * 1000;
         let admitted = false;
         let lastProgressBump = Date.now();
+        // AI second-opinion cadence. The CSS heuristic (isInMeeting) is fast and
+        // runs every poll; Claude's join-state classifier is expensive, so we
+        // only consult it periodically while the heuristic keeps saying "not in
+        // yet". This is the safety net for the failure mode where Zoom renamed
+        // its in-meeting classes and the heuristic never fired even though we
+        // were admitted (VP sat at "Waiting." forever). It also lets us end the
+        // wait early on an error/removed/blocked screen instead of timing out.
+        let lastAiCheck = Date.now();
+        const AI_CHECK_INTERVAL_MS = 30_000;
         const sm = details.invite.virtualParticipantId
             ? (await import('./status-manager.js')).createStatusManager(
                   details.invite.virtualParticipantId,
@@ -870,6 +885,28 @@ export default class Zoom {
                 }
             } catch {
                 /* ignore — page may be navigating */
+            }
+            // Heuristic still says "not in". Ask Claude what screen we're really
+            // on every AI_CHECK_INTERVAL_MS so a class-rename can't strand us.
+            if (isResolverEnabled() && Date.now() - lastAiCheck > AI_CHECK_INTERVAL_MS) {
+                lastAiCheck = Date.now();
+                try {
+                    const verdict = await classifyJoinState(page, { platform: 'ZOOM' });
+                    if (verdict) {
+                        console.log(`[zoom] AI join-state check: ${verdict.state} — ${verdict.reason}`);
+                        if (verdict.state === 'in-meeting') {
+                            console.log('[zoom] AI confirms we are in the meeting (CSS heuristic missed it) — proceeding.');
+                            admitted = true;
+                            break;
+                        }
+                        if (verdict.state === 'error') {
+                            console.warn(`[zoom] AI detected an error/blocked screen during admission wait: ${verdict.reason}`);
+                            return { reason: 'never-joined', trigger: 'pre-join:ai-error-screen' };
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[zoom] AI join-state check failed (non-fatal):', e);
+                }
             }
             // Keep the UI alive during the (potentially minutes-long) wait so
             // it never looks frozen — refresh the JOINING detail + updatedAt
