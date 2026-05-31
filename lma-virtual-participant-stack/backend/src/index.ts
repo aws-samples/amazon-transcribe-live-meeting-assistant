@@ -6,7 +6,7 @@ import Chime from './chime.js';
 import Zoom from './zoom.js';
 import Teams from './teams.js';
 import Webex from './webex.js';
-import { details, ExitInfo, formatExitMessage } from './details.js';
+import { details, ExitInfo, formatExitMessage, didJoinMeeting } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
@@ -784,11 +784,15 @@ const main = async (): Promise<void> => {
         // sync the profile back to S3 so the next launch resumes the session.
         await closeAndPersistProfile();
 
-        // Final status update. Persist the human-readable exit detail
-        // (e.g. "Asked to leave by Jeremy") alongside COMPLETED so the UI
-        // can show why the meeting actually ended instead of a generic
-        // "Meeting ended normally" line.
-        if (success) {
+        // Final status update. A returned exitInfo doesn't always mean
+        // success: the handler returns 'never-joined' when the VP never
+        // actually entered the meeting (prejoin timeout / not admitted /
+        // stuck on the join form). That must be surfaced as FAILED — not
+        // COMPLETED — so the UI doesn't falsely report success on a meeting
+        // the VP never joined. Genuine completions persist the human-readable
+        // exit detail (e.g. "Asked to leave by Jeremy") alongside COMPLETED.
+        const joined = exitInfo ? didJoinMeeting(exitInfo) : true;
+        if (success && joined) {
             const completionMessage = exitInfo ? formatExitMessage(exitInfo) : undefined;
             if (statusManager) {
                 await statusManager.setCompleted(completionMessage);
@@ -799,6 +803,14 @@ const main = async (): Promise<void> => {
                     : 'LMA Virtual Participant completed successfully',
             );
             process.exit(0);
+        } else if (success && !joined) {
+            // Ran cleanly but never joined → FAILED with the reason.
+            const failMessage = exitInfo ? formatExitMessage(exitInfo) : 'Could not join the meeting.';
+            if (statusManager) {
+                await statusManager.setFailed(failMessage);
+            }
+            console.log(`LMA Virtual Participant did not join: ${failMessage}`);
+            process.exit(1);
         } else {
             console.log('LMA Virtual Participant failed');
             process.exit(1);

@@ -271,7 +271,21 @@ export type ExitReasonCode =
   | 'host-ended'          // host ended the meeting for everyone
   | 'meeting-timeout'     // VP hit the configured maximum meeting duration
   | 'page-closed'         // the browser/page went away unexpectedly
+  | 'never-joined'        // VP never actually entered the meeting (prejoin
+                          // timeout, never admitted, stuck on join form) —
+                          // this is a FAILURE, not a normal completion
   | 'unknown';            // fallback when no signal could be classified
+
+/**
+ * True when the VP actually made it into the meeting (so ending is a normal
+ * COMPLETED). False for reasons that mean it never joined — those must be
+ * surfaced as FAILED so the UI doesn't falsely report success. `unknown` is
+ * treated as "joined" to preserve prior behaviour for unclassified mid-
+ * meeting exits; only the explicit never-joined reason flips to failure.
+ */
+export function didJoinMeeting(info: ExitInfo): boolean {
+  return info.reason !== 'never-joined';
+}
 
 export interface ExitInfo {
   reason: ExitReasonCode;
@@ -305,6 +319,8 @@ export function formatExitMessage(info: ExitInfo): string {
       return 'Meeting reached maximum duration.';
     case 'page-closed':
       return 'Meeting page closed unexpectedly.';
+    case 'never-joined':
+      return 'Could not join the meeting (was not admitted, or stuck on the join screen).';
     case 'unknown':
     default:
       return 'Meeting ended.';

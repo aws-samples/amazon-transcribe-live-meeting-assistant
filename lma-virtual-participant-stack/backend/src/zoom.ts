@@ -108,6 +108,78 @@ export default class Zoom {
         startDialogWatchdog(page, { platform: 'ZOOM' });
     }
 
+    /**
+     * Wait for the Zoom prejoin form to settle before we fill it. After a
+     * manual sign-in (e.g. the user solved a reCAPTCHA in VNC), Zoom bounces
+     * the page through several redirects (app.zoom.us/signin → /wc/<id>/join)
+     * and re-renders the prejoin form more than once. Filling the passcode
+     * into a transient form that then re-mounts silently loses the input and
+     * the VP sits unadmitted until timeout. Poll until a prejoin control
+     * (passcode, name, or Join button) is visible AND the URL has been stable
+     * briefly. Returns true if a prejoin control appeared, false on timeout.
+     */
+    private async waitForPrejoinReady(page: Page, timeoutMs = 30000): Promise<boolean> {
+        const deadline = Date.now() + timeoutMs;
+        let lastUrl = '';
+        let stableSince = Date.now();
+        while (Date.now() < deadline) {
+            let url = lastUrl;
+            try {
+                url = page.url();
+            } catch {
+                await new Promise((r) => setTimeout(r, 300));
+                continue;
+            }
+            if (url !== lastUrl) {
+                lastUrl = url;
+                stableSince = Date.now();
+            }
+            // A prejoin control present + URL stable for ~1.2s = settled.
+            const hasControl = await page
+                .evaluate(() => {
+                    const sels = [
+                        '#input-for-pwd',
+                        '#input-for-name',
+                        'button.preview-join-button',
+                        'button.zm-btn.preview-join-button',
+                    ];
+                    for (const s of sels) {
+                        const el = document.querySelector(s) as HTMLElement | null;
+                        if (el) {
+                            const r = el.getBoundingClientRect();
+                            if (r.width > 0 && r.height > 0) return true;
+                        }
+                    }
+                    // Already in-meeting? (avatar tile) — also "ready" (no prejoin).
+                    return !!document.querySelector('.video-avatar__avatar');
+                })
+                .catch(() => false);
+            if (hasControl && Date.now() - stableSince > 1200) {
+                console.log(`[zoom] prejoin settled at ${url}`);
+                return true;
+            }
+            await new Promise((r) => setTimeout(r, 300));
+        }
+        console.warn(`[zoom] prejoin did not settle within ${timeoutMs}ms (at ${(() => { try { return page.url(); } catch { return '?'; } })()}); proceeding anyway`);
+        return false;
+    }
+
+    /** True once we've left the prejoin screen — i.e. the Join button and
+     *  passcode field are gone, or the in-meeting avatar tile is present. */
+    private async hasLeftPrejoin(page: Page): Promise<boolean> {
+        return page
+            .evaluate(() => {
+                const join = document.querySelector('button.preview-join-button, button.zm-btn.preview-join-button');
+                const pwd = document.querySelector('#input-for-pwd');
+                const inMeeting = document.querySelector('.video-avatar__avatar, [class*="footer-button"]');
+                // Left prejoin if the join/pwd controls are gone, or we can
+                // see in-meeting chrome.
+                if (inMeeting) return true;
+                return !join && !pwd;
+            })
+            .catch(() => false);
+    }
+
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
         const found = await findElementWithFallback(
             page,
@@ -341,27 +413,42 @@ export default class Zoom {
                     console.error('The host requires authentication on the commercial Zoom platform.');
                     console.error('This meeting requires signing in with a commercial Zoom account.');
                     enterpriseLogin = true;
-                    
-                    // Notify frontend that manual action is required
-                    const { details } = await import('./details.js');
-                    if (details.invite.virtualParticipantId) {
-                        const { createStatusManager } = await import('./status-manager.js');
-                        const statusManager = createStatusManager(details.invite.virtualParticipantId);
-                        await statusManager.setManualActionRequired(
+
+                    // Notify frontend that manual action is required.
+                    const { createStatusManager } = await import('./status-manager.js');
+                    const sm = details.invite.virtualParticipantId
+                        ? createStatusManager(details.invite.virtualParticipantId)
+                        : null;
+                    if (sm) {
+                        await sm.setManualActionRequired(
                             'LOGIN',
                             'Enterprise Zoom authentication required. Please sign in using the VNC viewer.',
-                            120
+                            120,
                         );
                     }
-                    
-                    await page.waitForSelector('.video-avatar__avatar', { timeout: 120000 }); // Give 2 minutes to login
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-                    
-                    // Clear manual action notification after successful login
-                    if (details.invite.virtualParticipantId) {
-                        const { createStatusManager } = await import('./status-manager.js');
-                        const statusManager = createStatusManager(details.invite.virtualParticipantId);
-                        await statusManager.clearManualAction();
+
+                    // Wait up to 2 min for the human to complete enterprise
+                    // login (avatar tile appears). ALWAYS clear the manual
+                    // action afterwards — on success AND on timeout — so the
+                    // UI never stays stuck on the "auth required" banner. On
+                    // timeout, fail cleanly as never-joined instead of
+                    // silently continuing into a prejoin flow that can't work.
+                    let enterpriseLoggedIn = false;
+                    try {
+                        await page.waitForSelector('.video-avatar__avatar', { timeout: 120000 });
+                        enterpriseLoggedIn = true;
+                        await new Promise((resolve) => setTimeout(resolve, 5000));
+                    } catch {
+                        console.warn('[zoom] Enterprise login not completed within 2 min.');
+                    }
+                    if (sm) {
+                        await sm.clearManualAction().catch(() => {});
+                    }
+                    if (!enterpriseLoggedIn) {
+                        return {
+                            reason: 'never-joined',
+                            trigger: 'enterprise-login-timeout',
+                        };
                     }
                 }
             }
@@ -371,28 +458,60 @@ export default class Zoom {
 
         // if they logged in with enterprise they won't need to put in name password etc so skip
         if (enterpriseLogin === false) {
+            // Wait for the prejoin form to settle. Critical after a manual
+            // sign-in (reCAPTCHA/2FA solved in VNC): Zoom redirects through
+            // app.zoom.us/signin → /wc/<id>/join and re-renders the form, so
+            // filling it too early loses the input. See waitForPrejoinReady.
+            await substep('Loading the meeting join screen…');
+            await this.waitForPrejoinReady(page);
+
             // A non-empty meetingPassword doesn't guarantee Zoom renders
             // #input-for-pwd — Personal Meeting Rooms and passcode-disabled
             // meetings skip it. Probe (primary-only; the selector is
             // stable) and proceed if absent rather than failing the join.
+            // Type, verify the value landed, and re-type once if not (the
+            // form can still re-mount under us right after settling).
             if (details.invite.meetingPassword) {
-                const PASSWORD_PROBE_RETRIES = 6;
-                const PASSWORD_PROBE_DELAY_MS = 500;
-                let passwordHandle: ElementHandle<Element> | null = null;
-                for (let attempt = 1; attempt <= PASSWORD_PROBE_RETRIES; attempt++) {
-                    passwordHandle = await page.$('#input-for-pwd');
-                    if (passwordHandle) {
-                        const box = await passwordHandle.boundingBox().catch(() => null);
-                        if (box && box.width > 0 && box.height > 0) break;
-                        passwordHandle = null;
+                const findPwd = async (): Promise<ElementHandle<Element> | null> => {
+                    for (let attempt = 1; attempt <= 6; attempt++) {
+                        const h = await page.$('#input-for-pwd');
+                        if (h) {
+                            const box = await h.boundingBox().catch(() => null);
+                            if (box && box.width > 0 && box.height > 0) return h;
+                        }
+                        await new Promise((r) => setTimeout(r, 500));
                     }
-                    if (attempt < PASSWORD_PROBE_RETRIES) {
-                        await new Promise((r) => setTimeout(r, PASSWORD_PROBE_DELAY_MS));
-                    }
-                }
+                    return null;
+                };
+                let passwordHandle = await findPwd();
                 if (passwordHandle) {
-                    console.log('Typing meeting password.');
-                    await humanType(page, passwordHandle, details.invite.meetingPassword);
+                    const pwd = details.invite.meetingPassword;
+                    let entered = false;
+                    for (let attempt = 1; attempt <= 2 && !entered; attempt++) {
+                        console.log(`Typing meeting password (attempt ${attempt}).`);
+                        await passwordHandle.evaluate((el: Element) => {
+                            const i = el as HTMLInputElement;
+                            i.focus();
+                            i.value = '';
+                        }).catch(() => {});
+                        await humanType(page, passwordHandle, pwd);
+                        const got = await passwordHandle
+                            .evaluate((el: Element) => (el as HTMLInputElement).value || '')
+                            .catch(() => '');
+                        if (got.length === pwd.length) {
+                            entered = true;
+                        } else {
+                            console.warn(
+                                `Passcode value mismatch (expected ${pwd.length} chars, got ${got.length}) — re-locating and retrying.`,
+                            );
+                            const fresh = await findPwd();
+                            if (!fresh) break;
+                            passwordHandle = fresh;
+                        }
+                    }
+                    if (!entered) {
+                        console.warn('Could not reliably enter meeting passcode after retries — continuing; Join may reject it.');
+                    }
                 } else {
                     console.log('Meeting does not require a password — skipping password entry.');
                 }
@@ -523,31 +642,76 @@ export default class Zoom {
                 console.log('No prejoin name field on this page — skipping.');
             }
 
-            // Submit the prejoin form. Use the explicit Join button when we
-            // can find it; fall back to Enter on the name field or page.
-            const joinButtonResult = await findElementWithFallback(
-                page,
-                [
-                    'button.zm-btn.preview-join-button',
-                    'button.preview-join-button',
-                    'button[type="submit"].zm-btn',
-                ],
-                {
-                    intent: 'Zoom prejoin "Join" button that submits the meeting prejoin form',
-                    platform: 'ZOOM',
-                    step: 'zoom.join.submit',
-                },
-                { maxRetries: 10, delayMs: 500 },
-            );
-            if (joinButtonResult) {
-                console.log('Clicking Join button to enter the meeting.');
-                await humanClick(page, joinButtonResult.element);
-            } else if (nameResult) {
-                console.log('Could not locate Join button — pressing Enter on name field as fallback.');
-                await nameResult.element.press('Enter');
+            // Submit the prejoin form, then VERIFY we actually left it. A
+            // single click often silently no-ops when the passcode didn't
+            // register (e.g. it was typed into a form that re-mounted), and
+            // the VP then sits on the prejoin screen until waitingTimeout. So
+            // we click, check whether we advanced, and if not re-enter the
+            // passcode and re-click once before giving up to the admission
+            // poll (which the dialog-watchdog also covers).
+            const clickJoin = async (): Promise<void> => {
+                const joinButtonResult = await findElementWithFallback(
+                    page,
+                    [
+                        'button.zm-btn.preview-join-button',
+                        'button.preview-join-button',
+                        'button[type="submit"].zm-btn',
+                    ],
+                    {
+                        intent: 'Zoom prejoin "Join" button that submits the meeting prejoin form',
+                        platform: 'ZOOM',
+                        step: 'zoom.join.submit',
+                    },
+                    { maxRetries: 10, delayMs: 500 },
+                );
+                if (joinButtonResult) {
+                    console.log('Clicking Join button to enter the meeting.');
+                    await humanClick(page, joinButtonResult.element);
+                } else if (nameResult) {
+                    console.log('Could not locate Join button — pressing Enter on name field as fallback.');
+                    await nameResult.element.press('Enter').catch(() => {});
+                } else {
+                    console.log('Could not locate Join button or name field — pressing Enter on page.');
+                    await page.keyboard.press('Enter').catch(() => {});
+                }
+            };
+
+            await clickJoin();
+
+            // Did the click advance us past the prejoin form? Poll briefly.
+            const waitLeftPrejoin = async (ms: number): Promise<boolean> => {
+                const until = Date.now() + ms;
+                while (Date.now() < until) {
+                    if (await this.hasLeftPrejoin(page)) return true;
+                    await new Promise((r) => setTimeout(r, 500));
+                }
+                return false;
+            };
+
+            if (!(await waitLeftPrejoin(6000))) {
+                console.warn('Join did not advance the prejoin screen — re-entering passcode and retrying once.');
+                await substep('Re-attempting to join the meeting…');
+                // Re-enter passcode if the field is still there (it being
+                // present is itself the signal Join didn't take).
+                if (details.invite.meetingPassword) {
+                    const pwd2 = await page.$('#input-for-pwd');
+                    if (pwd2) {
+                        await pwd2.evaluate((el: Element) => {
+                            const i = el as HTMLInputElement;
+                            i.focus();
+                            i.value = '';
+                        }).catch(() => {});
+                        await humanType(page, pwd2, details.invite.meetingPassword);
+                    }
+                }
+                await clickJoin();
+                if (await waitLeftPrejoin(6000)) {
+                    console.log('Join succeeded on retry — left the prejoin screen.');
+                } else {
+                    console.warn('Still on prejoin after retry — handing off to admission poll / dialog-watchdog.');
+                }
             } else {
-                console.log('Could not locate Join button or name field — pressing Enter on page.');
-                await page.keyboard.press('Enter');
+                console.log('Left the prejoin screen — proceeding to admission wait.');
             }
         }
 
@@ -573,11 +737,13 @@ export default class Zoom {
         // the verification / sign-in challenge in VNC, and the
         // VP exits before they finish.
         const POLL_INTERVAL_MS = 1500;
-        const baseDeadline = Date.now() + details.waitingTimeout;
+        const startWait = Date.now();
+        const baseDeadline = startWait + details.waitingTimeout;
         // When MANUAL_ACTION is active, give the user up to 5 extra
         // minutes from the moment they cleared the original deadline.
         const MANUAL_ACTION_GRACE_MS = 5 * 60 * 1000;
         let admitted = false;
+        let lastProgressBump = Date.now();
         const sm = details.invite.virtualParticipantId
             ? (await import('./status-manager.js')).createStatusManager(
                   details.invite.virtualParticipantId,
@@ -593,6 +759,18 @@ export default class Zoom {
                 }
             } catch {
                 /* ignore — page may be navigating */
+            }
+            // Keep the UI alive during the (potentially minutes-long) wait so
+            // it never looks frozen — refresh the JOINING detail + updatedAt
+            // every ~20s with elapsed seconds. Skip if MANUAL_ACTION is
+            // active (that has its own banner we don't want to overwrite).
+            if (Date.now() - lastProgressBump > 20000) {
+                lastProgressBump = Date.now();
+                const secs = Math.round((Date.now() - startWait) / 1000);
+                const current = sm ? await sm.getCurrentStatus().catch(() => null) : null;
+                if (current !== 'MANUAL_ACTION_REQUIRED') {
+                    await substep(`Waiting to be admitted to the meeting… (${secs}s — host may need to admit the participant)`);
+                }
             }
             // Check current status — if MANUAL_ACTION_REQUIRED, extend deadline.
             let extended = false;
@@ -614,13 +792,13 @@ export default class Zoom {
             }
             if (Date.now() > baseDeadline && !extended) {
                 console.log('LMA Virtual Participant was not admitted into the meeting.');
-                return { reason: 'unknown', trigger: 'pre-join:not-admitted' };
+                return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
             }
             await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         }
         if (!admitted) {
             console.log('LMA Virtual Participant was not admitted into the meeting.');
-            return { reason: 'unknown', trigger: 'pre-join:not-admitted' };
+            return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
 
         // Dismiss any Zoom popups (recording consent, language interpretation, etc.)
