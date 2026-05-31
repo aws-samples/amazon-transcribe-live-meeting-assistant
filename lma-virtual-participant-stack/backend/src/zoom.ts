@@ -150,8 +150,11 @@ export default class Zoom {
                             if (r.width > 0 && r.height > 0) return true;
                         }
                     }
-                    // Already in-meeting? (avatar tile) — also "ready" (no prejoin).
-                    return !!document.querySelector('.video-avatar__avatar');
+                    // Already in-meeting? Any in-meeting chrome counts as
+                    // "ready" (no prejoin to wait for).
+                    return !!document.querySelector(
+                        '.video-avatar__avatar, [class*="footer-button"], footer.footer, [class*="meeting-client"]',
+                    );
                 })
                 .catch(() => false);
             if (hasControl && Date.now() - stableSince > 1200) {
@@ -164,18 +167,63 @@ export default class Zoom {
         return false;
     }
 
-    /** True once we've left the prejoin screen — i.e. the Join button and
-     *  passcode field are gone, or the in-meeting avatar tile is present. */
+    /**
+     * Robust "are we inside the meeting?" check. Zoom's web client UI changes
+     * its class names across versions, so relying on a single selector (the
+     * old `.video-avatar__avatar`) is fragile — when Zoom Workplace stopped
+     * rendering that exact class, the VP joined but the admission poll never
+     * saw it and sat at "Waiting." forever. Check a broad set of in-meeting
+     * signals (footer toolbar, leave/audio/video controls, participants/chat
+     * buttons, the speaker/gallery video containers) AND that prejoin controls
+     * are gone. Any positive in-meeting signal counts.
+     */
+    private async isInMeeting(page: Page): Promise<boolean> {
+        return page
+            .evaluate(() => {
+                // Still on prejoin? Then definitely not in-meeting.
+                const onPrejoin =
+                    document.querySelector('#input-for-pwd') ||
+                    document.querySelector('button.preview-join-button, button.zm-btn.preview-join-button');
+                if (onPrejoin) return false;
+
+                const visible = (sel: string): boolean => {
+                    const el = document.querySelector(sel) as HTMLElement | null;
+                    if (!el) return false;
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                };
+                const inMeetingSignals = [
+                    '.video-avatar__avatar',                 // legacy avatar tile
+                    'footer.footer',                          // meeting footer bar
+                    '[class*="footer-button"]',               // any footer control
+                    '#foot-bar',
+                    'button[aria-label*="audio" i]',          // mute/unmute
+                    'button[aria-label*="mute" i]',
+                    'button[aria-label*="video" i]',          // start/stop video
+                    'button[aria-label*="participant" i]',    // participants panel
+                    'button[aria-label*="chat" i]',           // chat panel
+                    'button[aria-label*="leave" i]',          // leave button
+                    'button[aria-label*="End" i]',
+                    '[class*="meeting-client"]',
+                    '[class*="speaker-view"]',
+                    '[class*="gallery-video"]',
+                    '[class*="sharee-container"]',
+                ];
+                return inMeetingSignals.some(visible);
+            })
+            .catch(() => false);
+    }
+
+    /** True once we've left the prejoin screen (join/passcode controls gone,
+     *  or any in-meeting signal present). */
     private async hasLeftPrejoin(page: Page): Promise<boolean> {
         return page
             .evaluate(() => {
                 const join = document.querySelector('button.preview-join-button, button.zm-btn.preview-join-button');
                 const pwd = document.querySelector('#input-for-pwd');
-                const inMeeting = document.querySelector('.video-avatar__avatar, [class*="footer-button"]');
-                // Left prejoin if the join/pwd controls are gone, or we can
-                // see in-meeting chrome.
-                if (inMeeting) return true;
-                return !join && !pwd;
+                if (!join && !pwd) return true;
+                // Or in-meeting chrome appeared even while a control lingers.
+                return !!document.querySelector('[class*="footer-button"], footer.footer, [class*="meeting-client"]');
             })
             .catch(() => false);
     }
@@ -461,11 +509,18 @@ export default class Zoom {
                     // timeout, fail cleanly as never-joined instead of
                     // silently continuing into a prejoin flow that can't work.
                     let enterpriseLoggedIn = false;
-                    try {
-                        await page.waitForSelector('.video-avatar__avatar', { timeout: 120000 });
-                        enterpriseLoggedIn = true;
+                    const enterpriseDeadline = Date.now() + 120000;
+                    while (Date.now() < enterpriseDeadline) {
+                        if (page.isClosed()) break;
+                        if (await this.isInMeeting(page)) {
+                            enterpriseLoggedIn = true;
+                            break;
+                        }
+                        await new Promise((resolve) => setTimeout(resolve, 1500));
+                    }
+                    if (enterpriseLoggedIn) {
                         await new Promise((resolve) => setTimeout(resolve, 5000));
-                    } catch {
+                    } else {
                         console.warn('[zoom] Enterprise login not completed within 2 min.');
                     }
                     if (sm) {
@@ -779,8 +834,7 @@ export default class Zoom {
         while (true) {
             if (page.isClosed()) break;
             try {
-                const avatar = await page.$('.video-avatar__avatar');
-                if (avatar) {
+                if (await this.isInMeeting(page)) {
                     admitted = true;
                     break;
                 }

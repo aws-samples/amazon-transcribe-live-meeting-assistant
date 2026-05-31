@@ -556,6 +556,21 @@ export class SimliAvatar {
           if (pc.iceGatheringState === 'complete') resolve();
         });
       });
+      // DIAGNOSTIC: dump the ICE candidate lines from the gathered SDP so we
+      // can see WHY loopback ICE fails (iceState stuck at "new"). Classify
+      // each candidate's type (host/srflx) and whether the connection-address
+      // is an mDNS .local hostname (unresolvable in the container → no
+      // pairing) vs a real IP.
+      const sdp = pc.localDescription?.sdp || '';
+      const cands = sdp.split('\n').filter((l) => l.startsWith('a=candidate:'));
+      const summary = cands.map((c) => {
+        const parts = c.split(' ');
+        const addr = parts[4] || '?';
+        const typ = (c.match(/typ (\w+)/) || [])[1] || '?';
+        const mdns = /\.local/.test(addr);
+        return `${typ}:${mdns ? 'mdns' : addr}`;
+      });
+      console.log(`[Simli] bridge sender ICE candidates (${cands.length}): ${summary.join(', ') || 'NONE'}`);
       return JSON.stringify(pc.localDescription);
     });
 
