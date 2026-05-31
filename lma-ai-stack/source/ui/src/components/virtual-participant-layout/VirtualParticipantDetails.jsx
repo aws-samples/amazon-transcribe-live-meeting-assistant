@@ -147,8 +147,7 @@ const STATUS_CONFIG = {
   },
   HYDRATING_PROFILE: {
     message: 'Restoring browser profile…',
-    description:
-      'Downloading saved cookies / trusted-device markers from S3 (signs in cleanly on repeat joins)',
+    description: 'Downloading saved cookies / trusted-device markers from S3 (signs in cleanly on repeat joins)',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
@@ -866,12 +865,17 @@ const VirtualParticipantDetails = () => {
         </Header>
       </Container>
 
-      {/* Current Status */}
+      {/* Current Status. The backend reuses the errorMessage field as a
+          generic status-detail channel: a human-readable exit reason on
+          COMPLETED, and live progress sub-steps during the long in-progress
+          phases (e.g. "Waiting to be admitted…" within JOINING) so the VP
+          doesn't look frozen. Surface it for both; on FAILED it's the real
+          error and is shown in the troubleshooting card instead. */}
       <StatusDetails
         status={vpDetails.status}
         updatedAt={vpDetails.updatedAt}
         scheduledFor={vpDetails.scheduledFor}
-        statusMessage={vpDetails.status === 'COMPLETED' ? vpDetails.errorMessage : null}
+        statusMessage={vpDetails.status === 'FAILED' ? null : vpDetails.errorMessage}
       />
 
       {/* Status Timeline - Only show if enhanced data available */}
@@ -880,7 +884,7 @@ const VirtualParticipantDetails = () => {
           history={vpDetails.statusHistory}
           currentStatus={vpDetails.status}
           currentTimestamp={vpDetails.updatedAt}
-          currentStatusMessage={vpDetails.status === 'COMPLETED' ? vpDetails.errorMessage : null}
+          currentStatusMessage={vpDetails.status === 'FAILED' ? null : vpDetails.errorMessage}
         />
       )}
 

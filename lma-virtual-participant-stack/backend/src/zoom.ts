@@ -161,6 +161,19 @@ export default class Zoom {
             console.error('Browser Error: page crashed');
         });
 
+        // Push a human-readable sub-step into the JOINING status so the long
+        // join span (sign-in → navigate → prejoin → admission → chat) doesn't
+        // look frozen in the UI. Best-effort, no-op without a vpId.
+        const substep = async (message: string): Promise<void> => {
+            if (!details.invite.virtualParticipantId) return;
+            try {
+                const { createStatusManager } = await import('./status-manager.js');
+                await createStatusManager(details.invite.virtualParticipantId).setJoiningSubstep(message);
+            } catch {
+                /* best-effort progress */
+            }
+        };
+
         // Optional: sign in to Zoom first using user-provided credentials.
         // When the user has stored Zoom credentials in LMA Settings, the
         // launching state machine plumbs the secret name into this env var.
@@ -176,6 +189,7 @@ export default class Zoom {
             // NOT initialized yet so it doesn't contend for CPU here.
             console.log('[phase] SIGNING_IN — authenticating to Zoom before join');
             console.log(`Zoom credentials provided (secret: ${zoomCredentialsSecretName}); signing in before join.`);
+            await substep('Signing in to Zoom…');
             try {
                 const creds = await fetchZoomCredentials(zoomCredentialsSecretName);
                 const loginResult = await loginToZoom(page, creds);
@@ -293,6 +307,7 @@ export default class Zoom {
         // (~1800/2048 CPU units) is acceptable here and the avatar must be
         // ready before the prejoin camera toggle below captures the camera.
         console.log('[phase] JOINING — navigating to the meeting and joining');
+        await substep('Entering the meeting room…');
         await prepareAvatar();
 
         console.log('Getting Zoom meeting link.');
@@ -383,6 +398,7 @@ export default class Zoom {
                 }
             }
 
+            await substep('Setting up audio and video…');
             console.log('Checking audio button state with retry...');
             // Wait for audio button to appear (handles loading state)
             const audioResult = await this.waitForButtonWithRetry(
@@ -549,6 +565,7 @@ export default class Zoom {
         }
 
         console.log('Waiting.');
+        await substep('Waiting to be admitted to the meeting…');
         // Poll for the avatar selector instead of a single waitForSelector
         // call so we can dynamically extend the timeout when the watchdog
         // has escalated to MANUAL_ACTION_REQUIRED. Otherwise the 5-min
@@ -747,6 +764,7 @@ export default class Zoom {
             await humanClick(page, chatButtonResult.element);
         }
 
+        await substep('In the meeting — posting introduction…');
         console.log('Sending introduction messages.');
         await this.sendMessages(page, details.introMessages);
 
