@@ -278,15 +278,42 @@ export default class Zoom {
                     // silently degrade to guest join (which joins far less
                     // reliably, and the user explicitly opted into
                     // credentialled login).
-                    console.warn(`[zoom] Sign-in needs manual action: ${loginResult.detail || ''} — escalating to user via VNC`);
+                    console.warn(`[zoom] Sign-in needs manual action (reason=${loginResult.manualReason || 'generic'}): ${loginResult.detail || ''} — escalating to user via VNC`);
+
+                    // Build a clean, user-facing message by category. Never
+                    // surface internal selector/loop detail (e.g. "action
+                    // continue on #js_btn_login did not advance").
+                    const manualMessage = (() => {
+                        switch (loginResult.manualReason) {
+                            case 'captcha':
+                                return 'Zoom is asking for a CAPTCHA / human verification that the bot can\'t solve. Open the LMA viewer and complete the Zoom sign-in (solve the CAPTCHA) — the participant will join automatically once you\'re signed in.';
+                            case 'otp-2fa':
+                                return 'Zoom is asking for a one-time / 2FA verification code. Open the LMA viewer and enter the code to finish signing in — the participant will join automatically afterward.';
+                            case 'sso':
+                                return 'Zoom is redirecting to your single sign-on (SSO) provider. Open the LMA viewer and complete the SSO sign-in — the participant will join automatically afterward.';
+                            default:
+                                return 'Zoom needs you to finish signing in manually. Open the LMA viewer and complete the Zoom sign-in — the participant will join automatically afterward.';
+                        }
+                    })();
+
+                    // For a CAPTCHA, reload the sign-in page so the human gets
+                    // a clean, fully-rendered form to work with rather than the
+                    // half-interacted state the automation left behind.
+                    if (loginResult.manualReason === 'captcha') {
+                        try {
+                            await page.goto('https://zoom.us/signin', { waitUntil: 'domcontentloaded' });
+                            console.log('[zoom] Reloaded sign-in page for clean manual CAPTCHA sign-in.');
+                        } catch (e) {
+                            console.warn('[zoom] Could not reload sign-in page for manual login (non-fatal).');
+                        }
+                    }
+
                     if (details.invite.virtualParticipantId) {
                         const { createStatusManager } = await import('./status-manager.js');
                         const statusManager = createStatusManager(details.invite.virtualParticipantId);
                         await statusManager.setManualActionRequired(
                             'LOGIN',
-                            loginResult.detail
-                                ? `Zoom sign-in needs your help: ${loginResult.detail}. Open the LMA viewer to complete sign-in.`
-                                : 'Zoom sign-in needs your help. Open the LMA viewer to complete sign-in.',
+                            manualMessage,
                             300,
                         );
                         // Give the user up to 5 minutes to finish the sign-in

@@ -22,10 +22,49 @@ export interface ZoomCredentials {
 
 export type LoginOutcome = 'success' | 'manual-required' | 'invalid-credentials';
 
+// Why a manual-required outcome happened, so the caller can show a clean,
+// user-facing message instead of leaking internal selector/loop detail.
+export type ManualReason = 'captcha' | 'otp-2fa' | 'sso' | 'blocked' | 'generic';
+
 export interface LoginResult {
     outcome: LoginOutcome;
     detail?: string;
+    /** Categorised reason for outcome==='manual-required'. */
+    manualReason?: ManualReason;
 }
+
+/**
+ * Detect a Zoom sign-in CAPTCHA challenge. Zoom uses Google reCAPTCHA
+ * Enterprise, which loads as a `google.com/recaptcha/...` iframe and exposes
+ * `grecaptcha` on the window. Either signal (a visible recaptcha iframe, or
+ * the global) means a human has to solve it — we can't. Checked best-effort
+ * across the main frame and child frames.
+ */
+const detectCaptcha = async (page: Page): Promise<boolean> => {
+    try {
+        // Any frame whose URL is a recaptcha/hcaptcha challenge.
+        for (const frame of page.frames()) {
+            const u = frame.url() || '';
+            if (/recaptcha\/(api2|enterprise)\/(bframe|anchor)/.test(u) || /hcaptcha\.com/.test(u)) {
+                // anchor iframe alone is the (often invisible) checkbox; the
+                // bframe is the actual challenge popup. Treat either as
+                // "captcha present" since Zoom gates Sign-In on it.
+                return true;
+            }
+        }
+        // Fallback: grecaptcha global or a visible recaptcha widget in the DOM.
+        return await page.evaluate(() => {
+            // @ts-ignore
+            if ((window as any).grecaptcha) return true;
+            const el = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"], iframe[title*="recaptcha" i]');
+            if (!el) return false;
+            const r = (el as HTMLElement).getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+        });
+    } catch {
+        return false;
+    }
+};
 
 let secretsClient: SecretsManagerClient | null = null;
 const getSecrets = (): SecretsManagerClient => {
@@ -465,6 +504,21 @@ async function aiDrivenLoginLoop(
             continue;
         }
 
+        // Fast path 3: CAPTCHA challenge gating the form. Once we've tried to
+        // submit the password, a reCAPTCHA challenge means a human must solve
+        // it — escalate immediately with a clean reason rather than letting
+        // the AI loop burn iterations clicking a Sign-In button the CAPTCHA
+        // is blocking (which is what produced the cryptic "action continue on
+        // #js_btn_login did not advance" message).
+        if (didFillPassword && (await detectCaptcha(page))) {
+            console.warn('[zoom-login] CAPTCHA challenge detected after password — escalating to manual.');
+            return {
+                outcome: 'manual-required',
+                manualReason: 'captcha',
+                detail: 'Zoom is asking for a CAPTCHA / human verification.',
+            };
+        }
+
         // Main path: ask Claude what to do.
         let action: any = null;
         try {
@@ -523,13 +577,24 @@ async function aiDrivenLoginLoop(
             pageFingerprint &&
             pageFingerprint === lastPageFingerprint
         ) {
+            // The page isn't advancing. The usual cause is a CAPTCHA gating
+            // the Sign-In button — detect it and return a clean, user-facing
+            // reason instead of leaking the internal selector/loop detail.
+            const captcha = await detectCaptcha(page);
             console.warn(
-                `[zoom-login] Stuck loop detected (action "${actionSignature}" repeated without page change) — escalating`,
+                `[zoom-login] Stuck loop detected (action "${actionSignature}" repeated without page change; captcha=${captcha}) — escalating`,
             );
-            return {
-                outcome: 'manual-required',
-                detail: `Sign-in is stuck: action "${action.kind}" on selector "${action.selector || '(none)'}" did not advance the page.`,
-            };
+            return captcha
+                ? {
+                      outcome: 'manual-required',
+                      manualReason: 'captcha',
+                      detail: 'Zoom is asking for a CAPTCHA / human verification.',
+                  }
+                : {
+                      outcome: 'manual-required',
+                      manualReason: 'generic',
+                      detail: 'The sign-in page stopped responding to automated steps.',
+                  };
         }
         lastActionSignature = actionSignature;
         lastPageFingerprint = pageFingerprint;
