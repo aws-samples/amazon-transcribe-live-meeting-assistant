@@ -89,7 +89,15 @@ const typeWithDelay = async (
     // Zoom floats a transient overlay over the form. Budget scales with
     // text length so withTimeout doesn't abort legitimately-slow typing.
     const perChar = 50 + Math.floor(Math.random() * 70);
-    const budget = perChar * Math.max(text.length, 1) * 3 + 2000;
+    // Budget is decoupled from the rolled perChar and based on the MAX
+    // per-char (120ms) plus generous slack — under CPU contention
+    // page.keyboard.type's per-keystroke overhead far exceeds the nominal
+    // delay (observed 23 chars taking >5.5s). A too-tight budget previously
+    // threw and the caller failed the whole sign-in. Now: budget = 120ms ×
+    // len × 4 + 8s floor, and a timeout does NOT throw — typeAndVerify's
+    // readback catches a short/empty value and retries, which is the correct
+    // recovery path. Swallowing here keeps a slow type from aborting the join.
+    const budget = Math.max(8000, 120 * Math.max(text.length, 1) * 4 + 4000);
     await withTimeout(
         (async () => {
             await elem.evaluate((el) => (el as HTMLElement).focus());
@@ -97,7 +105,9 @@ const typeWithDelay = async (
         })(),
         budget,
         `type(${text.length} chars)`,
-    );
+    ).catch((err) => {
+        console.warn(`[zoom-login] typeWithDelay slow/failed (verify will retry): ${err?.message || err}`);
+    });
 };
 
 // Type into a field, then read back .value to confirm it landed. Zoom's
