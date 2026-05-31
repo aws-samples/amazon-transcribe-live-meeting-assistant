@@ -1,7 +1,7 @@
 # checkov:skip=CKV_DOCKER_2: "ECS target-group health check on 5901"
 
-# CloakBrowser ships a glibc-only Chromium binary; ECR Public mirror avoids
-# Docker Hub anonymous rate limits in CodeBuild.
+# Stock Chromium from Debian apt (the v0.3.3-proven browser). ECR Public
+# mirror avoids Docker Hub anonymous rate limits in CodeBuild.
 FROM public.ecr.aws/docker/library/python:3.12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -11,13 +11,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
     SCREEN_DEPTH=24 \
     VNC_PORT=5900 \
     NOVNC_PORT=5901 \
-    CLOAKBROWSER_CACHE_DIR=/opt/cloakbrowser \
-    CLOAKBROWSER_AUTO_UPDATE=false
+    CHROME_BIN=/usr/bin/chromium \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /srv
 
-# Do NOT install `chromium` from apt — we rely on the cloakbrowser binary.
+# Install stock Chromium from apt. Playwright launches this binary via
+# executablePath (CHROME_BIN) — we do NOT use Playwright's bundled browser
+# download. The Simli avatar's loopback WebRTC bridge works on stock
+# Chromium (cloakbrowser's WebRTC patch broke it — 0 ICE candidates).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        chromium \
         libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
         libdbus-1-3 libdrm2 libxkbcommon0 libatspi2.0-0 libxcomposite1 \
         libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
@@ -36,13 +40,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
-
-# 0.3.29 is the first release exposing launchPersistentContext on cloakbrowser/puppeteer.
-ARG CLOAKBROWSER_VERSION=0.3.29
-
-RUN pip install --no-cache-dir "cloakbrowser[geoip]==${CLOAKBROWSER_VERSION}" \
-    && python -m cloakbrowser install \
-    && python -m cloakbrowser info
 
 COPY . /srv
 
@@ -63,6 +60,6 @@ EXPOSE 5900 5901
 
 RUN chmod +x /srv/entrypoint.sh
 RUN useradd -m -d /home/appuser -s /bin/bash appuser
-RUN chown -R appuser:appuser /srv /opt/cloakbrowser
+RUN chown -R appuser:appuser /srv
 USER appuser
 ENTRYPOINT ["/srv/entrypoint.sh"]

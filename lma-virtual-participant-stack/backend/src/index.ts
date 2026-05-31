@@ -1,6 +1,10 @@
-// Playwright wrapper: more reliable Zoom joins than the Puppeteer wrapper,
-// whose CDP-automation inconsistencies could break the join. Returns a BrowserContext.
-import { launchPersistentContext } from 'cloakbrowser';
+// Stock Chromium via Playwright. We previously used cloakbrowser (a patched
+// anti-fingerprint Chromium), but its WebRTC patch broke the same-browser
+// loopback RTCPeerConnection that bridges the Simli avatar's video into the
+// meeting page (0 ICE candidates → black camera), suppressed CDP console
+// forwarding, and wedged the renderer under load. v0.3.3 ran fine on stock
+// Chromium, so we launch the apt-installed binary at CHROME_BIN/usr/bin/chromium.
+import { chromium } from 'playwright-core';
 import { promises as fs } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
@@ -23,20 +27,18 @@ import {
     initProfileDefaults,
     cleanStaleLocks,
     warmupNavigation,
-    fingerprintSeedForUser,
-    randomFingerprintSeed,
 } from './lib/profile.js';
 
 // Match the Xvfb screen size; fluxbox toolbar is suppressed in entrypoint.sh.
 const WINDOW_WIDTH = 1920;
 const WINDOW_HEIGHT = 1080;
 
-const getCloakLaunchArgs = (fingerprintSeed: number): string[] => [
-    `--fingerprint=${fingerprintSeed}`,
-    `--fingerprint-screen-width=${WINDOW_WIDTH}`,
-    `--fingerprint-screen-height=${WINDOW_HEIGHT}`,
+const getChromiumLaunchArgs = (): string[] => [
     // Size the headed OS window to fill the Xvfb display.
     `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT}`,
+    // Required to run Chromium as a non-root user inside the container (v0.3.3
+    // ran with this; cloakbrowser's binary didn't need it but stock does).
+    '--no-sandbox',
     '--window-position=0,0',
     '--use-fake-ui-for-media-stream',
     '--autoplay-policy=no-user-gesture-required',
@@ -57,13 +59,11 @@ const getCloakLaunchArgs = (fingerprintSeed: number): string[] => [
     '--test-type',
     // WebRTC loopback enablement for the Simli avatar bridge. The avatar's
     // video reaches the meeting page over a same-browser loopback
-    // RTCPeerConnection. Headless Chromium (and cloakbrowser's WebRTC
-    // fingerprint patch) default to hiding local IPs behind mDNS .local
-    // hostnames, which don't resolve inside the container — so ICE can never
-    // pair the two loopback peers (symptom: track arrives live but iceState
-    // stays "new"). These flags expose real host candidates so loopback ICE
-    // completes. WebRtcHideLocalIpsWithMdns is merged into the password/
-    // autofill --disable-features list below.
+    // RTCPeerConnection. Chromium defaults to hiding local IPs behind mDNS
+    // .local hostnames, which don't resolve inside the container — so ICE
+    // can never pair the two loopback peers. These flags expose real host
+    // candidates so loopback ICE completes. WebRtcHideLocalIpsWithMdns is
+    // merged into the password/autofill --disable-features list below.
     '--force-webrtc-ip-handling-policy=default',
     // Suppress password/autofill bubbles that overlay meeting UI buttons.
     '--disable-features=PasswordManagerOnboarding,AutofillEnableAccountWalletStorage,PasswordImport,PasswordsAccountStorage,Translate,WebRtcHideLocalIpsWithMdns',
@@ -289,26 +289,22 @@ const main = async (): Promise<void> => {
     const cookiePatchedCount = patchPreferencesFor3pCookies(userDataDir);
     console.log(`[profile-store] Wrote 3p-cookie allow exceptions for ${cookiePatchedCount} meeting platforms`);
 
-    const fingerprintSeed = process.env.LMA_USER_SUB
-        ? fingerprintSeedForUser(process.env.LMA_USER_SUB)
-        : randomFingerprintSeed();
+    const executablePath = process.env.CHROME_BIN
+        || process.env.PUPPETEER_EXECUTABLE_PATH
+        || '/usr/bin/chromium';
 
-    console.log(`[browser] Launching CloakBrowser persistent context`);
+    console.log(`[browser] Launching stock Chromium persistent context`);
+    console.log(`[browser]   executablePath    = ${executablePath}`);
     console.log(`[browser]   userDataDir       = ${userDataDir}`);
-    console.log(`[browser]   fingerprint seed  = ${fingerprintSeed}`);
     console.log(`[browser]   profile freshness = ${isFresh ? 'FRESH (warmup will run)' : 'EXISTING (skipping warmup)'}`);
 
-    const context = await launchPersistentContext({
+    const context = await chromium.launchPersistentContext(userDataDir, {
         headless: false,
-        humanize: true,
-        humanPreset: 'default',
-        userDataDir,
+        executablePath,
         viewport: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT },
-        args: getCloakLaunchArgs(fingerprintSeed),
-        launchOptions: {
-            ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
-        },
-    } as any);
+        args: getChromiumLaunchArgs(),
+        ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
+    });
     browserContext = context;
     // Sane default for actions; the one meeting-length wait (end-of-meeting
     // watcher) passes its own explicit { timeout }. Do NOT set a multi-hour
@@ -378,19 +374,12 @@ const main = async (): Promise<void> => {
     // Never let an unconsumed rejection crash the process; the race below is
     // the real consumer.
     pageCrashLatch.catch(() => {});
-    // No setUserAgent: cloakbrowser ships a coordinated UA fingerprint.
-    // Viewport is set at context launch.
 
     // Forward early meeting-page console output (getUserMedia override,
     // Simli bridge) to container logs before platform handlers attach.
-    //
-    // NOTE: cloakbrowser's patched Chromium does not reliably emit
-    // Runtime.consoleAPICalled over CDP, so Playwright's `page.on('console')`
-    // captures almost nothing on the meeting page. We keep it as a
-    // best-effort fallback, but the reliable path is the `__lmaLog` binding
-    // below: an init script patches console.* in every frame to forward
-    // matching lines through an exposed Node function, which bypasses the
-    // CDP console channel entirely.
+    // Stock Chromium emits Runtime.consoleAPICalled normally, so this
+    // `page.on('console')` works; the `__lmaLog` init-script binding below
+    // is kept as a belt-and-braces path that also captures subframe logs.
     page.on('console', (msg) => {
         const text = msg.text();
         const type = msg.type();

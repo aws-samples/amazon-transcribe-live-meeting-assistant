@@ -30,7 +30,6 @@
     "aws-amplify": "^6.0.0",
     "aws-sigv4-fetch": "^4.3.0",
     "axios": "^1.15.0",
-    "cloakbrowser": "0.3.29",
     "graphql": "^16.8.1",
     "graphql-tag": "^2.12.6",
     "jsonwebtoken": "^9.0.2",

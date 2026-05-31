@@ -23,12 +23,10 @@ async function clickClickableAncestor(element: ElementHandle<Element>): Promise<
     });
 }
 
-// Meaningful UX-style clicks (Join, Sign In, Skip-this-step). cloakbrowser's
-// humanize patches the context so plain clicks already use human-like mouse
-// pathing — no separate cursor library needed. force:true skips Playwright's
-// "covered by another element" actionability check (Zoom often floats a
-// transient overlay over the Join/chat buttons); the old Puppeteer click
-// didn't do that check, so this preserves prior behavior.
+// Meaningful UX-style clicks (Join, Sign In, Skip-this-step). force:true skips
+// Playwright's "covered by another element" actionability check (Zoom often
+// floats a transient overlay over the Join/chat buttons); the old Puppeteer
+// click didn't do that check, so this preserves prior behavior.
 async function humanClick(
     page: Page,
     target: string | ElementHandle<Element>,
@@ -43,8 +41,8 @@ async function humanClick(
 // Type into a (possibly overlay-covered) input. Playwright's ElementHandle
 // .type() runs an actionability/pointer check that fails when Zoom floats a
 // transient overlay over the prejoin form. Focus the element directly in the
-// DOM (no actionability check), then type via the keyboard so humanize still
-// applies per-keystroke timing.
+// DOM (no actionability check), then type via the keyboard with a small
+// per-keystroke delay so input lands reliably in Zoom's SPA fields.
 async function humanType(
     page: Page,
     element: ElementHandle<Element>,
