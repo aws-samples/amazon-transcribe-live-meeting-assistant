@@ -415,13 +415,15 @@ const main = async (): Promise<void> => {
     // the real consumer.
     pageCrashLatch.catch(() => {});
 
-    // Forward early meeting-page console output (getUserMedia override,
-    // Simli bridge) to container logs before platform handlers attach.
-    // cloakbrowser's patched Chromium does not reliably emit
-    // Runtime.consoleAPICalled over CDP, so `page.on('console')` captures
-    // little on the meeting page — the reliable path is the `__lmaLog`
-    // exposeFunction binding below (an init script forwards matching lines from
-    // every frame). page.on('console') is kept as a best-effort fallback.
+    // Forward meeting-page console output (getUserMedia override, Simli bridge)
+    // to container logs. NOTE: we deliberately do NOT install a global
+    // console.* wrapper via addInitScript here. An earlier attempt to do so (an
+    // exposeFunction '__lmaLog' bridge + per-frame console patching) interfered
+    // with the meeting page under cloakbrowser and broke the speaker
+    // MutationObserver's exposeFunction callbacks (speakerChange never fired →
+    // every turn labelled "none"). The simpler page.on('console') below matches
+    // the working baseline; the platform handler attaches its own richer
+    // console listener once it starts.
     page.on('console', (msg) => {
         const text = msg.text();
         const type = msg.type();
@@ -434,57 +436,6 @@ const main = async (): Promise<void> => {
             console.log(`Browser ${type}: ${text}`);
         }
     });
-
-    // Reliable browser→container log bridge (see note above). Forward only
-    // lines we care about so Zoom's own chatty logging doesn't flood the
-    // container logs.
-    try {
-        await page.exposeFunction('__lmaLog', (level: string, text: string) => {
-            console.log(`Browser ${level}: ${text}`);
-        });
-        await page.addInitScript(() => {
-            // Runs at document start in every frame (main + subframes). Wrap
-            // console.* so matching messages reach the container via the
-            // __lmaLog binding even when CDP console forwarding is suppressed.
-            const wantsForward = (text: string, level: string): boolean =>
-                level === 'error' ||
-                level === 'warn' ||
-                text.includes('[LMA-Simli]') ||
-                text.includes('[Simli]');
-            const wrap = (level: string, orig: (...a: any[]) => void) =>
-                function (this: unknown, ...args: any[]) {
-                    try {
-                        const text = args
-                            .map((a) => {
-                                if (typeof a === 'string') return a;
-                                try {
-                                    return JSON.stringify(a);
-                                } catch {
-                                    return String(a);
-                                }
-                            })
-                            .join(' ');
-                        if (wantsForward(text, level)) {
-                            // @ts-ignore — binding installed by exposeFunction
-                            if (typeof window.__lmaLog === 'function') window.__lmaLog(level, text);
-                        }
-                    } catch {
-                        /* never let logging break the page */
-                    }
-                    return orig.apply(this, args);
-                };
-            try {
-                console.log = wrap('log', console.log.bind(console)) as any;
-                console.warn = wrap('warn', console.warn.bind(console)) as any;
-                console.error = wrap('error', console.error.bind(console)) as any;
-                console.info = wrap('info', console.info.bind(console)) as any;
-            } catch {
-                /* ignore */
-            }
-        });
-    } catch (err) {
-        console.warn('Failed to install __lmaLog browser-console bridge (non-critical):', err);
-    }
     page.on('pageerror', (err) => console.warn('MeetingPage error:', err?.message || err));
     page.on('framenavigated', (frame) => {
         if (frame === page.mainFrame()) {
