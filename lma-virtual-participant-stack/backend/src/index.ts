@@ -5,7 +5,7 @@
 // forwarding, and wedged the renderer under load. v0.3.3 ran fine on stock
 // Chromium, so we launch the apt-installed binary at CHROME_BIN/usr/bin/chromium.
 import { chromium } from 'playwright-core';
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
 import Teams from './teams.js';
@@ -116,8 +116,27 @@ const closeAndPersistProfile = async (): Promise<void> => {
 // Local testing mode - skip ALB registration and AppSync updates
 const isLocalTest = process.env.LOCAL_TEST === 'true';
 
+// Read the build stamp baked into the image at build time (see Dockerfile).
+// Logged at startup so it's trivial to confirm which image a task runs.
+const readBuildInfo = (): { buildDate: string; gitCommit: string; buildSource: string } => {
+    try {
+        const raw = readFileSync('/srv/build-info.json', 'utf8');
+        const j = JSON.parse(raw);
+        return {
+            buildDate: j.buildDate || 'unknown',
+            gitCommit: j.gitCommit || 'unknown',
+            buildSource: j.buildSource || 'unknown',
+        };
+    } catch {
+        return { buildDate: 'unknown', gitCommit: 'unknown', buildSource: 'unknown' };
+    }
+};
+
 const main = async (): Promise<void> => {
-    console.log('LMA Virtual Participant starting...');
+    const buildInfo = readBuildInfo();
+    console.log(
+        `LMA Virtual Participant starting... [build ${buildInfo.buildDate} commit ${buildInfo.gitCommit} via ${buildInfo.buildSource}]`,
+    );
     if (isLocalTest) {
         console.log('*** LOCAL TEST MODE - Skipping ALB registration and AppSync updates ***');
     }

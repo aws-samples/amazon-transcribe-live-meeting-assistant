@@ -95,7 +95,20 @@ aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "$REGISTRY" >/dev/null
 
 log "Building image (context: $BACKEND_DIR)..."
-docker build -t "$ECR_URI:latest" "$BACKEND_DIR"
+# Stamp the image so logs/UI can identify exactly what's running. buildDate
+# defaults to the in-build `date`; we pass the local git commit (with a -dirty
+# suffix if the tree has uncommitted changes) and mark the source as this script.
+GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if ! git -C "$REPO_ROOT" diff --quiet 2>/dev/null || ! git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null; then
+  GIT_COMMIT="${GIT_COMMIT}-dirty"
+fi
+BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+log "Build stamp: date=$BUILD_DATE commit=$GIT_COMMIT source=dev-push-vp.sh"
+docker build \
+  --build-arg "BUILD_DATE=$BUILD_DATE" \
+  --build-arg "GIT_COMMIT=$GIT_COMMIT" \
+  --build-arg "BUILD_SOURCE=dev-push-vp.sh" \
+  -t "$ECR_URI:latest" "$BACKEND_DIR"
 
 log "Pushing $ECR_URI:latest ..."
 docker push "$ECR_URI:latest"

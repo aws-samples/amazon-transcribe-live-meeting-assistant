@@ -54,6 +54,18 @@ RUN npm ci && \
     npm run build && \
     npx esbuild node_modules/simli-client/dist/index.js --bundle --format=esm --platform=browser --outfile=dist/simli-client.bundle.mjs
 
+# Build stamp — lets logs/UI identify exactly which image a task is running.
+# BUILD_DATE defaults to the in-build `date` (the true image build time);
+# GIT_COMMIT / BUILD_SOURCE are passed by the builder (dev-push-vp.sh or
+# CodeBuild) when available. Read at startup by entrypoint.sh + index.ts.
+ARG BUILD_DATE=""
+ARG GIT_COMMIT="unknown"
+ARG BUILD_SOURCE="unknown"
+RUN BD="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
+    printf '{"buildDate":"%s","gitCommit":"%s","buildSource":"%s"}\n' \
+      "$BD" "$GIT_COMMIT" "$BUILD_SOURCE" > /srv/build-info.json && \
+    echo "Build stamp: $(cat /srv/build-info.json)"
+
 RUN mkdir -p /srv/cloakbrowser-profiles
 
 EXPOSE 5900 5901

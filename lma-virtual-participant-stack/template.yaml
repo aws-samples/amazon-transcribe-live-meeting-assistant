@@ -613,7 +613,7 @@ Resources:
                   - echo `pwd`
                   - echo `ls -altr`
                   - echo Building container image...
-                  - docker build -t ${ImageRepo} backend
+                  - docker build --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-arg BUILD_SOURCE=codebuild -t ${ImageRepo} backend
                   - docker tag ${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
                   - echo Pushing image to ECR...
                   - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
