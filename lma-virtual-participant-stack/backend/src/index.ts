@@ -53,18 +53,29 @@ const getChromiumLaunchArgs = (): string[] => [
     '--log-level=0',
     '--remote-debugging-port=9222',
     // Headed-in-container essentials.
-    '--use-angle=swiftshader',
-    '--ignore-gpu-blocklist',
+    // PERF: disable the GPU entirely. There is no hardware GPU in the
+    // container, so with --use-angle=swiftshader Chrome ran ALL WebGL/
+    // compositing on the CPU via SwiftShader — a GPU process measured at
+    // ~200% CPU under load, the dominant cost that wedged the renderer on
+    // t3.medium (manifesting as Zoom's "Oops, enable hardware acceleration"
+    // video crash AND a starved MutationObserver that mis-attributed every
+    // speaker turn to LMA). We don't need to SEE Zoom's video — we inject our
+    // own camera (Simli) and consume audio — so dropping WebGL sheds the cost.
+    // (Per Jeremy's MR-169 finding; applied here on stock Chromium.)
+    '--disable-gpu',
+    '--disable-software-rasterizer',
     '--disable-infobars',
     '--test-type',
     // WebRTC loopback enablement for the Simli avatar bridge. The avatar's
     // video reaches the meeting page over a same-browser loopback
     // RTCPeerConnection. Chromium defaults to hiding local IPs behind mDNS
     // .local hostnames, which don't resolve inside the container — so ICE
-    // can never pair the two loopback peers. These flags expose real host
-    // candidates so loopback ICE completes. WebRtcHideLocalIpsWithMdns is
-    // merged into the password/autofill --disable-features list below.
+    // can never pair the two loopback peers. BOTH webrtc-ip-handling flags are
+    // needed to reliably expose real host candidates (the legacy and current
+    // flag names). WebRtcHideLocalIpsWithMdns is merged into the password/
+    // autofill --disable-features list below.
     '--force-webrtc-ip-handling-policy=default',
+    '--webrtc-ip-handling-policy=default',
     // Suppress password/autofill bubbles that overlay meeting UI buttons.
     '--disable-features=PasswordManagerOnboarding,AutofillEnableAccountWalletStorage,PasswordImport,PasswordsAccountStorage,Translate,WebRtcHideLocalIpsWithMdns',
     '--password-store=basic',
