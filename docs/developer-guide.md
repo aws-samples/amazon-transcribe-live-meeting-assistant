@@ -51,7 +51,7 @@ lma-ai-stack/                     # Core: Lambdas, AppSync, DynamoDB, UI
   ├── Makefile                    # Build orchestration
   └── config.mk                  # Build configuration
 lma-websocket-transcriber-stack/  # WebSocket server (TypeScript/Fastify on Fargate)
-lma-virtual-participant-stack/    # VP (TypeScript/Playwright + Chromium on ECS)
+lma-virtual-participant-stack/    # VP (TypeScript/Playwright + CloakBrowser on ECS)
 lma-vpc-stack/                    # VPC networking
 lma-cognito-stack/                # Cognito auth
 lma-meetingassist-setup-stack/    # Strands agent config

@@ -66,7 +66,7 @@ Python uses Black (formatter), Flake8, Pylint (100 char lines). Config in `lma-a
 |-------|---------|----------|
 | `lma-ai-stack/` | Core stack: Lambda functions, AppSync GraphQL API, Cognito auth, DynamoDB, UI (React/CloudFront) | Python (Lambdas), React (UI) |
 | `lma-websocket-transcriber-stack/` | WebSocket server on ECS Fargate ingesting stereo audio, streaming to Amazon Transcribe, writing to Kinesis | TypeScript/Fastify |
-| `lma-virtual-participant-stack/` | Headless Chromium (Playwright) on ECS Fargate joining meetings, optional voice assistant + avatar | TypeScript |
+| `lma-virtual-participant-stack/` | Headless CloakBrowser/Chromium (Playwright) on ECS Fargate joining meetings, optional voice assistant + avatar | TypeScript |
 | `lma-vpc-stack/` | VPC networking, security groups, NAT gateways | CloudFormation |
 | `lma-meetingassist-setup-stack/` | Meeting assistant configuration | CloudFormation |
 | `lma-bedrockkb-stack/` | Bedrock Knowledge Base setup | CloudFormation |

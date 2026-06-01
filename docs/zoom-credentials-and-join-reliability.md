@@ -9,7 +9,7 @@ LMA's Virtual Participant (VP) joins Zoom meetings via headless Chromium. A gues
 
 ## Browser stack
 
-- The VP drives **stock Chromium** (the Debian `chromium` package) through Playwright's `chromium.launchPersistentContext`. Stock Chromium is what the VP shipped with originally; it provides reliable WebRTC (needed for the Simli avatar's loopback video bridge), CDP console forwarding, and predictable renderer behaviour under load.
+- The VP drives **[CloakBrowser](https://github.com/CloakHQ/cloakbrowser)** (a source-patched stealth Chromium, pinned at 0.3.29) via `playwright-core`. CloakBrowser reduces the CDP-automation signals that trip Zoom's reCAPTCHA Enterprise, and its newer patched Chromium handles Zoom's web-client video encoder reliably even on a 2-vCPU host (`t3.medium`) — the older stock Debian Chromium threw Zoom's "Something went wrong" and turned the VP camera off under the same load. Two launch flags (`--force-webrtc-ip-handling-policy=default` + `--webrtc-ip-handling-policy=default`) undo CloakBrowser's ICE-suppression patch so the Simli avatar's loopback video bridge connects.
 - A per-user **persistent profile** (cookies, "trusted device" markers) is restored from S3 on launch and saved back at meeting end, so a user who has signed in once is recognised on subsequent meetings (see [Persistent Chromium profile per user](#persistent-chromium-profile-per-user) below).
 - Fresh profiles run a short **warmup** (Google → HN → Wikipedia → the meeting-platform home pages) before navigating to the meeting URL, so a first-time profile arrives with normal browsing history rather than zero state.
 
