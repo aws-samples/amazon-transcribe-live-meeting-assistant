@@ -1542,6 +1542,28 @@ export default class Zoom {
                 observer = new MutationObserver(callback);
                 observer.observe(parentNode, config);
 
+                // One-time DOM dump of the active-speaker-related markup so we
+                // can see the REAL current structure (Zoom Workplace renames
+                // these). Logged via console; forwarded to container logs.
+                try {
+                    const dump: any = { selectorsTried: (window as any).__lmaSpeakerSelectors };
+                    dump.mainContainer = !!document.querySelector('.single-main-container');
+                    dump.footerSpans = Array.from(
+                        document.querySelectorAll('.video-avatar__avatar-footer span'),
+                    ).slice(0, 8).map((e) => (e.textContent || '').trim());
+                    // Anything that looks like a speaking/active-speaker marker.
+                    dump.speakingTiles = Array.from(
+                        document.querySelectorAll('[class*="speak" i], [class*="active-speaker" i], [class*="talking" i]'),
+                    ).slice(0, 6).map((e) => (e as HTMLElement).className.toString().slice(0, 120));
+                    // Names visible anywhere in video tiles (broad net).
+                    dump.tileNames = Array.from(
+                        document.querySelectorAll('[class*="video-avatar" i] span, [class*="participant" i] span'),
+                    ).slice(0, 10).map((e) => (e.textContent || '').trim()).filter(Boolean);
+                    console.log('[LMA] speaker-DOM dump: ' + JSON.stringify(dump));
+                } catch (e) {
+                    console.log('[LMA] speaker-DOM dump failed: ' + (e as Error).message);
+                }
+
                 // Handle initial state
                 const initialSpeaker = getCurrentSpeaker();
                 if (initialSpeaker) {
