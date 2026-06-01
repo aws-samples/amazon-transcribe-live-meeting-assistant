@@ -422,55 +422,40 @@ export default class Zoom {
     }
 
     /**
-     * Open the in-meeting chat panel and VERIFY the message input actually
-     * appeared. A single click on the chat toolbar button often no-ops right
-     * after admission (the meeting UI is still settling / the toolbar button
-     * isn't wired yet), so the panel never opens and the intro message is
-     * silently dropped. Click, poll for the input, and re-click up to a few
-     * times before giving up — mirrors the Join-button verify-and-retry.
+     * Open the in-meeting chat panel — idempotently. Zoom's toolbar button is a
+     * TOGGLE: when the panel is open its aria-label flips to "close the chat
+     * panel", so a naive "click the chat button" (especially via AI fallback,
+     * which resolves whatever chat-ish button exists) will CLOSE an already-open
+     * panel. We therefore (a) no-op if the input is already visible, and (b)
+     * only ever click a button whose label is specifically "open the chat
+     * panel" — never a "close" button. One click is enough on cloakbrowser's
+     * Chromium; no verify-retry loop (that loop caused an open/close war).
      */
     private async openChatPanel(page: Page): Promise<boolean> {
-        for (let attempt = 1; attempt <= 4; attempt++) {
-            // Already open? Done.
-            if (await this.chatInputVisible(page)) {
-                console.log('Chat panel input is visible.');
-                return true;
-            }
-            const chatButtonResult = await findElementWithFallback(
-                page,
-                ['button[aria-label="open the chat panel"]'],
-                {
-                    intent: 'Zoom toolbar button that opens the in-meeting chat panel',
-                    platform: 'ZOOM',
-                    step: 'zoom.join.chatButton',
-                },
-                { maxRetries: attempt === 1 ? 10 : 3, delayMs: 500 },
-            );
-            if (!chatButtonResult) {
-                console.log(`Could not locate chat panel button (attempt ${attempt}).`);
-            } else {
-                console.log(`Clicking chat panel button (attempt ${attempt}).`);
-                await humanClick(page, chatButtonResult.element);
-            }
-            // Give the panel up to ~3s to render its input before re-checking.
+        if (await this.chatInputVisible(page)) {
+            return true; // already open
+        }
+        // Primary-only (no AI fallback): we must not let the resolver pick the
+        // "close the chat panel" button and toggle the panel shut.
+        const openBtn = await page.$('button[aria-label="open the chat panel"]');
+        if (openBtn) {
+            console.log('Opening chat panel.');
+            await humanClick(page, openBtn);
+            // brief settle for the panel to render its input
             const until = Date.now() + 3000;
             while (Date.now() < until) {
-                if (await this.chatInputVisible(page)) {
-                    console.log(`Chat panel opened on attempt ${attempt}.`);
-                    return true;
-                }
+                if (await this.chatInputVisible(page)) return true;
                 await new Promise((r) => setTimeout(r, 300));
             }
-            console.warn(`Chat input not visible after attempt ${attempt} — retrying.`);
+        } else {
+            console.log('Chat "open" button not present (panel may already be open) — continuing.');
         }
-        console.warn('Chat panel did not open after retries — intro/messages may not post.');
-        return false;
+        return this.chatInputVisible(page);
     }
 
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
-        // The panel can be closed when this is called for later messages
-        // (start/pause/exit) — re-open and verify the input before typing so
-        // messages aren't silently dropped.
+        // Make sure the panel is open, but never toggle a panel that's already
+        // open (see openChatPanel — the toolbar button is a toggle).
         if (!(await this.chatInputVisible(page))) {
             await this.openChatPanel(page);
         }
@@ -1300,7 +1285,6 @@ export default class Zoom {
         // joined the meeting and is capturing audio, so a chat hiccup (e.g. a
         // transient Zoom window pushing the chat button off-viewport) must
         // NEVER fail the meeting. Swallow any error and keep going.
-        console.log('Opening chat panel.');
         await substep('In the meeting — posting introduction…');
         try {
             await this.openChatPanel(page);
@@ -1472,16 +1456,17 @@ export default class Zoom {
             const MIC_ACTIVITY_THRESHOLD = 5; // px
             const MIC_SILENCE_DELAY = 2000; // ms - increased to 2 seconds to handle pauses in speech
 
-            // Mutable selector list — node-side watchdog can inject a new
-            // selector when Zoom changes the active-speaker DOM.
-            (window as any).__lmaSpeakerSelectors = [
+            // Default active-speaker selectors. Kept on window so the node-side
+            // liveness watchdog can prepend a fresh one if Zoom renames the DOM.
+            const DEFAULT_SPEAKER_SELECTORS = [
                 // Normal mode - main view (prioritized: shows active speaker)
                 '.single-main-container__video-frame .video-avatar__avatar-footer span',
                 // Screen sharing mode - suspension window (small video)
                 '.single-suspension-container__video-frame .video-avatar__avatar-footer span',
                 // Fallback - any avatar footer
-                '.video-avatar__avatar-footer span[role="none"]'
+                '.video-avatar__avatar-footer span[role="none"]',
             ];
+            (window as any).__lmaSpeakerSelectors = DEFAULT_SPEAKER_SELECTORS.slice();
             (window as any).__lmaSetSpeakerSelectors = (extra: string[]) => {
                 const cur = (window as any).__lmaSpeakerSelectors as string[];
                 for (const s of extra) {
@@ -1491,8 +1476,11 @@ export default class Zoom {
 
             // Function to get current speaker from any view
             function getCurrentSpeaker(): string | null {
-                const selectors: string[] = (window as any).__lmaSpeakerSelectors;
-                
+                // Defensive: never let a missing/empty global throw inside the
+                // observer callback (that would silently kill all speaker events).
+                const selectors: string[] =
+                    (window as any).__lmaSpeakerSelectors || DEFAULT_SPEAKER_SELECTORS;
+
                 let vpName: string | null = null;
                 for (const selector of selectors) {
                     const element = document.querySelector(selector);
@@ -1583,28 +1571,6 @@ export default class Zoom {
                 observer = new MutationObserver(callback);
                 observer.observe(parentNode, config);
 
-                // One-time DOM dump of the active-speaker-related markup so we
-                // can see the REAL current structure (Zoom Workplace renames
-                // these). Logged via console; forwarded to container logs.
-                try {
-                    const dump: any = { selectorsTried: (window as any).__lmaSpeakerSelectors };
-                    dump.mainContainer = !!document.querySelector('.single-main-container');
-                    dump.footerSpans = Array.from(
-                        document.querySelectorAll('.video-avatar__avatar-footer span'),
-                    ).slice(0, 8).map((e) => (e.textContent || '').trim());
-                    // Anything that looks like a speaking/active-speaker marker.
-                    dump.speakingTiles = Array.from(
-                        document.querySelectorAll('[class*="speak" i], [class*="active-speaker" i], [class*="talking" i]'),
-                    ).slice(0, 6).map((e) => (e as HTMLElement).className.toString().slice(0, 120));
-                    // Names visible anywhere in video tiles (broad net).
-                    dump.tileNames = Array.from(
-                        document.querySelectorAll('[class*="video-avatar" i] span, [class*="participant" i] span'),
-                    ).slice(0, 10).map((e) => (e.textContent || '').trim()).filter(Boolean);
-                    console.log('[LMA] speaker-DOM dump: ' + JSON.stringify(dump));
-                } catch (e) {
-                    console.log('[LMA] speaker-DOM dump failed: ' + (e as Error).message);
-                }
-
                 // Handle initial state
                 const initialSpeaker = getCurrentSpeaker();
                 if (initialSpeaker) {
@@ -1617,43 +1583,6 @@ export default class Zoom {
             // Wait for Zoom UI to be ready, then setup observer
             setTimeout(setupObserver, 2000);
         }, details.scribeIdentity);
-
-        // Resolve the active-speaker name selector ONCE up front via the AI
-        // resolver and inject it ahead of the stale hardcoded defaults. Zoom
-        // Workplace renamed the speaker-name DOM (the old
-        // `.video-avatar__avatar-footer span` selectors match only the VP's own
-        // tile, so every turn was misattributed to LMA). The resolver caches the
-        // winner in memory for this meeting AND in DynamoDB (30-day TTL) for all
-        // later meetings — so this is one AI call now, zero on subsequent
-        // meetings. The discovered selector is logged ("[ai-dom-resolver]
-        // Discovered selector for zoom.monitor.activeSpeaker: ...") so it can be
-        // promoted to a code default later and drop even the one-time call.
-        if (isResolverEnabled()) {
-            try {
-                const sp = await findElementWithFallback(
-                    page,
-                    [
-                        '.single-main-container__video-frame .video-avatar__avatar-footer span',
-                        '.video-avatar__avatar-footer span[role="none"]',
-                    ],
-                    {
-                        intent: 'Element on the Zoom meeting screen that shows the name label of the currently active/spotlighted speaker (the participant whose video tile is highlighted as actively speaking, NOT the bot\'s own tile)',
-                        platform: 'ZOOM',
-                        step: 'zoom.monitor.activeSpeaker',
-                    },
-                    { maxRetries: 3, delayMs: 500 },
-                );
-                if (sp) {
-                    console.log(`[zoom] Active-speaker selector resolved via ${sp.source}: ${sp.selector}`);
-                    await page.evaluate((sel: string) => {
-                        const fn = (window as any).__lmaSetSpeakerSelectors;
-                        if (fn) fn([sel]);
-                    }, sp.selector);
-                }
-            } catch (err) {
-                console.warn('[zoom] up-front active-speaker selector resolve failed (non-fatal):', err);
-            }
-        }
 
         // Node-side liveness watchdog: if no speaker change has been seen for
         // 60s while the meeting reports >1 attendee, ask Claude to find the
