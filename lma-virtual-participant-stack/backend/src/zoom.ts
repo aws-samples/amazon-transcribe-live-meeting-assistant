@@ -340,7 +340,11 @@ export default class Zoom {
         }
         for (const message of messages) {
             await new Promise(resolve => setTimeout(resolve, 10));
-            await humanType(page, found.element, message);
+            // Chat messages type fast — no per-keystroke human delay. The chat
+            // box isn't subject to bot detection, and the slow paced typing
+            // (50-120ms/char) made long intros take 15-30s to post.
+            await found.element.evaluate((el) => (el as HTMLElement).focus());
+            await page.keyboard.type(message, { delay: 0 });
             await page.keyboard.press('Enter');
         }
     }
