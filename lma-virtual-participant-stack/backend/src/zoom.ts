@@ -275,6 +275,75 @@ export default class Zoom {
             .catch(() => false);
     }
 
+    /**
+     * After admission, make sure the in-meeting camera is actually ON when the
+     * Simli avatar is connected. The prejoin "turn video on" toggle frequently
+     * does NOT survive the transition into the meeting — Zoom resets the camera
+     * on admission (especially after a waiting room or a slow join), so the VP
+     * lands in-meeting with video OFF and the avatar never shows. The prejoin
+     * state can't be trusted; the only reliable signal is the in-meeting toolbar
+     * itself. Poll the in-meeting video control, and if it reads "Start Video"
+     * (camera off), click it to turn the avatar camera on. Re-checks for a while
+     * because the toolbar takes a moment to render after admission, and Zoom can
+     * flip the state again as media pipelines settle. Best-effort and silent on
+     * failure — video is not worth failing a joined meeting over.
+     */
+    private async ensureInMeetingVideoOn(page: Page): Promise<void> {
+        if (!simliAvatar.isConnected()) return;
+        // In-meeting video control: aria-label is "start my video" when OFF and
+        // "stop my video" when ON (case-insensitive). Returns 'off' | 'on' |
+        // 'unknown'. We act only on a confident 'off'.
+        const readVideoState = async (): Promise<'off' | 'on' | 'unknown'> =>
+            page
+                .evaluate(() => {
+                    const btn = document.querySelector(
+                        'button[aria-label*="video" i]',
+                    ) as HTMLElement | null;
+                    if (!btn) return 'unknown';
+                    const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+                    if (label.includes('start')) return 'off';
+                    if (label.includes('stop')) return 'on';
+                    // Fall back to the SVG icon class if the label is ambiguous.
+                    if (btn.querySelector('svg.SvgVideoOff, [class*="video-off" i]')) return 'off';
+                    if (btn.querySelector('svg.SvgVideoOn, [class*="video-on" i]')) return 'on';
+                    return 'unknown';
+                })
+                .catch(() => 'unknown' as const);
+
+        const deadline = Date.now() + 20000;
+        let clicks = 0;
+        while (Date.now() < deadline) {
+            const state = await readVideoState();
+            if (state === 'on') {
+                console.log('[zoom] In-meeting video is ON (avatar camera active).');
+                return;
+            }
+            if (state === 'off' && clicks < 3) {
+                clicks += 1;
+                console.log(`[zoom] In-meeting video is OFF with avatar connected — clicking Start Video (attempt ${clicks}).`);
+                const found = await findElementWithFallback(
+                    page,
+                    ['button[aria-label*="start my video" i]', 'button[aria-label*="video" i]'],
+                    {
+                        intent: 'Zoom in-meeting toolbar "Start Video" button (turns the camera on)',
+                        platform: 'ZOOM',
+                        step: 'zoom.meeting.startVideo',
+                    },
+                    { maxRetries: 3, delayMs: 500 },
+                );
+                if (found) {
+                    await humanClick(page, found.element);
+                    // Force a fresh getUserMedia so the avatar override fires.
+                    await simliAvatar.connectStreamToMeetingPage(page).catch(() => null);
+                }
+                await new Promise((r) => setTimeout(r, 1500));
+                continue;
+            }
+            await new Promise((r) => setTimeout(r, 1000));
+        }
+        console.warn('[zoom] Could not confirm in-meeting video ON after retries (non-fatal).');
+    }
+
     /** True when the chat panel's message input is present and visible. */
     private async chatInputVisible(page: Page): Promise<boolean> {
         return page
@@ -1176,6 +1245,15 @@ export default class Zoom {
             await this.sendMessages(page, details.introMessages);
         } catch (err) {
             console.warn('[zoom] Opening chat / posting intro failed (non-fatal, staying in meeting):', err);
+        }
+
+        // The prejoin "video on" toggle often doesn't survive admission — verify
+        // the in-meeting camera is actually on and (re)start it if not. Avatar
+        // only; best-effort.
+        try {
+            await this.ensureInMeetingVideoOn(page);
+        } catch (err) {
+            console.warn('[zoom] Post-join video check failed (non-fatal):', err);
         }
 
         // Set up attendee change monitoring
