@@ -288,87 +288,123 @@ export default class Zoom {
      * flip the state again as media pipelines settle. Best-effort and silent on
      * failure — video is not worth failing a joined meeting over.
      */
+    // Read the in-meeting camera state. Zoom's toolbar has SEVERAL buttons
+    // whose aria-label contains "video" (Start/Stop Video, video settings
+    // caret, "View" layout, etc.), so matching the first one misreads the
+    // state. Scan ALL candidate controls and look for the specific
+    // "start/stop ... video" verb (svg-class fallback). The first call dumps
+    // the real candidate markup to the logs once. Returns 'off' | 'on' | 'unknown'.
+    private videoCandidatesLogged = false;
+    private async readInMeetingVideoState(page: Page): Promise<'off' | 'on' | 'unknown'> {
+        const doLog = !this.videoCandidatesLogged;
+        this.videoCandidatesLogged = true;
+        return page
+            .evaluate((logIt: boolean) => {
+                const btns = Array.from(
+                    document.querySelectorAll('button[aria-label], [role="button"][aria-label]'),
+                ) as HTMLElement[];
+                const cands = btns
+                    .map((b) => ({
+                        label: (b.getAttribute('aria-label') || '').toLowerCase(),
+                        cls: (b.className?.toString?.() || '').toLowerCase(),
+                        html: (b.querySelector('svg')?.getAttribute('class') || '').toLowerCase(),
+                    }))
+                    .filter((c) => c.label.includes('video') || c.html.includes('video'));
+                if (logIt && cands.length) {
+                    console.log('[LMA] video-button candidates: ' + JSON.stringify(cands.slice(0, 6)));
+                }
+                for (const c of cands) {
+                    if (/start[\s\w]*video/.test(c.label)) return 'off';
+                    if (/stop[\s\w]*video/.test(c.label)) return 'on';
+                }
+                for (const c of cands) {
+                    if (c.html.includes('videooff') || c.html.includes('video-off')) return 'off';
+                    if (c.html.includes('videoon') || c.html.includes('video-on')) return 'on';
+                }
+                return 'unknown';
+            }, doLog)
+            .catch(() => 'unknown' as const);
+    }
+
+    // Click Zoom's in-meeting "Start Video" control once (avatar camera on).
+    private async clickStartVideo(page: Page): Promise<void> {
+        const found = await findElementWithFallback(
+            page,
+            ['button[aria-label*="start my video" i]', 'button[aria-label*="start video" i]'],
+            {
+                intent: 'Zoom in-meeting toolbar button that turns the camera ON (its label says "Start Video" / "start my video"). NOT video settings, NOT the layout/View button.',
+                platform: 'ZOOM',
+                step: 'zoom.meeting.startVideo',
+            },
+            { maxRetries: 3, delayMs: 500 },
+        );
+        if (found) {
+            await humanClick(page, found.element);
+            await simliAvatar.connectStreamToMeetingPage(page).catch(() => null);
+        } else {
+            console.warn('[zoom] Could not locate a Start Video control this attempt.');
+        }
+    }
+
+    // Initial post-admission confirmation that the avatar camera is on.
     private async ensureInMeetingVideoOn(page: Page): Promise<void> {
         if (!simliAvatar.isConnected()) return;
-        // Read the in-meeting camera state. Zoom's toolbar has SEVERAL buttons
-        // whose aria-label contains "video" (Start/Stop Video, video settings
-        // caret, "View" layout, etc.), so matching the first one misreads the
-        // state (the bug: reported ON while the camera was off). Instead, scan
-        // ALL candidate controls and look for the specific "start/stop ... video"
-        // verb. We also LOG every candidate's actual label + classes once, so the
-        // true current markup is captured in the task logs and can be promoted to
-        // a hardcoded default later. Returns 'off' | 'on' | 'unknown'.
-        let loggedCandidates = false;
-        const readVideoState = async (): Promise<'off' | 'on' | 'unknown'> =>
-            page
-                .evaluate((doLog: boolean) => {
-                    const btns = Array.from(
-                        document.querySelectorAll('button[aria-label], [role="button"][aria-label]'),
-                    ) as HTMLElement[];
-                    const cands = btns
-                        .map((b) => ({
-                            label: (b.getAttribute('aria-label') || '').toLowerCase(),
-                            cls: (b.className?.toString?.() || '').toLowerCase(),
-                            html: (b.querySelector('svg')?.getAttribute('class') || '').toLowerCase(),
-                        }))
-                        .filter((c) => c.label.includes('video') || c.html.includes('video'));
-                    if (doLog && cands.length) {
-                        // Surface the real markup for promoting a code default.
-                        console.log('[LMA] video-button candidates: ' + JSON.stringify(cands.slice(0, 6)));
-                    }
-                    // Prefer the explicit start/stop-video verb on the label.
-                    for (const c of cands) {
-                        if (/start[\s\w]*video/.test(c.label)) return 'off';
-                        if (/stop[\s\w]*video/.test(c.label)) return 'on';
-                    }
-                    // Icon-class fallback (svg class names carry on/off state).
-                    for (const c of cands) {
-                        if (c.html.includes('videooff') || c.html.includes('video-off')) return 'off';
-                        if (c.html.includes('videoon') || c.html.includes('video-on')) return 'on';
-                    }
-                    return 'unknown';
-                }, !loggedCandidates)
-                .catch(() => 'unknown' as const);
-
         const deadline = Date.now() + 20000;
         let clicks = 0;
         while (Date.now() < deadline) {
-            const state = await readVideoState();
-            loggedCandidates = true; // only dump the candidate list once
+            const state = await this.readInMeetingVideoState(page);
             if (state === 'on') {
                 console.log('[zoom] In-meeting video is ON (avatar camera active).');
                 return;
             }
-            // Act on 'off' AND 'unknown': if we can't confidently confirm the
-            // camera is on, click Start Video (idempotent-ish — if it was
-            // already on, the avatar stays; the AI resolver finds the right
-            // control even when our heuristic can't read state).
             if (clicks < 3) {
                 clicks += 1;
                 console.log(`[zoom] In-meeting video not confirmed ON (state=${state}) with avatar connected — clicking Start Video (attempt ${clicks}).`);
-                const found = await findElementWithFallback(
-                    page,
-                    ['button[aria-label*="start my video" i]', 'button[aria-label*="start video" i]'],
-                    {
-                        intent: 'Zoom in-meeting toolbar button that turns the camera ON (its label says "Start Video" / "start my video"). NOT video settings, NOT the layout/View button.',
-                        platform: 'ZOOM',
-                        step: 'zoom.meeting.startVideo',
-                    },
-                    { maxRetries: 3, delayMs: 500 },
-                );
-                if (found) {
-                    await humanClick(page, found.element);
-                    // Force a fresh getUserMedia so the avatar override fires.
-                    await simliAvatar.connectStreamToMeetingPage(page).catch(() => null);
-                } else {
-                    console.warn('[zoom] Could not locate a Start Video control this attempt.');
-                }
+                await this.clickStartVideo(page);
                 await new Promise((r) => setTimeout(r, 2000));
                 continue;
             }
             await new Promise((r) => setTimeout(r, 1000));
         }
         console.warn('[zoom] Could not confirm in-meeting video ON after retries (non-fatal).');
+    }
+
+    /**
+     * Long-running camera watchdog. Zoom's web client periodically throws
+     * "Something went wrong" and turns the VP's camera OFF mid-meeting
+     * (observed on 2-vCPU hosts under encoder pressure, and intermittently
+     * elsewhere) — the avatar then disappears even though the Simli session +
+     * loopback bridge stay perfectly healthy (canvas keeps drawing, bridge
+     * stays connected). The fix is the same thing a human does in VNC:
+     * re-click "Start Video". This polls every ~10s and, whenever Simli is
+     * connected but the in-meeting camera reads OFF, re-starts it. Cheap (one
+     * DOM scan per tick) and best-effort; runs until the page closes. This is
+     * the Zoom-UI counterpart to Simli's own session reconnect watchdog —
+     * Simli self-heals its session; this self-heals Zoom's camera toggle.
+     */
+    private startCameraWatchdog(page: Page): void {
+        if (!simliAvatar.isSimliEnabled()) return;
+        const POLL_MS = 10_000;
+        let consecutiveOff = 0;
+        const timer = setInterval(async () => {
+            if (page.isClosed()) {
+                clearInterval(timer);
+                return;
+            }
+            if (!simliAvatar.isConnected()) return;
+            try {
+                const state = await this.readInMeetingVideoState(page);
+                if (state === 'off') {
+                    consecutiveOff += 1;
+                    console.warn(`[camera-watchdog] in-meeting video is OFF with avatar connected (x${consecutiveOff}) — re-clicking Start Video`);
+                    await this.clickStartVideo(page);
+                } else {
+                    consecutiveOff = 0;
+                }
+            } catch (err) {
+                /* transient; try next tick */
+            }
+        }, POLL_MS);
     }
 
     /** True when the chat panel's message input is present and visible. */
@@ -1282,6 +1318,11 @@ export default class Zoom {
         } catch (err) {
             console.warn('[zoom] Post-join video check failed (non-fatal):', err);
         }
+        // Then keep watching: Zoom's "Something went wrong" can flip the camera
+        // off mid-meeting (the avatar disappears though Simli/bridge stay
+        // healthy). This re-clicks Start Video whenever that happens — the
+        // automated version of the manual VNC re-enable.
+        this.startCameraWatchdog(page);
 
         // Set up attendee change monitoring
         await page.exposeFunction('attendeeChange', async (number: number) => {
