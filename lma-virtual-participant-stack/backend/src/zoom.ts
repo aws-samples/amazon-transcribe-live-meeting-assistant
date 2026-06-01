@@ -25,16 +25,34 @@ async function clickClickableAncestor(element: ElementHandle<Element>): Promise<
 
 // Meaningful UX-style clicks (Join, Sign In, Skip-this-step). force:true skips
 // Playwright's "covered by another element" actionability check (Zoom often
-// floats a transient overlay over the Join/chat buttons); the old Puppeteer
-// click didn't do that check, so this preserves prior behavior.
+// floats a transient overlay over the Join/chat buttons). force:true does NOT
+// bypass the viewport check, though — when Zoom opens a transient window (e.g.
+// the whiteboard dashboard) it can push a toolbar button out of the viewport,
+// and a positional click then throws "Element is outside of the viewport". So
+// on any click failure we fall back to a DOM-level click via evaluate, which
+// scrolls the element into view and dispatches click() directly — no viewport
+// or actionability constraint.
 async function humanClick(
     page: Page,
     target: string | ElementHandle<Element>,
 ): Promise<void> {
-    if (typeof target === 'string') {
-        await page.click(target, { force: true });
-    } else {
-        await target.click({ force: true });
+    const handle: ElementHandle<Element> | null =
+        typeof target === 'string' ? await page.$(target) : target;
+    try {
+        if (typeof target === 'string') {
+            await page.click(target, { force: true });
+        } else {
+            await target.click({ force: true });
+        }
+    } catch (err) {
+        // Positional click failed (commonly off-viewport). Fall back to a
+        // synthetic DOM click that ignores viewport/overlay constraints.
+        if (!handle) throw err;
+        await handle.evaluate((el: Element) => {
+            const t = (el.closest('button, [role="button"], a') as HTMLElement | null) || (el as HTMLElement);
+            t.scrollIntoView({ block: 'center', inline: 'center' });
+            t.click();
+        });
     }
 }
 
@@ -1146,12 +1164,19 @@ export default class Zoom {
         // the rest of the meeting to catch consent/recording-notice/etc.
         // dialogs that may appear after the join.)
 
+        // Opening chat + posting the intro is best-effort: the VP has already
+        // joined the meeting and is capturing audio, so a chat hiccup (e.g. a
+        // transient Zoom window pushing the chat button off-viewport) must
+        // NEVER fail the meeting. Swallow any error and keep going.
         console.log('Opening chat panel.');
-        await this.openChatPanel(page);
-
         await substep('In the meeting — posting introduction…');
-        console.log('Sending introduction messages.');
-        await this.sendMessages(page, details.introMessages);
+        try {
+            await this.openChatPanel(page);
+            console.log('Sending introduction messages.');
+            await this.sendMessages(page, details.introMessages);
+        } catch (err) {
+            console.warn('[zoom] Opening chat / posting intro failed (non-fatal, staying in meeting):', err);
+        }
 
         // Set up attendee change monitoring
         await page.exposeFunction('attendeeChange', async (number: number) => {
