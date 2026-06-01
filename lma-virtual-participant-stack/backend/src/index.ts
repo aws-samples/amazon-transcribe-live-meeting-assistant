@@ -1,10 +1,12 @@
-// Stock Chromium via Playwright. We previously used cloakbrowser (a patched
-// anti-fingerprint Chromium), but its WebRTC patch broke the same-browser
-// loopback RTCPeerConnection that bridges the Simli avatar's video into the
-// meeting page (0 ICE candidates → black camera), suppressed CDP console
-// forwarding, and wedged the renderer under load. v0.3.3 ran fine on stock
-// Chromium, so we launch the apt-installed binary at CHROME_BIN/usr/bin/chromium.
-import { chromium } from 'playwright-core';
+// CloakBrowser: a source-patched stealth Chromium (currently Chromium 146)
+// driven via playwright-core. Chosen over stock Debian Chromium because (a) it
+// reduces the CDP-automation signals that trip Zoom's reCAPTCHA Enterprise, and
+// (b) its newer/purpose-built Chromium handles Zoom's web-client video encoder
+// reliably on a 2-vCPU host (t3.medium) — stock Chromium's older build threw
+// Zoom's "Something went wrong" and turned the camera off under the same load.
+// The Simli loopback-WebRTC bridge requires two extra launch flags here to
+// undo cloakbrowser's ICE-suppression patch (see getCloakLaunchArgs).
+import { launchPersistentContext } from 'cloakbrowser';
 import { promises as fs, readFileSync } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
@@ -27,18 +29,20 @@ import {
     initProfileDefaults,
     cleanStaleLocks,
     warmupNavigation,
+    fingerprintSeedForUser,
+    randomFingerprintSeed,
 } from './lib/profile.js';
 
 // Match the Xvfb screen size; fluxbox toolbar is suppressed in entrypoint.sh.
 const WINDOW_WIDTH = 1920;
 const WINDOW_HEIGHT = 1080;
 
-const getChromiumLaunchArgs = (): string[] => [
+const getCloakLaunchArgs = (fingerprintSeed: number, simliEnabled: boolean): string[] => [
+    `--fingerprint=${fingerprintSeed}`,
+    `--fingerprint-screen-width=${WINDOW_WIDTH}`,
+    `--fingerprint-screen-height=${WINDOW_HEIGHT}`,
     // Size the headed OS window to fill the Xvfb display.
     `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT}`,
-    // Required to run Chromium as a non-root user inside the container (v0.3.3
-    // ran with this; cloakbrowser's binary didn't need it but stock does).
-    '--no-sandbox',
     '--window-position=0,0',
     '--use-fake-ui-for-media-stream',
     '--autoplay-policy=no-user-gesture-required',
@@ -52,36 +56,38 @@ const getChromiumLaunchArgs = (): string[] => [
     '--enable-logging=stderr',
     '--log-level=0',
     '--remote-debugging-port=9222',
-    // Headed-in-container essentials.
-    // PERF: disable the GPU entirely. There is no hardware GPU in the
-    // container, so with --use-angle=swiftshader Chrome ran ALL WebGL/
-    // compositing on the CPU via SwiftShader — a GPU process measured at
-    // ~200% CPU under load, the dominant cost that wedged the renderer on
-    // t3.medium (manifesting as Zoom's "Oops, enable hardware acceleration"
-    // video crash AND a starved MutationObserver that mis-attributed every
-    // speaker turn to LMA). We don't need to SEE Zoom's video — we inject our
-    // own camera (Simli) and consume audio — so dropping WebGL sheds the cost.
-    // (Per Jeremy's MR-169 finding; applied here on stock Chromium.)
+    // PERF: disable GPU entirely. There is no hardware GPU in the container, so
+    // Chrome runs all WebGL/compositing on the CPU via SwiftShader (the GPU
+    // process measured ~200% under load — the dominant cost). cloakbrowser
+    // force-adds --ignore-gpu-blocklist in headed mode to make WebGL work in
+    // Docker/Xvfb, but its arg-merge lets our args override by key. We don't
+    // need to SEE Zoom's video (we inject our own camera and consume audio), so
+    // disabling GPU/WebGL sheds the SwiftShader cost.
     '--disable-gpu',
     '--disable-software-rasterizer',
     '--disable-infobars',
     '--test-type',
-    // WebRTC loopback enablement for the Simli avatar bridge. The avatar's
-    // video reaches the meeting page over a same-browser loopback
-    // RTCPeerConnection. Chromium defaults to hiding local IPs behind mDNS
-    // .local hostnames, which don't resolve inside the container — so ICE
-    // can never pair the two loopback peers. BOTH webrtc-ip-handling flags are
-    // needed to reliably expose real host candidates (the legacy and current
-    // flag names). WebRtcHideLocalIpsWithMdns is merged into the password/
-    // autofill --disable-features list below.
-    '--force-webrtc-ip-handling-policy=default',
-    '--webrtc-ip-handling-policy=default',
     // Suppress password/autofill bubbles that overlay meeting UI buttons.
-    '--disable-features=PasswordManagerOnboarding,AutofillEnableAccountWalletStorage,PasswordImport,PasswordsAccountStorage,Translate,WebRtcHideLocalIpsWithMdns',
+    '--disable-features=PasswordManagerOnboarding,AutofillEnableAccountWalletStorage,PasswordImport,PasswordsAccountStorage,Translate',
     '--password-store=basic',
     '--use-mock-keychain',
     '--no-first-run',
     '--no-default-browser-check',
+    // CloakBrowser's compiled WebRTC IP-leak patch suppresses ALL ICE host
+    // candidates by default, which prevents the Simli avatar's page-to-page
+    // WebRTC video bridge (Simli page -> meeting page) from ever connecting
+    // (connectionState stays 'new'). Both flags are required to restore host
+    // candidate gathering; verified empirically. Only the container's private
+    // RFC1918 IP is exposed, and no proxy is in use, so this leaks nothing the
+    // TCP connection doesn't already reveal. See simli-avatar.ts bridge.
+    '--force-webrtc-ip-handling-policy=default',
+    '--webrtc-ip-handling-policy=default',
+    // When Simli is NOT active we don't override getUserMedia, so without this
+    // Chrome reports no camera/mic — an unusual, fingerprintable state. The
+    // fake device gives a realistic capture device. When Simli IS active we
+    // must NOT add it: it would register a competing fake camera alongside our
+    // injected avatar stream.
+    ...(simliEnabled ? [] : ['--use-fake-device-for-media-stream']),
 ];
 
 // Global variables for graceful shutdown
@@ -319,22 +325,26 @@ const main = async (): Promise<void> => {
     const cookiePatchedCount = patchPreferencesFor3pCookies(userDataDir);
     console.log(`[profile-store] Wrote 3p-cookie allow exceptions for ${cookiePatchedCount} meeting platforms`);
 
-    const executablePath = process.env.CHROME_BIN
-        || process.env.PUPPETEER_EXECUTABLE_PATH
-        || '/usr/bin/chromium';
+    const fingerprintSeed = process.env.LMA_USER_SUB
+        ? fingerprintSeedForUser(process.env.LMA_USER_SUB)
+        : randomFingerprintSeed();
 
-    console.log(`[browser] Launching stock Chromium persistent context`);
-    console.log(`[browser]   executablePath    = ${executablePath}`);
+    console.log(`[browser] Launching CloakBrowser persistent context`);
     console.log(`[browser]   userDataDir       = ${userDataDir}`);
+    console.log(`[browser]   fingerprint seed  = ${fingerprintSeed}`);
     console.log(`[browser]   profile freshness = ${isFresh ? 'FRESH (warmup will run)' : 'EXISTING (skipping warmup)'}`);
 
-    const context = await chromium.launchPersistentContext(userDataDir, {
+    const context = await launchPersistentContext({
         headless: false,
-        executablePath,
+        humanize: true,
+        humanPreset: 'default',
+        userDataDir,
         viewport: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT },
-        args: getChromiumLaunchArgs(),
-        ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
-    });
+        args: getCloakLaunchArgs(fingerprintSeed, simliAvatar.isSimliEnabled()),
+        launchOptions: {
+            ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
+        },
+    } as any);
     browserContext = context;
     // Sane default for actions; the one meeting-length wait (end-of-meeting
     // watcher) passes its own explicit { timeout }. Do NOT set a multi-hour
@@ -407,9 +417,11 @@ const main = async (): Promise<void> => {
 
     // Forward early meeting-page console output (getUserMedia override,
     // Simli bridge) to container logs before platform handlers attach.
-    // Stock Chromium emits Runtime.consoleAPICalled normally, so this
-    // `page.on('console')` works; the `__lmaLog` init-script binding below
-    // is kept as a belt-and-braces path that also captures subframe logs.
+    // cloakbrowser's patched Chromium does not reliably emit
+    // Runtime.consoleAPICalled over CDP, so `page.on('console')` captures
+    // little on the meeting page — the reliable path is the `__lmaLog`
+    // exposeFunction binding below (an init script forwards matching lines from
+    // every frame). page.on('console') is kept as a best-effort fallback.
     page.on('console', (msg) => {
         const text = msg.text();
         const type = msg.type();

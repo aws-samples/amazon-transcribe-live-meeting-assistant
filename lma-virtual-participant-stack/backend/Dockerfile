@@ -1,7 +1,7 @@
 # checkov:skip=CKV_DOCKER_2: "ECS target-group health check on 5901"
 
-# Stock Chromium from Debian apt (the v0.3.3-proven browser). ECR Public
-# mirror avoids Docker Hub anonymous rate limits in CodeBuild.
+# CloakBrowser ships a glibc-only patched Chromium binary (pinned 0.3.29);
+# ECR Public mirror avoids Docker Hub anonymous rate limits in CodeBuild.
 FROM public.ecr.aws/docker/library/python:3.12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -11,17 +11,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
     SCREEN_DEPTH=24 \
     VNC_PORT=5900 \
     NOVNC_PORT=5901 \
-    CHROME_BIN=/usr/bin/chromium \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    CLOAKBROWSER_CACHE_DIR=/opt/cloakbrowser \
+    CLOAKBROWSER_AUTO_UPDATE=false
 
 WORKDIR /srv
 
-# Install stock Chromium from apt. Playwright launches this binary via
-# executablePath (CHROME_BIN) — we do NOT use Playwright's bundled browser
-# download. The Simli avatar's loopback WebRTC bridge works on stock
-# Chromium (cloakbrowser's WebRTC patch broke it — 0 ICE candidates).
+# Do NOT install `chromium` from apt — we rely on the cloakbrowser binary
+# (newer patched Chromium that handles Zoom's video encoder reliably on
+# 2-vCPU hosts where stock Debian Chromium threw "Something went wrong").
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        chromium \
         libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
         libdbus-1-3 libdrm2 libxkbcommon0 libatspi2.0-0 libxcomposite1 \
         libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
@@ -40,6 +38,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# 0.3.29 is the first release exposing launchPersistentContext; pinned to match
+# the npm cloakbrowser dep. A binary bump was deliberately deferred to avoid
+# regressing the now-stable WebRTC/login behavior.
+ARG CLOAKBROWSER_VERSION=0.3.29
+RUN pip install --no-cache-dir "cloakbrowser[geoip]==${CLOAKBROWSER_VERSION}" \
+    && python -m cloakbrowser install \
+    && python -m cloakbrowser info
 
 COPY . /srv
 
@@ -72,6 +78,6 @@ EXPOSE 5900 5901
 
 RUN chmod +x /srv/entrypoint.sh
 RUN useradd -m -d /home/appuser -s /bin/bash appuser
-RUN chown -R appuser:appuser /srv
+RUN chown -R appuser:appuser /srv /opt/cloakbrowser
 USER appuser
 ENTRYPOINT ["/srv/entrypoint.sh"]
