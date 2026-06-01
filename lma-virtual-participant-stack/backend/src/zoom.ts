@@ -290,42 +290,67 @@ export default class Zoom {
      */
     private async ensureInMeetingVideoOn(page: Page): Promise<void> {
         if (!simliAvatar.isConnected()) return;
-        // In-meeting video control: aria-label is "start my video" when OFF and
-        // "stop my video" when ON (case-insensitive). Returns 'off' | 'on' |
-        // 'unknown'. We act only on a confident 'off'.
+        // Read the in-meeting camera state. Zoom's toolbar has SEVERAL buttons
+        // whose aria-label contains "video" (Start/Stop Video, video settings
+        // caret, "View" layout, etc.), so matching the first one misreads the
+        // state (the bug: reported ON while the camera was off). Instead, scan
+        // ALL candidate controls and look for the specific "start/stop ... video"
+        // verb. We also LOG every candidate's actual label + classes once, so the
+        // true current markup is captured in the task logs and can be promoted to
+        // a hardcoded default later. Returns 'off' | 'on' | 'unknown'.
+        let loggedCandidates = false;
         const readVideoState = async (): Promise<'off' | 'on' | 'unknown'> =>
             page
-                .evaluate(() => {
-                    const btn = document.querySelector(
-                        'button[aria-label*="video" i]',
-                    ) as HTMLElement | null;
-                    if (!btn) return 'unknown';
-                    const label = (btn.getAttribute('aria-label') || '').toLowerCase();
-                    if (label.includes('start')) return 'off';
-                    if (label.includes('stop')) return 'on';
-                    // Fall back to the SVG icon class if the label is ambiguous.
-                    if (btn.querySelector('svg.SvgVideoOff, [class*="video-off" i]')) return 'off';
-                    if (btn.querySelector('svg.SvgVideoOn, [class*="video-on" i]')) return 'on';
+                .evaluate((doLog: boolean) => {
+                    const btns = Array.from(
+                        document.querySelectorAll('button[aria-label], [role="button"][aria-label]'),
+                    ) as HTMLElement[];
+                    const cands = btns
+                        .map((b) => ({
+                            label: (b.getAttribute('aria-label') || '').toLowerCase(),
+                            cls: (b.className?.toString?.() || '').toLowerCase(),
+                            html: (b.querySelector('svg')?.getAttribute('class') || '').toLowerCase(),
+                        }))
+                        .filter((c) => c.label.includes('video') || c.html.includes('video'));
+                    if (doLog && cands.length) {
+                        // Surface the real markup for promoting a code default.
+                        console.log('[LMA] video-button candidates: ' + JSON.stringify(cands.slice(0, 6)));
+                    }
+                    // Prefer the explicit start/stop-video verb on the label.
+                    for (const c of cands) {
+                        if (/start[\s\w]*video/.test(c.label)) return 'off';
+                        if (/stop[\s\w]*video/.test(c.label)) return 'on';
+                    }
+                    // Icon-class fallback (svg class names carry on/off state).
+                    for (const c of cands) {
+                        if (c.html.includes('videooff') || c.html.includes('video-off')) return 'off';
+                        if (c.html.includes('videoon') || c.html.includes('video-on')) return 'on';
+                    }
                     return 'unknown';
-                })
+                }, !loggedCandidates)
                 .catch(() => 'unknown' as const);
 
         const deadline = Date.now() + 20000;
         let clicks = 0;
         while (Date.now() < deadline) {
             const state = await readVideoState();
+            loggedCandidates = true; // only dump the candidate list once
             if (state === 'on') {
                 console.log('[zoom] In-meeting video is ON (avatar camera active).');
                 return;
             }
-            if (state === 'off' && clicks < 3) {
+            // Act on 'off' AND 'unknown': if we can't confidently confirm the
+            // camera is on, click Start Video (idempotent-ish — if it was
+            // already on, the avatar stays; the AI resolver finds the right
+            // control even when our heuristic can't read state).
+            if (clicks < 3) {
                 clicks += 1;
-                console.log(`[zoom] In-meeting video is OFF with avatar connected — clicking Start Video (attempt ${clicks}).`);
+                console.log(`[zoom] In-meeting video not confirmed ON (state=${state}) with avatar connected — clicking Start Video (attempt ${clicks}).`);
                 const found = await findElementWithFallback(
                     page,
-                    ['button[aria-label*="start my video" i]', 'button[aria-label*="video" i]'],
+                    ['button[aria-label*="start my video" i]', 'button[aria-label*="start video" i]'],
                     {
-                        intent: 'Zoom in-meeting toolbar "Start Video" button (turns the camera on)',
+                        intent: 'Zoom in-meeting toolbar button that turns the camera ON (its label says "Start Video" / "start my video"). NOT video settings, NOT the layout/View button.',
                         platform: 'ZOOM',
                         step: 'zoom.meeting.startVideo',
                     },
@@ -335,8 +360,10 @@ export default class Zoom {
                     await humanClick(page, found.element);
                     // Force a fresh getUserMedia so the avatar override fires.
                     await simliAvatar.connectStreamToMeetingPage(page).catch(() => null);
+                } else {
+                    console.warn('[zoom] Could not locate a Start Video control this attempt.');
                 }
-                await new Promise((r) => setTimeout(r, 1500));
+                await new Promise((r) => setTimeout(r, 2000));
                 continue;
             }
             await new Promise((r) => setTimeout(r, 1000));
@@ -1527,6 +1554,43 @@ export default class Zoom {
             // Wait for Zoom UI to be ready, then setup observer
             setTimeout(setupObserver, 2000);
         }, details.scribeIdentity);
+
+        // Resolve the active-speaker name selector ONCE up front via the AI
+        // resolver and inject it ahead of the stale hardcoded defaults. Zoom
+        // Workplace renamed the speaker-name DOM (the old
+        // `.video-avatar__avatar-footer span` selectors match only the VP's own
+        // tile, so every turn was misattributed to LMA). The resolver caches the
+        // winner in memory for this meeting AND in DynamoDB (30-day TTL) for all
+        // later meetings — so this is one AI call now, zero on subsequent
+        // meetings. The discovered selector is logged ("[ai-dom-resolver]
+        // Discovered selector for zoom.monitor.activeSpeaker: ...") so it can be
+        // promoted to a code default later and drop even the one-time call.
+        if (isResolverEnabled()) {
+            try {
+                const sp = await findElementWithFallback(
+                    page,
+                    [
+                        '.single-main-container__video-frame .video-avatar__avatar-footer span',
+                        '.video-avatar__avatar-footer span[role="none"]',
+                    ],
+                    {
+                        intent: 'Element on the Zoom meeting screen that shows the name label of the currently active/spotlighted speaker (the participant whose video tile is highlighted as actively speaking, NOT the bot\'s own tile)',
+                        platform: 'ZOOM',
+                        step: 'zoom.monitor.activeSpeaker',
+                    },
+                    { maxRetries: 3, delayMs: 500 },
+                );
+                if (sp) {
+                    console.log(`[zoom] Active-speaker selector resolved via ${sp.source}: ${sp.selector}`);
+                    await page.evaluate((sel: string) => {
+                        const fn = (window as any).__lmaSetSpeakerSelectors;
+                        if (fn) fn([sel]);
+                    }, sp.selector);
+                }
+            } catch (err) {
+                console.warn('[zoom] up-front active-speaker selector resolve failed (non-fatal):', err);
+            }
+        }
 
         // Node-side liveness watchdog: if no speaker change has been seen for
         // 60s while the meeting reports >1 attendee, ask Claude to find the
