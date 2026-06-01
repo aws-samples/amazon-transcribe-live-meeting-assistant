@@ -595,65 +595,18 @@ const main = async (): Promise<void> => {
                 }
                 console.log('✓ Camera and microphone permissions granted for meeting platforms');
 
-                // 2. Inject getUserMedia/enumerateDevices/permissions overrides.
-                // These run via addInitScript, so they apply to subsequent
-                // navigations/documents — installing them here (post-sign-in,
-                // pre-camera) is still ahead of when Zoom captures the camera.
+                // 2. Inject the getUserMedia override AND start the Node-side
+                // WebRTC bridge poll loop (both live inside
+                // injectGetUserMediaOverride). The poll loop scans page.frames()
+                // and services any frame that calls getUserMedia({video}) —
+                // platform-agnostic, picks up new subframes/navigations
+                // automatically, and self-heals if the bridge drops mid-call. So
+                // no framenavigated wiring or on-demand-reconnect plumbing is
+                // needed here. The avatar is downscaled to 256x256@15fps before
+                // the bridge so Zoom's video encoder stays cheap enough for a
+                // 2-vCPU host (t3.medium).
                 await simliAvatar.injectGetUserMediaOverride(page);
-                console.log('✓ Simli getUserMedia override injected into meeting page');
-
-                let reconnectInFlight: Promise<void> | null = null;
-                const connectSimliStream = async () => {
-                    try {
-                        await simliAvatar.connectStreamToMeetingPage(page);
-                        console.log('✓ Simli video stream connected to meeting page');
-                    } catch (error) {
-                        console.error('Failed to connect Simli stream (non-critical):', error);
-                    }
-                };
-
-                await page.exposeFunction('__simliRequestReconnect', async () => {
-                    if (reconnectInFlight) {
-                        await reconnectInFlight;
-                        return;
-                    }
-                    console.log('Simli avatar: on-demand reconnect requested from meeting page');
-                    reconnectInFlight = connectSimliStream().finally(() => {
-                        reconnectInFlight = null;
-                    });
-                    await reconnectInFlight;
-                });
-
-                // The getUserMedia override + frame relay survive meeting-URL
-                // navigations. Confirm frames are flowing once per real
-                // meeting-URL load.
-                const isMeetingUrl = (u: string): boolean =>
-                    /\/wc\/\d+\/(join|start|live)/.test(u) ||
-                    /teams\.microsoft\.com\/.*meetup-join/.test(u) ||
-                    /web\.webex\.com\/meeting/.test(u) ||
-                    /chime\.aws\/meetings\//.test(u);
-                page.on('framenavigated', async (frame) => {
-                    if (frame !== page.mainFrame()) return;
-                    const url = frame.url();
-                    if (!isMeetingUrl(url)) return;
-                    if (reconnectInFlight) return;
-                    console.log(`[simli-bridge] meeting URL detected — confirming avatar frames`);
-                    reconnectInFlight = connectSimliStream().finally(() => {
-                        reconnectInFlight = null;
-                    });
-                    await reconnectInFlight;
-                });
-
-                // If the meeting page is already on the meeting URL by the time
-                // we prepare the avatar (e.g. handler navigated before calling
-                // prepareAvatar), connect the consumer now — the framenavigated
-                // event won't re-fire for the current document.
-                if (isMeetingUrl(page.url())) {
-                    reconnectInFlight = connectSimliStream().finally(() => {
-                        reconnectInFlight = null;
-                    });
-                    await reconnectInFlight;
-                }
+                console.log('✓ Simli getUserMedia override + WebRTC bridge installed');
             } catch (error) {
                 console.error('Failed to set up Simli avatar for meeting (non-critical):', error);
             }
