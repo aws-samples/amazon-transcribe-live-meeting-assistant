@@ -9,10 +9,9 @@ LMA's Virtual Participant (VP) joins Zoom meetings via headless Chromium. A gues
 
 ## Browser stack
 
-- **[CloakBrowser](https://github.com/CloakHQ/cloakbrowser)** ships a Chromium build with source-level patches across canvas / WebGL / audio / fonts / GPU / WebRTC / TLS, so meeting platforms see a consistent, real-browser environment. The VP drives it through `cloakbrowser/playwright`'s `launchPersistentContext`. This is more robust than the previous JS-injection / CDP-runtime-patch approach, whose inconsistencies could break a join.
-- Each user gets a **stable per-Cognito-sub fingerprint seed**, so the same user presents as the same returning visitor across launches rather than a brand-new environment each time.
+- The VP drives **stock Chromium** (the Debian `chromium` package) through Playwright's `chromium.launchPersistentContext`. Stock Chromium is what the VP shipped with originally; it provides reliable WebRTC (needed for the Simli avatar's loopback video bridge), CDP console forwarding, and predictable renderer behaviour under load.
+- A per-user **persistent profile** (cookies, "trusted device" markers) is restored from S3 on launch and saved back at meeting end, so a user who has signed in once is recognised on subsequent meetings (see [Persistent Chromium profile per user](#persistent-chromium-profile-per-user) below).
 - Fresh profiles run a short **warmup** (Google → HN → Wikipedia → the meeting-platform home pages) before navigating to the meeting URL, so a first-time profile arrives with normal browsing history rather than zero state.
-- Meaningful clicks and typing (Sign-In, Join, "Skip for now" interstitials, in-meeting chat) go through CloakBrowser's humanized input, which applies realistic mouse pathing and per-keystroke timing.
 
 ## Per-user Zoom credentials
 
@@ -52,7 +51,7 @@ This keeps the deterministic logic out of the codebase and lets the VP tolerate 
 
 The same AI navigator handles the post-login interstitial sequence on the way to the meeting URL, and the in-meeting unknown-dialog watchdog (consent, recording-notice, verification prompts, etc.).
 
-## Persistent Chromium profile per user (Phase C4)
+## Persistent Chromium profile per user
 
 The VP container hydrates a per-user `userDataDir` from S3 at launch and uploads it back at meeting end. Once the user has signed in once and cleared any verification challenge via the VNC viewer, Zoom plants a "trusted device" cookie that persists. Subsequent meetings reuse that cookie, so the VP signs in cleanly without re-prompting.
 

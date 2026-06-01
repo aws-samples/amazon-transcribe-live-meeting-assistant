@@ -29,7 +29,7 @@ Simli Avatar Manager
 Simli Cloud (lip-sync rendering)
     ↓ Returns video stream via WebRTC
     ↓
-Background Puppeteer Page (renders avatar video)
+Background Playwright Page (renders avatar video)
     ↓ Bridges video via internal RTCPeerConnection
     ↓
 Meeting Page (getUserMedia override)

@@ -30,7 +30,7 @@ title: "Virtual Participant"
 
 > **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio, and Virtual Participant.
 
-The Virtual Participant (VP) is a headless Chrome browser running on ECS (Fargate or EC2) that joins meetings as a separate participant via Puppeteer. It captures audio and metadata, sending them to the LMA Kinesis Data Stream for transcription and processing.
+The Virtual Participant (VP) is a headless Chrome browser running on ECS (Fargate or EC2) that joins meetings as a separate participant, driven by Playwright. It captures audio and metadata, sending them to the LMA Kinesis Data Stream for transcription and processing.
 
 ## When to use Virtual Participant
 
@@ -69,7 +69,7 @@ The VP reports a granular status as it boots, joins, and runs. The UI uses these
 | `BOOTING` | Container started; pulling Chrome image, starting Xvfb / VNC / PulseAudio |
 | `REGISTERING_NETWORK` | Registering the task with the live-view ALB (typically 30-60 seconds) |
 | `HYDRATING_PROFILE` | Restoring the per-user Chromium profile (cookies, "trusted device" markers) from S3 |
-| `LAUNCHING_BROWSER` | Launching CloakBrowser's patched Chromium via `cloakbrowser/playwright` |
+| `LAUNCHING_BROWSER` | Launching Chromium via Playwright (`chromium.launchPersistentContext`) |
 | `VNC_READY` | Browser is up; live-view viewer can connect |
 | `CONNECTING` | Initializing audio/video pipelines (Nova Sonic, Simli avatar, agent mic) |
 | `JOINING` | Navigating to the meeting URL; signing in to Zoom if credentials are stored |
@@ -158,7 +158,7 @@ Fargate launch type is serverless and uses SOCI (Seekable OCI) for faster contai
 
 ## EC2 Instance Types
 
-Each VP container is capped at 2500 MB (~1.85× observed peak memory of ~1348 MB during concurrent Chrome + Simli + Nova Sonic startup). Pick an instance whose host memory accommodates your expected concurrent VPs per host plus ~600 MB for the OS / ECS agent:
+Each VP container is capped at 3500 MB (observed peak memory is ~1650 MB with Chromium + Simli + Nova Sonic; the cap leaves headroom). **CPU, not memory, is the binding constraint for voice + avatar workloads**: a meeting with the Nova Sonic voice assistant active draws ~3300 CPU units (≈1.6 vCPU) steady-state — more than a 2-vCPU burstable instance (`t3.medium`) can sustain. Pick a compute-optimized instance (`c5.xlarge`+) for voice/avatar meetings; `t3.medium` is only adequate for transcription-only VPs (no voice assistant). Also ensure host memory accommodates your expected concurrent VPs per host plus ~600 MB for the OS / ECS agent:
 
 **General Purpose:**
 - `t3.medium` (default) -- 3867 MB host → 1 concurrent VP. The capacity-provider auto-scaler launches additional hosts when concurrent demand exceeds capacity, so users running one meeting at a time pay the baseline (~$30/month per host) and only scale up while multiple VPs are active.
@@ -166,8 +166,8 @@ Each VP container is capped at 2500 MB (~1.85× observed peak memory of ~1348 MB
 - `t3.xlarge` -- 15.7 GB host → 6 concurrent VPs.
 
 **Compute-Optimized (recommended for voice + avatar):**
-- `c5.large` -- Voice assistant workloads, 1 concurrent VP
-- `c5.xlarge` -- Voice assistant with avatar, 3 concurrent VPs (no burstable throttling)
+- `c5.large` (2 vCPU) -- **insufficient** for a voice-assistant meeting (steady-state ~1.6 vCPU saturates 2 vCPU and wedges the renderer); use only for transcription-only VPs
+- `c5.xlarge` (4 vCPU) -- **recommended** for voice assistant with avatar; 1 VP comfortably (no burstable throttling)
 - `c5.2xlarge` -- Heavy voice and avatar processing, 6 concurrent VPs
 
 **Memory-Optimized (recommended for voice + avatar with large meeting context):**
