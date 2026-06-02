@@ -486,6 +486,9 @@ export default class Zoom {
         if (!(await this.chatInputVisible(page))) {
             await this.openChatPanel(page);
         }
+        // openChatPanel already confirmed the input is visible, so this resolves
+        // on the first primary try in the common case — keep the retry budget
+        // small so we don't add seconds before posting the intro.
         const found = await findElementWithFallback(
             page,
             ['p[data-placeholder="Type message here ..."]'],
@@ -494,20 +497,47 @@ export default class Zoom {
                 platform: 'ZOOM',
                 step: 'zoom.chat.input',
             },
-            { maxRetries: 10, delayMs: 500 },
+            { maxRetries: 4, delayMs: 300 },
         );
         if (!found) {
             console.log('Could not locate chat message input — aborting sendMessages');
             return;
         }
         for (const message of messages) {
-            await new Promise(resolve => setTimeout(resolve, 10));
-            // Chat messages type fast — no per-keystroke human delay. The chat
-            // box isn't subject to bot detection, and the slow paced typing
-            // (50-120ms/char) made long intros take 15-30s to post.
-            await found.element.evaluate((el) => (el as HTMLElement).focus());
-            await page.keyboard.type(message, { delay: 0 });
+            // Insert the whole message in ONE shot rather than simulating
+            // keystrokes. page.keyboard.type() sends one key at a time over CDP
+            // — even with delay:0 a ~250-char intro took ~50s on Zoom's
+            // contenteditable. The chat box isn't bot-detected, so we focus the
+            // element and use execCommand('insertText'), which fires the proper
+            // beforeinput/input events Zoom's editor (ProseMirror) listens for,
+            // populating it instantly. Enter still sends.
+            const inserted = await found.element.evaluate((el, text) => {
+                const node = el as HTMLElement;
+                node.focus();
+                // Place caret in the editor, then insert the text as a single
+                // input event (ProseMirror/contenteditable-friendly).
+                try {
+                    const sel = window.getSelection();
+                    if (sel) {
+                        sel.removeAllRanges();
+                        const range = document.createRange();
+                        range.selectNodeContents(node);
+                        range.collapse(false);
+                        sel.addRange(range);
+                    }
+                } catch { /* best-effort caret placement */ }
+                // execCommand is deprecated but still the most reliable way to
+                // drive a contenteditable's input pipeline synchronously.
+                const ok = document.execCommand('insertText', false, text);
+                return ok;
+            }, message).catch(() => false);
+            if (!inserted) {
+                // Fallback to keystroke typing if execCommand was blocked.
+                await found.element.evaluate((el) => (el as HTMLElement).focus());
+                await page.keyboard.type(message, { delay: 0 });
+            }
             await page.keyboard.press('Enter');
+            await new Promise((r) => setTimeout(r, 50));
         }
     }
 
