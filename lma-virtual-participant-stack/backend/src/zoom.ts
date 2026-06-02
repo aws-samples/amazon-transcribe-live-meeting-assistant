@@ -347,9 +347,15 @@ export default class Zoom {
     }
 
     // Initial post-admission confirmation that the avatar camera is on.
+    // Only ever clicks on a CONFIDENT 'off' reading — never on 'unknown'. An
+    // earlier version clicked on 'unknown' too, which (when our heuristic
+    // couldn't read the toolbar) blindly toggled the VP's own video and
+    // shuffled the Zoom layout, breaking the attendee-counter / speaker-tile
+    // DOM the monitors depend on. On cloakbrowser the camera reliably stays on
+    // after the prejoin toggle, so a confident-only check is sufficient.
     private async ensureInMeetingVideoOn(page: Page): Promise<void> {
         if (!simliAvatar.isConnected()) return;
-        const deadline = Date.now() + 20000;
+        const deadline = Date.now() + 12000;
         let clicks = 0;
         while (Date.now() < deadline) {
             const state = await this.readInMeetingVideoState(page);
@@ -357,16 +363,17 @@ export default class Zoom {
                 console.log('[zoom] In-meeting video is ON (avatar camera active).');
                 return;
             }
-            if (clicks < 3) {
+            if (state === 'off' && clicks < 2) {
                 clicks += 1;
-                console.log(`[zoom] In-meeting video not confirmed ON (state=${state}) with avatar connected — clicking Start Video (attempt ${clicks}).`);
+                console.log(`[zoom] In-meeting video is OFF with avatar connected — clicking Start Video (attempt ${clicks}).`);
                 await this.clickStartVideo(page);
                 await new Promise((r) => setTimeout(r, 2000));
                 continue;
             }
+            // 'unknown' → do NOT click (can't confirm off; a blind click would
+            // toggle video off and disrupt the meeting layout). Just wait.
             await new Promise((r) => setTimeout(r, 1000));
         }
-        console.warn('[zoom] Could not confirm in-meeting video ON after retries (non-fatal).');
     }
 
     /**
@@ -395,9 +402,15 @@ export default class Zoom {
             try {
                 const state = await this.readInMeetingVideoState(page);
                 if (state === 'off') {
+                    // Require two consecutive confident 'off' reads before
+                    // acting, so a transient toolbar re-render can't trigger a
+                    // spurious click that would disrupt the meeting layout.
                     consecutiveOff += 1;
-                    console.warn(`[camera-watchdog] in-meeting video is OFF with avatar connected (x${consecutiveOff}) — re-clicking Start Video`);
-                    await this.clickStartVideo(page);
+                    if (consecutiveOff >= 2) {
+                        console.warn('[camera-watchdog] in-meeting video OFF (x2) with avatar connected — re-clicking Start Video');
+                        await this.clickStartVideo(page);
+                        consecutiveOff = 0;
+                    }
                 } else {
                     consecutiveOff = 0;
                 }
@@ -432,23 +445,37 @@ export default class Zoom {
      * Chromium; no verify-retry loop (that loop caused an open/close war).
      */
     private async openChatPanel(page: Page): Promise<boolean> {
+        // Idempotent: if the chat input is already visible the panel is open —
+        // do NOT click (the toolbar button is a toggle; clicking would close it).
         if (await this.chatInputVisible(page)) {
-            return true; // already open
+            return true;
         }
-        // Primary-only (no AI fallback): we must not let the resolver pick the
-        // "close the chat panel" button and toggle the panel shut.
-        const openBtn = await page.$('button[aria-label="open the chat panel"]');
-        if (openBtn) {
-            console.log('Opening chat panel.');
-            await humanClick(page, openBtn);
-            // brief settle for the panel to render its input
-            const until = Date.now() + 3000;
-            while (Date.now() < until) {
-                if (await this.chatInputVisible(page)) return true;
-                await new Promise((r) => setTimeout(r, 300));
-            }
-        } else {
-            console.log('Chat "open" button not present (panel may already be open) — continuing.');
+        // Otherwise locate and click the chat toolbar button ONCE (matches the
+        // proven base behavior — findElementWithFallback finds it on the primary
+        // selector, or via AI when Zoom renames it). No retry loop: the loop is
+        // what caused the open/close toggle war when AI resolved a "close"
+        // button on an already-open panel. The pre-check above prevents that.
+        const chatButtonResult = await findElementWithFallback(
+            page,
+            ['button[aria-label="open the chat panel"]'],
+            {
+                intent: 'Zoom toolbar button that OPENS the in-meeting chat panel (label "open the chat panel"). Not the close button.',
+                platform: 'ZOOM',
+                step: 'zoom.join.chatButton',
+            },
+            { maxRetries: 10, delayMs: 500 },
+        );
+        if (!chatButtonResult) {
+            console.log('Could not locate chat panel button — continuing without chat');
+            return false;
+        }
+        console.log('Opening chat panel.');
+        await humanClick(page, chatButtonResult.element);
+        // brief settle for the panel to render its input
+        const until = Date.now() + 3000;
+        while (Date.now() < until) {
+            if (await this.chatInputVisible(page)) return true;
+            await new Promise((r) => setTimeout(r, 300));
         }
         return this.chatInputVisible(page);
     }
