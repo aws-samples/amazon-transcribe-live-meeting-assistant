@@ -62,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 
+- **`VPProfilesBucket` emptied + deleted on stack delete (when data retention is disabled)** — Added `DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]` plus a `Custom::RemoveVPProfilesBucketOnDelete` resource that wires the bucket into the existing `BucketDeleteLambda` (gated on a new `ShouldDeleteDataOnDelete` condition). Stops the per-user Chromium profile bucket from being orphaned in S3 on stack delete; data retention mode still leaves it intact.
+
+- **`make srt-clean` pre-scan cleanup** — New `scripts/srt/clean.py` + Make targets (`srt-clean`, `srt-clean-preview`, `srt-clean-checksums`) physically remove the build artifacts SRT's Bandit invocation can't be told to ignore (vendored Lambda-layer `python/` trees, `.aws-sam/`, `out/`, `node_modules/`, `dist/`, `build/`, `__pycache__/`, `.ash/`, intermediate scan JSONs). Preserves the SRT binary, scanner venv, `.srt/issues.json`, root `.venv`, `.env.local`, and `.checksum` cache. Scan time ~13 min → ~78 sec; open HIGH/CRITICAL count 190 → 0 after suppressing 7 reviewed findings whose rationale already existed for sister resources. Also expanded `.semgrepignore` to mirror `.ash.yaml`, and replaced the AWS-docs example placeholder credentials in `scripts/srt/setup.py` (used to satisfy `srt config` in CI) with non-AWS-format dummies. See [Security Scanning](docs/security-scanning.md).
+
 - **CloudFront security headers** — Added a `ResponseHeadersPolicy` to the CloudFront distribution with Content-Security-Policy (restricted `connect-src` to AWS service origins), Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options (DENY), and Referrer-Policy (strict-origin-when-cross-origin).
 
 - **Unified LOG_LEVEL propagation** — The `LogLevel` CloudFormation parameter now propagates from the main stack to all nested stacks (AI, WebSocket Transcriber, Virtual Participant), all Lambda functions (via SAM Globals), and all ECS task definitions. Replaces previously hardcoded or missing log level configuration across 27 Lambda functions and 2 ECS services.

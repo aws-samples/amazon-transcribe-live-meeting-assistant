@@ -405,6 +405,15 @@ srt-scan: ## Run SRT assessment (non-zero exit in CI on open findings)
 srt-fix: ## Open the SRT dashboard for interactive triage
 	$(PYTHON) scripts/srt/fix.py
 
+srt-clean: ## Remove vendored layer trees, .aws-sam, out/, node_modules, scan artifacts (preserves SRT binary, venv, issues.json, .checksum)
+	$(PYTHON) scripts/srt/clean.py --apply
+
+srt-clean-preview: ## Show what `make srt-clean` would remove without deleting anything
+	$(PYTHON) scripts/srt/clean.py
+
+srt-clean-checksums: ## Remove **/.checksum cache files (forces full rebuild on next make/publish)
+	@find . -name .checksum -not -path './.git/*' -print -delete | wc -l | xargs -I{} echo "Removed {} .checksum file(s)"
+
 srt-migrate-dsr: ## Migrate suppressions from .dsr/issues.json → .srt/issues.json (one-shot)
 	$(PYTHON) scripts/srt/migrate_dsr_to_srt.py $(if $(FORCE),--force,)
 

@@ -227,10 +227,19 @@ def main():
             aws_config.write_text("[default]\nregion = us-east-1\noutput = json\n")
         aws_creds = aws_dir / "credentials"
         if not aws_creds.exists():
+            # SRT's `srt config` flow refuses to install scanner prerequisites
+            # (Checkov/Semgrep/Syft/Bandit/Jupyter) unless ~/.aws/credentials
+            # exists.  CI runners (GitLab/GitHub) don't ship one, so we write a
+            # placeholder that satisfies SRT's input parsing without ever
+            # holding real credentials.  The values below are deliberately NOT
+            # in AWS access-key format (no AKIA prefix, no 40-char secret) so
+            # they can't be mistaken for real credentials by humans or by
+            # secret-detection scanners.  SRT does not validate them — the
+            # actual scanner runs use AWS_PROFILE / AWS_REGION env vars.
             aws_creds.write_text(
                 "[default]\n"
-                "aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n"
-                "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n"
+                "aws_access_key_id = SRT-CI-PLACEHOLDER-NOT-A-REAL-KEY\n"
+                "aws_secret_access_key = SRT-CI-PLACEHOLDER-NOT-A-REAL-SECRET\n"
             )
         config_file.write_text(json.dumps({
             "AWS_PROFILE": os.getenv("AWS_PROFILE", "default"),

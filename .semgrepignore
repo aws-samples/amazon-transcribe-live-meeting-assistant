@@ -1,7 +1,84 @@
-# Script only processes files that already exist in the build directory
+# .semgrepignore — paths Semgrep should not scan.
+#
+# Kept in sync with the `ignore_paths` list in `.ash.yaml` so SRT's Semgrep
+# pass and ASH's scanners agree on what counts as "LMA source" vs build
+# artifacts / vendored deps.  When you add an exclusion here, mirror it in
+# `.ash.yaml` (and vice versa).
+#
+# Bandit, Checkov, and Syft inside SRT do NOT honor `.semgrepignore`.  For
+# noisy findings from those scanners, suppress them via `.srt/issues.json`
+# during dashboard triage.
+
+# ---------------------------------------------------------------------------
+# Source-tree exception: the manifest generator runs over files that exist
+# only after the build copy, so Semgrep can't analyze it usefully in-tree.
+# ---------------------------------------------------------------------------
 lma-ai-stack/deployment/manifest-generator/app.js
 
-# Prior scan artifacts — exclude so we don't find our own findings.
+# ---------------------------------------------------------------------------
+# Prior-scan workspaces — exclude so we don't find findings inside our own
+# scan output (base64 strings inside syft-scan.json, bandit-scan.json,
+# extracted zip archives, ASH/CDK-Nag template copies, etc.).
+# ---------------------------------------------------------------------------
 .dsr/
 .srt/
 .ash/
+
+# ---------------------------------------------------------------------------
+# SAM build output — vendored third-party Python packages (phonenumbers,
+# boto3, etc.) plus the rewritten SAM templates.  Already in `.gitignore`;
+# excluded here so Semgrep doesn't churn through ~300k lines of vendored
+# code on every scan.  `.aws-sam/` can appear at the repo root or inside
+# any per-stack directory after `sam build`.
+# ---------------------------------------------------------------------------
+.aws-sam/
+**/.aws-sam/
+
+# ---------------------------------------------------------------------------
+# SAM-packaged output (`sam package` / `publish.sh` artifacts): packaged
+# YAML templates with rewritten S3 URIs plus zipped Lambda source bundles.
+# These are byte-for-byte copies of the templates already in scope at
+# `deployment/*.yaml`, so scanning them double-counts every finding.
+# ---------------------------------------------------------------------------
+**/out/
+
+# ---------------------------------------------------------------------------
+# Vendored third-party Python packages shipped as Lambda Layers (boto3,
+# strands, opensearchpy, transcript-enrichment).  These are pip-installed
+# dependencies, not LMA-authored code; upgrades are tracked separately via
+# the layer requirements.txt files which DO remain in scope.
+# ---------------------------------------------------------------------------
+**/boto3_layer/python/
+**/strands_layer/python/
+**/opensearchpy_layer/python/
+**/transcript_enrichment_layer/python/
+
+# ---------------------------------------------------------------------------
+# Lockfiles — third-party dependency versions verbatim.  Vulns are caught
+# by npm-audit + grype; duplicating findings on every line is pure noise.
+# ---------------------------------------------------------------------------
+**/package-lock.json
+
+# ---------------------------------------------------------------------------
+# Compiled / bundled TypeScript / build outputs — scan the TS source, not
+# the emitted JS.  `dist/` and `build/` are common output dirs across
+# lma-virtual-participant-stack/backend, lma-browser-extension-stack,
+# docs-site, and various Lambdas.
+# ---------------------------------------------------------------------------
+**/dist/
+**/build/
+
+# ---------------------------------------------------------------------------
+# Local Python virtual environments (root and per-subdir).  Installed deps
+# only; not project source.
+# ---------------------------------------------------------------------------
+.venv/
+**/.venv/
+
+# ---------------------------------------------------------------------------
+# NPM node_modules trees.  Each `npm install` re-creates these under
+# lma-ai-stack/source/ui, lma-virtual-participant-stack/backend,
+# lma-browser-extension-stack, docs-site, and others.  Real vulns are
+# covered by npm-audit + grype, not by Semgrep on installed code.
+# ---------------------------------------------------------------------------
+**/node_modules/
