@@ -158,23 +158,22 @@ Fargate launch type is serverless and uses SOCI (Seekable OCI) for faster contai
 
 ## EC2 Instance Types
 
-Each VP container is capped at 3500 MB (observed peak memory is ~1650 MB with Chromium + Simli + Nova Sonic; the cap leaves headroom). **CPU, not memory, is the binding constraint for voice + avatar workloads**: a meeting with the Nova Sonic voice assistant active draws ~3300 CPU units (≈1.6 vCPU) steady-state — more than a 2-vCPU burstable instance (`t3.medium`) can sustain. Pick a compute-optimized instance (`c5.xlarge`+) for voice/avatar meetings; `t3.medium` is only adequate for transcription-only VPs (no voice assistant). Also ensure host memory accommodates your expected concurrent VPs per host plus ~600 MB for the OS / ECS agent:
+Each VP container is capped at 3500 MB (observed peak memory is ~1650 MB with Chromium + Simli + Nova Sonic; the cap leaves headroom). A full voice-assistant + Simli-avatar meeting draws ~1.35 vCPU steady-state and runs reliably on the default **`t3.medium`** (the CloakBrowser stack downscales the avatar to 256×256@15fps and disables the emulated GPU, which keeps the encode cheap). Pick a larger instance mainly for **more concurrent VPs per host** rather than for a single meeting's headroom — and ensure host memory accommodates your expected concurrent VPs plus ~600 MB for the OS / ECS agent:
 
 **General Purpose:**
 - `t3.medium` (default) -- 3867 MB host → 1 concurrent VP. The capacity-provider auto-scaler launches additional hosts when concurrent demand exceeds capacity, so users running one meeting at a time pay the baseline (~$30/month per host) and only scale up while multiple VPs are active.
 - `t3.large` -- 7857 MB host → 3 concurrent VPs. Pick this if you regularly run 2-3 concurrent meetings and want fewer scale-outs.
 - `t3.xlarge` -- 15.7 GB host → 6 concurrent VPs.
 
-**Compute-Optimized (recommended for voice + avatar):**
-- `c5.large` (2 vCPU) -- **insufficient** for a voice-assistant meeting (steady-state ~1.6 vCPU saturates 2 vCPU and wedges the renderer); use only for transcription-only VPs
-- `c5.xlarge` (4 vCPU) -- **recommended** for voice assistant with avatar; 1 VP comfortably (no burstable throttling)
-- `c5.2xlarge` -- Heavy voice and avatar processing, 6 concurrent VPs
+**Compute-Optimized (non-burstable; for higher concurrency or guaranteed sustained CPU):**
+- `c5.large` (2 vCPU) -- a dedicated-CPU alternative to `t3.medium` for a single voice + avatar VP (no burstable credit limits)
+- `c5.xlarge` (4 vCPU) -- multiple concurrent voice + avatar VPs per host
+- `c5.2xlarge` -- heavier concurrency
 
-**Memory-Optimized (recommended for voice + avatar with large meeting context):**
-- `m5.large` -- Voice assistant workloads with higher memory needs, 1 concurrent VP
-- `m5.xlarge` -- Recommended for voice assistant with avatar and large meeting context, 3-4 concurrent VPs
+**Memory-Optimized (for large meeting context):**
+- `m5.large` / `m5.xlarge` -- when meeting context / model memory needs are higher
 
-`t3` instances are burstable and may cause audio glitches under sustained load — prefer `c5.*` or `m5.*` for the voice-assistant + avatar combination.
+`t3` instances are burstable: a single voice + avatar VP fits the `t3.medium` baseline, but if you run **multiple concurrent** VPs per host (or very long meetings), prefer `c5.*` / `m5.*` for guaranteed sustained CPU.
 
 ## Auto-Scaling
 

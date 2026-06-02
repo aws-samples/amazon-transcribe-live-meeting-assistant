@@ -235,7 +235,7 @@ This guide details the security controls implemented in the Live Meeting Assista
 |---------|---------------|
 | **Private subnet** | VP tasks in private subnets (NAT egress) |
 | **Ephemeral containers** | Fresh container per meeting (no persistence) |
-| **Chrome sandbox** | Browser sandbox enabled (not --no-sandbox) |
+| **Container/network isolation** | Browser runs with `--no-sandbox`; containment relies on container isolation + least-privilege IAM + restricted NAT egress, not the Chromium sandbox |
 | **IAM least-privilege** | Minimal task role (write WebSocket, read config) |
 | **Health monitoring** | ECS health checks with task restart |
 | **Resource limits** | CPU/memory sizing per Fargate task |
@@ -355,7 +355,7 @@ This guide details the security controls implemented in the Live Meeting Assista
 - [ ] Review MCP tool invocation logs for anomalies
 - [ ] Audit VP launch events and recording sessions
 - [ ] Rotate third-party API keys (ElevenLabs, Simli, Tavily)
-- [ ] Update Chrome/Puppeteer container images
+- [ ] Update CloakBrowser/Chromium container images
 - [ ] Review and update Bedrock Guardrails policies
 - [ ] Monitor agent tool invocation patterns
 - [ ] Verify data retention compliance (TTL, lifecycle)

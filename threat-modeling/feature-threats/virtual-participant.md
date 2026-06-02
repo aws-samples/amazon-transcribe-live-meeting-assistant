@@ -11,7 +11,7 @@
 
 ## 1. Feature Overview
 
-The Virtual Participant enables LMA to join meetings autonomously by running a headless Chrome browser (Puppeteer) in an ECS Fargate container. It supports:
+The Virtual Participant enables LMA to join meetings autonomously by running a headless Chromium browser (CloakBrowser, driven by Playwright) in an ECS container. It supports:
 - **Platform support**: Zoom, Microsoft Teams, Amazon Chime, Google Meet, WebEx
 - **Meeting join**: Navigates to meeting URLs and joins as a participant
 - **Audio capture**: Captures two-channel audio from the browser
@@ -30,7 +30,7 @@ flowchart TD
     end
 
     subgraph Fargate[ECS Fargate - Private Subnet]
-        Chrome[Headless Chrome - Puppeteer]
+        Chrome[Headless Chromium - Playwright/CloakBrowser]
         AudioCapture[Audio Capture Module]
         VoiceOut[Voice Output Module]
         AvatarMod[Avatar Module]
@@ -73,7 +73,7 @@ flowchart TD
 | **Threat ID** | VP.T01 |
 | **Category** | STRIDE: Information Disclosure |
 | **Description** | The Virtual Participant requires credentials or meeting URLs (potentially with embedded passwords) to join meetings. These credentials could be exposed through ECS task definitions, environment variables, CloudWatch logs, or memory dumps. |
-| **Attack Vector** | Meeting URLs with embedded passwords stored in ECS task parameters, logged to CloudWatch during Puppeteer navigation, or accessible via ECS DescribeTask API calls by over-privileged IAM roles |
+| **Attack Vector** | Meeting URLs with embedded passwords stored in ECS task parameters, logged to CloudWatch during browser navigation, or accessible via ECS DescribeTask API calls by over-privileged IAM roles |
 | **Impact** | Unauthorized access to meetings, replay attacks to join future recurring meetings, exposure of meeting passwords |
 | **Likelihood** | Medium (2) |
 | **Severity** | High (3) |
@@ -89,16 +89,16 @@ flowchart TD
 |-----------|-------|
 | **Threat ID** | VP.T02 |
 | **Category** | STRIDE: Elevation of Privilege |
-| **Description** | Headless Chrome/Puppeteer running in the Fargate container processes untrusted web content from meeting platforms. A vulnerability in Chrome could allow sandbox escape, providing access to the container's network, IAM credentials, or other ECS resources. |
-| **Attack Vector** | Meeting platform serves malicious JavaScript or WebRTC content that exploits a Chrome vulnerability, escaping the browser sandbox and gaining code execution in the Fargate container with access to its IAM role |
+| **Description** | Headless Chromium (CloakBrowser, driven by Playwright) running in the container processes untrusted web content from meeting platforms. A vulnerability in Chromium could allow sandbox escape, providing access to the container's network, IAM credentials, or other ECS resources. |
+| **Attack Vector** | Meeting platform serves malicious JavaScript or WebRTC content that exploits a Chromium vulnerability, escaping the browser sandbox and gaining code execution in the container with access to its IAM role |
 | **Impact** | Container-level compromise, access to IAM task role credentials, lateral movement to internal services, data exfiltration |
 | **Likelihood** | Low (1) |
 | **Severity** | Critical (4) |
 | **Risk Score** | **4 (Medium)** |
-| **Affected Components** | Headless Chrome, Fargate container, IAM task role, VPC network |
-| **Existing Mitigations** | Fargate isolation (no shared host), private subnet (limited egress via NAT), IAM task role least-privilege, container image regularly updated, Chrome `--no-sandbox` flag NOT used (sandbox enabled) |
-| **Status** | Mitigated |
-| **Recommendations** | Implement regular Chrome/Puppeteer image updates, use minimal IAM task role, add VPC security group egress restrictions, enable GuardDuty for ECS, implement container health monitoring |
+| **Affected Components** | Headless Chromium, container, IAM task role, VPC network |
+| **Existing Mitigations** | Container/instance isolation, private subnet (limited egress via NAT), IAM task role least-privilege, container image regularly updated. NOTE: Chromium runs with `--no-sandbox` (required to run it as a non-root user in the container), so the browser's own sandbox is NOT a defense layer here — container and network isolation are the primary controls. |
+| **Status** | Partially mitigated |
+| **Recommendations** | Compensate for the disabled Chromium sandbox with strong container isolation: minimal IAM task role, tight VPC security-group egress restrictions, GuardDuty for ECS, regular CloakBrowser/Chromium image updates, and container health monitoring. |
 
 ### VP.T03: Meeting Platform API Abuse
 
@@ -178,6 +178,6 @@ flowchart TD
 | **KMS log encryption** | CloudWatch Logs encrypted with customer key | VP.T01 |
 | **Admin-only launch** | Only admin group can start VP sessions | VP.T04, VP.T05 |
 | **Bot identification** | VP identified as bot in meeting participant list | VP.T04, VP.T05 |
-| **Chrome sandbox** | Browser sandbox enabled (not --no-sandbox) | VP.T02 |
+| **Container/network isolation** | VP browser runs with `--no-sandbox`, so container isolation + least-privilege IAM + restricted NAT egress are the primary controls for browser-exploit containment | VP.T02 |
 | **Audit logging** | All VP launch/stop events logged | VP.T04, VP.T05 |
 | **Health checks** | ECS health monitoring with task restart | VP.T06 |
