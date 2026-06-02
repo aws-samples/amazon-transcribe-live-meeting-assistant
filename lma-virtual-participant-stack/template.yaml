@@ -1589,7 +1589,7 @@ Resources:
             - Name: DOM_SELECTOR_CACHE_TABLE_NAME
               Value: !Ref DomSelectorCacheTableName
             - Name: BEDROCK_DOM_RESOLVER_MODEL_ID
-              Value: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+              Value: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
             - Name: VP_PROFILES_BUCKET
               Value: !Ref VPProfilesBucketName
             # Overridden at task launch by Step Functions when the user opts in.

@@ -113,7 +113,7 @@ interface InteractiveElement {
 
 const DEFAULT_MODEL_ID =
   process.env.BEDROCK_DOM_RESOLVER_MODEL_ID ||
-  'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+  'global.anthropic.claude-haiku-4-5-20251001-v1:0';
 const RESOLVER_DISABLED = !DEFAULT_MODEL_ID;
 const TABLE_NAME = process.env.DOM_SELECTOR_CACHE_TABLE_NAME || '';
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
