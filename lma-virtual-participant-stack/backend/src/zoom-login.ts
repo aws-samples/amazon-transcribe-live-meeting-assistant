@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page } from 'puppeteer-core';
+import { Page, ElementHandle } from 'playwright-core';
 import {
     SecretsManagerClient,
     GetSecretValueCommand,
@@ -22,10 +22,49 @@ export interface ZoomCredentials {
 
 export type LoginOutcome = 'success' | 'manual-required' | 'invalid-credentials';
 
+// Why a manual-required outcome happened, so the caller can show a clean,
+// user-facing message instead of leaking internal selector/loop detail.
+export type ManualReason = 'captcha' | 'otp-2fa' | 'sso' | 'blocked' | 'generic';
+
 export interface LoginResult {
     outcome: LoginOutcome;
     detail?: string;
+    /** Categorised reason for outcome==='manual-required'. */
+    manualReason?: ManualReason;
 }
+
+/**
+ * Detect a Zoom sign-in CAPTCHA challenge. Zoom uses Google reCAPTCHA
+ * Enterprise, which loads as a `google.com/recaptcha/...` iframe and exposes
+ * `grecaptcha` on the window. Either signal (a visible recaptcha iframe, or
+ * the global) means a human has to solve it — we can't. Checked best-effort
+ * across the main frame and child frames.
+ */
+const detectCaptcha = async (page: Page): Promise<boolean> => {
+    try {
+        // Any frame whose URL is a recaptcha/hcaptcha challenge.
+        for (const frame of page.frames()) {
+            const u = frame.url() || '';
+            if (/recaptcha\/(api2|enterprise)\/(bframe|anchor)/.test(u) || /hcaptcha\.com/.test(u)) {
+                // anchor iframe alone is the (often invisible) checkbox; the
+                // bframe is the actual challenge popup. Treat either as
+                // "captcha present" since Zoom gates Sign-In on it.
+                return true;
+            }
+        }
+        // Fallback: grecaptcha global or a visible recaptcha widget in the DOM.
+        return await page.evaluate(() => {
+            // @ts-ignore
+            if ((window as any).grecaptcha) return true;
+            const el = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"], iframe[title*="recaptcha" i]');
+            if (!el) return false;
+            const r = (el as HTMLElement).getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+        });
+    } catch {
+        return false;
+    }
+};
 
 let secretsClient: SecretsManagerClient | null = null;
 const getSecrets = (): SecretsManagerClient => {
@@ -54,12 +93,171 @@ export async function fetchZoomCredentials(secretName: string): Promise<ZoomCred
 const sleepJitter = (base: number, jitter: number): Promise<void> =>
     new Promise((r) => setTimeout(r, base + Math.random() * jitter));
 
+// Race a browser-call promise against a wall-clock timeout. evaluate /
+// type / click can hang for 30+ seconds when the page's execution context
+// is destroyed mid-call (Zoom SPA re-mount); this turns the hang into a
+// fast rejection so the surrounding retry/iteration loop can fire.
+const withTimeout = async <T>(
+    promise: Promise<T>,
+    ms: number,
+    label: string,
+): Promise<T> => {
+    let to: NodeJS.Timeout | undefined;
+    try {
+        return await Promise.race<T>([
+            promise,
+            new Promise<T>((_, reject) => {
+                to = setTimeout(
+                    () => reject(new Error(`[zoom-login] ${label} timed out after ${ms}ms`)),
+                    ms,
+                );
+            }),
+        ]);
+    } finally {
+        if (to) clearTimeout(to);
+    }
+};
+
 const typeWithDelay = async (
-    elem: any,
+    page: Page,
+    elem: ElementHandle<Element>,
     text: string,
 ): Promise<void> => {
-    // 50–120ms per character with jitter to look human
-    await elem.type(text, { delay: 50 + Math.floor(Math.random() * 70) });
+    // Focus in the DOM then type via page.keyboard (mirrors humanType in
+    // zoom.ts): avoids Playwright's actionability check, which fails when
+    // Zoom floats a transient overlay over the form. Budget scales with
+    // text length so withTimeout doesn't abort legitimately-slow typing.
+    const perChar = 50 + Math.floor(Math.random() * 70);
+    // Budget is decoupled from the rolled perChar and based on the MAX
+    // per-char (120ms) plus generous slack — under CPU contention
+    // page.keyboard.type's per-keystroke overhead far exceeds the nominal
+    // delay (observed 23 chars taking >5.5s). A too-tight budget previously
+    // threw and the caller failed the whole sign-in. Now: budget = 120ms ×
+    // len × 4 + 8s floor, and a timeout does NOT throw — typeAndVerify's
+    // readback catches a short/empty value and retries, which is the correct
+    // recovery path. Swallowing here keeps a slow type from aborting the join.
+    const budget = Math.max(8000, 120 * Math.max(text.length, 1) * 4 + 4000);
+    await withTimeout(
+        (async () => {
+            await elem.evaluate((el) => (el as HTMLElement).focus());
+            await page.keyboard.type(text, { delay: perChar });
+        })(),
+        budget,
+        `type(${text.length} chars)`,
+    ).catch((err) => {
+        console.warn(`[zoom-login] typeWithDelay slow/failed (verify will retry): ${err?.message || err}`);
+    });
+};
+
+// Type into a field, then read back .value to confirm it landed. Zoom's
+// SPA re-mounts the form mid-flow, so typing into a pre-hydration input
+// silently drops the text and submits empty. On mismatch, relocate() the
+// (re-mounted) element and retry once.
+const typeAndVerify = async (
+    page: Page,
+    initialHandle: ElementHandle<Element>,
+    text: string,
+    relocate: () => Promise<ElementHandle<Element> | null>,
+    label: string,
+): Promise<{ ok: boolean; handle: ElementHandle<Element> }> => {
+    const readValue = async (h: ElementHandle<Element>): Promise<string> => {
+        try {
+            return await withTimeout(
+                h.evaluate((el: Element) => (el as HTMLInputElement).value || ''),
+                3000,
+                `${label} readValue`,
+            );
+        } catch {
+            // Either the evaluate threw (destroyed context) or it timed
+            // out. Either way the caller treats this as "verify failed"
+            // and re-locates + retries.
+            return '';
+        }
+    };
+    const clearAndType = async (h: ElementHandle<Element>): Promise<void> => {
+        try {
+            await withTimeout(
+                h.evaluate((el: Element) => {
+                    const i = el as HTMLInputElement;
+                    i.focus();
+                    i.value = '';
+                }),
+                3000,
+                `${label} clear`,
+            );
+        } catch {
+            // best effort — if we can't clear, type() will append; the
+            // verify step below catches the resulting mismatch.
+        }
+        await typeWithDelay(page, h, text);
+    };
+
+    let handle = initialHandle;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        await clearAndType(handle);
+        await sleepJitter(150, 200);
+        const got = await readValue(handle);
+        if (got === text) {
+            return { ok: true, handle };
+        }
+        console.warn(
+            `[zoom-login] ${label} value mismatch after attempt ${attempt} ` +
+                `(expected "${text.length}" chars, got "${got.length}" chars) — ` +
+                `${attempt < 2 ? 're-locating and retrying' : 'giving up retry'}`,
+        );
+        if (attempt < 2) {
+            const fresh = await relocate();
+            if (!fresh) {
+                console.warn(`[zoom-login] ${label} could not be re-located for retry`);
+                return { ok: false, handle };
+            }
+            handle = fresh;
+        }
+    }
+    return { ok: false, handle };
+};
+
+// Poll for the visible sign-in email input, returning the instant it
+// appears (so a fast box pays no latency) or false at timeoutMs. The 30s
+// default tolerates a CPU-starved cold start — Simli + Nova + Chrome +
+// warmup contend on a 2-vCPU t3.medium, and Zoom's SPA can take 20-30s to
+// hydrate. We poll the input directly rather than the URL, which can sit
+// at /signin the whole time while the bundle parses.
+const waitForSignInFormReady = async (
+    page: Page,
+    opts: { timeoutMs?: number } = {},
+): Promise<boolean> => {
+    const timeoutMs = opts.timeoutMs ?? 30_000;
+    const deadline = Date.now() + timeoutMs;
+    let polls = 0;
+    while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 250));
+        const hasInput = await withTimeout(
+            page.evaluate(() => {
+                const sels = ['#email', 'input[type="email"]', 'input[name="email"]'];
+                for (const s of sels) {
+                    const el = document.querySelector(s) as HTMLElement | null;
+                    if (!el) continue;
+                    const r = el.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) return true;
+                }
+                return false;
+            }),
+            2500,
+            'waitForSignInFormReady probe',
+        ).catch(() => false);
+        polls += 1;
+        if (hasInput) {
+            console.log(
+                `[zoom-login] sign-in email field ready after ${Date.now() - (deadline - timeoutMs)}ms (${polls} polls)`,
+            );
+            return true;
+        }
+    }
+    console.warn(
+        `[zoom-login] waitForSignInFormReady timed out after ${timeoutMs}ms at ${page.url()} (${polls} polls); proceeding anyway`,
+    );
+    return false;
 };
 
 /**
@@ -72,7 +270,7 @@ const typeWithDelay = async (
  */
 const hasZoomAuthCookie = async (page: Page): Promise<boolean> => {
     // Zoom marks its session cookies as HttpOnly, so they're invisible to
-    // `document.cookie` from JavaScript. Use Puppeteer's `page.cookies()`
+    // `document.cookie` from JavaScript. Use the context's cookies() API
     // (CDP / Network.getCookies) which returns HttpOnly cookies.
     //
     // Only check cookies that are SET ONLY when authenticated. Verified
@@ -83,7 +281,7 @@ const hasZoomAuthCookie = async (page: Page): Promise<boolean> => {
     //   - `zm_aid` (account id) and `zm_haid` (host account id) are
     //     ONLY set after authentication completes
     try {
-        const cookies = await page.cookies('https://zoom.us', 'https://app.zoom.us');
+        const cookies = await page.context().cookies(['https://zoom.us', 'https://app.zoom.us']);
         const wanted = new Set(['zm_aid', 'zm_haid']);
         return cookies.some((c) => wanted.has(c.name) && !!c.value);
     } catch {
@@ -124,21 +322,54 @@ export async function loginToZoom(
     }
     console.log(`[zoom-login] At ${postLoadUrl} — proceeding with email/password flow`);
 
+    console.log('[zoom-login] step=waitForSignInFormReady BEGIN');
+    const formReady = await waitForSignInFormReady(page);
+    console.log(`[zoom-login] step=waitForSignInFormReady END (ready=${formReady}) at ${page.url()}`);
+
     // Step 1: email
+    const emailPrimaries = ['#email', 'input[type="email"]', 'input[name="email"]'];
+    const emailIntent = {
+        intent: 'Zoom sign-in page email/username input field',
+        platform: 'ZOOM' as const,
+        step: 'zoom.login.email',
+    };
+    // When the field is already confirmed present, a short primary lookup
+    // hits immediately; skip the AI fallback (3 Bedrock round-trips, ~40s
+    // on a slow box). Only give the longer budget + AI when unconfirmed.
+    console.log('[zoom-login] step=findEmail BEGIN');
     const emailRes = await findElementWithFallback(
         page,
-        ['#email', 'input[type="email"]', 'input[name="email"]'],
-        {
-            intent: 'Zoom sign-in page email/username input field',
-            platform: 'ZOOM',
-            step: 'zoom.login.email',
-        },
-        { maxRetries: 6, delayMs: 500 },
+        emailPrimaries,
+        emailIntent,
+        formReady ? { maxRetries: 4, delayMs: 400 } : { maxRetries: 8, delayMs: 750 },
     );
+    console.log(`[zoom-login] step=findEmail END (found=${!!emailRes}, source=${emailRes?.source ?? 'none'})`);
     if (!emailRes) {
         return { outcome: 'manual-required', detail: 'Could not locate Zoom sign-in email field' };
     }
-    await typeWithDelay(emailRes.element, creds.username);
+    console.log('[zoom-login] step=typeEmail BEGIN');
+    const emailVerify = await typeAndVerify(
+        page,
+        emailRes.element,
+        creds.username,
+        async () => {
+            const r = await findElementWithFallback(
+                page,
+                emailPrimaries,
+                emailIntent,
+                { maxRetries: 3, delayMs: 400 },
+            );
+            return r?.element ?? null;
+        },
+        'email',
+    );
+    console.log(`[zoom-login] step=typeEmail END (ok=${emailVerify.ok})`);
+    if (!emailVerify.ok) {
+        return {
+            outcome: 'manual-required',
+            detail: 'Could not reliably type email into Zoom sign-in field (form may be re-mounting).',
+        };
+    }
     await sleepJitter(150, 250);
 
     // After email is submitted, hand control to the AI navigator. It
@@ -159,6 +390,7 @@ export async function loginToZoom(
 
     // First click "Next" to advance from email step. AI handles everything
     // afterwards including potentially filling password.
+    console.log('[zoom-login] step=findNext BEGIN');
     const nextRes = await findElementWithFallback(
         page,
         [
@@ -174,8 +406,13 @@ export async function loginToZoom(
         },
         { maxRetries: 6, delayMs: 500 },
     );
+    console.log(`[zoom-login] step=findNext END (found=${!!nextRes}, source=${nextRes?.source ?? 'none'})`);
     if (nextRes) {
-        await nextRes.element.click();
+        console.log('[zoom-login] step=clickNext BEGIN');
+        await withTimeout(nextRes.element.click(), 5000, 'Next button click').catch((err) => {
+            console.warn(`[zoom-login] Next button click failed/timed out: ${err?.message || err}`);
+        });
+        console.log('[zoom-login] step=clickNext END');
         await sleepJitter(800, 800);
     }
     // If there was no Next button, the page might already be showing the
@@ -267,6 +504,21 @@ async function aiDrivenLoginLoop(
             continue;
         }
 
+        // Fast path 3: CAPTCHA challenge gating the form. Once we've tried to
+        // submit the password, a reCAPTCHA challenge means a human must solve
+        // it — escalate immediately with a clean reason rather than letting
+        // the AI loop burn iterations clicking a Sign-In button the CAPTCHA
+        // is blocking (which is what produced the cryptic "action continue on
+        // #js_btn_login did not advance" message).
+        if (didFillPassword && (await detectCaptcha(page))) {
+            console.warn('[zoom-login] CAPTCHA challenge detected after password — escalating to manual.');
+            return {
+                outcome: 'manual-required',
+                manualReason: 'captcha',
+                detail: 'Zoom is asking for a CAPTCHA / human verification.',
+            };
+        }
+
         // Main path: ask Claude what to do.
         let action: any = null;
         try {
@@ -325,13 +577,24 @@ async function aiDrivenLoginLoop(
             pageFingerprint &&
             pageFingerprint === lastPageFingerprint
         ) {
+            // The page isn't advancing. The usual cause is a CAPTCHA gating
+            // the Sign-In button — detect it and return a clean, user-facing
+            // reason instead of leaking the internal selector/loop detail.
+            const captcha = await detectCaptcha(page);
             console.warn(
-                `[zoom-login] Stuck loop detected (action "${actionSignature}" repeated without page change) — escalating`,
+                `[zoom-login] Stuck loop detected (action "${actionSignature}" repeated without page change; captcha=${captcha}) — escalating`,
             );
-            return {
-                outcome: 'manual-required',
-                detail: `Sign-in is stuck: action "${action.kind}" on selector "${action.selector || '(none)'}" did not advance the page.`,
-            };
+            return captcha
+                ? {
+                      outcome: 'manual-required',
+                      manualReason: 'captcha',
+                      detail: 'Zoom is asking for a CAPTCHA / human verification.',
+                  }
+                : {
+                      outcome: 'manual-required',
+                      manualReason: 'generic',
+                      detail: 'The sign-in page stopped responding to automated steps.',
+                  };
         }
         lastActionSignature = actionSignature;
         lastPageFingerprint = pageFingerprint;
@@ -380,13 +643,26 @@ async function aiDrivenLoginLoop(
             return { outcome: 'manual-required', detail: 'human did not complete sign-in within timeout' };
         }
         if (action.kind === 'fill_password' && !didFillPassword && action.selector) {
-            const handle = await page.$(action.selector);
+            const passwordSelector = action.selector;
+            const handle = await page.$(passwordSelector);
             if (handle) {
                 try {
                     await handle.evaluate((el: Element) => {
                         (el as HTMLElement).scrollIntoView({ block: 'center' });
                     });
-                    await typeWithDelay(handle as any, creds.password);
+                    const pwVerify = await typeAndVerify(
+                        page,
+                        handle as ElementHandle<Element>,
+                        creds.password,
+                        async () => page.$(passwordSelector),
+                        'password',
+                    );
+                    if (!pwVerify.ok) {
+                        return {
+                            outcome: 'manual-required',
+                            detail: 'Could not reliably type password into Zoom sign-in field (form may be re-mounting).',
+                        };
+                    }
                     didFillPassword = true;
                     await sleepJitter(150, 250);
                     // Submit the form. Prefer the AI's submitSelector; fall
@@ -410,7 +686,7 @@ async function aiDrivenLoginLoop(
                         }
                     }
                     if (!submitted) {
-                        await (handle as any).press('Enter').catch(() => null);
+                        await (pwVerify.handle as any).press('Enter').catch(() => null);
                     }
                     await page
                         .waitForNavigation({ timeout: 15_000, waitUntil: 'domcontentloaded' })

@@ -59,7 +59,7 @@ Use the search bar to filter meetings by topic or other attributes.
 
 ## Manual Action Alerts
 
-A **persistent Flashbar** at the top of the LMA UI surfaces any of your Virtual Participants currently in the `MANUAL_ACTION_REQUIRED` state — a CAPTCHA, 2FA prompt, SSO redirect, unknown consent dialog, or Zoom bot-detection challenge that needs human input. Each alert links directly to the affected meeting detail page where you can open the live VNC viewer and complete the challenge.
+A **persistent Flashbar** at the top of the LMA UI surfaces any of your Virtual Participants currently in the `MANUAL_ACTION_REQUIRED` state — a CAPTCHA, 2FA prompt, SSO redirect, unknown consent dialog, or other Zoom verification step that needs human input. Each alert links directly to the affected meeting detail page where you can open the live VNC viewer and complete the challenge.
 
 - Alerts arrive in real time via an AppSync GraphQL subscription, with a one-time backfill on page load so anything fired while the tab was closed still shows up.
 - Each alert is **dismissible** — dismissed alerts are remembered in `localStorage` (per VP id) so they don't reappear on every refresh after you've dealt with them.
@@ -82,7 +82,7 @@ The **Create Virtual Participant** button opens a modal where you enter meeting 
 - ✅ **Signed in as user@example.com — [Update] [Remove]** — your stored Zoom credentials are present. Tick **"Sign in with my stored Zoom account when joining this meeting"** to use them; the VP signs in to Zoom before navigating to the meeting URL.
 - ⚠ **Not configured. The VP will join as a guest. [Add Zoom credentials]** — no credentials stored. Click to open a sub-modal with username + password fields. Credentials are stored in AWS Secrets Manager scoped to your Cognito sub; the plaintext password is never returned to the UI.
 
-For the full sign-in flow, bot-detection notes, and operational caveats, see [Zoom Sign-in & Bot-Detection Hardening](zoom-credentials-and-bot-detection.md).
+For the full sign-in flow, join-reliability notes, and operational caveats, see [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md).
 
 ### Virtual Participant detail page
 

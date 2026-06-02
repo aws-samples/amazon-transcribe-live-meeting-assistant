@@ -19,7 +19,7 @@ title: "Troubleshooting"
   - [VP Stuck at MANUAL_ACTION_REQUIRED](#vp-stuck-at-manual_action_required)
   - [VP Stuck in INITIALIZING](#vp-stuck-in-initializing)
   - [VP Stuck in WAITING_FOR_CAPACITY](#vp-stuck-in-waiting_for_capacity)
-  - [Zoom Bot-Detection Block](#zoom-bot-detection-block)
+  - [Zoom Join Blocked](#zoom-join-blocked)
   - [Voice Assistant Connection Issues](#voice-assistant-connection-issues)
   - [MCP Server Installation Fails](#mcp-server-installation-fails)
 - [Cost Assessment](#cost-assessment)
@@ -91,7 +91,7 @@ The Virtual Participant ECS task may have crashed. This issue was addressed in v
 
 ### VP Stuck at MANUAL_ACTION_REQUIRED
 
-This status means the VP hit a CAPTCHA, 2FA prompt, SSO redirect, an unknown consent dialog, or Zoom's bot-detection challenge that needs human input. To resolve:
+This status means the VP hit a CAPTCHA, 2FA prompt, SSO redirect, an unknown consent dialog, or another Zoom verification step that needs human input. To resolve:
 
 1. Open the meeting detail page for the affected VP (the Flashbar alert at the top of the LMA UI links directly to it).
 2. Open the **Live Virtual Participant View** panel and toggle **View Only** off so the noVNC viewer accepts your input.
@@ -116,17 +116,17 @@ This means the cluster is full and the capacity-provider auto-scaler is launchin
 2. Check ASG **Activity history** for launch failures (e.g. *"Insufficient capacity in availability zone"*). Switch to a different instance type via `VPInstanceType` if the current one is unavailable in your region.
 3. Check the EC2 console for new instances in `pending` state — userdata bootstrap (yum security update, ECR docker pull) takes ~30 seconds, then the ECS agent registers.
 
-### Zoom Bot-Detection Block
+### Zoom Join Blocked
 
-Symptom: the VP fails with the Zoom dialog *"We detected you may be a bot. Automated bots aren't allowed to join this meeting or webinar..."*.
+Symptom: the VP fails to join with the Zoom dialog *"We detected you may be a bot. Automated bots aren't allowed to join this meeting or webinar..."*.
 
 Resolutions, in order of effectiveness:
 
-1. **Add Zoom credentials to LMA** (per-user, opt-in) — open the Create Virtual Participant modal and use the **Zoom account** card. A signed-in session bypasses most bot detection. See [Zoom Sign-in & Bot-Detection Hardening](zoom-credentials-and-bot-detection.md).
-2. **Sign in to Zoom on your laptop with the same account at least once** before relying on LMA. Brand-new accounts whose only activity is joining from AWS IP ranges can still trip detection.
+1. **Add Zoom credentials to LMA** (per-user, opt-in) — open the Create Virtual Participant modal and use the **Zoom account** card. A signed-in session joins far more reliably. See [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md).
+2. **Sign in to Zoom on your laptop with the same account at least once** before relying on LMA. A brand-new account whose only activity is joining from AWS IP ranges is more likely to hit this block.
 3. **Remove and re-save the credentials** if you previously saved them and now hit blocks — this also wipes the user's persisted Chromium profile in S3, clearing any stale cookies.
 
-The residual risk is AWS egress IP reputation, which cannot be fully mitigated from inside the container. If many users in your org see blocks even when signed in, route VP egress through a NAT or residential-proxy provider.
+The residual factor is AWS egress IP reputation, which cannot be fully controlled from inside the container. If many users in your org see joins blocked even when signed in, route VP egress through a NAT or residential-proxy provider.
 
 ### Voice Assistant Connection Issues
 

@@ -431,6 +431,21 @@ export class VirtualParticipantStatusManager {
     return this.updateStatus('JOINING');
   }
 
+  /**
+   * Refresh the JOINING status with a human-readable sub-step so the long
+   * join span (sign-in → navigate → prejoin → admission → chat) doesn't
+   * look frozen in the UI. Keeps status=JOINING (UI-safe; the detail line
+   * renders this via the errorMessage channel) but bumps updatedAt and the
+   * shown message. Best-effort — never throws or blocks the join.
+   */
+  async setJoiningSubstep(message: string): Promise<void> {
+    try {
+      await this.updateStatus('JOINING', message);
+    } catch {
+      /* progress sub-message is best-effort */
+    }
+  }
+
   async setJoined(): Promise<boolean> {
     const result = this.updateStatus('JOINED');
     if (!result) {

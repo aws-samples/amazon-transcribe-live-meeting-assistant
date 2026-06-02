@@ -127,7 +127,7 @@ flowchart TD
 | **Live Transcription** | Real-time speech-to-text with speaker labels | Transcribe, Kinesis, AppSync subscriptions |
 | **Live Translation** | 75+ language translation of transcripts | Amazon Translate |
 | **AI Meeting Assistant** | On-demand/automatic summaries, Q&A, action items | Strands Agents, Bedrock |
-| **Virtual Participant** | Headless Chrome bot joins Zoom/Teams/Chime/Meet/WebEx | ECS Fargate, Puppeteer |
+| **Virtual Participant** | Headless Chromium joins Zoom/Teams/Chime/Meet/WebEx | ECS, Playwright/CloakBrowser |
 | **Voice Assistant** | Natural voice interaction during meetings | Nova Sonic, ElevenLabs TTS |
 | **Animated Avatar** | Visual avatar for voice assistant | Simli API |
 | **Meeting Search** | Semantic search across all meeting transcripts | Bedrock KB, S3 Vectors |
@@ -275,7 +275,7 @@ flowchart TD
 
 - **Deployment method**: AWS CloudFormation (11 nested stacks via `lma-main.yaml`)
 - **Runtime**: Python 3.12+ (Lambda), Node.js (Fargate WebSocket), React (UI)
-- **Container images**: ECS Fargate (WebSocket server, Virtual Participant with Puppeteer)
+- **Container images**: ECS (WebSocket server, Virtual Participant with Playwright/CloakBrowser)
 - **Regions**: Commercial AWS regions with Transcribe Streaming, Bedrock, and ECS support
 - **Multi-tenancy**: Single-tenant per deployment (one stack = one environment)
 - **Authentication**: Cognito User Pool with optional MFA, self-registration with email domain restrictions, admin group

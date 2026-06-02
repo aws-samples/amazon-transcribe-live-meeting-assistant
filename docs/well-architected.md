@@ -117,7 +117,7 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
 - Implement adaptive Kinesis shard scaling based on active meeting count and event throughput.
 - Consider caching frequently used LLM prompt templates in Lambda warm starts rather than reading from DynamoDB per invocation.
 - Evaluate Graviton-based Fargate tasks for the WebSocket server for improved price-performance.
-- Optimize Virtual Participant Puppeteer containers for faster cold-start times when joining meetings.
+- Optimize Virtual Participant Chromium containers for faster cold-start times when joining meetings.
 
 ## 5. Cost Optimization
 
@@ -170,9 +170,9 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
 - **Strengths**: Serverless scaling per meeting; Strands SDK provides structured agent orchestration with tool use; Bedrock Guardrails prevent harmful outputs.
 - **Considerations**: Monitor Lambda duration and memory for cost optimization; implement timeout handling for long-running agent tool chains.
 
-### Virtual Participant (ECS Fargate + Puppeteer)
+### Virtual Participant (ECS Fargate + Playwright)
 
-- **Strengths**: Headless Chrome provides cross-platform meeting support (Zoom, Teams, Chime, Meet, WebEx); Step Functions scheduler manages lifecycle.
+- **Strengths**: Headless Chromium provides cross-platform meeting support (Zoom, Teams, Chime, Meet, WebEx); Step Functions scheduler manages lifecycle.
 - **Considerations**: Monitor warm pool costs; implement auto-shutdown for idle VP instances; consider Graviton-based tasks for cost reduction.
 
 ### MCP Server Integration (API Gateway)

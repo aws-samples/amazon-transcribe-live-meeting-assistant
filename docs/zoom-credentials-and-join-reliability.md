@@ -1,21 +1,21 @@
 ---
-title: Zoom Sign-in & Bot-Detection Hardening
+title: Zoom Sign-in & Join Reliability
 sidebar_label: Zoom Sign-in
 ---
 
-# Zoom Sign-in & Bot-Detection Hardening
+# Zoom Sign-in & Join Reliability
 
-LMA's Virtual Participant (VP) joins Zoom meetings via headless Chromium. Zoom's bot-detection sometimes blocks guest joins with the dialog *"We detected you may be a bot. Automated bots aren't allowed to join this meeting or webinar..."*. This page describes the features LMA ships to mitigate that, and how to use them.
+LMA's Virtual Participant (VP) joins Zoom meetings via headless Chromium. A guest join from a fresh, automation-driven browser is the least reliable path — Zoom may require an account, or present a verification step the VP can't complete on its own. This page describes the features LMA ships to make Zoom joins reliable, and how to use them.
 
 ## Browser stack
 
-- **`rebrowser-puppeteer`** (replaces `puppeteer-extra-plugin-stealth`) patches CDP at the runtime-binding layer so pages can't detect the `Runtime.Evaluate` / `chrome.runtime.connect` shims that the Stealth plugin had to add on top of vanilla Puppeteer. Strictly fewer fingerprint signals than the previous Stealth-plugin posture.
-- **Chromium on Alpine** (apk-installed) is the base browser, not Chrome Stable. Combined with the persistent S3 profile (which carries the trusted-device cookies), the marginal benefit of Chrome-vs-Chromium is small enough that the CVE-noise reduction (`node:22-alpine` has materially fewer findings than `node:22-bookworm-slim`) wins.
-- **`ghost-cursor`** drives a Bezier-curve mouse path on the cursor-pathing-sensitive clicks (Sign-In, Join, "Skip for now" interstitials, in-meeting chat-panel button). Audio/video SVG toggles still use a direct ancestor-walk click since SVG elements can't be the cursor target directly.
+- The VP drives **[CloakBrowser](https://github.com/CloakHQ/cloakbrowser)** (a patched Chromium build, pinned at 0.3.29) via `playwright-core`. Its newer Chromium handles Zoom's web-client video encoder reliably even on a small 2-vCPU host (`t3.medium`) — the older stock Debian Chromium threw Zoom's "Something went wrong" error and turned the VP camera off under the same load. Two launch flags (`--force-webrtc-ip-handling-policy=default` + `--webrtc-ip-handling-policy=default`) restore local ICE candidate gathering so the Simli avatar's same-browser loopback video bridge connects.
+- A per-user **persistent profile** (cookies, "trusted device" markers) is restored from S3 on launch and saved back at meeting end, so a user who has signed in once is recognised on subsequent meetings (see [Persistent Chromium profile per user](#persistent-chromium-profile-per-user) below).
+- Fresh profiles run a short **warmup** (Google → HN → Wikipedia → the meeting-platform home pages) before navigating to the meeting URL, so a first-time profile arrives with normal browsing history rather than zero state.
 
 ## Per-user Zoom credentials
 
-Each LMA user can store **one** set of Zoom credentials. When a user starts a virtual participant for a Zoom meeting and ticks **"Sign in with my stored Zoom account when joining this meeting"**, the VP signs in to Zoom before navigating to the meeting URL. A signed-in session avoids most bot-detection blocks and allows the VP to join meetings that disallow guests.
+Each LMA user can store **one** set of Zoom credentials. When a user starts a virtual participant for a Zoom meeting and ticks **"Sign in with my stored Zoom account when joining this meeting"**, the VP signs in to Zoom before navigating to the meeting URL. A signed-in session joins far more reliably and allows the VP to join meetings that disallow guests.
 
 ### How it works
 
@@ -34,8 +34,8 @@ Each LMA user can store **one** set of Zoom credentials. When a user starts a vi
 
 ### Caveats
 
-- **CAPTCHA / 2FA still happens.** When Zoom challenges the sign-in, the VP escalates to `MANUAL_ACTION_REQUIRED` and the React UI surfaces a Flashbar alert + the live noVNC viewer. Solve the challenge there; the VP picks up automatically when the session is authenticated.
-- **Brand-new accounts can still look bot-shaped.** Sign in to Zoom on your own laptop with the account at least once *before* relying on LMA — accounts whose only activity is joining meetings from AWS IP ranges can still trip detection.
+- **CAPTCHA / 2FA still happens.** When Zoom presents a verification challenge during sign-in, the VP escalates to `MANUAL_ACTION_REQUIRED` and the React UI surfaces a Flashbar alert + the live noVNC viewer. Solve the challenge there; the VP picks up automatically when the session is authenticated.
+- **Brand-new accounts join less reliably.** Sign in to Zoom on your own laptop with the account at least once *before* relying on LMA — an account whose only activity is joining meetings from AWS IP ranges is more likely to hit a verification step.
 
 ## AI-driven sign-in loop
 
@@ -49,11 +49,11 @@ The VP delegates each post-username step to Claude (Bedrock, vision-capable). Af
 
 This keeps the deterministic logic out of the codebase and lets the VP tolerate Zoom's frequent sign-in flow changes without a code/deploy cycle.
 
-The same AI navigator handles the post-login interstitial sequence on the way to the meeting URL, and the in-meeting unknown-dialog watchdog (consent, recording-notice, bot-detection, etc.).
+The same AI navigator handles the post-login interstitial sequence on the way to the meeting URL, and the in-meeting unknown-dialog watchdog (consent, recording-notice, verification prompts, etc.).
 
-## Persistent Chromium profile per user (Phase C4)
+## Persistent Chromium profile per user
 
-The VP container hydrates a per-user `userDataDir` from S3 at launch and uploads it back at meeting end. Once the user has signed in once and solved any reCAPTCHA / 2FA via the VNC viewer, Zoom plants a "trusted device" cookie that persists. Subsequent meetings reuse that cookie and skip both the reCAPTCHA *and* the bot-detection dialog.
+The VP container hydrates a per-user `userDataDir` from S3 at launch and uploads it back at meeting end. Once the user has signed in once and cleared any verification challenge via the VNC viewer, Zoom plants a "trusted device" cookie that persists. Subsequent meetings reuse that cookie, so the VP signs in cleanly without re-prompting.
 
 - Profile path: `s3://${StackName}-vp-profiles-${AccountId}/profiles/{cognitoSub}/{platform}/`.
 - Concurrency lock: `lock.json` at the same prefix, with a 10-minute expiry. If two meetings start for the same user simultaneously, the second falls back to a fresh profile.
@@ -70,6 +70,6 @@ Independently of the sign-in feature, every platform handler wraps its hardcoded
 
 ## Operational notes
 
-- **What if I see "Zoom blocked the join"?** Make sure your stored Zoom account has signed in from a normal browser at least once, then try again. If the failure persists, try removing the credentials and re-saving them — the persistent profile is wiped on credential removal, which clears any stale cookies.
-- **AWS egress IP reputation** is the residual risk we cannot fully mitigate from inside the container. If many users in your org see blocks even when signed in, route VP egress through a NAT or residential-proxy provider.
+- **What if the join fails?** Make sure your stored Zoom account has signed in from a normal browser at least once, then try again. If the failure persists, try removing the credentials and re-saving them — the persistent profile is wiped on credential removal, which clears any stale cookies.
+- **AWS egress IP reputation** is the residual factor we cannot fully control from inside the container. If many users in your org see joins fail even when signed in, route VP egress through a NAT or residential-proxy provider.
 - **Disabling AI fallback**: set the task-definition env var `BEDROCK_DOM_RESOLVER_MODEL_ID=""` and the resolver becomes a no-op (returns `null`); behavior reverts to the pre-change hardcoded path.

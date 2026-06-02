@@ -4,7 +4,7 @@ title: "Virtual Participant Local Development"
 
 # Virtual Participant Local Development
 
-This guide describes how to run and iterate on the LMA Virtual Participant (VP) locally against a deployed LMA CloudFormation stack. The VP is a headless-Chrome-on-Linux Puppeteer app that normally runs in ECS (Fargate or EC2), so the most realistic local environment is a Linux EC2 instance that mirrors the ECS task's runtime — edited via VSCode Remote-SSH and previewed via VNC.
+This guide describes how to run and iterate on the LMA Virtual Participant (VP) locally against a deployed LMA CloudFormation stack. The VP is a headless-Chromium-on-Linux Playwright app that normally runs in ECS (Fargate or EC2), so the most realistic local environment is a Linux EC2 instance that mirrors the ECS task's runtime — edited via VSCode Remote-SSH and previewed via VNC.
 
 ## Table of Contents
 
@@ -22,7 +22,7 @@ This guide describes how to run and iterate on the LMA Virtual Participant (VP) 
 
 The VP container bundles a specific Linux + Chromium + audio-stack combination that closely matches what ECS runs in production. Running Docker on macOS or Windows (even via WSL or Docker Desktop) introduces subtle differences in:
 
-- Chromium/Puppeteer behavior and fonts
+- Chromium/Playwright behavior and fonts
 - Audio device enumeration and virtual sinks
 - CPU architecture (Apple Silicon vs. x86_64)
 - Networking and DNS resolution inside the container

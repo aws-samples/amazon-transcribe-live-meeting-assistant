@@ -137,7 +137,7 @@ Elevation of privilege threats involve gaining capabilities beyond what was auth
 | Threat | Impact | Mitigations |
 |--------|--------|-------------|
 | **Hook Lambda dependency compromise** | Transcript data exfiltration | Customer responsibility, documentation |
-| **Chrome/Puppeteer vulnerability** | Container compromise in VP | Regular image updates, sandbox enforcement |
+| **Chromium browser vulnerability** | Container compromise in VP | Regular image updates; container + network isolation (browser runs --no-sandbox) |
 | **React dependency compromise** | XSS in web UI | Lock files, dependency scanning, CSP |
 | **Browser extension code tampering** | Audio interception | Extension signing, code review |
 

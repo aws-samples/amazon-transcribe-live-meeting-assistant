@@ -41,8 +41,8 @@ def execute(
         is_admin: Whether user is admin
         use_stored_zoom_credentials: When the user has stored Zoom
             credentials in LMA, sign in to Zoom with them before joining
-            the meeting (recommended; avoids most bot-detection blocks
-            and meetings that disallow guests). Set to False to force
+            the meeting (recommended; joins far more reliably and can join
+            meetings that disallow guests). Set to False to force
             a guest join. Has no effect on non-Zoom platforms.
 
     Returns:

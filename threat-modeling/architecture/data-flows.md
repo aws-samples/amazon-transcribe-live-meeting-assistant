@@ -72,7 +72,7 @@ sequenceDiagram
     Admin->>AppSync: Start Virtual Participant (meeting URL)
     AppSync->>Lambda: Invoke VP launcher
     Lambda->>ECS: Run Fargate task (headless Chrome)
-    ECS->>Platform: Join meeting via browser (Puppeteer)
+    ECS->>Platform: Join meeting via browser (Playwright/CloakBrowser)
     Platform-->>ECS: Meeting audio/video stream
     ECS->>ECS: Capture audio from Chrome (two-channel)
     ECS->>Fargate: Stream audio via internal WebSocket

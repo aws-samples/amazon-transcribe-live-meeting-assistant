@@ -30,7 +30,7 @@ title: "Virtual Participant"
 
 > **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio, and Virtual Participant.
 
-The Virtual Participant (VP) is a headless Chrome browser running on ECS (Fargate or EC2) that joins meetings as a separate participant via Puppeteer. It captures audio and metadata, sending them to the LMA Kinesis Data Stream for transcription and processing.
+The Virtual Participant (VP) is a headless Chrome browser running on ECS (Fargate or EC2) that joins meetings as a separate participant, driven by Playwright. It captures audio and metadata, sending them to the LMA Kinesis Data Stream for transcription and processing.
 
 ## When to use Virtual Participant
 
@@ -69,11 +69,11 @@ The VP reports a granular status as it boots, joins, and runs. The UI uses these
 | `BOOTING` | Container started; pulling Chrome image, starting Xvfb / VNC / PulseAudio |
 | `REGISTERING_NETWORK` | Registering the task with the live-view ALB (typically 30-60 seconds) |
 | `HYDRATING_PROFILE` | Restoring the per-user Chromium profile (cookies, "trusted device" markers) from S3 |
-| `LAUNCHING_BROWSER` | Launching Chromium via `rebrowser-puppeteer` with bot-detection patches at the CDP layer |
+| `LAUNCHING_BROWSER` | Launching Chromium via Playwright (`chromium.launchPersistentContext`) |
 | `VNC_READY` | Browser is up; live-view viewer can connect |
 | `CONNECTING` | Initializing audio/video pipelines (Nova Sonic, Simli avatar, agent mic) |
 | `JOINING` | Navigating to the meeting URL; signing in to Zoom if credentials are stored |
-| `MANUAL_ACTION_REQUIRED` | A CAPTCHA, 2FA, SSO, consent dialog, or Zoom bot-detection challenge needs human input — see [Manual Action Required](#manual-action-required-captcha-2fa-sso) |
+| `MANUAL_ACTION_REQUIRED` | A CAPTCHA, 2FA, SSO, consent dialog, or other Zoom verification step needs human input — see [Manual Action Required](#manual-action-required-captcha-2fa-sso) |
 | `ACTIVE` / `JOINED` | VP is in the meeting and capturing audio |
 | `COMPLETED` / `ENDED` | Meeting ended cleanly (host removed the VP, all attendees left, or the VP got "lonely") |
 | `FAILED` | The VP could not join. The DDB record carries an `errorMessage` describing what went wrong (e.g. *"Meeting join failed: …"*, *"Zoom login failed: invalid credentials"*, *"ECS RunTask soft-failure: agent not connected"*) |
@@ -82,7 +82,7 @@ When ECS reports a "soft failure" on RunTask (returns HTTP 200 with a non-empty 
 
 ## Manual Action Required (CAPTCHA, 2FA, SSO)
 
-When the VP can't proceed without a human (Zoom 2FA passcode, reCAPTCHA, SSO redirect, an unknown consent dialog the auto-dismiss handler can't classify), it sets status to `MANUAL_ACTION_REQUIRED` and surfaces:
+When the VP can't proceed without a human (Zoom 2FA passcode, CAPTCHA, SSO redirect, an unknown consent dialog the auto-dismiss handler can't classify), it sets status to `MANUAL_ACTION_REQUIRED` and surfaces:
 
 - A persistent **Flashbar alert** at the top of the LMA UI with the action type and a link to the meeting detail page.
 - An **action banner** on the Virtual Participant detail page above the live VNC viewer.
@@ -102,19 +102,19 @@ The same resolver classifies unknown popup dialogs:
 
 Disable the AI fallback by setting `BedrockDomResolverModelId` to an empty string at deploy time — the VP reverts to hardcoded-selector-only behavior.
 
-For full details on the AI resolver and its interaction with the Zoom sign-in flow, see [Zoom Sign-in & Bot-Detection Hardening](zoom-credentials-and-bot-detection.md).
+For full details on the AI resolver and its interaction with the Zoom sign-in flow, see [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md).
 
 ## Zoom Sign-in
 
-LMA can sign the VP in to Zoom using **per-user stored credentials** before navigating to the meeting URL. A signed-in session avoids most bot-detection blocks ("We detected you may be a bot…") and allows the VP to join meetings that disallow guests.
+LMA can sign the VP in to Zoom using **per-user stored credentials** before navigating to the meeting URL. A signed-in session joins far more reliably ("We detected you may be a bot…" guest blocks become rare) and allows the VP to join meetings that disallow guests.
 
 - Each user adds their own credentials via the **Zoom account** card in the Create Virtual Participant modal. Credentials live in AWS Secrets Manager keyed by Cognito sub, and the plaintext password is never returned to the React UI.
 - The VP container reads the secret at runtime; it is never put on the task definition or in the Step Functions execution input.
 - The sign-in flow is **AI-driven** end-to-end. After submitting the username, Claude inspects each subsequent page (password entry, OTP, passkey-binding upsell, phone-binding upsell, dashboard, etc.) and decides whether to fill, skip, click-through, wait, or escalate — so it tolerates Zoom's frequent post-login interstitials without code changes.
 - **2FA / CAPTCHA / SSO challenges** that need human input fall through to `MANUAL_ACTION_REQUIRED` (see above).
-- **Per-user persistent Chromium profile** in S3 means cookies and "trusted device" markers survive across meetings — after the first manual sign-in, subsequent VPs reuse the session and skip both the reCAPTCHA *and* the bot-detection dialog.
+- **Per-user persistent Chromium profile** in S3 means cookies and "trusted device" markers survive across meetings — after the first manual sign-in, subsequent VPs reuse the session and sign in cleanly without re-prompting.
 
-For setup, caveats, and the bot-detection mitigation stack, see [Zoom Sign-in & Bot-Detection Hardening](zoom-credentials-and-bot-detection.md).
+For setup, caveats, and the full join-reliability stack, see [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md).
 
 ## Meeting Scheduling
 
@@ -158,23 +158,22 @@ Fargate launch type is serverless and uses SOCI (Seekable OCI) for faster contai
 
 ## EC2 Instance Types
 
-Each VP container is capped at 2500 MB (~1.85× observed peak memory of ~1348 MB during concurrent Chrome + Simli + Nova Sonic startup). Pick an instance whose host memory accommodates your expected concurrent VPs per host plus ~600 MB for the OS / ECS agent:
+Each VP container is capped at 3500 MB (observed peak memory is ~1650 MB with Chromium + Simli + Nova Sonic; the cap leaves headroom). A full voice-assistant + Simli-avatar meeting draws ~1.35 vCPU steady-state and runs reliably on the default **`t3.medium`** (the CloakBrowser stack downscales the avatar to 256×256@15fps and disables the emulated GPU, which keeps the encode cheap). Pick a larger instance mainly for **more concurrent VPs per host** rather than for a single meeting's headroom — and ensure host memory accommodates your expected concurrent VPs plus ~600 MB for the OS / ECS agent:
 
 **General Purpose:**
 - `t3.medium` (default) -- 3867 MB host → 1 concurrent VP. The capacity-provider auto-scaler launches additional hosts when concurrent demand exceeds capacity, so users running one meeting at a time pay the baseline (~$30/month per host) and only scale up while multiple VPs are active.
 - `t3.large` -- 7857 MB host → 3 concurrent VPs. Pick this if you regularly run 2-3 concurrent meetings and want fewer scale-outs.
 - `t3.xlarge` -- 15.7 GB host → 6 concurrent VPs.
 
-**Compute-Optimized (recommended for voice + avatar):**
-- `c5.large` -- Voice assistant workloads, 1 concurrent VP
-- `c5.xlarge` -- Voice assistant with avatar, 3 concurrent VPs (no burstable throttling)
-- `c5.2xlarge` -- Heavy voice and avatar processing, 6 concurrent VPs
+**Compute-Optimized (non-burstable; for higher concurrency or guaranteed sustained CPU):**
+- `c5.large` (2 vCPU) -- a dedicated-CPU alternative to `t3.medium` for a single voice + avatar VP (no burstable credit limits)
+- `c5.xlarge` (4 vCPU) -- multiple concurrent voice + avatar VPs per host
+- `c5.2xlarge` -- heavier concurrency
 
-**Memory-Optimized (recommended for voice + avatar with large meeting context):**
-- `m5.large` -- Voice assistant workloads with higher memory needs, 1 concurrent VP
-- `m5.xlarge` -- Recommended for voice assistant with avatar and large meeting context, 3-4 concurrent VPs
+**Memory-Optimized (for large meeting context):**
+- `m5.large` / `m5.xlarge` -- when meeting context / model memory needs are higher
 
-`t3` instances are burstable and may cause audio glitches under sustained load — prefer `c5.*` or `m5.*` for the voice-assistant + avatar combination.
+`t3` instances are burstable: a single voice + avatar VP fits the `t3.medium` baseline, but if you run **multiple concurrent** VPs per host (or very long meetings), prefer `c5.*` / `m5.*` for guaranteed sustained CPU.
 
 ## Auto-Scaling
 

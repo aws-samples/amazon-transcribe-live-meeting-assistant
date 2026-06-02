@@ -147,22 +147,21 @@ const STATUS_CONFIG = {
   },
   HYDRATING_PROFILE: {
     message: 'Restoring browser profile…',
-    description:
-      'Downloading saved cookies / trusted-device markers from S3 (skips Zoom bot-detection on repeat joins)',
+    description: 'Downloading saved cookies / trusted-device markers from S3 (signs in cleanly on repeat joins)',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
   },
   LAUNCHING_BROWSER: {
     message: 'Launching browser…',
-    description: 'Starting Chrome with stealth plugin and platform extensions',
+    description: 'Starting the browser and platform extensions',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
   },
   WARMING_PROFILE: {
     message: 'Warming new profile…',
-    description: 'First-launch browsing pass to look like a returning visitor before joining (one-time, ~15s)',
+    description: 'First-launch browsing pass before joining (one-time, ~15s)',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
@@ -378,7 +377,7 @@ ConnectionDetails.propTypes = {
   }).isRequired,
 };
 
-const ErrorTroubleshooting = ({ status, errorDetails, vpId, vncReady, userAcknowledgedFailure }) => {
+const ErrorTroubleshooting = ({ status, errorDetails, errorMessage, vpId, vncReady, userAcknowledgedFailure }) => {
   const [acking, setAcking] = useState(false);
   const [ackError, setAckError] = useState(null);
   const [ackedLocal, setAckedLocal] = useState(false);
@@ -403,6 +402,12 @@ const ErrorTroubleshooting = ({ status, errorDetails, vpId, vncReady, userAcknow
       setAcking(false);
     }
   };
+
+  // The backend writes a specific, user-facing failure reason to the
+  // errorMessage field (e.g. "The meeting browser ran out of memory and
+  // crashed during join."). Prefer that over the structured errorDetails
+  // (which is only populated for a few categorised errors).
+  const specificMessage = (errorDetails && errorDetails.errorMessage) || errorMessage || null;
 
   const getErrorSolution = () => {
     // Use enhanced error details if available
@@ -431,7 +436,15 @@ const ErrorTroubleshooting = ({ status, errorDetails, vpId, vncReady, userAcknow
       );
     }
 
-    // Fallback to generic solutions
+    // When the backend gave us a specific reason, that's shown above as the
+    // "Error:" line — don't bury it under the generic checklist, which would
+    // be misleading (e.g. an out-of-memory crash has nothing to do with the
+    // meeting ID or password).
+    if (specificMessage) {
+      return null;
+    }
+
+    // Fallback to generic solutions only when we have no specific reason.
     return (
       <SpaceBetween direction="vertical" size="s">
         <div>
@@ -455,9 +468,9 @@ const ErrorTroubleshooting = ({ status, errorDetails, vpId, vncReady, userAcknow
             <div>
               <strong>Virtual Participant failed to join the meeting</strong>
             </div>
-            {errorDetails && errorDetails.errorMessage && (
+            {specificMessage && (
               <div>
-                <strong>Error:</strong> {errorDetails.errorMessage}
+                <strong>Error:</strong> {specificMessage}
               </div>
             )}
             {getErrorSolution()}
@@ -499,6 +512,7 @@ ErrorTroubleshooting.propTypes = {
     lastErrorAt: PropTypes.string,
     errorCount: PropTypes.number,
   }),
+  errorMessage: PropTypes.string,
   vpId: PropTypes.string,
   vncReady: PropTypes.bool,
   userAcknowledgedFailure: PropTypes.bool,
@@ -506,6 +520,7 @@ ErrorTroubleshooting.propTypes = {
 
 ErrorTroubleshooting.defaultProps = {
   errorDetails: null,
+  errorMessage: null,
   vpId: null,
   vncReady: false,
   userAcknowledgedFailure: false,
@@ -866,12 +881,17 @@ const VirtualParticipantDetails = () => {
         </Header>
       </Container>
 
-      {/* Current Status */}
+      {/* Current Status. The backend reuses the errorMessage field as a
+          generic status-detail channel: a human-readable exit reason on
+          COMPLETED, and live progress sub-steps during the long in-progress
+          phases (e.g. "Waiting to be admitted…" within JOINING) so the VP
+          doesn't look frozen. Surface it for both; on FAILED it's the real
+          error and is shown in the troubleshooting card instead. */}
       <StatusDetails
         status={vpDetails.status}
         updatedAt={vpDetails.updatedAt}
         scheduledFor={vpDetails.scheduledFor}
-        statusMessage={vpDetails.status === 'COMPLETED' ? vpDetails.errorMessage : null}
+        statusMessage={vpDetails.status === 'FAILED' ? null : vpDetails.errorMessage}
       />
 
       {/* Status Timeline - Only show if enhanced data available */}
@@ -880,7 +900,7 @@ const VirtualParticipantDetails = () => {
           history={vpDetails.statusHistory}
           currentStatus={vpDetails.status}
           currentTimestamp={vpDetails.updatedAt}
-          currentStatusMessage={vpDetails.status === 'COMPLETED' ? vpDetails.errorMessage : null}
+          currentStatusMessage={vpDetails.status === 'FAILED' ? null : vpDetails.errorMessage}
         />
       )}
 
@@ -953,6 +973,7 @@ const VirtualParticipantDetails = () => {
       <ErrorTroubleshooting
         status={vpDetails.status}
         errorDetails={vpDetails.errorDetails}
+        errorMessage={vpDetails.errorMessage}
         vpId={vpId}
         vncReady={vpDetails.vncReady}
         userAcknowledgedFailure={vpDetails.userAcknowledgedFailure}

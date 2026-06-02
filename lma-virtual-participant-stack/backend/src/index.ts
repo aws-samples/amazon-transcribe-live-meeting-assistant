@@ -1,11 +1,18 @@
-// launchPersistentContext (not launch) — only it forwards userDataDir.
-import { launchPersistentContext } from 'cloakbrowser/puppeteer';
-import { promises as fs } from 'fs';
+// CloakBrowser: a source-patched stealth Chromium (currently Chromium 146)
+// driven via playwright-core. Chosen over stock Debian Chromium because (a) it
+// reduces the CDP-automation signals that trip Zoom's reCAPTCHA Enterprise, and
+// (b) its newer/purpose-built Chromium handles Zoom's web-client video encoder
+// reliably on a 2-vCPU host (t3.medium) — stock Chromium's older build threw
+// Zoom's "Something went wrong" and turned the camera off under the same load.
+// The Simli loopback-WebRTC bridge requires two extra launch flags here to
+// undo cloakbrowser's ICE-suppression patch (see getCloakLaunchArgs).
+import { launchPersistentContext } from 'cloakbrowser';
+import { promises as fs, readFileSync } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
 import Teams from './teams.js';
 import Webex from './webex.js';
-import { details, ExitInfo, formatExitMessage } from './details.js';
+import { details, ExitInfo, formatExitMessage, didJoinMeeting } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
@@ -30,11 +37,11 @@ import {
 const WINDOW_WIDTH = 1920;
 const WINDOW_HEIGHT = 1080;
 
-const getCloakLaunchArgs = (fingerprintSeed: number): string[] => [
+const getCloakLaunchArgs = (fingerprintSeed: number, simliEnabled: boolean): string[] => [
     `--fingerprint=${fingerprintSeed}`,
     `--fingerprint-screen-width=${WINDOW_WIDTH}`,
     `--fingerprint-screen-height=${WINDOW_HEIGHT}`,
-    // Puppeteer doesn't resize the OS window via CDP — flags do.
+    // Size the headed OS window to fill the Xvfb display.
     `--window-size=${WINDOW_WIDTH},${WINDOW_HEIGHT}`,
     '--window-position=0,0',
     '--use-fake-ui-for-media-stream',
@@ -49,9 +56,15 @@ const getCloakLaunchArgs = (fingerprintSeed: number): string[] => [
     '--enable-logging=stderr',
     '--log-level=0',
     '--remote-debugging-port=9222',
-    // Headed-in-container essentials.
-    '--use-angle=swiftshader',
-    '--ignore-gpu-blocklist',
+    // PERF: disable GPU entirely. There is no hardware GPU in the container, so
+    // Chrome runs all WebGL/compositing on the CPU via SwiftShader (the GPU
+    // process measured ~200% under load — the dominant cost). cloakbrowser
+    // force-adds --ignore-gpu-blocklist in headed mode to make WebGL work in
+    // Docker/Xvfb, but its arg-merge lets our args override by key. We don't
+    // need to SEE Zoom's video (we inject our own camera and consume audio), so
+    // disabling GPU/WebGL sheds the SwiftShader cost.
+    '--disable-gpu',
+    '--disable-software-rasterizer',
     '--disable-infobars',
     '--test-type',
     // Suppress password/autofill bubbles that overlay meeting UI buttons.
@@ -60,6 +73,21 @@ const getCloakLaunchArgs = (fingerprintSeed: number): string[] => [
     '--use-mock-keychain',
     '--no-first-run',
     '--no-default-browser-check',
+    // CloakBrowser's compiled WebRTC IP-leak patch suppresses ALL ICE host
+    // candidates by default, which prevents the Simli avatar's page-to-page
+    // WebRTC video bridge (Simli page -> meeting page) from ever connecting
+    // (connectionState stays 'new'). Both flags are required to restore host
+    // candidate gathering; verified empirically. Only the container's private
+    // RFC1918 IP is exposed, and no proxy is in use, so this leaks nothing the
+    // TCP connection doesn't already reveal. See simli-avatar.ts bridge.
+    '--force-webrtc-ip-handling-policy=default',
+    '--webrtc-ip-handling-policy=default',
+    // When Simli is NOT active we don't override getUserMedia, so without this
+    // Chrome reports no camera/mic — an unusual, fingerprintable state. The
+    // fake device gives a realistic capture device. When Simli IS active we
+    // must NOT add it: it would register a competing fake camera alongside our
+    // injected avatar stream.
+    ...(simliEnabled ? [] : ['--use-fake-device-for-media-stream']),
 ];
 
 // Global variables for graceful shutdown
@@ -69,12 +97,63 @@ let statusManager: VirtualParticipantStatusManager | null = null;
 let vpId: string | null = null;
 let mcpHandler: MCPCommandHandler | null = null;
 let strandsWarmupTimer: NodeJS.Timeout | null = null;
+// Hoisted to module scope so the signal/emergency shutdown paths can close the
+// browser and flush the profile to S3 — not just main()'s normal cleanup.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let browserContext: any = null;
+let activeProfileHandle: import('./profile-store.js').ProfileHandle | null = null;
+let profilePersisted = false;
+
+// Close the browser context (flushing Chromium's cookie/SQLite state to the
+// userDataDir) and upload the profile tar to S3. Guarded so it runs exactly
+// once across whichever shutdown path fires first (normal exit, SIGINT/SIGTERM
+// from nodemon/Ctrl-C, or an emergency crash).
+const closeAndPersistProfile = async (): Promise<void> => {
+    if (profilePersisted) return;
+    profilePersisted = true;
+    try {
+        if (browserContext) await browserContext.close();
+    } catch (error) {
+        console.error('Error closing browser:', error);
+    }
+    if (activeProfileHandle) {
+        try {
+            await persistProfile(activeProfileHandle);
+        } catch (error) {
+            console.error('Error persisting Chromium profile:', error);
+        }
+        try {
+            await releaseProfile(activeProfileHandle);
+        } catch (error) {
+            console.error('Error releasing Chromium profile:', error);
+        }
+    }
+};
 
 // Local testing mode - skip ALB registration and AppSync updates
 const isLocalTest = process.env.LOCAL_TEST === 'true';
 
+// Read the build stamp baked into the image at build time (see Dockerfile).
+// Logged at startup so it's trivial to confirm which image a task runs.
+const readBuildInfo = (): { buildDate: string; gitCommit: string; buildSource: string } => {
+    try {
+        const raw = readFileSync('/srv/build-info.json', 'utf8');
+        const j = JSON.parse(raw);
+        return {
+            buildDate: j.buildDate || 'unknown',
+            gitCommit: j.gitCommit || 'unknown',
+            buildSource: j.buildSource || 'unknown',
+        };
+    } catch {
+        return { buildDate: 'unknown', gitCommit: 'unknown', buildSource: 'unknown' };
+    }
+};
+
 const main = async (): Promise<void> => {
-    console.log('LMA Virtual Participant starting...');
+    const buildInfo = readBuildInfo();
+    console.log(
+        `LMA Virtual Participant starting... [build ${buildInfo.buildDate} commit ${buildInfo.gitCommit} via ${buildInfo.buildSource}]`,
+    );
     if (isLocalTest) {
         console.log('*** LOCAL TEST MODE - Skipping ALB registration and AppSync updates ***');
     }
@@ -212,6 +291,7 @@ const main = async (): Promise<void> => {
     const profileHandle = await acquireProfile({
         cognitoSub: process.env.LMA_USER_SUB || '',
     });
+    activeProfileHandle = profileHandle;
 
     if (statusManager) {
         await statusManager.setLaunchingBrowser();
@@ -254,19 +334,22 @@ const main = async (): Promise<void> => {
     console.log(`[browser]   fingerprint seed  = ${fingerprintSeed}`);
     console.log(`[browser]   profile freshness = ${isFresh ? 'FRESH (warmup will run)' : 'EXISTING (skipping warmup)'}`);
 
-    const browser = await launchPersistentContext({
+    const context = await launchPersistentContext({
         headless: false,
         humanize: true,
         humanPreset: 'default',
         userDataDir,
-        args: getCloakLaunchArgs(fingerprintSeed),
+        viewport: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT },
+        args: getCloakLaunchArgs(fingerprintSeed, simliAvatar.isSimliEnabled()),
         launchOptions: {
-            defaultViewport: null,
-            protocolTimeout: details.meetingTimeout,
-            timeout: details.meetingTimeout,
             ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
         },
     } as any);
+    browserContext = context;
+    // Sane default for actions; the one meeting-length wait (end-of-meeting
+    // watcher) passes its own explicit { timeout }. Do NOT set a multi-hour
+    // default here — it makes every transient wait hang instead of failing fast.
+    context.setDefaultTimeout(30_000);
 
     await new Promise(resolve => setTimeout(resolve, 2000));
     console.log('✓ Chrome launched with remote debugging on port 9222');
@@ -277,7 +360,7 @@ const main = async (): Promise<void> => {
         }
         try {
             console.log('[warmup] Profile is fresh — running 3-phase warmup before joining meeting');
-            await warmupNavigation(() => browser.newPage() as any, {
+            await warmupNavigation(() => context.newPage() as any, {
                 runMeetingPlatforms: true,
                 log: (m) => console.log(`[browser] ${m}`),
             });
@@ -299,26 +382,48 @@ const main = async (): Promise<void> => {
         console.log('✓ Skipping AppSync VNC ready update (local test mode)');
     }
 
-    // Initialize Simli Avatar AFTER browser is launched (background page for avatar rendering)
-    if (simliAvatar.isSimliEnabled()) {
-        try {
-            console.log('Initializing Simli Avatar...');
-            await simliAvatar.initialize(browser);
-            console.log('✓ Simli Avatar initialized');
-        } catch (error) {
-            console.error('Failed to initialize Simli Avatar (non-critical):', error);
-            // Non-fatal - meeting can proceed without avatar
-        }
-    }
+    // NOTE: Simli Avatar is NOT initialized here anymore. Its background
+    // page renders the avatar and continuously JPEG-encodes ~20fps frames,
+    // which measures at ~1800/2048 CPU units sustained — and on a 2-vCPU
+    // host that contends directly with the CPU-heavy Zoom sign-in (Bedrock
+    // calls + SPA hydration), stalling sign-in until it escalates to
+    // MANUAL_ACTION. Avatar init is deferred into a `prepareAvatar()`
+    // callback (defined below) that each platform handler invokes at the
+    // right moment: for Zoom, AFTER sign-in completes but BEFORE the
+    // prejoin camera is enabled; for guest/other platforms, at the top of
+    // the join (unchanged timing, since they have no heavy sign-in phase).
 
     // Create page BEFORE MCP — external CDP client during newPage() deadlocks target handshake.
-    const page = await browser.newPage();
-    await page.setViewport({ width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
+    const page = await context.newPage();
     page.setDefaultTimeout(20000);
-    // No setUserAgent: cloakbrowser ships a coordinated UA fingerprint.
 
-    // Forward early meeting-page console output (getUserMedia override,
-    // Simli bridge) to container logs before platform handlers attach.
+    // Renderer-crash latch. A renderer OOM crash leaves every page.evaluate
+    // hanging on "Target crashed", so meeting.initialize() never returns and
+    // the UI stays stuck on JOINING. We race initialize() against this latch
+    // (below) so a crash deterministically loses the race and drives the
+    // catch → FAILED path instead of an indefinite hang. Settled at most once.
+    let rejectOnPageCrash: (err: Error) => void = () => {};
+    let pageCrashSettled = false;
+    const pageCrashLatch = new Promise<never>((_, reject) => {
+        rejectOnPageCrash = (err: Error) => {
+            if (pageCrashSettled) return;
+            pageCrashSettled = true;
+            reject(err);
+        };
+    });
+    // Never let an unconsumed rejection crash the process; the race below is
+    // the real consumer.
+    pageCrashLatch.catch(() => {});
+
+    // Forward meeting-page console output (getUserMedia override, Simli bridge)
+    // to container logs. NOTE: we deliberately do NOT install a global
+    // console.* wrapper via addInitScript here. An earlier attempt to do so (an
+    // exposeFunction '__lmaLog' bridge + per-frame console patching) interfered
+    // with the meeting page under cloakbrowser and broke the speaker
+    // MutationObserver's exposeFunction callbacks (speakerChange never fired →
+    // every turn labelled "none"). The simpler page.on('console') below matches
+    // the working baseline; the platform handler attaches its own richer
+    // console listener once it starts.
     page.on('console', (msg) => {
         const text = msg.text();
         const type = msg.type();
@@ -326,7 +431,7 @@ const main = async (): Promise<void> => {
             text.includes('[LMA-Simli]') ||
             text.includes('[Simli]') ||
             type === 'error' ||
-            type === 'warn'
+            type === 'warning'
         ) {
             console.log(`Browser ${type}: ${text}`);
         }
@@ -339,27 +444,26 @@ const main = async (): Promise<void> => {
             console.log(`[meeting-page] subframe navigated → ${frame.url()}`);
         }
     });
-    // Page-lifecycle diagnostics: surface anything that could cause the dialog
-    // watchdog's waitForFunction to abort with ZOOM_END_DIALOG_ABORTED.
+    // Page-lifecycle diagnostics.
     page.on('close', () => {
         console.warn('[page-lifecycle] page CLOSED event fired');
     });
-    page.on('error', (err) => {
-        console.warn('[page-lifecycle] page ERROR (renderer crashed):', err?.message || err);
+    page.on('crash', () => {
+        // A renderer crash (most commonly an OOM kill — "Aw, Snap! Error
+        // code 9" — when memory hits the task cap) leaves every subsequent
+        // page.evaluate hanging on "Target crashed". Without this, the join
+        // sequence stalls forever and the UI stays stuck on JOINING. Reject
+        // the crash latch so the meeting init loses the race below and the
+        // catch path drives a clean FAILED + task exit.
+        console.error('[page-lifecycle] page CRASHED (renderer crash) — aborting join');
+        rejectOnPageCrash(new Error('Renderer crashed (likely out of memory) — the meeting page died mid-join'));
     });
     page.on('framedetached', (frame) => {
         const isMain = frame === page.mainFrame();
         console.log(`[meeting-page] frame detached (mainFrame=${isMain}) url=${frame.url()}`);
     });
-    browser.on('targetdestroyed', (target) => {
-        try {
-            console.log(`[browser-lifecycle] target destroyed type=${target.type()} url=${target.url()}`);
-        } catch (e) {
-            console.log('[browser-lifecycle] target destroyed (could not read details)');
-        }
-    });
-    browser.on('disconnected', () => {
-        console.warn('[browser-lifecycle] browser DISCONNECTED');
+    context.on('close', () => {
+        console.warn('[browser-lifecycle] browser context CLOSED');
     });
 
     // Initialize MCP command handler AFTER browser is launched and the
@@ -416,68 +520,62 @@ const main = async (): Promise<void> => {
         }
     }
 
-    // Simli Avatar: Inject getUserMedia override and set up stream connection
-    // This must happen BEFORE the page navigates to the meeting URL
-    if (simliAvatar.isConnected()) {
-        try {
-            // 1. Grant camera+mic permissions at browser level for all meeting domains
-            const context = page.browser().defaultBrowserContext();
-            for (const domain of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com']) {
-                await context.overridePermissions(domain, ['camera', 'microphone']).catch(() => {});
+    // Simli Avatar deferred setup. Each platform handler calls this via the
+    // `prepareAvatar` option at the right moment (Zoom: after sign-in, before
+    // the prejoin camera is enabled; others: at the top of the join). This
+    // both (a) brings the avatar up only when it's about to be needed as the
+    // camera, and (b) keeps its sustained ~1800-CPU-unit render+encode load
+    // off the CPU-heavy sign-in phase. Idempotent + concurrency-safe via the
+    // run-once guard, so multiple calls (e.g. framenavigated + handler) are
+    // cheap no-ops after the first.
+    let avatarPrepared: Promise<void> | null = null;
+    const prepareAvatar = async (): Promise<void> => {
+        if (!simliAvatar.isSimliEnabled()) return;
+        if (avatarPrepared) return avatarPrepared;
+        avatarPrepared = (async () => {
+            try {
+                console.log('Initializing Simli Avatar...');
+                await simliAvatar.initialize(context);
+                console.log('✓ Simli Avatar initialized');
+            } catch (error) {
+                console.error('Failed to initialize Simli Avatar (non-critical):', error);
+                return; // No avatar — meeting proceeds without it.
             }
-            console.log('✓ Camera and microphone permissions granted for meeting platforms');
-            
-            // 2. Inject getUserMedia/enumerateDevices/permissions overrides (evaluateOnNewDocument)
-            await simliAvatar.injectGetUserMediaOverride(page);
-            console.log('✓ Simli getUserMedia override injected into meeting page');
-            
-            let isReconnecting = false;
-            let reconnectInFlight: Promise<void> | null = null;
-            const connectSimliStream = async () => {
-                try {
-                    await simliAvatar.connectStreamToMeetingPage(page);
-                    console.log('✓ Simli video stream connected to meeting page');
-                } catch (error) {
-                    console.error('Failed to connect Simli stream (non-critical):', error);
+            // Initializing the Simli avatar opened a second tab (local.simli),
+            // which becomes the foreground tab and hides the meeting in the VNC
+            // viewer. Bring the meeting page back to the front so the human
+            // watching VNC sees the meeting by default.
+            try {
+                await page.bringToFront();
+            } catch (e) {
+                /* non-critical */
+            }
+            if (!simliAvatar.isConnected()) return;
+            try {
+                // 1. Grant camera+mic permissions at context level for all meeting domains
+                for (const origin of ['https://zoom.us', 'https://app.zoom.us', 'https://app.chime.aws', 'https://teams.microsoft.com', 'https://web.webex.com']) {
+                    await context.grantPermissions(['camera', 'microphone'], { origin }).catch(() => {});
                 }
-            };
+                console.log('✓ Camera and microphone permissions granted for meeting platforms');
 
-            await page.exposeFunction('__simliRequestReconnect', async () => {
-                if (reconnectInFlight) {
-                    await reconnectInFlight;
-                    return;
-                }
-                isReconnecting = true;
-                console.log('Simli avatar: on-demand reconnect requested from meeting page');
-                reconnectInFlight = connectSimliStream().finally(() => {
-                    reconnectInFlight = null;
-                    isReconnecting = false;
-                });
-                await reconnectInFlight;
-            });
-
-            // Receiver PC is per-document; rebuild on every meeting-URL navigation.
-            const isMeetingUrl = (u: string): boolean =>
-                /\/wc\/\d+\/(join|start|live)/.test(u) ||
-                /teams\.microsoft\.com\/.*meetup-join/.test(u) ||
-                /web\.webex\.com\/meeting/.test(u) ||
-                /chime\.aws\/meetings\//.test(u);
-            page.on('framenavigated', async (frame) => {
-                if (frame !== page.mainFrame()) return;
-                const url = frame.url();
-                if (!isMeetingUrl(url)) return;
-                if (reconnectInFlight) return;
-                console.log(`[simli-bridge] meeting URL detected (${url}) — building Simli WebRTC bridge`);
-                reconnectInFlight = connectSimliStream().finally(() => {
-                    reconnectInFlight = null;
-                });
-                await reconnectInFlight;
-            });
-            
-        } catch (error) {
-            console.error('Failed to set up Simli avatar for meeting (non-critical):', error);
-        }
-    }
+                // 2. Inject the getUserMedia override AND start the Node-side
+                // WebRTC bridge poll loop (both live inside
+                // injectGetUserMediaOverride). The poll loop scans page.frames()
+                // and services any frame that calls getUserMedia({video}) —
+                // platform-agnostic, picks up new subframes/navigations
+                // automatically, and self-heals if the bridge drops mid-call. So
+                // no framenavigated wiring or on-demand-reconnect plumbing is
+                // needed here. The avatar is downscaled to 256x256@15fps before
+                // the bridge so Zoom's video encoder stays cheap enough for a
+                // 2-vCPU host (t3.medium).
+                await simliAvatar.injectGetUserMediaOverride(page);
+                console.log('✓ Simli getUserMedia override + WebRTC bridge installed');
+            } catch (error) {
+                console.error('Failed to set up Simli avatar for meeting (non-critical):', error);
+            }
+        })();
+        return avatarPrepared;
+    };
 
     let meeting: Chime | Zoom | Teams | Webex;
     let success = false;
@@ -519,7 +617,13 @@ const main = async (): Promise<void> => {
         // returns a structured ExitInfo describing WHY the meeting ended;
         // we log it canonically and persist a human-readable form alongside
         // the COMPLETED status for the UI.
-        exitInfo = await meeting.initialize(page);
+        // Race against the renderer-crash latch so an OOM crash mid-join
+        // rejects here (→ catch → FAILED) instead of hanging forever on a
+        // dead "Target crashed" page.evaluate.
+        exitInfo = await Promise.race([
+            meeting.initialize(page, { prepareAvatar }),
+            pageCrashLatch,
+        ]);
 
         const exitDetailParts = [
             `reason=${exitInfo.reason}`,
@@ -537,7 +641,9 @@ const main = async (): Promise<void> => {
         
         if (statusManager) {
             const errorMsg = error.message.toLowerCase();
-            if (errorMsg.includes('password') || errorMsg.includes('passcode')) {
+            if (errorMsg.includes('renderer crashed') || errorMsg.includes('target crashed')) {
+                await statusManager.setFailed('The meeting browser ran out of memory and crashed during join. Please try again.');
+            } else if (errorMsg.includes('password') || errorMsg.includes('passcode')) {
                 await statusManager.setFailed('Wrong meeting password');
             } else if (errorMsg.includes('meeting not found') || errorMsg.includes('invalid meeting')) {
                 await statusManager.setFailed('Invalid meeting ID');
@@ -642,30 +748,19 @@ const main = async (): Promise<void> => {
             console.error('Error stopping AgentSpeakingDetector:', error);
         }
 
-        try {
-            // Close browser
-            await browser.close();
-        } catch (error) {
-            console.error('Error closing browser:', error);
-        }
+        // Close the browser context (persistent context owns the browser) and
+        // sync the profile back to S3 so the next launch resumes the session.
+        await closeAndPersistProfile();
 
-        // Sync profile back to S3 so the next launch resumes the session.
-        try {
-            await persistProfile(profileHandle);
-        } catch (error) {
-            console.error('Error persisting Chromium profile:', error);
-        }
-        try {
-            await releaseProfile(profileHandle);
-        } catch (error) {
-            console.error('Error releasing Chromium profile:', error);
-        }
-
-        // Final status update. Persist the human-readable exit detail
-        // (e.g. "Asked to leave by Jeremy") alongside COMPLETED so the UI
-        // can show why the meeting actually ended instead of a generic
-        // "Meeting ended normally" line.
-        if (success) {
+        // Final status update. A returned exitInfo doesn't always mean
+        // success: the handler returns 'never-joined' when the VP never
+        // actually entered the meeting (prejoin timeout / not admitted /
+        // stuck on the join form). That must be surfaced as FAILED — not
+        // COMPLETED — so the UI doesn't falsely report success on a meeting
+        // the VP never joined. Genuine completions persist the human-readable
+        // exit detail (e.g. "Asked to leave by Jeremy") alongside COMPLETED.
+        const joined = exitInfo ? didJoinMeeting(exitInfo) : true;
+        if (success && joined) {
             const completionMessage = exitInfo ? formatExitMessage(exitInfo) : undefined;
             if (statusManager) {
                 await statusManager.setCompleted(completionMessage);
@@ -676,6 +771,14 @@ const main = async (): Promise<void> => {
                     : 'LMA Virtual Participant completed successfully',
             );
             process.exit(0);
+        } else if (success && !joined) {
+            // Ran cleanly but never joined → FAILED with the reason.
+            const failMessage = exitInfo ? formatExitMessage(exitInfo) : 'Could not join the meeting.';
+            if (statusManager) {
+                await statusManager.setFailed(failMessage);
+            }
+            console.log(`LMA Virtual Participant did not join: ${failMessage}`);
+            process.exit(1);
         } else {
             console.log('LMA Virtual Participant failed');
             process.exit(1);
@@ -752,7 +855,12 @@ const signalHandler = async (signal: string) => {
     } catch (error) {
         console.error('Error during service cleanup:', error);
     }
-    
+
+    // Close the browser and flush the profile to S3 so the session is
+    // remembered next launch. nodemon/Ctrl-C deliver SIGTERM/SIGINT here, so
+    // without this the latest session would never be persisted.
+    await closeAndPersistProfile();
+
     console.log('Graceful shutdown complete. Exiting...');
     process.exit(0);
 };
@@ -807,6 +915,10 @@ const emergencyCleanup = async (errorMessage: string): Promise<void> => {
         clearInterval(strandsWarmupTimer);
         strandsWarmupTimer = null;
     }
+
+    // Best-effort: flush the profile to S3 even on a crash so a partially
+    // established session isn't lost.
+    await closeAndPersistProfile();
 
     console.log('Emergency cleanup complete');
 };

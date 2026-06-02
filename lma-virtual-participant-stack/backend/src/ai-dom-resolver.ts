@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Page, ElementHandle } from 'puppeteer-core';
+import { Page, ElementHandle } from 'playwright-core';
 import {
   BedrockRuntimeClient,
   InvokeModelCommand,
@@ -121,6 +121,31 @@ const TTL_DAYS = 30;
 
 const memoryCache = new Map<string, CacheEntry>();
 
+// Race a browser-call promise against a wall-clock timeout. evaluate /
+// screenshot / boundingBox can hang for tens of seconds when the page's
+// execution context is destroyed mid-call (Zoom SPA re-mount); this turns
+// the hang into a fast rejection so the surrounding retry loop can fire.
+const withCdpTimeout = async <T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> => {
+  let to: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race<T>([
+      promise,
+      new Promise<T>((_, reject) => {
+        to = setTimeout(
+          () => reject(new Error(`[ai-dom-resolver] ${label} timed out after ${ms}ms`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    if (to) clearTimeout(to);
+  }
+};
+
 let bedrockClient: BedrockRuntimeClient | null = null;
 let ddbClient: DynamoDBClient | null = null;
 
@@ -219,7 +244,7 @@ async function evictCacheEntry(
 
 /**
  * Resolve a CSS selector to ElementHandles. Tolerates Claude (and human-doc)
- * habit of producing jQuery `:contains('text')` extensions, which Puppeteer
+ * habit of producing jQuery `:contains('text')` extensions, which the browser
  * doesn't understand — falls back to an in-page text scan with the prefix
  * selector. Returns at most one element when the `:contains()` form is used,
  * matching the jQuery semantics callers expect.
@@ -232,42 +257,54 @@ async function querySelectorAllSafe(
   if (containsMatch) {
     const baseSelector = containsMatch[1].trim() || '*';
     const wantText = containsMatch[3].toLowerCase();
-    const handle = (await page.evaluateHandle(
-      (sel: string, text: string) => {
-        const candidates = Array.from(document.querySelectorAll(sel));
-        for (const el of candidates) {
-          const t = (el.textContent || '').trim().toLowerCase();
-          if (t.includes(text)) {
-            const rect = (el as HTMLElement).getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) return el;
+    const handle = (await withCdpTimeout(
+      page.evaluateHandle(
+        ({ sel, text }: { sel: string; text: string }) => {
+          const candidates = Array.from(document.querySelectorAll(sel));
+          for (const el of candidates) {
+            const t = (el.textContent || '').trim().toLowerCase();
+            if (t.includes(text)) {
+              const rect = (el as HTMLElement).getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) return el;
+            }
           }
-        }
-        return null;
-      },
-      baseSelector,
-      wantText,
+          return null;
+        },
+        { sel: baseSelector, text: wantText },
+      ),
+      2000,
+      `evaluateHandle(${selector})`,
     )) as ElementHandle<Element> | null;
-    const isNull = await page.evaluate((h) => h === null, handle as any);
+    const isNull = await withCdpTimeout(
+      page.evaluate((h) => h === null, handle as any),
+      2000,
+      'evaluate(isNull)',
+    );
     if (isNull) {
       await (handle as any).dispose();
       return [];
     }
     return [handle as ElementHandle<Element>];
   }
-  return page.$$(selector);
+  return withCdpTimeout(page.$$(selector), 2000, `page.$$(${selector})`);
 }
 
 async function selectorMatches(
   page: Page,
   selector: string,
 ): Promise<ElementHandle<Element> | null> {
+  // Wrap boundingBox in a per-call timeout — the underlying CDP call has
+  // been observed to hang on destroyed execution contexts. See
+  // `withCdpTimeout` for context.
+  const safeBox = (h: ElementHandle<Element>) =>
+    withCdpTimeout(h.boundingBox(), 2000, 'boundingBox').catch(() => null);
   try {
     const handles = await querySelectorAllSafe(page, selector);
     if (handles.length !== 1) {
       // Allow multiple matches if exactly one is visible
       let visibleHandle: ElementHandle<Element> | null = null;
       for (const h of handles) {
-        const box = await h.boundingBox().catch(() => null);
+        const box = await safeBox(h);
         if (box && box.width > 0 && box.height > 0) {
           if (visibleHandle) {
             return null;
@@ -277,7 +314,7 @@ async function selectorMatches(
       }
       return visibleHandle;
     }
-    const box = await handles[0].boundingBox().catch(() => null);
+    const box = await safeBox(handles[0]);
     if (!box || box.width === 0 || box.height === 0) return null;
     return handles[0];
   } catch {
@@ -289,7 +326,8 @@ async function snapshotInteractiveElements(
   page: Page,
   maxElements = 80,
 ): Promise<InteractiveElement[]> {
-  return page.evaluate((max: number) => {
+  return withCdpTimeout(
+    page.evaluate((max: number) => {
     const out: any[] = [];
     const sels = [
       'button',
@@ -343,38 +381,49 @@ async function snapshotInteractiveElements(
       if (out.length >= max) break;
     }
     return out;
-  }, maxElements);
+  }, maxElements),
+    3000,
+    'snapshotInteractiveElements',
+  );
 }
 
 async function snapshotVisibleDialogs(page: Page): Promise<{ html: string }[]> {
-  return page.evaluate(() => {
-    const candidates = Array.from(
-      document.querySelectorAll(
-        '[role="dialog"],[role="alertdialog"],.zm-modal,.zm-modal-legacy,.ReactModal__Content',
-      ),
-    );
-    const out: { html: string }[] = [];
-    for (const el of candidates) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) continue;
-      const html = (el as HTMLElement).outerHTML
-        .replace(/\s+/g, ' ')
-        .slice(0, 4000);
-      out.push({ html });
-    }
-    return out;
-  });
+  return withCdpTimeout(
+    page.evaluate(() => {
+      const candidates = Array.from(
+        document.querySelectorAll(
+          '[role="dialog"],[role="alertdialog"],.zm-modal,.zm-modal-legacy,.ReactModal__Content',
+        ),
+      );
+      const out: { html: string }[] = [];
+      for (const el of candidates) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const html = (el as HTMLElement).outerHTML
+          .replace(/\s+/g, ' ')
+          .slice(0, 4000);
+        out.push({ html });
+      }
+      return out;
+    }),
+    3000,
+    'snapshotVisibleDialogs',
+  );
 }
 
 async function captureScreenshot(page: Page): Promise<string | null> {
   try {
-    const buf = await page.screenshot({
-      type: 'png',
-      fullPage: false,
-      clip: { x: 0, y: 0, width: 1024, height: 768 },
-      encoding: 'base64',
-    });
-    return buf as unknown as string;
+    // Playwright's screenshot() always returns a Buffer (no `encoding` option).
+    const buf = await withCdpTimeout(
+      page.screenshot({
+        type: 'png',
+        fullPage: false,
+        clip: { x: 0, y: 0, width: 1024, height: 768 },
+      }),
+      5000,
+      'captureScreenshot',
+    );
+    return buf.toString('base64');
   } catch {
     return null;
   }
@@ -768,35 +817,53 @@ export async function analyzePageAction(
   },
 ): Promise<PageAction | null> {
   if (RESOLVER_DISABLED) return null;
-  try {
-    const url = page.url();
-    const elems = await snapshotInteractiveElements(page);
-    const screenshot =
-      opts.useScreenshot !== false ? await captureScreenshot(page) : null;
-    const prompt = PAGE_ACTION_PROMPT(opts.platform, url, elems, {
-      allowFillPassword: !!opts.allowFillPassword,
-    });
-    const text = await invokeClaude(prompt, screenshot);
+
+  const decodeAction = (text: string): PageAction | null => {
     const json = extractJson(text);
     if (!json || !json.kind) return null;
     const kind = json.kind as PageActionKind;
     const valid = ['skip', 'continue', 'wait', 'needs_human', 'done'];
     if (opts.allowFillPassword) valid.push('fill_password');
-    if (!valid.includes(kind)) {
-      return null;
-    }
+    if (!valid.includes(kind)) return null;
     return {
       kind,
       selector:
-        typeof json.selector === 'string' && json.selector
-          ? json.selector
-          : undefined,
+        typeof json.selector === 'string' && json.selector ? json.selector : undefined,
       submitSelector:
         typeof json.submitSelector === 'string' && json.submitSelector
           ? json.submitSelector
           : undefined,
       reason: typeof json.reason === 'string' ? json.reason : '',
     };
+  };
+
+  try {
+    const url = page.url();
+    const elems = await snapshotInteractiveElements(page);
+    const prompt = PAGE_ACTION_PROMPT(opts.platform, url, elems, {
+      allowFillPassword: !!opts.allowFillPassword,
+    });
+
+    // DOM-first: the interactive-element snapshot (button text, aria-label,
+    // role, type) is enough to pick Skip/Continue/fill_password on almost
+    // every sign-in interstitial — no screenshot needed. Only when the
+    // DOM-only pass is inconclusive ('wait'/unparseable) AND the caller
+    // allows it do we spend a screenshot + vision tokens on a second pass.
+    // Saves CPU (PNG encode) and Bedrock cost on the common case.
+    const domText = await invokeClaude(prompt, null);
+    const domAction = decodeAction(domText);
+    if (domAction && domAction.kind !== 'wait') {
+      return domAction;
+    }
+    if (opts.useScreenshot) {
+      const screenshot = await captureScreenshot(page);
+      if (screenshot) {
+        const visionText = await invokeClaude(prompt, screenshot);
+        const visionAction = decodeAction(visionText);
+        if (visionAction) return visionAction;
+      }
+    }
+    return domAction;
   } catch (err) {
     console.error('[ai-dom-resolver] analyzePageAction failed:', err);
     return null;
@@ -835,7 +902,7 @@ export async function scrollIntoViewAndClick(
       return true;
     } catch {
       // fallback: dispatch a synthetic click on the element. Works even
-      // when puppeteer's positional click misses due to overlays.
+      // when the positional click misses due to overlays.
       try {
         await handle.evaluate((el: Element) => (el as HTMLElement).click());
         return true;
@@ -845,6 +912,118 @@ export async function scrollIntoViewAndClick(
     }
   } catch {
     return false;
+  }
+}
+
+/**
+ * Coarse classification of where the bot is in the join lifecycle. Used as a
+ * vision-backed second opinion when the brittle CSS-selector heuristics in the
+ * platform handler are ambiguous (Zoom renames its in-meeting classes across
+ * versions, which previously left the VP stuck at "Waiting." forever after it
+ * had actually been admitted). Claude looks at the screenshot + interactive
+ * elements and tells us which screen we're on.
+ *
+ *   - 'prejoin'      — still on the pre-join screen (name/passcode/Join button,
+ *                      device-preview, "Join" not yet clicked or not accepted).
+ *   - 'waiting-room' — admitted to the waiting room; host has not let us in yet
+ *                      ("Please wait, the host will let you in soon").
+ *   - 'in-meeting'   — we are inside the live meeting (toolbar with leave/audio/
+ *                      video/participants/chat, video tiles, gallery/speaker).
+ *   - 'error'        — an error / blocked / removed / meeting-ended screen.
+ *   - 'unknown'      — none of the above could be determined.
+ */
+export type JoinState =
+  | 'prejoin'
+  | 'waiting-room'
+  | 'in-meeting'
+  | 'error'
+  | 'unknown';
+
+export interface JoinStateResult {
+  state: JoinState;
+  reason: string;
+}
+
+const JOIN_STATE_PROMPT = (
+  platform: Platform,
+  url: string,
+  elems: InteractiveElement[],
+): string =>
+  [
+    `You are watching an automated meeting bot drive the ${platform} web client.`,
+    `Current URL: ${url}`,
+    'Decide which screen the bot is currently on. Use BOTH the screenshot and the',
+    'interactive-element JSON below — class names change across versions, so judge',
+    'by what the screen actually shows, not by any single selector.',
+    '',
+    'Screens:',
+    '- "prejoin": the pre-join / preview screen — a "Join" button, a display-name',
+    '  input, a meeting-passcode input, or camera/mic preview toggles, and we have',
+    '  NOT yet entered the meeting.',
+    '- "waiting-room": admitted to a waiting room; a message like "Please wait, the',
+    '  host will let you in soon" / "waiting for the host to start" is shown. No',
+    '  in-meeting toolbar yet.',
+    '- "in-meeting": we are INSIDE the live meeting. Signs: an in-meeting toolbar',
+    '  with Mute/Unmute, Start/Stop Video, Participants, Chat, Share, and a red',
+    '  Leave/End button; participant video tiles; gallery or speaker view.',
+    '- "error": an error, blocked, "removed from the meeting", "meeting has ended",',
+    '  "you have been removed", invalid-link, or sign-in-required screen.',
+    '- "unknown": a transient/loading screen or none of the above.',
+    '',
+    'Visible interactive elements (JSON):',
+    '```json',
+    JSON.stringify(elems),
+    '```',
+    '',
+    'Return ONLY a raw JSON object (no prose, no markdown fences):',
+    '{ "state": "prejoin" | "waiting-room" | "in-meeting" | "error" | "unknown",',
+    '  "reason": "<one short sentence>" }',
+  ].join('\n');
+
+/**
+ * Ask Claude which join-lifecycle screen the page is currently showing. This
+ * is a relatively expensive call (Bedrock + screenshot), so callers should use
+ * it only as a fallback when their fast CSS heuristics are inconclusive — not
+ * on every poll iteration. Returns null when the resolver is disabled or the
+ * model call fails, so callers can fall back to their heuristic verdict.
+ */
+export async function classifyJoinState(
+  page: Page,
+  opts: { platform: Platform; useScreenshot?: boolean },
+): Promise<JoinStateResult | null> {
+  if (RESOLVER_DISABLED) return null;
+  try {
+    const url = page.url();
+    const elems = await snapshotInteractiveElements(page);
+    // DOM-only by default. "Which join screen are we on?" is answerable from
+    // the interactive-element snapshot (an in-meeting toolbar with Leave/Mute/
+    // Participants is unmistakable in the DOM), so we skip the screenshot to
+    // save CPU (PNG encode in a headed browser) and Bedrock vision tokens —
+    // this runs every ~30s during the admission wait. Opt in explicitly when
+    // a caller genuinely needs pixels.
+    const screenshot = opts.useScreenshot ? await captureScreenshot(page) : null;
+    const text = await invokeClaude(
+      JOIN_STATE_PROMPT(opts.platform, url, elems),
+      screenshot,
+    );
+    const json = extractJson(text);
+    if (!json || !json.state) return null;
+    const valid: JoinState[] = [
+      'prejoin',
+      'waiting-room',
+      'in-meeting',
+      'error',
+      'unknown',
+    ];
+    const state = json.state as JoinState;
+    if (!valid.includes(state)) return null;
+    return {
+      state,
+      reason: typeof json.reason === 'string' ? json.reason : '',
+    };
+  } catch (err) {
+    console.error('[ai-dom-resolver] classifyJoinState failed:', err);
+    return null;
   }
 }
 

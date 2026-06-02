@@ -2,6 +2,14 @@
 
 echo "=== LMA Virtual Participant Startup ==="
 
+# Identify exactly which container image this task is running (build date +
+# git commit), so logs make it obvious whether the expected code is deployed.
+if [ -f /srv/build-info.json ]; then
+    echo "=== VP build: $(cat /srv/build-info.json) ==="
+else
+    echo "=== VP build: (no build-info.json) ==="
+fi
+
 # Push BOOTING status before Node starts so the UI shows progress during cold-start.
 push_booting_status() {
     if [ -z "$VIRTUAL_PARTICIPANT_ID" ] || [ -z "$VP_TABLE_NAME" ]; then

@@ -1,6 +1,5 @@
-import { Page, ConsoleMessage, ElementHandle } from 'puppeteer-core';
-import { createCursor, GhostCursor } from 'ghost-cursor';
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo } from './details.js';
+import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
+import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
@@ -8,12 +7,13 @@ import {
     findElementWithFallback,
     isResolverEnabled,
     scrollIntoViewAndClick,
+    classifyJoinState,
 } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { fetchZoomCredentials, loginToZoom, dismissPostLoginInterstitials } from './zoom-login.js';
 
 // Zoom's audio/video toggles use SVG icons inside a clickable <button>.
-// SVGs aren't directly clickable in Puppeteer, so we walk up to the nearest
+// SVGs aren't reliable click targets, so we walk up to the nearest
 // clickable ancestor before clicking.
 async function clickClickableAncestor(element: ElementHandle<Element>): Promise<void> {
     await element.evaluate((el) => {
@@ -23,29 +23,80 @@ async function clickClickableAncestor(element: ElementHandle<Element>): Promise<
     });
 }
 
-// Prefer ghost-cursor for the meaningful UX-style clicks (Join, Sign In,
-// Skip-this-step) where cursor pathing is a bot-detection signal. Falls back
-// to a plain element click if ghost-cursor errors. Audio/video SVG toggles
-// stay on clickClickableAncestor since ghost-cursor expects a clickable
-// element directly under the cursor.
+// Meaningful UX-style clicks (Join, Sign In, Skip-this-step). force:true skips
+// Playwright's "covered by another element" actionability check (Zoom often
+// floats a transient overlay over the Join/chat buttons). force:true does NOT
+// bypass the viewport check, though — when Zoom opens a transient window (e.g.
+// the whiteboard dashboard) it can push a toolbar button out of the viewport,
+// and a positional click then throws "Element is outside of the viewport". So
+// on any click failure we fall back to a DOM-level click via evaluate, which
+// scrolls the element into view and dispatches click() directly — no viewport
+// or actionability constraint.
 async function humanClick(
-    cursor: GhostCursor | null,
     page: Page,
     target: string | ElementHandle<Element>,
 ): Promise<void> {
-    if (cursor) {
-        try {
-            await cursor.click(target as any);
-            return;
-        } catch (err) {
-            console.warn('[zoom] ghost-cursor click failed, falling back:', err);
+    const handle: ElementHandle<Element> | null =
+        typeof target === 'string' ? await page.$(target) : target;
+    try {
+        if (typeof target === 'string') {
+            await page.click(target, { force: true });
+        } else {
+            await target.click({ force: true });
         }
+    } catch (err) {
+        // Positional click failed (commonly off-viewport). Fall back to a
+        // synthetic DOM click that ignores viewport/overlay constraints.
+        if (!handle) throw err;
+        await handle.evaluate((el: Element) => {
+            const t = (el.closest('button, [role="button"], a') as HTMLElement | null) || (el as HTMLElement);
+            t.scrollIntoView({ block: 'center', inline: 'center' });
+            t.click();
+        });
     }
-    if (typeof target === 'string') {
-        const handle = await page.$(target);
-        if (handle) await handle.click();
-    } else {
-        await target.click();
+}
+
+// Type into a (possibly overlay-covered) input. Playwright's ElementHandle
+// .type() runs an actionability/pointer check that fails when Zoom floats a
+// transient overlay over the prejoin form. Focus the element directly in the
+// DOM (no actionability check), then type via the keyboard with a small
+// per-keystroke delay so input lands reliably in Zoom's SPA fields.
+async function humanType(
+    page: Page,
+    element: ElementHandle<Element>,
+    text: string,
+): Promise<void> {
+    await element.evaluate((el) => (el as HTMLElement).focus());
+    await page.keyboard.type(text, { delay: 50 + Math.floor(Math.random() * 70) });
+}
+
+// Run a page.evaluate with a wall-clock timeout. A CDP evaluate can hang
+// indefinitely (page mid-navigation, execution context destroyed, renderer
+// under load) — observed freezing the whole join sequence at the post-join
+// popup-handler install, so the VP joined the room but never opened chat /
+// posted the intro / went ACTIVE. On timeout this resolves to `fallback`
+// (default undefined) and logs, so the join sequence keeps moving rather than
+// blocking forever. Use for non-critical setup evaluates in the join path.
+async function safeEvaluate<T>(
+    page: Page,
+    label: string,
+    fn: () => T | Promise<T>,
+    ms = 8000,
+    fallback?: T,
+): Promise<T | undefined> {
+    let to: NodeJS.Timeout | undefined;
+    try {
+        return await Promise.race<T>([
+            page.evaluate(fn),
+            new Promise<T>((_, reject) => {
+                to = setTimeout(() => reject(new Error(`evaluate "${label}" timed out after ${ms}ms`)), ms);
+            }),
+        ]);
+    } catch (e: any) {
+        console.warn(`[zoom] safeEvaluate(${label}) failed/timed out: ${e?.message || e}`);
+        return fallback;
+    } finally {
+        if (to) clearTimeout(to);
     }
 }
 
@@ -98,13 +149,346 @@ export default class Zoom {
     // The AI-driven dialog watchdog logic is shared across all platform
     // handlers and lives in dialog-watchdog.ts. This thin wrapper preserves
     // the per-instance call signature and lets us also start the watchdog
-    // before the join completes (so bot-detection / consent dialogs that
+    // before the join completes (so verification / consent dialogs that
     // block the prejoin/waiting-room are caught and escalated to MANUAL).
     private startUnknownDialogWatchdog(page: Page): void {
         startDialogWatchdog(page, { platform: 'ZOOM' });
     }
 
+    /**
+     * Wait for the Zoom prejoin form to settle before we fill it. After a
+     * manual sign-in (e.g. the user solved a reCAPTCHA in VNC), Zoom bounces
+     * the page through several redirects (app.zoom.us/signin → /wc/<id>/join)
+     * and re-renders the prejoin form more than once. Filling the passcode
+     * into a transient form that then re-mounts silently loses the input and
+     * the VP sits unadmitted until timeout. Poll until a prejoin control
+     * (passcode, name, or Join button) is visible AND the URL has been stable
+     * briefly. Returns true if a prejoin control appeared, false on timeout.
+     */
+    private async waitForPrejoinReady(page: Page, timeoutMs = 30000): Promise<boolean> {
+        const deadline = Date.now() + timeoutMs;
+        let lastUrl = '';
+        let stableSince = Date.now();
+        while (Date.now() < deadline) {
+            let url = lastUrl;
+            try {
+                url = page.url();
+            } catch {
+                await new Promise((r) => setTimeout(r, 300));
+                continue;
+            }
+            if (url !== lastUrl) {
+                lastUrl = url;
+                stableSince = Date.now();
+            }
+            // A prejoin control present + URL stable for ~1.2s = settled.
+            const hasControl = await page
+                .evaluate(() => {
+                    const sels = [
+                        '#input-for-pwd',
+                        '#input-for-name',
+                        'button.preview-join-button',
+                        'button.zm-btn.preview-join-button',
+                    ];
+                    for (const s of sels) {
+                        const el = document.querySelector(s) as HTMLElement | null;
+                        if (el) {
+                            const r = el.getBoundingClientRect();
+                            if (r.width > 0 && r.height > 0) return true;
+                        }
+                    }
+                    // Already in-meeting? Any in-meeting chrome counts as
+                    // "ready" (no prejoin to wait for).
+                    return !!document.querySelector(
+                        '.video-avatar__avatar, [class*="footer-button"], footer.footer, [class*="meeting-client"]',
+                    );
+                })
+                .catch(() => false);
+            if (hasControl && Date.now() - stableSince > 1200) {
+                console.log(`[zoom] prejoin settled at ${url}`);
+                return true;
+            }
+            await new Promise((r) => setTimeout(r, 300));
+        }
+        console.warn(`[zoom] prejoin did not settle within ${timeoutMs}ms (at ${(() => { try { return page.url(); } catch { return '?'; } })()}); proceeding anyway`);
+        return false;
+    }
+
+    /**
+     * Robust "are we inside the meeting?" check. Zoom's web client UI changes
+     * its class names across versions, so relying on a single selector (the
+     * old `.video-avatar__avatar`) is fragile — when Zoom Workplace stopped
+     * rendering that exact class, the VP joined but the admission poll never
+     * saw it and sat at "Waiting." forever. Check a broad set of in-meeting
+     * signals (footer toolbar, leave/audio/video controls, participants/chat
+     * buttons, the speaker/gallery video containers) AND that prejoin controls
+     * are gone. Any positive in-meeting signal counts.
+     */
+    private async isInMeeting(page: Page): Promise<boolean> {
+        return page
+            .evaluate(() => {
+                // Still on prejoin? Then definitely not in-meeting.
+                const onPrejoin =
+                    document.querySelector('#input-for-pwd') ||
+                    document.querySelector('button.preview-join-button, button.zm-btn.preview-join-button');
+                if (onPrejoin) return false;
+
+                const visible = (sel: string): boolean => {
+                    const el = document.querySelector(sel) as HTMLElement | null;
+                    if (!el) return false;
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                };
+                const inMeetingSignals = [
+                    '.video-avatar__avatar',                 // legacy avatar tile
+                    'footer.footer',                          // meeting footer bar
+                    '[class*="footer-button"]',               // any footer control
+                    '#foot-bar',
+                    'button[aria-label*="audio" i]',          // mute/unmute
+                    'button[aria-label*="mute" i]',
+                    'button[aria-label*="video" i]',          // start/stop video
+                    'button[aria-label*="participant" i]',    // participants panel
+                    'button[aria-label*="chat" i]',           // chat panel
+                    'button[aria-label*="leave" i]',          // leave button
+                    'button[aria-label*="End" i]',
+                    '[class*="meeting-client"]',
+                    '[class*="speaker-view"]',
+                    '[class*="gallery-video"]',
+                    '[class*="sharee-container"]',
+                ];
+                return inMeetingSignals.some(visible);
+            })
+            .catch(() => false);
+    }
+
+    /** True once we've left the prejoin screen (join/passcode controls gone,
+     *  or any in-meeting signal present). */
+    private async hasLeftPrejoin(page: Page): Promise<boolean> {
+        return page
+            .evaluate(() => {
+                const join = document.querySelector('button.preview-join-button, button.zm-btn.preview-join-button');
+                const pwd = document.querySelector('#input-for-pwd');
+                if (!join && !pwd) return true;
+                // Or in-meeting chrome appeared even while a control lingers.
+                return !!document.querySelector('[class*="footer-button"], footer.footer, [class*="meeting-client"]');
+            })
+            .catch(() => false);
+    }
+
+    /**
+     * After admission, make sure the in-meeting camera is actually ON when the
+     * Simli avatar is connected. The prejoin "turn video on" toggle frequently
+     * does NOT survive the transition into the meeting — Zoom resets the camera
+     * on admission (especially after a waiting room or a slow join), so the VP
+     * lands in-meeting with video OFF and the avatar never shows. The prejoin
+     * state can't be trusted; the only reliable signal is the in-meeting toolbar
+     * itself. Poll the in-meeting video control, and if it reads "Start Video"
+     * (camera off), click it to turn the avatar camera on. Re-checks for a while
+     * because the toolbar takes a moment to render after admission, and Zoom can
+     * flip the state again as media pipelines settle. Best-effort and silent on
+     * failure — video is not worth failing a joined meeting over.
+     */
+    // Read the in-meeting camera state. Zoom's toolbar has SEVERAL buttons
+    // whose aria-label contains "video" (Start/Stop Video, video settings
+    // caret, "View" layout, etc.), so matching the first one misreads the
+    // state. Scan ALL candidate controls and look for the specific
+    // "start/stop ... video" verb (svg-class fallback). The first call dumps
+    // the real candidate markup to the logs once. Returns 'off' | 'on' | 'unknown'.
+    private videoCandidatesLogged = false;
+    private async readInMeetingVideoState(page: Page): Promise<'off' | 'on' | 'unknown'> {
+        const doLog = !this.videoCandidatesLogged;
+        this.videoCandidatesLogged = true;
+        return page
+            .evaluate((logIt: boolean) => {
+                const btns = Array.from(
+                    document.querySelectorAll('button[aria-label], [role="button"][aria-label]'),
+                ) as HTMLElement[];
+                const cands = btns
+                    .map((b) => ({
+                        label: (b.getAttribute('aria-label') || '').toLowerCase(),
+                        cls: (b.className?.toString?.() || '').toLowerCase(),
+                        html: (b.querySelector('svg')?.getAttribute('class') || '').toLowerCase(),
+                    }))
+                    .filter((c) => c.label.includes('video') || c.html.includes('video'));
+                if (logIt && cands.length) {
+                    console.log('[LMA] video-button candidates: ' + JSON.stringify(cands.slice(0, 6)));
+                }
+                for (const c of cands) {
+                    if (/start[\s\w]*video/.test(c.label)) return 'off';
+                    if (/stop[\s\w]*video/.test(c.label)) return 'on';
+                }
+                for (const c of cands) {
+                    if (c.html.includes('videooff') || c.html.includes('video-off')) return 'off';
+                    if (c.html.includes('videoon') || c.html.includes('video-on')) return 'on';
+                }
+                return 'unknown';
+            }, doLog)
+            .catch(() => 'unknown' as const);
+    }
+
+    // Click Zoom's in-meeting "Start Video" control once (avatar camera on).
+    private async clickStartVideo(page: Page): Promise<void> {
+        const found = await findElementWithFallback(
+            page,
+            ['button[aria-label*="start my video" i]', 'button[aria-label*="start video" i]'],
+            {
+                intent: 'Zoom in-meeting toolbar button that turns the camera ON (its label says "Start Video" / "start my video"). NOT video settings, NOT the layout/View button.',
+                platform: 'ZOOM',
+                step: 'zoom.meeting.startVideo',
+            },
+            { maxRetries: 3, delayMs: 500 },
+        );
+        if (found) {
+            await humanClick(page, found.element);
+            await simliAvatar.connectStreamToMeetingPage(page).catch(() => null);
+        } else {
+            console.warn('[zoom] Could not locate a Start Video control this attempt.');
+        }
+    }
+
+    // Initial post-admission confirmation that the avatar camera is on.
+    // Only ever clicks on a CONFIDENT 'off' reading — never on 'unknown'. An
+    // earlier version clicked on 'unknown' too, which (when our heuristic
+    // couldn't read the toolbar) blindly toggled the VP's own video and
+    // shuffled the Zoom layout, breaking the attendee-counter / speaker-tile
+    // DOM the monitors depend on. On cloakbrowser the camera reliably stays on
+    // after the prejoin toggle, so a confident-only check is sufficient.
+    private async ensureInMeetingVideoOn(page: Page): Promise<void> {
+        if (!simliAvatar.isConnected()) return;
+        const deadline = Date.now() + 12000;
+        let clicks = 0;
+        while (Date.now() < deadline) {
+            const state = await this.readInMeetingVideoState(page);
+            if (state === 'on') {
+                console.log('[zoom] In-meeting video is ON (avatar camera active).');
+                return;
+            }
+            if (state === 'off' && clicks < 2) {
+                clicks += 1;
+                console.log(`[zoom] In-meeting video is OFF with avatar connected — clicking Start Video (attempt ${clicks}).`);
+                await this.clickStartVideo(page);
+                await new Promise((r) => setTimeout(r, 2000));
+                continue;
+            }
+            // 'unknown' → do NOT click (can't confirm off; a blind click would
+            // toggle video off and disrupt the meeting layout). Just wait.
+            await new Promise((r) => setTimeout(r, 1000));
+        }
+    }
+
+    /**
+     * Long-running camera watchdog. Zoom's web client periodically throws
+     * "Something went wrong" and turns the VP's camera OFF mid-meeting
+     * (observed on 2-vCPU hosts under encoder pressure, and intermittently
+     * elsewhere) — the avatar then disappears even though the Simli session +
+     * loopback bridge stay perfectly healthy (canvas keeps drawing, bridge
+     * stays connected). The fix is the same thing a human does in VNC:
+     * re-click "Start Video". This polls every ~10s and, whenever Simli is
+     * connected but the in-meeting camera reads OFF, re-starts it. Cheap (one
+     * DOM scan per tick) and best-effort; runs until the page closes. This is
+     * the Zoom-UI counterpart to Simli's own session reconnect watchdog —
+     * Simli self-heals its session; this self-heals Zoom's camera toggle.
+     */
+    private startCameraWatchdog(page: Page): void {
+        if (!simliAvatar.isSimliEnabled()) return;
+        const POLL_MS = 10_000;
+        let consecutiveOff = 0;
+        const timer = setInterval(async () => {
+            if (page.isClosed()) {
+                clearInterval(timer);
+                return;
+            }
+            if (!simliAvatar.isConnected()) return;
+            try {
+                const state = await this.readInMeetingVideoState(page);
+                if (state === 'off') {
+                    // Require two consecutive confident 'off' reads before
+                    // acting, so a transient toolbar re-render can't trigger a
+                    // spurious click that would disrupt the meeting layout.
+                    consecutiveOff += 1;
+                    if (consecutiveOff >= 2) {
+                        console.warn('[camera-watchdog] in-meeting video OFF (x2) with avatar connected — re-clicking Start Video');
+                        await this.clickStartVideo(page);
+                        consecutiveOff = 0;
+                    }
+                } else {
+                    consecutiveOff = 0;
+                }
+            } catch (err) {
+                /* transient; try next tick */
+            }
+        }, POLL_MS);
+    }
+
+    /** True when the chat panel's message input is present and visible. */
+    private async chatInputVisible(page: Page): Promise<boolean> {
+        return page
+            .evaluate(() => {
+                const el = document.querySelector(
+                    'p[data-placeholder="Type message here ..."], div[contenteditable="true"][aria-label*="message" i]',
+                ) as HTMLElement | null;
+                if (!el) return false;
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && r.height > 0;
+            })
+            .catch(() => false);
+    }
+
+    /**
+     * Open the in-meeting chat panel — idempotently. Zoom's toolbar button is a
+     * TOGGLE: when the panel is open its aria-label flips to "close the chat
+     * panel", so a naive "click the chat button" (especially via AI fallback,
+     * which resolves whatever chat-ish button exists) will CLOSE an already-open
+     * panel. We therefore (a) no-op if the input is already visible, and (b)
+     * only ever click a button whose label is specifically "open the chat
+     * panel" — never a "close" button. One click is enough on cloakbrowser's
+     * Chromium; no verify-retry loop (that loop caused an open/close war).
+     */
+    private async openChatPanel(page: Page): Promise<boolean> {
+        // Idempotent: if the chat input is already visible the panel is open —
+        // do NOT click (the toolbar button is a toggle; clicking would close it).
+        if (await this.chatInputVisible(page)) {
+            return true;
+        }
+        // Otherwise locate and click the chat toolbar button ONCE (matches the
+        // proven base behavior — findElementWithFallback finds it on the primary
+        // selector, or via AI when Zoom renames it). No retry loop: the loop is
+        // what caused the open/close toggle war when AI resolved a "close"
+        // button on an already-open panel. The pre-check above prevents that.
+        const chatButtonResult = await findElementWithFallback(
+            page,
+            ['button[aria-label="open the chat panel"]'],
+            {
+                intent: 'Zoom toolbar button that OPENS the in-meeting chat panel (label "open the chat panel"). Not the close button.',
+                platform: 'ZOOM',
+                step: 'zoom.join.chatButton',
+            },
+            { maxRetries: 10, delayMs: 500 },
+        );
+        if (!chatButtonResult) {
+            console.log('Could not locate chat panel button — continuing without chat');
+            return false;
+        }
+        console.log('Opening chat panel.');
+        await humanClick(page, chatButtonResult.element);
+        // brief settle for the panel to render its input
+        const until = Date.now() + 3000;
+        while (Date.now() < until) {
+            if (await this.chatInputVisible(page)) return true;
+            await new Promise((r) => setTimeout(r, 300));
+        }
+        return this.chatInputVisible(page);
+    }
+
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
+        // Make sure the panel is open, but never toggle a panel that's already
+        // open (see openChatPanel — the toolbar button is a toggle).
+        if (!(await this.chatInputVisible(page))) {
+            await this.openChatPanel(page);
+        }
+        // openChatPanel already confirmed the input is visible, so this resolves
+        // on the first primary try in the common case — keep the retry budget
+        // small so we don't add seconds before posting the intro.
         const found = await findElementWithFallback(
             page,
             ['p[data-placeholder="Type message here ..."]'],
@@ -113,20 +497,52 @@ export default class Zoom {
                 platform: 'ZOOM',
                 step: 'zoom.chat.input',
             },
-            { maxRetries: 10, delayMs: 500 },
+            { maxRetries: 4, delayMs: 300 },
         );
         if (!found) {
             console.log('Could not locate chat message input — aborting sendMessages');
             return;
         }
         for (const message of messages) {
-            await new Promise(resolve => setTimeout(resolve, 10));
-            await found.element.type(message);
-            await found.element.press('Enter');
+            // Insert the whole message in ONE shot rather than simulating
+            // keystrokes. page.keyboard.type() sends one key at a time over CDP
+            // — even with delay:0 a ~250-char intro took ~50s on Zoom's
+            // contenteditable. The chat box isn't bot-detected, so we focus the
+            // element and use execCommand('insertText'), which fires the proper
+            // beforeinput/input events Zoom's editor (ProseMirror) listens for,
+            // populating it instantly. Enter still sends.
+            const inserted = await found.element.evaluate((el, text) => {
+                const node = el as HTMLElement;
+                node.focus();
+                // Place caret in the editor, then insert the text as a single
+                // input event (ProseMirror/contenteditable-friendly).
+                try {
+                    const sel = window.getSelection();
+                    if (sel) {
+                        sel.removeAllRanges();
+                        const range = document.createRange();
+                        range.selectNodeContents(node);
+                        range.collapse(false);
+                        sel.addRange(range);
+                    }
+                } catch { /* best-effort caret placement */ }
+                // execCommand is deprecated but still the most reliable way to
+                // drive a contenteditable's input pipeline synchronously.
+                const ok = document.execCommand('insertText', false, text);
+                return ok;
+            }, message).catch(() => false);
+            if (!inserted) {
+                // Fallback to keystroke typing if execCommand was blocked.
+                await found.element.evaluate((el) => (el as HTMLElement).focus());
+                await page.keyboard.type(message, { delay: 0 });
+            }
+            await page.keyboard.press('Enter');
+            await new Promise((r) => setTimeout(r, 50));
         }
     }
 
-    public async initialize(page: Page): Promise<ExitInfo> {
+    public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
+        const prepareAvatar = opts.prepareAvatar ?? (async () => {});
 
         page.on('console', (message: ConsoleMessage) => {
             const type = message.type();
@@ -152,20 +568,44 @@ export default class Zoom {
             console.error('Page Error:', error);
         });
 
-        page.on('error', (error: unknown) => {
-            console.error('Browser Error:', error);
+        page.on('crash', () => {
+            // Renderer crash (usually OOM). If this happens after we've joined
+            // and are sitting in the wait-for-meeting-end race, requestEnd
+            // unblocks it cleanly; before join, index.ts's crash latch wins the
+            // initialize() race. Either way we never hang on a dead page.
+            console.error('Browser Error: page crashed (renderer crash) — ending meeting');
+            this.requestEnd({ reason: 'page-closed', trigger: 'renderer-crash' });
         });
+
+        // Push a human-readable sub-step into the JOINING status so the long
+        // join span (sign-in → navigate → prejoin → admission → chat) doesn't
+        // look frozen in the UI. Best-effort, no-op without a vpId.
+        const substep = async (message: string): Promise<void> => {
+            if (!details.invite.virtualParticipantId) return;
+            try {
+                const { createStatusManager } = await import('./status-manager.js');
+                await createStatusManager(details.invite.virtualParticipantId).setJoiningSubstep(message);
+            } catch {
+                /* best-effort progress */
+            }
+        };
 
         // Optional: sign in to Zoom first using user-provided credentials.
         // When the user has stored Zoom credentials in LMA Settings, the
         // launching state machine plumbs the secret name into this env var.
-        // A signed-in session avoids many bot-detection blocks ("We detected
-        // you may be a bot. ... sign in to join the meeting") and lets the
-        // VP join meetings that disallow guests.
+        // A signed-in session joins far more reliably (the "We detected
+        // you may be a bot. ... sign in to join the meeting" guest block
+        // becomes rare) and lets the VP join meetings that disallow guests.
         const zoomCredentialsSecretName = (process.env.ZOOM_CREDENTIALS_SECRET_NAME || '').trim();
         let signedInToZoom = false;
         if (zoomCredentialsSecretName) {
+            // Phase: SIGNING_IN. Kept distinct from JOINING (below) in the logs
+            // because it's the CPU-heavy phase (Bedrock + Zoom SPA hydration) and
+            // the one that historically stalls; the Simli avatar is deliberately
+            // NOT initialized yet so it doesn't contend for CPU here.
+            console.log('[phase] SIGNING_IN — authenticating to Zoom before join');
             console.log(`Zoom credentials provided (secret: ${zoomCredentialsSecretName}); signing in before join.`);
+            await substep('Signing in to Zoom…');
             try {
                 const creds = await fetchZoomCredentials(zoomCredentialsSecretName);
                 const loginResult = await loginToZoom(page, creds);
@@ -179,18 +619,45 @@ export default class Zoom {
                     // manual-required: user must finish sign-in (CAPTCHA, 2FA,
                     // SSO, or — when the resolver flat-out couldn't find the
                     // form — sign in by hand). Escalate to the UI so we don't
-                    // silently degrade to guest join (which would trip
-                    // bot-detection in many meetings, since the user
-                    // explicitly opted into credentialled login).
-                    console.warn(`[zoom] Sign-in needs manual action: ${loginResult.detail || ''} — escalating to user via VNC`);
+                    // silently degrade to guest join (which joins far less
+                    // reliably, and the user explicitly opted into
+                    // credentialled login).
+                    console.warn(`[zoom] Sign-in needs manual action (reason=${loginResult.manualReason || 'generic'}): ${loginResult.detail || ''} — escalating to user via VNC`);
+
+                    // Build a clean, user-facing message by category. Never
+                    // surface internal selector/loop detail (e.g. "action
+                    // continue on #js_btn_login did not advance").
+                    const manualMessage = (() => {
+                        switch (loginResult.manualReason) {
+                            case 'captcha':
+                                return 'Zoom needs you to sign in manually. Open the LMA viewer and sign in to Zoom again (there is usually no puzzle — it just needs a human-driven sign-in). The participant will join automatically once you\'re signed in. If it keeps asking, open zoom.us/signin in your own browser and sign OUT first — being signed in to the same Zoom account in multiple places at once can cause this.';
+                            case 'otp-2fa':
+                                return 'Zoom is asking for a one-time / 2FA verification code. Open the LMA viewer and enter the code to finish signing in — the participant will join automatically afterward.';
+                            case 'sso':
+                                return 'Zoom is redirecting to your single sign-on (SSO) provider. Open the LMA viewer and complete the SSO sign-in — the participant will join automatically afterward.';
+                            default:
+                                return 'Zoom needs you to finish signing in manually. Open the LMA viewer and complete the Zoom sign-in — the participant will join automatically afterward.';
+                        }
+                    })();
+
+                    // For a CAPTCHA, reload the sign-in page so the human gets
+                    // a clean, fully-rendered form to work with rather than the
+                    // half-interacted state the automation left behind.
+                    if (loginResult.manualReason === 'captcha') {
+                        try {
+                            await page.goto('https://zoom.us/signin', { waitUntil: 'domcontentloaded' });
+                            console.log('[zoom] Reloaded sign-in page for clean manual CAPTCHA sign-in.');
+                        } catch (e) {
+                            console.warn('[zoom] Could not reload sign-in page for manual login (non-fatal).');
+                        }
+                    }
+
                     if (details.invite.virtualParticipantId) {
                         const { createStatusManager } = await import('./status-manager.js');
                         const statusManager = createStatusManager(details.invite.virtualParticipantId);
                         await statusManager.setManualActionRequired(
                             'LOGIN',
-                            loginResult.detail
-                                ? `Zoom sign-in needs your help: ${loginResult.detail}. Open the LMA viewer to complete sign-in.`
-                                : 'Zoom sign-in needs your help. Open the LMA viewer to complete sign-in.',
+                            manualMessage,
                             300,
                         );
                         // Give the user up to 5 minutes to finish the sign-in
@@ -213,7 +680,7 @@ export default class Zoom {
                                 const url = page.url();
                                 const onSignin = url.includes('/signin') || url.includes('/sso');
                                 if (!onSignin) {
-                                    const cookies = await page.cookies('https://zoom.us', 'https://app.zoom.us');
+                                    const cookies = await page.context().cookies(['https://zoom.us', 'https://app.zoom.us']);
                                     if (cookies.some((c) => wantedCookies.has(c.name) && c.value)) {
                                         signInOK = true;
                                         break;
@@ -235,16 +702,16 @@ export default class Zoom {
                             // the user see what happened. Mark as FAILED with
                             // a clear errorMessage so the UI / MCP poller
                             // surfaces the reason instead of silently joining
-                            // as guest (which trips bot detection).
+                            // as guest (which joins far less reliably).
                             console.warn('[zoom] User did not complete sign-in within 5 min — failing rather than joining as guest');
                             await statusManager.setFailed(
                                 'Zoom sign-in not completed in time. Open the LMA viewer next time the VP starts and complete the sign-in there. Alternatively, sign in to Zoom on your laptop with this account at least once before launching LMA so the trusted-device cookie is established.',
                             );
                         }
                         if (!signInOK) {
-                            // Hard-stop: avoid the bot-detection dialog by
-                            // not navigating to the meeting URL at all.
-                            throw new Error('Zoom sign-in not completed; aborting join to avoid bot detection');
+                            // Hard-stop: don't navigate to the meeting URL at
+                            // all — a guest join here would be unreliable.
+                            throw new Error('Zoom sign-in not completed; aborting join');
                         }
                     }
                 }
@@ -259,12 +726,12 @@ export default class Zoom {
                     // the underlying reason already on it.
                     throw err;
                 }
-                // Any other unexpected error during sign-in (e.g. Puppeteer
+                // Any other unexpected error during sign-in (e.g.
                 // 'Execution context was destroyed' from a navigation racing
-                // a page.evaluate) used to fall back to guest, which then
-                // tripped Zoom's bot detection. The user explicitly opted
-                // into stored-credential login, so guest-fallback violates
-                // their intent. Mark FAILED and abort instead.
+                // a page.evaluate) used to fall back to guest, which joins
+                // far less reliably. The user explicitly opted into
+                // stored-credential login, so guest-fallback violates their
+                // intent. Mark FAILED and abort instead.
                 console.error('[zoom] Sign-in attempt threw unexpectedly — failing rather than joining as guest:', err);
                 if (details.invite.virtualParticipantId) {
                     const { createStatusManager } = await import('./status-manager.js');
@@ -278,21 +745,16 @@ export default class Zoom {
             }
         }
 
+        // Phase: JOINING. Sign-in (the CPU-heavy phase) is done. NOW bring up
+        // the Simli avatar — its background render + ~20fps JPEG encode load
+        // (~1800/2048 CPU units) is acceptable here and the avatar must be
+        // ready before the prejoin camera toggle below captures the camera.
+        console.log('[phase] JOINING — navigating to the meeting and joining');
+        await substep('Entering the meeting room…');
+        await prepareAvatar();
+
         console.log('Getting Zoom meeting link.');
         await page.goto(`https://zoom.us/wc/${details.invite.meetingId}/join`);
-
-        // Initialize ghost-cursor for human-like cursor pathing on the
-        // meaningful UX clicks below (Join, Sign-In, etc.). Bezier-curve
-        // movement reduces a bot-detection signal that simple page.click()
-        // misses. Audio/video SVG toggles stay on clickClickableAncestor
-        // (ghost-cursor expects a clickable element directly under the cursor).
-        let cursor: GhostCursor | null = null;
-        try {
-            cursor = createCursor(page as any, undefined, true);
-            console.log('[zoom] ghost-cursor initialized.');
-        } catch (err) {
-            console.warn('[zoom] ghost-cursor unavailable, falling back to plain clicks:', err);
-        }
 
         // After arriving at the meeting URL, Zoom may redirect to a
         // post-login binding/upsell page (passkey, phone, SMS, "stay
@@ -322,27 +784,49 @@ export default class Zoom {
                     console.error('The host requires authentication on the commercial Zoom platform.');
                     console.error('This meeting requires signing in with a commercial Zoom account.');
                     enterpriseLogin = true;
-                    
-                    // Notify frontend that manual action is required
-                    const { details } = await import('./details.js');
-                    if (details.invite.virtualParticipantId) {
-                        const { createStatusManager } = await import('./status-manager.js');
-                        const statusManager = createStatusManager(details.invite.virtualParticipantId);
-                        await statusManager.setManualActionRequired(
+
+                    // Notify frontend that manual action is required.
+                    const { createStatusManager } = await import('./status-manager.js');
+                    const sm = details.invite.virtualParticipantId
+                        ? createStatusManager(details.invite.virtualParticipantId)
+                        : null;
+                    if (sm) {
+                        await sm.setManualActionRequired(
                             'LOGIN',
                             'Enterprise Zoom authentication required. Please sign in using the VNC viewer.',
-                            120
+                            120,
                         );
                     }
-                    
-                    await page.waitForSelector('.video-avatar__avatar', { timeout: 120000 }); // Give 2 minutes to login
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-                    
-                    // Clear manual action notification after successful login
-                    if (details.invite.virtualParticipantId) {
-                        const { createStatusManager } = await import('./status-manager.js');
-                        const statusManager = createStatusManager(details.invite.virtualParticipantId);
-                        await statusManager.clearManualAction();
+
+                    // Wait up to 2 min for the human to complete enterprise
+                    // login (avatar tile appears). ALWAYS clear the manual
+                    // action afterwards — on success AND on timeout — so the
+                    // UI never stays stuck on the "auth required" banner. On
+                    // timeout, fail cleanly as never-joined instead of
+                    // silently continuing into a prejoin flow that can't work.
+                    let enterpriseLoggedIn = false;
+                    const enterpriseDeadline = Date.now() + 120000;
+                    while (Date.now() < enterpriseDeadline) {
+                        if (page.isClosed()) break;
+                        if (await this.isInMeeting(page)) {
+                            enterpriseLoggedIn = true;
+                            break;
+                        }
+                        await new Promise((resolve) => setTimeout(resolve, 1500));
+                    }
+                    if (enterpriseLoggedIn) {
+                        await new Promise((resolve) => setTimeout(resolve, 5000));
+                    } else {
+                        console.warn('[zoom] Enterprise login not completed within 2 min.');
+                    }
+                    if (sm) {
+                        await sm.clearManualAction().catch(() => {});
+                    }
+                    if (!enterpriseLoggedIn) {
+                        return {
+                            reason: 'never-joined',
+                            trigger: 'enterprise-login-timeout',
+                        };
                     }
                 }
             }
@@ -352,26 +836,66 @@ export default class Zoom {
 
         // if they logged in with enterprise they won't need to put in name password etc so skip
         if (enterpriseLogin === false) {
-            // Handle meeting password if provided
+            // Wait for the prejoin form to settle. Critical after a manual
+            // sign-in (reCAPTCHA/2FA solved in VNC): Zoom redirects through
+            // app.zoom.us/signin → /wc/<id>/join and re-renders the form, so
+            // filling it too early loses the input. See waitForPrejoinReady.
+            await substep('Loading the meeting join screen…');
+            await this.waitForPrejoinReady(page);
+
+            // A non-empty meetingPassword doesn't guarantee Zoom renders
+            // #input-for-pwd — Personal Meeting Rooms and passcode-disabled
+            // meetings skip it. Probe (primary-only; the selector is
+            // stable) and proceed if absent rather than failing the join.
+            // Type, verify the value landed, and re-type once if not (the
+            // form can still re-mount under us right after settling).
             if (details.invite.meetingPassword) {
-                console.log('Typing meeting password.');
-                const passwordResult = await findElementWithFallback(
-                    page,
-                    ['#input-for-pwd'],
-                    {
-                        intent: 'Zoom meeting passcode input field',
-                        platform: 'ZOOM',
-                        step: 'zoom.join.password',
-                    },
-                    { maxRetries: 10, delayMs: 500 },
-                );
-                if (!passwordResult) {
-                    console.log('LMA Virtual Participant was unable to join the meeting.');
-                    throw new Error('Meeting not found or invalid meeting ID');
+                const findPwd = async (): Promise<ElementHandle<Element> | null> => {
+                    for (let attempt = 1; attempt <= 6; attempt++) {
+                        const h = await page.$('#input-for-pwd');
+                        if (h) {
+                            const box = await h.boundingBox().catch(() => null);
+                            if (box && box.width > 0 && box.height > 0) return h;
+                        }
+                        await new Promise((r) => setTimeout(r, 500));
+                    }
+                    return null;
+                };
+                let passwordHandle = await findPwd();
+                if (passwordHandle) {
+                    const pwd = details.invite.meetingPassword;
+                    let entered = false;
+                    for (let attempt = 1; attempt <= 2 && !entered; attempt++) {
+                        console.log(`Typing meeting password (attempt ${attempt}).`);
+                        await passwordHandle.evaluate((el: Element) => {
+                            const i = el as HTMLInputElement;
+                            i.focus();
+                            i.value = '';
+                        }).catch(() => {});
+                        await humanType(page, passwordHandle, pwd);
+                        const got = await passwordHandle
+                            .evaluate((el: Element) => (el as HTMLInputElement).value || '')
+                            .catch(() => '');
+                        if (got.length === pwd.length) {
+                            entered = true;
+                        } else {
+                            console.warn(
+                                `Passcode value mismatch (expected ${pwd.length} chars, got ${got.length}) — re-locating and retrying.`,
+                            );
+                            const fresh = await findPwd();
+                            if (!fresh) break;
+                            passwordHandle = fresh;
+                        }
+                    }
+                    if (!entered) {
+                        console.warn('Could not reliably enter meeting passcode after retries — continuing; Join may reject it.');
+                    }
+                } else {
+                    console.log('Meeting does not require a password — skipping password entry.');
                 }
-                await passwordResult.element.type(details.invite.meetingPassword, { delay: 50 + Math.floor(Math.random() * 70) });
             }
 
+            await substep('Setting up audio and video…');
             console.log('Checking audio button state with retry...');
             // Wait for audio button to appear (handles loading state)
             const audioResult = await this.waitForButtonWithRetry(
@@ -408,13 +932,40 @@ export default class Zoom {
             );
             
             if (videoResult && simliAvatar.isConnected()) {
-                // Simli avatar active - keep video ON so avatar shows as camera
+                // Simli avatar active - ensure video is ON, then force Zoom to
+                // (re-)acquire the camera so our getUserMedia override actually
+                // fires. The avatar reaches Zoom only when Zoom calls
+                // getUserMedia({video}); if the prejoin already shows video as
+                // "on", Zoom may never call it and the camera stays blank. A
+                // deliberate off→on toggle guarantees a fresh getUserMedia.
                 if (videoResult.selector === 'svg.SvgVideoOff') {
+                    // Currently off → single click turns it on (fresh getUserMedia).
                     console.log('Simli avatar active - clicking to turn video ON for avatar camera.');
                     await clickClickableAncestor(videoResult.element);
                 } else {
-                    console.log('Simli avatar active - video is already on, good.');
+                    // Currently on → toggle off then on to force a fresh
+                    // getUserMedia call that the override can intercept.
+                    console.log('Simli avatar active - video already on; toggling off→on to force camera (re)acquire.');
+                    await clickClickableAncestor(videoResult.element);
+                    await new Promise((r) => setTimeout(r, 800));
+                    const reVideo = await this.waitForButtonWithRetry(
+                        page,
+                        ['svg.SvgVideoOn', 'svg.SvgVideoOff'],
+                        'zoom.join.videoToggle',
+                        'Zoom join-screen camera toggle button (video on/off icon)',
+                        6,
+                        500,
+                    );
+                    if (reVideo && reVideo.selector === 'svg.SvgVideoOff') {
+                        await clickClickableAncestor(reVideo.element);
+                    } else if (reVideo) {
+                        // Already back on somehow — leave it on.
+                        console.log('Simli avatar active - video already back on after toggle.');
+                    }
                 }
+                // Eagerly connect the relay consumer + canvas in the meeting
+                // frames so the avatar feed is populated the moment Zoom pulls.
+                await simliAvatar.connectStreamToMeetingPage(page).catch(() => null);
             } else if (videoResult) {
                 if (videoResult.selector === 'svg.SvgVideoOn') {
                     console.log('Video is on, clicking to turn it off.');
@@ -426,19 +977,10 @@ export default class Zoom {
                 console.log('Warning: Could not find video button in either state after retries.');
             }
 
-            // Look for the prejoin name field and inspect its current value.
-            // Three possible states:
-            //   1. Field present + empty: Zoom's signed-in context didn't
-            //      auto-fill the name (happens on /wc/<id>/join?_x_zm_rtaid=...
-            //      redirects). Fill it ourselves.
-            //   2. Field present + already populated: signed-in account name
-            //      was carried over. Don't type into it (typing appends and
-            //      yields "Bob Strahan-LMALMA (user@…)"). Just click Join.
-            //   3. Field absent: not a prejoin step at all. Click Join /
-            //      press Enter to submit whatever form IS visible.
-            // Skipping name entry without checking led to an empty-name
-            // submission that Zoom silently rejected, leaving the VP stuck
-            // on the prejoin page until waitingTimeout.
+            // Always overwrite the prejoin display name with the scribe
+            // identity (a signed-in account otherwise pre-fills its own
+            // name). Clear before typing — typing alone appends, yielding
+            // e.g. "Bob Strahan-LMALMA (user@…)".
             const nameResult = await findElementWithFallback(
                 page,
                 ['#input-for-name'],
@@ -447,17 +989,29 @@ export default class Zoom {
                     platform: 'ZOOM',
                     step: 'zoom.join.name',
                 },
-                { maxRetries: signedInToZoom ? 3 : 10, delayMs: 500 },
+                { maxRetries: 6, delayMs: 500 },
             );
             if (nameResult) {
-                const currentValue = await nameResult.element.evaluate(
+                await nameResult.element.evaluate((el: Element) => {
+                    const i = el as HTMLInputElement;
+                    i.focus();
+                    i.value = '';
+                });
+                console.log(`Setting display name to scribe identity ("${details.scribeIdentity}").`);
+                await humanType(page, nameResult.element, details.scribeIdentity);
+                const got = await nameResult.element.evaluate(
                     (el: Element) => (el as HTMLInputElement).value || '',
                 );
-                if (currentValue.trim().length === 0) {
-                    console.log('Name field is empty — filling with scribe identity.');
-                    await nameResult.element.type(details.scribeIdentity, { delay: 50 + Math.floor(Math.random() * 70) });
-                } else {
-                    console.log(`Name field already populated ("${currentValue}") — leaving as-is.`);
+                if (got !== details.scribeIdentity) {
+                    console.warn(
+                        `Display-name value mismatch (expected "${details.scribeIdentity}", got "${got}") — clearing and re-typing.`,
+                    );
+                    await nameResult.element.evaluate((el: Element) => {
+                        const i = el as HTMLInputElement;
+                        i.focus();
+                        i.value = '';
+                    });
+                    await humanType(page, nameResult.element, details.scribeIdentity);
                 }
             } else if (!signedInToZoom) {
                 console.log('LMA Virtual Participant was unable to join the meeting.');
@@ -466,31 +1020,76 @@ export default class Zoom {
                 console.log('No prejoin name field on this page — skipping.');
             }
 
-            // Submit the prejoin form. Use the explicit Join button when we
-            // can find it; fall back to Enter on the name field or page.
-            const joinButtonResult = await findElementWithFallback(
-                page,
-                [
-                    'button.zm-btn.preview-join-button',
-                    'button.preview-join-button',
-                    'button[type="submit"].zm-btn',
-                ],
-                {
-                    intent: 'Zoom prejoin "Join" button that submits the meeting prejoin form',
-                    platform: 'ZOOM',
-                    step: 'zoom.join.submit',
-                },
-                { maxRetries: 10, delayMs: 500 },
-            );
-            if (joinButtonResult) {
-                console.log('Clicking Join button to enter the meeting.');
-                await humanClick(cursor, page, joinButtonResult.element);
-            } else if (nameResult) {
-                console.log('Could not locate Join button — pressing Enter on name field as fallback.');
-                await nameResult.element.press('Enter');
+            // Submit the prejoin form, then VERIFY we actually left it. A
+            // single click often silently no-ops when the passcode didn't
+            // register (e.g. it was typed into a form that re-mounted), and
+            // the VP then sits on the prejoin screen until waitingTimeout. So
+            // we click, check whether we advanced, and if not re-enter the
+            // passcode and re-click once before giving up to the admission
+            // poll (which the dialog-watchdog also covers).
+            const clickJoin = async (): Promise<void> => {
+                const joinButtonResult = await findElementWithFallback(
+                    page,
+                    [
+                        'button.zm-btn.preview-join-button',
+                        'button.preview-join-button',
+                        'button[type="submit"].zm-btn',
+                    ],
+                    {
+                        intent: 'Zoom prejoin "Join" button that submits the meeting prejoin form',
+                        platform: 'ZOOM',
+                        step: 'zoom.join.submit',
+                    },
+                    { maxRetries: 10, delayMs: 500 },
+                );
+                if (joinButtonResult) {
+                    console.log('Clicking Join button to enter the meeting.');
+                    await humanClick(page, joinButtonResult.element);
+                } else if (nameResult) {
+                    console.log('Could not locate Join button — pressing Enter on name field as fallback.');
+                    await nameResult.element.press('Enter').catch(() => {});
+                } else {
+                    console.log('Could not locate Join button or name field — pressing Enter on page.');
+                    await page.keyboard.press('Enter').catch(() => {});
+                }
+            };
+
+            await clickJoin();
+
+            // Did the click advance us past the prejoin form? Poll briefly.
+            const waitLeftPrejoin = async (ms: number): Promise<boolean> => {
+                const until = Date.now() + ms;
+                while (Date.now() < until) {
+                    if (await this.hasLeftPrejoin(page)) return true;
+                    await new Promise((r) => setTimeout(r, 500));
+                }
+                return false;
+            };
+
+            if (!(await waitLeftPrejoin(6000))) {
+                console.warn('Join did not advance the prejoin screen — re-entering passcode and retrying once.');
+                await substep('Re-attempting to join the meeting…');
+                // Re-enter passcode if the field is still there (it being
+                // present is itself the signal Join didn't take).
+                if (details.invite.meetingPassword) {
+                    const pwd2 = await page.$('#input-for-pwd');
+                    if (pwd2) {
+                        await pwd2.evaluate((el: Element) => {
+                            const i = el as HTMLInputElement;
+                            i.focus();
+                            i.value = '';
+                        }).catch(() => {});
+                        await humanType(page, pwd2, details.invite.meetingPassword);
+                    }
+                }
+                await clickJoin();
+                if (await waitLeftPrejoin(6000)) {
+                    console.log('Join succeeded on retry — left the prejoin screen.');
+                } else {
+                    console.warn('Still on prejoin after retry — handing off to admission poll / dialog-watchdog.');
+                }
             } else {
-                console.log('Could not locate Join button or name field — pressing Enter on page.');
-                await page.keyboard.press('Enter');
+                console.log('Left the prejoin screen — proceeding to admission wait.');
             }
         }
 
@@ -508,18 +1107,30 @@ export default class Zoom {
         }
 
         console.log('Waiting.');
+        await substep('Waiting to be admitted to the meeting…');
         // Poll for the avatar selector instead of a single waitForSelector
         // call so we can dynamically extend the timeout when the watchdog
         // has escalated to MANUAL_ACTION_REQUIRED. Otherwise the 5-min
         // waitingTimeout fires while the human is still trying to clear
-        // the bot-detection / captcha / sign-in challenge in VNC, and the
+        // the verification / sign-in challenge in VNC, and the
         // VP exits before they finish.
         const POLL_INTERVAL_MS = 1500;
-        const baseDeadline = Date.now() + details.waitingTimeout;
+        const startWait = Date.now();
+        const baseDeadline = startWait + details.waitingTimeout;
         // When MANUAL_ACTION is active, give the user up to 5 extra
         // minutes from the moment they cleared the original deadline.
         const MANUAL_ACTION_GRACE_MS = 5 * 60 * 1000;
         let admitted = false;
+        let lastProgressBump = Date.now();
+        // AI second-opinion cadence. The CSS heuristic (isInMeeting) is fast and
+        // runs every poll; Claude's join-state classifier is expensive, so we
+        // only consult it periodically while the heuristic keeps saying "not in
+        // yet". This is the safety net for the failure mode where Zoom renamed
+        // its in-meeting classes and the heuristic never fired even though we
+        // were admitted (VP sat at "Waiting." forever). It also lets us end the
+        // wait early on an error/removed/blocked screen instead of timing out.
+        let lastAiCheck = Date.now();
+        const AI_CHECK_INTERVAL_MS = 30_000;
         const sm = details.invite.virtualParticipantId
             ? (await import('./status-manager.js')).createStatusManager(
                   details.invite.virtualParticipantId,
@@ -528,13 +1139,46 @@ export default class Zoom {
         while (true) {
             if (page.isClosed()) break;
             try {
-                const avatar = await page.$('.video-avatar__avatar');
-                if (avatar) {
+                if (await this.isInMeeting(page)) {
                     admitted = true;
                     break;
                 }
             } catch {
                 /* ignore — page may be navigating */
+            }
+            // Heuristic still says "not in". Ask Claude what screen we're really
+            // on every AI_CHECK_INTERVAL_MS so a class-rename can't strand us.
+            if (isResolverEnabled() && Date.now() - lastAiCheck > AI_CHECK_INTERVAL_MS) {
+                lastAiCheck = Date.now();
+                try {
+                    const verdict = await classifyJoinState(page, { platform: 'ZOOM' });
+                    if (verdict) {
+                        console.log(`[zoom] AI join-state check: ${verdict.state} — ${verdict.reason}`);
+                        if (verdict.state === 'in-meeting') {
+                            console.log('[zoom] AI confirms we are in the meeting (CSS heuristic missed it) — proceeding.');
+                            admitted = true;
+                            break;
+                        }
+                        if (verdict.state === 'error') {
+                            console.warn(`[zoom] AI detected an error/blocked screen during admission wait: ${verdict.reason}`);
+                            return { reason: 'never-joined', trigger: 'pre-join:ai-error-screen' };
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[zoom] AI join-state check failed (non-fatal):', e);
+                }
+            }
+            // Keep the UI alive during the (potentially minutes-long) wait so
+            // it never looks frozen — refresh the JOINING detail + updatedAt
+            // every ~20s with elapsed seconds. Skip if MANUAL_ACTION is
+            // active (that has its own banner we don't want to overwrite).
+            if (Date.now() - lastProgressBump > 20000) {
+                lastProgressBump = Date.now();
+                const secs = Math.round((Date.now() - startWait) / 1000);
+                const current = sm ? await sm.getCurrentStatus().catch(() => null) : null;
+                if (current !== 'MANUAL_ACTION_REQUIRED') {
+                    await substep(`Waiting to be admitted to the meeting… (${secs}s — host may need to admit the participant)`);
+                }
             }
             // Check current status — if MANUAL_ACTION_REQUIRED, extend deadline.
             let extended = false;
@@ -556,18 +1200,23 @@ export default class Zoom {
             }
             if (Date.now() > baseDeadline && !extended) {
                 console.log('LMA Virtual Participant was not admitted into the meeting.');
-                return { reason: 'unknown', trigger: 'pre-join:not-admitted' };
+                return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
             }
             await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         }
         if (!admitted) {
             console.log('LMA Virtual Participant was not admitted into the meeting.');
-            return { reason: 'unknown', trigger: 'pre-join:not-admitted' };
+            return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
 
         // Dismiss any Zoom popups (recording consent, language interpretation, etc.)
+        // Wrapped in safeEvaluate: this install observed hanging post-join
+        // (CDP evaluate never resolving), which froze the whole join sequence
+        // — the VP was in the room but never opened chat / posted intro / went
+        // ACTIVE. A timeout lets the sequence proceed even if the install
+        // stalls (the popup auto-dismiss is best-effort anyway).
         console.log('Setting up Zoom popup auto-dismiss handler.');
-        await page.evaluate(() => {
+        await safeEvaluate(page, 'popup-dismiss-install', () => {
             // Text patterns that indicate a dismissible consent/info popup.
             // Only modals whose text matches one of these will be auto-dismissed.
             const POPUP_TEXT_PATTERNS = [
@@ -674,35 +1323,47 @@ export default class Zoom {
             };
         });
 
-        // Give a brief moment for any popup to appear and be dismissed
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Brief settle for an immediately-present popup. The auto-dismiss
+        // handler above is a self-running MutationObserver + poller, so we
+        // don't need to block long here — keep this short so the intro
+        // message posts ASAP after admission rather than a couple seconds
+        // later. (The dominant historical delay was CPU contention from the
+        // avatar during join, now removed by deferring Simli init.)
+        await new Promise(resolve => setTimeout(resolve, 500));
         console.log('Popup handler active, proceeding to open chat.');
 
         // (Note: the unknown-dialog watchdog is already running — started
-        // before the waiting-room poll above so it can catch bot-detection
-        // dialogs that appear on the prejoin page. It keeps running for
+        // before the waiting-room poll above so it can catch verification /
+        // blocking dialogs that appear on the prejoin page. It keeps running for
         // the rest of the meeting to catch consent/recording-notice/etc.
         // dialogs that may appear after the join.)
 
-        console.log('Opening chat panel.');
-        const chatButtonResult = await findElementWithFallback(
-            page,
-            ['button[aria-label="open the chat panel"]'],
-            {
-                intent: 'Zoom toolbar button that opens the in-meeting chat panel',
-                platform: 'ZOOM',
-                step: 'zoom.join.chatButton',
-            },
-            { maxRetries: 10, delayMs: 500 },
-        );
-        if (!chatButtonResult) {
-            console.log('Could not locate chat panel button — continuing without chat');
-        } else {
-            await humanClick(cursor, page, chatButtonResult.element);
+        // Opening chat + posting the intro is best-effort: the VP has already
+        // joined the meeting and is capturing audio, so a chat hiccup (e.g. a
+        // transient Zoom window pushing the chat button off-viewport) must
+        // NEVER fail the meeting. Swallow any error and keep going.
+        await substep('In the meeting — posting introduction…');
+        try {
+            await this.openChatPanel(page);
+            console.log('Sending introduction messages.');
+            await this.sendMessages(page, details.introMessages);
+        } catch (err) {
+            console.warn('[zoom] Opening chat / posting intro failed (non-fatal, staying in meeting):', err);
         }
 
-        console.log('Sending introduction messages.');
-        await this.sendMessages(page, details.introMessages);
+        // The prejoin "video on" toggle often doesn't survive admission — verify
+        // the in-meeting camera is actually on and (re)start it if not. Avatar
+        // only; best-effort.
+        try {
+            await this.ensureInMeetingVideoOn(page);
+        } catch (err) {
+            console.warn('[zoom] Post-join video check failed (non-fatal):', err);
+        }
+        // Then keep watching: Zoom's "Something went wrong" can flip the camera
+        // off mid-meeting (the avatar disappears though Simli/bridge stay
+        // healthy). This re-clicks Start Video whenever that happens — the
+        // automated version of the manual VNC re-enable.
+        this.startCameraWatchdog(page);
 
         // Set up attendee change monitoring
         await page.exposeFunction('attendeeChange', async (number: number) => {
@@ -852,16 +1513,17 @@ export default class Zoom {
             const MIC_ACTIVITY_THRESHOLD = 5; // px
             const MIC_SILENCE_DELAY = 2000; // ms - increased to 2 seconds to handle pauses in speech
 
-            // Mutable selector list — node-side watchdog can inject a new
-            // selector when Zoom changes the active-speaker DOM.
-            (window as any).__lmaSpeakerSelectors = [
+            // Default active-speaker selectors. Kept on window so the node-side
+            // liveness watchdog can prepend a fresh one if Zoom renames the DOM.
+            const DEFAULT_SPEAKER_SELECTORS = [
                 // Normal mode - main view (prioritized: shows active speaker)
                 '.single-main-container__video-frame .video-avatar__avatar-footer span',
                 // Screen sharing mode - suspension window (small video)
                 '.single-suspension-container__video-frame .video-avatar__avatar-footer span',
                 // Fallback - any avatar footer
-                '.video-avatar__avatar-footer span[role="none"]'
+                '.video-avatar__avatar-footer span[role="none"]',
             ];
+            (window as any).__lmaSpeakerSelectors = DEFAULT_SPEAKER_SELECTORS.slice();
             (window as any).__lmaSetSpeakerSelectors = (extra: string[]) => {
                 const cur = (window as any).__lmaSpeakerSelectors as string[];
                 for (const s of extra) {
@@ -871,8 +1533,11 @@ export default class Zoom {
 
             // Function to get current speaker from any view
             function getCurrentSpeaker(): string | null {
-                const selectors: string[] = (window as any).__lmaSpeakerSelectors;
-                
+                // Defensive: never let a missing/empty global throw inside the
+                // observer callback (that would silently kill all speaker events).
+                const selectors: string[] =
+                    (window as any).__lmaSpeakerSelectors || DEFAULT_SPEAKER_SELECTORS;
+
                 let vpName: string | null = null;
                 for (const selector of selectors) {
                     const element = document.querySelector(selector);
@@ -1138,7 +1803,9 @@ export default class Zoom {
                         }
                         return false;
                     },
-                    { timeout: details.meetingTimeout }
+                    // Playwright: 2nd positional is the page-function arg, options are 3rd.
+                    undefined,
+                    { timeout: details.meetingTimeout, polling: 1000 }
                 )
                 .then(async (handle) => {
                     const dialogText = (await handle.jsonValue()) as string;

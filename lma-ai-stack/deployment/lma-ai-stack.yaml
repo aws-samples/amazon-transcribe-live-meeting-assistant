@@ -5424,8 +5424,8 @@ Resources:
   # backed by S3. Each user's profile lives under profiles/{cognitoSub}/{platform}/.
   # On launch the VP container hydrates the local userDataDir from this prefix
   # and uploads it back at meeting end. Once a user has signed in once and
-  # solved any reCAPTCHA / 2FA, the session cookies persist here so subsequent
-  # meetings reuse them and skip Zoom's bot-detection dialog.
+  # cleared any CAPTCHA / 2FA, the session cookies persist here so subsequent
+  # meetings reuse them and sign in cleanly without re-prompting.
   VPProfilesBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -5740,7 +5740,7 @@ Resources:
   # Zoom Credentials Manager - per-user Zoom username/password storage
   # in AWS Secrets Manager, keyed by Cognito sub. Used by the Virtual
   # Participant when joining Zoom meetings that require sign-in (or to
-  # reduce bot-detection friction). Plaintext password is never returned
+  # improve join reliability). Plaintext password is never returned
   # to the React client; getMyZoomCredentialsStatus returns presence and
   # username only.
   ##########################################################################
@@ -6479,8 +6479,8 @@ Resources:
                   Description: >-
                     Start a meeting immediately with a virtual participant.
                     When the user has stored Zoom credentials in LMA, the VP
-                    signs in to Zoom with them by default to avoid bot-detection
-                    blocks; pass useStoredZoomCredentials=false to force a guest
+                    signs in to Zoom with them by default for a more reliable
+                    join; pass useStoredZoomCredentials=false to force a guest
                     join. Returns immediately with virtualParticipantId; the VP
                     may take up to 60s to fully join. Use
                     get_virtual_participant_status to poll progress, especially

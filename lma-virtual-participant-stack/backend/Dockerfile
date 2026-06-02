@@ -1,7 +1,7 @@
 # checkov:skip=CKV_DOCKER_2: "ECS target-group health check on 5901"
 
-# CloakBrowser ships a glibc-only Chromium binary; ECR Public mirror avoids
-# Docker Hub anonymous rate limits in CodeBuild.
+# CloakBrowser ships a glibc-only patched Chromium binary (pinned 0.3.29);
+# ECR Public mirror avoids Docker Hub anonymous rate limits in CodeBuild.
 FROM public.ecr.aws/docker/library/python:3.12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -16,7 +16,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 WORKDIR /srv
 
-# Do NOT install `chromium` from apt — we rely on the cloakbrowser binary.
+# Do NOT install `chromium` from apt — we rely on the cloakbrowser binary
+# (newer patched Chromium that handles Zoom's video encoder reliably on
+# 2-vCPU hosts where stock Debian Chromium threw "Something went wrong").
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
         libdbus-1-3 libdrm2 libxkbcommon0 libatspi2.0-0 libxcomposite1 \
@@ -37,9 +39,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# 0.3.29 is the first release exposing launchPersistentContext on cloakbrowser/puppeteer.
+# 0.3.29 is the first release exposing launchPersistentContext; pinned to match
+# the npm cloakbrowser dep. A binary bump was deliberately deferred to avoid
+# regressing the now-stable WebRTC/login behavior.
 ARG CLOAKBROWSER_VERSION=0.3.29
-
 RUN pip install --no-cache-dir "cloakbrowser[geoip]==${CLOAKBROWSER_VERSION}" \
     && python -m cloakbrowser install \
     && python -m cloakbrowser info
@@ -56,6 +59,18 @@ RUN mkdir -p /etc/chromium/policies/managed/ && \
 RUN npm ci && \
     npm run build && \
     npx esbuild node_modules/simli-client/dist/index.js --bundle --format=esm --platform=browser --outfile=dist/simli-client.bundle.mjs
+
+# Build stamp — lets logs/UI identify exactly which image a task is running.
+# BUILD_DATE defaults to the in-build `date` (the true image build time);
+# GIT_COMMIT / BUILD_SOURCE are passed by the builder (dev-push-vp.sh or
+# CodeBuild) when available. Read at startup by entrypoint.sh + index.ts.
+ARG BUILD_DATE=""
+ARG GIT_COMMIT="unknown"
+ARG BUILD_SOURCE="unknown"
+RUN BD="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
+    printf '{"buildDate":"%s","gitCommit":"%s","buildSource":"%s"}\n' \
+      "$BD" "$GIT_COMMIT" "$BUILD_SOURCE" > /srv/build-info.json && \
+    echo "Build stamp: $(cat /srv/build-info.json)"
 
 RUN mkdir -p /srv/cloakbrowser-profiles
 
