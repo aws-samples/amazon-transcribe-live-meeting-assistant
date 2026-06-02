@@ -9,6 +9,7 @@ import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
+import { humanClick, humanType } from './prejoin-actions.js';
 
 export default class Teams {
     private endRequested: Promise<ExitInfo>;
@@ -123,8 +124,36 @@ export default class Teams {
             console.log('Could not locate Teams display-name input — aborting join');
             return { reason: 'never-joined', trigger: 'pre-join:no-name-input' };
         }
-        await nameRes.element.type(details.scribeIdentity, { delay: 100 });
-        await nameRes.element.press("Enter");
+        // humanType focuses the field in the DOM and types via the keyboard,
+        // bypassing Playwright's actionability/pointer-events hit-test. The
+        // Teams light-meetings pre-join floats a transient shroud over the form
+        // while it finishes hydrating, and a plain ElementHandle.type() throws
+        // "failed pointer_events check: element is covered by <unknown>". Clear
+        // first, then verify the value landed and re-type once (the shroud can
+        // swallow the first keystroke burst), mirroring the Zoom handler.
+        await nameRes.element.evaluate((el: Element) => {
+            const i = el as HTMLInputElement;
+            i.focus();
+            i.value = '';
+        });
+        await humanType(page, nameRes.element, details.scribeIdentity);
+        const typedName = await nameRes.element.evaluate(
+            (el: Element) => (el as HTMLInputElement).value || '',
+        );
+        if (typedName !== details.scribeIdentity) {
+            console.warn(
+                `Display-name value mismatch (expected "${details.scribeIdentity}", got "${typedName}") — clearing and re-typing.`,
+            );
+            await nameRes.element.evaluate((el: Element) => {
+                const i = el as HTMLInputElement;
+                i.focus();
+                i.value = '';
+            });
+            await humanType(page, nameRes.element, details.scribeIdentity);
+        }
+        // The field already holds focus from humanType, so press Enter via the
+        // keyboard (no pointer hit-test) to commit any name autocomplete.
+        await page.keyboard.press('Enter');
 
         // Only click mute button if voice assistant is NOT enabled
         if (!voiceAssistant.isEnabled()) {
@@ -140,7 +169,7 @@ export default class Teams {
                 },
                 { maxRetries: 10, delayMs: 500 },
             );
-            await muteRes?.element.click();
+            if (muteRes) await humanClick(page, muteRes.element);
         } else {
             console.log('Voice assistant enabled - skipping mute button for agent audio');
         }
@@ -161,7 +190,7 @@ export default class Teams {
                 },
                 { maxRetries: 10, delayMs: 500 },
             );
-            await videoRes?.element.click();
+            if (videoRes) await humanClick(page, videoRes.element);
         }
 
         await new Promise((resolve) => setTimeout(resolve, 250));
@@ -181,7 +210,9 @@ export default class Teams {
             console.log('Could not locate Teams Join button — aborting');
             return { reason: 'never-joined', trigger: 'pre-join:no-join-button' };
         }
-        await joinRes.element.click();
+        // humanClick bypasses the pointer_events hit-test that fails when Teams
+        // floats a transient overlay over the "Join now" button.
+        await humanClick(page, joinRes.element);
 
         // Wait for potential CAPTCHA with longer timeout
         console.log("Checking for CAPTCHA...");

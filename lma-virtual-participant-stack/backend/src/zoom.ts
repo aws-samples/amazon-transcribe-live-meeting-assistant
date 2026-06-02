@@ -10,6 +10,7 @@ import {
     classifyJoinState,
 } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
+import { humanClick, humanType } from './prejoin-actions.js';
 import { fetchZoomCredentials, loginToZoom, dismissPostLoginInterstitials } from './zoom-login.js';
 
 // Zoom's audio/video toggles use SVG icons inside a clickable <button>.
@@ -21,53 +22,6 @@ async function clickClickableAncestor(element: ElementHandle<Element>): Promise<
         target.scrollIntoView({ block: 'center', inline: 'center' });
         target.click();
     });
-}
-
-// Meaningful UX-style clicks (Join, Sign In, Skip-this-step). force:true skips
-// Playwright's "covered by another element" actionability check (Zoom often
-// floats a transient overlay over the Join/chat buttons). force:true does NOT
-// bypass the viewport check, though — when Zoom opens a transient window (e.g.
-// the whiteboard dashboard) it can push a toolbar button out of the viewport,
-// and a positional click then throws "Element is outside of the viewport". So
-// on any click failure we fall back to a DOM-level click via evaluate, which
-// scrolls the element into view and dispatches click() directly — no viewport
-// or actionability constraint.
-async function humanClick(
-    page: Page,
-    target: string | ElementHandle<Element>,
-): Promise<void> {
-    const handle: ElementHandle<Element> | null =
-        typeof target === 'string' ? await page.$(target) : target;
-    try {
-        if (typeof target === 'string') {
-            await page.click(target, { force: true });
-        } else {
-            await target.click({ force: true });
-        }
-    } catch (err) {
-        // Positional click failed (commonly off-viewport). Fall back to a
-        // synthetic DOM click that ignores viewport/overlay constraints.
-        if (!handle) throw err;
-        await handle.evaluate((el: Element) => {
-            const t = (el.closest('button, [role="button"], a') as HTMLElement | null) || (el as HTMLElement);
-            t.scrollIntoView({ block: 'center', inline: 'center' });
-            t.click();
-        });
-    }
-}
-
-// Type into a (possibly overlay-covered) input. Playwright's ElementHandle
-// .type() runs an actionability/pointer check that fails when Zoom floats a
-// transient overlay over the prejoin form. Focus the element directly in the
-// DOM (no actionability check), then type via the keyboard with a small
-// per-keystroke delay so input lands reliably in Zoom's SPA fields.
-async function humanType(
-    page: Page,
-    element: ElementHandle<Element>,
-    text: string,
-): Promise<void> {
-    await element.evaluate((el) => (el as HTMLElement).focus());
-    await page.keyboard.type(text, { delay: 50 + Math.floor(Math.random() * 70) });
 }
 
 // Run a page.evaluate with a wall-clock timeout. A CDP evaluate can hang
