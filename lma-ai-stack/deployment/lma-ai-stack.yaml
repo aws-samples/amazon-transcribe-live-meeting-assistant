@@ -7225,15 +7225,20 @@ Resources:
           ContentSecurityPolicy:
             Override: true
             # Tightened CSP for LMA SPA:
-            #   - connect-src: restricted to AWS service hostnames (AppSync, Cognito,
-            #     S3, API Gateway) plus wss for realtime subscriptions and ws://localhost
-            #     for dev mode.
+            #   - connect-src: restricted to AWS service hostnames (*.amazonaws.com
+            #     covers AppSync, Cognito, S3, API Gateway, etc.) and the
+            #     CloudFront-fronted WebSocket transcriber/VNC endpoints
+            #     (*.cloudfront.net), plus wss for realtime subscriptions and
+            #     ws://localhost for dev mode. NOTE: CSP host-sources only allow '*'
+            #     as the leftmost label, so mid-domain wildcards like
+            #     cognito-idp.*.amazonaws.com are invalid (browser ignores them) and
+            #     are intentionally omitted -- they are already covered by *.amazonaws.com.
             #   - script-src/style-src: 'unsafe-inline' and 'unsafe-eval' retained
             #     for React SPA compatibility.
             #   - object-src: 'none' (no plugins needed).
             #   - base-uri: 'none' (prevent base tag injection).
             #   - frame-ancestors: 'self' (prevent clickjacking).
-            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://cognito-idp.*.amazonaws.com https://cognito-identity.*.amazonaws.com https://*.appsync-api.*.amazonaws.com https://*.execute-api.*.amazonaws.com https://*.s3.*.amazonaws.com https://*.s3-accelerate.amazonaws.com wss://*.amazonaws.com wss://*.appsync-realtime-api.*.amazonaws.com wss://*.execute-api.*.amazonaws.com ws://localhost:*;"
+            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.cloudfront.net https://*.amazoncognito.com https://*.s3-accelerate.amazonaws.com wss://*.amazonaws.com wss://*.cloudfront.net ws://localhost:*;"
           StrictTransportSecurity:
             Override: true
             AccessControlMaxAgeSec: 31536000
