@@ -1238,8 +1238,20 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             # Best-effort warm-cache only; ECS task-launch is source of truth.
-            (yum update -y --security || yum update -y --security --skip-broken || true) \
-              >> /var/log/lma-vp-yum-security.log 2>&1
+            # NOTE: the per-boot `yum update -y --security` was REMOVED. These
+            # hosts run AWS SSM Patch Manager (AWS-RunPatchBaseline with the
+            # default RebootOption=RebootIfNeeded), which already owns OS
+            # patching AND reboots the host to apply kernel/security updates.
+            # Running yum here was redundant with that managed patching, only
+            # slowed instance launch, and — worst of all — a freshly installed
+            # security kernel left the host one Patch Manager scan away from an
+            # in-place reboot that kills the live VP container mid-meeting
+            # (observed: task stopped with EssentialContainerExited when the
+            # host rebooted ~30 min after launch). Leave patching to Patch
+            # Manager so the reboot cadence is governed by its baseline /
+            # maintenance window rather than a kernel we pulled in at boot.
+            # (yum update -y --security || yum update -y --security --skip-broken || true) \
+            #   >> /var/log/lma-vp-yum-security.log 2>&1
             echo "ECS_CLUSTER=${Cluster}" >> /etc/ecs/ecs.config
             echo "ECS_IMAGE_PULL_BEHAVIOR=prefer-cached" >> /etc/ecs/ecs.config  # pragma: allowlist secret
             echo "ECS_ENABLE_CONTAINER_METADATA=true" >> /etc/ecs/ecs.config
@@ -2889,6 +2901,32 @@ Resources:
                   logger.error(f'UpdateItem failed for vp_id={vp_id}: {e}')
                   raise
 
+          # ECS reports a host that was reclaimed / rebooted out from under a
+          # running task as EssentialContainerExited (the container process was
+          # SIGKILLed when the instance went down). The single most common cause
+          # on these EC2 hosts is an in-place AWS SSM Patch Manager reboot
+          # (AWS-RunPatchBaseline, RebootOption=RebootIfNeeded) applying a
+          # kernel/security update. That is infrastructure maintenance, NOT a
+          # meeting/credentials problem, so we surface a message that says so
+          # rather than the misleading generic "check your meeting ID/password"
+          # guidance the UI would otherwise show.
+          def _build_error_message(stop_code, stopped_reason):
+              if stop_code == 'EssentialContainerExited':
+                  return (
+                      'The meeting was interrupted because its host server was '
+                      'restarted for routine infrastructure maintenance (e.g. an '
+                      'automatic security patch reboot) — not because of a problem '
+                      'with the meeting link or password. Please re-add the Virtual '
+                      'Participant to rejoin the meeting. '
+                      f'(stopCode={stop_code}: '
+                      f'{stopped_reason or "no reason given"}).'
+                  )
+              return (
+                  f'Virtual Participant task stopped unexpectedly '
+                  f'(stopCode={stop_code or "unknown"}: '
+                  f'{stopped_reason or "no reason given"}).'
+              )
+
           def lambda_handler(event, context):
               logger.debug(f'Event: {json.dumps(event, default=str)[:2000]}')
               detail = event.get('detail', {}) or {}
@@ -2913,11 +2951,7 @@ Resources:
                   )
                   return {'skipped': 'no vp_id'}
 
-              error_message = (
-                  f'Virtual Participant task stopped unexpectedly '
-                  f'(stopCode={stop_code or "unknown"}: '
-                  f'{stopped_reason or "no reason given"}).'
-              )
+              error_message = _build_error_message(stop_code, stopped_reason)
 
               flipped = _mark_failed(vp_id, error_message)
               if flipped:
