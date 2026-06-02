@@ -56,6 +56,20 @@ export default class Teams {
         // MANUAL_ACTION_REQUIRED so the user can clear it via VNC.
         startDialogWatchdog(page, { platform: 'TEAMS' });
 
+        // Push a human-readable sub-step into the JOINING status so the long
+        // join span (navigate → redirect chain → prejoin → admission → chat)
+        // doesn't look frozen in the UI — mirrors the Zoom handler. Best-effort,
+        // no-op without a vpId, never throws or blocks the join.
+        const substep = async (message: string): Promise<void> => {
+            if (!details.invite.virtualParticipantId) return;
+            try {
+                await createStatusManager(details.invite.virtualParticipantId).setJoiningSubstep(message);
+            } catch {
+                /* best-effort progress */
+            }
+        };
+
+        await substep('Entering the meeting room…');
         try {
             console.log("Getting meeting link.");
             await page.goto(
@@ -63,23 +77,51 @@ export default class Teams {
             );
         } catch {
             console.log("Your scribe was unable to join the meeting.");
-            return { reason: 'unknown', trigger: 'pre-join:goto-failed' };
+            return { reason: 'never-joined', trigger: 'pre-join:goto-failed' };
         }
 
+        // For an anonymous join, Teams does NOT land on the pre-join screen
+        // immediately. It first fires a silent SSO probe (which fails with
+        // AADSTS50058 for an anon session), then bounces the main frame through
+        // /dl/launcher/launcher.html and /light-meetings/launch?lightExperience=true
+        // before the lightweight web pre-join UI finally renders. This redirect
+        // storm takes several seconds, during which the DOM is empty. Wait for
+        // network to go idle so we don't start polling (and fire the AI fallback
+        // against a blank page) mid-redirect. Best-effort — the long retry
+        // budget below is the real backstop.
+        try {
+            await page.waitForLoadState('networkidle', { timeout: 30000 });
+        } catch {
+            // networkidle can legitimately never settle on the Teams SPA; the
+            // findElementWithFallback retry loop handles the wait either way.
+        }
+
+        await substep('Loading the meeting join screen…');
         console.log("Entering name.");
+        // Candidate selectors span both the v2 client and the lightweight anon
+        // ("light-meetings") client that anonymous joins are routed into.
+        // useScreenshot lets the AI fallback recover even when the DOM snapshot
+        // is momentarily empty mid-redirect. The retry budget (60 × 1s = 60s)
+        // must outlast the silent-SSO → launcher → light-meetings redirect chain
+        // and the heavy SPA load; it stays well under waitingTimeout (5 min).
         const nameRes = await findElementWithFallback(
             page,
-            ['[data-tid="prejoin-display-name-input"]'],
+            [
+                '[data-tid="prejoin-display-name-input"]',
+                '#prejoin-display-name',
+                'input[data-tid="prejoin-display-name-input"]',
+            ],
             {
                 intent: 'Teams pre-join screen display-name input field',
                 platform: 'TEAMS',
                 step: 'teams.join.name',
+                useScreenshot: true,
             },
-            { maxRetries: 10, delayMs: 500 },
+            { maxRetries: 60, delayMs: 1000 },
         );
         if (!nameRes) {
             console.log('Could not locate Teams display-name input — aborting join');
-            return { reason: 'unknown', trigger: 'pre-join:no-name-input' };
+            return { reason: 'never-joined', trigger: 'pre-join:no-name-input' };
         }
         await nameRes.element.type(details.scribeIdentity, { delay: 100 });
         await nameRes.element.press("Enter");
@@ -123,6 +165,7 @@ export default class Teams {
         }
 
         await new Promise((resolve) => setTimeout(resolve, 250));
+        await substep('Setting up audio and video…');
         console.log("Clicking join button.");
         const joinRes = await findElementWithFallback(
             page,
@@ -136,7 +179,7 @@ export default class Teams {
         );
         if (!joinRes) {
             console.log('Could not locate Teams Join button — aborting');
-            return { reason: 'unknown', trigger: 'pre-join:no-join-button' };
+            return { reason: 'never-joined', trigger: 'pre-join:no-join-button' };
         }
         await joinRes.element.click();
 
@@ -189,6 +232,7 @@ export default class Teams {
             console.log("No CAPTCHA detected or CAPTCHA timeout, continuing...");
         }
 
+        await substep('Waiting to be admitted to the meeting…');
         console.log("Opening chat panel.");
         try {
             const chatPanelElement = await page.waitForSelector("#chat-button", {
@@ -198,7 +242,7 @@ export default class Teams {
             await chatPanelElement?.click();
         } catch {
             console.log("Your scribe was not admitted into the meeting.");
-            return { reason: 'unknown', trigger: 'pre-join:not-admitted' };
+            return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
 
         // Update status to JOINED
@@ -206,6 +250,7 @@ export default class Teams {
             const statusManager = createStatusManager(details.invite.virtualParticipantId);
             await statusManager.setJoined();
         }
+        await substep('In the meeting — posting introduction…');
         console.log("Sending introduction messages.");
         await this.sendMessages(page, details.introMessages);
 
