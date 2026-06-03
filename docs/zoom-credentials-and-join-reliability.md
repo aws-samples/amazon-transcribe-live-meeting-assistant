@@ -9,9 +9,15 @@ LMA's Virtual Participant (VP) joins Zoom meetings via headless Chromium. A gues
 
 ## Browser stack
 
-- The VP drives **[CloakBrowser](https://github.com/CloakHQ/cloakbrowser)** (a patched Chromium build, pinned at 0.3.29) via `playwright-core`. Its newer Chromium handles Zoom's web-client video encoder reliably even on a small 2-vCPU host (`t3.medium`) — the older stock Debian Chromium threw Zoom's "Something went wrong" error and turned the VP camera off under the same load. Two launch flags (`--force-webrtc-ip-handling-policy=default` + `--webrtc-ip-handling-policy=default`) restore local ICE candidate gathering so the Simli avatar's same-browser loopback video bridge connects.
+- The VP drives **[CloakBrowser](https://github.com/CloakHQ/cloakbrowser)** (a patched Chromium build, pinned at 0.3.29) via `playwright-core`. Its newer Chromium handles Zoom's web-client video encoder reliably even on a small 2-vCPU host (`t3.medium`) — the older stock Debian Chromium threw Zoom's "Something went wrong" error and turned the VP camera off under the same load. Enabling the **Simli avatar** makes the browser's WebRTC behaviour more conspicuous, which makes Zoom more likely to require a login or present a CAPTCHA — see [Simli and join reliability](#simli-and-join-reliability).
 - A per-user **persistent profile** (cookies, "trusted device" markers) is restored from S3 on launch and saved back at meeting end, so a user who has signed in once is recognised on subsequent meetings (see [Persistent Chromium profile per user](#persistent-chromium-profile-per-user) below).
 - Fresh profiles run a short **warmup** (Google → HN → Wikipedia → the meeting-platform home pages) before navigating to the meeting URL, so a first-time profile arrives with normal browsing history rather than zero state.
+
+## Simli and join reliability
+
+Enabling the **Simli avatar** (both `SimliApiKey` and `SimliFaceId` set) requires browser settings that bridge the avatar's video into the meeting. Those settings change the browser's WebRTC behaviour in a way that meeting platforms are more likely to flag, so **with Simli enabled a Zoom join is more likely to require a login or trigger a CAPTCHA** before it lets the participant in.
+
+> **If you are hitting login prompts or CAPTCHA challenges on join and don't need the on-camera avatar, disable Simli** by leaving `SimliApiKey` and `SimliFaceId` unset. Without Simli the VP joins with the most reliable profile. If you do want the avatar, signing in with [per-user Zoom credentials](#per-user-zoom-credentials) makes joins far more reliable.
 
 ## Per-user Zoom credentials
 
