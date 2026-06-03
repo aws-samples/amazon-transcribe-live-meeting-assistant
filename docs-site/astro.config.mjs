@@ -85,7 +85,7 @@ export default defineConfig({
             { label: "Salesforce MCP", slug: "salesforce-mcp-setup" },
             {
               label: "Amazon QuickSuite MCP",
-              slug: "quicksuite-mcp-setup",
+              slug: "amazon-quick-mcp-setup",
             },
             { label: "DeepWiki MCP", slug: "deepwiki-mcp-setup" },
           ],
@@ -163,12 +163,12 @@ export default defineConfig({
         {
           label: "New & Uncategorized",
           items: [
+            { label: "Amazon Quick Desktop Integration", slug: "amazon-quick-desktop-integration" },
             { label: "Cloudformation Service Role", slug: "cloudformation-service-role" },
             { label: "Meeting Sources", slug: "meeting-sources" },
-            { label: "Quick Desktop Integration", slug: "quick-desktop-integration" },
-            { label: "Quick Desktop Lma Integration Proposal", slug: "quick-desktop-lma-integration-proposal" },
             { label: "Upload Audio", slug: "upload-audio" },
             { label: "Virtual Participant Local Dev", slug: "virtual-participant-local-dev" },
+            { label: "Zoom Credentials And Join Reliability", slug: "zoom-credentials-and-join-reliability" },
           ],
         },
         // AUTO-SIDEBAR-END
