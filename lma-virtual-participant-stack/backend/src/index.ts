@@ -82,12 +82,8 @@ const getCloakLaunchArgs = (fingerprintSeed: number, simliEnabled: boolean): str
     // TCP connection doesn't already reveal. See simli-avatar.ts bridge.
     ...(simliEnabled ? ['--force-webrtc-ip-handling-policy=default'] : []),
     ...(simliEnabled ? ['--webrtc-ip-handling-policy=default'] : []),
-    // When Simli is NOT active we don't override getUserMedia, so without this
-    // Chrome reports no camera/mic — an unusual, fingerprintable state. The
-    // fake device gives a realistic capture device. When Simli IS active we
-    // must NOT add it: it would register a competing fake camera alongside our
-    // injected avatar stream.
-    ...(simliEnabled ? [] : ['--use-fake-device-for-media-stream']),
+    // Only add the fake capture device when neither Simli nor a voice assistan is active.
+    ...(simliEnabled || voiceAssistant.isEnabled() ? [] : ['--use-fake-device-for-media-stream']),
 ];
 
 // Global variables for graceful shutdown
