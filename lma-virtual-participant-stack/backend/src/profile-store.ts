@@ -32,7 +32,26 @@ const S3_PREFIX = 'profiles/';
 // drops them.) We promote these auth cookies to persistent with a future
 // expiry on the restored DB before launch, so the next session is recognized
 // as logged in. host_key is matched as a LIKE suffix (e.g. '%zoom.us').
-const SESSION_AUTH_COOKIE_HOSTS = ['zoom.us', 'zoom.com', 'chime.aws', 'webex.com', 'teams.microsoft.com'];
+//
+// The Microsoft identity hosts (microsoftonline.com / live.com / office.com /
+// the broad microsoft.com suffix) carry not just Teams sign-in but also the
+// anonymous-join HIP CAPTCHA *trust token*. Microsoft issues that token on its
+// identity surface (the anon join redirects through login.microsoftonline.com
+// before landing on the teams.microsoft.com light-meetings pre-join), so it
+// lands on a different host than teams.microsoft.com. Promoting these lets a
+// CAPTCHA the user solved once in VNC survive the profile save/restore, so
+// subsequent joins for that user skip the challenge.
+const SESSION_AUTH_COOKIE_HOSTS = [
+    'zoom.us',
+    'zoom.com',
+    'chime.aws',
+    'webex.com',
+    'teams.microsoft.com',
+    'microsoft.com',
+    'microsoftonline.com',
+    'live.com',
+    'office.com',
+];
 // 30 days, expressed as Chrome's Win32 FILETIME (microseconds since 1601-01-01).
 const CHROME_EPOCH_OFFSET_US = 11_644_473_600 * 1_000_000;
 const PROMOTE_LIFETIME_US = 30 * 24 * 60 * 60 * 1_000_000;
