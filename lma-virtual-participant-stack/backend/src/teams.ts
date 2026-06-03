@@ -21,26 +21,150 @@ export default class Teams {
         });
     }
 
-    private async sendMessages(page: Page, messages: string[]): Promise<void> {
-        const found = await findElementWithFallback(
-            page,
-            ['.ck-placeholder'],
-            {
-                intent: 'Microsoft Teams in-meeting chat compose input area',
-                platform: 'TEAMS',
-                step: 'teams.chat.input',
-            },
-            { maxRetries: 10, delayMs: 500 },
-        );
-        if (!found) {
-            console.log('Could not locate Teams chat input — aborting sendMessages');
-            return;
+    // Candidate selectors for the Teams in-meeting chat compose box. Spans the
+    // CKEditor-based composer (.ck-editor__editable / [contenteditable] with a
+    // message-y aria-label) used by the v2 client and the light-meetings client.
+    // The legacy `.ck-placeholder` is only the placeholder hint span and is
+    // absent once anything is typed, so it's a poor primary — keep it last.
+    private static readonly CHAT_INPUT_SELECTORS = [
+        '[data-tid="ckeditor"] [contenteditable="true"]',
+        'div[role="textbox"][contenteditable="true"][aria-label*="message" i]',
+        'div[contenteditable="true"][data-tid="ckeditor-replyBox"]',
+        '.ck-editor__editable[contenteditable="true"]',
+        '.cke_editable[contenteditable="true"]',
+        '.ck-placeholder',
+    ];
+
+    // Candidate selectors for the in-meeting toolbar button that OPENS the chat
+    // panel, spanning the v2 client (#chat-button) and light-meetings / aria
+    // variants. Teams' chat button is a toggle, so callers must pre-check that
+    // the panel isn't already open before clicking (see openChatPanel).
+    private static readonly CHAT_BUTTON_SELECTORS = [
+        '#chat-button',
+        '[data-tid="chat-button"]',
+        'button[data-tid="toggle-chat"]',
+        'button[aria-label*="meeting chat" i]',
+        'button[aria-label*="show conversation" i]',
+        'button[aria-label*="chat" i]',
+    ];
+
+    // True when the chat compose box is present AND visible — the reliable
+    // "panel is open" signal. Used to make openChatPanel idempotent (the toolbar
+    // button is a toggle: clicking an already-open panel would CLOSE it).
+    private async chatInputVisible(page: Page): Promise<boolean> {
+        return page
+            .evaluate((sels: string[]) => {
+                for (const s of sels) {
+                    const el = document.querySelector(s) as HTMLElement | null;
+                    if (!el) continue;
+                    const r = el.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) return true;
+                }
+                return false;
+            }, Teams.CHAT_INPUT_SELECTORS)
+            .catch(() => false);
+    }
+
+    // Open the in-meeting chat panel idempotently. No-op if the compose box is
+    // already visible (the toolbar button is a toggle — re-clicking would close
+    // it). Otherwise locate the chat button (primary selectors → AI fallback)
+    // and click ONCE, then wait briefly for the input to render. Returns whether
+    // the panel ended up open. Never throws.
+    private async openChatPanel(page: Page): Promise<boolean> {
+        if (await this.chatInputVisible(page)) return true;
+        try {
+            const chatBtn = await findElementWithFallback(
+                page,
+                Teams.CHAT_BUTTON_SELECTORS,
+                {
+                    intent: 'Microsoft Teams in-meeting toolbar button that OPENS the chat / conversation panel (its label mentions "chat" or "conversation"). NOT the people/roster button, NOT a close button.',
+                    platform: 'TEAMS',
+                    step: 'teams.meeting.chatButton',
+                    useScreenshot: true,
+                },
+                { maxRetries: 8, delayMs: 500 },
+            );
+            if (!chatBtn) {
+                console.log('Could not locate Teams chat panel button — continuing without chat.');
+                return false;
+            }
+            console.log('Opening chat panel.');
+            await humanClick(page, chatBtn.element);
+        } catch (e) {
+            console.warn('Opening chat panel failed (non-fatal):', e);
+            return false;
         }
-        for (const message of messages) {
-            await found.element.click();
-            await new Promise((resolve) => setTimeout(resolve, 500));
-            await found.element.type(message);
-            await found.element.press("Enter");
+        const until = Date.now() + 4000;
+        while (Date.now() < until) {
+            if (await this.chatInputVisible(page)) return true;
+            await new Promise((r) => setTimeout(r, 300));
+        }
+        return this.chatInputVisible(page);
+    }
+
+    // Post chat messages. Resilient and NON-FATAL: the VP is already admitted
+    // and transcribing by the time this runs, so a chat failure (panel won't
+    // open, composer not found, typing blocked) must never abort the join — we
+    // log and return. Opens the panel idempotently, then inserts each message in
+    // one shot via execCommand('insertText') (drives CKEditor's input pipeline
+    // synchronously — far faster and more reliable than per-key .type(), and it
+    // avoids the raw .click()/.type() actionability checks that previously threw
+    // "failed visible check" and killed the whole join).
+    private async sendMessages(page: Page, messages: string[]): Promise<void> {
+        try {
+            if (!(await this.chatInputVisible(page))) {
+                await this.openChatPanel(page);
+            }
+            const found = await findElementWithFallback(
+                page,
+                Teams.CHAT_INPUT_SELECTORS,
+                {
+                    intent: 'Microsoft Teams in-meeting chat compose input area (contenteditable message box)',
+                    platform: 'TEAMS',
+                    step: 'teams.chat.input',
+                    useScreenshot: true,
+                },
+                { maxRetries: 6, delayMs: 500 },
+            );
+            if (!found) {
+                console.log('Could not locate Teams chat input — skipping message post (non-fatal).');
+                return;
+            }
+            for (const message of messages) {
+                const inserted = await found.element
+                    .evaluate((el, text) => {
+                        const node = el as HTMLElement;
+                        node.focus();
+                        try {
+                            const sel = window.getSelection();
+                            if (sel) {
+                                sel.removeAllRanges();
+                                const range = document.createRange();
+                                range.selectNodeContents(node);
+                                range.collapse(false);
+                                sel.addRange(range);
+                            }
+                        } catch {
+                            /* best-effort caret placement */
+                        }
+                        return document.execCommand('insertText', false, text);
+                    }, message)
+                    .catch(() => false);
+                if (!inserted) {
+                    // Fallback to keystroke typing if execCommand was blocked.
+                    try {
+                        await found.element.evaluate((el) => (el as HTMLElement).focus());
+                        await page.keyboard.type(message, { delay: 0 });
+                    } catch (e) {
+                        console.warn('Chat message typing failed (non-fatal), skipping rest:', e);
+                        return;
+                    }
+                }
+                await page.keyboard.press('Enter');
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+        } catch (e) {
+            console.warn('sendMessages failed (non-fatal — VP remains in meeting):', e);
         }
     }
 
@@ -402,34 +526,26 @@ export default class Teams {
             return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
 
-        // Admitted. Open the chat panel (best-effort — the intro/chat flow is
-        // resilient to the panel toggle not being found via the primary id).
-        console.log("Opening chat panel.");
-        try {
-            const chatRes = await findElementWithFallback(
-                page,
-                ['#chat-button', '[data-tid="chat-button"]'],
-                {
-                    intent: 'Teams in-meeting toolbar button that opens the chat panel',
-                    platform: 'TEAMS',
-                    step: 'teams.meeting.chatButton',
-                },
-                { maxRetries: 8, delayMs: 500 },
-            );
-            if (chatRes) await humanClick(page, chatRes.element);
-            else console.log('Chat button not found post-admission — continuing (intro may not post).');
-        } catch (e) {
-            console.warn('Opening chat panel failed (non-fatal):', e);
-        }
-
-        // Update status to JOINED
+        // Admitted — we are in the meeting and about to start transcribing.
+        // Mark JOINED FIRST, before any chat/intro work. Everything below
+        // (opening the chat panel, posting the intro, switching to speaker view)
+        // is best-effort cosmetics: the VP is already a successful participant,
+        // so a failure in any of it must NEVER flip the join to FAILED. This is
+        // exactly the bug that bit us — a non-visible chat element threw "failed
+        // visible check" and aborted an otherwise-successful join.
         if (details.invite.virtualParticipantId) {
             const statusManager = createStatusManager(details.invite.virtualParticipantId);
             await statusManager.setJoined();
         }
-        await substep('In the meeting — posting introduction…');
+
+        await substep('In the meeting — opening chat panel…');
+        console.log("Opening chat panel.");
+        await this.openChatPanel(page);
+
+        await substep('In the meeting — posting introduction message…');
         console.log("Sending introduction messages.");
         await this.sendMessages(page, details.introMessages);
+        await substep('In the meeting — listening for participants and transcript…');
 
         // Switch to speaker view — best-effort and SHORT-timed. This is a
         // cosmetic preference (better speaker attribution / video framing), not
@@ -453,6 +569,13 @@ export default class Teams {
             console.log("View/speaker-view controls not found (likely light-meetings client) — skipping.");
         }
 
+        // All the in-meeting monitoring wiring below (attendee/speaker/message
+        // observers) is set up AFTER we've marked JOINED. It's resilient
+        // best-effort: a transient DOM/CDP error while installing any observer
+        // must NOT abort an admitted VP (the crash latch in index.ts would flip
+        // it to FAILED). Wrap the whole block; transcription start happens after
+        // it regardless.
+        try {
         // Set up simple attendee change monitoring
         await page.exposeFunction('attendeeChange', async (hasOthers: boolean) => {
             console.log(`DEBUG: Teams has other participants: ${hasOthers}`);
@@ -686,8 +809,16 @@ export default class Teams {
             const observer = new MutationObserver(callback);
             if (targetNode) observer.observe(targetNode, config);
         });
+        } catch (e) {
+            // A monitoring-setup failure is non-fatal: the VP is admitted and
+            // (below) transcribing. Speaker/attendee attribution may be degraded
+            // but the meeting still works.
+            console.warn('In-meeting monitoring setup failed (non-fatal — VP remains in meeting):', e);
+        }
 
-        // Start transcription if enabled (LMA behavior)
+        // Start transcription if enabled (LMA behavior). This is the actual
+        // point of the VP, so it runs regardless of any best-effort chat /
+        // monitoring hiccups above.
         if (details.start) {
             console.log(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
