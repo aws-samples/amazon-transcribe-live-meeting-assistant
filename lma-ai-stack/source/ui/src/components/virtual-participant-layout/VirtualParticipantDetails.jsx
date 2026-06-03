@@ -147,7 +147,7 @@ const STATUS_CONFIG = {
   },
   HYDRATING_PROFILE: {
     message: 'Restoring browser profile…',
-    description: 'Downloading saved cookies / trusted-device markers from S3 (signs in cleanly on repeat joins)',
+    description: 'Downloading saved cookies / trusted-device markers from S3',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',

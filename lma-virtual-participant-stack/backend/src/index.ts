@@ -30,7 +30,7 @@ import {
     cleanStaleLocks,
     warmupNavigation,
     fingerprintSeedForUser,
-    randomFingerprintSeed,
+    stableFingerprintSeed,
 } from './lib/profile.js';
 
 // Match the Xvfb screen size; fluxbox toolbar is suppressed in entrypoint.sh.
@@ -325,9 +325,17 @@ const main = async (): Promise<void> => {
     const cookiePatchedCount = patchPreferencesFor3pCookies(userDataDir);
     console.log(`[profile-store] Wrote 3p-cookie allow exceptions for ${cookiePatchedCount} meeting platforms`);
 
+    // Authenticated joins get a per-user fingerprint (stable across that user's
+    // joins). Anonymous / CLI launches have no sub, so fall back to a seed
+    // derived from a deployment-stable id (profiles bucket name, else region)
+    // rather than a fresh random one per launch — a stable device fingerprint
+    // is a weaker bot signal than a never-seen-before one. See
+    // stableFingerprintSeed for why this helps Teams anonymous-join CAPTCHA.
     const fingerprintSeed = process.env.LMA_USER_SUB
         ? fingerprintSeedForUser(process.env.LMA_USER_SUB)
-        : randomFingerprintSeed();
+        : stableFingerprintSeed(
+            process.env.VP_PROFILES_BUCKET || process.env.AWS_REGION || '',
+        );
 
     console.log(`[browser] Launching CloakBrowser persistent context`);
     console.log(`[browser]   userDataDir       = ${userDataDir}`);
