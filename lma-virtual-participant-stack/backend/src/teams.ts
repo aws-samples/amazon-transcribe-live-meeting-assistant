@@ -132,6 +132,51 @@ export default class Teams {
         }
     }
 
+    // Diagnostic dump of the chat MESSAGE-LIST DOM (container + a sample of
+    // message rows with their attributes), so we can pin the real incoming-
+    // message selectors for the anon light-meetings client and confirm the
+    // end-command reader actually sees messages. Best-effort, never throws.
+    private async dumpChatListDom(page: Page): Promise<void> {
+        try {
+            const info = await page.evaluate(() => {
+                const attrs = (el: Element) => ({
+                    tag: el.tagName.toLowerCase(),
+                    id: (el as HTMLElement).id || undefined,
+                    tid: el.getAttribute('data-tid') || undefined,
+                    role: el.getAttribute('role') || undefined,
+                    aria: el.getAttribute('aria-label') || undefined,
+                    cls: ((el as HTMLElement).className?.toString?.() || '').slice(0, 80) || undefined,
+                });
+                const candidates = [
+                    '#chat-pane-list',
+                    '[data-tid="chat-pane-list"]',
+                    '[data-tid="chat-pane-message-list"]',
+                    '[data-tid="message-pane-list-runway"]',
+                    '[data-tid="messages-list"]',
+                    '[role="log"]',
+                    '[data-tid="chat-pane"]',
+                ];
+                const containers = candidates
+                    .map((s) => ({ s, el: document.querySelector(s) }))
+                    .filter((c) => c.el)
+                    .map((c) => ({ selector: c.s, ...attrs(c.el as Element) }));
+                // Sample message-ish rows anywhere in the doc.
+                const rows = Array.from(
+                    document.querySelectorAll(
+                        '[data-tid*="message" i], [role="heading"][aria-level="4"], .ui-chat__item, [id^="content-"]',
+                    ),
+                )
+                    .slice(0, 8)
+                    .map((el) => ({ ...attrs(el), text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 50) }));
+                return { containers, rows };
+            });
+            console.log(`[chat-list-dom] containers=${JSON.stringify(info.containers)}`);
+            console.log(`[chat-list-dom] sampleRows=${JSON.stringify(info.rows)}`);
+        } catch (e) {
+            console.warn('[chat-list-dom] dump failed (non-fatal):', e);
+        }
+    }
+
     // One-time diagnostic dump of the real in-meeting chat DOM. Teams' light-
     // meetings (anon) client uses different ids/classes than the full v2 client,
     // and our selector guesses kept missing the composer/send-button — so dump
@@ -179,14 +224,15 @@ export default class Teams {
     // and transcribing by the time this runs, so a chat failure must never abort
     // the join — we log and return.
     //
-    // The Teams composer is CKEditor 5. The earlier execCommand('insertText')
-    // approach silently failed: it mutates the contenteditable's VISIBLE DOM but
-    // does NOT fire the beforeinput/input events CKEditor's internal MODEL
-    // listens to — so the model stayed empty, the visible-text check passed
-    // (fooling us), and Enter/Send submitted nothing while clearing the visible
-    // text. Fix: drive the editor with REAL keystrokes via page.keyboard.type()
-    // (CKEditor's view listens to those), then submit by clicking the actual
-    // Send button (data-tid="newMessageCommands-send", confirmed via DOM dump) —
+    // The Teams composer is CKEditor 5. execCommand('insertText') silently
+    // failed: it mutates the contenteditable's VISIBLE DOM but does NOT fire the
+    // input events CKEditor's internal MODEL listens to — model stayed empty,
+    // the visible-text check passed (fooling us), and submit sent nothing. Fix:
+    // insert the message via a synthetic 'paste' ClipboardEvent (CKEditor's
+    // model consumes paste in ONE shot — instant, vs. the slow per-keystroke
+    // page.keyboard.type() that made a long intro crawl in visibly), falling
+    // back to keystrokes if the paste doesn't land. Submit by clicking the real
+    // Send button (data-tid="newMessageCommands-send", confirmed via DOM dump);
     // the anon light-meetings composer does not reliably submit on Enter.
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
         try {
@@ -211,8 +257,7 @@ export default class Teams {
             }
             console.log(`Teams chat input resolved via ${found.source} selector: ${found.selector}`);
             for (const message of messages) {
-                // Focus + click the composer so the caret is inside it, then type
-                // with real key events (CKEditor's model updates from these).
+                // Focus + click the composer so the caret is inside it.
                 try {
                     await found.element.evaluate((el) => {
                         const n = el as HTMLElement;
@@ -222,7 +267,42 @@ export default class Teams {
                     await found.element.click({ timeout: 5000 }).catch(() => {
                         /* contenteditable focus above is enough; click is best-effort */
                     });
-                    await page.keyboard.type(message, { delay: 10 });
+                    // Insert the whole message at once via a synthetic paste.
+                    // CKEditor consumes the 'paste' ClipboardEvent and updates its
+                    // model in one shot — instant, vs. ~1 key/CDP-roundtrip with
+                    // keyboard.type() which made a long intro crawl in visibly.
+                    // (execCommand('insertText') is NOT usable here — it skips the
+                    // input pipeline CKEditor listens to; see the prior fix.)
+                    const pasted = await found.element
+                        .evaluate((el, text) => {
+                            const node = el as HTMLElement;
+                            node.focus();
+                            try {
+                                const dt = new DataTransfer();
+                                dt.setData('text/plain', text as string);
+                                const evt = new ClipboardEvent('paste', {
+                                    clipboardData: dt,
+                                    bubbles: true,
+                                    cancelable: true,
+                                });
+                                node.dispatchEvent(evt);
+                                return true;
+                            } catch {
+                                return false;
+                            }
+                        }, message)
+                        .catch(() => false);
+                    // Give the editor a tick to apply the paste, then check it
+                    // landed; if not, fall back to real keystrokes (delay:0 is the
+                    // fastest reliable keystroke path).
+                    await new Promise((r) => setTimeout(r, 120));
+                    const afterPaste = await found.element
+                        .evaluate((el) => ((el as HTMLElement).innerText || el.textContent || '').trim())
+                        .catch(() => '');
+                    if (!pasted || !afterPaste.includes(message.slice(0, Math.min(20, message.length)))) {
+                        console.log(`Paste insert did not land (pasted=${pasted}) — typing with keystrokes.`);
+                        await page.keyboard.type(message, { delay: 0 });
+                    }
                 } catch (e) {
                     console.warn('Chat composer typing failed (non-fatal), skipping rest:', e);
                     return;
@@ -232,7 +312,7 @@ export default class Teams {
                     .evaluate((el) => ((el as HTMLElement).innerText || el.textContent || '').trim().slice(0, 120))
                     .catch(() => '');
                 const ok = typed.includes(message.slice(0, Math.min(20, message.length)));
-                console.log(`Composer content after typing: "${typed}" (matches=${ok}).`);
+                console.log(`Composer content after insert: "${typed}" (matches=${ok}).`);
 
                 // Submit. Click the real Send button (primary), fall back to
                 // Enter. Then verify the composer cleared (message left the box).
@@ -343,6 +423,16 @@ export default class Teams {
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
+        // Forward in-page console output for the speaker/attendee/message
+        // observers (they emit `DEBUG:`-prefixed logs that otherwise go nowhere)
+        // so we can see in CloudWatch whether messageChange actually fires — key
+        // for diagnosing the chat end-command reader on the anon client.
+        page.on('console', (msg) => {
+            const t = msg.text();
+            if (t.startsWith('DEBUG:') || t.includes('messageChange') || t.includes('speakerChange')) {
+                console.log(`Browser: ${t}`);
+            }
+        });
         // Teams has no heavy credentialled sign-in phase, so bring the Simli
         // avatar up now (timing unchanged from before the deferral refactor).
         if (opts.prepareAvatar) await opts.prepareAvatar();
@@ -908,27 +998,81 @@ export default class Teams {
         });
         await new Promise((resolve) => setTimeout(resolve, 1000));
         console.log("Listening for message changes.");
-        await page.evaluate(() => {
-            const targetNode = document.querySelector("#chat-pane-list");
+        const chatListInfo = await page.evaluate(() => {
+            // The incoming-message DOM differs between the full v2 client and the
+            // anon light-meetings client (the old hardcoded `#chat-pane-list` +
+            // `div[dir="auto"][role="heading"][aria-level="4"]` only matched v2,
+            // so the end command / chat commands were never read on anon joins).
+            // Attach to the broadest chat container we can find and extract each
+            // incoming message's text from several known node shapes. Observing a
+            // bit broadly is fine — messageChange is idempotent via the seen-set.
+            const CONTAINER_SELECTORS = [
+                '#chat-pane-list',
+                '[data-tid="chat-pane-list"]',
+                '[data-tid="chat-pane-message-list"]',
+                '[data-tid="message-pane-list-runway"]',
+                '[data-tid="messages-list"]',
+                '[role="log"]',
+                '[data-tid="chat-pane"]',
+            ];
+            let container: Element | null = null;
+            let matchedSelector = '';
+            for (const s of CONTAINER_SELECTORS) {
+                const el = document.querySelector(s);
+                if (el) {
+                    container = el;
+                    matchedSelector = s;
+                    break;
+                }
+            }
+            // Fall back to body so we still catch messages even if no known
+            // container id matches — the message-node extraction below is
+            // specific enough to avoid false positives.
+            const target = container || document.body;
+
+            // Pull the human-readable message text out of an added chat node,
+            // trying the known message-body shapes across both clients.
+            const MESSAGE_SELECTORS = [
+                'div[dir="auto"][role="heading"][aria-level="4"]', // v2 client
+                '[data-tid="messageBodyContent"]',
+                '[data-tid="chat-pane-message"] [dir="auto"]',
+                'div[id^="content-"] [dir="auto"]',
+                '.ui-chat__messagecontent',
+                '[data-tid="messageContent"]',
+            ];
+            const extractText = (element: Element): string | null => {
+                for (const sel of MESSAGE_SELECTORS) {
+                    const node = element.matches?.(sel) ? element : element.querySelector(sel);
+                    if (node) {
+                        const t = (node.textContent || '').trim();
+                        if (t) return t;
+                    }
+                }
+                return null;
+            };
+
+            const seen = new Set<string>();
             const config = { childList: true, subtree: true };
             const callback = (mutationList: MutationRecord[]) => {
                 for (const mutation of mutationList) {
                     for (const addedNode of mutation.addedNodes) {
-                        if (addedNode.nodeType === Node.ELEMENT_NODE) {
-                            const element = addedNode as Element;
-                            const messageElement = element.querySelector(
-                                'div[dir="auto"][role="heading"][aria-level="4"]'
-                            );
-                            if (messageElement) {
-                                (window as any).messageChange(messageElement.textContent);
-                            }
+                        if (addedNode.nodeType !== Node.ELEMENT_NODE) continue;
+                        const text = extractText(addedNode as Element);
+                        if (text && !seen.has(text)) {
+                            seen.add(text);
+                            (window as any).messageChange(text);
                         }
                     }
                 }
             };
             const observer = new MutationObserver(callback);
-            if (targetNode) observer.observe(targetNode, config);
+            observer.observe(target, config);
+            return { matchedSelector: matchedSelector || '(none — fell back to body)' };
         });
+        console.log(`Teams chat message observer attached to: ${chatListInfo.matchedSelector}`);
+        // One-shot diagnostic dump of the chat-list DOM so we can confirm the
+        // real light-meetings container/message-node selectors from the logs.
+        await this.dumpChatListDom(page);
         } catch (e) {
             // A monitoring-setup failure is non-fatal: the VP is admitted and
             // (below) transcribing. Speaker/attendee attribution may be degraded
