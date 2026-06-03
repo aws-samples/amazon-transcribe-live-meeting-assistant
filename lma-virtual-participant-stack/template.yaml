@@ -1672,7 +1672,7 @@ Resources:
         - UseEC2LaunchType
         - - EC2
         - - FARGATE
-      Cpu: !If [UseFargateLaunchType, "1 vCPU", !Ref AWS::NoValue]
+      Cpu: !If [UseFargateLaunchType, "2 vCPU", !Ref AWS::NoValue]
       Memory: !If [UseFargateLaunchType, "4 GB", !Ref AWS::NoValue]
     DependsOn:
       - Cluster

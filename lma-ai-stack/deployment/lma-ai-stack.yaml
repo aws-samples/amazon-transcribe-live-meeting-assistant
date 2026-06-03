@@ -7249,12 +7249,14 @@ Resources:
             #     as the leftmost label, so mid-domain wildcards like
             #     cognito-idp.*.amazonaws.com are invalid (browser ignores them) and
             #     are intentionally omitted -- they are already covered by *.amazonaws.com.
+            #     registry.modelcontextprotocol.io is allowed so the MCP Servers UI can
+            #     browse/install servers from the official MCP registry.
             #   - script-src/style-src: 'unsafe-inline' and 'unsafe-eval' retained
             #     for React SPA compatibility.
             #   - object-src: 'none' (no plugins needed).
             #   - base-uri: 'none' (prevent base tag injection).
             #   - frame-ancestors: 'self' (prevent clickjacking).
-            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.cloudfront.net https://*.amazoncognito.com https://*.s3-accelerate.amazonaws.com wss://*.amazonaws.com wss://*.cloudfront.net ws://localhost:*;"
+            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.cloudfront.net https://*.amazoncognito.com https://*.s3-accelerate.amazonaws.com https://registry.modelcontextprotocol.io wss://*.amazonaws.com wss://*.cloudfront.net ws://localhost:*;"
           StrictTransportSecurity:
             Override: true
             AccessControlMaxAgeSec: 31536000
