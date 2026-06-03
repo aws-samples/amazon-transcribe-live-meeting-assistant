@@ -39,10 +39,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# 0.3.29 is the first release exposing launchPersistentContext; pinned to match
-# the npm cloakbrowser dep. A binary bump was deliberately deferred to avoid
-# regressing the now-stable WebRTC/login behavior.
-ARG CLOAKBROWSER_VERSION=0.3.29
+# Pinned to match the npm cloakbrowser dep (see package.json). 0.3.31 brings the
+# 58-patch fingerprint binary (Chrome 146 profiles) and a humanize iframe
+# pointer-events fix; deps/peerDeps/engines are unchanged from 0.3.29 (no
+# breaking changes verified against the changelog).
+ARG CLOAKBROWSER_VERSION=0.3.31
 RUN pip install --no-cache-dir "cloakbrowser[geoip]==${CLOAKBROWSER_VERSION}" \
     && python -m cloakbrowser install \
     && python -m cloakbrowser info
