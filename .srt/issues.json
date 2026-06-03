@@ -7644,10 +7644,10 @@
     "check_id": "B110",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
-    "status": "reopened",
+    "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
     "assessmentCount": 8,
-    "suppressionReason": "try/except pass used for optional macOS quarantine attribute removal. Failure is non-fatal — the binary still works without xattr removal."
+    "suppressionReason": "Best-effort version probe of our own srt binary (get_installed_version). On any failure it returns None, which simply triggers a clean reinstall — non-fatal and not security-relevant. Broad except is intentional and already annotated # noqa: BLE001."
   },
   {
     "source": "Bandit",
