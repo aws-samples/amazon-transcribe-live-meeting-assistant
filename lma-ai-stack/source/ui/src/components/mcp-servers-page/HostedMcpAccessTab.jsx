@@ -89,9 +89,9 @@ const HostedMcpAccessTab = () => {
         and{' '}
         <Link
           external
-          href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/main/docs/quicksuite-mcp-setup.md"
+          href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/main/docs/amazon-quick-mcp-setup.md"
         >
-          Amazon Quick Suite setup
+          Amazon Quick (Suite &amp; Desktop) setup
         </Link>{' '}
         for walkthroughs.
       </Alert>

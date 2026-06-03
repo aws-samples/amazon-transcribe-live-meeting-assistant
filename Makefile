@@ -385,6 +385,38 @@ vp-logs: ## Tail logs for the local VP container (dev mode)
 vp-shell: ## Open a shell inside the running local VP container
 	@docker exec -it lma-vp-local-test /bin/bash
 
+##@ Security
+# Sample Security Review Tool (https://github.com/aws-samples/sample-security-review-tool).
+# Suppressions are tracked in .srt/issues.json (committed via negative-gitignore).
+# See docs/security-scanning.md.
+
+srt: ## Run full SRT workflow (setup, scan, then prompt to open dashboard)
+	@$(MAKE) srt-setup
+	@$(MAKE) srt-scan
+	@echo ""
+	@echo -e "$(CYAN)Open the dashboard to triage findings:$(NC) make srt-fix"
+
+srt-setup: ## Download and configure SRT (pin via SRT_VERSION env var)
+	$(PYTHON) scripts/srt/setup.py
+
+srt-scan: ## Run SRT assessment (non-zero exit in CI on open findings)
+	$(PYTHON) scripts/srt/run.py
+
+srt-fix: ## Open the SRT dashboard for interactive triage
+	$(PYTHON) scripts/srt/fix.py
+
+srt-clean: ## Remove vendored layer trees, .aws-sam, out/, node_modules, scan artifacts (preserves SRT binary, venv, issues.json, .checksum)
+	$(PYTHON) scripts/srt/clean.py --apply
+
+srt-clean-preview: ## Show what `make srt-clean` would remove without deleting anything
+	$(PYTHON) scripts/srt/clean.py
+
+srt-clean-checksums: ## Remove **/.checksum cache files (forces full rebuild on next make/publish)
+	@find . -name .checksum -not -path './.git/*' -print -delete | wc -l | xargs -I{} echo "Removed {} .checksum file(s)"
+
+srt-migrate-dsr: ## Migrate suppressions from .dsr/issues.json → .srt/issues.json (one-shot)
+	$(PYTHON) scripts/srt/migrate_dsr_to_srt.py $(if $(FORCE),--force,)
+
 ##@ Publishing & Deployment
 
 # Usage: make publish BUCKET=<bucket-basename> PREFIX=<prefix> REGION=<region> [PUBLIC=true]
@@ -458,6 +490,8 @@ docs-setup: ## One-time docs site setup (symlinks + npm install)
 	@echo -e "$(GREEN)✅ Docs site setup complete!$(NC)"
 
 docs-build: docs-setup ## Build documentation site (no serve)
+	@echo "Ensuring docs have frontmatter..."
+	cd docs-site && bash add-frontmatter.sh
 	@echo "Syncing sidebar with new docs..."
 	cd docs-site && node sync-sidebar.mjs
 	@echo "Building documentation site..."

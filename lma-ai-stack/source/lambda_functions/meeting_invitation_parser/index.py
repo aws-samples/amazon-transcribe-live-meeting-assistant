@@ -77,7 +77,12 @@ CRITICAL MEETING ID AND PASSWORD RULES:
 2. For meetingPlatform, use one of: ZOOM, TEAMS, CHIME, WEBEX, GOOGLE_MEET
 3. Extract meeting ID from URLs when possible (e.g., Zoom meeting ID from zoom.us URLs)
 4. For Zoom, extract the numeric meeting ID, not the full URL. Remove any spaces from the meeting ID (e.g., "961 8750 1703" should become "96187501703")
-5. For Teams, extract the meeting URL or conference ID
+5. For Teams, extract the numeric meeting ID and the passcode separately, NOT the full URL.
+   - New format URLs look like https://teams.microsoft.com/meet/MEETINGID?p=PASSCODE
+     where the meetingId is ONLY the numeric part (e.g. "243574196567966") and the
+     meetingPassword is the value of the "p" parameter (e.g. "ixpjsDWNj8cLxyHlQD").
+   - For older "meetup-join" URLs (https://teams.microsoft.com/l/meetup-join/...) where there
+     is no separate numeric ID or passcode, use the full join URL as the meetingId.
 6. For Webex, extract ONLY the numeric meeting ID from URLs. Webex URLs look like https://meetXXXX.webex.com/meet/prYYYYYYYYYY where the meeting ID is ONLY the numeric part (YYYYYYYYYY) WITHOUT the "pr" prefix. For example, from https://meet1648.webex.com/meet/pr2552362251, the meetingId should be "2552362251" (not "pr2552362251")
 7. For Zoom passwords from URLs: Extract the COMPLETE password from the URL's pwd parameter. The password can contain letters, numbers, and special characters including periods (.). Extract everything after "pwd=" up to the next "&" or end of URL. Do NOT truncate the password at periods or other special characters.
 
@@ -252,6 +257,23 @@ def validate_parsed_data(data):
             webex_pr_match = re.match(r"^pr(\d+)$", meeting_id, re.IGNORECASE)
             if webex_pr_match:
                 data["meetingId"] = webex_pr_match.group(1)
+
+    # Clean up meeting ID for Teams.
+    # New format: https://teams.microsoft.com/meet/243574196567966?p=ixpjsDWNj8cLxyHlQD
+    #   -> meetingId="243574196567966", meetingPassword="ixpjsDWNj8cLxyHlQD"
+    # Older "meetup-join" URLs have no separate numeric ID/passcode, so the full URL is kept.
+    if data.get("meetingPlatform") == "TEAMS" and data.get("meetingId"):
+        meeting_id = data["meetingId"]
+        teams_new_match = re.search(
+            r"teams\.microsoft\.com/(?:v2/.*?)?meet/(\d+)", meeting_id, re.IGNORECASE
+        )
+        if teams_new_match:
+            data["meetingId"] = teams_new_match.group(1)
+            # Extract the passcode from the "p" query parameter if not already set
+            if not data.get("meetingPassword"):
+                password_match = re.search(r"[?&]p=([^&\s]+)", meeting_id)
+                if password_match:
+                    data["meetingPassword"] = password_match.group(1)
 
     # Calculate next occurrence for recurring meetings
     data = calculate_next_occurrence(data)

@@ -33,6 +33,7 @@ title: "LMA Documentation"
 - [Upload Audio](upload-audio.md) — Upload a pre-recorded audio/video file for batch transcription and summary
 - [Browser Extension](browser-extension.md) — Chrome extension for capturing browser tab audio from any meeting platform
 - [Virtual Participant](virtual-participant.md) — Headless Chrome bot that joins Zoom, Teams, Chime, Google Meet, and WebEx meetings
+- [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md) — Per-user Zoom credentials, AI-driven sign-in loop, persistent Chromium profiles, AI DOM resolver fallback
 
 ### Voice Assistant & Avatar
 
@@ -46,7 +47,8 @@ title: "LMA Documentation"
 - [MCP Servers Overview](mcp-servers.md) — Model Context Protocol, authentication methods, admin UI, built-in LMA tools
 - [MCP API Key Authentication](mcp-api-key-auth.md) — Per-user API key auth for programmatic MCP clients, JSON-RPC 2.0 protocol support
 - [Salesforce MCP Setup](salesforce-mcp-setup.md) — Salesforce Connected App with OAuth 2.1
-- [Amazon Quick Suite MCP Setup](quicksuite-mcp-setup.md) — Amazon Quick Suite integration
+- [Amazon Quick MCP Setup](amazon-quick-mcp-setup.md) — Connect LMA to Amazon Quick Suite (web, OAuth) or Quick Desktop (native, API key)
+- [Amazon Quick Desktop: LMA Workflows](amazon-quick-desktop-integration.md) — Conversational workflows, scheduled agent recipes, and the skills pack for Quick Desktop
 - [DeepWiki MCP Setup](deepwiki-mcp-setup.md) — DeepWiki repository documentation search
 
 ### Web UI
@@ -58,6 +60,7 @@ title: "LMA Documentation"
 - [User Management](user-management.md) — Admin-only UI to create and delete LMA users (Admin or User roles)
 - [User-Based Access Control](user-based-access-control.md) — Admin vs non-admin users, meeting sharing, meeting deletion
 - [Infrastructure & Security](infrastructure-and-security.md) — Architecture overview, VPC, Cognito, KMS encryption, CloudFront, IAM, data retention
+- [Security Scanning (SRT)](security-scanning.md) — Automated security scanning via the AWS Sample Security Review Tool, suppression workflow, GitLab CI integration, DSR → SRT migration
 - [CloudFormation Service Role](cloudformation-service-role.md) — Delegated IAM role for non-admin LMA deployment and management
 
 ### Integration & API
@@ -70,6 +73,7 @@ title: "LMA Documentation"
 
 - [CloudFormation Parameters Reference](cloudformation-parameters.md) — Complete reference of all stack parameters by category
 - [Stack Updates & Upgrades](stack-updates-and-upgrades.md) — Updating existing stacks, template URLs, version migration notes
+- [Well-Architected Framework Assessment](well-architected.md) — Assessment of LMA against the six pillars of the AWS Well-Architected Framework
 - [Troubleshooting](troubleshooting.md) — Monitoring, CloudWatch logs, common issues, cost assessment
 - [Cleanup](cleanup.md) — Deleting stacks and retained resources
 

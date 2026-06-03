@@ -13,6 +13,8 @@ from typing import Any, Dict
 
 import boto3
 
+from tools.url_helper import get_meeting_url
+
 logger = logging.getLogger()
 
 
@@ -81,6 +83,8 @@ def execute(
         # Add topics if requested
         if include_topics:
             result["topics"] = parse_topics(meeting)
+
+        result["meetingUrl"] = get_meeting_url(meeting_id)
 
         logger.info(f"Retrieved summary for meeting {meeting_id}")
         return result

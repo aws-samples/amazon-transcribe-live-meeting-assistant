@@ -2,16 +2,55 @@
 
 echo "=== LMA Virtual Participant Startup ==="
 
+# Identify exactly which container image this task is running (build date +
+# git commit), so logs make it obvious whether the expected code is deployed.
+if [ -f /srv/build-info.json ]; then
+    echo "=== VP build: $(cat /srv/build-info.json) ==="
+else
+    echo "=== VP build: (no build-info.json) ==="
+fi
+
+# Push BOOTING status before Node starts so the UI shows progress during cold-start.
+push_booting_status() {
+    if [ -z "$VIRTUAL_PARTICIPANT_ID" ] || [ -z "$VP_TABLE_NAME" ]; then
+        return 0
+    fi
+    aws dynamodb update-item \
+        --table-name "$VP_TABLE_NAME" \
+        --key "{\"id\":{\"S\":\"$VIRTUAL_PARTICIPANT_ID\"}}" \
+        --update-expression "SET #s = :s, updatedAt = :u" \
+        --expression-attribute-names '{"#s":"status"}' \
+        --expression-attribute-values "{\":s\":{\"S\":\"BOOTING\"},\":u\":{\"S\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"}}" \
+        --region "${AWS_REGION:-us-west-2}" \
+        > /dev/null 2>&1 || true
+}
+push_booting_status &
+
 echo "Starting D-Bus..."
 dbus-daemon --system --fork 2>/dev/null || echo "D-Bus already running or not needed"
 
 echo "Starting virtual display (Xvfb)..."
-# Increased height to 1120 to account for window decorations and ensure full visibility
-Xvfb :99 -screen 0 1920x1120x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
+Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
 export DISPLAY=:99
 
 echo "Waiting for display to initialize..."
 sleep 3
+
+# Suppress fluxbox toolbar so Chromium fills the full Xvfb screen.
+mkdir -p ~/.fluxbox
+cat > ~/.fluxbox/init <<'FLUXINIT'
+session.screen0.toolbar.visible:        false
+session.screen0.slit.autoHide:          true
+session.screen0.fullMaximization:       true
+session.screen0.workspaces:             1
+session.screen0.tabs.usePixmap:         false
+session.screen0.iconbar.usePixmap:      false
+session.screen0.toolbar.autoHide:       true
+session.screen0.toolbar.maxOver:        true
+session.screen0.workspaceNames:         one,
+session.screen0.titlebar.left:
+session.screen0.titlebar.right:         Close
+FLUXINIT
 
 echo "Starting window manager (Fluxbox)..."
 fluxbox > /dev/null 2>&1 &
@@ -65,9 +104,7 @@ if [ "$VNC_READY" = false ]; then
 fi
 
 echo "Starting WebSocket proxy (websockify)..."
-# Start websockify to proxy WebSocket connections from 5901 to VNC port 5900
-# Bind to 0.0.0.0 to accept external connections (not just localhost)
-/usr/share/novnc/utils/websockify/run \
+websockify \
     --web /usr/share/novnc \
     0.0.0.0:5901 \
     localhost:5900 \
@@ -131,9 +168,7 @@ echo "Created agent_output sink (module $AGENT_SINK)"
 COMBINED_SINK=$(pactl load-module module-null-sink sink_name=combined_audio sink_properties=device.description="Combined_Audio_For_Transcription")
 echo "Created combined_audio sink (module $COMBINED_SINK)"
 
-# Route meeting_audio.monitor to combined_audio sink
-# Note: latency_msec=1 was too aggressive and caused buffer underruns on smaller instances.
-# 20ms provides a good balance between low latency and stability across instance sizes.
+# 20ms latency: 1ms caused underruns on smaller instances.
 pactl load-module module-loopback source=meeting_audio.monitor sink=combined_audio latency_msec=20
 echo "Routed meeting audio to combined sink"
 

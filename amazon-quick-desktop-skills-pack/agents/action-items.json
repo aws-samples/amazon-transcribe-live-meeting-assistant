@@ -1,0 +1,25 @@
+{
+  "agent_id": "lma-action-items",
+  "description": "Action item extraction agent — hourly check for completed meetings, extracts commitments, posts to activity feed.",
+  "model": "smart",
+  "schedule": {
+    "type": "interval",
+    "minutes": 60
+  },
+  "trigger": {
+    "trigger_id": "new-meetings-completed",
+    "type": "custom_code",
+    "description": "new LMA meetings completed since last check",
+    "code": "def check(params, tools, state):\n    \"\"\"Check for newly completed LMA meetings.\"\"\"\n    from datetime import datetime, timedelta, timezone\n\n    list_meetings = tools.get(\"live_meeting_assistant_lma__list_meetings\")\n    if not list_meetings:\n        return False\n\n    now = datetime.now(timezone.utc)\n    start = (now - timedelta(hours=2)).isoformat()\n    end = now.isoformat()\n\n    result = list_meetings(startDate=start, endDate=end)\n    if not result:\n        return False\n\n    meetings = result.get(\"meetings\", []) if isinstance(result, dict) else []\n    if not meetings:\n        return False\n\n    seen_ids = set(state.get(\"processed_meeting_ids\", []))\n    new_meetings = [m for m in meetings if m.get(\"meetingId\") not in seen_ids]\n\n    if not new_meetings:\n        return False\n\n    all_ids = list(seen_ids | {m.get(\"meetingId\") for m in new_meetings})\n    state[\"processed_meeting_ids\"] = all_ids[-100:]\n\n    return {\n        \"new_meetings\": [{\"id\": m.get(\"meetingId\"), \"name\": m.get(\"meetingName\", \"Unknown\"), \"url\": m.get(\"meetingUrl\")} for m in new_meetings],\n        \"count\": len(new_meetings)\n    }"
+  },
+  "tool_policy": [
+    {"group": "outlook_builtin"},
+    {"group": "user_mcp__live_meeting_assistant_lma"},
+    {"group": "kg_tools"},
+    {"effect": "allow", "tool": "live_meeting_assistant_lma__search_lma_meetings"},
+    {"effect": "allow", "tool": "live_meeting_assistant_lma__get_meeting_summary"},
+    {"effect": "allow", "tool": "live_meeting_assistant_lma__list_meetings"}
+  ],
+  "allow_unscoped_write_tools": true,
+  "prompt": "You are an action item extraction agent. Your job is to find newly completed meetings and extract actionable commitments.\n\n## Process\n\n1. The trigger provides you with a list of newly completed meetings (IDs and names).\n\n2. For each meeting, call `live_meeting_assistant_lma__get_meeting_summary` with `includeActionItems=true` and `includeTopics=true`.\n\n3. Extract action items. For each:\n   - Identify the owner (who committed to doing it)\n   - Identify the action (what they committed to)\n   - Note any deadline mentioned\n   - Note the source meeting name and URL\n\n4. Post a summary to the activity feed using `update_feed` with importance=\"important\":\n   - Group action items by owner\n   - Include the meeting name, date, and meetingUrl for each\n   - Flag any items assigned to the user specifically with ⚠️\n   - Format as a scannable list\n\n## Guidelines\n- If no new meetings are found in the trigger context, call skip_cycle.\n- Focus on concrete, actionable commitments — not vague discussion points.\n- Never fabricate action items — only report what's explicitly in the summary.\n- Include LMA meeting URLs so the user can click through to full context.\n- Do NOT call schedule_meeting or start_meeting_now — you are read-only."
+}

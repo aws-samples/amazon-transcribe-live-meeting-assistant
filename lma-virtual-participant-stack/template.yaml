@@ -27,8 +27,9 @@ Parameters:
     Type: String
     Default: >-
       Hello. I am an AI Live Meeting Assistant (LMA).
-      I was invited by {LMA_USER} to join this call. 
-      To learn more about me please visit: https://amazon.com/live-meeting-assistant.
+      I was invited by {LMA_USER} to join this call.
+      Anyone here can ask me to leave at any time by typing "LMA leave" (or "LMA end") in chat.
+      To learn more please visit: https://amazon.com/live-meeting-assistant.
 
   StartRecordingMessage:
     Type: String
@@ -89,6 +90,14 @@ Parameters:
   VPTaskRegistryTableName:
     Type: String
     Description: Name of the VPTaskRegistry DynamoDB table from AI stack
+
+  DomSelectorCacheTableName:
+    Type: String
+    Description: Name of the DomSelectorCache DynamoDB table from AI stack (shared by VP tasks for AI-discovered selectors)
+
+  VPProfilesBucketName:
+    Type: String
+    Description: Name of the S3 bucket holding per-user persisted Chromium profiles
 
   EventSourcingTableName:
     Type: String
@@ -153,16 +162,18 @@ Parameters:
     NoEcho: true
     Default: ""
     Description: >-
-      (Optional) API key for Simli avatar. When provided with a Face ID,
-      enables animated avatar video for the Virtual Participant's camera feed.
-      The avatar lip-syncs with the voice assistant's audio output.
+      (Optional) API key for Simli avatar. The avatar feature requires BOTH
+      SimliApiKey and SimliFaceId — leave both blank to disable, or set both
+      to enable animated avatar video for the Virtual Participant's camera
+      feed. The avatar lip-syncs with the voice assistant's audio output.
 
   SimliFaceId:
     Type: String
     Default: ""
     Description: >-
-      (Optional) Simli Face ID for the avatar appearance.
-      Get this from your Simli dashboard at simli.com.
+      (Optional) Simli Face ID for the avatar appearance. Required when
+      SimliApiKey is set — the avatar is enabled only when BOTH parameters
+      are non-empty. Get this from your Simli dashboard at simli.com.
 
   SimliTransportMode:
     Type: String
@@ -407,9 +418,16 @@ Parameters:
       - m5.xlarge
     Description: >-
       EC2 instance type (only used if VPLaunchType=EC2).
-      For voice assistant + Simli avatar workloads, use c5.xlarge or larger
-      for sustained CPU performance (no burstable throttling).
-      t3 instances are burstable and may cause audio glitches under sustained load.
+      Defaults to t3.medium which fits 1 VP task (capped at 2500 MB).
+      The capacity-provider auto-scaler launches additional hosts (up to
+      VPMaxInstances) when concurrent demand exceeds the current cluster's
+      capacity, so users running one meeting at a time pay the t3.medium
+      baseline (~$30/month) and only scale up while multiple VPs are active.
+      Bump to t3.large (3 VPs/host) or larger if you regularly run >3 concurrent
+      meetings and want fewer scale-outs. For voice assistant + Simli avatar
+      workloads, use c5.xlarge or larger for sustained CPU performance (no
+      burstable throttling). t3 instances are burstable and may cause audio
+      glitches under sustained load.
 
   VPMinInstances:
     Type: Number
@@ -424,6 +442,18 @@ Parameters:
     MinValue: 1
     MaxValue: 100
     Description: Maximum EC2 instances (only used if VPLaunchType=EC2)
+
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Description: >-
+      Logging level for ECS containers and Lambda functions. Set to DEBUG for
+      troubleshooting, INFO for normal operation.
 
 
 Conditions:
@@ -583,7 +613,7 @@ Resources:
                   - echo `pwd`
                   - echo `ls -altr`
                   - echo Building container image...
-                  - docker build -t ${ImageRepo} backend
+                  - docker build --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-arg BUILD_SOURCE=codebuild -t ${ImageRepo} backend
                   - docker tag ${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
                   - echo Pushing image to ECR...
                   - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
@@ -989,6 +1019,28 @@ Resources:
                 Condition:
                   StringEquals:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+        - PolicyName: DomSelectorCachePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:PutItem"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:DeleteItem"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DomSelectorCacheTableName}"
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                  - "kms:Encrypt"
+                  - "kms:GenerateDataKey"
+                  - "kms:DescribeKey"
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
         - PolicyName: ALBDynamicRoutingPolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -1008,6 +1060,49 @@ Resources:
                   - "elasticloadbalancing:ModifyRule"
                   - "elasticloadbalancing:AddTags"
                 Resource: "*"
+        - PolicyName: VPProfilesPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # VP backend writes only under profiles/.
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${VPProfilesBucketName}"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "arn:aws:s3:::${VPProfilesBucketName}/profiles/*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "s3.${AWS::Region}.amazonaws.com"
+        - PolicyName: ZoomCredentialsReadPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${LMAStackName}/zoom-credentials/*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
         - PolicyName: BedrockPolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -1019,6 +1114,9 @@ Resources:
                   - "bedrock:InvokeModelWithBidirectionalStream"
                 Resource:
                   - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-haiku-4-5*"
+                  - !Sub "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5*"
+                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*claude-haiku-4-5*"
         - PolicyName: NovaSonicConfigAccess
           PolicyDocument:
             Version: 2012-10-17
@@ -1077,9 +1175,11 @@ Resources:
 
   Cluster:
     Type: "AWS::ECS::Cluster"
+    # NOTE: capacity providers are attached via ClusterCapacityProviderAssociations
+    # below (when UseEC2LaunchType is true) instead of inline here, because
+    # both can't be set simultaneously. For Fargate-only deployments the
+    # association resource is skipped and Fargate is implicitly available.
     Properties:
-      CapacityProviders:
-        - FARGATE
       ClusterSettings:
         - Name: containerInsights
           Value: enabled
@@ -1137,15 +1237,37 @@ Resources:
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
-            set -e
+            # Best-effort warm-cache only; ECS task-launch is source of truth.
+            # NOTE: the per-boot `yum update -y --security` was REMOVED. These
+            # hosts run AWS SSM Patch Manager (AWS-RunPatchBaseline with the
+            # default RebootOption=RebootIfNeeded), which already owns OS
+            # patching AND reboots the host to apply kernel/security updates.
+            # Running yum here was redundant with that managed patching, only
+            # slowed instance launch, and — worst of all — a freshly installed
+            # security kernel left the host one Patch Manager scan away from an
+            # in-place reboot that kills the live VP container mid-meeting
+            # (observed: task stopped with EssentialContainerExited when the
+            # host rebooted ~30 min after launch). Leave patching to Patch
+            # Manager so the reboot cadence is governed by its baseline /
+            # maintenance window rather than a kernel we pulled in at boot.
+            # (yum update -y --security || yum update -y --security --skip-broken || true) \
+            #   >> /var/log/lma-vp-yum-security.log 2>&1
             echo "ECS_CLUSTER=${Cluster}" >> /etc/ecs/ecs.config
             echo "ECS_IMAGE_PULL_BEHAVIOR=prefer-cached" >> /etc/ecs/ecs.config  # pragma: allowlist secret
             echo "ECS_ENABLE_CONTAINER_METADATA=true" >> /etc/ecs/ecs.config
             echo "ECS_ENABLE_TASK_IAM_ROLE=true" >> /etc/ecs/ecs.config
             echo "ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true" >> /etc/ecs/ecs.config
-            aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
-            docker pull ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
-            systemctl enable --now ecs
+            # Newer ECS-optimized AMIs ship without aws-cli pre-installed.
+            if ! command -v aws >/dev/null 2>&1; then
+              yum install -y aws-cli >> /var/log/lma-vp-aws-cli-install.log 2>&1 || true
+            fi
+            if command -v aws >/dev/null 2>&1; then
+              aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com >> /var/log/lma-vp-ecr-login.log 2>&1 || true
+              docker pull ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest >> /var/log/lma-vp-docker-pull.log 2>&1 || true
+            fi
+            # ecs.service is already enabled on the AMI; using --now would deadlock
+            # against cloud-final.service (ecs.service has After=cloud-final.service).
+            systemctl enable ecs || true
 
   # Custom Resource to handle ASG deletion gracefully
   ASGDeletionHandlerRole:
@@ -1320,6 +1442,28 @@ Resources:
     Condition: UseEC2LaunchType
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
+    # Suspend health-check / replace / rebalance / alarm / scheduled processes
+    # during a CFN-driven launch-template update so a stale ECS health-check
+    # signal during the rollout doesn't churn the cluster while the new
+    # instances are being launched. Without this, every CFN deploy that
+    # touches the launch template triggers an ASG scale-out + scale-in that
+    # can leave the cluster without an active host for several minutes —
+    # the exact symptom we hit during today's testing. The capacity provider
+    # still launches new hosts on demand at runtime; this only affects how
+    # the ASG behaves during a stack update.
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 0
+        MaxBatchSize: 1
+        PauseTime: PT10M
+        WaitOnResourceSignals: false
+        MinSuccessfulInstancesPercent: 100
+        SuspendProcesses:
+          - HealthCheck
+          - ReplaceUnhealthy
+          - AZRebalance
+          - AlarmNotification
+          - ScheduledActions
     Properties:
       AutoScalingGroupName: !Sub "${AWS::StackName}-VP-ASG"
       MinSize: !Ref VPMinInstances
@@ -1348,10 +1492,29 @@ Resources:
         AutoScalingGroupArn: !Ref VPAutoScalingGroup
         ManagedScaling:
           Status: ENABLED
+          # TargetCapacity 100 = "scale up only when the cluster is fully reserved";
+          # combined with the small step sizes below this gives a tight, demand-driven
+          # scale-up. Scale-down happens automatically when reservation drops.
           TargetCapacity: 100
           MinimumScalingStepSize: 1
-          MaximumScalingStepSize: 10
+          MaximumScalingStepSize: 2
+          InstanceWarmupPeriod: 90
         ManagedTerminationProtection: ENABLED
+
+  # Wire the capacity provider as the cluster's default strategy. Without this
+  # association ECS RunTask falls back to LaunchType=EC2 (the legacy behavior)
+  # and never auto-scales the ASG when capacity is exhausted.
+  VPClusterCapacityProviderAssociation:
+    Type: AWS::ECS::ClusterCapacityProviderAssociations
+    Condition: UseEC2LaunchType
+    Properties:
+      Cluster: !Ref Cluster
+      CapacityProviders:
+        - !Ref VPCapacityProvider
+        - FARGATE
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: !Ref VPCapacityProvider
+          Weight: 1
 
   TaskDefinition:
     Type: "AWS::ECS::TaskDefinition"
@@ -1433,6 +1596,19 @@ Resources:
               Value: !Ref AppSyncEventApiUrl
             - Name: VP_TASK_REGISTRY_TABLE_NAME
               Value: !Ref VPTaskRegistryTableName
+            - Name: VP_TABLE_NAME
+              Value: !Ref VirtualParticipantTableName
+            - Name: DOM_SELECTOR_CACHE_TABLE_NAME
+              Value: !Ref DomSelectorCacheTableName
+            - Name: BEDROCK_DOM_RESOLVER_MODEL_ID
+              Value: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+            - Name: VP_PROFILES_BUCKET
+              Value: !Ref VPProfilesBucketName
+            # Overridden at task launch by Step Functions when the user opts in.
+            - Name: ZOOM_CREDENTIALS_SECRET_NAME
+              Value: ""
+            - Name: LMA_USER_SUB
+              Value: ""
             - Name: DYNAMODB_TABLE_NAME
               Value: !Ref EventSourcingTableName
             - Name: ENABLE_AUDIO_RECORDING
@@ -1471,6 +1647,8 @@ Resources:
               Value: !Ref NovaSonicConfigTableName
             - Name: STRANDS_LAMBDA_ARN
               Value: !Ref StrandsLambdaArn
+            - Name: LOG_LEVEL
+              Value: !Ref LogLevel
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:
@@ -1487,14 +1665,14 @@ Resources:
                 Ref: AWS::Region
           Name: "scribe"
       Family: !Sub ${AWS::StackName}VirtualParticipantTaskDef
-      TaskRoleArn: !Ref TaskRole
+      TaskRoleArn: !GetAtt TaskRole.Arn
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       NetworkMode: "awsvpc"
       RequiresCompatibilities: !If
         - UseEC2LaunchType
         - - EC2
         - - FARGATE
-      Cpu: !If [UseFargateLaunchType, "1 vCPU", !Ref AWS::NoValue]
+      Cpu: !If [UseFargateLaunchType, "2 vCPU", !Ref AWS::NoValue]
       Memory: !If [UseFargateLaunchType, "4 GB", !Ref AWS::NoValue]
     DependsOn:
       - Cluster
@@ -1713,6 +1891,19 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:GetItem
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*VirtualParticipant*"
+              # The VirtualParticipant DDB table is encrypted with the
+              # customer-managed CMK. UpdateItem requires kms:Decrypt
+              # and kms:GenerateDataKey on the key (DDB calls KMS via
+              # service principal, scoped by kms:ViaService condition).
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
   LMAVirtualParticipantSchedulerStateMachine:
     Type: "AWS::StepFunctions::StateMachine"
@@ -1768,7 +1959,51 @@ Resources:
                     "Next": "CreateSchedule"
                   }
                 ],
-                "Default": "RunTask"
+                "Default": "Resolve Zoom Secret"
+              },
+              "Resolve Zoom Secret": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "And": [
+                      { "Variable": "$.data.userZoomSub", "IsPresent": true },
+                      { "Variable": "$.data.userZoomSub", "IsString": true },
+                      { "Not": { "Variable": "$.data.userZoomSub", "StringMatches": "" } }
+                    ],
+                    "Next": "Format Zoom Secret Name"
+                  }
+                ],
+                "Default": "Empty Zoom Secret Name"
+              },
+              "Format Zoom Secret Name": {
+                "Type": "Pass",
+                "Comment": "Defaults written to $.computed; MergeZoomSecret JsonMerges with override=false so existing $.data fields win. Tolerates callers (MCP tool, scheduled meetings) that don't pass userSub/userZoomSub at all.",
+                "Parameters": {
+                  "zoomCredentialsSecretName.$": "States.Format('${LMAStackName}/zoom-credentials/{}', $.data.userZoomSub)",
+                  "userSub": "",
+                  "userZoomSub": ""
+                },
+                "ResultPath": "$.computed",
+                "Next": "MergeZoomSecret"
+              },
+              "Empty Zoom Secret Name": {
+                "Type": "Pass",
+                "Parameters": {
+                  "zoomCredentialsSecretName": "",
+                  "userSub": "",
+                  "userZoomSub": ""
+                },
+                "ResultPath": "$.computed",
+                "Next": "MergeZoomSecret"
+              },
+              "MergeZoomSecret": {
+                "Type": "Pass",
+                "Comment": "JsonMerge(a, b, false) puts b's keys on top of a's on collision. We want $.data (user input, e.g. userSub from the UI) to WIN over $.computed (the empty defaults), so $.computed must be the FIRST argument.",
+                "Parameters": {
+                  "apiInfo.$": "$.apiInfo",
+                  "data.$": "States.JsonMerge($.computed, $.data, false)"
+                },
+                "Next": "RunTask"
               },
               "RunTask": {
                 "Type": "Task",
@@ -1776,7 +2011,7 @@ Resources:
                 "Parameters": {
                   "Cluster": "${ClusterArn}",
                   "TaskDefinition": "${TaskDefinition}",
-                  "LaunchType": "${VPLaunchType}",
+                  ${RunTaskDispatch},
                   "NetworkConfiguration": {
                     "AwsvpcConfiguration": {
                       "AssignPublicIp": "DISABLED",
@@ -1829,16 +2064,125 @@ Resources:
                           {
                             "Name": "VIRTUAL_PARTICIPANT_ID",
                             "Value.$": "$.data.virtualParticipantId"
+                          },
+                          {
+                            "Name": "ZOOM_CREDENTIALS_SECRET_NAME",
+                            "Value.$": "$.data.zoomCredentialsSecretName"
+                          },
+                          {
+                            "Name": "LMA_USER_SUB",
+                            "Value.$": "$.data.userSub"
                           }
                         ]
                       }
                     ]
                   }
                 },
-                "End": true,
+                "Next": "CheckRunTaskFailures",
+                "ResultPath": "$.runTaskResult",
                 "ResultSelector": {
-                  "failures.$": "$.Failures"
-                }
+                  "failures.$": "$.Failures",
+                  "tasks.$": "$.Tasks"
+                },
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "Next": "MarkVPFailed",
+                    "ResultPath": "$.runTaskError"
+                  }
+                ]
+              },
+              "CheckRunTaskFailures": {
+                "Comment": "ECS RunTask returns HTTP 200 with a non-empty `failures` array when capacity/agent/etc. issues prevent the task from being placed. The Catch above only catches thrown exceptions, not these soft failures — so we have to inspect the result and route to MarkVPFailed explicitly. Also detect `PROVISIONING` (task queued waiting for the capacity provider to launch a new EC2 host) and surface that to the user as WAITING_FOR_CAPACITY.",
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.runTaskResult.failures[0]",
+                    "IsPresent": true,
+                    "Next": "MarkRunTaskSoftFailure"
+                  },
+                  {
+                    "Variable": "$.runTaskResult.tasks[0].LastStatus",
+                    "StringEquals": "PROVISIONING",
+                    "Next": "MarkWaitingForCapacity"
+                  }
+                ],
+                "Default": "End"
+              },
+              "MarkRunTaskSoftFailure": {
+                "Type": "Pass",
+                "Parameters": {
+                  "Cause.$": "States.Format('ECS RunTask returned without scheduling the task. Reason: {}, Detail: {}', $.runTaskResult.failures[0].Reason, $.runTaskResult.failures[0].Detail)"
+                },
+                "ResultPath": "$.runTaskError",
+                "Next": "MarkVPFailed"
+              },
+              "MarkWaitingForCapacity": {
+                "Type": "Task",
+                "Comment": "Task is queued (lastStatus=PROVISIONING) waiting for the capacity provider to launch a new EC2 host. Write WAITING_FOR_CAPACITY to the VP record so the UI shows progress instead of sitting silently at INITIALIZING for 60-90s. The container's entrypoint.sh writes BOOTING as soon as the container starts, which overwrites this.",
+                "Resource": "arn:${AWS::Partition}:states:::aws-sdk:dynamodb:updateItem",
+                "Parameters": {
+                  "TableName": "${VirtualParticipantTableName}",
+                  "Key": {
+                    "id": { "S.$": "$.data.virtualParticipantId" }
+                  },
+                  "UpdateExpression": "SET #s = :status, #ea = :now",
+                  "ExpressionAttributeNames": {
+                    "#s": "status",
+                    "#ea": "updatedAt"
+                  },
+                  "ExpressionAttributeValues": {
+                    ":status": { "S": "WAITING_FOR_CAPACITY" },
+                    ":now": { "S.$": "$$.State.EnteredTime" }
+                  }
+                },
+                "ResultPath": null,
+                "End": true,
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "Next": "End"
+                  }
+                ]
+              },
+              "End": {
+                "Type": "Pass",
+                "End": true
+              },
+              "MarkVPFailed": {
+                "Type": "Task",
+                "Comment": "RunTask failed (e.g. ECS capacity, IAM, image pull). Surface a FAILED status + error message on the VP DynamoDB row so the UI / MCP poller stops showing INITIALIZING forever.",
+                "Resource": "arn:${AWS::Partition}:states:::aws-sdk:dynamodb:updateItem",
+                "Parameters": {
+                  "TableName": "${VirtualParticipantTableName}",
+                  "Key": {
+                    "id": { "S.$": "$.data.virtualParticipantId" }
+                  },
+                  "UpdateExpression": "SET #s = :failed, #e = :err, #ea = :now",
+                  "ExpressionAttributeNames": {
+                    "#s": "status",
+                    "#e": "errorMessage",
+                    "#ea": "updatedAt"
+                  },
+                  "ExpressionAttributeValues": {
+                    ":failed": { "S": "FAILED" },
+                    ":err": { "S.$": "States.Format('VP launch failed: {}', $.runTaskError.Cause)" },
+                    ":now": { "S.$": "$$.State.EnteredTime" }
+                  }
+                },
+                "ResultPath": null,
+                "End": true,
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "Next": "FailureLogged"
+                  }
+                ]
+              },
+              "FailureLogged": {
+                "Type": "Pass",
+                "Comment": "Best-effort: even if the DDB update fails, end the execution so the caller (MCP sync exec) gets a clean failure response.",
+                "End": true
               },
               "CreateSchedule": {
                 "Type": "Task",
@@ -1962,12 +2306,18 @@ Resources:
               }
             }
           }
-        - {
-            ClusterArn: !GetAtt [Cluster, Arn],
-            TargetECSRoleArn: !GetAtt [TargetECSRole, Arn],
-            VPSecurityGroupId: !Ref VPSecurityGroupId,
-            VPLaunchType: !Ref VPLaunchType,
-          }
+        - ClusterArn: !GetAtt Cluster.Arn
+          TargetECSRoleArn: !GetAtt TargetECSRole.Arn
+          VPSecurityGroupId: !Ref VPSecurityGroupId
+          VPLaunchType: !Ref VPLaunchType
+          LMAStackName: !Ref LMAStackName
+          # JSON fragment used in the RunTask state. For EC2, drive RunTask
+          # via the capacity provider so ECS auto-scales the ASG when the
+          # cluster is full. For Fargate, fall back to plain LaunchType.
+          RunTaskDispatch: !If
+            - UseEC2LaunchType
+            - !Sub '"CapacityProviderStrategy": [{ "CapacityProvider": "${VPCapacityProvider}", "Weight": 1 }]'
+            - '"LaunchType": "FARGATE"'
 
   UpdateLMASettingsWithStateMachine:
     Type: AWS::CloudFormation::CustomResource
@@ -2120,9 +2470,9 @@ Resources:
           import boto3
           import logging
           from datetime import datetime, timezone
-          
+
           logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
           
           scheduler_client = boto3.client('scheduler')
           ecs_client = boto3.client('ecs')
@@ -2153,11 +2503,21 @@ Resources:
                           if is_scheduled and meeting_time:
                               meeting_time_int = int(meeting_time)
                               current_time = int(datetime.now().timestamp())
-                              
+
                               # Schedule for future execution
                               delay_seconds = 120  # 2 minutes before meeting
                               scheduled_time = datetime.fromtimestamp(meeting_time_int - delay_seconds, tz=timezone.utc)
-                              
+
+                              # User identity for persistent profile + stored Zoom creds.
+                              # Absent on older rows / guest-only flows.
+                              user_sub = new_image.get('userSub', {}).get('S', '')
+                              user_zoom_sub = new_image.get('userZoomSub', {}).get('S', '')
+                              stack_name = os.environ.get('LMA_STACK_NAME', '')
+                              zoom_secret_name = (
+                                  f"{stack_name}/zoom-credentials/{user_zoom_sub}"
+                                  if user_zoom_sub and stack_name else ''
+                              )
+
                               ecs_params = {
                                   'ClientToken': vp_id,
                                   'TaskDefinition': os.environ['TASK_DEFINITION_ARN'],
@@ -2181,6 +2541,8 @@ Resources:
                                               {'Name': 'MEETING_NAME', 'Value': new_image.get('meetingName', {}).get('S', '')},
                                               {'Name': 'MEETING_TIME', 'Value': str(meeting_time_int)},
                                               {'Name': 'LMA_USER', 'Value': new_image.get('owner', {}).get('S', '')},
+                                              {'Name': 'LMA_USER_SUB', 'Value': user_sub},
+                                              {'Name': 'ZOOM_CREDENTIALS_SECRET_NAME', 'Value': zoom_secret_name},
                                               {'Name': 'GRAPHQL_ENDPOINT', 'Value': os.environ.get('GRAPHQL_ENDPOINT', '')},
                                               {'Name': 'CALL_DATA_STREAM_NAME', 'Value': os.environ.get('CALL_DATA_STREAM_NAME', '')},
                                               {'Name': 'RECORDINGS_BUCKET_NAME', 'Value': os.environ.get('RECORDINGS_BUCKET_NAME', '')},
@@ -2247,6 +2609,8 @@ Resources:
           SCHEDULE_GROUP_NAME: !Ref VPScheduleGroup
           SCHEDULER_ROLE_ARN: !GetAtt VPSchedulerExecutionRole.Arn
           VP_LAUNCH_TYPE: !Ref VPLaunchType
+          LMA_STACK_NAME: !Ref LMAStackName
+          LOG_LEVEL: !Ref LogLevel
   # DynamoDB Event Source Mapping for Scheduler Lambda
   VirtualParticipantSchedulerEventSourceMapping:
     Type: AWS::Lambda::EventSourceMapping
@@ -2263,6 +2627,386 @@ Resources:
       LogGroupName: !Sub "/${AWS::StackName}/lambda/VPScheduler"
       RetentionInDays: !Ref CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # ----------------------------------------------------------------------
+  # VP Task Reaper
+  # ----------------------------------------------------------------------
+  # When the underlying ECS host (EC2) is terminated externally — by a
+  # deploy / ASG replacement / spot interruption / EC2 health check —
+  # the container is killed without a SIGTERM, so the VP process never
+  # runs its emergencyCleanup handler. The DDB row is left at whatever
+  # status it last wrote (typically JOINING / CONNECTING / etc.) and
+  # the UI shows an indefinite spinner.
+  #
+  # This reaper subscribes to ECS Task State Change events for our
+  # cluster and, when a task transitions to lastStatus=STOPPED while
+  # the matching VP DDB row is in a non-terminal status, flips the row
+  # to FAILED with a descriptive errorMessage. Conditional updates make
+  # this safe to fire alongside the normal happy-path cleanup — if the
+  # VP process already wrote ENDED/COMPLETED/FAILED, the conditional
+  # update is a no-op.
+  VPTaskReaperRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM4
+            reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
+          - id: AwsSolutions-IAM5
+            reason: 'Wildcards scoped by table/stream/log resources; standard CFN least-privilege pattern'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: ReaperPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
+              # The VirtualParticipant + VPTaskRegistry tables and the
+              # CallData Kinesis stream are encrypted with the customer-managed
+              # KMS key. Without these grants every UpdateItem/PutRecord the
+              # reaper attempts fails with an AccessDeniedException (KMS key
+              # access denied), so a row never flips to FAILED and the UI
+              # sticks at JOINING/WAITING_FOR_CAPACITY — the exact failure this
+              # reaper exists to prevent. Scoped by ViaService like the other
+              # roles in this stack.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                      - !Sub "kinesis.${AWS::Region}.amazonaws.com"
+
+  VPTaskReaperFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS'
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; EventBridge retries are sufficient"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; reaches AWS public APIs only"
+    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive table/stream names"
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-VPTaskReaper"
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 60
+      Role: !GetAtt VPTaskReaperRole.Arn
+      Environment:
+        Variables:
+          VP_TABLE_NAME: !Ref VirtualParticipantTableName
+          VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistryTableName
+          KINESIS_STREAM_NAME: !Ref CallDataStreamName
+          CLUSTER_ARN: !GetAtt Cluster.Arn
+          LOG_LEVEL: !Ref LogLevel
+      Code:
+        ZipFile: |
+          # ECS Task State Change reaper. Marks the VP DDB row FAILED
+          # when its task stops while the row is still in a non-terminal
+          # status — covers host EC2 termination, OOM kill, agent loss,
+          # and any other path where the container dies without running
+          # its own SIGTERM cleanup.
+          import json
+          import logging
+          import os
+          from datetime import datetime, timezone
+
+          import boto3
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
+
+          ddb = boto3.client('dynamodb')
+          kinesis = boto3.client('kinesis')
+
+          VP_TABLE = os.environ['VP_TABLE_NAME']
+          REGISTRY_TABLE = os.environ['VP_TASK_REGISTRY_TABLE_NAME']
+          KINESIS_STREAM = os.environ.get('KINESIS_STREAM_NAME', '')
+          CLUSTER_ARN = os.environ['CLUSTER_ARN']
+
+          # Statuses that indicate the VP is still active. If we see a
+          # task stop while the row is in one of these, we know the VP
+          # process didn't get a chance to clean up — flip to FAILED.
+          # FAILED/COMPLETED/ENDED/CANCELLED are terminal: the VP (or
+          # the manage-Lambda) already wrote them, so we leave alone.
+          TERMINAL_STATUSES = {'FAILED', 'COMPLETED', 'ENDED', 'CANCELLED'}
+
+          def _vpid_from_overrides(detail):
+              # ECS Task State Change events contain overrides under
+              # `detail.overrides.containerOverrides[].environment[]`
+              # (Title-cased on the ECS event, lower-cased on the SDK).
+              # Try both shapes.
+              overrides = detail.get('overrides') or detail.get('Overrides') or {}
+              container_overrides = (
+                  overrides.get('containerOverrides')
+                  or overrides.get('ContainerOverrides')
+                  or []
+              )
+              for co in container_overrides:
+                  env = co.get('environment') or co.get('Environment') or []
+                  for kv in env:
+                      name = kv.get('name') or kv.get('Name')
+                      value = kv.get('value') or kv.get('Value')
+                      if name == 'VIRTUAL_PARTICIPANT_ID' and value:
+                          return value
+              return None
+
+          def _vpid_from_registry(task_arn):
+              # Fallback: scan the VPTaskRegistry by taskArn. The registry
+              # is small (one row per active VP, TTL'd) so a scan is fine.
+              try:
+                  paginator = ddb.get_paginator('scan')
+                  for page in paginator.paginate(
+                      TableName=REGISTRY_TABLE,
+                      FilterExpression='taskArn = :ta',
+                      ExpressionAttributeValues={':ta': {'S': task_arn}},
+                      ProjectionExpression='vpId',
+                  ):
+                      for item in page.get('Items', []):
+                          vp_id = item.get('vpId', {}).get('S')
+                          if vp_id:
+                              return vp_id
+              except ClientError as e:
+                  logger.warning(f'Registry scan failed for taskArn={task_arn}: {e}')
+              return None
+
+          def _get_vp_callid(vp_id):
+              try:
+                  resp = ddb.get_item(
+                      TableName=VP_TABLE,
+                      Key={'id': {'S': vp_id}},
+                      ProjectionExpression='CallId',
+                  )
+                  return resp.get('Item', {}).get('CallId', {}).get('S')
+              except ClientError as e:
+                  logger.warning(f'GetItem on VP row failed for vp_id={vp_id}: {e}')
+                  return None
+
+          def _send_end_to_kinesis(call_id):
+              # Best-effort END to close the meeting transcript so the
+              # call_event_processor stops showing it as in-progress.
+              # Mirrors send_end_meeting_event in virtual_participant_manager.
+              if not (KINESIS_STREAM and call_id):
+                  return
+              try:
+                  kinesis.put_record(
+                      StreamName=KINESIS_STREAM,
+                      PartitionKey=call_id,
+                      Data=json.dumps({
+                          'EventType': 'END',
+                          'CallId': call_id,
+                          'CustomerPhoneNumber': 'Virtual Participant',
+                          'SystemPhoneNumber': 'LMA System',
+                          'CreatedAt': datetime.now(timezone.utc).isoformat(),
+                          'AgentId': 'VPTaskReaper',
+                          'AccessToken': '',
+                          'IdToken': '',
+                          'RefreshToken': '',
+                      }).encode('utf-8'),
+                  )
+                  logger.info(f'Sent END Kinesis event for CallId={call_id}')
+              except ClientError as e:
+                  logger.warning(f'Kinesis PutRecord failed for CallId={call_id}: {e}')
+
+          def _delete_registry_entry(vp_id):
+              try:
+                  ddb.delete_item(
+                      TableName=REGISTRY_TABLE,
+                      Key={'vpId': {'S': vp_id}},
+                  )
+              except ClientError as e:
+                  logger.warning(f'Registry delete failed for vp_id={vp_id}: {e}')
+
+          def _mark_failed(vp_id, error_message):
+              # Conditional update: only flip to FAILED if the row is
+              # still in a non-terminal status. This makes us safe to
+              # race against the VP's own emergencyCleanup and against
+              # the manage-Lambda's user-initiated end.
+              now = datetime.now(timezone.utc).isoformat()
+              try:
+                  ddb.update_item(
+                      TableName=VP_TABLE,
+                      Key={'id': {'S': vp_id}},
+                      UpdateExpression=(
+                          'SET #s = :failed, #e = :err, #ea = :now, #endedAt = :now'
+                      ),
+                      ConditionExpression=(
+                          'attribute_exists(id) AND NOT (#s IN '
+                          '(:failed, :completed, :ended, :cancelled))'
+                      ),
+                      ExpressionAttributeNames={
+                          '#s': 'status',
+                          '#e': 'errorMessage',
+                          '#ea': 'updatedAt',
+                          '#endedAt': 'endedAt',
+                      },
+                      ExpressionAttributeValues={
+                          ':failed': {'S': 'FAILED'},
+                          ':completed': {'S': 'COMPLETED'},
+                          ':ended': {'S': 'ENDED'},
+                          ':cancelled': {'S': 'CANCELLED'},
+                          ':err': {'S': error_message[:1000]},
+                          ':now': {'S': now},
+                      },
+                  )
+                  logger.info(
+                      f'VP {vp_id} flipped to FAILED by reaper: {error_message}'
+                  )
+                  return True
+              except ClientError as e:
+                  if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+                      logger.info(
+                          f'VP {vp_id} already in terminal state — reaper no-op'
+                      )
+                      return False
+                  logger.error(f'UpdateItem failed for vp_id={vp_id}: {e}')
+                  raise
+
+          # ECS reports a host that was reclaimed / rebooted out from under a
+          # running task as EssentialContainerExited (the container process was
+          # SIGKILLed when the instance went down). The single most common cause
+          # on these EC2 hosts is an in-place AWS SSM Patch Manager reboot
+          # (AWS-RunPatchBaseline, RebootOption=RebootIfNeeded) applying a
+          # kernel/security update. That is infrastructure maintenance, NOT a
+          # meeting/credentials problem, so we surface a message that says so
+          # rather than the misleading generic "check your meeting ID/password"
+          # guidance the UI would otherwise show.
+          def _build_error_message(stop_code, stopped_reason):
+              if stop_code == 'EssentialContainerExited':
+                  return (
+                      'The meeting was interrupted because its host server was '
+                      'restarted for routine infrastructure maintenance (e.g. an '
+                      'automatic security patch reboot) — not because of a problem '
+                      'with the meeting link or password. Please re-add the Virtual '
+                      'Participant to rejoin the meeting. '
+                      f'(stopCode={stop_code}: '
+                      f'{stopped_reason or "no reason given"}).'
+                  )
+              return (
+                  f'Virtual Participant task stopped unexpectedly '
+                  f'(stopCode={stop_code or "unknown"}: '
+                  f'{stopped_reason or "no reason given"}).'
+              )
+
+          def lambda_handler(event, context):
+              logger.debug(f'Event: {json.dumps(event, default=str)[:2000]}')
+              detail = event.get('detail', {}) or {}
+
+              # Only act on STOPPED transitions for our cluster. The
+              # EventBridge rule already filters on these but defense-
+              # in-depth is cheap and protects against rule changes.
+              if detail.get('lastStatus') != 'STOPPED':
+                  return {'skipped': 'not STOPPED'}
+              if detail.get('clusterArn') != CLUSTER_ARN:
+                  return {'skipped': 'wrong cluster'}
+
+              task_arn = detail.get('taskArn', '')
+              stop_code = detail.get('stopCode', '')
+              stopped_reason = detail.get('stoppedReason', '')
+
+              vp_id = _vpid_from_overrides(detail) or _vpid_from_registry(task_arn)
+              if not vp_id:
+                  logger.info(
+                      f'No vp_id resolved for taskArn={task_arn} '
+                      f'(stopCode={stop_code}, reason={stopped_reason!r}) — skipping'
+                  )
+                  return {'skipped': 'no vp_id'}
+
+              error_message = _build_error_message(stop_code, stopped_reason)
+
+              flipped = _mark_failed(vp_id, error_message)
+              if flipped:
+                  call_id = _get_vp_callid(vp_id)
+                  _send_end_to_kinesis(call_id)
+                  _delete_registry_entry(vp_id)
+              else:
+                  # Even if the VP row was already terminal, the registry
+                  # entry is now stale — its TTL will eventually clean up,
+                  # but explicit delete avoids a small window of confusion.
+                  _delete_registry_entry(vp_id)
+
+              return {
+                  'vpId': vp_id,
+                  'taskArn': task_arn,
+                  'flipped': flipped,
+              }
+
+  VPTaskReaperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/VPTaskReaper"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  VPTaskReaperRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${LMAStackName}-VPTaskReaper"
+      Description: >-
+        Invokes VPTaskReaper when an ECS task in the VP cluster transitions
+        to STOPPED, so the VP DDB row is flipped to FAILED if the VP
+        process didn't have a chance to update it itself.
+      EventPattern:
+        source:
+          - aws.ecs
+        detail-type:
+          - ECS Task State Change
+        detail:
+          clusterArn:
+            - !GetAtt Cluster.Arn
+          lastStatus:
+            - STOPPED
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt VPTaskReaperFunction.Arn
+          Id: VPTaskReaperFunctionTarget
+
+  VPTaskReaperPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt VPTaskReaperFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt VPTaskReaperRule.Arn
 
 Outputs:
   StepFunctions:

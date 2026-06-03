@@ -133,6 +133,7 @@ export class VirtualParticipantStatusManager {
             vncEndpoint
             vncPort
             vncReady
+            errorMessage
             updatedAt
             Owner
             SharedWith
@@ -159,6 +160,16 @@ export class VirtualParticipantStatusManager {
         variables.input.vncPort = current.vncPort;
         variables.input.vncReady = current.vncReady;
         console.log(`Preserving VNC fields: ${current.vncEndpoint}:${current.vncPort}, ready: ${current.vncReady}`);
+      }
+
+      // The schema's `errorMessage` field is the generic status detail —
+      // it's persisted on FAILED *and* on normal terminal states like
+      // COMPLETED so the UI can show why the meeting actually ended
+      // (e.g. "Asked to leave by Jeremy"). Without this assignment the
+      // mutation would only carry the status code itself and the detail
+      // string would be silently dropped.
+      if (errorMessage) {
+        variables.input.errorMessage = errorMessage;
       }
 
       if (status === 'FAILED' && errorMessage) {
@@ -270,6 +281,50 @@ export class VirtualParticipantStatusManager {
     }
   }
 
+  // Read just the current status of this VP.
+  async getCurrentStatus(): Promise<string | null> {
+    try {
+      const query = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            status
+          }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(query, {
+        id: this.participantId,
+      });
+      return result?.getVirtualParticipant?.status || null;
+    } catch (error) {
+      console.error('Error reading VP status:', error);
+      return null;
+    }
+  }
+
+  // True if the user has clicked "Got it" on the FAILED banner. The cleanup
+  // path waits on this so the VNC viewer doesn't grey out the moment we
+  // mark the VP failed — letting the user actually read the error message.
+  async getUserAcknowledgedFailure(): Promise<boolean> {
+    try {
+      const query = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            userAcknowledgedFailure
+          }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(query, {
+        id: this.participantId,
+      });
+      return !!result?.getVirtualParticipant?.userAcknowledgedFailure;
+    } catch (error) {
+      console.error('Error reading userAcknowledgedFailure:', error);
+      return false;
+    }
+  }
+
   // Method to get CallId from VP record
   async getCallId(): Promise<string | null> {
     try {
@@ -349,12 +404,46 @@ export class VirtualParticipantStatusManager {
     return this.updateStatus('INITIALIZING');
   }
 
+  // Granular sub-states inside the INITIALIZING phase. Each maps to a
+  // different long-running setup step so the UI can show progress
+  // instead of staying on a generic "Setting up..." for ~60s.
+  async setRegisteringNetwork(): Promise<boolean> {
+    return this.updateStatus('REGISTERING_NETWORK');
+  }
+
+  async setLaunchingBrowser(): Promise<boolean> {
+    return this.updateStatus('LAUNCHING_BROWSER');
+  }
+
+  async setHydratingProfile(): Promise<boolean> {
+    return this.updateStatus('HYDRATING_PROFILE');
+  }
+
+  async setWarmingProfile(): Promise<boolean> {
+    return this.updateStatus('WARMING_PROFILE');
+  }
+
   async setConnecting(): Promise<boolean> {
     return this.updateStatus('CONNECTING');
   }
 
   async setJoining(): Promise<boolean> {
     return this.updateStatus('JOINING');
+  }
+
+  /**
+   * Refresh the JOINING status with a human-readable sub-step so the long
+   * join span (sign-in → navigate → prejoin → admission → chat) doesn't
+   * look frozen in the UI. Keeps status=JOINING (UI-safe; the detail line
+   * renders this via the errorMessage channel) but bumps updatedAt and the
+   * shown message. Best-effort — never throws or blocks the join.
+   */
+  async setJoiningSubstep(message: string): Promise<void> {
+    try {
+      await this.updateStatus('JOINING', message);
+    } catch {
+      /* progress sub-message is best-effort */
+    }
   }
 
   async setJoined(): Promise<boolean> {
@@ -369,8 +458,8 @@ export class VirtualParticipantStatusManager {
     return this.updateStatus('ACTIVE');
   }
 
-  async setCompleted(): Promise<boolean> {
-    return this.updateStatus('COMPLETED');
+  async setCompleted(statusMessage?: string): Promise<boolean> {
+    return this.updateStatus('COMPLETED', statusMessage);
   }
 
   async setFailed(errorMessage?: string): Promise<boolean> {

@@ -16,6 +16,10 @@ title: "Troubleshooting"
   - [No Transcription Appearing](#no-transcription-appearing)
   - [Meeting Assistant Not Responding](#meeting-assistant-not-responding)
   - [VP Fails to Join Meeting](#vp-fails-to-join-meeting)
+  - [VP Stuck at MANUAL_ACTION_REQUIRED](#vp-stuck-at-manual_action_required)
+  - [VP Stuck in INITIALIZING](#vp-stuck-in-initializing)
+  - [VP Stuck in WAITING_FOR_CAPACITY](#vp-stuck-in-waiting_for_capacity)
+  - [Zoom Join Blocked](#zoom-join-blocked)
   - [Voice Assistant Connection Issues](#voice-assistant-connection-issues)
   - [MCP Server Installation Fails](#mcp-server-installation-fails)
 - [Cost Assessment](#cost-assessment)
@@ -83,6 +87,46 @@ The Virtual Participant ECS task may have crashed. This issue was addressed in v
 2. Check the ECS task logs for the specific VP task.
 3. Verify that the meeting URL and credentials are correct.
 4. Check for platform-specific issues (Zoom, Teams, Chime, etc.).
+5. **Check the VP detail page** for an `errorMessage`. The VP writes a human-readable failure reason to the DDB record (e.g. *"Meeting join failed: …"*, *"Zoom login failed: invalid credentials"*, *"ECS RunTask soft-failure: agent not connected"*) and surfaces it on the detail page's troubleshooting card.
+
+### VP Stuck at MANUAL_ACTION_REQUIRED
+
+This status means the VP hit a CAPTCHA, 2FA prompt, SSO redirect, an unknown consent dialog, or another Zoom verification step that needs human input. To resolve:
+
+1. Open the meeting detail page for the affected VP (the Flashbar alert at the top of the LMA UI links directly to it).
+2. Open the **Live Virtual Participant View** panel and toggle **View Only** off so the noVNC viewer accepts your input.
+3. Complete the challenge as described in the on-screen banner — type the OTP, solve the CAPTCHA, sign in via SSO, click the consent button, etc.
+4. The VP detects the resolved state and continues automatically. The default timeout is 3 minutes; if no human response arrives, the VP fails the meeting cleanly with `errorMessage` set to *"Manual action timed out"*.
+
+To get notified about MANUAL_ACTION events when you're not watching the LMA tab, grant the browser notification permission in the Web UI — the VP UI fires a desktop notification + audio chime when the status flips.
+
+### VP Stuck in INITIALIZING
+
+Most often caused by an ECS soft-failure: RunTask returns HTTP 200 but with a non-empty `failures` array (typically *"Container instance ... agent connection lost"* or *"Insufficient memory available"*). The state machine catches this explicitly in v0.3.4+ and writes `FAILED` to the VP record with the failure reason. If you're on an older version, check the ECS console > Tasks > Stopped for the failure reason on the task that should have launched, and consider upgrading.
+
+If the task did launch but the VP is stuck in `INITIALIZING` without progressing to `BOOTING`, ECS Container Insights → Memory Utilized for the VP task definition family will show whether the host is starved (memory ~95%+ usually means a too-small instance type — see the [Virtual Participant](virtual-participant.md#ec2-instance-types) docs for sizing guidance).
+
+A different symptom — VP sat at `INITIALIZING` *forever* with no error — was caused by a `MarkVPFailed` cleanup-state DDB AttributeValue shape bug fixed in v0.3.4+. If you see this on a v0.3.3-or-earlier deployment, the corresponding ECS task will have stopped with `RESOURCE:MEMORY` or similar in the AWS Step Functions execution log; manually mark the VP `FAILED` in DynamoDB and upgrade.
+
+### VP Stuck in WAITING_FOR_CAPACITY
+
+This means the cluster is full and the capacity-provider auto-scaler is launching a new EC2 host. Expect 60-90 seconds before the status transitions to `BOOTING`. If it stays at `WAITING_FOR_CAPACITY` longer:
+
+1. Check the ASG console for **`LMA-*-VP-ASG`**. If `DesiredCapacity` is already at `VPMaxInstances`, raise the parameter or wait for an active VP to finish.
+2. Check ASG **Activity history** for launch failures (e.g. *"Insufficient capacity in availability zone"*). Switch to a different instance type via `VPInstanceType` if the current one is unavailable in your region.
+3. Check the EC2 console for new instances in `pending` state — userdata bootstrap (yum security update, ECR docker pull) takes ~30 seconds, then the ECS agent registers.
+
+### Zoom Join Blocked
+
+Symptom: the VP fails to join with the Zoom dialog *"We detected you may be a bot. Automated bots aren't allowed to join this meeting or webinar..."*.
+
+Resolutions, in order of effectiveness:
+
+1. **Add Zoom credentials to LMA** (per-user, opt-in) — open the Create Virtual Participant modal and use the **Zoom account** card. A signed-in session joins far more reliably. See [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md).
+2. **Sign in to Zoom on your laptop with the same account at least once** before relying on LMA. A brand-new account whose only activity is joining from AWS IP ranges is more likely to hit this block.
+3. **Remove and re-save the credentials** if you previously saved them and now hit blocks — this also wipes the user's persisted Chromium profile in S3, clearing any stale cookies.
+
+The residual factor is AWS egress IP reputation, which cannot be fully controlled from inside the container. If many users in your org see joins blocked even when signed in, route VP egress through a NAT or residential-proxy provider.
 
 ### Voice Assistant Connection Issues
 
@@ -99,7 +143,7 @@ Check the VP task logs for WebSocket or Bedrock session errors. Voice assistant 
 LMA costs depend on usage patterns and configuration. The following are approximate estimates:
 
 - **Base infrastructure**: ~$10/month (Fargate WebSocket server at 0.25 vCPU + VPC networking)
-- **VP EC2 instances**: ~$33/month per warm instance (t3.medium)
+- **VP EC2 instances**: ~$30/month per warm `t3.medium` instance (default; capacity-provider scales 1→`VPMaxInstances` on demand). Bump `VPInstanceType` to `t3.large` (~$60/month) for 3-VPs-per-host density. Set `VPMinInstances=0` to scale down to zero when idle and pay only when a VP is requested (~60-90s cold-start added to first VP).
 - **Per-meeting usage**: ~$0.17 per 5-minute call (varies based on options selected)
 
 Key AWS service pricing pages for detailed cost estimation:

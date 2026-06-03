@@ -324,7 +324,16 @@ const getTimestampFromSeconds = (secs) => {
   if (!secs || Number.isNaN(secs)) {
     return '00:00.0';
   }
-  return new Date(secs * 1000).toISOString().substr(14, 7);
+  // ISO string is YYYY-MM-DDTHH:MM:SS.sssZ. The previous code took substr(14, 7)
+  // = "MM:SS.s", which silently DROPPED the hours field — so a segment at
+  // 1h48m rendered as "48:00.0". Include the hours component once the offset
+  // reaches an hour (e.g. "1:48:00") and keep the compact "MM:SS.s" form below.
+  const iso = new Date(secs * 1000).toISOString();
+  if (secs >= 3600) {
+    const hours = Math.floor(secs / 3600);
+    return `${hours}:${iso.substr(14, 5)}`; // H:MM:SS
+  }
+  return iso.substr(14, 7); // MM:SS.s
 };
 
 const TranscriptContent = ({ segment, translateCache }) => {

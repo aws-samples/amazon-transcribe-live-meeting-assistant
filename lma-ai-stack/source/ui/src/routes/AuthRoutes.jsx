@@ -24,6 +24,7 @@ import NovaSonicConfigRoutes from './NovaSonicConfigRoutes';
 import TranscriptSummaryRoutes from './TranscriptSummaryRoutes';
 import UserManagementRoutes from './UserManagementRoutes';
 import EmbedRoutes from './EmbedRoutes';
+import ManualActionAlerts from '../components/virtual-participant-layout/ManualActionAlerts';
 
 import {
   CALLS_PATH,
@@ -65,6 +66,7 @@ const AuthRoutes = ({ redirectParam }) => {
 
   return (
     <SettingsContext.Provider value={settingsContextValue}>
+      <ManualActionAlerts />
       <Routes>
         <Route path={`${CALLS_PATH}/*`} element={<CallsRoutes />} />
         <Route

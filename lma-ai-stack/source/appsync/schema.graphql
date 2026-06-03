@@ -210,6 +210,10 @@ type Mutation @aws_iam {
 	revokeMCPApiKey(keyPrefix: String!): Boolean @aws_cognito_user_pools
 	createUser(input: CreateUserInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	deleteUser(input: DeleteUserInput!): DeleteUserOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	setMyZoomCredentials(input: SetZoomCredentialsInput!): ZoomCredentialsStatus @aws_cognito_user_pools
+	deleteMyZoomCredentials: Boolean @aws_cognito_user_pools
+	deleteMyChromeProfile: Boolean @aws_cognito_user_pools
+	acknowledgeVPFailure(virtualParticipantId: ID!): Boolean @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -245,6 +249,25 @@ type Query @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
 	listUsers: UserList @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools
+	getMyChromeProfileStatus: ChromeProfileStatus @aws_cognito_user_pools
+}
+
+type ZoomCredentialsStatus @aws_cognito_user_pools {
+	present: Boolean!
+	username: String
+	lastUpdatedAt: AWSDateTime
+}
+
+type ChromeProfileStatus @aws_cognito_user_pools {
+	present: Boolean!
+	sizeBytes: Float
+	lastModified: AWSDateTime
+}
+
+input SetZoomCredentialsInput {
+	username: String!
+	password: String!
 }
 
 type VirtualParticipant @aws_cognito_user_pools @aws_iam {
@@ -261,6 +284,14 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	owner: String
 	Owner: String
 	SharedWith: String
+	# Persisted on the VP row only for SCHEDULED meetings: the launching
+	# user's Cognito sub (so the VPScheduler Lambda can pass LMA_USER_SUB to
+	# the eventually-launched ECS task) and a flag/duplicate sub indicating
+	# whether to fetch the user's Zoom credentials at launch time. Immediate
+	# meetings carry these via the Step Functions state-machine input rather
+	# than persisting them.
+	userSub: String
+	userZoomSub: String
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
 	CallId: ID
@@ -273,6 +304,14 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	manualActionMessage: String
 	manualActionTimeoutSeconds: Int
 	manualActionStartTime: AWSDateTime
+	errorMessage: String
+	# Set to true by acknowledgeVPFailure when the user clicks "Got it" on
+	# the failure banner. The VP container polls this on the FAILED path
+	# and proceeds with ALB/VNC tear-down as soon as it flips (or after a
+	# hard cap). Lets the user actually read the error in the LMA viewer
+	# instead of having the VNC connection drop the moment the failure
+	# is set.
+	userAcknowledgedFailure: Boolean
 }
 
 input CreateVirtualParticipantInput {
@@ -283,6 +322,19 @@ input CreateVirtualParticipantInput {
 	meetingTime: AWSTimestamp
 	isScheduled: Boolean
 	status: String!
+	# Optional override for the Owner field — used by IAM-authenticated callers
+	# (e.g. the MCP analytics Lambda) so the row is owned by the LMA user
+	# rather than the calling Lambda's IAM role session.
+	# When the caller is a Cognito user the resolver ignores this field and
+	# trusts $ctx.identity.username as before.
+	owner: String
+	# Persisted on the VP row for SCHEDULED meetings only, so the
+	# VPScheduler Lambda can pass LMA_USER_SUB / ZOOM_CREDENTIALS_SECRET_NAME
+	# to the launched ECS task at meeting time. Immediate (non-scheduled)
+	# meetings plumb these through the Step Functions input directly and
+	# don't need to persist them on the row.
+	userSub: String
+	userZoomSub: String
 }
 
 input UpdateVirtualParticipantInput {
@@ -298,6 +350,8 @@ input UpdateVirtualParticipantInput {
 	manualActionMessage: String
 	manualActionTimeoutSeconds: Int
 	manualActionStartTime: AWSDateTime
+	errorMessage: String
+	userAcknowledgedFailure: Boolean
 }
 
 input EndVirtualParticipantInput {
@@ -423,6 +477,8 @@ type Subscription {
 		@aws_subscribe(mutations: ["deleteCall"])
 	onUnshareCall: UnshareCallOutput
 		@aws_subscribe(mutations: ["unshareCall"])
+	onCreateVirtualParticipant: VirtualParticipant
+		@aws_subscribe(mutations: ["createVirtualParticipant"])
 	onUpdateVirtualParticipant: VirtualParticipant
 		@aws_subscribe(mutations: ["updateVirtualParticipant", "endVirtualParticipant"])
 	onVNCPreviewToggle(CallId: ID!): VNCPreviewControl

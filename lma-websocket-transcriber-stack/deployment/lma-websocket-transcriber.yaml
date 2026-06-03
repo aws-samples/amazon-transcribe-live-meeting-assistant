@@ -311,6 +311,18 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Description: >-
+      Logging level for Lambda functions and ECS containers. Set to DEBUG for
+      troubleshooting, INFO for normal operation.
+
 Metadata:
   "AWS::CloudFormation::Interface":
     ParameterGroups:
@@ -739,6 +751,9 @@ Resources:
       Handler: lambda_start_codebuild.handler
       CodeUri: ../source/lambda_functions/start_codebuild
       Description: This AWS Lambda Function kicks off a code build job.
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/LambdaCodeBuildStartBuild
@@ -1146,6 +1161,8 @@ Resources:
               Value: !Ref EnableAudioRecording
             - Name: CodeLocation
               Value: !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
+            - Name: WS_LOG_LEVEL
+              Value: !Ref LogLevel
             - Name: DEBUG
               Value: "false"
           Essential: true
@@ -1467,6 +1484,7 @@ Resources:
           PCA_WEB_APP_URL: !Ref PcaWebAppURL
           PCA_WEB_APP_CALL_PATH_PREFIX: !Ref PcaWebAppCallPathPrefix
           IS_CONTENT_REDACTION_ENABLED: !Ref IsContentRedactionEnabled
+          LOG_LEVEL: !Ref LogLevel
       CodeUri: ../source/lambda_functions/pca_integration
       LoggingConfig:
         LogGroup:

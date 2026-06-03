@@ -10,6 +10,8 @@ Live Meeting Assistant (LMA) -- an AWS-based solution for real-time meeting tran
 
 **Prerequisites:** bash, node v18/v20/v22, npm, docker (running), zip, python3, pip3, virtualenv, aws cli, sam cli (>=1.118.0).
 
+**AWS profile:** Always use `AWS_PROFILE=default` for build/deploy/test commands in this repo unless the user explicitly tells you otherwise. Other profiles (e.g. `bedrock`) point at unrelated accounts and will fail with `AccessDenied` on S3/CloudFormation.
+
 **Full build and publish to S3:**
 ```bash
 ./publish.sh <cfn_bucket_basename> <cfn_prefix> <region> [public]
@@ -28,7 +30,7 @@ This validates dependencies, builds all stacks (SAM + npm), uploads artifacts to
 ```bash
 npm install && npm start    # local dev server
 npm run build               # production build
-npm test                    # jest/react-scripts tests
+npm test                    # vitest tests
 ```
 
 **WebSocket server** (in `lma-websocket-transcriber-stack/source/app/`):
@@ -64,7 +66,7 @@ Python uses Black (formatter), Flake8, Pylint (100 char lines). Config in `lma-a
 |-------|---------|----------|
 | `lma-ai-stack/` | Core stack: Lambda functions, AppSync GraphQL API, Cognito auth, DynamoDB, UI (React/CloudFront) | Python (Lambdas), React (UI) |
 | `lma-websocket-transcriber-stack/` | WebSocket server on ECS Fargate ingesting stereo audio, streaming to Amazon Transcribe, writing to Kinesis | TypeScript/Fastify |
-| `lma-virtual-participant-stack/` | Headless Chrome (Puppeteer) on ECS Fargate joining meetings, optional voice assistant + avatar | TypeScript |
+| `lma-virtual-participant-stack/` | Headless CloakBrowser/Chromium (Playwright) on ECS Fargate joining meetings, optional voice assistant + avatar | TypeScript |
 | `lma-vpc-stack/` | VPC networking, security groups, NAT gateways | CloudFormation |
 | `lma-meetingassist-setup-stack/` | Meeting assistant configuration | CloudFormation |
 | `lma-bedrockkb-stack/` | Bedrock Knowledge Base setup | CloudFormation |
@@ -94,3 +96,22 @@ Full documentation lives in `./docs/` with the master entry point at `docs/INDEX
 - `develop` branch: active development (default PR target)
 - Feature branches: `feature/` prefix
 - Release branches: `release/` prefix
+
+## Skill Files
+
+Project-specific coding patterns, checklists, and review workflows live in
+`.claude/skills/`. Consult the relevant skill file whenever a task touches
+the corresponding domain — these conventions take precedence over generic
+patterns.
+
+| Skill File | When to Use |
+|------------|-------------|
+| `.claude/skills/backend-lambda.md` | Writing Python Lambda handlers in `lma-ai-stack/source/lambda_functions/` |
+| `.claude/skills/frontend-ui.md` | React / Cloudscape UI changes in `lma-ai-stack/source/ui/` |
+| `.claude/skills/infrastructure.md` | CloudFormation / SAM templates, nested stacks, GovCloud rules |
+| `.claude/skills/code-review.md` | Pre-commit self-review checklist for your own changes |
+| `.claude/skills/pr-review.md` | Reviewing a GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
+
+When asked to `review <PR/MR URL>`, follow `.claude/skills/pr-review.md` and
+produce a structured review answering the six questions (good PR / safe /
+good UX / no security issues / well documented / safe to merge).

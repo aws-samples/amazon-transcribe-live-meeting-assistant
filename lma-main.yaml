@@ -81,16 +81,19 @@ Parameters:
     NoEcho: true
     Default: ""
     Description: >-
-      (Optional) API key for Simli avatar. When provided with a Face ID,
-      enables an animated lip-synced avatar as the Virtual Participant's camera feed.
+      (Optional) API key for Simli avatar. The avatar feature requires BOTH
+      SimliApiKey and SimliFaceId — leave both blank to disable the avatar,
+      or set both to enable an animated lip-synced avatar as the Virtual
+      Participant's camera feed.
       Get your API key from https://simli.com. Leave blank to disable avatar.
 
   SimliFaceId:
     Type: String
     Default: ""
     Description: >-
-      (Optional) Simli Face ID for the avatar appearance.
-      Get this from your Simli dashboard at https://simli.com.
+      (Optional) Simli Face ID for the avatar appearance. Required when
+      SimliApiKey is set — the avatar is enabled only when BOTH parameters
+      are non-empty. Get this from your Simli dashboard at https://simli.com.
 
   VoiceAssistantProvider:
     Type: String
@@ -166,26 +169,6 @@ Parameters:
     Description: >-
       If MeetingAssistService is 'STRANDS_BEDROCK_WITH_KB (Create)', provide comma separated list of optional S3 prefixes 
       with the paths to your source documents e.g. "prefix1/, prefix2/". If you leave blank, all documents in your S3 bucket will be scanned.
-
-  BedrockKnowledgeBaseWebCrawlerURLs:
-    Type: String
-    Default: https://en.wikipedia.org/wiki/Life_insurance, https://en.wikipedia.org/wiki/Mortgage_loan
-    Description: >-
-      If MeetingAssistService is 'STRANDS_BEDROCK_WITH_KB (Create)', provide comma separated list of public web sites to crawl,
-      or leave blank if you don't need a Web data source.
-
-  BedrockKnowledgeBaseWebCrawlerScope:
-    Type: String
-    AllowedValues:
-      - "DEFAULT"
-      - "HOST_ONLY"
-      - "SUBDOMAINS"
-    Default: DEFAULT
-    Description: >-
-      If MeetingAssistService is 'STRANDS_BEDROCK_WITH_KB (Create)', specify the scope of what is crawled for your URLs.
-      Choose DEFAULT to limit to web pages that have the same host and the same initial path as the source URLs.
-      Choose HOST_ONLY to limit to web pages that have the same host as the source URLs.
-      Choose SUBDOMAINS to include sub domains in addition to the host or primary domain.
 
   AssistantWakePhraseRegEx:
     Type: String
@@ -694,6 +677,18 @@ Parameters:
       When false: All resources deleted for clean stack removal.
       Enterprise customers with compliance requirements should set to true.
 
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Description: >-
+      Default logging level for all Lambda functions. Set to DEBUG for
+      troubleshooting, INFO for normal operation.
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -738,8 +733,6 @@ Metadata:
           - BedrockKnowledgeBaseId
           - BedrockKnowledgeBaseS3BucketName
           - BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
-          - BedrockKnowledgeBaseWebCrawlerURLs
-          - BedrockKnowledgeBaseWebCrawlerScope
       - Label:
           default: Transcript Knowledge Base Configuration
         Parameters:
@@ -852,10 +845,6 @@ Metadata:
         default: S3 bucket with knowledge base source documents (optional).
       BedrockKnowledgeBaseS3DocumentUploadFolderPrefix:
         default: S3 prefix(es) for your content (optional)
-      BedrockKnowledgeBaseWebCrawlerURLs:
-        default: Publicly accessible URLs for web crawling (optional)
-      BedrockKnowledgeBaseWebCrawlerScope:
-        default: Web crawling sync scope
       TranscriptKnowledgeBase:
         default: Transcript Knowledge Base
       EnableMCP:
@@ -978,8 +967,6 @@ Conditions:
   ShouldCreateTranscriptKnowledgeBase:
     !Equals [!Ref TranscriptKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)"]
   ShouldUseTranscriptKnowledgeBase: !Condition ShouldCreateTranscriptKnowledgeBase
-  IsS3VectorsForTranscript: !Equals ["S3_VECTORS", "S3_VECTORS"]
-  IsS3VectorsForMeetingAssist: !Equals ["S3_VECTORS", "S3_VECTORS"]
   ShouldEnableMCP: !Equals [!Ref EnableMCP, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
@@ -1103,22 +1090,19 @@ Resources:
             Condition:
               StringEquals:
                 "aws:SourceAccount": !Ref "AWS::AccountId"
-          - !If
-            - IsS3VectorsForTranscript
-            - Sid: Allow S3 Vectors indexing service
-              Effect: Allow
-              Principal:
-                Service: indexing.s3vectors.amazonaws.com
-              Action:
-                - kms:Encrypt
-                - kms:Decrypt
-                - kms:GenerateDataKey*
-                - kms:DescribeKey
-              Resource: "*"
-              Condition:
-                StringEquals:
-                  "aws:SourceAccount": !Ref "AWS::AccountId"
-            - !Ref AWS::NoValue
+          - Sid: Allow S3 Vectors indexing service
+            Effect: Allow
+            Principal:
+              Service: indexing.s3vectors.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
 
   CustomerManagedEncryptionKeyAlias:
     Type: AWS::KMS::Alias
@@ -1173,13 +1157,17 @@ Resources:
       Timeout: 60
       MemorySize: 128
       Description: "Lambda function to process KMS key events for monitoring and compliance"
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
       InlineCode: |
         import json
+        import os
         import boto3
         import logging
 
         logger = logging.getLogger()
-        logger.setLevel(logging.INFO)
+        logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
 
         def handler(event, context):
             """
@@ -1697,6 +1685,7 @@ Resources:
         Mode: Active
       Environment:
         Variables:
+          LOG_LEVEL: !Ref LogLevel
           LOGGING_BUCKET_NAME: !Ref LoggingBucket
           RECORDINGS_BUCKET_NAME: !If
             - ShouldCreateRecordingBucket
@@ -1704,12 +1693,13 @@ Resources:
             - ""
       Code:
         ZipFile: |
+          import os
           import boto3
           import cfnresponse
           import logging
           
           logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
           
           s3 = boto3.client('s3')
           
@@ -2092,6 +2082,9 @@ Resources:
       Role: !GetAtt RecordingsBucketNotificationFunctionRole.Arn
       TracingConfig:
         Mode: Active
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
       Code:
         ZipFile: |
           """Installs (or removes on Delete) an S3 ObjectCreated notification
@@ -2099,12 +2092,13 @@ Resources:
           Implemented as a custom resource to break the AISTACK ↔
           RecordingsBucket CloudFormation cycle."""
           import json
+          import os
           import logging
           import boto3
           import cfnresponse
 
           log = logging.getLogger()
-          log.setLevel(logging.INFO)
+          log.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
           s3 = boto3.client("s3")
 
           def handler(event, context):
@@ -2350,6 +2344,7 @@ Resources:
         MCPServerCallbackURLs: !Ref MCPServerCallbackURLs
         CognitoUserPoolDomain: !GetAtt COGNITOSTACK.Outputs.CognitoUserPoolDomain
         VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
+        LogLevel: !Ref LogLevel
 
   BEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -2360,13 +2355,9 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
       Parameters:
-        pVectorStoreType: "S3_VECTORS"
         pKnowledgeBaseBucketName: !Ref BedrockKnowledgeBaseS3BucketName
         pInputDocumentUploadFolderPrefix: !Ref BedrockKnowledgeBaseS3DocumentUploadFolderPrefix
         pS3SyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
-        pWebCrawlerURLs: !Ref BedrockKnowledgeBaseWebCrawlerURLs
-        pWebCrawlerScope: !Ref BedrockKnowledgeBaseWebCrawlerScope
-        pWebSyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
@@ -2379,7 +2370,6 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
       Parameters:
-        pVectorStoreType: "S3_VECTORS"
         pKnowledgeBaseBucketName: !Ref RecordingsBucket
         pInputDocumentUploadFolderPrefix: "lma-transcripts/"
         pS3SyncScheduleExpression: "cron(0/15 * ? * * *)"  # default is to sync transcripts every 15 minutes
@@ -2503,6 +2493,7 @@ Resources:
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.PrivateSubnet2
           - !Ref PrivateSubnet2
+        LogLevel: !Ref LogLevel
 
   VIRTUALPARTICIPANTSTACK:
     Type: AWS::CloudFormation::Stack
@@ -2552,6 +2543,8 @@ Resources:
         AppSyncEventApiUrl: !GetAtt AISTACK.Outputs.AppSyncEventApiUrl
         CloudFrontDomainName: !GetAtt AISTACK.Outputs.CloudFrontDomainName
         VPTaskRegistryTableName: !GetAtt AISTACK.Outputs.VPTaskRegistryTableName
+        DomSelectorCacheTableName: !GetAtt AISTACK.Outputs.DomSelectorCacheTableName
+        VPProfilesBucketName: !GetAtt AISTACK.Outputs.VPProfilesBucketName
         EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
         VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
         VNCALBListenerArn: !GetAtt AISTACK.Outputs.VNCALBListenerArn
@@ -2585,6 +2578,7 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         ShowSpeakerLabel: "false"
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        LogLevel: !Ref LogLevel
 
   BROWSEREXTENSIONSTACK:
     Type: AWS::CloudFormation::Stack

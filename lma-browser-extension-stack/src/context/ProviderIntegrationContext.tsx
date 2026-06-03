@@ -105,7 +105,14 @@ function IntegrationProvider({ children }: any) {
       setPlatform("Zoom");
     } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.chime.aws") {
       setPlatform("Amazon Chime");
-    } else if (newMetadata.baseUrl === "https://teams.microsoft.com" || newMetadata.baseUrl === "https://teams.live.com") {
+    } else if (
+      newMetadata && newMetadata.baseUrl && (
+        newMetadata.baseUrl.includes("teams.microsoft.com") ||
+        newMetadata.baseUrl.includes("teams.live.com") ||
+        newMetadata.baseUrl.includes("teams.microsoft.us") ||
+        newMetadata.baseUrl.includes("teams.cloud.microsoft")
+      )
+    ) {
       setPlatform("Microsoft Teams");
     } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl.includes("webex.com")) {
       setPlatform("Cisco Webex");

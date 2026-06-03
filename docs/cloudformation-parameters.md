@@ -52,8 +52,6 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | BedrockKnowledgeBaseId | Existing Bedrock Knowledge Base ID (for Use Existing mode) | (none) | Valid KB ID |
 | BedrockKnowledgeBaseS3BucketName | S3 bucket containing documents for the Knowledge Base (for Create mode) | (none) | Valid S3 bucket name |
 | BedrockKnowledgeBaseS3Prefix | S3 key prefixes for Knowledge Base documents | (none) | Comma-separated prefixes |
-| BedrockKnowledgeBaseWebCrawlerUrls | URLs for the Knowledge Base web crawler data source | (none) | Comma-separated URLs |
-| BedrockKnowledgeBaseWebCrawlerScope | Scope of web crawling | DEFAULT | DEFAULT, HOST_ONLY, SUBDOMAINS |
 | TranscriptKnowledgeBaseService | Whether to create a Knowledge Base from meeting transcripts | DISABLED | BEDROCK_KNOWLEDGE_BASE (Create), DISABLED |
 
 ## Transcription
@@ -80,9 +78,17 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
 | VPLaunchType | Compute launch type for Virtual Participant tasks | EC2 | EC2, FARGATE |
-| VPInstanceType | EC2 instance type for Virtual Participant | t3.medium | t3.medium, t3.large, t3.xlarge, c5.large, c5.xlarge, c5.2xlarge, m5.large, m5.xlarge |
-| VPMinInstances | Minimum number of EC2 instances in the VP Auto Scaling group | 1 | Positive integer |
-| VPMaxInstances | Maximum number of EC2 instances in the VP Auto Scaling group | 5 | Positive integer |
+| VPInstanceType | EC2 instance type for Virtual Participant. `t3.medium` (default) runs 1 voice + avatar VP (container capped at 3500 MB); the capacity-provider auto-scaler launches additional hosts when concurrent demand exceeds capacity. Bump to `t3.large` or a `c5.*`/`m5.*` instance for more concurrent VPs per host. | t3.medium | t3.medium, t3.large, t3.xlarge, c5.large, c5.xlarge, c5.2xlarge, m5.large, m5.xlarge |
+| VPMinInstances | Minimum warm EC2 instances always running. Set to `0` to fully scale down when idle (cold-start adds ~60-90s to the first VP). | 1 | 0-10 |
+| VPMaxInstances | Maximum EC2 instances. Capacity-provider managed scaling launches new hosts up to this cap when concurrent demand exceeds the current cluster's capacity. | 10 | 1-100 |
+
+The VP stack also creates these infrastructure resources used by the auto-scaling, AI DOM resolver, and per-user persistent Chromium profile features:
+
+- **`VPCapacityProvider`** ECS capacity provider — wires the EC2 ASG into ECS managed scaling (`TargetCapacity=100`, step size 1-2, instance warmup 90s, `ManagedTerminationProtection=ENABLED`). RunTask drives `CapacityProviderStrategy` instead of `LaunchType=EC2`, so when the cluster is full ECS automatically launches new hosts up to `VPMaxInstances`. The launching VP shows status `WAITING_FOR_CAPACITY` while the auto-scaler provisions a new host.
+- **`DomSelectorCache`** DynamoDB table — caches AI-discovered selectors across all VP tasks (30-day TTL on `lastUsedAt`). KMS-encrypted, PAY_PER_REQUEST.
+- **`VPProfilesBucket`** S3 bucket — stores per-user persistent Chromium profiles (cookies, "trusted device" markers) keyed by Cognito sub. KMS-encrypted, public access blocked, versioned.
+
+None of these requires user configuration. The AI fallback resolver model is configured via the task-definition env var `BEDROCK_DOM_RESOLVER_MODEL_ID` (default `us.anthropic.claude-haiku-4-5-20251001-v1:0`); set to empty string in the task definition to disable the fallback. See [Virtual Participant → Auto-Scaling](virtual-participant.md#auto-scaling) and [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md) for details.
 
 ## Voice Assistant
 

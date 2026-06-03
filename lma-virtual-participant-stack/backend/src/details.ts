@@ -18,6 +18,18 @@ export interface Speaker {
   timestamp: number;
 }
 
+/**
+ * Options passed to each platform handler's initialize(). `prepareAvatar`
+ * brings up the Simli avatar (background render page + getUserMedia override
+ * + relay wiring) on demand. Handlers call it at the point where the avatar
+ * is about to be needed as the camera — for Zoom that's after sign-in and
+ * before the prejoin camera toggle, keeping the avatar's CPU load off the
+ * sign-in phase. Idempotent; a no-op when Simli is disabled.
+ */
+export interface MeetingInitOptions {
+  prepareAvatar?: () => Promise<void>;
+}
+
 export interface MeetingDetails {
   // Meeting Configuration
   invite: MeetingInvite;
@@ -58,6 +70,8 @@ export interface MeetingDetails {
   recordingsKeyPrefix: string;
   graphqlEndpoint: string;
   vpTaskRegistryTableName: string;
+  domSelectorCacheTableName: string;
+  bedrockDomResolverModelId: string;
   
   // Transcription Configuration
   transcribeLanguageCode: string;
@@ -97,8 +111,10 @@ class DetailsManager {
 
     // Messages Configuration
     const introMessage = replacePlaceholders(
-      process.env.INTRO_MESSAGE || 
-      'Hello. I am an AI Live Meeting Assistant (LMA). I was invited by {LMA_USER} to join this call. To learn more about me please visit: https://amazon.com/live-meeting-assistant.'
+      process.env.INTRO_MESSAGE ||
+      'Hello. I am an AI Live Meeting Assistant (LMA). I was invited by {LMA_USER} to join this call. ' +
+      'Anyone here can ask me to leave at any time by typing "LMA leave" (or "LMA end") in chat. ' +
+      'To learn more please visit: https://amazon.com/live-meeting-assistant.'
     );
     const startRecordingMessage = replacePlaceholders(
       process.env.START_RECORDING_MESSAGE || 'Live Meeting Assistant started.'
@@ -139,7 +155,12 @@ class DetailsManager {
       pauseMessages: [stopRecordingMessage],
       exitMessages: [exitMessage],
 
-      // Commands
+      // Commands. The end-command matcher (matchesEndCommand below)
+      // requires an explicit "LMA" prefix on every dismissal phrase
+      // ("LMA END", "LMA LEAVE", "LMA STOP", "LMA QUIT", "Goodbye LMA",
+      // etc., case-insensitive, word-bounded) so that prose like
+      // "the meeting will end at 3pm" or "I'll leave at 3" never trips
+      // a false dismissal.
       startCommand: 'START',
       pauseCommand: 'PAUSE',
       endCommand: 'END',
@@ -158,6 +179,8 @@ class DetailsManager {
       recordingsKeyPrefix: process.env.RECORDINGS_KEY_PREFIX || 'lma-audio-recordings/',
       graphqlEndpoint: process.env.GRAPHQL_ENDPOINT || '',
       vpTaskRegistryTableName: process.env.VP_TASK_REGISTRY_TABLE_NAME || '',
+      domSelectorCacheTableName: process.env.DOM_SELECTOR_CACHE_TABLE_NAME || '',
+      bedrockDomResolverModelId: process.env.BEDROCK_DOM_RESOLVER_MODEL_ID || '',
 
       // Transcription Configuration
       transcribeLanguageCode: process.env.TRANSCRIBE_LANGUAGE_CODE || 'en-US',
@@ -193,3 +216,127 @@ class DetailsManager {
 // Export singleton instance
 export const detailsManager = new DetailsManager();
 export const details = detailsManager.details;
+
+/**
+ * Returns true when a chat message is a direct, two-token dismissal of LMA.
+ * The matcher is deliberately strict — it accepts only messages that consist
+ * of exactly the addressee + verb (or verb + addressee), with optional
+ * lightweight punctuation. This prevents false positives from prose that
+ * happens to contain both "LMA" and a dismissal verb — most importantly
+ * the bot's own intro message (which itself reads
+ *   '...typing "LMA leave" (or "LMA end") in chat.'
+ * ), so a second LMA bot in the same meeting can no longer end the first
+ * one with its join announcement.
+ *
+ * Recognised verbs (case-insensitive): end, leave, stop, quit, exit, goodbye, bye.
+ * The addressee may be "LMA" or "@LMA".
+ *
+ * Examples that match:
+ *   "LMA end", "LMA, leave!", "@LMA stop", "lma quit",
+ *   "Goodbye LMA", "bye, LMA!", "exit LMA"
+ *
+ * Examples that do NOT match:
+ *   "the meeting will end at 3pm", "I have to leave, but LMA looks great",
+ *   any message that quotes the command in a longer sentence (including the
+ *   bot's own intro), "Hello LMA", "endpoint", "ending soon".
+ */
+export function matchesEndCommand(message: string): boolean {
+  if (!message) return false;
+  const trimmed = message.trim();
+  if (!trimmed) return false;
+  // Cheap belt-and-braces guard — every legitimate command fits comfortably
+  // under this. Real prose virtually never does.
+  if (trimmed.length > 40) return false;
+  const verb = '(?:end|leave|stop|quit|exit|goodbye|bye)';
+  const addressee = '@?lma';
+  // Allow optional inline punctuation between the two tokens (",", ":", "-",
+  // "!", "?", ".") and trailing terminators.
+  const sep = '[\\s,:!?.\\-]+';
+  const trail = '[\\s!?.]*';
+  const addresseeFirst = new RegExp(`^${addressee}${sep}${verb}${trail}$`, 'i');
+  const verbFirst = new RegExp(`^${verb}${sep}${addressee}${trail}$`, 'i');
+  return addresseeFirst.test(trimmed) || verbFirst.test(trimmed);
+}
+
+/**
+ * Canonical reason codes describing why the VP left a meeting. Each platform
+ * handler returns one of these; the orchestrator uses it to emit a canonical
+ * log line and to derive a human-readable status message persisted to the
+ * VP record (visible in the UI).
+ */
+export type ExitReasonCode =
+  | 'end-command'         // attendee typed "LMA leave"/"LMA end"/etc. in chat
+  | 'alone-in-meeting'    // VP is the only attendee left
+  | 'removed-from-meeting'// host kicked the VP, or VP removed by platform
+  | 'host-ended'          // host ended the meeting for everyone
+  | 'meeting-timeout'     // VP hit the configured maximum meeting duration
+  | 'page-closed'         // the browser/page went away unexpectedly
+  | 'never-joined'        // VP never actually entered the meeting (prejoin
+                          // timeout, never admitted, stuck on join form) —
+                          // this is a FAILURE, not a normal completion
+  | 'unknown';            // fallback when no signal could be classified
+
+/**
+ * True when the VP actually made it into the meeting (so ending is a normal
+ * COMPLETED). False for reasons that mean it never joined — those must be
+ * surfaced as FAILED so the UI doesn't falsely report success. `unknown` is
+ * treated as "joined" to preserve prior behaviour for unclassified mid-
+ * meeting exits; only the explicit never-joined reason flips to failure.
+ */
+export function didJoinMeeting(info: ExitInfo): boolean {
+  return info.reason !== 'never-joined';
+}
+
+export interface ExitInfo {
+  reason: ExitReasonCode;
+  /** Platform-specific identifier of the exact branch (e.g. 'ZOOM_END_DIALOG',
+   *  'HANGUP_BUTTON_HIDDEN', 'attendees-left'). Logged but not displayed. */
+  trigger?: string;
+  /** When reason==='end-command', the parsed sender name (when available). */
+  requestedBy?: string | null;
+  /** When reason==='end-command', the chat-message body that matched. */
+  matchedMessage?: string;
+}
+
+/**
+ * Build the human-readable status detail shown in the UI alongside
+ * COMPLETED. Keep these short and user-facing — the canonical reason code
+ * and trigger live in the logs, not in this string.
+ */
+export function formatExitMessage(info: ExitInfo): string {
+  switch (info.reason) {
+    case 'end-command':
+      return info.requestedBy
+        ? `Asked to leave by ${info.requestedBy}.`
+        : 'Asked to leave by a participant.';
+    case 'alone-in-meeting':
+      return 'Everyone else left the meeting.';
+    case 'removed-from-meeting':
+      return 'Removed from the meeting.';
+    case 'host-ended':
+      return 'Meeting ended by host.';
+    case 'meeting-timeout':
+      return 'Meeting reached maximum duration.';
+    case 'page-closed':
+      return 'Meeting page closed unexpectedly.';
+    case 'never-joined':
+      return 'Could not join the meeting (was not admitted, or stuck on the join screen).';
+    case 'unknown':
+    default:
+      return 'Meeting ended.';
+  }
+}
+
+/**
+ * Build a personalised exit-message list. When we know who issued the
+ * dismissal, the goodbye acknowledges them so other participants understand
+ * what just happened.
+ */
+export function exitMessagesFor(requester?: string | null): string[] {
+  if (!requester) return details.exitMessages;
+  const safe = requester.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 80);
+  if (!safe) return details.exitMessages;
+  // Prepend an acknowledgement; keep the configured exit message as the
+  // farewell so users keeping a custom exit message still see it.
+  return [`Thanks ${safe} — I'll head out now.`, ...details.exitMessages];
+}

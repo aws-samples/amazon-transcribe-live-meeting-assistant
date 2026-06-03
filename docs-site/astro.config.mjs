@@ -109,6 +109,10 @@ export default defineConfig({
               label: "Infrastructure & Security",
               slug: "infrastructure-and-security",
             },
+            {
+              label: "Security Scanning (SRT)",
+              slug: "security-scanning",
+            },
           ],
         },
         {
@@ -139,6 +143,10 @@ export default defineConfig({
               label: "Stack Updates & Upgrades",
               slug: "stack-updates-and-upgrades",
             },
+            {
+              label: "Well-Architected Assessment",
+              slug: "well-architected",
+            },
             { label: "Troubleshooting", slug: "troubleshooting" },
             { label: "Cleanup", slug: "cleanup" },
           ],
@@ -157,6 +165,8 @@ export default defineConfig({
           items: [
             { label: "Cloudformation Service Role", slug: "cloudformation-service-role" },
             { label: "Meeting Sources", slug: "meeting-sources" },
+            { label: "Quick Desktop Integration", slug: "quick-desktop-integration" },
+            { label: "Quick Desktop Lma Integration Proposal", slug: "quick-desktop-lma-integration-proposal" },
             { label: "Upload Audio", slug: "upload-audio" },
             { label: "Virtual Participant Local Dev", slug: "virtual-participant-local-dev" },
           ],

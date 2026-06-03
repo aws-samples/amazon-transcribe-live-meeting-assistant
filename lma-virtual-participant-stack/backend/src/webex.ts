@@ -1,12 +1,23 @@
-import { Page, Frame } from 'puppeteer';
-import { details } from './details.js';
+import { Page, Frame } from 'playwright-core';
+import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
+import { findElementWithFallback } from './ai-dom-resolver.js';
+import { startDialogWatchdog } from './dialog-watchdog.js';
 
 export default class Webex {
     private readonly iframe = '#unified-webclient-iframe';
+    private endRequested: Promise<ExitInfo>;
+    private requestEnd: (info: ExitInfo) => void = () => {};
+
+    constructor() {
+        this.endRequested = new Promise<ExitInfo>((resolve) => {
+            this.requestEnd = resolve;
+        });
+    }
+
     private async sendMessages(
         frame: Frame,
         messages: string[],
@@ -20,13 +31,35 @@ export default class Webex {
         console.log('Sent messages:', messages);
     }
 
-    public async initialize(page: Page): Promise<void> {
+    public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
+        // Webex has no heavy credentialled sign-in phase, so bring the Simli
+        // avatar up now (timing unchanged from before the deferral refactor).
+        if (opts.prepareAvatar) await opts.prepareAvatar();
+        // AI-driven dialog watchdog runs for the entire meeting lifecycle.
+        // See dialog-watchdog.ts. Catches sign-in / pre-join / waiting-room /
+        // in-meeting dialogs (consent, recording notice, captcha, SSO, etc.)
+        // and either auto-dismisses (CONSENT-class) or escalates to
+        // MANUAL_ACTION_REQUIRED so the user can clear it via VNC.
+        startDialogWatchdog(page, { platform: 'WEBEX' });
+
         console.log('Getting Webex meeting link.');
         await page.goto('https://signin.webex.com/join');
         console.log('Entering meeting ID.');
-        const meetingTextElement = await page.waitForSelector('#join-meeting-form');
-        await meetingTextElement?.type(details.invite.meetingId);
-        await meetingTextElement?.press('Enter');
+        const meetingIdRes = await findElementWithFallback(
+            page,
+            ['#join-meeting-form'],
+            {
+                intent: 'Webex landing page meeting-ID input field',
+                platform: 'WEBEX',
+                step: 'webex.join.meetingIdInput',
+            },
+            { maxRetries: 10, delayMs: 500 },
+        );
+        if (!meetingIdRes) {
+            throw new Error('Webex meeting-ID input not found');
+        }
+        await meetingIdRes.element.type(details.invite.meetingId);
+        await meetingIdRes.element.press('Enter');
         
         // Wait a moment for the page to stabilize after entering meeting ID
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -125,7 +158,7 @@ export default class Webex {
                     // Wait for name input to appear (successful CAPTCHA solve + Next click)
                     frame.waitForSelector('input[data-test="Name (required)"]', {
                         timeout: 120000,
-                        visible: true
+                        state: 'visible'
                     }),
                     // Or wait for the Next button to be clicked (we'll detect by it disappearing)
                     frame.waitForFunction(
@@ -133,6 +166,7 @@ export default class Webex {
                             const nextBtn = document.querySelector('mdc-button[type="submit"]');
                             return !nextBtn || nextBtn.getAttribute('disabled') === null;
                         },
+                        undefined,
                         { timeout: 120000 }
                     )
                 ]);
@@ -260,7 +294,7 @@ export default class Webex {
         } catch(error: any) {
             console.log("Chat panel button error:", error.message);
             console.log("Your scribe was not admitted into the meeting.");
-            return;
+            return { reason: 'unknown', trigger: 'pre-join:not-admitted' };
         }
 
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -396,13 +430,23 @@ export default class Webex {
                 clearInterval(interval);
               };
             });
-        // Set up message monitoring with LMA features
-        await page.exposeFunction('messageChange', async (message: string) => {
-            if (message.includes(details.endCommand)) {
-                console.log('LMA Virtual Participant has been removed from the meeting.');
-                await this.sendMessages(frame, details.exitMessages);
+        // Set up message monitoring with LMA features. Webex exposes
+        // `sender:::body` to the node bridge in some contexts; we accept
+        // both shapes.
+        await page.exposeFunction('messageChange', async (raw: string) => {
+            const idx = raw.indexOf(':::');
+            const sender = idx > 0 ? raw.slice(0, idx).trim() : null;
+            const message = idx > 0 ? raw.slice(idx + 3) : raw;
+            if (matchesEndCommand(message)) {
+                console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(message)}`);
+                await this.sendMessages(frame, exitMessagesFor(sender));
                 details.start = false;
-                await page.goto('about:blank');
+                this.requestEnd({
+                    reason: 'end-command',
+                    trigger: 'chat',
+                    requestedBy: sender,
+                    matchedMessage: message,
+                });
             } else if (
                 details.start &&
                 message.includes(details.pauseCommand)
@@ -468,62 +512,58 @@ export default class Webex {
         }
 
         console.log('Waiting for meeting end.');
+        let exitInfo: ExitInfo = { reason: 'unknown' };
         try {
-            // Set up meeting end detection by monitoring iframe text content
-            let meetingEnded = false;
-            await page.exposeFunction('meetingEndDetected', async (reason: string) => {
-                if (!meetingEnded) {
-                    meetingEnded = true;
-                    console.log(`Meeting ended detected: ${reason}`);
-                    details.start = false;
-                }
-            });
-
-            // Monitor the iframe for meeting end text
-            await frame.evaluate(() => {
+            // Detect Webex's own meeting-end UI by watching the iframe text.
+            // The detected substring distinguishes "meeting ended" (host) from
+            // "you have left the meeting" / "disconnected" (page-closed-ish).
+            const meetingEndDetected = new Promise<ExitInfo>(async (resolve) => {
+                await page.exposeFunction('meetingEndDetected', (matched: string) => {
+                    const text = matched.toLowerCase();
+                    const reason: ExitInfo['reason'] =
+                        text.includes('disconnected') || text.includes('left the meeting')
+                            ? 'page-closed'
+                            : 'host-ended';
+                    resolve({ reason, trigger: `webex-text:${matched}` });
+                });
+                await frame.evaluate(() => {
+                    const PHRASES = [
+                        'meeting has ended',
+                        'this meeting has ended',
+                        'meeting ended',
+                        'you have left the meeting',
+                        'meeting disconnected',
+                    ];
+                    const matchPhrase = (text: string) => PHRASES.find((p) => text.includes(p)) || null;
                     const observer = new MutationObserver(() => {
                         const bodyText = document.body?.textContent?.toLowerCase() || '';
-
-                        if (bodyText.includes('meeting has ended') ||
-                            bodyText.includes('this meeting has ended') ||
-                            bodyText.includes('meeting ended') ||
-                            bodyText.includes('you have left the meeting') ||
-                            bodyText.includes('meeting disconnected')) {
-                            (window as any).meetingEndDetected('Meeting end text detected');
+                        const hit = matchPhrase(bodyText);
+                        if (hit) {
+                            (window as any).meetingEndDetected(hit);
                             observer.disconnect();
                         }
                     });
-
-                    observer.observe(document.body, {
-                        childList: true,
-                        subtree: true,
-                        characterData: true
-                    });
-
-                    // Check immediately in case meeting already ended
-                    const bodyText = document.body?.textContent?.toLowerCase() || '';
-                    if (bodyText.includes('meeting has ended') ||
-                        bodyText.includes('this meeting has ended') ||
-                        bodyText.includes('meeting ended')) {
-                        (window as any).meetingEndDetected('Meeting end text detected immediately');
+                    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+                    const initial = matchPhrase((document.body?.textContent || '').toLowerCase());
+                    if (initial) {
+                        (window as any).meetingEndDetected(initial);
                         observer.disconnect();
                     }
                 });
+            });
 
-            // Wait for meeting end or timeout
-            const startTime = Date.now();
-            while (!meetingEnded && (Date.now() - startTime) < details.meetingTimeout) {
-                await new Promise(resolve => setTimeout(resolve, 1000)); // Check every second
-            }
+            const meetingTimeout = new Promise<ExitInfo>((resolve) =>
+                setTimeout(() => resolve({ reason: 'meeting-timeout', trigger: 'meetingTimeout' }), details.meetingTimeout),
+            );
 
-            if (!meetingEnded) {
-                console.log('Meeting timed out.');
-            }
-            console.log('Meeting ended.');
+            exitInfo = await Promise.race([this.endRequested, meetingEndDetected, meetingTimeout]);
         } catch (error) {
             console.log('Meeting ended with error:', error);
+            exitInfo = { reason: 'unknown', trigger: `error:${error instanceof Error ? error.message : String(error)}` };
         } finally {
             details.start = false;
         }
+        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+        return exitInfo;
     }
 }

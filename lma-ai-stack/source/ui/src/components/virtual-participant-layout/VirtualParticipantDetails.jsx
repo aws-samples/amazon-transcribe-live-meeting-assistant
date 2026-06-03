@@ -41,6 +41,7 @@ const getVirtualParticipant = `
       isScheduled
       scheduleId
       status
+      errorMessage
       createdAt
       updatedAt
       owner
@@ -50,6 +51,7 @@ const getVirtualParticipant = `
       vncEndpoint
       vncPort
       vncReady
+      userAcknowledgedFailure
     }
   }
 `;
@@ -59,6 +61,7 @@ const onUpdateVirtualParticipantDetailed = `
     onUpdateVirtualParticipant {
       id
       status
+      errorMessage
       updatedAt
       meetingName
       owner
@@ -72,6 +75,7 @@ const onUpdateVirtualParticipantDetailed = `
       manualActionMessage
       manualActionTimeoutSeconds
       manualActionStartTime
+      userAcknowledgedFailure
     }
   }
 `;
@@ -83,6 +87,12 @@ const endVirtualParticipant = `
       status
       updatedAt
     }
+  }
+`;
+
+const acknowledgeVPFailureMutation = `
+  mutation AcknowledgeVPFailure($virtualParticipantId: ID!) {
+    acknowledgeVPFailure(virtualParticipantId: $virtualParticipantId)
   }
 `;
 
@@ -98,14 +108,66 @@ const STATUS_CONFIG = {
     color: 'blue',
   },
   INITIALIZING: {
-    message: 'Setting up virtual participant...',
-    description: 'Preparing connection parameters and authentication',
+    message: 'Allocating compute…',
+    description: 'Starting Fargate task and waiting for the headless browser stack to come up',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  WAITING_FOR_CAPACITY: {
+    message: 'Waiting for compute capacity…',
+    description:
+      'Task is queued waiting for an EC2 host slot. If the cluster is full, the auto-scaler will ' +
+      'launch a new host (~60-90s); otherwise the task is just waiting briefly for placement.',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  BOOTING: {
+    message: 'Booting container…',
+    description: 'Container started — pulling Chrome image, starting display, audio, and VNC server',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  REGISTERING_NETWORK: {
+    message: 'Registering network…',
+    description:
+      'Creating ALB target group and waiting for the live-view endpoint to become healthy (typically 30–60s)',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  VNC_READY: {
+    message: 'Live view ready',
+    description: 'About to navigate to the meeting URL',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  HYDRATING_PROFILE: {
+    message: 'Restoring browser profile…',
+    description: 'Downloading saved cookies / trusted-device markers from S3',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  LAUNCHING_BROWSER: {
+    message: 'Launching browser…',
+    description: 'Starting the browser and platform extensions',
+    icon: 'loading',
+    type: 'in-progress',
+    color: 'blue',
+  },
+  WARMING_PROFILE: {
+    message: 'Warming new profile…',
+    description: 'First-launch browsing pass before joining (one-time, ~15s)',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
   },
   CONNECTING: {
-    message: 'Connecting to meeting platform...',
+    message: 'Connecting to meeting platform…',
     description: 'Establishing connection with meeting platform',
     icon: 'loading',
     type: 'in-progress',
@@ -180,9 +242,25 @@ StatusBadge.propTypes = {
   status: PropTypes.string.isRequired,
 };
 
-export const StatusDetails = ({ status, updatedAt, scheduledFor }) => {
+export const StatusDetails = ({ status, updatedAt, scheduledFor, statusMessage }) => {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.FAILED;
-  const isInProgress = ['INITIALIZING', 'CONNECTING', 'JOINING'].includes(status);
+  const isInProgress = [
+    'INITIALIZING',
+    'WAITING_FOR_CAPACITY',
+    'BOOTING',
+    'REGISTERING_NETWORK',
+    'VNC_READY',
+    'HYDRATING_PROFILE',
+    'LAUNCHING_BROWSER',
+    'WARMING_PROFILE',
+    'CONNECTING',
+    'JOINING',
+  ].includes(status);
+
+  // The VP backend writes a human-readable exit detail to errorMessage on
+  // terminal states (e.g. "Asked to leave by Jeremy Feldman.") — show it
+  // instead of the generic per-status default when present.
+  const description = statusMessage || config.description;
 
   return (
     <Container>
@@ -197,7 +275,7 @@ export const StatusDetails = ({ status, updatedAt, scheduledFor }) => {
             {config.message}
           </Box>
         </div>
-        <Box color="text-body-secondary">{config.description}</Box>
+        <Box color="text-body-secondary">{description}</Box>
         {status === 'SCHEDULED' && scheduledFor && (
           <Box color="text-status-info" fontSize="body-m" fontWeight="bold">
             Scheduled for: {new Date(scheduledFor).toLocaleString()}
@@ -215,10 +293,12 @@ StatusDetails.propTypes = {
   status: PropTypes.string.isRequired,
   updatedAt: PropTypes.string.isRequired,
   scheduledFor: PropTypes.string,
+  statusMessage: PropTypes.string,
 };
 
 StatusDetails.defaultProps = {
   scheduledFor: null,
+  statusMessage: null,
 };
 
 export const ConnectionDetails = ({ vpDetails }) => {
@@ -297,8 +377,37 @@ ConnectionDetails.propTypes = {
   }).isRequired,
 };
 
-const ErrorTroubleshooting = ({ status, errorDetails }) => {
+const ErrorTroubleshooting = ({ status, errorDetails, errorMessage, vpId, vncReady, userAcknowledgedFailure }) => {
+  const [acking, setAcking] = useState(false);
+  const [ackError, setAckError] = useState(null);
+  const [ackedLocal, setAckedLocal] = useState(false);
+
   if (status !== 'FAILED') return null;
+
+  const acknowledged = !!userAcknowledgedFailure || ackedLocal;
+  const showAckButton = !!vpId && !!vncReady && !acknowledged;
+
+  const handleAcknowledge = async () => {
+    setAcking(true);
+    setAckError(null);
+    try {
+      await client.graphql({
+        query: acknowledgeVPFailureMutation,
+        variables: { virtualParticipantId: vpId },
+      });
+      setAckedLocal(true);
+    } catch (e) {
+      setAckError(e?.errors?.[0]?.message || e?.message || 'Failed to acknowledge');
+    } finally {
+      setAcking(false);
+    }
+  };
+
+  // The backend writes a specific, user-facing failure reason to the
+  // errorMessage field (e.g. "The meeting browser ran out of memory and
+  // crashed during join."). Prefer that over the structured errorDetails
+  // (which is only populated for a few categorised errors).
+  const specificMessage = (errorDetails && errorDetails.errorMessage) || errorMessage || null;
 
   const getErrorSolution = () => {
     // Use enhanced error details if available
@@ -327,7 +436,15 @@ const ErrorTroubleshooting = ({ status, errorDetails }) => {
       );
     }
 
-    // Fallback to generic solutions
+    // When the backend gave us a specific reason, that's shown above as the
+    // "Error:" line — don't bury it under the generic checklist, which would
+    // be misleading (e.g. an out-of-memory crash has nothing to do with the
+    // meeting ID or password).
+    if (specificMessage) {
+      return null;
+    }
+
+    // Fallback to generic solutions only when we have no specific reason.
     return (
       <SpaceBetween direction="vertical" size="s">
         <div>
@@ -345,19 +462,42 @@ const ErrorTroubleshooting = ({ status, errorDetails }) => {
 
   return (
     <Container header={<Header variant="h3">Troubleshooting</Header>}>
-      <Alert type="error">
-        <SpaceBetween direction="vertical" size="s">
-          <div>
-            <strong>Virtual Participant failed to join the meeting</strong>
-          </div>
-          {errorDetails && errorDetails.errorMessage && (
+      <SpaceBetween direction="vertical" size="s">
+        <Alert type="error">
+          <SpaceBetween direction="vertical" size="s">
             <div>
-              <strong>Error:</strong> {errorDetails.errorMessage}
+              <strong>Virtual Participant failed to join the meeting</strong>
             </div>
-          )}
-          {getErrorSolution()}
-        </SpaceBetween>
-      </Alert>
+            {specificMessage && (
+              <div>
+                <strong>Error:</strong> {specificMessage}
+              </div>
+            )}
+            {getErrorSolution()}
+          </SpaceBetween>
+        </Alert>
+        {showAckButton && (
+          <Alert type="info">
+            <SpaceBetween direction="vertical" size="s">
+              <div>
+                The live browser above is still available so you can inspect what tripped up the join (e.g. a CAPTCHA,
+                an unexpected dialog, or a stuck page).
+              </div>
+              <div>
+                Click <strong>Got it — close Virtual Participant session</strong> when you&apos;re done. The session
+                will close automatically after 10 minutes.
+              </div>
+              {ackError && <div style={{ color: '#d13212' }}>{ackError}</div>}
+              <Button onClick={handleAcknowledge} loading={acking} variant="primary">
+                Got it — close Virtual Participant session
+              </Button>
+            </SpaceBetween>
+          </Alert>
+        )}
+        {acknowledged && vncReady && (
+          <Alert type="success">Acknowledged. Virtual Participant session is closing.</Alert>
+        )}
+      </SpaceBetween>
     </Container>
   );
 };
@@ -372,10 +512,18 @@ ErrorTroubleshooting.propTypes = {
     lastErrorAt: PropTypes.string,
     errorCount: PropTypes.number,
   }),
+  errorMessage: PropTypes.string,
+  vpId: PropTypes.string,
+  vncReady: PropTypes.bool,
+  userAcknowledgedFailure: PropTypes.bool,
 };
 
 ErrorTroubleshooting.defaultProps = {
   errorDetails: null,
+  errorMessage: null,
+  vpId: null,
+  vncReady: false,
+  userAcknowledgedFailure: false,
 };
 
 const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule }) => {
@@ -463,67 +611,128 @@ const VirtualParticipantDetails = () => {
     }
   }, [vpId, authState]);
 
-  // Set up real-time updates subscription - NO NOTIFICATIONS (handled by VirtualParticipantList)
+  // Set up real-time updates: AppSync subscription + retry-on-error +
+  // polling fallback. The subscription is the fast path; the poll is a
+  // 5s safety net that runs while the VP is still in any in-progress
+  // state (so a dropped websocket / expired auth token doesn't leave
+  // the page stuck on stale state until the user manually refreshes).
   useEffect(() => {
     if (!vpId) return undefined;
-
     if (authState !== 'authenticated') return undefined;
 
-    console.log('=== Setting up AppSync subscription for VP:', vpId);
-    const subscription = client.graphql({ query: onUpdateVirtualParticipantDetailed }).subscribe({
-      next: (message) => {
-        console.log('=== AppSync subscription received update ===');
-        console.log('Raw value:', JSON.stringify(message, null, 2));
+    let cancelled = false;
+    let subscription = null;
+    let pollTimer = null;
+    let retryTimer = null;
+    let retryAttempt = 0;
 
-        const updated = message?.data?.onUpdateVirtualParticipant;
-        console.log('Parsed update:', updated);
+    const pickNew = (next, prev) => (next != null ? next : prev);
+    const applyUpdate = (updated) => {
+      if (!updated || updated.id !== vpId) return;
+      setVpDetails((prev) => ({
+        ...prev,
+        ...updated,
+        // pickNew so a partial update with status=null doesn't blank it
+        status: pickNew(updated.status, prev?.status),
+        updatedAt: pickNew(updated.updatedAt, prev?.updatedAt),
+        CallId: pickNew(updated.CallId, prev?.CallId),
+        vncEndpoint: pickNew(updated.vncEndpoint, prev?.vncEndpoint),
+        vncPort: pickNew(updated.vncPort, prev?.vncPort),
+        // Latch vncReady=true so a later partial update can't unset it.
+        vncReady: prev?.vncReady === true ? true : pickNew(updated.vncReady, prev?.vncReady),
+        manualActionType: pickNew(updated.manualActionType, prev?.manualActionType),
+        manualActionMessage: pickNew(updated.manualActionMessage, prev?.manualActionMessage),
+        manualActionTimeoutSeconds: pickNew(updated.manualActionTimeoutSeconds, prev?.manualActionTimeoutSeconds),
+        manualActionStartTime: pickNew(updated.manualActionStartTime, prev?.manualActionStartTime),
+      }));
+    };
 
-        if (updated && updated.id === vpId) {
-          console.log('Update is for our VP:', vpId);
-          console.log('VNC fields in update:', {
-            vncEndpoint: updated.vncEndpoint,
-            vncPort: updated.vncPort,
-            vncReady: updated.vncReady,
-          });
-
-          // Update local state, no notifications (VirtualParticipantList handles notifications),
-          // including VNC and manual action fields
-          setVpDetails((prev) => {
-            const newState = {
-              ...prev,
-              status: updated.status,
-              updatedAt: updated.updatedAt,
-              CallId: updated.CallId || prev?.CallId,
-              vncEndpoint: updated.vncEndpoint || prev?.vncEndpoint,
-              vncPort: updated.vncPort || prev?.vncPort,
-              vncReady: updated.vncReady !== undefined ? updated.vncReady : prev?.vncReady,
-              manualActionType: updated.manualActionType || prev?.manualActionType,
-              manualActionMessage: updated.manualActionMessage || prev?.manualActionMessage,
-              manualActionTimeoutSeconds: updated.manualActionTimeoutSeconds || prev?.manualActionTimeoutSeconds,
-              manualActionStartTime: updated.manualActionStartTime || prev?.manualActionStartTime,
-            };
-            console.log('Updated VP state:', newState);
-            return newState;
-          });
-
-          // Log VNC updates
-          if (updated.vncReady && updated.vncEndpoint) {
-            console.log('✓ VNC is ready! Endpoint:', updated.vncEndpoint, 'Port:', updated.vncPort);
+    // Quiet poll fallback: only runs while we genuinely need it (status
+    // is in-progress AND vncReady is not yet true). Does NOT touch
+    // loading state, so the page never flickers — uses the same
+    // applyUpdate as the subscription so we merge fields rather than
+    // wholesale-replacing state. Once vncReady=true is latched, polling
+    // stops; the subscription remains the only update mechanism.
+    const POLL_INTERVAL_MS = 5000;
+    const startPolling = () => {
+      if (pollTimer || cancelled) return;
+      const tick = async () => {
+        pollTimer = null;
+        if (cancelled) return;
+        // Decide whether we still need to poll, based on freshest state.
+        let shouldKeepPolling = true;
+        setVpDetails((prev) => {
+          if (prev?.vncReady === true) shouldKeepPolling = false;
+          if (prev?.status && ['COMPLETED', 'FAILED', 'ENDED', 'CANCELLED'].includes(prev.status)) {
+            shouldKeepPolling = false;
           }
-        } else {
-          console.log('Update is NOT for our VP. Update ID:', updated?.id, 'Our ID:', vpId);
+          return prev;
+        });
+        if (!shouldKeepPolling) return;
+        // Quiet refetch — no setLoading, no full-replace, no notifications.
+        try {
+          const r = await client.graphql({
+            query: getVirtualParticipant,
+            variables: { id: vpId },
+          });
+          const fresh = r?.data?.getVirtualParticipant;
+          if (fresh && !cancelled) applyUpdate(fresh);
+        } catch (_) {
+          // ignore — keep polling
         }
-      },
-      error: (err) => {
-        console.error('=== AppSync subscription error ===', err);
-        logger.error('Subscription error:', err);
-        // Don't retry on subscription errors to avoid infinite loops
-      },
-    });
+        if (!cancelled) {
+          pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+        }
+      };
+      pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+    };
+
+    const subscribe = () => {
+      if (cancelled) return;
+      console.log('=== Setting up AppSync subscription for VP:', vpId);
+      subscription = client.graphql({ query: onUpdateVirtualParticipantDetailed }).subscribe({
+        next: (message) => {
+          retryAttempt = 0; // healthy subscription — reset backoff
+          const updated = message?.data?.onUpdateVirtualParticipant;
+          applyUpdate(updated);
+          if (updated?.vncReady && updated?.vncEndpoint) {
+            console.log('✓ VNC is ready! Endpoint:', updated.vncEndpoint);
+          }
+        },
+        error: (err) => {
+          console.error('=== AppSync subscription error ===', err);
+          logger.error('Subscription error:', err);
+          // Reconnect with exponential backoff (1s, 2s, 4s, … capped at 30s).
+          // Polling fallback below keeps the UI fresh while we wait.
+          if (cancelled) return;
+          const delay = Math.min(30_000, 1000 * 2 ** retryAttempt);
+          retryAttempt += 1;
+          console.log(`Retrying subscription in ${delay}ms (attempt ${retryAttempt})`);
+          retryTimer = setTimeout(() => {
+            try {
+              subscription?.unsubscribe?.();
+            } catch {
+              /* ignore */
+            }
+            subscribe();
+          }, delay);
+        },
+      });
+    };
+
+    subscribe();
+    startPolling();
 
     return () => {
       console.log('=== Unsubscribing from AppSync for VP:', vpId);
-      subscription.unsubscribe();
+      cancelled = true;
+      try {
+        subscription?.unsubscribe?.();
+      } catch {
+        /* ignore */
+      }
+      if (pollTimer) clearTimeout(pollTimer);
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [vpId, authState]);
 
@@ -672,8 +881,18 @@ const VirtualParticipantDetails = () => {
         </Header>
       </Container>
 
-      {/* Current Status */}
-      <StatusDetails status={vpDetails.status} updatedAt={vpDetails.updatedAt} scheduledFor={vpDetails.scheduledFor} />
+      {/* Current Status. The backend reuses the errorMessage field as a
+          generic status-detail channel: a human-readable exit reason on
+          COMPLETED, and live progress sub-steps during the long in-progress
+          phases (e.g. "Waiting to be admitted…" within JOINING) so the VP
+          doesn't look frozen. Surface it for both; on FAILED it's the real
+          error and is shown in the troubleshooting card instead. */}
+      <StatusDetails
+        status={vpDetails.status}
+        updatedAt={vpDetails.updatedAt}
+        scheduledFor={vpDetails.scheduledFor}
+        statusMessage={vpDetails.status === 'FAILED' ? null : vpDetails.errorMessage}
+      />
 
       {/* Status Timeline - Only show if enhanced data available */}
       {vpDetails.statusHistory && (
@@ -681,6 +900,7 @@ const VirtualParticipantDetails = () => {
           history={vpDetails.statusHistory}
           currentStatus={vpDetails.status}
           currentTimestamp={vpDetails.updatedAt}
+          currentStatusMessage={vpDetails.status === 'FAILED' ? null : vpDetails.errorMessage}
         />
       )}
 
@@ -689,12 +909,23 @@ const VirtualParticipantDetails = () => {
         <ConnectionDetails vpDetails={vpDetails} />
       </Container>
 
-      {/* VNC Live View - Show when VNC is ready and VP is active */}
+      {/* VNC Live View - Show when VNC is ready and VP is active.
+          FAILED is intentionally included: the VP container waits up to
+          10 min after FAILED before tearing down the ALB target so the
+          user can use the live browser to inspect what blocked the join. */}
       {vpDetails.vncReady &&
         vpDetails.vncEndpoint &&
-        ['VNC_READY', 'CONNECTING', 'JOINING', 'JOINED', 'ACTIVE', 'MANUAL_ACTION_REQUIRED'].includes(
-          vpDetails.status,
-        ) && (
+        [
+          'VNC_READY',
+          'HYDRATING_PROFILE',
+          'LAUNCHING_BROWSER',
+          'CONNECTING',
+          'JOINING',
+          'JOINED',
+          'ACTIVE',
+          'MANUAL_ACTION_REQUIRED',
+          'FAILED',
+        ].includes(vpDetails.status) && (
           <VNCViewer
             vpId={vpId}
             vncEndpoint={vpDetails.vncEndpoint}
@@ -707,23 +938,46 @@ const VirtualParticipantDetails = () => {
           />
         )}
 
-      {/* VNC Preparing Message - Show while VNC is starting up */}
-      {!vpDetails.vncReady && ['INITIALIZING', 'CONNECTING', 'JOINING'].includes(vpDetails.status) && (
-        <Container>
-          <Box textAlign="center" padding="l">
-            <Spinner size="large" />
-            <Box margin={{ top: 's' }}>
-              <strong>Preparing live view...</strong>
+      {/* VNC Preparing Message - Show while VNC is starting up. Headline +
+          subtext are pulled from STATUS_CONFIG so as the VP progresses
+          through INITIALIZING → REGISTERING_NETWORK → HYDRATING_PROFILE →
+          LAUNCHING_BROWSER → CONNECTING → JOINING, the user sees what's
+          actually happening rather than a static 'Preparing...' spinner. */}
+      {!vpDetails.vncReady &&
+        [
+          'INITIALIZING',
+          'WAITING_FOR_CAPACITY',
+          'BOOTING',
+          'REGISTERING_NETWORK',
+          'HYDRATING_PROFILE',
+          'LAUNCHING_BROWSER',
+          'WARMING_PROFILE',
+          'CONNECTING',
+          'JOINING',
+        ].includes(vpDetails.status) && (
+          <Container>
+            <Box textAlign="center" padding="l">
+              <Spinner size="large" />
+              <Box margin={{ top: 's' }}>
+                <strong>{STATUS_CONFIG[vpDetails.status]?.message || 'Preparing live view…'}</strong>
+              </Box>
+              <Box margin={{ top: 'xs' }} color="text-body-secondary">
+                {STATUS_CONFIG[vpDetails.status]?.description ||
+                  'VNC viewer is waiting for the VP to start up. This may take ~60 seconds.'}
+              </Box>
             </Box>
-            <Box margin={{ top: 'xs' }} color="text-body-secondary">
-              VNC viewer is waiting for the VP to start up. This may take ~60 seconds.
-            </Box>
-          </Box>
-        </Container>
-      )}
+          </Container>
+        )}
 
       {/* Error Troubleshooting - Only show for failed status */}
-      <ErrorTroubleshooting status={vpDetails.status} errorDetails={vpDetails.errorDetails} />
+      <ErrorTroubleshooting
+        status={vpDetails.status}
+        errorDetails={vpDetails.errorDetails}
+        errorMessage={vpDetails.errorMessage}
+        vpId={vpId}
+        vncReady={vpDetails.vncReady}
+        userAcknowledgedFailure={vpDetails.userAcknowledgedFailure}
+      />
 
       {/* Basic Status Timeline for basic schema */}
       {!vpDetails.statusHistory && (

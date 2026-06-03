@@ -15,6 +15,7 @@ This guide walks you through setting up the Simli avatar integration for the LMA
 - LMA deployed (version 0.2.31 and above)
 - A voice assistant configured and working (`amazon_nova_sonic` or `elevenlabs`)
 - Simli account with API access
+- **Both** `SimliApiKey` and `SimliFaceId` set on the stack — the avatar is only enabled when both parameters are non-empty. Setting just one (e.g. only the API key) will silently leave the avatar disabled and the Virtual Participant will join with no camera.
 
 ## How It Works
 
@@ -28,7 +29,7 @@ Simli Avatar Manager
 Simli Cloud (lip-sync rendering)
     ↓ Returns video stream via WebRTC
     ↓
-Background Puppeteer Page (renders avatar video)
+Background Playwright Page (renders avatar video)
     ↓ Bridges video via internal RTCPeerConnection
     ↓
 Meeting Page (getUserMedia override)
@@ -68,10 +69,12 @@ When deploying or updating your LMA stack, set these parameters:
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `SimliApiKey` | Your Simli API key | API key from Step 1.2 |
-| `SimliFaceId` | Your chosen Face ID | Face ID from Step 1.3 |
+| `SimliApiKey` | Your Simli API key | **Required for the avatar.** API key from Step 1.2. |
+| `SimliFaceId` | Your chosen Face ID | **Required for the avatar.** Face ID from Step 1.3. |
 | `VoiceAssistantProvider` | `amazon_nova_sonic` or `elevenlabs` | A voice assistant must be enabled |
 | `VoiceAssistantActivationMode` | `wake_phrase` or `always_active` | Choose activation mode |
+
+> **Important:** Although each Simli parameter shows as "(Optional)" in the CloudFormation template (the stack deploys fine without them), the avatar feature itself requires **both** `SimliApiKey` *and* `SimliFaceId` to be non-empty. Set both, or leave both blank.
 
 > **Important:** Simli avatar is meant to be used with a voice assistant. The avatar is driven by the voice assistant's audio output — without a voice assistant, there is no audio to animate the avatar.
 
@@ -248,6 +251,12 @@ When Simli avatar is active, the Virtual Participant's behavior changes slightly
 - Outbound HTTPS access to Simli CDN (`esm.sh`, `unpkg.com`) for SDK loading
 - Outbound WebRTC access to Simli servers for video streaming
 - The `livekit` transport mode is more firewall-friendly than `p2p`
+
+### Join Reliability Tradeoff
+
+Enabling Simli requires browser settings that bridge the avatar's video into the meeting. Those settings make a Zoom join **more likely to require a login or trigger a CAPTCHA** before the Virtual Participant is let in.
+
+**If you are hitting login prompts or CAPTCHA challenges on join and don't need the on-camera avatar, leave `SimliApiKey` and `SimliFaceId` unset** — the VP joins with the most reliable profile. If you do want the avatar, signing in with per-user Zoom credentials makes joins far more reliable. See [Zoom Sign-in & Join Reliability → Simli and join reliability](./zoom-credentials-and-join-reliability.md#simli-and-join-reliability) for details.
 
 ## Cost Considerations
 

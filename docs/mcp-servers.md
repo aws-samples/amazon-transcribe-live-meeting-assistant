@@ -66,10 +66,13 @@ The following tools are available to the Strands agent without installing any ad
 | `search_lma_meetings` | Semantic search across meetings |
 | `get_meeting_summary` | Get summary for a specific meeting |
 | `get_meeting_transcript` | Get transcript for a specific meeting |
-| `start_meeting_now` | Start a new Virtual Participant meeting |
+| `start_meeting_now` | Launch a Virtual Participant into a meeting now (Zoom, Teams, Webex, Chime, Google Meet). Defaults to using stored Zoom credentials when present so the VP signs in to Zoom rather than joining as a guest. |
+| `get_virtual_participant_status` | Poll the status of a VP launched via `start_meeting_now`. Returns the granular status (e.g. `JOINING`, `MANUAL_ACTION_REQUIRED`, `ACTIVE`, `FAILED`), a human-readable summary, the live VNC viewer URL, the meeting URL, and any `errorMessage` or `manualActionMessage`. Designed to be polled by the agent after a `start_meeting_now` call so it can verbalize *"the VP is in the meeting"* — or surface a CAPTCHA/2FA challenge to the user with the viewer URL — without further prompting. |
 | `schedule_meeting` | Schedule a future VP meeting |
 
 These built-in tools give the meeting assistant access to your meeting history and the ability to manage Virtual Participant sessions without any additional configuration.
+
+When `start_meeting_now` returns a VP id, the agent should poll `get_virtual_participant_status` periodically until the status reaches `ACTIVE` (success) or `FAILED` (with `errorMessage`) or `MANUAL_ACTION_REQUIRED` (in which case the agent should surface the `manualActionMessage` and `virtualParticipantUrl` to the user so they can complete the challenge). See [Virtual Participant › Status Lifecycle](virtual-participant.md#status-lifecycle) and [Manual Action Required](virtual-participant.md#manual-action-required-captcha-2fa-sso) for the full state machine.
 
 ## MCP Layer Rebuild
 
@@ -91,7 +94,7 @@ These callback URLs are used during the OAuth authorization flow to redirect the
 LMA provides setup guides for several popular MCP server integrations:
 
 - [Salesforce MCP Setup](salesforce-mcp-setup.md) — Full CRUD operations on Salesforce objects (accounts, contacts, opportunities, leads, and more)
-- [Amazon Quick Suite MCP Setup](quicksuite-mcp-setup.md) — Search, retrieval, and scheduling capabilities across Amazon Quick Suite services
+- [Amazon Quick MCP Setup](amazon-quick-mcp-setup.md) — Connect LMA to Amazon Quick Suite (web, OAuth) or Quick Desktop (native, API key)
 - [DeepWiki MCP Setup](deepwiki-mcp-setup.md) — Repository documentation search for accessing code documentation during meetings
 - **Custom MCP servers** — Install from the public registry or configure a custom endpoint
 

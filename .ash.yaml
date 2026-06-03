@@ -16,6 +16,10 @@ global_settings:
       reason: "DSR workspace contains prior scan outputs, reviewer analysis, and zip archives — not LMA source."
     - path: ".dsr/**"
       reason: "DSR workspace (recursive)."
+    - path: ".srt/"
+      reason: "SRT scan workspace — not LMA source."
+    - path: ".srt/**"
+      reason: "SRT workspace (recursive)."
     - path: ".ash/"
       reason: "ASH's own output directory — avoid scanning previous run artifacts."
     - path: ".ash/**"
@@ -39,16 +43,13 @@ global_settings:
       reason: "SAM-packaged output (recursive)."
 
     # Vendored third-party Python packages shipped as Lambda Layers (boto3,
-    # strands, cryptography, opensearchpy, etc.).  These are pip-installed
-    # dependencies, not LMA-authored code; upgrades are tracked separately
-    # via the Lambda Layer requirements.txt / pyproject.toml files which DO
-    # remain in scope.
+    # strands, cryptography, etc.).  These are pip-installed dependencies,
+    # not LMA-authored code; upgrades are tracked separately via the Lambda
+    # Layer requirements.txt / pyproject.toml files which DO remain in scope.
     - path: "**/boto3_layer/python/**"
       reason: "Vendored pip deps for the boto3 Lambda Layer; scan the requirements file, not the installed tree."
     - path: "**/strands_layer/python/**"
       reason: "Vendored pip deps for the strands agents Lambda Layer."
-    - path: "**/opensearchpy_layer/python/**"
-      reason: "Vendored pip deps for the OpenSearch Python Lambda Layer."
     - path: "**/transcript_enrichment_layer/python/**"
       reason: "Vendored pip deps for the transcript enrichment Lambda Layer."
 

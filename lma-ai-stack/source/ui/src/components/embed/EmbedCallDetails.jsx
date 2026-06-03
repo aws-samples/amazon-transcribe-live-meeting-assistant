@@ -128,7 +128,13 @@ const getTimestampFromSeconds = (secs) => {
   if (!secs || Number.isNaN(secs)) {
     return '00:00.0';
   }
-  return new Date(secs * 1000).toISOString().substr(14, 7);
+  // Include hours past an hour (substr(14,7) alone drops the hour, so a 1h48m
+  // segment would render as "48:00.0").
+  const iso = new Date(secs * 1000).toISOString();
+  if (secs >= 3600) {
+    return `${Math.floor(secs / 3600)}:${iso.substr(14, 5)}`; // H:MM:SS
+  }
+  return iso.substr(14, 7); // MM:SS.s
 };
 
 const getSentimentImage = (segment, enableSentimentAnalysis) => {

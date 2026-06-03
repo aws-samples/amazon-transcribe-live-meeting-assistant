@@ -296,12 +296,35 @@ const VNCViewer = ({
           </Alert>
         )}
 
+        {/*
+          When Scale to Fit is ON: the outer wrapper takes full width and
+          uses aspect-ratio to match the 1920:1000 Puppeteer viewport.
+          The canvas div inside it is explicitly sized to 100%/100% (NOT
+          flex) so noVNC's scaleViewport scales the source to fill the
+          full visible area. Without this, flex+flex-start was leaving
+          gaps that prevented the right column of wide Zoom layouts from
+          rendering.
+
+          When Scale to Fit is OFF: let the viewer grow naturally and
+          scroll horizontally / vertically.
+        */}
         <div
           style={
             scaleViewport
               ? {
-                  height: compact ? '300px' : '600px',
+                  width: '100%',
+                  // Source viewport is 1920x1000 (see
+                  // lma-virtual-participant-stack/backend/src/index.ts).
+                  aspectRatio: '1920 / 1000',
+                  // Cap height so it doesn't dominate tall windows.
+                  maxHeight: compact ? '50vh' : '75vh',
                   overflow: 'hidden',
+                  border: '1px solid #ccc',
+                  backgroundColor: '#000',
+                  // Centre when maxHeight kicks in (wide window) so the
+                  // letterboxing is symmetrical.
+                  display: 'flex',
+                  justifyContent: 'center',
                 }
               : {}
           }
@@ -309,19 +332,19 @@ const VNCViewer = ({
           <div
             ref={canvasRef}
             style={{
-              width: '100%',
+              // 100% / 100% under scaleViewport so noVNC's scaleViewport
+              // sees a real bounding box equal to the wrapper. Without
+              // this the inner div was sized to its natural content and
+              // didn't fill the wrapper, leaving the source clipped.
+              width: scaleViewport ? '100%' : '100%',
               height: (() => {
                 if (scaleViewport) return '100%';
                 return compact ? '300px' : '800px';
               })(),
-              border: '1px solid #ccc',
+              border: scaleViewport ? 'none' : '1px solid #ccc',
               backgroundColor: '#000',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'flex-start', // Changed from 'center' to 'flex-start' to show top of screen
               cursor: connected ? 'default' : 'wait',
               overflow: scaleViewport ? 'hidden' : 'auto',
-              paddingTop: scaleViewport ? '0' : '0', // Can add padding if needed
             }}
           />
         </div>
