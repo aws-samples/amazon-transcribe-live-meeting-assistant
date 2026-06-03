@@ -368,6 +368,52 @@ export default class Teams {
         }
     }
 
+    // Route one incoming chat message through the command logic. Called by the
+    // message poll loop (previously an exposed `messageChange` function fed by a
+    // MutationObserver — replaced by polling because the anon chat list is
+    // virtualized and the v2 message-node shape doesn't exist there). Handles:
+    // end command ("LMA leave/end"), pause/resume, and transcript capture.
+    // Teams chat text doesn't expose the sender on the same node, so we use the
+    // lenient matcher and a generic farewell.
+    private async handleIncomingMessage(page: Page, message: string): Promise<void> {
+        if (!message) return;
+        if (matchesEndCommand(message)) {
+            console.log(`LMA Virtual Participant has been asked to leave the meeting: ${JSON.stringify(message)}`);
+            try {
+                await this.sendMessages(page, exitMessagesFor(null));
+            } catch (e) {
+                // Best effort — fall through to ending the meeting.
+                console.warn('Could not send goodbye message:', e);
+            }
+            details.start = false;
+            // Hand off to the wait-for-meeting-end race; the orchestrator's
+            // cleanup chain in index.ts owns the browser close.
+            this.requestEnd({
+                reason: 'end-command',
+                trigger: 'chat',
+                matchedMessage: message,
+            });
+        } else if (
+            details.start &&
+            message.includes(details.pauseCommand) &&
+            !message.includes(`"${details.pauseCommand}"`)
+        ) {
+            details.start = false;
+            console.log(details.pauseMessages[0]);
+            await this.sendMessages(page, details.pauseMessages);
+        } else if (
+            !details.start &&
+            message.includes(details.startCommand) &&
+            !message.includes(`"${details.startCommand}"`)
+        ) {
+            details.start = true;
+            console.log(details.startMessages[0]);
+            await this.sendMessages(page, details.startMessages);
+        } else if (details.start) {
+            details.messages.push(message);
+        }
+    }
+
     /**
      * Robust "are we inside the meeting?" check for Teams. Anonymous joins run
      * in the lightweight "light-meetings" client whose in-meeting DOM differs
@@ -423,13 +469,12 @@ export default class Teams {
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
-        // Forward in-page console output for the speaker/attendee/message
-        // observers (they emit `DEBUG:`-prefixed logs that otherwise go nowhere)
-        // so we can see in CloudWatch whether messageChange actually fires — key
-        // for diagnosing the chat end-command reader on the anon client.
+        // Forward the speaker/attendee observers' in-page `DEBUG:` logs (and the
+        // speakerChange signal) to CloudWatch — they otherwise go nowhere, and
+        // they're useful for diagnosing in-meeting attribution on the anon client.
         page.on('console', (msg) => {
             const t = msg.text();
-            if (t.startsWith('DEBUG:') || t.includes('messageChange') || t.includes('speakerChange')) {
+            if (t.startsWith('DEBUG:') || t.includes('speakerChange')) {
                 console.log(`Browser: ${t}`);
             }
         });
@@ -954,125 +999,119 @@ export default class Teams {
             }
         });
 
-        await page.exposeFunction("messageChange", async (message: string) => {
-            // Teams chat-message text doesn't expose sender on the same node;
-            // best-effort sender extraction would require additional DOM
-            // wiring. For now we use the lenient matcher and a generic
-            // farewell.
-            if (matchesEndCommand(message)) {
-                console.log(`LMA Virtual Participant has been asked to leave the meeting: ${JSON.stringify(message)}`);
-                try {
-                    await this.sendMessages(page, exitMessagesFor(null));
-                } catch (e) {
-                    // Best effort — fall through to ending the meeting.
-                    console.warn('Could not send goodbye message:', e);
-                }
-                details.start = false;
-                // Hand off to the wait-for-meeting-end race below; the
-                // orchestrator's cleanup chain in index.ts owns the browser
-                // close so we don't orphan the exposed-function callback.
-                this.requestEnd({
-                    reason: 'end-command',
-                    trigger: 'chat',
-                    matchedMessage: message,
-                });
-            } else if (
-                details.start &&
-                message.includes(details.pauseCommand) &&
-                !message.includes(`"${details.pauseCommand}"`)
-            ) {
-                details.start = false;
-                console.log(details.pauseMessages[0]);
-                await this.sendMessages(page, details.pauseMessages);
-            } else if (
-                !details.start &&
-                message.includes(details.startCommand) &&
-                !message.includes(`"${details.startCommand}"`)
-            ) {
-                details.start = true;
-                console.log(details.startMessages[0]);
-                await this.sendMessages(page, details.startMessages);
-            } else if (details.start) {
-                details.messages.push(message);
-            }
-        });
         await new Promise((resolve) => setTimeout(resolve, 1000));
         console.log("Listening for message changes.");
-        const chatListInfo = await page.evaluate(() => {
-            // The incoming-message DOM differs between the full v2 client and the
-            // anon light-meetings client (the old hardcoded `#chat-pane-list` +
-            // `div[dir="auto"][role="heading"][aria-level="4"]` only matched v2,
-            // so the end command / chat commands were never read on anon joins).
-            // Attach to the broadest chat container we can find and extract each
-            // incoming message's text from several known node shapes. Observing a
-            // bit broadly is fine — messageChange is idempotent via the seen-set.
-            const CONTAINER_SELECTORS = [
-                '#chat-pane-list',
-                '[data-tid="chat-pane-list"]',
-                '[data-tid="chat-pane-message-list"]',
-                '[data-tid="message-pane-list-runway"]',
-                '[data-tid="messages-list"]',
-                '[role="log"]',
-                '[data-tid="chat-pane"]',
-            ];
-            let container: Element | null = null;
-            let matchedSelector = '';
-            for (const s of CONTAINER_SELECTORS) {
-                const el = document.querySelector(s);
-                if (el) {
-                    container = el;
-                    matchedSelector = s;
-                    break;
-                }
-            }
-            // Fall back to body so we still catch messages even if no known
-            // container id matches — the message-node extraction below is
-            // specific enough to avoid false positives.
-            const target = container || document.body;
-
-            // Pull the human-readable message text out of an added chat node,
-            // trying the known message-body shapes across both clients.
-            const MESSAGE_SELECTORS = [
-                'div[dir="auto"][role="heading"][aria-level="4"]', // v2 client
-                '[data-tid="messageBodyContent"]',
-                '[data-tid="chat-pane-message"] [dir="auto"]',
-                'div[id^="content-"] [dir="auto"]',
-                '.ui-chat__messagecontent',
-                '[data-tid="messageContent"]',
-            ];
-            const extractText = (element: Element): string | null => {
+        // Incoming-message reader. The chat list is a VIRTUALIZED Fluent UI list
+        // (message-pane-list-runway/viewport), so rows are recycled rather than
+        // cleanly "added" — a childList MutationObserver misses them, and the
+        // exact v2 node shape (div[dir=auto][role=heading][aria-level=4]) does
+        // not exist on the anon light-meetings client. So instead of observing
+        // mutations we POLL the rendered chat rows every ~2s and diff a seen-set.
+        // The AI selector resolver is a one-shot request/response and the wrong
+        // tool to run per-message, so it's NOT used per poll; instead it's a
+        // bounded fallback (below) that fires once if our heuristic extraction
+        // comes up empty for a sustained window, to survive a future redesign.
+        await page.evaluate(() => {
+            (window as any).__lmaSeenMessages = new Set<string>();
+            // Extraction driven by the real anon DOM (confirmed via dump): each
+            // message renders an author span [data-tid="message-author-name"]
+            // and a body in a [role="heading"] / [id^="content-"] node. Scrape
+            // every message-ish row and return any not-yet-seen text. Also
+            // accepts an optional extra selector discovered by the AI fallback.
+            (window as any).__lmaScrapeMessages = (extraSelector?: string): string[] => {
+                const seen: Set<string> = (window as any).__lmaSeenMessages;
+                const out: string[] = [];
+                const MESSAGE_SELECTORS = [
+                    'div[dir="auto"][role="heading"][aria-level="4"]', // v2 client
+                    '[data-tid="messageBodyContent"]',
+                    '[data-tid="messageContent"]',
+                    '[id^="content-message-body-"]',
+                    '[id^="content-"][class*="Primitive"]',
+                    '[data-tid="control-message-renderer"]',
+                    '[role="heading"]',
+                    '.ui-chat__messagecontent',
+                ];
+                if (extraSelector) MESSAGE_SELECTORS.unshift(extraSelector);
+                const nodes = new Set<Element>();
                 for (const sel of MESSAGE_SELECTORS) {
-                    const node = element.matches?.(sel) ? element : element.querySelector(sel);
-                    if (node) {
-                        const t = (node.textContent || '').trim();
-                        if (t) return t;
+                    try {
+                        document.querySelectorAll(sel).forEach((n) => nodes.add(n));
+                    } catch {
+                        /* bad selector from AI — ignore */
                     }
                 }
-                return null;
+                for (const node of nodes) {
+                    const t = (node.textContent || '').replace(/\s+/g, ' ').trim();
+                    // Skip empties and the system "invited to the meeting" notices.
+                    if (!t || t.length > 2000) continue;
+                    if (/was invited to the meeting/i.test(t)) continue;
+                    if (seen.has(t)) continue;
+                    seen.add(t);
+                    out.push(t);
+                }
+                return out;
             };
+        });
 
-            const seen = new Set<string>();
-            const config = { childList: true, subtree: true };
-            const callback = (mutationList: MutationRecord[]) => {
-                for (const mutation of mutationList) {
-                    for (const addedNode of mutation.addedNodes) {
-                        if (addedNode.nodeType !== Node.ELEMENT_NODE) continue;
-                        const text = extractText(addedNode as Element);
-                        if (text && !seen.has(text)) {
-                            seen.add(text);
-                            (window as any).messageChange(text);
+        // One-shot diagnostic dump of the chat-list DOM (confirms real selectors
+        // in CloudWatch). Kept — cheap and behind a single call.
+        await this.dumpChatListDom(page);
+
+        // Node-side poll loop. Runs until the page closes; each tick scrapes new
+        // messages and routes them through messageChange (which handles end /
+        // pause / resume / transcript-capture). emptyStreak drives the bounded
+        // AI fallback: if we keep finding the chat list but extract nothing for
+        // ~30s while it clearly has content, ask the AI resolver ONCE for the
+        // message-node selector and feed it into the scraper.
+        let aiMessageSelector: string | undefined;
+        let aiTried = false;
+        let emptyStreak = 0;
+        const pollMessages = async (): Promise<void> => {
+            if (page.isClosed()) return;
+            try {
+                const fresh: string[] = await page.evaluate(
+                    (extra) => (window as any).__lmaScrapeMessages(extra),
+                    aiMessageSelector,
+                );
+                if (fresh.length) {
+                    emptyStreak = 0;
+                    for (const text of fresh) {
+                        await this.handleIncomingMessage(page, text);
+                    }
+                } else if (!aiTried) {
+                    // Nothing extracted this tick. If the chat list visibly has
+                    // content but our selectors find nothing for ~15 ticks (~30s),
+                    // try the AI resolver ONCE to discover the message-body node.
+                    emptyStreak += 1;
+                    if (emptyStreak >= 15 && isResolverEnabled()) {
+                        aiTried = true;
+                        try {
+                            const res = await findElementWithFallback(
+                                page,
+                                [],
+                                {
+                                    intent: 'A single Microsoft Teams chat message body element in the in-meeting chat panel (the text a participant typed, e.g. a "LMA leave" command). NOT the compose box, NOT a system "was invited" notice.',
+                                    platform: 'TEAMS',
+                                    step: 'teams.chat.messageNode',
+                                    useScreenshot: true,
+                                },
+                                { maxRetries: 1, delayMs: 200 },
+                            );
+                            if (res?.selector) {
+                                aiMessageSelector = res.selector;
+                                console.log(`[teams] AI discovered chat message selector: ${res.selector}`);
+                            }
+                        } catch (e) {
+                            console.warn('[teams] AI message-selector discovery failed (non-fatal):', e);
                         }
                     }
                 }
-            };
-            const observer = new MutationObserver(callback);
-            observer.observe(target, config);
-            return { matchedSelector: matchedSelector || '(none — fell back to body)' };
-        });
-        console.log(`Teams chat message observer attached to: ${chatListInfo.matchedSelector}`);
-        // One-shot diagnostic dump of the chat-list DOM so we can confirm the
-        // real light-meetings container/message-node selectors from the logs.
-        await this.dumpChatListDom(page);
+            } catch {
+                /* page navigating / context gone — try again next tick */
+            }
+            if (!page.isClosed()) setTimeout(() => { void pollMessages(); }, 2000);
+        };
+        void pollMessages();
         } catch (e) {
             // A monitoring-setup failure is non-fatal: the VP is admitted and
             // (below) transcribing. Speaker/attendee attribution may be degraded
