@@ -7,7 +7,7 @@ import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
-import { findElementWithFallback } from './ai-dom-resolver.js';
+import { findElementWithFallback, classifyJoinState, isResolverEnabled } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { humanClick, humanType } from './prejoin-actions.js';
 
@@ -42,6 +42,60 @@ export default class Teams {
             await found.element.type(message);
             await found.element.press("Enter");
         }
+    }
+
+    /**
+     * Robust "are we inside the meeting?" check for Teams. Anonymous joins run
+     * in the lightweight "light-meetings" client whose in-meeting DOM differs
+     * from the full v2 client, and Teams renames its ids/classes across
+     * versions — so relying on a single selector (the old `#chat-button`)
+     * strands the VP even though it was admitted (avatar visible, but the
+     * admission poll never matched). Check a BROAD set of in-meeting signals
+     * spanning both clients, and treat the pre-join "Join now" button still
+     * being visible as a hard "not in yet". Any positive in-meeting signal
+     * counts. Wrapped in .catch so a navigation-destroyed context (the
+     * light-meetings → full-client hop right after admission) reads as "not yet"
+     * instead of throwing out of the poll loop.
+     */
+    private async isInMeeting(page: Page): Promise<boolean> {
+        return page
+            .evaluate(() => {
+                // Still on the pre-join screen? Then definitely not in-meeting.
+                const onPrejoin = document.querySelector('[data-tid="prejoin-join-button"]');
+                if (onPrejoin) {
+                    const r = (onPrejoin as HTMLElement).getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) return false;
+                }
+
+                const visible = (sel: string): boolean => {
+                    const el = document.querySelector(sel) as HTMLElement | null;
+                    if (!el) return false;
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                };
+                const inMeetingSignals = [
+                    '#chat-button',                              // v2 client chat toggle
+                    '#hangup-button',                           // leave/hangup control
+                    '#roster-button',                           // participants/people panel
+                    'button[data-inp="roster-button"]',
+                    '#custom-view-button',                      // view switcher
+                    '#microphone-button',                       // in-meeting mic toggle
+                    '#video-button',                            // in-meeting camera toggle
+                    '[data-tid="toggle-mute"][data-tid]',       // light-meetings in-call mute
+                    '[data-tid="calling-toolbar"]',             // light-meetings call toolbar
+                    '[data-tid="call-roster"]',
+                    '[data-tid="chat-button"]',
+                    '[data-tid="hangup-button"]',
+                    '[data-tid="modern-stage-wrapper"]',        // speaker/gallery stage
+                    '[data-tid="callingScreen"]',
+                    'button[aria-label*="leave" i]',
+                    'button[aria-label*="hang up" i]',
+                    'button[aria-label*="chat" i]',
+                    'button[aria-label*="people" i]',
+                ];
+                return inMeetingSignals.some(visible);
+            })
+            .catch(() => false);
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
@@ -264,16 +318,108 @@ export default class Teams {
         }
 
         await substep('Waiting to be admitted to the meeting…');
-        console.log("Opening chat panel.");
-        try {
-            const chatPanelElement = await page.waitForSelector("#chat-button", {
-                timeout: details.waitingTimeout,
-                state: 'visible',
-            });
-            await chatPanelElement?.click();
-        } catch {
+        // Poll for any in-meeting signal rather than a single waitForSelector on
+        // a brittle id. The old `#chat-button` wait both (a) missed the
+        // light-meetings anon client (different DOM than the full v2 client) and
+        // (b) THREW early — not timed out — when the post-CAPTCHA navigation from
+        // light-meetings into the full client destroyed its execution context,
+        // so an actually-admitted VP (avatar visible) reported "not admitted"
+        // after ~50s. Mirror the Zoom admission poll: fast CSS heuristic every
+        // 1.5s, backed by Claude's vision join-state classifier every 30s (so a
+        // Teams DOM rename can't strand us), with MANUAL_ACTION deadline grace.
+        const POLL_INTERVAL_MS = 1500;
+        const startWait = Date.now();
+        const baseDeadline = startWait + details.waitingTimeout;
+        const MANUAL_ACTION_GRACE_MS = 5 * 60 * 1000;
+        const AI_CHECK_INTERVAL_MS = 30_000;
+        let lastAiCheck = Date.now();
+        let lastProgressBump = Date.now();
+        let admitted = false;
+        const sm = details.invite.virtualParticipantId
+            ? createStatusManager(details.invite.virtualParticipantId)
+            : null;
+        while (true) {
+            if (page.isClosed()) break;
+            try {
+                if (await this.isInMeeting(page)) {
+                    admitted = true;
+                    break;
+                }
+            } catch {
+                /* ignore — page may be navigating (light-meetings → full client) */
+            }
+            if (isResolverEnabled() && Date.now() - lastAiCheck > AI_CHECK_INTERVAL_MS) {
+                lastAiCheck = Date.now();
+                try {
+                    const verdict = await classifyJoinState(page, { platform: 'TEAMS' });
+                    if (verdict) {
+                        console.log(`[teams] AI join-state check: ${verdict.state} — ${verdict.reason}`);
+                        if (verdict.state === 'in-meeting') {
+                            console.log('[teams] AI confirms we are in the meeting (CSS heuristic missed it) — proceeding.');
+                            admitted = true;
+                            break;
+                        }
+                        if (verdict.state === 'error') {
+                            console.warn(`[teams] AI detected an error/blocked screen during admission wait: ${verdict.reason}`);
+                            return { reason: 'never-joined', trigger: 'pre-join:ai-error-screen' };
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[teams] AI join-state check failed (non-fatal):', e);
+                }
+            }
+            // Keep the JOINING detail fresh so the long admission wait never
+            // looks frozen. Skip while MANUAL_ACTION is active (CAPTCHA banner).
+            if (Date.now() - lastProgressBump > 20000) {
+                lastProgressBump = Date.now();
+                const secs = Math.round((Date.now() - startWait) / 1000);
+                const current = sm ? await sm.getCurrentStatus().catch(() => null) : null;
+                if (current !== 'MANUAL_ACTION_REQUIRED') {
+                    await substep(`Waiting to be admitted to the meeting… (${secs}s — host may need to admit the participant)`);
+                }
+            }
+            // Extend the deadline while a manual action (CAPTCHA) is being solved
+            // in VNC, so the wait doesn't expire mid-solve.
+            let extended = false;
+            if (sm && Date.now() > baseDeadline) {
+                try {
+                    const current = await sm.getCurrentStatus();
+                    if (current === 'MANUAL_ACTION_REQUIRED' && Date.now() < baseDeadline + MANUAL_ACTION_GRACE_MS) {
+                        extended = true;
+                    }
+                } catch {
+                    /* couldn't read status; fall through */
+                }
+            }
+            if (Date.now() > baseDeadline && !extended) {
+                console.log("Your scribe was not admitted into the meeting.");
+                return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
+            }
+            await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        }
+        if (!admitted) {
             console.log("Your scribe was not admitted into the meeting.");
             return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
+        }
+
+        // Admitted. Open the chat panel (best-effort — the intro/chat flow is
+        // resilient to the panel toggle not being found via the primary id).
+        console.log("Opening chat panel.");
+        try {
+            const chatRes = await findElementWithFallback(
+                page,
+                ['#chat-button', '[data-tid="chat-button"]'],
+                {
+                    intent: 'Teams in-meeting toolbar button that opens the chat panel',
+                    platform: 'TEAMS',
+                    step: 'teams.meeting.chatButton',
+                },
+                { maxRetries: 8, delayMs: 500 },
+            );
+            if (chatRes) await humanClick(page, chatRes.element);
+            else console.log('Chat button not found post-admission — continuing (intro may not post).');
+        } catch (e) {
+            console.warn('Opening chat panel failed (non-fatal):', e);
         }
 
         // Update status to JOINED
@@ -285,17 +431,27 @@ export default class Teams {
         console.log("Sending introduction messages.");
         await this.sendMessages(page, details.introMessages);
 
-        console.log("Opening view panel.");
-        const viewPanelElement = await page.waitForSelector("#custom-view-button", {
-            timeout: details.waitingTimeout,
-        });
-        await viewPanelElement?.click();
-
-        console.log("Selecting speaker view.");
-        const speakerViewElement = await page.waitForSelector("#SpeakerView-button", {
-            timeout: details.waitingTimeout,
-        });
-        await speakerViewElement?.click();
+        // Switch to speaker view — best-effort and SHORT-timed. This is a
+        // cosmetic preference (better speaker attribution / video framing), not
+        // required to be in the meeting and transcribe. The full-client ids
+        // (#custom-view-button / #SpeakerView-button) don't exist in the
+        // light-meetings anon client, so a hard waitForSelector here would block
+        // the intro + transcription for up to waitingTimeout (5 min) or throw
+        // and abort an otherwise-successful join. Try briefly, then move on.
+        console.log("Opening view panel (best-effort).");
+        try {
+            const viewPanelElement = await page.waitForSelector("#custom-view-button", {
+                timeout: 5000,
+            });
+            await viewPanelElement?.click();
+            console.log("Selecting speaker view.");
+            const speakerViewElement = await page.waitForSelector("#SpeakerView-button", {
+                timeout: 5000,
+            });
+            await speakerViewElement?.click();
+        } catch {
+            console.log("View/speaker-view controls not found (likely light-meetings client) — skipping.");
+        }
 
         // Set up simple attendee change monitoring
         await page.exposeFunction('attendeeChange', async (hasOthers: boolean) => {

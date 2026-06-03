@@ -48,6 +48,7 @@ import {
   filterVPsByTime,
 } from './vp-table-config';
 import ZoomCredentialsManager from './ZoomCredentialsManager';
+import ChromeProfileManager from './ChromeProfileManager';
 
 import '@cloudscape-design/global-styles/index.css';
 
@@ -841,6 +842,22 @@ const VirtualParticipantList = () => {
                 </SpaceBetween>
               </FormField>
             )}
+
+            {/* Stored Chrome profile — platform-agnostic (one profile per user
+                across Zoom/Teams/Webex/Chime). Surfaced for every platform so a
+                Teams user can see/remove the profile that carries their solved
+                CAPTCHA trust token, matching the Zoom experience. */}
+            <FormField
+              label="Stored browser profile (Optional)"
+              description={
+                'LMA reuses a saved browser profile across your meetings so cookies and trusted-device ' +
+                'markers persist. For Teams, this lets a CAPTCHA you solve once carry over to later joins. ' +
+                'Remove it to start fresh.'
+              }
+              stretch
+            >
+              <ChromeProfileManager />
+            </FormField>
 
             <FormField
               label="Meeting Time (Optional)"
