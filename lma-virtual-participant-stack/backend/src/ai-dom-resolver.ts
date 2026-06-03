@@ -324,11 +324,10 @@ async function selectorMatches(
 
 async function snapshotInteractiveElements(
   page: Page,
-  maxElements = 80,
+  maxElements = 150,
 ): Promise<InteractiveElement[]> {
   return withCdpTimeout(
     page.evaluate((max: number) => {
-    const out: any[] = [];
     const sels = [
       'button',
       'input',
@@ -348,6 +347,14 @@ async function snapshotInteractiveElements(
     const truncate = (s: string | null | undefined, n: number): string =>
       (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
 
+    // Collect ALL visible interactive elements first, then prioritize before
+    // truncating to `max`. In a busy meeting DOM (Teams in-meeting has many
+    // video-tile / caption buttons) a naive document-order cap can drop the
+    // toolbar control we actually want — that's how the chat button went
+    // "not present" in the snapshot. Elements carrying an id / data-tid /
+    // aria-label / name are far more likely to be the meaningful named controls
+    // (chat, people, leave) the resolver targets, so rank those first.
+    const all: any[] = [];
     for (const el of Array.from(set)) {
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) continue;
@@ -360,7 +367,14 @@ async function snapshotInteractiveElements(
         const v = ds[k];
         if (v) dataset[k] = truncate(v, 60);
       }
-      out.push({
+      const hasNamedHandle = !!(
+        (el as HTMLElement).id ||
+        el.getAttribute('aria-label') ||
+        (el as HTMLInputElement).name ||
+        Object.keys(dataset).length
+      );
+      all.push({
+        _priority: hasNamedHandle ? 0 : 1,
         tag: el.tagName.toLowerCase(),
         id: (el as HTMLElement).id || undefined,
         name: (el as HTMLInputElement).name || undefined,
@@ -378,9 +392,14 @@ async function snapshotInteractiveElements(
           h: Math.round(rect.height),
         },
       });
-      if (out.length >= max) break;
     }
-    return out;
+    // Stable sort: named-handle elements first, original order preserved within
+    // each group. Then cap and strip the internal _priority field.
+    all.sort((a, b) => a._priority - b._priority);
+    return all.slice(0, max).map((e) => {
+      const { _priority, ...rest } = e;
+      return rest;
+    });
   }, maxElements),
     3000,
     'snapshotInteractiveElements',

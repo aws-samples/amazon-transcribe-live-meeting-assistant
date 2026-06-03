@@ -152,6 +152,21 @@ export function randomFingerprintSeed(): number {
     return 10000 + Math.floor(Math.random() * 90000);
 }
 
+// Deterministic seed from any stable string. Used for anonymous / CLI-launched
+// VPs that have no Cognito sub: deriving the fingerprint from a deployment-
+// stable identifier (e.g. the profiles bucket name) makes every join from that
+// deployment present the SAME device fingerprint instead of a brand-new random
+// one each launch. A stable fingerprint reads as a returning device rather than
+// a never-before-seen one, which is a weaker bot signal to platforms like
+// Teams that gate anonymous joins behind a HIP CAPTCHA. Falls back to a random
+// seed only when no stable identifier is available at all.
+export function stableFingerprintSeed(stableId: string): number {
+    const id = (stableId || '').trim();
+    if (!id) return randomFingerprintSeed();
+    const h = crypto.createHash('sha256').update(id).digest();
+    return 10000 + (h.readUInt32BE(0) % 90000);
+}
+
 // Stale Singleton* files from SIGKILL/OOM block re-launch.
 export function cleanStaleLocks(userDataDir: string): void {
     for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
