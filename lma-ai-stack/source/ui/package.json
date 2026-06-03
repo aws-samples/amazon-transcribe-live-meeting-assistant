@@ -38,7 +38,7 @@
     "react-dom": "^18.3.1",
     "react-icons": "^4.12.0",
     "react-markdown": "^9.1.0",
-    "react-router-dom": "^6.30.3",
+    "react-router-dom": "^6.30.4",
     "react-use-websocket": "^4.8.1",
     "rehype-raw": "^7.0.0",
     "vuera": "^0.2.7",
