@@ -176,11 +176,18 @@ export default class Teams {
     }
 
     // Post chat messages. Resilient and NON-FATAL: the VP is already admitted
-    // and transcribing by the time this runs, so a chat failure (panel won't
-    // open, composer not found, typing blocked) must never abort the join — we
-    // log and return. Opens the panel idempotently, inserts each message via
-    // execCommand('insertText'), VERIFIES the text actually landed in the
-    // composer, and submits via Enter then (fallback) an explicit Send button.
+    // and transcribing by the time this runs, so a chat failure must never abort
+    // the join — we log and return.
+    //
+    // The Teams composer is CKEditor 5. The earlier execCommand('insertText')
+    // approach silently failed: it mutates the contenteditable's VISIBLE DOM but
+    // does NOT fire the beforeinput/input events CKEditor's internal MODEL
+    // listens to — so the model stayed empty, the visible-text check passed
+    // (fooling us), and Enter/Send submitted nothing while clearing the visible
+    // text. Fix: drive the editor with REAL keystrokes via page.keyboard.type()
+    // (CKEditor's view listens to those), then submit by clicking the actual
+    // Send button (data-tid="newMessageCommands-send", confirmed via DOM dump) —
+    // the anon light-meetings composer does not reliably submit on Enter.
     private async sendMessages(page: Page, messages: string[]): Promise<void> {
         try {
             if (!(await this.chatInputVisible(page))) {
@@ -197,69 +204,53 @@ export default class Teams {
                 },
                 { maxRetries: 6, delayMs: 500 },
             );
-            // Always dump the real DOM so we can confirm/correct selectors from logs.
-            await this.dumpChatDom(page, found ? `matched:${found.source}:${found.selector}` : 'no-input');
             if (!found) {
+                await this.dumpChatDom(page, 'no-input');
                 console.log('Could not locate Teams chat input — skipping message post (non-fatal).');
                 return;
             }
             console.log(`Teams chat input resolved via ${found.source} selector: ${found.selector}`);
             for (const message of messages) {
-                // Insert text and report what actually landed in the composer.
-                const result = await found.element
-                    .evaluate((el, text) => {
-                        const node = el as HTMLElement;
-                        node.focus();
-                        node.click();
-                        try {
-                            const sel = window.getSelection();
-                            if (sel) {
-                                sel.removeAllRanges();
-                                const range = document.createRange();
-                                range.selectNodeContents(node);
-                                range.collapse(false);
-                                sel.addRange(range);
-                            }
-                        } catch {
-                            /* best-effort caret placement */
-                        }
-                        const ok = document.execCommand('insertText', false, text);
-                        return { ok, after: (node.innerText || node.textContent || '').slice(0, 80) };
-                    }, message)
-                    .catch((e) => ({ ok: false, after: `ERR:${e?.message || e}` }));
-                let landed = result.ok && result.after.includes(message.slice(0, 20));
-                if (!landed) {
-                    // execCommand didn't populate the composer — fall back to
-                    // real keystrokes on the focused element.
-                    console.log(`execCommand insert did not land (ok=${result.ok}, content="${result.after}") — trying keyboard type.`);
-                    try {
-                        await found.element.evaluate((el) => {
-                            const n = el as HTMLElement;
-                            n.focus();
-                            n.click();
-                        });
-                        await page.keyboard.type(message, { delay: 10 });
-                        const after = await found.element
-                            .evaluate((el) => ((el as HTMLElement).innerText || el.textContent || '').slice(0, 80))
-                            .catch(() => '');
-                        landed = after.includes(message.slice(0, 20));
-                        console.log(`After keyboard type, composer content: "${after}" (landed=${landed})`);
-                    } catch (e) {
-                        console.warn('Chat message typing failed (non-fatal), skipping rest:', e);
-                        return;
-                    }
+                // Focus + click the composer so the caret is inside it, then type
+                // with real key events (CKEditor's model updates from these).
+                try {
+                    await found.element.evaluate((el) => {
+                        const n = el as HTMLElement;
+                        n.scrollIntoView({ block: 'center' });
+                        n.focus();
+                    });
+                    await found.element.click({ timeout: 5000 }).catch(() => {
+                        /* contenteditable focus above is enough; click is best-effort */
+                    });
+                    await page.keyboard.type(message, { delay: 10 });
+                } catch (e) {
+                    console.warn('Chat composer typing failed (non-fatal), skipping rest:', e);
+                    return;
                 }
-                // Submit: Enter first (works on the v2 composer), then verify the
-                // composer cleared; if it didn't, click an explicit Send button.
-                await page.keyboard.press('Enter');
-                await new Promise((resolve) => setTimeout(resolve, 400));
+                // Verify the text actually entered the composer before submitting.
+                const typed = await found.element
+                    .evaluate((el) => ((el as HTMLElement).innerText || el.textContent || '').trim().slice(0, 120))
+                    .catch(() => '');
+                const ok = typed.includes(message.slice(0, Math.min(20, message.length)));
+                console.log(`Composer content after typing: "${typed}" (matches=${ok}).`);
+
+                // Submit. Click the real Send button (primary), fall back to
+                // Enter. Then verify the composer cleared (message left the box).
+                const sent = await this.clickSendButton(page);
+                if (!sent) {
+                    console.log('Send button not found — falling back to Enter key.');
+                    await page.keyboard.press('Enter');
+                }
+                await new Promise((resolve) => setTimeout(resolve, 500));
                 const stillThere = await found.element
                     .evaluate((el, text) => ((el as HTMLElement).innerText || el.textContent || '').includes((text as string).slice(0, 20)), message)
                     .catch(() => false);
                 if (stillThere) {
-                    console.log('Enter did not send (composer still holds text) — looking for a Send button.');
-                    const sent = await this.clickSendButton(page);
-                    console.log(`Send-button fallback ${sent ? 'clicked' : 'not found'}.`);
+                    console.log('Composer still holds text after submit — retrying Enter once.');
+                    await page.keyboard.press('Enter');
+                    await new Promise((resolve) => setTimeout(resolve, 400));
+                } else {
+                    console.log('Chat message submitted (composer cleared).');
                 }
                 await new Promise((resolve) => setTimeout(resolve, 150));
             }
@@ -268,9 +259,10 @@ export default class Teams {
         }
     }
 
-    // Click the chat "Send" button (light-meetings client often does NOT submit
-    // on Enter). Tries known selectors, then any visible button whose label/tid
-    // mentions "send". Returns whether a click was dispatched.
+    // Click the chat "Send" button. The anon light-meetings client does NOT
+    // reliably submit on Enter, so this is the primary submit path. Confirmed
+    // selector from the in-meeting DOM dump: data-tid="newMessageCommands-send".
+    // Returns whether a click was dispatched.
     private async clickSendButton(page: Page): Promise<boolean> {
         try {
             const found = await findElementWithFallback(
@@ -285,7 +277,6 @@ export default class Teams {
                     intent: 'Microsoft Teams chat "Send" button that submits the typed message (paper-plane icon, label "Send").',
                     platform: 'TEAMS',
                     step: 'teams.chat.send',
-                    useScreenshot: true,
                 },
                 { maxRetries: 4, delayMs: 300 },
             );
