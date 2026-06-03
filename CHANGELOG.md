@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-06-03
+
 ### Added
 
 - **Browser desktop notifications + audio chime for `MANUAL_ACTION_REQUIRED`** — When a Virtual Participant escalates to `MANUAL_ACTION_REQUIRED` (CAPTCHA, 2FA, SSO, unknown consent dialog) the LMA UI now fires a desktop notification (with `requireInteraction: true` so it stays visible until clicked) plus a short audio chime in addition to the existing in-page Flashbar. A 15-second debounce suppresses notifications for transient escalations that auto-clear within the window (e.g. a consent dialog the VP itself dismisses). The chime is generated via WebAudio to avoid shipping an audio asset. Browser notification permission is requested once at first visit; if the user denies, the in-page Flashbar still works. See [Web UI Guide → Manual Action Alerts](docs/web-ui-guide.md#manual-action-alerts).
