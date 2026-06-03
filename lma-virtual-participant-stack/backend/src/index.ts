@@ -80,8 +80,8 @@ const getCloakLaunchArgs = (fingerprintSeed: number, simliEnabled: boolean): str
     // candidate gathering; verified empirically. Only the container's private
     // RFC1918 IP is exposed, and no proxy is in use, so this leaks nothing the
     // TCP connection doesn't already reveal. See simli-avatar.ts bridge.
-    '--force-webrtc-ip-handling-policy=default',
-    '--webrtc-ip-handling-policy=default',
+    ...(simliEnabled ? ['--force-webrtc-ip-handling-policy=default'] : []),
+    ...(simliEnabled ? ['--webrtc-ip-handling-policy=default'] : []),
     // When Simli is NOT active we don't override getUserMedia, so without this
     // Chrome reports no camera/mic — an unusual, fingerprintable state. The
     // fake device gives a realistic capture device. When Simli IS active we

@@ -252,6 +252,12 @@ When Simli avatar is active, the Virtual Participant's behavior changes slightly
 - Outbound WebRTC access to Simli servers for video streaming
 - The `livekit` transport mode is more firewall-friendly than `p2p`
 
+### Join Reliability Tradeoff
+
+Enabling Simli requires browser settings that bridge the avatar's video into the meeting. Those settings make a Zoom join **more likely to require a login or trigger a CAPTCHA** before the Virtual Participant is let in.
+
+**If you are hitting login prompts or CAPTCHA challenges on join and don't need the on-camera avatar, leave `SimliApiKey` and `SimliFaceId` unset** — the VP joins with the most reliable profile. If you do want the avatar, signing in with per-user Zoom credentials makes joins far more reliable. See [Zoom Sign-in & Join Reliability → Simli and join reliability](./zoom-credentials-and-join-reliability.md#simli-and-join-reliability) for details.
+
 ## Cost Considerations
 
 ### Simli Pricing
