@@ -571,6 +571,7 @@ Metadata:
 
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
+  ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
@@ -5426,8 +5427,21 @@ Resources:
   # and uploads it back at meeting end. Once a user has signed in once and
   # cleared any CAPTCHA / 2FA, the session cookies persist here so subsequent
   # meetings reuse them and sign in cleanly without re-prompting.
+  # Empty and delete the VP profiles bucket on stack delete, but only when
+  # data retention is disabled. When ShouldRetainDataOnDelete is true the
+  # bucket carries DeletionPolicy: Retain and is left in place with its
+  # contents intact, so we must not create this cleanup resource.
+  RemoveVPProfilesBucketOnDelete:
+    Type: Custom::RemoveVPProfilesBucketOnDelete
+    Condition: ShouldDeleteDataOnDelete
+    Properties:
+      ServiceToken: !GetAtt BucketDeleteLambda.Arn
+      BucketName: !Ref VPProfilesBucket
+
   VPProfilesBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       # No BucketName: let CloudFormation generate a globally-unique
       # lowercase name. Avoids issues with stack names that contain
@@ -6981,6 +6995,8 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::${WebAppBucket}"
                   - !Sub "arn:aws:s3:::${WebAppBucket}/*"
+                  - !Sub "arn:aws:s3:::${VPProfilesBucket}"
+                  - !Sub "arn:aws:s3:::${VPProfilesBucket}/*"
           PolicyName: deleteBucketS3Policy
 
   BucketDeleteLambda:
