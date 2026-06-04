@@ -11,6 +11,10 @@ the knowledge graph, web search, and other MCP servers. That composability
 is what makes the integration powerful: it isn't a fixed feature set, it's
 a building block.
 
+
+https://github.com/user-attachments/assets/efae35e5-04ce-4f93-9c34-c2365bd82019
+
+
 This guide shows three layers of usage:
 
 1. **[Conversational workflows](#conversational-workflows)** — ad-hoc
