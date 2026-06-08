@@ -1,6 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// Per-user CloakBrowser userDataDir backed by S3 as profile.tar.gz.
-// Last-write-wins on concurrent VPs; one profile per user across platforms.
+// Per-user, per-platform CloakBrowser userDataDir backed by S3 as profile.tar.gz.
+// Last-write-wins on concurrent VPs for the same user+platform. Profiles are
+// keyed by meeting platform so a Zoom-authenticated session is never reused for
+// a Webex/Teams/Chime meeting (and vice versa) — each platform's cookies and
+// trusted-device markers live in their own tar.
 
 import { spawn } from 'child_process';
 import { createHash } from 'crypto';
@@ -115,7 +118,22 @@ export interface ProfileHandle {
     s3Key: string;
 }
 
-export async function acquireProfile(opts: { cognitoSub: string }): Promise<ProfileHandle> {
+// Normalize a meeting platform label to a stable S3 path segment. Mirrors the
+// values the UI / scheduler send ('ZOOM' | 'CHIME' | 'TEAMS' | 'WEBEX', with
+// older mixed-case variants) so the key matches between writer and reader.
+// Falls back to 'unknown' so a missing/garbage platform still gets an isolated
+// (never shared) profile rather than colliding with a real one.
+function normalizePlatform(platform: string | undefined): string {
+    const p = (platform || '').trim().toLowerCase();
+    if (p.startsWith('zoom')) return 'zoom';
+    if (p.startsWith('chime')) return 'chime';
+    if (p.startsWith('team')) return 'teams';
+    if (p.startsWith('webex')) return 'webex';
+    if (p.startsWith('google')) return 'googlemeet';
+    return p.replace(/[^a-z0-9]+/g, '') || 'unknown';
+}
+
+export async function acquireProfile(opts: { cognitoSub: string; platform?: string }): Promise<ProfileHandle> {
     const handle: ProfileHandle = { enabled: false, localDir: '', s3Key: '' };
     const sub = (opts.cognitoSub || '').trim();
     if (!PROFILES_BUCKET || !sub) {
@@ -126,13 +144,16 @@ export async function acquireProfile(opts: { cognitoSub: string }): Promise<Prof
         return handle;
     }
 
+    const platform = normalizePlatform(opts.platform);
     const userHash = createHash('sha256').update(sub.toLowerCase()).digest('hex');
     handle.enabled = true;
-    handle.s3Key = `${S3_PREFIX}${userHash}/${TAR_NAME}`;
-    handle.localDir = join(PROFILE_ROOT, userHash.slice(0, 16));
+    // Per-user, per-platform: profiles/{userHash}/{platform}/profile.tar.gz
+    handle.s3Key = `${S3_PREFIX}${userHash}/${platform}/${TAR_NAME}`;
+    handle.localDir = join(PROFILE_ROOT, `${userHash.slice(0, 16)}-${platform}`);
     await fs.mkdir(handle.localDir, { recursive: true });
 
     console.log(`[profile-store] user hash (sha256) : ${userHash.slice(0, 16)}...`);
+    console.log(`[profile-store] platform           : ${platform}`);
     console.log(`[profile-store] localDir           : ${handle.localDir}`);
     console.log(`[profile-store] s3Key              : s3://${PROFILES_BUCKET}/${handle.s3Key}`);
 

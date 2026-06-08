@@ -286,6 +286,7 @@ const main = async (): Promise<void> => {
     }
     const profileHandle = await acquireProfile({
         cognitoSub: process.env.LMA_USER_SUB || '',
+        platform: details.invite.meetingPlatform,
     });
     activeProfileHandle = profileHandle;
 

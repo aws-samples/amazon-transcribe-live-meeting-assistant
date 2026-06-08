@@ -42,27 +42,42 @@ export default class Webex {
         // MANUAL_ACTION_REQUIRED so the user can clear it via VNC.
         startDialogWatchdog(page, { platform: 'WEBEX' });
 
-        console.log('Getting Webex meeting link.');
-        await page.goto('https://signin.webex.com/join');
-        console.log('Entering meeting ID.');
-        const meetingIdRes = await findElementWithFallback(
-            page,
-            ['#join-meeting-form'],
-            {
-                intent: 'Webex landing page meeting-ID input field',
-                platform: 'WEBEX',
-                step: 'webex.join.meetingIdInput',
-            },
-            { maxRetries: 10, delayMs: 500 },
-        );
-        if (!meetingIdRes) {
-            throw new Error('Webex meeting-ID input not found');
+        // The meetingId is either a numeric Webex meeting number (entered into the
+        // join-by-number form) or a full join URL such as a "j.php?MTID=..." launch
+        // link. For a launch link the numeric ID/password cannot be derived from the
+        // opaque MTID token, so we navigate straight to the URL and let Webex resolve
+        // the meeting server-side (mirrors how Teams meetup-join URLs are handled).
+        const meetingIdValue = (details.invite.meetingId || '').trim();
+        const isJoinUrl = /^https?:\/\//i.test(meetingIdValue);
+
+        if (isJoinUrl) {
+            console.log('Navigating directly to Webex join URL.');
+            await page.goto(meetingIdValue);
+            // Give the launch link time to redirect to the meeting join page.
+            await new Promise(resolve => setTimeout(resolve, 3000));
+        } else {
+            console.log('Getting Webex meeting link.');
+            await page.goto('https://signin.webex.com/join');
+            console.log('Entering meeting ID.');
+            const meetingIdRes = await findElementWithFallback(
+                page,
+                ['#join-meeting-form'],
+                {
+                    intent: 'Webex landing page meeting-ID input field',
+                    platform: 'WEBEX',
+                    step: 'webex.join.meetingIdInput',
+                },
+                { maxRetries: 10, delayMs: 500 },
+            );
+            if (!meetingIdRes) {
+                throw new Error('Webex meeting-ID input not found');
+            }
+            await meetingIdRes.element.type(meetingIdValue);
+            await meetingIdRes.element.press('Enter');
+
+            // Wait a moment for the page to stabilize after entering meeting ID
+            await new Promise(resolve => setTimeout(resolve, 2000));
         }
-        await meetingIdRes.element.type(details.invite.meetingId);
-        await meetingIdRes.element.press('Enter');
-        
-        // Wait a moment for the page to stabilize after entering meeting ID
-        await new Promise(resolve => setTimeout(resolve, 2000));
         
         // Try to click "Join from this browser" button if it appears
         // Sometimes Webex skips this step and goes directly to the meeting join page
