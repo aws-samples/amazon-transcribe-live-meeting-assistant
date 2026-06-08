@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pin `lma-sdk` to its in-repo path and mark internal npm packages private** — Added a `[tool.uv.sources]` override pinning `lma-sdk` to the local package path in `lib/lma_cli_pkg/pyproject.toml` and `utilities/load-simulator/pyproject.toml`, so `uv` resolves `lma-sdk` from the repo rather than public PyPI. Added `"private": true` to `docs-site`, `lma-virtual-participant-stack/backend`, and `pca_integration` `package.json`. Added `lib/README.md` documenting the editable install flow for the internal `lma-sdk`, `lma-cli`, and `lma-load-simulator` packages.
+
 ## [0.3.4] - 2026-06-03
 
 ### Added
