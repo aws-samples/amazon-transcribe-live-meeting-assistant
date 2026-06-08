@@ -86,9 +86,14 @@ const onUpdateVirtualParticipantDetailed = `
  * by composing the exported `StatusDetails` + `ConnectionDetails` cards so the
  * embed view matches the host application's design.
  */
-const VPDetailsPanel = ({ vpDetails }) => (
+const VPDetailsPanel = ({ vpDetails, launchType }) => (
   <SpaceBetween direction="vertical" size="l">
-    <VPStatusDetails status={vpDetails.status} updatedAt={vpDetails.updatedAt} scheduledFor={vpDetails.scheduledFor} />
+    <VPStatusDetails
+      status={vpDetails.status}
+      updatedAt={vpDetails.updatedAt}
+      scheduledFor={vpDetails.scheduledFor}
+      launchType={launchType}
+    />
     <Container header={<Header variant="h3">Connection Details</Header>}>
       <VPConnectionDetails vpDetails={vpDetails} />
     </Container>
@@ -105,6 +110,12 @@ VPDetailsPanel.propTypes = {
     updatedAt: PropTypes.string,
     scheduledFor: PropTypes.string,
   }).isRequired,
+  // Deployment hosting mode ('FARGATE' | 'EC2') for launch-type-aware copy.
+  launchType: PropTypes.string,
+};
+
+VPDetailsPanel.defaultProps = {
+  launchType: null,
 };
 
 const EmbedVirtualParticipant = ({ params, sendToParent }) => {
@@ -342,7 +353,7 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
         {/* VP Details panel */}
         {showDetails && (
           <div className="embed-panel">
-            <VPDetailsPanel vpDetails={vpDetails} />
+            <VPDetailsPanel vpDetails={vpDetails} launchType={settings?.VPLaunchType} />
           </div>
         )}
 

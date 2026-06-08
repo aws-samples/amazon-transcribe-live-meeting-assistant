@@ -1597,6 +1597,10 @@ Resources:
         - ShouldUseTranscriptKnowledgeBase
         - True
         - False
+        # Surfaced to the Web UI so Virtual Participant startup status copy
+        # (e.g. WAITING_FOR_CAPACITY) matches the actual hosting mode instead
+        # of always describing EC2 host-slot / auto-scaler behavior.
+        VPLaunchType: !Ref VPLaunchType
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 

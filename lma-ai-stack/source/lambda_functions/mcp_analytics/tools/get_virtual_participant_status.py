@@ -115,12 +115,11 @@ def execute(
     elif status == "JOINING":
         summary = "Virtual participant is joining the meeting."
     elif status == "INITIALIZING":
-        summary = "Virtual participant is starting up — allocating Fargate compute."
+        summary = "Virtual participant is starting up — allocating compute."
     elif status == "WAITING_FOR_CAPACITY":
         summary = (
-            "Waiting for compute capacity — task is queued for an EC2 host slot. "
-            "If the cluster is full, the auto-scaler will launch a new host (~60-90s); "
-            "otherwise the task is just waiting briefly for placement."
+            "Waiting for compute capacity — the task is queued for placement. "
+            "This usually clears within ~60-90 seconds."
         )
     elif status == "BOOTING":
         summary = (
