@@ -30,3 +30,9 @@ lma = "lma_cli.entry:safe_main"
 
 [tool.setuptools.packages.find]
 include = ["lma_cli*"]
+
+# lma-sdk is an internal in-repo package (lib/lma_sdk), NOT published on PyPI.
+# Pin it to the local path so uv resolves it from the repo rather than public
+# PyPI, where the name is unregistered and claimable (dependency confusion).
+[tool.uv.sources]
+lma-sdk = { path = "../lma_sdk", editable = true }
