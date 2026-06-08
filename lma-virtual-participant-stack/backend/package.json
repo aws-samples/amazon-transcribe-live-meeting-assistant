@@ -1,5 +1,6 @@
 {
   "name": "lma-virtual-participant-app",
+  "private": true,
   "version": "1.0.0",
   "description": "LMA Virtual Participant Application",
   "main": "dist/index.js",
