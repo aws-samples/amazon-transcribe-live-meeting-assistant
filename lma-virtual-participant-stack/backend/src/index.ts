@@ -25,6 +25,7 @@ import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { acquireProfile, persistProfile, releaseProfile } from './profile-store.js';
 import {
     patchPreferencesFor3pCookies,
+    patchPreferencesForExternalProtocols,
     profileIsFresh,
     initProfileDefaults,
     cleanStaleLocks,
@@ -321,6 +322,12 @@ const main = async (): Promise<void> => {
     initProfileDefaults(userDataDir);
     const cookiePatchedCount = patchPreferencesFor3pCookies(userDataDir);
     console.log(`[profile-store] Wrote 3p-cookie allow exceptions for ${cookiePatchedCount} meeting platforms`);
+    // Suppress the native "Open <app>?" external-protocol chooser that meeting
+    // landing pages (e.g. Webex j.php) raise when they try to launch a desktop
+    // client. Headless containers have no such app; the dialog only blocks the
+    // web join flow. Must run before launch (Chromium clobbers in-session edits).
+    const protoExcludedCount = patchPreferencesForExternalProtocols(userDataDir);
+    console.log(`[profile-store] Excluded ${protoExcludedCount} external-protocol schemes (suppresses native app-launch dialog)`);
 
     // Authenticated joins get a per-user fingerprint (stable across that user's
     // joins). Anonymous / CLI launches have no sub, so fall back to a seed

@@ -42,6 +42,21 @@ export default class Webex {
         // MANUAL_ACTION_REQUIRED so the user can clear it via VNC.
         startDialogWatchdog(page, { platform: 'WEBEX' });
 
+        // Belt-and-suspenders for the native app-launch chooser: the profile
+        // Preferences patch (patchPreferencesForExternalProtocols) already tells
+        // Chromium to ignore the meeting-app custom schemes, but if a JS-level
+        // dialog (beforeunload / window.confirm) still surfaces during the join
+        // flow, auto-dismiss it so it can't block the page. External-protocol
+        // choosers are handled by the Preferences patch, not here.
+        page.on('dialog', async (dialog: any) => {
+            try {
+                console.log(`Auto-dismissing ${dialog.type()} dialog: ${dialog.message()}`);
+                await dialog.dismiss();
+            } catch {
+                /* dialog already handled / page closed */
+            }
+        });
+
         // The meetingId is either a numeric Webex meeting number (entered into the
         // join-by-number form) or a full join URL such as a "j.php?MTID=..." launch
         // link. For a launch link the numeric ID/password cannot be derived from the
@@ -97,15 +112,36 @@ export default class Webex {
         // Wait for the page to stabilize
         await new Promise(resolve => setTimeout(resolve, 2000));
         console.log('Launching app.');
+        // The web client renders in one of three places depending on the join
+        // flow and Webex build:
+        //   - 'default'    : classic web client inside #unified-webclient-iframe
+        //   - 'enterprise' : enterprise web client inside iframe[name="thinIframe"]
+        //   - 'mainframe'  : newer builds reached via a j.php launch link load the
+        //                    client directly in the page (preloader.html?...runInOwnPage=true),
+        //                    so there is NO iframe — the join UI lives in the main frame.
+        // We race all three and take whichever appears first. The mainframe probe
+        // watches for the pre-join UI itself (name/password/join controls) so we
+        // don't mistake the app-download chooser page for a loaded client.
+        const MAINFRAME_JOIN_UI = [
+            'input[data-test="Name (required)"]',
+            'input[aria-label="Meeting password"]',
+            'mdc-button[data-test="join-button"]',
+        ].join(', ');
         const frameElement = await Promise.any([
-            page.waitForSelector(this.iframe, { timeout: 15000 }).then((el: any) => ({ source: 'default', el })).catch(() => null),
-            page.waitForSelector('iframe[name="thinIframe"]', { timeout: 15000 }).then((el: any) => ({ source: 'enterprise', el })).catch(() => null)
+            page.waitForSelector(this.iframe, { timeout: 30000 }).then((el: any) => ({ source: 'default', el })).catch(() => null),
+            page.waitForSelector('iframe[name="thinIframe"]', { timeout: 30000 }).then((el: any) => ({ source: 'enterprise', el })).catch(() => null),
+            page.waitForSelector(MAINFRAME_JOIN_UI, { timeout: 30000 }).then(() => ({ source: 'mainframe', el: null })).catch(() => null),
         ]).catch(() => null);
 
-        const frame = await frameElement?.el?.contentFrame();
+        // For the iframe variants resolve the content frame; for the mainframe
+        // variant the join UI is on the page itself.
+        const frame = frameElement?.source === 'mainframe'
+            ? page.mainFrame()
+            : await frameElement?.el?.contentFrame();
         if (!frame) {
             throw new Error('Failed to access Webex meeting frame');
         }
+        console.log(`Webex web client located in: ${frameElement?.source}`);
         await page.evaluate(() => {
             const checkAndClosePopup = () => {
                 const dialog = document.querySelector('.el-dialog__wrapper');
