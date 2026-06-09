@@ -96,7 +96,9 @@ class TestGetChromeProfileStatus(unittest.TestCase):
     @patch.object(index, "s3")
     def test_status_scoped_to_platform_prefix(self, mock_s3):
         mock_s3.list_objects_v2.return_value = {"Contents": []}
-        index.get_my_chrome_profile_status(make_event("getMyChromeProfileStatus", arguments={"platform": "WEBEX"}))
+        index.get_my_chrome_profile_status(
+            make_event("getMyChromeProfileStatus", arguments={"platform": "WEBEX"})
+        )
         _, kwargs = mock_s3.list_objects_v2.call_args
         self.assertEqual(kwargs["Prefix"], f"profiles/{user_hash(VALID_SUB)}/webex/")
 

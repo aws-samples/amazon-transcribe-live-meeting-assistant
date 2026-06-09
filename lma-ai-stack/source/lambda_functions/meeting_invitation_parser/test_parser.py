@@ -36,9 +36,7 @@ class TestWebexMeetingId(unittest.TestCase):
 
     def test_jphp_launch_url_with_whitespace_is_stripped(self):
         url = "https://amazon.webex.com/amazon-en/j.php?MTID=abc123"
-        out = index.validate_parsed_data(
-            {"meetingPlatform": "WEBEX", "meetingId": f"  {url}  "}
-        )
+        out = index.validate_parsed_data({"meetingPlatform": "WEBEX", "meetingId": f"  {url}  "})
         self.assertEqual(out["meetingId"], url)
 
     def test_jphp_url_password_param_extracted(self):
@@ -61,7 +59,10 @@ class TestWebexMeetingId(unittest.TestCase):
 
     def test_personal_room_url_extracts_numeric_id(self):
         out = index.validate_parsed_data(
-            {"meetingPlatform": "WEBEX", "meetingId": "https://meet1648.webex.com/meet/pr2552362251"}
+            {
+                "meetingPlatform": "WEBEX",
+                "meetingId": "https://meet1648.webex.com/meet/pr2552362251",
+            }
         )
         self.assertEqual(out["meetingId"], "2552362251")
 
@@ -72,9 +73,7 @@ class TestWebexMeetingId(unittest.TestCase):
         self.assertEqual(out["meetingId"], "2552362251")
 
     def test_bare_pr_id_strips_prefix(self):
-        out = index.validate_parsed_data(
-            {"meetingPlatform": "WEBEX", "meetingId": "pr2552362251"}
-        )
+        out = index.validate_parsed_data({"meetingPlatform": "WEBEX", "meetingId": "pr2552362251"})
         self.assertEqual(out["meetingId"], "2552362251")
 
 
@@ -82,9 +81,7 @@ class TestMeetingIdGeneralCleanup(unittest.TestCase):
     """Cross-platform cleanup that also affects the value space above."""
 
     def test_spaces_removed_from_meeting_id(self):
-        out = index.validate_parsed_data(
-            {"meetingPlatform": "ZOOM", "meetingId": "961 8750 1703"}
-        )
+        out = index.validate_parsed_data({"meetingPlatform": "ZOOM", "meetingId": "961 8750 1703"})
         self.assertEqual(out["meetingId"], "96187501703")
 
     def test_zoom_url_extracts_numeric_id(self):
