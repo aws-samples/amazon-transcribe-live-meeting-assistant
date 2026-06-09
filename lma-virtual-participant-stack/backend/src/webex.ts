@@ -13,6 +13,9 @@ export default class Webex {
     private readonly iframe = '#unified-webclient-iframe';
     private endRequested: Promise<ExitInfo>;
     private requestEnd: (info: ExitInfo) => void = () => {};
+    // Set once the chat end-command has been handled, so the message observer
+    // firing twice for the same message doesn't trigger a double exit/goodbye.
+    private endHandled = false;
 
     constructor() {
         this.endRequested = new Promise<ExitInfo>((resolve) => {
@@ -80,7 +83,12 @@ export default class Webex {
         messages: string[],
         isEnterprise: boolean | null = false
     ): Promise<void> {
-        const messageElement = await frame.waitForSelector(isEnterprise ? '#chat-panel > div > textarea' : '.ql-editor[contenteditable="true"]');
+        // Cap the input lookup so a stale/missing chat editor selector can't hang
+        // the caller forever (the goodbye-on-exit path is time-sensitive).
+        const messageElement = await frame.waitForSelector(
+            isEnterprise ? '#chat-panel > div > textarea' : '.ql-editor[contenteditable="true"]',
+            { timeout: 8000 },
+        );
         for (const message of messages) {
             await messageElement?.type(message);
             await messageElement?.press('Enter');
@@ -678,9 +686,23 @@ export default class Webex {
             const sender = idx > 0 ? raw.slice(0, idx).trim() : null;
             const message = idx > 0 ? raw.slice(idx + 3) : raw;
             if (matchesEndCommand(message)) {
+                // Guard against the observer firing twice for the same message
+                // (it can emit duplicate add events) — only act on the first.
+                if (this.endHandled) return;
+                this.endHandled = true;
                 console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(message)}`);
-                await this.sendMessages(frame, exitMessagesFor(sender));
                 details.start = false;
+                // Post the goodbye BEFORE signalling exit — requestEnd triggers
+                // teardown which closes the page, and a goodbye sent after that
+                // fails with "Target page ... has been closed". We bound the send
+                // (sendMessages has an 8s waitForSelector cap, and we race a 6s
+                // ceiling on top) so a stale chat-input selector can't hang the
+                // exit indefinitely (the original bug) — worst case we wait a few
+                // seconds, then leave regardless.
+                await Promise.race([
+                    this.sendMessages(frame, exitMessagesFor(sender)),
+                    new Promise((r) => setTimeout(r, 6000)),
+                ]).catch((e) => console.log('Goodbye message send failed (non-fatal):', e));
                 this.requestEnd({
                     reason: 'end-command',
                     trigger: 'chat',
