@@ -65,7 +65,7 @@ The VP reports a granular status as it boots, joins, and runs. The UI uses these
 | Status | What's happening |
 | --- | --- |
 | `INITIALIZING` | Step Functions has submitted the ECS RunTask request; container is being scheduled |
-| `WAITING_FOR_CAPACITY` | All current EC2 hosts are full; the capacity-provider auto-scaler is launching a new t3.large host (typically 60-90 seconds). See [Auto-Scaling](#auto-scaling) |
+| `WAITING_FOR_CAPACITY` | The task is queued waiting for compute placement (typically 60-90 seconds). On **EC2**, the capacity-provider auto-scaler may be launching a new host (see [Auto-Scaling](#auto-scaling)); on **Fargate**, this is the brief serverless provisioning / networking step. The UI tailors this message to your deployment's `VPLaunchType`. |
 | `BOOTING` | Container started; pulling Chrome image, starting Xvfb / VNC / PulseAudio |
 | `REGISTERING_NETWORK` | Registering the task with the live-view ALB (typically 30-60 seconds) |
 | `HYDRATING_PROFILE` | Restoring the per-user Chromium profile (cookies, "trusted device" markers) from S3 |

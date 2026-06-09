@@ -103,12 +103,29 @@ if ! git -C "$REPO_ROOT" diff --quiet 2>/dev/null || ! git -C "$REPO_ROOT" diff 
   GIT_COMMIT="${GIT_COMMIT}-dirty"
 fi
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-log "Build stamp: date=$BUILD_DATE commit=$GIT_COMMIT source=dev-push-vp.sh"
-docker build \
+# Fargate (and the EC2 launch type) run linux/amd64. On Apple Silicon a plain
+# `docker build` produces an arm64-only manifest, which Fargate rejects with
+# "image Manifest does not contain descriptor matching platform 'linux/amd64'".
+# Force the target platform (override with TARGET_PLATFORM if ever needed) and
+# use buildx so the build + push emit a single-arch amd64 manifest the task can
+# pull. buildx --push builds and pushes in one step (no separate docker push).
+TARGET_PLATFORM="${TARGET_PLATFORM:-linux/amd64}"
+log "Build stamp: date=$BUILD_DATE commit=$GIT_COMMIT source=dev-push-vp.sh platform=$TARGET_PLATFORM"
+# Build the target-platform image into the LOCAL docker image store (--load),
+# then push separately. buildx `--push` with the default `docker` driver was
+# observed to hang at the ECR auth/manifest handshake; the build-then-`docker
+# push` path is reliable (and emits a plain single-arch manifest Fargate pulls
+# cleanly). --provenance=false keeps it a single image, not an OCI index.
+log "Building $ECR_URI:latest for $TARGET_PLATFORM (buildx --load)..."
+docker buildx build \
+  --platform "$TARGET_PLATFORM" \
+  --provenance=false \
   --build-arg "BUILD_DATE=$BUILD_DATE" \
   --build-arg "GIT_COMMIT=$GIT_COMMIT" \
   --build-arg "BUILD_SOURCE=dev-push-vp.sh" \
-  -t "$ECR_URI:latest" "$BACKEND_DIR"
+  -t "$ECR_URI:latest" \
+  --load \
+  "$BACKEND_DIR"
 
 log "Pushing $ECR_URI:latest ..."
 docker push "$ECR_URI:latest"

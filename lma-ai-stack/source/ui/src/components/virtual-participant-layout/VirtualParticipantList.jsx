@@ -515,12 +515,17 @@ const VirtualParticipantList = () => {
         meetingTimestamp = Math.floor(meetingDateTime.getTime() / 1000);
       }
 
+      // A join URL carries its password server-side and the password field is
+      // hidden, so never submit a (possibly stale) separate password with one.
+      const submittingUrl = /^\s*https?:\/\//i.test(createForm.meetingId || '');
+      const effectivePassword = submittingUrl ? '' : createForm.meetingPassword || '';
+
       // Create VP record with scheduling information
       const vpInput = {
         meetingName: createForm.meetingName,
         meetingPlatform: createForm.meetingPlatform,
         meetingId: createForm.meetingId.replace(/ /g, ''),
-        meetingPassword: createForm.meetingPassword || '',
+        meetingPassword: effectivePassword,
         status: isScheduled ? 'SCHEDULED' : 'INITIALIZING',
       };
 
@@ -559,7 +564,7 @@ const VirtualParticipantList = () => {
             data: {
               meetingPlatform: createForm.meetingPlatform,
               meetingID: createForm.meetingId.replace(/ /g, ''),
-              meetingPassword: createForm.meetingPassword,
+              meetingPassword: effectivePassword,
               meetingName: createForm.meetingName,
               meetingTime: '',
               userName,
@@ -689,6 +694,10 @@ const VirtualParticipantList = () => {
     }
   };
 
+  // A meetingId that is a full join URL (http/https) carries its own password
+  // server-side, so the UI relabels the field and hides the password input.
+  const meetingIdIsUrl = /^\s*https?:\/\//i.test(createForm.meetingId || '');
+
   // Check if form is ready for immediate execution
   const isFormValidForImmediate = createForm.meetingName && createForm.meetingId && consentChecked;
 
@@ -807,21 +816,27 @@ const VirtualParticipantList = () => {
               />
             </FormField>
 
-            <FormField label="Meeting ID" stretch>
+            {/* A full join URL (e.g. a Webex "j.php?MTID=..." launch link) carries
+                the meeting and password server-side, so relabel the field "Meeting
+                URL" and hide the separate password input when a URL is entered. A
+                bare numeric ID keeps the "Meeting ID" + password layout. */}
+            <FormField label={meetingIdIsUrl ? 'Meeting URL' : 'Meeting ID'} stretch>
               <Input
                 value={createForm.meetingId}
                 onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, meetingId: detail.value }))}
-                placeholder="Enter meeting ID"
+                placeholder={meetingIdIsUrl ? 'Enter meeting URL' : 'Enter meeting ID or paste a meeting URL'}
               />
             </FormField>
 
-            <FormField label="Meeting Password (Optional)" stretch>
-              <Input
-                value={createForm.meetingPassword}
-                onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, meetingPassword: detail.value }))}
-                placeholder="Enter meeting password if required"
-              />
-            </FormField>
+            {!meetingIdIsUrl && (
+              <FormField label="Meeting Password (Optional)" stretch>
+                <Input
+                  value={createForm.meetingPassword}
+                  onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, meetingPassword: detail.value }))}
+                  placeholder="Enter meeting password if required"
+                />
+              </FormField>
+            )}
 
             {createForm.meetingPlatform === 'ZOOM' && (
               <FormField
@@ -843,20 +858,21 @@ const VirtualParticipantList = () => {
               </FormField>
             )}
 
-            {/* Stored Chrome profile — platform-agnostic (one profile per user
-                across Zoom/Teams/Webex/Chime). Surfaced for every platform so a
-                Teams user can see/remove the profile that carries their solved
-                CAPTCHA trust token, matching the Zoom experience. */}
+            {/* Stored Chrome profile — scoped to the selected platform (one
+                profile per user PER platform). A Zoom-authenticated profile is
+                never reused for a Webex/Teams/Chime meeting. Surfaced for every
+                platform so a Teams user can see/remove the profile that carries
+                their solved CAPTCHA trust token, matching the Zoom experience. */}
             <FormField
               label="Stored browser profile (Optional)"
               description={
-                'LMA reuses a saved browser profile across your meetings so cookies and trusted-device ' +
+                'LMA reuses a saved browser profile for this meeting platform so cookies and trusted-device ' +
                 'markers persist. For Teams, this lets a CAPTCHA you solve once carry over to later joins. ' +
                 'Remove it to start fresh.'
               }
               stretch
             >
-              <ChromeProfileManager />
+              <ChromeProfileManager platform={createForm.meetingPlatform} />
             </FormField>
 
             <FormField

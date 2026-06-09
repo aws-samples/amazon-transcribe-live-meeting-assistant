@@ -690,7 +690,11 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
-        ComputeType: BUILD_GENERAL1_SMALL
+        # MEDIUM (4 vCPU / 7 GB) over SMALL (2 vCPU / 3 GB): the build is CPU/IO
+        # bound (apt install of ~50 packages, npm ci/build, and the multi-GB
+        # `docker save` SOCI round-trip), so the extra cores/RAM cut wall-clock
+        # well beyond the modest per-minute price increase.
+        ComputeType: BUILD_GENERAL1_MEDIUM
         PrivilegedMode: true
         EnvironmentVariables:
           - Name: SOURCE_CODE_LOCATION

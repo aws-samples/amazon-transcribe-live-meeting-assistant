@@ -212,7 +212,7 @@ type Mutation @aws_iam {
 	deleteUser(input: DeleteUserInput!): DeleteUserOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	setMyZoomCredentials(input: SetZoomCredentialsInput!): ZoomCredentialsStatus @aws_cognito_user_pools
 	deleteMyZoomCredentials: Boolean @aws_cognito_user_pools
-	deleteMyChromeProfile: Boolean @aws_cognito_user_pools
+	deleteMyChromeProfile(platform: String): Boolean @aws_cognito_user_pools
 	acknowledgeVPFailure(virtualParticipantId: ID!): Boolean @aws_cognito_user_pools
 }
 
@@ -250,7 +250,7 @@ type Query @aws_cognito_user_pools
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
 	listUsers: UserList @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools
-	getMyChromeProfileStatus: ChromeProfileStatus @aws_cognito_user_pools
+	getMyChromeProfileStatus(platform: String): ChromeProfileStatus @aws_cognito_user_pools
 }
 
 type ZoomCredentialsStatus @aws_cognito_user_pools {

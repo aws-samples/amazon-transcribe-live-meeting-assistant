@@ -175,23 +175,50 @@ def get_my_zoom_credentials_status(event: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _user_profile_prefix(sub: str) -> str:
+def _normalize_platform(platform: Optional[str]) -> str:
+    # Mirror normalizePlatform() in
+    # lma-virtual-participant-stack/backend/src/profile-store.ts so the S3 key
+    # segment matches between the writer (VP backend) and this reader/deleter.
+    p = (platform or "").strip().lower()
+    if p.startswith("zoom"):
+        return "zoom"
+    if p.startswith("chime"):
+        return "chime"
+    if p.startswith("team"):
+        return "teams"
+    if p.startswith("webex"):
+        return "webex"
+    if p.startswith("google"):
+        return "googlemeet"
+    cleaned = re.sub(r"[^a-z0-9]+", "", p)
+    return cleaned or "unknown"
+
+
+def _user_profile_prefix(sub: str, platform: Optional[str] = None) -> str:
     # Must match lma-virtual-participant-stack/backend/src/profile-store.ts
-    # which writes to profiles/{sha256(sub.lower())}/profile.tar.gz. The
-    # earlier version of this Lambda used the raw sub, leaving every saved
+    # which writes to profiles/{sha256(sub.lower())}/{platform}/profile.tar.gz.
+    # The earlier version of this Lambda used the raw sub, leaving every saved
     # profile orphaned in S3 when the user clicked Remove.
+    #
+    # platform=None targets profiles/{userHash}/ (all of a user's platforms);
+    # a specific platform narrows to that one platform's profile.
     user_hash = hashlib.sha256(sub.lower().encode("utf-8")).hexdigest()
+    if platform:
+        return f"profiles/{user_hash}/{_normalize_platform(platform)}/"
     return f"profiles/{user_hash}/"
 
 
-def _delete_user_profiles(sub: str) -> int:
+def _delete_user_profiles(sub: str, platform: Optional[str] = None) -> int:
     """Delete the user's persisted Chromium profile prefix in S3.
+
+    platform=None wipes every platform's profile for the user (used when Zoom
+    credentials are removed). A specific platform wipes only that one.
 
     Returns the number of objects deleted. Best-effort — non-fatal on error.
     """
     if not VP_PROFILES_BUCKET:
         return 0
-    prefix = _user_profile_prefix(sub)
+    prefix = _user_profile_prefix(sub, platform)
     deleted = 0
     paginator = s3.get_paginator("list_objects_v2")
     try:
@@ -206,12 +233,16 @@ def _delete_user_profiles(sub: str) -> int:
     return deleted
 
 
-def _describe_user_profile(sub: str) -> Dict[str, Any]:
-    """Return {present, sizeBytes, lastModified} for the user's profile tar."""
+def _describe_user_profile(sub: str, platform: Optional[str] = None) -> Dict[str, Any]:
+    """Return {present, sizeBytes, lastModified} for the user's profile tar.
+
+    Scoped to a single platform when given, else aggregated across all of the
+    user's platform profiles.
+    """
     out: Dict[str, Any] = {"present": False, "sizeBytes": None, "lastModified": None}
     if not VP_PROFILES_BUCKET:
         return out
-    prefix = _user_profile_prefix(sub)
+    prefix = _user_profile_prefix(sub, platform)
     try:
         resp = s3.list_objects_v2(Bucket=VP_PROFILES_BUCKET, Prefix=prefix, MaxKeys=10)
     except ClientError as exc:
@@ -235,15 +266,24 @@ def get_my_chrome_profile_status(event: Dict[str, Any]) -> Dict[str, Any]:
     sub = _get_cognito_sub(event)
     if not sub:
         return {"present": False, "sizeBytes": None, "lastModified": None}
-    return _describe_user_profile(sub)
+    # Optional platform scopes the status to one platform's profile; omitted
+    # aggregates across all of the user's platforms (back-compat).
+    platform = (event.get("arguments", {}) or {}).get("platform")
+    return _describe_user_profile(sub, platform)
 
 
 def delete_my_chrome_profile(event: Dict[str, Any]) -> bool:
     sub = _get_cognito_sub(event)
     if not sub:
         return False
-    deleted = _delete_user_profiles(sub)
-    logger.info("Wiped %d Chromium profile object(s) for user sub=%s", deleted, sub)
+    platform = (event.get("arguments", {}) or {}).get("platform")
+    deleted = _delete_user_profiles(sub, platform)
+    logger.info(
+        "Wiped %d Chromium profile object(s) for user sub=%s platform=%s",
+        deleted,
+        sub,
+        platform or "ALL",
+    )
     return True
 
 
@@ -263,12 +303,13 @@ def delete_my_zoom_credentials(event: Dict[str, Any]) -> bool:
         if code != "ResourceNotFoundException":
             logger.error("Failed to delete secret %s: %s", secret_name, exc)
             raise
-    # Wipe persisted Chromium profile (cookies, "trusted device" markers).
-    # Without this the next login session for the same user-sub would
-    # outlive the credentials.
-    deleted = _delete_user_profiles(sub)
+    # Wipe the persisted ZOOM Chromium profile (cookies, "trusted device"
+    # markers). Without this the next Zoom login session for the same user-sub
+    # would outlive the credentials. Other platforms' profiles are unrelated to
+    # Zoom credentials and are left intact.
+    deleted = _delete_user_profiles(sub, "zoom")
     if deleted:
-        logger.info("Wiped %d objects under profiles/%s/", deleted, sub)
+        logger.info("Wiped %d Zoom profile object(s) for user sub=%s", deleted, sub)
     return True
 
 

@@ -22,6 +22,7 @@ import {
   Flashbar,
 } from '@cloudscape-design/components';
 import useAppContext from '../../contexts/app';
+import useSettingsContext from '../../contexts/settings';
 import StatusTimeline from './StatusTimeline';
 import VNCViewer from './VNCViewer';
 
@@ -109,16 +110,16 @@ const STATUS_CONFIG = {
   },
   INITIALIZING: {
     message: 'Allocating compute…',
-    description: 'Starting Fargate task and waiting for the headless browser stack to come up',
+    // Launch-type-neutral default; refined by resolveStatusDescription when the
+    // deployment's VPLaunchType is known (see DESCRIPTION_BY_LAUNCH_TYPE).
+    description: 'Starting the container and waiting for the headless browser stack to come up',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
   },
   WAITING_FOR_CAPACITY: {
     message: 'Waiting for compute capacity…',
-    description:
-      'Task is queued waiting for an EC2 host slot. If the cluster is full, the auto-scaler will ' +
-      'launch a new host (~60-90s); otherwise the task is just waiting briefly for placement.',
+    description: 'Task is queued waiting for compute capacity. This usually clears within ~60–90 seconds.',
     icon: 'loading',
     type: 'in-progress',
     color: 'blue',
@@ -233,6 +234,36 @@ const STATUS_CONFIG = {
 
 export const VP_STATUS_CONFIG = STATUS_CONFIG;
 
+// Status descriptions that genuinely differ between hosting modes. FARGATE is
+// serverless (no host slots / auto-scaler); EC2 uses warm hosts behind a
+// capacity-provider auto-scaler. Keyed by normalized launch type, then status.
+// Anything not listed here falls back to the launch-neutral STATUS_CONFIG copy.
+const DESCRIPTION_BY_LAUNCH_TYPE = {
+  FARGATE: {
+    INITIALIZING: 'Starting the Fargate task and waiting for the headless browser stack to come up',
+    WAITING_FOR_CAPACITY:
+      'Task is queued while Fargate provisions serverless compute and attaches networking. ' +
+      'This is normal and usually clears within a few seconds.',
+  },
+  EC2: {
+    INITIALIZING: 'Starting the container on an EC2 host and waiting for the headless browser stack to come up',
+    WAITING_FOR_CAPACITY:
+      'Task is queued waiting for an EC2 host slot. If the cluster is full, the auto-scaler will ' +
+      'launch a new host (~60–90s); otherwise the task is just waiting briefly for placement.',
+  },
+};
+
+// Resolve the best status description for a given deployment launch type.
+// Precedence: explicit backend statusMessage > launch-type-specific copy >
+// launch-neutral STATUS_CONFIG default.
+export const resolveStatusDescription = (status, launchType, statusMessage) => {
+  if (statusMessage) return statusMessage;
+  const lt = (launchType || '').toUpperCase();
+  const byType = DESCRIPTION_BY_LAUNCH_TYPE[lt]?.[status];
+  if (byType) return byType;
+  return (STATUS_CONFIG[status] || STATUS_CONFIG.FAILED).description;
+};
+
 export const StatusBadge = ({ status }) => {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.FAILED;
   return <Badge color={config.color}>{status}</Badge>;
@@ -242,7 +273,7 @@ StatusBadge.propTypes = {
   status: PropTypes.string.isRequired,
 };
 
-export const StatusDetails = ({ status, updatedAt, scheduledFor, statusMessage }) => {
+export const StatusDetails = ({ status, updatedAt, scheduledFor, statusMessage, launchType }) => {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.FAILED;
   const isInProgress = [
     'INITIALIZING',
@@ -259,8 +290,9 @@ export const StatusDetails = ({ status, updatedAt, scheduledFor, statusMessage }
 
   // The VP backend writes a human-readable exit detail to errorMessage on
   // terminal states (e.g. "Asked to leave by Jeremy Feldman.") — show it
-  // instead of the generic per-status default when present.
-  const description = statusMessage || config.description;
+  // instead of the generic per-status default when present. Otherwise fall back
+  // to launch-type-aware copy (Fargate vs EC2), then the neutral default.
+  const description = resolveStatusDescription(status, launchType, statusMessage);
 
   return (
     <Container>
@@ -294,11 +326,14 @@ StatusDetails.propTypes = {
   updatedAt: PropTypes.string.isRequired,
   scheduledFor: PropTypes.string,
   statusMessage: PropTypes.string,
+  // Deployment hosting mode ('FARGATE' | 'EC2') so startup copy matches reality.
+  launchType: PropTypes.string,
 };
 
 StatusDetails.defaultProps = {
   scheduledFor: null,
   statusMessage: null,
+  launchType: null,
 };
 
 export const ConnectionDetails = ({ vpDetails }) => {
@@ -578,6 +613,10 @@ const VirtualParticipantDetails = () => {
   const { vpId } = useParams();
   const navigate = useNavigate();
   const { authState } = useAppContext();
+  // Deployment hosting mode (FARGATE | EC2) so startup status copy matches the
+  // actual launch type instead of always describing EC2 host-slot behavior.
+  const { settings } = useSettingsContext() || {};
+  const launchType = settings?.VPLaunchType;
   const [vpDetails, setVpDetails] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -892,6 +931,7 @@ const VirtualParticipantDetails = () => {
         updatedAt={vpDetails.updatedAt}
         scheduledFor={vpDetails.scheduledFor}
         statusMessage={vpDetails.status === 'FAILED' ? null : vpDetails.errorMessage}
+        launchType={launchType}
       />
 
       {/* Status Timeline - Only show if enhanced data available */}
@@ -962,7 +1002,7 @@ const VirtualParticipantDetails = () => {
                 <strong>{STATUS_CONFIG[vpDetails.status]?.message || 'Preparing live view…'}</strong>
               </Box>
               <Box margin={{ top: 'xs' }} color="text-body-secondary">
-                {STATUS_CONFIG[vpDetails.status]?.description ||
+                {resolveStatusDescription(vpDetails.status, launchType) ||
                   'VNC viewer is waiting for the VP to start up. This may take ~60 seconds.'}
               </Box>
             </Box>
