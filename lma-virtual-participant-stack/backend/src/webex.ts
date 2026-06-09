@@ -6,6 +6,7 @@ import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
+import { humanClick } from './prejoin-actions.js';
 
 export default class Webex {
     private readonly iframe = '#unified-webclient-iframe';
@@ -42,12 +43,30 @@ export default class Webex {
         // MANUAL_ACTION_REQUIRED so the user can clear it via VNC.
         startDialogWatchdog(page, { platform: 'WEBEX' });
 
-        // Belt-and-suspenders for the native app-launch chooser: the profile
-        // Preferences patch (patchPreferencesForExternalProtocols) already tells
-        // Chromium to ignore the meeting-app custom schemes, but if a JS-level
-        // dialog (beforeunload / window.confirm) still surfaces during the join
-        // flow, auto-dismiss it so it can't block the page. External-protocol
-        // choosers are handled by the Preferences patch, not here.
+        // The j.php launch link makes Webex auto-fire a native external-protocol
+        // ("Open xdg-open?") chooser to launch the desktop app. That dialog is
+        // browser chrome — it does NOT block clicking the page DOM behind it, so
+        // the real join fix is the robust "Join from this browser" click below.
+        // We still best-effort dismiss any dialog that surfaces so it can't grab
+        // focus: a CDP Page.javascriptDialogOpening handler (some builds route
+        // the chooser here) plus page.on('dialog') for JS-level dialogs. Note the
+        // managed-policy / Preferences hints are unreliable against cloakbrowser's
+        // patched Chromium binary, which is why we lean on the click, not the
+        // dialog suppression, to actually join.
+        try {
+            const cdp = await page.context().newCDPSession(page);
+            await cdp.send('Page.enable');
+            // Auto-dismiss native JS dialogs (alert/confirm/beforeunload). Native
+            // external-protocol choosers may also surface here on some builds.
+            cdp.on('Page.javascriptDialogOpening', async () => {
+                try {
+                    await cdp.send('Page.handleJavaScriptDialog', { accept: false });
+                    console.log('Auto-cancelled native dialog via CDP.');
+                } catch { /* already handled */ }
+            });
+        } catch (err) {
+            console.log('CDP dialog handler setup failed (non-fatal):', err);
+        }
         page.on('dialog', async (dialog: any) => {
             try {
                 console.log(`Auto-dismissing ${dialog.type()} dialog: ${dialog.message()}`);
@@ -94,19 +113,48 @@ export default class Webex {
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
         
-        // Try to click "Join from this browser" button if it appears
-        // Sometimes Webex skips this step and goes directly to the meeting join page
+        // The j.php launch link lands on a "Join your Webex meeting" chooser page
+        // ("Download the Webex app" vs "Join from this browser") and Webex
+        // auto-fires a native external-protocol ("Open xdg-open?") dialog trying
+        // to launch the desktop app. That native dialog is browser chrome, NOT
+        // page DOM, so it does NOT block clicking the page behind it — the fix is
+        // simply to reliably click "Join from this browser". The old
+        // `#broadcom-center-right` selector matched a layout container (the click
+        // silently no-oped), so use robust text-based matching with an AI fallback.
+        // (Older flows skip this chooser and go straight to the web client, so a
+        // miss here is non-fatal.)
         console.log('Checking for "Join from this browser" button...');
         try {
-            const joinFromBrowserButton = await page.waitForSelector('#broadcom-center-right', { timeout: 5000 });
-            if (joinFromBrowserButton) {
-                console.log('Found "Join from this browser" button, clicking it.');
-                await joinFromBrowserButton.click();
-                // Wait for the page to load after clicking
+            // Prefer interactive elements (button/a/[role=button]) matched by
+            // text so we click the actual control, not an outer wrapper div.
+            // `#broadcom-center-right` kept last as a legacy layout fallback, and
+            // the AI resolver backstops a UI change. humanClick climbs to the
+            // nearest clickable ancestor if the matched node isn't itself one.
+            const joinBrowserRes = await findElementWithFallback(
+                page,
+                [
+                    'button:contains("Join from this browser")',
+                    'a:contains("Join from this browser")',
+                    '[role="button"]:contains("Join from this browser")',
+                    '#broadcom-center-right',
+                ],
+                {
+                    intent: 'The "Join from this browser" button on the Webex app-download chooser page',
+                    platform: 'WEBEX',
+                    step: 'webex.join.joinFromBrowser',
+                },
+                { maxRetries: 6, delayMs: 500 },
+            );
+            if (joinBrowserRes) {
+                console.log(`Found "Join from this browser" (${joinBrowserRes.source}), clicking it.`);
+                await humanClick(page, joinBrowserRes.element);
+                // Wait for the web client to start loading after clicking.
                 await new Promise(resolve => setTimeout(resolve, 3000));
+            } else {
+                console.log('"Join from this browser" button not found - Webex may have auto-detected browser mode. Continuing...');
             }
         } catch (error) {
-            console.log('"Join from this browser" button not found - Webex may have auto-detected browser mode. Continuing...');
+            console.log('"Join from this browser" click failed (non-fatal), continuing:', error);
         }
         
         // Wait for the page to stabilize
