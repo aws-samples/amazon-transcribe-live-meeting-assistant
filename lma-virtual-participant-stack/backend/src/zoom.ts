@@ -1051,11 +1051,26 @@ export default class Zoom {
         // [JoinFlow] Bot-modal reload recovery
         //
         // Zoom's "We detected you may be a bot" modal appears in Shadow DOM
-        // after the Join click. Puppeteer cannot interact with it. However,
-        // the modal does NOT reappear after a page.reload(). Strategy:
+        // after the Join click. Puppeteer cannot interact with it, and unlike
+        // the prejoin/in-meeting dialogs it is NOT reliably classifiable by the
+        // AI unknown-dialog watchdog started below (the modal lives in a closed
+        // shadow root, so neither the DOM scan nor a reasoned screenshot lands
+        // on a clickable target). The one thing that does clear it: a
+        // page.reload() — the modal does NOT reappear on the second attempt.
+        //
+        // Strategy:
         //   1. Wait 15s for quick admission (covers the normal no-modal case)
-        //   2. If not admitted → reload → re-enter credentials → rejoin
+        //   2. If still STUCK ON THE PREJOIN SCREEN → reload → re-enter
+        //      credentials → rejoin (the bot modal blocked submission)
         //   3. Fall through to the standard admission poll below
+        //
+        // IMPORTANT: the reload only fires when we are still on the prejoin
+        // screen. A meeting with a waiting room (host must admit) also leaves
+        // isInMeeting() false past 15s, but there we have ALREADY left prejoin
+        // and are legitimately queued — reloading would bounce us out of the
+        // waiting room and re-queue at the back. So gate on hasLeftPrejoin():
+        // if we've advanced, skip the reload and let the admission poll (5-min
+        // timeout + AI watchdog) handle the wait.
         // Confirmed working in live tests — VP admitted in ~18s total.
         // ─────────────────────────────────────────────────────────────────────
         const JOIN_FLOW_QUICK_TIMEOUT_MS = 15_000;
@@ -1074,11 +1089,25 @@ export default class Zoom {
             await new Promise((r) => setTimeout(r, 1000));
         }
 
+        // Decide whether a reload is warranted. Only reload if we are still on
+        // the prejoin screen (the bot modal blocks form submission). If we've
+        // left prejoin (waiting room / host-admit) the reload would re-queue
+        // us, so skip it.
+        const stillOnPrejoin = !joinFlowAdmitted
+            && !page.isClosed()
+            && !(await this.hasLeftPrejoin(page).catch(() => false));
+
         if (joinFlowAdmitted) {
             console.log('[JoinFlow] ✅ Admitted to meeting within 15s — no reload needed.');
+        } else if (!stillOnPrejoin) {
+            console.log(
+                '[JoinFlow] Not admitted within 15s but already past prejoin '
+                + '(waiting room / host admit) — skipping reload, handing off to admission poll.',
+            );
         } else {
-            // Not admitted — likely the bot modal is blocking. Reload clears it.
-            console.log('[JoinFlow] Not admitted after 15s — reloading page to clear bot modal.');
+            // Still on prejoin after 15s — likely the bot modal is blocking
+            // form submission. Reload clears it.
+            console.log('[JoinFlow] Still on prejoin after 15s — reloading page to clear bot modal.');
             await substep('Clearing bot detection — reloading…');
 
             try {
@@ -1168,7 +1197,6 @@ export default class Zoom {
 
             console.log('[JoinFlow] Reload recovery complete — proceeding to admission poll.');
         }
-
 
         // Start the AI-driven unknown-dialog watchdog BEFORE we begin the
         // waiting-room poll. Previously we only started this watchdog after
