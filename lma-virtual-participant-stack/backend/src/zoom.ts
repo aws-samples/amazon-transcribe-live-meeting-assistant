@@ -1047,6 +1047,129 @@ export default class Zoom {
             }
         }
 
+        // ─────────────────────────────────────────────────────────────────────
+        // [JoinFlow] Bot-modal reload recovery
+        //
+        // Zoom's "We detected you may be a bot" modal appears in Shadow DOM
+        // after the Join click. Puppeteer cannot interact with it. However,
+        // the modal does NOT reappear after a page.reload(). Strategy:
+        //   1. Wait 15s for quick admission (covers the normal no-modal case)
+        //   2. If not admitted → reload → re-enter credentials → rejoin
+        //   3. Fall through to the standard admission poll below
+        // Confirmed working in live tests — VP admitted in ~18s total.
+        // ─────────────────────────────────────────────────────────────────────
+        const JOIN_FLOW_QUICK_TIMEOUT_MS = 15_000;
+        const joinFlowStart = Date.now();
+        let joinFlowAdmitted = false;
+
+        console.log(`[JoinFlow] Waiting up to ${JOIN_FLOW_QUICK_TIMEOUT_MS / 1000}s for quick admission…`);
+        while (Date.now() - joinFlowStart < JOIN_FLOW_QUICK_TIMEOUT_MS) {
+            if (page.isClosed()) break;
+            try {
+                if (await this.isInMeeting(page)) {
+                    joinFlowAdmitted = true;
+                    break;
+                }
+            } catch { /* page may be navigating */ }
+            await new Promise((r) => setTimeout(r, 1000));
+        }
+
+        if (joinFlowAdmitted) {
+            console.log('[JoinFlow] ✅ Admitted to meeting within 15s — no reload needed.');
+        } else {
+            // Not admitted — likely the bot modal is blocking. Reload clears it.
+            console.log('[JoinFlow] Not admitted after 15s — reloading page to clear bot modal.');
+            await substep('Clearing bot detection — reloading…');
+
+            try {
+                await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+            } catch (e: any) {
+                console.warn(`[JoinFlow] page.reload() warning: ${e?.message || e}`);
+            }
+            console.log('[JoinFlow] Page reloaded. Waiting for prejoin form to re-render…');
+
+            // Wait for the prejoin form to settle after reload
+            await this.waitForPrejoinReady(page);
+
+            // Re-enter password if required
+            if (details.invite.meetingPassword) {
+                const reloadPwd = (details.invite.meetingPassword || '').trim();
+                const reloadPwdField = await findElementWithFallback(
+                    page,
+                    ['#input-for-pwd', 'input[type="password"]'],
+                    {
+                        intent: 'Zoom meeting password input after page reload',
+                        platform: 'ZOOM',
+                        step: 'zoom.joinflow.reload-password',
+                    },
+                    { maxRetries: 10, delayMs: 500 },
+                );
+                if (reloadPwdField) {
+                    await reloadPwdField.element.evaluate((el: Element) => {
+                        const i = el as HTMLInputElement;
+                        i.focus();
+                        i.value = '';
+                    }).catch(() => {});
+                    await humanType(page, reloadPwdField.element, reloadPwd);
+                    console.log('[JoinFlow] Password re-entered after reload.');
+                } else {
+                    console.warn('[JoinFlow] Password field not found after reload — may not be required.');
+                }
+            }
+
+            // Re-enter display name
+            const reloadNameField = await findElementWithFallback(
+                page,
+                ['#input-for-name', 'input[type="text"][id*="name"]'],
+                {
+                    intent: 'Zoom display-name input field after page reload',
+                    platform: 'ZOOM',
+                    step: 'zoom.joinflow.reload-name',
+                },
+                { maxRetries: 6, delayMs: 500 },
+            );
+            if (reloadNameField) {
+                await reloadNameField.element.evaluate((el: Element) => {
+                    const i = el as HTMLInputElement;
+                    i.focus();
+                    i.value = '';
+                }).catch(() => {});
+                await humanType(page, reloadNameField.element, details.scribeIdentity);
+                console.log(`[JoinFlow] Name re-entered after reload: "${details.scribeIdentity}".`);
+            } else {
+                console.warn('[JoinFlow] Name field not found after reload — proceeding anyway.');
+            }
+
+            // Click Join again
+            const reloadJoinBtn = await findElementWithFallback(
+                page,
+                [
+                    'button.zm-btn.preview-join-button',
+                    'button.preview-join-button',
+                    'button[type="submit"].zm-btn',
+                ],
+                {
+                    intent: 'Zoom prejoin "Join" button after page reload',
+                    platform: 'ZOOM',
+                    step: 'zoom.joinflow.reload-join',
+                },
+                { maxRetries: 10, delayMs: 500 },
+            );
+            if (reloadJoinBtn) {
+                await humanClick(page, reloadJoinBtn.element);
+                console.log('[JoinFlow] Join pressed after reload.');
+            } else if (reloadNameField) {
+                await reloadNameField.element.press('Enter').catch(() => {});
+                console.log('[JoinFlow] Enter pressed on name field after reload (Join button not found).');
+            } else {
+                await page.keyboard.press('Enter').catch(() => {});
+                console.log('[JoinFlow] Enter pressed on page after reload (no button or name field found).');
+            }
+
+            console.log('[JoinFlow] Reload recovery complete — proceeding to admission poll.');
+        }
+
+
         // Start the AI-driven unknown-dialog watchdog BEFORE we begin the
         // waiting-room poll. Previously we only started this watchdog after
         // the meeting was joined (line ~679 below), which meant Zoom's
