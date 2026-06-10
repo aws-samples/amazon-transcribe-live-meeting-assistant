@@ -15,9 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Zoom "We detected you may be a bot" prejoin block now self-recovers** — Zoom occasionally renders a bot-detection modal in a closed Shadow DOM after the VP clicks Join; Puppeteer can't interact with it and the AI dialog watchdog can't reliably target it, so the VP previously sat on the prejoin screen until the 5-minute waiting timeout and exited "not admitted." The Zoom handler now waits 15s for quick admission and, **only if still stuck on the prejoin screen**, reloads the page (which clears the modal — it doesn't reappear), re-enters password + display name, and re-clicks Join before handing off to the standard admission poll. Meetings with a waiting room are unaffected: once the VP has left prejoin and is queued for host admission it skips the reload, so it's never bounced out of the waiting room.
+- **Zoom prejoin block now self-recovers** — The Zoom handler now waits 15s for quick admission and, **only if still stuck on the prejoin screen**, reloads the page, re-enters password + display name, and re-clicks Join before handing off to the standard admission poll.
+  
 - **Webex meetings joined via `j.php` launch links now work** — Pasting/using a Webex `https://SITE.webex.com/.../j.php?MTID=…` invite now joins reliably. The invite parser keeps the full launch URL as the Meeting ID (the `MTID` token has no extractable numeric ID), the VP navigates directly to it, clicks "Join from this browser", and dismisses Chromium's native "Open Webex.app?" app-launch prompt (via a real X11 keystroke — it's browser chrome that JS/CDP can't reach). Also handles the newer build's name/email pre-join form and avoids the "No camera found" popup that previously blocked the join.
+  
 - **VP startup status copy matches the hosting mode** — `WAITING_FOR_CAPACITY` / `INITIALIZING` no longer show EC2-only wording (host slots, auto-scaler) on Fargate deployments; copy is now launch-type-aware.
+
 - **Pin `lma-sdk` to its in-repo path and mark internal npm packages private** — `uv` resolves `lma-sdk` from the repo rather than public PyPI, and internal packages (`docs-site`, VP backend, `pca_integration`) are marked private. See `lib/README.md` for the editable-install flow.
 
 ## [0.3.4] - 2026-06-03
