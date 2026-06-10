@@ -49,5 +49,9 @@
     "esbuild": "^0.25.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3"
+  },
+  "overrides": {
+    "fast-xml-parser@4": "^4.5.6",
+    "jws": "^3.2.3"
   }
 }
