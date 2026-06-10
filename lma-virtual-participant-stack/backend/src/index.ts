@@ -83,8 +83,6 @@ const getCloakLaunchArgs = (fingerprintSeed: number, simliEnabled: boolean): str
     // TCP connection doesn't already reveal. See simli-avatar.ts bridge.
     ...(simliEnabled ? ['--force-webrtc-ip-handling-policy=default'] : []),
     ...(simliEnabled ? ['--webrtc-ip-handling-policy=default'] : []),
-    // Only add the fake capture device when neither Simli nor a voice assistan is active.
-    ...(simliEnabled || voiceAssistant.isEnabled() ? [] : ['--use-fake-device-for-media-stream']),
 ];
 
 // Global variables for graceful shutdown
