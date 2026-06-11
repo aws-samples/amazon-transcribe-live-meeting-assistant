@@ -55,12 +55,24 @@ const VNCViewer = ({
 }) => {
   const canvasRef = useRef(null);
   const rfbRef = useRef(null);
+  // Set while we (or React) intentionally tear down the connection (cleanup,
+  // unmount, manual reconnect) so the disconnect handler doesn't treat it as a
+  // dropout and kick off an auto-reconnect.
+  const intentionalDisconnectRef = useRef(false);
+  const reconnectTimerRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [error, setError] = useState(null);
   const [viewOnly, setViewOnly] = useState(true);
   const [scaleViewport, setScaleViewport] = useState(true);
   const [manualActionTimeRemaining, setManualActionTimeRemaining] = useState(0);
+  // Bumping this forces the connection effect to tear down and reconnect. The
+  // Reconnect button and auto-reconnect logic both drive it.
+  const [reconnectNonce, setReconnectNonce] = useState(0);
+
+  const MAX_RECONNECT_ATTEMPTS = 8;
 
   // Determine if manual action is required based on props
   const manualActionRequired = status === 'MANUAL_ACTION_REQUIRED' && manualActionType;
@@ -102,6 +114,7 @@ const VNCViewer = ({
   useEffect(() => {
     if (!canvasRef.current || !vpId || !vncEndpoint) return undefined;
 
+    intentionalDisconnectRef.current = false;
     setConnecting(true);
     setError(null);
 
@@ -136,8 +149,10 @@ const VNCViewer = ({
         // Event handlers
         rfb.addEventListener('connect', () => {
           console.log('VNC connected successfully');
+          reconnectAttemptsRef.current = 0;
           setConnected(true);
           setConnecting(false);
+          setReconnecting(false);
           setError(null);
         });
 
@@ -145,9 +160,36 @@ const VNCViewer = ({
           console.log('VNC disconnected:', e.detail);
           setConnected(false);
           setConnecting(false);
-          if (e.detail.clean === false) {
-            setError('Connection lost. The virtual participant may have ended.');
+          rfbRef.current = null;
+
+          // Intentional teardown (cleanup, unmount, manual reconnect): the
+          // effect that triggered it will re-establish the connection.
+          if (intentionalDisconnectRef.current) {
+            return;
           }
+
+          // Unexpected drop. This includes "clean" closes that happen when the
+          // browser idles or the tab is backgrounded (the proxy/websocket gets
+          // torn down), which is the black-screen case. Auto-reconnect with
+          // exponential backoff up to a cap.
+          if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+            setReconnecting(false);
+            setError('Connection lost. The virtual participant may have ended. Use Reconnect to try again.');
+            return;
+          }
+
+          const attempt = reconnectAttemptsRef.current + 1;
+          reconnectAttemptsRef.current = attempt;
+          const delayMs = Math.min(1000 * 2 ** (attempt - 1), 15000);
+          console.log(`VNC reconnecting (attempt ${attempt}/${MAX_RECONNECT_ATTEMPTS}) in ${delayMs}ms`);
+          setReconnecting(true);
+          setError(null);
+          if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+          }
+          reconnectTimerRef.current = setTimeout(() => {
+            setReconnectNonce((n) => n + 1);
+          }, delayMs);
         });
 
         rfb.addEventListener('securityfailure', (e) => {
@@ -174,12 +216,42 @@ const VNCViewer = ({
     connectWithAuth();
 
     return () => {
+      // Mark teardown as intentional so the disconnect handler doesn't queue
+      // an auto-reconnect when React re-runs this effect or unmounts.
+      intentionalDisconnectRef.current = true;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       if (rfbRef.current) {
         rfbRef.current.disconnect();
         rfbRef.current = null;
       }
     };
-  }, [vpId, vncEndpoint, websocketUrl, scaleViewport, viewOnly]);
+  }, [vpId, vncEndpoint, websocketUrl, scaleViewport, viewOnly, reconnectNonce]);
+
+  // When the user returns to the tab/window after it was backgrounded, the VNC
+  // connection has often been silently dropped (going black). If we're not
+  // connected anymore, reconnect right away instead of waiting on backoff.
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (rfbRef.current) return; // still connected
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      reconnectAttemptsRef.current = 0;
+      setReconnectNonce((n) => n + 1);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleVisibility);
+    };
+  }, []);
 
   const handleFullscreen = () => {
     if (canvasRef.current) {
@@ -197,10 +269,25 @@ const VNCViewer = ({
   };
 
   const handleRefresh = () => {
-    if (rfbRef.current) {
-      rfbRef.current.disconnect();
+    // Cancel any pending auto-reconnect and reset backoff so a manual click
+    // always tries immediately.
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
-    // Reconnection will happen automatically via useEffect
+    reconnectAttemptsRef.current = 0;
+    setError(null);
+    setReconnecting(false);
+    // Tear down the current connection (if any) intentionally, then bump the
+    // nonce so the connection effect re-runs and reconnects. Previously this
+    // only called disconnect(), but nothing in the effect's deps changed so it
+    // never reconnected — the button did nothing.
+    if (rfbRef.current) {
+      intentionalDisconnectRef.current = true;
+      rfbRef.current.disconnect();
+      rfbRef.current = null;
+    }
+    setReconnectNonce((n) => n + 1);
   };
 
   return (
@@ -240,7 +327,8 @@ const VNCViewer = ({
           >
             {compact ? 'VP Live Preview' : 'Live Virtual Participant View'}
             {connected && <Badge color="green">Connected</Badge>}
-            {connecting && <Badge color="blue">Connecting...</Badge>}
+            {connecting && !reconnecting && <Badge color="blue">Connecting...</Badge>}
+            {reconnecting && <Badge color="blue">Reconnecting...</Badge>}
           </Header>
         ) : null
       }
@@ -252,10 +340,12 @@ const VNCViewer = ({
           </Alert>
         )}
 
-        {connecting && !error && (
+        {(connecting || reconnecting) && !error && (
           <Box textAlign="center" padding="l">
             <Spinner size="large" />
-            <Box margin={{ top: 's' }}>Connecting to virtual participant...</Box>
+            <Box margin={{ top: 's' }}>
+              {reconnecting ? 'Reconnecting to virtual participant...' : 'Connecting to virtual participant...'}
+            </Box>
           </Box>
         )}
 
