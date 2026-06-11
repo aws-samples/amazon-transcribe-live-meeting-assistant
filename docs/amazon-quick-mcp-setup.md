@@ -229,14 +229,22 @@ architecture.
 1. Open **Amazon Quick Desktop**
 2. Navigate to **Settings → Capabilities → MCP**
 3. Click **+ Add MCP / Skill**
-4. Configure:
+4. Choose **REMOTE** as the connection type
+5. Configure:
    - **Name**: `Live Meeting Assistant (LMA)`
-   - **Endpoint URL**: your **MCP API Endpoint URL** from Step 1
-   - **Authentication**: Bearer Token
-   - **Token**: your API key from Step 1
-5. Click **Connect**
+   - **URL**: your **MCP API Endpoint URL** from Step 1
+   - **Headers**: click **+ Add header** and enter:
+     - **Header Name**: `x-api-key`
+     - **Value**: your API key from Step 1
+6. Click **Connect**
 
 Quick Desktop will discover the seven LMA tools and confirm the connection.
+
+> **Note**: Quick Desktop authenticates the API-key path with a custom
+> `x-api-key` header rather than a Bearer-token field. LMA's MCP API Gateway
+> accepts the API key over either `x-api-key` or `Authorization: Bearer`, so
+> if your Quick Desktop version offers a Bearer-token option instead of custom
+> headers, that works too.
 
 ## Step 3: Test (Quick Desktop)
 
@@ -338,7 +346,9 @@ Common parameters for the most-used tools.
   not the BedrockAgentCore Gateway URL
 - Verify the API key hasn't been revoked (check **MCP Servers Configuration**
   in the LMA UI)
-- Ensure the auth method is **Bearer Token** (not custom header)
+- Confirm the connection type is **REMOTE** and the key is supplied via an
+  `x-api-key` header (or a Bearer-token field, if your Quick Desktop version
+  offers one instead)
 
 ### Authentication failed / Invalid credentials
 
