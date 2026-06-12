@@ -485,6 +485,25 @@ Parameters:
       meeting will not be recorded.
       If set to true, the meeting will be recorded.
 
+  ZoomMeetingSdkClientId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Zoom Meeting SDK app Client ID. When both ZoomMeetingSdkClientId
+      and ZoomMeetingSdkClientSecret are provided, the Virtual Participant joins
+      Zoom meetings via the Zoom Meeting Web SDK instead of automating the public
+      web client. Requires Zoom approval/allowlist of the SDK app for meetings
+      outside the app owner's own account. Leave both blank to use the default
+      web-client join.
+
+  ZoomMeetingSdkClientSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional) Zoom Meeting SDK app Client Secret. Paired with
+      ZoomMeetingSdkClientId. Used to sign the SDK join signature.
+
   AudioRecordingExpirationInDays:
     Type: Number
     Description:
@@ -722,6 +741,8 @@ Metadata:
           - VoiceAssistantActivationMode
           - VoiceAssistantWakePhrases
           - VoiceAssistantActivationDuration
+          - ZoomMeetingSdkClientId
+          - ZoomMeetingSdkClientSecret
       - Label:
           default: Meeting Assist Bedrock Guardrails
         Parameters:
@@ -825,6 +846,10 @@ Metadata:
         default: Simli API Key for Avatar (Optional)
       SimliFaceId:
         default: Simli Face ID for Avatar Appearance (Optional)
+      ZoomMeetingSdkClientId:
+        default: Zoom Meeting SDK Client ID (Optional)
+      ZoomMeetingSdkClientSecret:
+        default: Zoom Meeting SDK Client Secret (Optional)
       VoiceAssistantProvider:
         default: Voice Assistant Provider (none, elevenlabs, amazon_nova_sonic)
       VoiceAssistantActivationMode:
@@ -2515,6 +2540,8 @@ Resources:
           - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
           - ""
         EnableAudioRecording: !Ref EnableAudioRecording
+        ZoomMeetingSdkClientId: !Ref ZoomMeetingSdkClientId
+        ZoomMeetingSdkClientSecret: !Ref ZoomMeetingSdkClientSecret
         ElevenLabsApiKey: !Ref ElevenLabsApiKey
         ElevenLabsAgentId: !Ref ElevenLabsAgentId
         SimliApiKey: !Ref SimliApiKey

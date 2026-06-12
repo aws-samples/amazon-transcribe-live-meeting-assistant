@@ -83,6 +83,7 @@ Accepted `PLATFORM` values: `WEBEX`, `ZOOM`, `TEAMS`, `CHIME`.
 
 - `ELEVENLABS_API_KEY` — ElevenLabs Conversational AI API key
 - `SIMLI_API_KEY` — Simli avatar API key
+- `ZOOM_MEETING_SDK_CLIENT_ID` / `ZOOM_MEETING_SDK_CLIENT_SECRET` — Zoom Meeting SDK app credentials. When both are set, Zoom meetings join via the Web SDK (see [Zoom Meeting SDK Join](zoom-meeting-sdk.md)); `MEETING_ZOOM_METHOD` (`auto`/`sdk`/`dom`) can force a method.
 - Any other workflow-specific overrides you want to test (e.g. a custom `MEETING_NAME` to target an existing real meeting so Nova Sonic / ElevenLabs tool calls work end-to-end)
 
 ### Workflow

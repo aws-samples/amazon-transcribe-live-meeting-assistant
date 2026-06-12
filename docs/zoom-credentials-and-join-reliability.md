@@ -7,6 +7,8 @@ sidebar_label: Zoom Sign-in
 
 LMA's Virtual Participant (VP) joins Zoom meetings via headless Chromium. A guest join from a fresh, automation-driven browser is the least reliable path — Zoom may require an account, or present a verification step the VP can't complete on its own. This page describes the features LMA ships to make Zoom joins reliable, and how to use them.
 
+> **Alternative join method.** Everything on this page describes the default **web-client automation** path. LMA can also join Zoom via the **[Zoom Meeting Web SDK](zoom-meeting-sdk.md)** when Meeting SDK credentials are configured — the supported path for automated participants, and the one to use if web-client joins are being blocked by Zoom's bot detection.
+
 ## Browser stack
 
 - The VP drives **[CloakBrowser](https://github.com/CloakHQ/cloakbrowser)** (a patched Chromium build, pinned at 0.3.31) via `playwright-core`. Its newer Chromium handles Zoom's web-client video encoder reliably even on a small 2-vCPU host (`t3.medium`) — the older stock Debian Chromium threw Zoom's "Something went wrong" error and turned the VP camera off under the same load. Enabling the **Simli avatar** makes the browser's WebRTC behaviour more conspicuous, which makes Zoom more likely to require a login or present a CAPTCHA — see [Simli and join reliability](#simli-and-join-reliability).

@@ -1,15 +1,8 @@
-// CloakBrowser: a source-patched stealth Chromium (currently Chromium 146)
-// driven via playwright-core. Chosen over stock Debian Chromium because (a) it
-// reduces the CDP-automation signals that trip Zoom's reCAPTCHA Enterprise, and
-// (b) its newer/purpose-built Chromium handles Zoom's web-client video encoder
-// reliably on a 2-vCPU host (t3.medium) — stock Chromium's older build threw
-// Zoom's "Something went wrong" and turned the camera off under the same load.
-// The Simli loopback-WebRTC bridge requires two extra launch flags here to
-// undo cloakbrowser's ICE-suppression patch (see getCloakLaunchArgs).
 import { launchPersistentContext } from 'cloakbrowser';
 import { promises as fs, readFileSync } from 'fs';
 import Chime from './chime.js';
 import Zoom from './zoom.js';
+import ZoomSdk from './zoom-sdk.js';
 import Teams from './teams.js';
 import Webex from './webex.js';
 import { details, ExitInfo, formatExitMessage, didJoinMeeting } from './details.js';
@@ -36,7 +29,7 @@ import {
 
 // Match the Xvfb screen size; fluxbox toolbar is suppressed in entrypoint.sh.
 const WINDOW_WIDTH = 1920;
-const WINDOW_HEIGHT = 1080;
+const WINDOW_HEIGHT = 1080 - 130;
 
 const getCloakLaunchArgs = (fingerprintSeed: number, simliEnabled: boolean): string[] => [
     `--fingerprint=${fingerprintSeed}`,
@@ -364,7 +357,8 @@ const main = async (): Promise<void> => {
     await new Promise(resolve => setTimeout(resolve, 2000));
     console.log('✓ Chrome launched with remote debugging on port 9222');
 
-    if (isFresh) {
+    const zoomSdkPath = details.invite.meetingPlatform === 'ZOOM' && details.zoomMethod === 'sdk';
+    if (isFresh && !zoomSdkPath) {
         if (statusManager) {
             await statusManager.setWarmingProfile();
         }
@@ -377,6 +371,8 @@ const main = async (): Promise<void> => {
         } catch (err) {
             console.warn('[warmup] Warmup error (non-fatal, continuing to meeting):', err);
         }
+    } else if (zoomSdkPath) {
+        console.log('[warmup] Skipping warmup (Zoom SDK path does not visit zoom.us)');
     }
 
     // Now that warmup (if any) is done, publish the VNC endpoint so the user's
@@ -587,7 +583,7 @@ const main = async (): Promise<void> => {
         return avatarPrepared;
     };
 
-    let meeting: Chime | Zoom | Teams | Webex;
+    let meeting: Chime | Zoom | ZoomSdk | Teams | Webex;
     let success = false;
     let exitInfo: ExitInfo | null = null;
 
@@ -607,7 +603,8 @@ const main = async (): Promise<void> => {
                 meeting = new Chime();
                 break;
             case 'ZOOM':
-                meeting = new Zoom();
+                meeting = details.zoomMethod === 'sdk' ? new ZoomSdk() : new Zoom();
+                console.log(`Zoom join method: ${details.zoomMethod}`);
                 break;
             case 'TEAMS':
             case 'Teams':
