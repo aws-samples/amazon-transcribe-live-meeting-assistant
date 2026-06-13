@@ -287,6 +287,8 @@ export default class ZoomSdk {
         }
         console.log('[zoom-sdk] joined meeting');
 
+        await page.evaluate(() => (window as any).__lmaStartPopupDismiss()).catch(() => {});
+
         await substep('Setting up audio and video…');
         await this.setupInMeetingMedia(page);
         this.startCameraWatchdog(page);
