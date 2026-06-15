@@ -4,15 +4,15 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { S3Client, ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 
 const logger = new ConsoleLogger('VideoAPI');
 
 // Configuration — these should come from environment/settings
-const VIDEO_BUCKET = process.env.REACT_APP_VIDEO_BUCKET || '';
+const VIDEO_BUCKET = import.meta.env.VITE_VIDEO_BUCKET || '';
 const VIDEO_PREFIX = 'lma-video-recordings/';
-const VIDEO_REGION = process.env.REACT_APP_AWS_REGION || 'us-east-1';
+const VIDEO_REGION = import.meta.env.VITE_AWS_REGION || 'us-east-1';
 
 /**
  * Get the video recording URL for a given callId.
