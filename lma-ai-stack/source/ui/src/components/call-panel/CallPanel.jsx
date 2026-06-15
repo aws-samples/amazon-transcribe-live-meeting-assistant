@@ -37,6 +37,7 @@ import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeeti
 import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
 
 import RecordingPlayer from '../recording-player';
+import VideoPlayer from '../video-player';
 import useSettingsContext from '../../contexts/settings';
 
 import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
@@ -165,6 +166,16 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
                 <strong>Recording Audio</strong>
               </Box>
               <RecordingPlayer recordingUrl={item.recordingUrl} />
+            </div>
+          </SpaceBetween>
+        )}
+        {item?.videoRecordingUrl?.length && item?.recordingStatusLabel !== IN_PROGRESS_STATUS && (
+          <SpaceBetween size="xs">
+            <div>
+              <Box margin={{ bottom: 'xxxs' }} color="text-label">
+                <strong>Recording Video</strong>
+              </Box>
+              <VideoPlayer videoRecordingUrl={item.videoRecordingUrl} />
             </div>
           </SpaceBetween>
         )}

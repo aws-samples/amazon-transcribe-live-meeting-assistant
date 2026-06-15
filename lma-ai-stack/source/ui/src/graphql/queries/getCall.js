@@ -20,6 +20,7 @@ export default /* GraphQL */ `
       SystemPhoneNumber
       UpdatedAt
       RecordingUrl
+      VideoRecordingUrl
       PcaUrl
       TotalConversationDurationMillis
       Sentiment {

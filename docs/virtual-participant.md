@@ -186,6 +186,21 @@ When concurrent demand exceeds the current cluster's capacity, ECS automatically
 
 `ManagedTerminationProtection` is enabled, so a host running an active VP will never be killed by scale-in until the VP exits.
 
+## Meeting Video Recording
+
+In addition to the audio recording, the Virtual Participant can capture the meeting **screen** (screen shares, slides, participant video, the platform UI) as an MP4. The VP records its own X11 display — the same browser view you see in the live VNC viewer — with FFmpeg, uploads 60-second segments to S3 as the meeting runs (so a container crash loses at most the last segment), and assembles a single seekable `.mp4` when the meeting ends.
+
+**Enabling / disabling**
+
+- **Per meeting**: the **Create Virtual Participant** modal has a **Record meeting video** toggle (default **on**). Turn it off to capture audio + transcript only for that meeting.
+- **Per deployment**: the `EnableVideoRecording` CloudFormation parameter (default `true`) sets the default the toggle starts from and applies to launches that don't specify a value (e.g. the `start_meeting_now` MCP tool).
+
+**Playback**: once the meeting ends and the video finishes uploading, a **Recording Video** player appears in the meeting detail view alongside the **Recording Audio** player. The URL is stored on the call record (`Call.VideoRecordingUrl`) and presigned with your Cognito credentials at playback time — the same mechanism as the audio recording.
+
+**Storage & retention**: final videos are written to the recordings bucket under `lma-video-recordings/` and follow the same retention as audio (`AudioRecordingExpirationInDays`). In-progress segments under `lma-video-chunks/` are deleted as soon as the final `.mp4` is assembled; a 1-day S3 lifecycle rule reaps any chunks orphaned by a crash. Expect roughly **30-50 MB per meeting** at the default 5 fps (vs. ~5 MB for audio-only).
+
+**Resource cost**: capture runs at 5 fps with `libx264 -preset ultrafast` to keep CPU overhead low (~5-10%). This fits comfortably on the default `t3.medium` host for a typical VP; if you run many concurrent video-recording VPs per host, size the instance up. Tunable via the `VIDEO_FRAMERATE`, `VIDEO_RESOLUTION`, and `VIDEO_SEGMENT_DURATION` task-definition environment variables.
+
 ## Chat Introduction Message
 
 The VP posts a customizable introduction message in the meeting chat when it joins. This message informs meeting participants that the VP is present and recording. You can configure the message content to suit your organization's requirements and compliance policies.

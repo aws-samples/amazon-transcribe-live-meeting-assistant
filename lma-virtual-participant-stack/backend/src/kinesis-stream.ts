@@ -283,6 +283,24 @@ class KinesisStreamManager {
     console.log(`Sent call recording event to Kinesis.`);
   }
 
+  async sendCallVideoRecording(url: string): Promise<void> {
+    // Parallel to sendCallRecording: ADD_S3_VIDEO_RECORDING_URL carries the
+    // screen-recording .mp4 URL so the call_event_processor persists it on the
+    // Call record's VideoRecordingUrl field (separate from the audio
+    // RecordingUrl so the two never clobber each other).
+    const record: any = {
+      EventType: 'ADD_S3_VIDEO_RECORDING_URL',
+      CallId: this.callId,
+      VideoRecordingUrl: url,
+      AccessToken: process.env.USER_ACCESS_TOKEN || '',
+      IdToken: process.env.USER_ID_TOKEN || '',
+      RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+    };
+
+    await this.sendRecord(record);
+    console.log(`Sent call video recording event to Kinesis.`);
+  }
+
   syncTranscriptSegmentState(speaker: string, transcriptResult: any): void {
     this.processTranscriptionResults(speaker, transcriptResult);
   }
@@ -475,3 +493,4 @@ export const sendAddTranscriptSegment = (speaker: string, transcriptResult: any)
 export const sendCallCategory = (category: string, score?: number) => 
   kinesisStreamManager.sendCallCategory(category, score);
 export const sendCallRecording = (url: string) => kinesisStreamManager.sendCallRecording(url);
+export const sendCallVideoRecording = (url: string) => kinesisStreamManager.sendCallVideoRecording(url);

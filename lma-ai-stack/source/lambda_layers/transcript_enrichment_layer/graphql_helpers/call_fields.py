@@ -45,6 +45,7 @@ def call_fields(schema: DSLSchema) -> Tuple[DSLField, ...]:
         schema.Call.CustomerPhoneNumber,
         schema.Call.SystemPhoneNumber,
         schema.Call.RecordingUrl,
+        schema.Call.VideoRecordingUrl,
         schema.Call.PcaUrl,
         schema.Call.Owner,
         schema.Call.SharedWith,

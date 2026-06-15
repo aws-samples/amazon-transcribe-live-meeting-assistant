@@ -5,11 +5,15 @@
  * using FFmpeg, uploads .ts segments to S3 incrementally, and assembles a
  * seekable .mp4 on call end.
  *
- * Architecture mirrors the existing audio RecordingService:
- *   FFmpeg → local .ts chunks → S3 upload → concat to .mp4
+ * Architecture mirrors the existing audio RecordingService (recording.ts):
+ *   FFmpeg → local .ts chunks → incremental S3 upload → concat to .mp4
  *
- * Feature-flagged via ENABLE_VIDEO_RECORDING environment variable.
- * Default: disabled (no impact on existing audio-only deployments).
+ * Gated per-VP via details.enableVideoRecording (sourced from the
+ * ENABLE_VIDEO_RECORDING task-definition env var, default true). The final
+ * recording URL is returned to index.ts, which sends it to Kinesis as an
+ * ADD_S3_VIDEO_RECORDING_URL event so the Call record carries it (exactly the
+ * way audio uses ADD_S3_RECORDING_URL). The UI presigns that stored URL — it
+ * never lists or guesses S3 objects.
  *
  * @see recording.ts for the parallel audio recording implementation
  */
@@ -24,21 +28,21 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'fs';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { details } from './details.js';
 import path from 'path';
 
 // ─── Configuration (from environment) ────────────────────────────────────────
-const ENABLE_VIDEO = process.env.ENABLE_VIDEO_RECORDING === 'true';
 const RESOLUTION = process.env.VIDEO_RESOLUTION || '1920x1080';
 const FRAMERATE = process.env.VIDEO_FRAMERATE || '5';
 const DISPLAY = process.env.DISPLAY || ':99';
 const SEGMENT_DURATION = parseInt(process.env.VIDEO_SEGMENT_DURATION || '60', 10);
-const BUCKET = process.env.RECORDINGS_BUCKET_NAME || '';
 const VIDEO_PREFIX = process.env.VIDEO_RECORDINGS_KEY_PREFIX || 'lma-video-recordings/';
 const CHUNKS_PREFIX = process.env.VIDEO_CHUNKS_KEY_PREFIX || 'lma-video-chunks/';
 const REGION = process.env.AWS_REGION || 'us-east-1';
 const CHUNKS_DIR = '/tmp/video_chunks';
+const CONCAT_LIST_FILE = '/tmp/video_concat_list.txt';
+const FINAL_OUTPUT_FILE = '/tmp/video_final.mp4';
 const AUDIO_SINK = 'combined_audio.monitor';
 const AUDIO_WAIT_TIMEOUT_MS = 15_000;
 const CHUNK_POLL_INTERVAL_MS = 5_000;
@@ -64,6 +68,22 @@ class VideoRecorder {
   /** Whether video recording is currently active. */
   get isRecording(): boolean {
     return this._isRecording;
+  }
+
+  /** The recordings bucket, resolved at call time so details reflects env. */
+  private get bucket(): string {
+    return details.recordingsBucketName;
+  }
+
+  /**
+   * Build an HTTPS S3 URL for a key in the bucket/region format the UI's
+   * presigner expects (`bucket.s3.region.amazonaws.com/<encoded-key>`).
+   * Mirrors RecordingService.generateRecordingUrl so video plays back through
+   * the same presigned-URL path as audio.
+   */
+  private generateRecordingUrl(key: string): string {
+    const encodedPath = encodeURIComponent(key);
+    return `https://${this.bucket}.s3.${REGION}.amazonaws.com/${encodedPath}`;
   }
 
   /**
@@ -110,12 +130,16 @@ class VideoRecorder {
    * @param callId — Unique identifier for this call (used in S3 key naming)
    */
   async start(callId: string): Promise<void> {
-    if (!ENABLE_VIDEO) {
-      console.log('[VideoRecorder] Disabled (ENABLE_VIDEO_RECORDING != true)');
+    if (!details.enableVideoRecording) {
+      console.log('[VideoRecorder] Video recording disabled - skipping recording');
       return;
     }
-    if (!BUCKET) {
+    if (!this.bucket) {
       console.error('[VideoRecorder] RECORDINGS_BUCKET_NAME not set, cannot record');
+      return;
+    }
+    if (this._isRecording) {
+      console.log('[VideoRecorder] Recording already in progress');
       return;
     }
 
@@ -189,6 +213,7 @@ class VideoRecorder {
     this.ffmpegProcess.on('error', (error: Error) => {
       console.error(`[VideoRecorder] FFmpeg error: ${error.message}`);
       this.ffmpegProcess = null;
+      this._isRecording = false;
     });
 
     this.ffmpegProcess.on('exit', (code: number | null, signal: string | null) => {
@@ -244,7 +269,7 @@ class VideoRecorder {
             const fileSize = statSync(filePath).size;
             await this.s3Client.send(
               new PutObjectCommand({
-                Bucket: BUCKET,
+                Bucket: this.bucket,
                 Key: key,
                 Body: fileStream,
                 ContentType: 'video/mp2t',
@@ -268,7 +293,8 @@ class VideoRecorder {
   /**
    * Stop recording, upload remaining segments, concatenate into MP4, and upload.
    *
-   * @returns S3 URI of the final .mp4 recording, or null if no recording was made
+   * @returns HTTPS S3 URL of the final .mp4 recording (presignable by the UI),
+   *   or null if no recording was made
    */
   async stop(): Promise<string | null> {
     if (!this._isRecording && !this.ffmpegProcess) {
@@ -326,7 +352,7 @@ class VideoRecorder {
         const key = `${CHUNKS_PREFIX}${this.callId}/${file}`;
         await this.s3Client.send(
           new PutObjectCommand({
-            Bucket: BUCKET,
+            Bucket: this.bucket,
             Key: key,
             Body: fileStream,
             ContentType: 'video/mp2t',
@@ -345,18 +371,18 @@ class VideoRecorder {
     // If no chunks were recorded, nothing to concatenate
     if (this.uploadedChunks.length === 0) {
       console.log('[VideoRecorder] No chunks recorded');
-      this.cleanup();
+      await this.cleanup();
       return null;
     }
 
     // Concatenate all segments into a single seekable MP4
     try {
-      const finalUri = await this.concatenateAndUpload();
-      this.cleanup();
-      return finalUri;
+      const finalUrl = await this.concatenateAndUpload();
+      await this.cleanup();
+      return finalUrl;
     } catch (e: any) {
       console.error(`[VideoRecorder] Concat/upload failed: ${e.message}`);
-      this.cleanup();
+      await this.cleanup();
       return null;
     }
   }
@@ -364,6 +390,9 @@ class VideoRecorder {
   /**
    * Concatenate local .ts chunks into a single .mp4 and upload to S3.
    * Uses FFmpeg concat demuxer with +faststart for seekable browser playback.
+   *
+   * @returns HTTPS S3 URL of the uploaded .mp4, or null if there was nothing
+   *   to concatenate.
    */
   private async concatenateAndUpload(): Promise<string | null> {
     const files = readdirSync(CHUNKS_DIR)
@@ -374,21 +403,18 @@ class VideoRecorder {
 
     // Write FFmpeg concat list file
     const concatList = files.map((f) => `file '${path.join(CHUNKS_DIR, f)}'`).join('\n');
-    const concatFile = '/tmp/video_concat_list.txt';
-    writeFileSync(concatFile, concatList);
-
-    const outputFile = '/tmp/video_final.mp4';
+    writeFileSync(CONCAT_LIST_FILE, concatList);
 
     // Concat with +faststart moov atom for seekable browser playback
     await new Promise<void>((resolve, reject) => {
       const proc = spawn('ffmpeg', [
         '-f', 'concat',
         '-safe', '0',
-        '-i', concatFile,
+        '-i', CONCAT_LIST_FILE,
         '-c', 'copy',
         '-movflags', '+faststart',
         '-y',
-        outputFile,
+        FINAL_OUTPUT_FILE,
       ]);
       proc.on('error', reject);
       proc.on('exit', (code) => {
@@ -403,40 +429,69 @@ class VideoRecorder {
       });
     });
 
-    // Upload final MP4 to S3
+    // Upload final MP4 to S3. The key embeds callId so the object is traceable,
+    // but lookup is by the URL stored on the Call record — never by filename.
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const callName = this.callId || 'call';
-    const finalKey = `${VIDEO_PREFIX}call_${callName}_${timestamp}.mp4`;
-    const fileSize = statSync(outputFile).size;
-    const fileStream = createReadStream(outputFile);
+    const safeCallId = (this.callId || 'call').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const finalKey = `${VIDEO_PREFIX}call_${safeCallId}_${timestamp}.mp4`;
+    const fileSize = statSync(FINAL_OUTPUT_FILE).size;
+    const fileStream = createReadStream(FINAL_OUTPUT_FILE);
 
     await this.s3Client.send(
       new PutObjectCommand({
-        Bucket: BUCKET,
+        Bucket: this.bucket,
         Key: finalKey,
         Body: fileStream,
         ContentType: 'video/mp4',
       })
     );
 
-    const uri = `s3://${BUCKET}/${finalKey}`;
+    const url = this.generateRecordingUrl(finalKey);
     console.log(
-      `[VideoRecorder] Final video uploaded: ${uri} (${(fileSize / 1024 / 1024).toFixed(1)}MB)`
+      `[VideoRecorder] Final video uploaded: s3://${this.bucket}/${finalKey} ` +
+      `(${(fileSize / 1024 / 1024).toFixed(1)}MB)`
     );
-    return uri;
+    return url;
   }
 
   /**
-   * Clean up temporary files from /tmp.
+   * Delete the in-progress .ts segments from S3 once they have been concatenated
+   * into the final .mp4. Without this the lma-video-chunks/ prefix accumulates
+   * forever (the bucket's lifecycle rule is a backstop, not the primary cleanup).
    */
-  private cleanup(): void {
+  private async deleteChunksFromS3(): Promise<void> {
+    if (this.uploadedChunks.length === 0 || !this.bucket) return;
+    try {
+      // DeleteObjects accepts at most 1000 keys per request.
+      for (let i = 0; i < this.uploadedChunks.length; i += 1000) {
+        const batch = this.uploadedChunks.slice(i, i + 1000);
+        await this.s3Client.send(
+          new DeleteObjectsCommand({
+            Bucket: this.bucket,
+            Delete: { Objects: batch.map((Key) => ({ Key })) },
+          })
+        );
+      }
+      console.log(`[VideoRecorder] Deleted ${this.uploadedChunks.length} S3 chunk(s)`);
+    } catch (e: any) {
+      // Non-fatal: the bucket lifecycle rule on lma-video-chunks/ will reap them.
+      console.error(`[VideoRecorder] Failed to delete S3 chunks: ${e.message}`);
+    }
+  }
+
+  /**
+   * Clean up temporary files from /tmp and the in-progress chunks from S3.
+   */
+  private async cleanup(): Promise<void> {
+    await this.deleteChunksFromS3();
+    this.uploadedChunks = [];
     try {
       const files = readdirSync(CHUNKS_DIR);
       for (const f of files) {
         unlinkSync(path.join(CHUNKS_DIR, f));
       }
-      if (existsSync('/tmp/video_concat_list.txt')) unlinkSync('/tmp/video_concat_list.txt');
-      if (existsSync('/tmp/video_final.mp4')) unlinkSync('/tmp/video_final.mp4');
+      if (existsSync(CONCAT_LIST_FILE)) unlinkSync(CONCAT_LIST_FILE);
+      if (existsSync(FINAL_OUTPUT_FILE)) unlinkSync(FINAL_OUTPUT_FILE);
     } catch {
       // Ignore cleanup errors
     }
