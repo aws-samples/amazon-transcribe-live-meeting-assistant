@@ -1,53 +1,66 @@
 import React, { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
+import { getVideoRecordingUrl } from './video-api';
+import { useAppContext } from '../../contexts/AppContext';
 import './VideoPlayer.css';
 
-const VIDEO_API = 'https://iv9wbg9f36.execute-api.us-east-1.amazonaws.com/demo';
+interface VideoPlayerProps {
+  callId?: string;
+  onTimeUpdate?: (time: { currentTime: number; duration: number }) => void;
+}
 
-export const VideoPlayer = forwardRef(({ callId, onTimeUpdate }, ref) => {
-  const videoRef = useRef(null);
-  const [videoUrl, setVideoUrl] = useState(null);
-  const [status, setStatus] = useState('loading');
+export interface VideoPlayerHandle {
+  seek: (t: number) => void;
+  play: () => void;
+  pause: () => void;
+}
+
+export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(({ callId, onTimeUpdate }, ref) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'not-found'>('loading');
+  const { currentCredentials } = useAppContext();
 
   useImperativeHandle(ref, () => ({
-    seek: (t) => { if (videoRef.current) videoRef.current.currentTime = t; },
-    play: () => videoRef.current?.play(),
-    pause: () => videoRef.current?.pause(),
+    seek: (t: number) => { if (videoRef.current) videoRef.current.currentTime = t; },
+    play: () => { videoRef.current?.play(); },
+    pause: () => { videoRef.current?.pause(); },
   }));
 
   useEffect(() => {
     if (!callId) { setStatus('not-found'); return; }
     let cancelled = false;
     setStatus('loading');
-    fetch(VIDEO_API + '/soap', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'get_video_url', call_id: callId })
-    })
-      .then(r => r.json())
-      .then(data => {
+
+    const fetchVideo = async () => {
+      try {
+        const result = await getVideoRecordingUrl(callId, currentCredentials);
         if (cancelled) return;
-        const res = data.body ? JSON.parse(data.body) : data;
-        if (res.video_url) {
-          setVideoUrl(res.video_url);
+        if (result.status === 'ready' && result.url) {
+          setVideoUrl(result.url);
           setStatus('ready');
         } else {
           setStatus('not-found');
         }
-      })
-      .catch(() => { if (!cancelled) setStatus('not-found'); });
+      } catch {
+        if (!cancelled) setStatus('not-found');
+      }
+    };
+
+    fetchVideo();
     return () => { cancelled = true; };
-  }, [callId]);
+  }, [callId, currentCredentials]);
 
   if (status === 'not-found' || status === 'loading') return null;
 
   return (
-    <Container header={<Header variant="h3">Recording Video</Header>}>
+    <Container header={<Header variant="h3">Session Recording</Header>}>
       <video
         ref={videoRef}
-        src={videoUrl}
+        src={videoUrl || undefined}
         controls
+        preload="metadata"
         style={{ width: '100%', borderRadius: '8px', maxHeight: '360px' }}
         onTimeUpdate={() => {
           if (videoRef.current && onTimeUpdate) {
