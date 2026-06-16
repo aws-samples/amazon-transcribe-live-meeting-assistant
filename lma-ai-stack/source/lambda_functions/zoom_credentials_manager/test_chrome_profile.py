@@ -69,20 +69,21 @@ class TestNormalizePlatform(unittest.TestCase):
 
 
 class TestUserProfilePrefix(unittest.TestCase):
-    """Per-user / per-platform S3 key layout."""
+    """Per-user S3 key layout (one profile per user, shared across platforms)."""
 
     def test_prefix_without_platform_targets_all(self):
         prefix = index._user_profile_prefix(VALID_SUB)
         self.assertEqual(prefix, f"profiles/{user_hash(VALID_SUB)}/")
 
-    def test_prefix_with_platform_is_scoped(self):
+    def test_prefix_ignores_platform(self):
         prefix = index._user_profile_prefix(VALID_SUB, "WEBEX")
-        self.assertEqual(prefix, f"profiles/{user_hash(VALID_SUB)}/webex/")
+        self.assertEqual(prefix, f"profiles/{user_hash(VALID_SUB)}/")
 
-    def test_prefix_platform_is_normalized(self):
-        # Mixed case / suffix collapses to the canonical segment.
-        prefix = index._user_profile_prefix(VALID_SUB, "Zoom")
-        self.assertEqual(prefix, f"profiles/{user_hash(VALID_SUB)}/zoom/")
+    def test_prefix_same_regardless_of_platform(self):
+        self.assertEqual(
+            index._user_profile_prefix(VALID_SUB, "Zoom"),
+            index._user_profile_prefix(VALID_SUB, "teams"),
+        )
 
     def test_sub_hash_is_case_insensitive(self):
         a = index._user_profile_prefix(VALID_SUB.upper(), "teams")
@@ -94,13 +95,13 @@ class TestGetChromeProfileStatus(unittest.TestCase):
     """getMyChromeProfileStatus passes the optional platform through."""
 
     @patch.object(index, "s3")
-    def test_status_scoped_to_platform_prefix(self, mock_s3):
+    def test_status_ignores_platform(self, mock_s3):
         mock_s3.list_objects_v2.return_value = {"Contents": []}
         index.get_my_chrome_profile_status(
             make_event("getMyChromeProfileStatus", arguments={"platform": "WEBEX"})
         )
         _, kwargs = mock_s3.list_objects_v2.call_args
-        self.assertEqual(kwargs["Prefix"], f"profiles/{user_hash(VALID_SUB)}/webex/")
+        self.assertEqual(kwargs["Prefix"], f"profiles/{user_hash(VALID_SUB)}/")
 
     @patch.object(index, "s3")
     def test_status_without_platform_uses_aggregate_prefix(self, mock_s3):
@@ -111,10 +112,10 @@ class TestGetChromeProfileStatus(unittest.TestCase):
 
 
 class TestDeleteChromeProfile(unittest.TestCase):
-    """deleteMyChromeProfile scopes the wipe to the given platform."""
+    """deleteMyChromeProfile wipes the single per-user profile."""
 
     @patch.object(index, "s3")
-    def test_delete_scoped_to_platform(self, mock_s3):
+    def test_delete_ignores_platform(self, mock_s3):
         paginator = MagicMock()
         paginator.paginate.return_value = [{"Contents": []}]
         mock_s3.get_paginator.return_value = paginator
@@ -124,7 +125,7 @@ class TestDeleteChromeProfile(unittest.TestCase):
         )
         self.assertTrue(result)
         _, kwargs = paginator.paginate.call_args
-        self.assertEqual(kwargs["Prefix"], f"profiles/{user_hash(VALID_SUB)}/teams/")
+        self.assertEqual(kwargs["Prefix"], f"profiles/{user_hash(VALID_SUB)}/")
 
     @patch.object(index, "s3")
     def test_delete_without_platform_wipes_all(self, mock_s3):
@@ -150,20 +151,21 @@ class TestDeleteChromeProfile(unittest.TestCase):
         self.assertEqual(mock_s3.delete_objects.call_count, 2)
 
 
-class TestDeleteZoomCredentialsWipesOnlyZoomProfile(unittest.TestCase):
-    """Removing Zoom credentials must wipe only the Zoom profile, not all."""
+class TestDeleteZoomCredentialsLeavesProfile(unittest.TestCase):
+    """Removing Zoom credentials deletes only the secret, not the profile."""
 
     @patch.object(index, "secrets")
     @patch.object(index, "s3")
-    def test_only_zoom_prefix_wiped(self, mock_s3, mock_secrets):
+    def test_profile_not_touched(self, mock_s3, mock_secrets):
         paginator = MagicMock()
         paginator.paginate.return_value = [{"Contents": []}]
         mock_s3.get_paginator.return_value = paginator
 
         index.delete_my_zoom_credentials(make_event("deleteMyZoomCredentials"))
 
-        _, kwargs = paginator.paginate.call_args
-        self.assertEqual(kwargs["Prefix"], f"profiles/{user_hash(VALID_SUB)}/zoom/")
+        mock_secrets.delete_secret.assert_called_once()
+        paginator.paginate.assert_not_called()
+        mock_s3.delete_objects.assert_not_called()
 
 
 if __name__ == "__main__":

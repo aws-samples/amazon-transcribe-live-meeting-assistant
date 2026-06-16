@@ -195,16 +195,7 @@ def _normalize_platform(platform: Optional[str]) -> str:
 
 
 def _user_profile_prefix(sub: str, platform: Optional[str] = None) -> str:
-    # Must match lma-virtual-participant-stack/backend/src/profile-store.ts
-    # which writes to profiles/{sha256(sub.lower())}/{platform}/profile.tar.gz.
-    # The earlier version of this Lambda used the raw sub, leaving every saved
-    # profile orphaned in S3 when the user clicked Remove.
-    #
-    # platform=None targets profiles/{userHash}/ (all of a user's platforms);
-    # a specific platform narrows to that one platform's profile.
     user_hash = hashlib.sha256(sub.lower().encode("utf-8")).hexdigest()
-    if platform:
-        return f"profiles/{user_hash}/{_normalize_platform(platform)}/"
     return f"profiles/{user_hash}/"
 
 
@@ -303,13 +294,6 @@ def delete_my_zoom_credentials(event: Dict[str, Any]) -> bool:
         if code != "ResourceNotFoundException":
             logger.error("Failed to delete secret %s: %s", secret_name, exc)
             raise
-    # Wipe the persisted ZOOM Chromium profile (cookies, "trusted device"
-    # markers). Without this the next Zoom login session for the same user-sub
-    # would outlive the credentials. Other platforms' profiles are unrelated to
-    # Zoom credentials and are left intact.
-    deleted = _delete_user_profiles(sub, "zoom")
-    if deleted:
-        logger.info("Wiped %d Zoom profile object(s) for user sub=%s", deleted, sub)
     return True
 
 

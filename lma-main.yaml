@@ -994,6 +994,9 @@ Conditions:
   ShouldUseTranscriptKnowledgeBase: !Condition ShouldCreateTranscriptKnowledgeBase
   ShouldEnableMCP: !Equals [!Ref EnableMCP, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  ZoomSdkEnabled: !And
+    - !Not [!Equals [!Ref ZoomMeetingSdkClientId, ""]]
+    - !Not [!Equals [!Ref ZoomMeetingSdkClientSecret, ""]]
 
 Resources:
   ##########################################################################
@@ -1626,6 +1629,10 @@ Resources:
         # (e.g. WAITING_FOR_CAPACITY) matches the actual hosting mode instead
         # of always describing EC2 host-slot / auto-scaler behavior.
         VPLaunchType: !Ref VPLaunchType
+        ZoomSdkEnabled: !If
+        - ZoomSdkEnabled
+        - True
+        - False
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 

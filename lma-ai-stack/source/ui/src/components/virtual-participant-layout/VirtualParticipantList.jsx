@@ -97,6 +97,7 @@ const parseMeetingInvitation = /* GraphQL */ `
 const VirtualParticipantList = () => {
   const { user, currentCredentials } = useAppContext();
   const { settings } = useSettingsContext();
+  const zoomSdkEnabled = String(settings?.ZoomSdkEnabled ?? '').toLowerCase() === 'true';
 
   const [participants, setParticipants] = useState([]);
   const [filteredParticipants, setFilteredParticipants] = useState([]);
@@ -838,7 +839,16 @@ const VirtualParticipantList = () => {
               </FormField>
             )}
 
-            {createForm.meetingPlatform === 'ZOOM' && (
+            {createForm.meetingPlatform === 'ZOOM' && zoomSdkEnabled && (
+              <FormField label="Zoom account" stretch>
+                <Alert type="info">
+                  Joining via the Zoom Meeting SDK. No Zoom account sign-in is needed — the participant authenticates
+                  with a meeting signature.
+                </Alert>
+              </FormField>
+            )}
+
+            {createForm.meetingPlatform === 'ZOOM' && !zoomSdkEnabled && (
               <FormField
                 label="Zoom account (Optional)"
                 description={
@@ -858,16 +868,11 @@ const VirtualParticipantList = () => {
               </FormField>
             )}
 
-            {/* Stored Chrome profile — scoped to the selected platform (one
-                profile per user PER platform). A Zoom-authenticated profile is
-                never reused for a Webex/Teams/Chime meeting. Surfaced for every
-                platform so a Teams user can see/remove the profile that carries
-                their solved CAPTCHA trust token, matching the Zoom experience. */}
             <FormField
               label="Stored browser profile (Optional)"
               description={
-                'LMA reuses a saved browser profile for this meeting platform so cookies and trusted-device ' +
-                'markers persist. For Teams, this lets a CAPTCHA you solve once carry over to later joins. ' +
+                'LMA reuses a saved browser profile across meetings so cookies and trusted-device markers ' +
+                'persist. For Teams, this lets a CAPTCHA you solve once carry over to later joins. ' +
                 'Remove it to start fresh.'
               }
               stretch
