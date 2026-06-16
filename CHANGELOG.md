@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **"Meeting URL" field for URL-based joins** — In the Create Virtual Participant modal, entering a full `http(s)://` join URL relabels the field to **Meeting URL** and hides the separate **Meeting Password** field (the URL carries its own password). A numeric ID keeps the **Meeting ID** + password layout.
+- **Per-platform stored browser profiles** — The VP's saved Chromium profile is now keyed per user *and* meeting platform, so a Zoom-authenticated session is never reused for Webex/Teams/Chime. The modal's **Stored browser profile** card shows/removes the profile for the selected platform. Existing pre-upgrade profiles aren't migrated (first join per platform starts fresh).
+- **VP container build uses a larger CodeBuild compute type** (MEDIUM) for faster image builds.
+
+### Fixed
+
+- **Webex meetings joined via `j.php` launch links now work** — Pasting/using a Webex `https://SITE.webex.com/.../j.php?MTID=…` invite now joins reliably. The invite parser keeps the full launch URL as the Meeting ID (the `MTID` token has no extractable numeric ID), the VP navigates directly to it, clicks "Join from this browser", and dismisses Chromium's native "Open Webex.app?" app-launch prompt (via a real X11 keystroke — it's browser chrome that JS/CDP can't reach). Also handles the newer build's name/email pre-join form and avoids the "No camera found" popup that previously blocked the join.
+- **VP startup status copy matches the hosting mode** — `WAITING_FOR_CAPACITY` / `INITIALIZING` no longer show EC2-only wording (host slots, auto-scaler) on Fargate deployments; copy is now launch-type-aware.
+- **Pin `lma-sdk` to its in-repo path and mark internal npm packages private** — `uv` resolves `lma-sdk` from the repo rather than public PyPI, and internal packages (`docs-site`, VP backend, `pca_integration`) are marked private. See `lib/README.md` for the editable-install flow.
+
 ## [0.3.4] - 2026-06-03
 
 ### Added

@@ -5,14 +5,15 @@
  */
 /* eslint-disable react/jsx-props-no-spreading */
 import React, { useCallback, useEffect, useState } from 'react';
+import PropTypes from 'prop-types';
 import { generateClient } from 'aws-amplify/api';
 import { Alert, Box, Button, Modal, SpaceBetween, StatusIndicator } from '@cloudscape-design/components';
 
 const client = generateClient();
 
 const Q_GET_PROFILE_STATUS = /* GraphQL */ `
-  query GetMyChromeProfileStatus {
-    getMyChromeProfileStatus {
+  query GetMyChromeProfileStatus($platform: String) {
+    getMyChromeProfileStatus(platform: $platform) {
       present
       sizeBytes
       lastModified
@@ -21,8 +22,8 @@ const Q_GET_PROFILE_STATUS = /* GraphQL */ `
 `;
 
 const M_DELETE_PROFILE = /* GraphQL */ `
-  mutation DeleteMyChromeProfile {
-    deleteMyChromeProfile
+  mutation DeleteMyChromeProfile($platform: String) {
+    deleteMyChromeProfile(platform: $platform)
   }
 `;
 
@@ -35,14 +36,16 @@ const formatSize = (bytes) => {
 };
 
 /**
- * Stored Chrome profile status + remove control. Platform-agnostic: the
- * persisted Chromium profile is ONE per user across every platform (cookies,
- * "remember this device" markers, and — for Teams anonymous joins — the HIP
- * CAPTCHA trust token all live in it), so this is shown for Zoom, Teams,
- * Webex, and Chime alike. Zoom *credentials* remain Zoom-only (see
- * ZoomCredentialsManager); this component is only the profile.
+ * Stored Chrome profile status + remove control, scoped to a meeting platform.
+ * Each platform keeps its OWN persisted Chromium profile (cookies, "remember
+ * this device" markers, and — for Teams anonymous joins — the HIP CAPTCHA
+ * trust token), so a Zoom-authenticated session is never reused for a
+ * Webex/Teams/Chime meeting. Pass the currently selected `platform` so the
+ * status and Remove action target that platform's profile. Zoom *credentials*
+ * remain Zoom-only (see ZoomCredentialsManager); this component is only the
+ * profile.
  */
-const ChromeProfileManager = () => {
+const ChromeProfileManager = ({ platform }) => {
   const [profile, setProfile] = useState({ present: false, sizeBytes: null, lastModified: null });
   const [loading, setLoading] = useState(true);
   const [confirmVisible, setConfirmVisible] = useState(false);
@@ -54,7 +57,7 @@ const ChromeProfileManager = () => {
     setLoading(true);
     setError(null);
     try {
-      const resp = await client.graphql({ query: Q_GET_PROFILE_STATUS });
+      const resp = await client.graphql({ query: Q_GET_PROFILE_STATUS, variables: { platform } });
       const p = resp?.data?.getMyChromeProfileStatus || { present: false, sizeBytes: null, lastModified: null };
       setProfile(p);
     } catch (e) {
@@ -62,8 +65,9 @@ const ChromeProfileManager = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [platform]);
 
+  // Re-fetch whenever the selected platform changes (refresh depends on it).
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -72,7 +76,7 @@ const ChromeProfileManager = () => {
     setSubmitting(true);
     setError(null);
     try {
-      await client.graphql({ query: M_DELETE_PROFILE });
+      await client.graphql({ query: M_DELETE_PROFILE, variables: { platform } });
       setProfile({ present: false, sizeBytes: null, lastModified: null });
       setConfirmVisible(false);
       setInfo(
@@ -162,6 +166,15 @@ const ChromeProfileManager = () => {
       </Modal>
     </Box>
   );
+};
+
+ChromeProfileManager.propTypes = {
+  // Meeting platform to scope the stored profile to (e.g. 'ZOOM', 'WEBEX').
+  platform: PropTypes.string,
+};
+
+ChromeProfileManager.defaultProps = {
+  platform: undefined,
 };
 
 export default ChromeProfileManager;

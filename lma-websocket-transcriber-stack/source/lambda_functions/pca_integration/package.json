@@ -1,5 +1,6 @@
 {
   "name": "pca-integration",
+  "private": true,
   "version": "1.0.0",
   "description": "Function triggered by TCA after post call processing. Copies files to PCA solution buckets.",
   "main": "index.js",

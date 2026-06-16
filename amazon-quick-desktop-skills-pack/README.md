@@ -23,12 +23,15 @@ Turn your Live Meeting Assistant into an AI-powered meeting intelligence system 
 
 1. Open **Amazon Quick Desktop**
 2. Go to **Settings → Capabilities → MCP → "+ Add MCP / Skill"**
-3. Enter:
+3. Choose **REMOTE** as the connection type
+4. Enter:
    - **Name**: `Live Meeting Assistant (LMA)`
-   - **Endpoint**: Your LMA MCP API endpoint URL
-   - **Auth**: [REDACTED_TOKEN]
-   - **Token**: Your LMA API key (`lma_xxxx...`)
-4. Click **Connect**
+   - **URL**: Your **MCP Server URL (API key auth)** from the LMA UI
+     (Settings → MCP Servers Configuration → Hosted MCP Access)
+   - **Headers**: click **+ Add header** and enter:
+     - **Header Name**: `x-api-key`
+     - **Value**: your LMA API key (`lma_xxxx...`)
+5. Click **Connect**
 
 ### Step 2: Install the Skills Pack
 

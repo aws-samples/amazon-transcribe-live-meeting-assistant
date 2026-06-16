@@ -64,6 +64,53 @@ export function patchPreferencesFor3pCookies(userDataDir: string): number {
     return THIRD_PARTY_COOKIE_ALLOW_PATTERNS.length;
 }
 
+// Custom URL schemes the meeting platforms try to hand off to a native desktop
+// app. When Chromium hits one of these (e.g. a Webex j.php landing page that
+// auto-launches the desktop client) it pops a native "Open <app>?" / "Open
+// xdg-open?" external-protocol chooser. That dialog is NOT a JS dialog, so
+// page.on('dialog') can't catch it — it just sits there as noise (and on some
+// builds steals focus from the join UI). Marking the scheme as excluded in
+// Preferences tells Chromium to silently ignore the handoff and stay on the
+// web client. Headless containers have no desktop app to launch anyway.
+const EXTERNAL_PROTOCOL_EXCLUDED_SCHEMES = [
+    'webex',
+    'webexstart',
+    'wbxstart',
+    'wbx',
+    'msteams',
+    'zoommtg',
+    'zoomus',
+    'zoomphonecall',
+];
+
+// Suppress the native external-protocol ("Open xdg-open?") chooser for the
+// meeting-app custom schemes above. Must run BEFORE Chromium launches; like the
+// cookie patch, Chromium clobbers in-session edits to Preferences at shutdown.
+// Returns the number of schemes excluded.
+export function patchPreferencesForExternalProtocols(userDataDir: string): number {
+    const prefsPath = path.join(userDataDir, 'Default', 'Preferences');
+    fs.mkdirSync(path.dirname(prefsPath), { recursive: true });
+
+    let prefs: Record<string, any> = {};
+    if (fs.existsSync(prefsPath)) {
+        try {
+            prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+        } catch {
+            prefs = {};
+        }
+    }
+
+    const protoNode = prefs.protocol_handler ?? (prefs.protocol_handler = {});
+    const excludedNode = protoNode.excluded_schemes ?? (protoNode.excluded_schemes = {});
+    // value=true => scheme is excluded: Chromium neither launches it nor prompts.
+    for (const scheme of EXTERNAL_PROTOCOL_EXCLUDED_SCHEMES) {
+        excludedNode[scheme] = true;
+    }
+
+    fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
+    return EXTERNAL_PROTOCOL_EXCLUDED_SCHEMES.length;
+}
+
 const WARMUP_ORDINARY_URLS = [
     'https://www.google.com/',
     'https://news.ycombinator.com/',

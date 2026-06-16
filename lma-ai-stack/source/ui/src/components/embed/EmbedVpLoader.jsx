@@ -536,6 +536,7 @@ const EmbedVpLoader = ({ params, sendToParent }) => {
           status={createdVp.status}
           updatedAt={createdVp.updatedAt || createdVp.createdAt || new Date().toISOString()}
           scheduledFor={createdVp.scheduledFor}
+          launchType={settings?.VPLaunchType}
         />
         <Container header={<Header variant="h3">Connection Details</Header>}>
           <VPConnectionDetails vpDetails={createdVp} />

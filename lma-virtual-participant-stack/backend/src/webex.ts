@@ -1,3 +1,4 @@
+import { spawn } from 'child_process';
 import { Page, Frame } from 'playwright-core';
 import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
@@ -6,11 +7,15 @@ import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
+import { humanClick } from './prejoin-actions.js';
 
 export default class Webex {
     private readonly iframe = '#unified-webclient-iframe';
     private endRequested: Promise<ExitInfo>;
     private requestEnd: (info: ExitInfo) => void = () => {};
+    // Set once the chat end-command has been handled, so the message observer
+    // firing twice for the same message doesn't trigger a double exit/goodbye.
+    private endHandled = false;
 
     constructor() {
         this.endRequested = new Promise<ExitInfo>((resolve) => {
@@ -18,12 +23,72 @@ export default class Webex {
         });
     }
 
+    // Run an xdotool command against the Xvfb display, resolving with stdout.
+    // Best-effort: resolves '' on any error so callers never throw.
+    private xdotool(args: string[]): Promise<string> {
+        return new Promise((resolve) => {
+            try {
+                const proc = spawn('xdotool', args, {
+                    env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
+                });
+                let out = '';
+                proc.stdout?.on('data', (d) => { out += d.toString(); });
+                proc.on('error', () => resolve(''));
+                proc.on('exit', () => resolve(out.trim()));
+            } catch {
+                resolve('');
+            }
+        });
+    }
+
+    // Dismiss the native external-protocol ("Open Webex.app?") chooser. This is
+    // a Chromium browser-CHROME modal (a Views widget), NOT page DOM — so
+    // Playwright's page.keyboard, page.on('dialog'), and CDP Input/Page dialog
+    // APIs all silently no-op against it (they target the page renderer). The
+    // only thing that reaches it is a real X11 input event, so we send a real
+    // Escape (= the focused "Cancel" button) to the Chromium window via xdotool
+    // on the Xvfb display. Tries `attempts` times because the chooser re-fires
+    // (observed: needs dismissing twice). Best-effort; never throws.
+    private async dismissNativeDialog(page: Page, attempts = 3): Promise<void> {
+        for (let i = 0; i < attempts; i++) {
+            try {
+                // Focus the active Chromium window, then send Escape to it. Using
+                // the active window avoids guessing the window id; key --window
+                // delivers the event even if focus drifted.
+                const winId = await this.xdotool(['getactivewindow']);
+                if (winId) {
+                    await this.xdotool(['key', '--window', winId, '--clearmodifiers', 'Escape']);
+                } else {
+                    // Fallback: search for the Chromium window by class.
+                    const search = await this.xdotool(['search', '--onlyvisible', '--class', 'chrom']);
+                    const wid = search.split('\n').filter(Boolean).pop();
+                    if (wid) {
+                        await this.xdotool(['windowactivate', '--sync', wid]);
+                        await this.xdotool(['key', '--window', wid, '--clearmodifiers', 'Escape']);
+                    } else {
+                        // Last resort: type Escape to whatever has focus.
+                        await this.xdotool(['key', '--clearmodifiers', 'Escape']);
+                    }
+                }
+                console.log(`[webex] Sent X11 Escape (xdotool) to dismiss native dialog (attempt ${i + 1}/${attempts}, win=${winId || 'n/a'}).`);
+            } catch (e) {
+                console.log('[webex] dismissNativeDialog xdotool failed (non-fatal):', e);
+            }
+            await new Promise((r) => setTimeout(r, 800));
+        }
+    }
+
     private async sendMessages(
         frame: Frame,
         messages: string[],
         isEnterprise: boolean | null = false
     ): Promise<void> {
-        const messageElement = await frame.waitForSelector(isEnterprise ? '#chat-panel > div > textarea' : '.ql-editor[contenteditable="true"]');
+        // Cap the input lookup so a stale/missing chat editor selector can't hang
+        // the caller forever (the goodbye-on-exit path is time-sensitive).
+        const messageElement = await frame.waitForSelector(
+            isEnterprise ? '#chat-panel > div > textarea' : '.ql-editor[contenteditable="true"]',
+            { timeout: 8000 },
+        );
         for (const message of messages) {
             await messageElement?.type(message);
             await messageElement?.press('Enter');
@@ -42,55 +107,175 @@ export default class Webex {
         // MANUAL_ACTION_REQUIRED so the user can clear it via VNC.
         startDialogWatchdog(page, { platform: 'WEBEX' });
 
-        console.log('Getting Webex meeting link.');
-        await page.goto('https://signin.webex.com/join');
-        console.log('Entering meeting ID.');
-        const meetingIdRes = await findElementWithFallback(
-            page,
-            ['#join-meeting-form'],
-            {
-                intent: 'Webex landing page meeting-ID input field',
-                platform: 'WEBEX',
-                step: 'webex.join.meetingIdInput',
-            },
-            { maxRetries: 10, delayMs: 500 },
-        );
-        if (!meetingIdRes) {
-            throw new Error('Webex meeting-ID input not found');
+        // The j.php launch link makes Webex auto-fire a native external-protocol
+        // ("Open xdg-open?") chooser to launch the desktop app. That dialog is
+        // browser chrome — it does NOT block clicking the page DOM behind it, so
+        // the real join fix is the robust "Join from this browser" click below.
+        // We still best-effort dismiss any dialog that surfaces so it can't grab
+        // focus: a CDP Page.javascriptDialogOpening handler (some builds route
+        // the chooser here) plus page.on('dialog') for JS-level dialogs. Note the
+        // managed-policy / Preferences hints are unreliable against cloakbrowser's
+        // patched Chromium binary, which is why we lean on the click, not the
+        // dialog suppression, to actually join.
+        try {
+            const cdp = await page.context().newCDPSession(page);
+            await cdp.send('Page.enable');
+            // Auto-dismiss native JS dialogs (alert/confirm/beforeunload). Native
+            // external-protocol choosers may also surface here on some builds.
+            cdp.on('Page.javascriptDialogOpening', async () => {
+                try {
+                    await cdp.send('Page.handleJavaScriptDialog', { accept: false });
+                    console.log('Auto-cancelled native dialog via CDP.');
+                } catch { /* already handled */ }
+            });
+        } catch (err) {
+            console.log('CDP dialog handler setup failed (non-fatal):', err);
         }
-        await meetingIdRes.element.type(details.invite.meetingId);
-        await meetingIdRes.element.press('Enter');
+        page.on('dialog', async (dialog: any) => {
+            try {
+                console.log(`Auto-dismissing ${dialog.type()} dialog: ${dialog.message()}`);
+                await dialog.dismiss();
+            } catch {
+                /* dialog already handled / page closed */
+            }
+        });
+
+        // The meetingId is either a numeric Webex meeting number (entered into the
+        // join-by-number form) or a full join URL such as a "j.php?MTID=..." launch
+        // link. For a launch link the numeric ID/password cannot be derived from the
+        // opaque MTID token, so we navigate straight to the URL and let Webex resolve
+        // the meeting server-side (mirrors how Teams meetup-join URLs are handled).
+        const meetingIdValue = (details.invite.meetingId || '').trim();
+        const isJoinUrl = /^https?:\/\//i.test(meetingIdValue);
+
+        if (isJoinUrl) {
+            console.log('Navigating directly to Webex join URL.');
+            await page.goto(meetingIdValue);
+            // Give the launch link time to redirect to the meeting join page.
+            await new Promise(resolve => setTimeout(resolve, 3000));
+        } else {
+            console.log('Getting Webex meeting link.');
+            await page.goto('https://signin.webex.com/join');
+            console.log('Entering meeting ID.');
+            const meetingIdRes = await findElementWithFallback(
+                page,
+                ['#join-meeting-form'],
+                {
+                    intent: 'Webex landing page meeting-ID input field',
+                    platform: 'WEBEX',
+                    step: 'webex.join.meetingIdInput',
+                },
+                { maxRetries: 10, delayMs: 500 },
+            );
+            if (!meetingIdRes) {
+                throw new Error('Webex meeting-ID input not found');
+            }
+            await meetingIdRes.element.type(meetingIdValue);
+            await meetingIdRes.element.press('Enter');
+
+            // Wait a moment for the page to stabilize after entering meeting ID
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
         
-        // Wait a moment for the page to stabilize after entering meeting ID
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Try to click "Join from this browser" button if it appears
-        // Sometimes Webex skips this step and goes directly to the meeting join page
+        // The j.php launch link lands on a "Join your Webex meeting" chooser page
+        // ("Download the Webex app" vs "Join from this browser", id
+        // #broadcom-center-right — a DIV with role=button). Clicking it fires the
+        // webex:// custom protocol, which raises Chromium's native "Open
+        // Webex.app?" chooser. That dialog is browser CHROME (a Views widget),
+        // NOT page DOM — it is modal and BLOCKS the join until dismissed, and the
+        // first click is consumed by the app-launch attempt. The confirmed manual
+        // flow is: click "Join from this browser" -> the native dialog pops ->
+        // Cancel it -> click "Join from this browser" AGAIN -> the web client
+        // ("Enter your information") finally loads. So we loop: click, dismiss the
+        // native dialog via a real X11 Escape (dismissNativeDialog/xdotool — the
+        // ONLY thing that reaches browser chrome), and repeat until the chooser
+        // button is gone (= page advanced). (Older flows skip this chooser, so a
+        // miss is non-fatal.)
+        const CHOOSER_SELECTORS = [
+            '#broadcom-center-right',
+            '[role="button"]:contains("Join from this browser")',
+            'button:contains("Join from this browser")',
+            'a:contains("Join from this browser")',
+        ];
+        const chooserStillPresent = async (): Promise<boolean> => {
+            try {
+                return await page.evaluate(() => {
+                    const el = document.querySelector('#broadcom-center-right');
+                    if (!el) return false;
+                    const r = (el as HTMLElement).getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                });
+            } catch {
+                return false;
+            }
+        };
         console.log('Checking for "Join from this browser" button...');
         try {
-            const joinFromBrowserButton = await page.waitForSelector('#broadcom-center-right', { timeout: 5000 });
-            if (joinFromBrowserButton) {
-                console.log('Found "Join from this browser" button, clicking it.');
-                await joinFromBrowserButton.click();
-                // Wait for the page to load after clicking
-                await new Promise(resolve => setTimeout(resolve, 3000));
+            // Up to 4 rounds of click + native-dialog dismiss. Each round: if the
+            // chooser is still showing, click it and clear the resulting dialog.
+            for (let round = 1; round <= 4; round++) {
+                if (!(await chooserStillPresent())) {
+                    console.log(`Chooser gone after ${round - 1} round(s) — page advanced past "Join from this browser".`);
+                    break;
+                }
+                const res = await findElementWithFallback(
+                    page,
+                    CHOOSER_SELECTORS,
+                    { intent: 'The "Join from this browser" button on the Webex app-download chooser', platform: 'WEBEX', step: 'webex.join.joinFromBrowser' },
+                    { maxRetries: 4, delayMs: 500 },
+                );
+                if (!res) {
+                    console.log(`Round ${round}: "Join from this browser" not found — assuming page advanced or auto-browser mode.`);
+                    break;
+                }
+                console.log(`Round ${round}: clicking "Join from this browser" (${res.source}).`);
+                await humanClick(page, res.element);
+                // The native "Open Webex.app?" dialog appears shortly after the
+                // click; give it a beat, then clear it with a real X11 Escape.
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                await this.dismissNativeDialog(page, 2);
+                await new Promise(resolve => setTimeout(resolve, 1500));
             }
         } catch (error) {
-            console.log('"Join from this browser" button not found - Webex may have auto-detected browser mode. Continuing...');
+            console.log('"Join from this browser" click loop failed (non-fatal), continuing:', error);
         }
-        
-        // Wait for the page to stabilize
-        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Wait for the web client to load.
+        await new Promise(resolve => setTimeout(resolve, 3000));
         console.log('Launching app.');
+        // The web client renders in one of three places depending on the join
+        // flow and Webex build:
+        //   - 'default'    : classic web client inside #unified-webclient-iframe
+        //   - 'enterprise' : enterprise web client inside iframe[name="thinIframe"]
+        //   - 'mainframe'  : newer builds reached via a j.php launch link load the
+        //                    client directly in the page (preloader.html?...runInOwnPage=true),
+        //                    so there is NO iframe — the join UI lives in the main frame.
+        // We race all three and take whichever appears first. The mainframe probe
+        // watches for the pre-join UI itself (name/password/join controls) so we
+        // don't mistake the app-download chooser page for a loaded client.
+        const MAINFRAME_JOIN_UI = [
+            'input[data-test="Name (required)"]',
+            'input[aria-label="Meeting password"]',
+            'mdc-button[data-test="join-button"]',
+        ].join(', ');
         const frameElement = await Promise.any([
-            page.waitForSelector(this.iframe, { timeout: 15000 }).then((el: any) => ({ source: 'default', el })).catch(() => null),
-            page.waitForSelector('iframe[name="thinIframe"]', { timeout: 15000 }).then((el: any) => ({ source: 'enterprise', el })).catch(() => null)
+            page.waitForSelector(this.iframe, { timeout: 30000 }).then((el: any) => ({ source: 'default', el })).catch(() => null),
+            page.waitForSelector('iframe[name="thinIframe"]', { timeout: 30000 }).then((el: any) => ({ source: 'enterprise', el })).catch(() => null),
+            page.waitForSelector(MAINFRAME_JOIN_UI, { timeout: 30000 }).then(() => ({ source: 'mainframe', el: null })).catch(() => null),
         ]).catch(() => null);
 
-        const frame = await frameElement?.el?.contentFrame();
+        // For the iframe variants resolve the content frame; for the mainframe
+        // variant the join UI is on the page itself.
+        let frame = frameElement?.source === 'mainframe'
+            ? page.mainFrame()
+            : await frameElement?.el?.contentFrame();
         if (!frame) {
-            throw new Error('Failed to access Webex meeting frame');
+            // Known frame selectors didn't match — fall back to the main frame so
+            // the flow can still proceed (best-effort) rather than hard-failing.
+            console.log('Known Webex frame selectors did not match — falling back to main frame.');
+            frame = page.mainFrame();
         }
+        console.log(`Webex web client located in: ${frameElement?.source ?? 'mainframe-fallback'}`);
         await page.evaluate(() => {
             const checkAndClosePopup = () => {
                 const dialog = document.querySelector('.el-dialog__wrapper');
@@ -244,44 +429,107 @@ export default class Webex {
             await nameInputElement?.type(details.scribeIdentity);
         }
 
-        // Wait for the meeting interface to load
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        // need to change frame for this.
+        // Wait for the meeting interface (interstitial / pre-join) to load.
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        const isEnterprise = !!(frameElement && frameElement.source === 'enterprise');
+
+        // Click the first matching selector inside `frame`, trying each in order.
+        // Best-effort: short per-selector timeout, never throws — a missed
+        // pre-join toggle must not abort the whole join (the meeting can still be
+        // entered with default mute/video state). Returns true if one matched.
+        const tryClickInFrame = async (label: string, selectors: string[], perTimeout = 4000): Promise<boolean> => {
+            for (const sel of selectors) {
+                try {
+                    const el = await frame.waitForSelector(sel, { timeout: perTimeout, state: 'visible' });
+                    if (el) {
+                        // Use evaluate-click for reliability inside the iframe (some
+                        // Webex controls ignore positional clicks under automation).
+                        await frame.evaluate((node: any) => node.click(), el);
+                        console.log(`[webex] Clicked ${label} via "${sel}".`);
+                        return true;
+                    }
+                } catch { /* try next selector */ }
+            }
+            console.log(`[webex] ${label} not found (non-fatal) — tried: ${selectors.join(' | ')}`);
+            return false;
+        };
+
         console.log('Handling cookie banner.');
         try {
             const rejectButton = await page.waitForSelector(
-                (frameElement && frameElement.source === 'enterprise') ? '#cookie-banner-text > div.cookie-manage-option > div.cookie-banner-btnContainer > button:nth-child(1)' : '.cookie-banner-body .a32ueaoVYHwRrsRMl0ci mdc-button:first-child',
+                isEnterprise ? '#cookie-banner-text > div.cookie-manage-option > div.cookie-banner-btnContainer > button:nth-child(1)' : '.cookie-banner-body .a32ueaoVYHwRrsRMl0ci mdc-button:first-child',
                 { timeout: 3000 }
             );
             await rejectButton?.click();
             console.log('Successfully clicked Reject cookie button');
         } catch (error) {
-            console.log('Cookie banner not found:', error);
+            console.log('Cookie banner not found (non-fatal).');
         }
 
-        // Only click mute button if voice assistant is NOT enabled
+        // Mute (only if the voice assistant isn't driving audio). Non-fatal.
         if (!voiceAssistant.isEnabled()) {
             console.log('Clicking mute button.');
-            const muteButtonElement = await frame.waitForSelector((frameElement && frameElement.source === 'enterprise') ? '#audioControlButton' : 'mdc-button[data-test="microphone-button"]');
-            await (frameElement && frameElement.source === 'enterprise') ? frame.evaluate((el: any) => el.click(), muteButtonElement) : muteButtonElement?.click();
+            await tryClickInFrame('mute button', isEnterprise
+                ? ['#audioControlButton', 'button[data-doi*="MUTE"]', 'button[aria-label*="Mute" i]', 'button[title*="Mute" i]']
+                : ['mdc-button[data-test="microphone-button"]', 'button[aria-label*="Mute" i]']);
         } else {
             console.log('Voice assistant enabled - skipping mute button for agent audio');
         }
 
+        // Video: only turn it OFF if it's currently ON. On a headless VP with no
+        // camera, this build renders the control as "Start video" with disabled=""
+        // (video is already off). Clicking that tries to START video and pops a
+        // blocking "No camera found" dialog — which previously wedged the join.
+        // So: with Simli we leave video on (avatar camera); otherwise we click the
+        // control ONLY when it's the STOP_VIDEO variant, and never the START_VIDEO
+        // one. Then dismiss any "No camera found" popup as a safety net.
         if (simliAvatar.isConnected()) {
             console.log('Simli avatar active - keeping video ON for avatar camera.');
-            // Don't click the video button - leave camera on so Simli avatar shows
+        } else if (isEnterprise) {
+            // Inspect the video control in-frame and only click STOP_VIDEO.
+            try {
+                const clickedStop = await frame.evaluate(() => {
+                    const stop = document.querySelector('button[data-doi*="STOP_VIDEO"]:not([disabled])') as HTMLElement | null;
+                    if (stop) { stop.click(); return true; }
+                    return false;
+                });
+                console.log(clickedStop
+                    ? '[webex] Turned video off (clicked STOP_VIDEO).'
+                    : '[webex] Video already off (no enabled STOP_VIDEO control) — leaving as-is.');
+            } catch {
+                console.log('[webex] Video state check failed (non-fatal) — leaving video as-is.');
+            }
         } else {
-            console.log('Clicking video button to turn off.');
-            const videoButtonElement = await frame.waitForSelector(
-                (frameElement && frameElement.source === 'enterprise') ? 'button[data-doi="VIDEO:STOP_VIDEO:MEETSIMPLE_INTERSTITIAL"]' : 'mdc-button[data-test="camera-button"]'
-            );
-            await (frameElement && frameElement.source === 'enterprise') ? frame.evaluate((el: any) => el.click(), videoButtonElement) : videoButtonElement?.click();
+            // Non-enterprise web client: best-effort camera-off, non-fatal.
+            await tryClickInFrame('camera button', ['mdc-button[data-test="camera-button"]'], 3000);
         }
 
+        // Safety net: dismiss a "No camera found" / "No video device" popup if one
+        // is showing (its primary action is an "OK" button), so it can't block Join.
+        try {
+            const dismissed = await frame.evaluate(() => {
+                const txt = (document.body.textContent || '').toLowerCase();
+                if (txt.includes('no camera found') || txt.includes('camera device') || txt.includes('no video device')) {
+                    const ok = Array.from(document.querySelectorAll('button'))
+                        .find((b) => (b.textContent || '').trim().toLowerCase() === 'ok') as HTMLElement | undefined;
+                    if (ok) { ok.click(); return true; }
+                }
+                return false;
+            });
+            if (dismissed) console.log('[webex] Dismissed "No camera found" popup (clicked OK).');
+        } catch { /* non-fatal */ }
+
+        // Join — this one DOES matter; if it misses, we can't enter. Try the known
+        // selectors plus text/title fallbacks ("Join meeting"). Still non-throwing
+        // so we fall through to the admission check below either way.
         console.log('Clicking join button.');
-        const joinButtonElement = await frame.waitForSelector((frameElement && frameElement.source === 'enterprise') ? '#interstitial_join_btn' : 'mdc-button[data-test="join-button"]');
-        await joinButtonElement?.click();
+        const joined = await tryClickInFrame('join button', isEnterprise
+            ? ['#interstitial_join_btn', 'button[data-doi*="JOIN"]', 'button[title*="Join" i]', 'button[aria-label*="Join meeting" i]']
+            : ['mdc-button[data-test="join-button"]', 'button[title*="Join" i]'], 8000);
+        if (!joined) {
+            console.log('[webex] WARNING: Join button not matched by any selector on the interstitial.');
+        }
 
         console.log("Opening chat panel.");
         try {
@@ -438,9 +686,23 @@ export default class Webex {
             const sender = idx > 0 ? raw.slice(0, idx).trim() : null;
             const message = idx > 0 ? raw.slice(idx + 3) : raw;
             if (matchesEndCommand(message)) {
+                // Guard against the observer firing twice for the same message
+                // (it can emit duplicate add events) — only act on the first.
+                if (this.endHandled) return;
+                this.endHandled = true;
                 console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(message)}`);
-                await this.sendMessages(frame, exitMessagesFor(sender));
                 details.start = false;
+                // Post the goodbye BEFORE signalling exit — requestEnd triggers
+                // teardown which closes the page, and a goodbye sent after that
+                // fails with "Target page ... has been closed". We bound the send
+                // (sendMessages has an 8s waitForSelector cap, and we race a 6s
+                // ceiling on top) so a stale chat-input selector can't hang the
+                // exit indefinitely (the original bug) — worst case we wait a few
+                // seconds, then leave regardless.
+                await Promise.race([
+                    this.sendMessages(frame, exitMessagesFor(sender)),
+                    new Promise((r) => setTimeout(r, 6000)),
+                ]).catch((e) => console.log('Goodbye message send failed (non-fatal):', e));
                 this.requestEnd({
                     reason: 'end-command',
                     trigger: 'chat',

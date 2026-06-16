@@ -83,7 +83,16 @@ CRITICAL MEETING ID AND PASSWORD RULES:
      meetingPassword is the value of the "p" parameter (e.g. "ixpjsDWNj8cLxyHlQD").
    - For older "meetup-join" URLs (https://teams.microsoft.com/l/meetup-join/...) where there
      is no separate numeric ID or passcode, use the full join URL as the meetingId.
-6. For Webex, extract ONLY the numeric meeting ID from URLs. Webex URLs look like https://meetXXXX.webex.com/meet/prYYYYYYYYYY where the meeting ID is ONLY the numeric part (YYYYYYYYYY) WITHOUT the "pr" prefix. For example, from https://meet1648.webex.com/meet/pr2552362251, the meetingId should be "2552362251" (not "pr2552362251")
+6. For Webex, there are two URL styles:
+   - Personal-room URLs look like https://meetXXXX.webex.com/meet/prYYYYYYYYYY. For these,
+     extract ONLY the numeric meeting ID (YYYYYYYYYY) WITHOUT the "pr" prefix. For example,
+     from https://meet1648.webex.com/meet/pr2552362251, the meetingId should be "2552362251"
+     (not "pr2552362251").
+   - "j.php" launch URLs look like https://SITE.webex.com/PATH/j.php?MTID=<token> (and sometimes
+     include a "&password=" or "&pwd=" parameter). The MTID is an opaque token, NOT a numeric
+     meeting number, and the numeric ID/password usually cannot be derived from it. For these,
+     set meetingId to the COMPLETE, UNMODIFIED join URL (keep the full https://... string), and
+     only set meetingPassword if an explicit "password"/"pwd" parameter is present in the URL.
 7. For Zoom passwords from URLs: Extract the COMPLETE password from the URL's pwd parameter. The password can contain letters, numbers, and special characters including periods (.). Extract everything after "pwd=" up to the next "&" or end of URL. Do NOT truncate the password at periods or other special characters.
 
 DATE AND TIME HANDLING:
@@ -243,20 +252,34 @@ def validate_parsed_data(data):
         if zoom_id_match:
             data["meetingId"] = zoom_id_match.group(1)
 
-    # Clean up meeting ID for Webex (extract numeric ID, remove "pr" prefix)
-    # Webex URLs look like: https://meetXXXX.webex.com/meet/prYYYYYYYYYY
-    # The meeting ID should be ONLY the numeric part (YYYYYYYYYY) without "pr"
+    # Clean up meeting ID for Webex.
+    # Personal-room URLs look like https://meetXXXX.webex.com/meet/prYYYYYYYYYY and the
+    #   meeting ID should be ONLY the numeric part (YYYYYYYYYY) without the "pr" prefix.
+    # "j.php" launch URLs look like https://SITE.webex.com/PATH/j.php?MTID=<token>. The MTID
+    #   is an opaque token, not a numeric meeting number, so we keep the full join URL as the
+    #   meetingId and let the virtual participant navigate directly to it.
     if data.get("meetingPlatform") == "WEBEX" and data.get("meetingId"):
         meeting_id = data["meetingId"]
-        # If it's a full URL, extract the path part after /meet/
-        webex_url_match = re.search(r"webex\.com/meet/(?:pr)?(\d+)", meeting_id, re.IGNORECASE)
-        if webex_url_match:
-            data["meetingId"] = webex_url_match.group(1)
+        if re.search(r"/j\.php\b", meeting_id, re.IGNORECASE):
+            # Launch URL: preserve the complete URL untouched.
+            data["meetingId"] = meeting_id.strip()
+            # Pull the password from the URL if present and not already captured.
+            if not data.get("meetingPassword"):
+                webex_pwd_match = re.search(
+                    r"[?&](?:password|pwd)=([^&\s]+)", meeting_id, re.IGNORECASE
+                )
+                if webex_pwd_match:
+                    data["meetingPassword"] = webex_pwd_match.group(1)
         else:
-            # If it starts with "pr" followed by digits, remove the "pr" prefix
-            webex_pr_match = re.match(r"^pr(\d+)$", meeting_id, re.IGNORECASE)
-            if webex_pr_match:
-                data["meetingId"] = webex_pr_match.group(1)
+            # Personal-room URL or bare ID: extract the numeric part, dropping "pr".
+            webex_url_match = re.search(r"webex\.com/meet/(?:pr)?(\d+)", meeting_id, re.IGNORECASE)
+            if webex_url_match:
+                data["meetingId"] = webex_url_match.group(1)
+            else:
+                # If it starts with "pr" followed by digits, remove the "pr" prefix
+                webex_pr_match = re.match(r"^pr(\d+)$", meeting_id, re.IGNORECASE)
+                if webex_pr_match:
+                    data["meetingId"] = webex_pr_match.group(1)
 
     # Clean up meeting ID for Teams.
     # New format: https://teams.microsoft.com/meet/243574196567966?p=ixpjsDWNj8cLxyHlQD

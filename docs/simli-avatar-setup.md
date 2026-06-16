@@ -10,6 +10,8 @@ This guide walks you through setting up the Simli avatar integration for the LMA
 
 **What it looks like:** Instead of the Virtual Participant joining with no camera, meeting participants see a realistic animated face that moves its lips in sync with the assistant's speech.
 
+> **Platform support:** The Simli avatar currently works on **Zoom** and **Microsoft Teams** only. On **Webex** the avatar is not yet supported — the Virtual Participant still joins and transcribes normally, but joins with no camera (no avatar video). Webex avatar support is planned; track its status before relying on it for Webex meetings.
+
 ## Prerequisites
 
 - LMA deployed (version 0.2.31 and above)
