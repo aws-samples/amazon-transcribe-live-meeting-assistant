@@ -270,6 +270,7 @@ async function wipeDirContents(dir: string): Promise<void> {
 
 function runShell(cmd: string, args: string[]): Promise<void> {
     return new Promise((resolve, reject) => {
+        // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process -- cmd is always a hardcoded literal ('tar') from the two internal callers; spawn() with an args array does not invoke a shell, so no command injection is possible
         const child = spawn(cmd, args, { stdio: ['ignore', 'inherit', 'inherit'] });
         child.on('error', reject);
         child.on('exit', (code) => {

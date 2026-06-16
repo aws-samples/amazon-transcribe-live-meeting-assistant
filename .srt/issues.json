@@ -315,7 +315,7 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -427,7 +427,7 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -538,7 +538,7 @@
     "priority": "HIGH",
     "check_id": "DDB-002",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. LMA DynamoDB tables store meeting transcripts and metadata; all access is via AppSync resolvers with Cognito authentication. Application-level access logging is provided by AppSync CloudWatch logs. CloudTrail data-plane logging can be enabled by operators who require it."
   },
   {
@@ -562,7 +562,7 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -586,7 +586,7 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -667,7 +667,7 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -702,7 +702,7 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -782,7 +782,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "suppressionReason": "One-shot CodeBuild trigger Lambda - CloudWatch alarms not applicable for custom resource invocations",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "Checkov",
@@ -872,7 +872,7 @@
     "priority": "HIGH",
     "check_id": "DDB-002",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. LMA DynamoDB tables store meeting transcripts and metadata; all access is via AppSync resolvers with Cognito authentication. Application-level access logging is provided by AppSync CloudWatch logs. CloudTrail data-plane logging can be enabled by operators who require it."
   },
   {
@@ -907,7 +907,7 @@
     "priority": "HIGH",
     "check_id": "DDB-002",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. LMA DynamoDB tables store meeting transcripts and metadata; all access is via AppSync resolvers with Cognito authentication. Application-level access logging is provided by AppSync CloudWatch logs. CloudTrail data-plane logging can be enabled by operators who require it."
   },
   {
@@ -931,7 +931,7 @@
     "priority": "HIGH",
     "check_id": "DDB-002",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. LMA DynamoDB tables store meeting transcripts and metadata; all access is via AppSync resolvers with Cognito authentication. Application-level access logging is provided by AppSync CloudWatch logs. CloudTrail data-plane logging can be enabled by operators who require it."
   },
   {
@@ -966,7 +966,7 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -1001,7 +1001,7 @@
     "priority": "HIGH",
     "check_id": "S3-008",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "S3 lifecycle policies for audio recordings are configurable by operators via the MeetingRecordExpirationInDays parameter (default 90 days). The DynamoDB TTL handles meeting record expiration; S3 lifecycle policies for the audio bucket can be added by operators based on their retention requirements."
   },
   {
@@ -1136,7 +1136,7 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -1193,7 +1193,7 @@
     "priority": "HIGH",
     "check_id": "DDB-002",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. LMA DynamoDB tables store meeting transcripts and metadata; all access is via AppSync resolvers with Cognito authentication. Application-level access logging is provided by AppSync CloudWatch logs. CloudTrail data-plane logging can be enabled by operators who require it."
   },
   {
@@ -1206,7 +1206,7 @@
     "priority": "HIGH",
     "check_id": "EC2-003",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "The security group inbound rule allows traffic from 0.0.0.0/0 on the ALB listener port (443/80). This is required for the WebSocket server ALB to accept connections from meeting participants. The ALB itself enforces TLS; backend ECS tasks are in private subnets and not directly reachable."
   },
   {
@@ -1219,7 +1219,7 @@
     "priority": "HIGH",
     "check_id": "ECS-006",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "ECS task IAM roles are scoped to the specific AWS services required by each task (Transcribe, Kinesis, DynamoDB, S3, Bedrock). The 'least privilege' finding is a heuristic; the actual policies have been reviewed and are appropriately scoped."
   },
   {
@@ -1254,7 +1254,7 @@
     "priority": "HIGH",
     "check_id": "ECS-002",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "ECS task environment variables contain configuration values (region, stack name, DynamoDB table names) that are not sensitive secrets. Actual secrets (API keys, credentials) are stored in AWS Secrets Manager or SSM Parameter Store and injected at runtime, not in environment variables."
   },
   {
@@ -1300,7 +1300,7 @@
     "priority": "HIGH",
     "check_id": "CFR-002",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "WAF for CloudFront (GLOBAL scope, us-east-1) is a known future enhancement documented in the Well-Architected assessment. The current WAF implementation covers REGIONAL resources (API Gateway, ALB). Adding GLOBAL WAF requires a separate us-east-1 deployment which is out of scope for this release."
   },
   {
@@ -1313,7 +1313,7 @@
     "priority": "HIGH",
     "check_id": "CFR-005",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "The CloudFront origin uses HTTPS to the S3 bucket via the OAI/OAC mechanism. The 'http-only' flag detected by this check refers to the S3 website endpoint protocol, which is an artifact of how CloudFormation expresses the S3 origin domain — the actual CloudFront-to-S3 communication uses HTTPS."
   },
   {
@@ -1416,7 +1416,7 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -1451,7 +1451,7 @@
     "priority": "HIGH",
     "check_id": "LAMBDA-011",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -1487,7 +1487,7 @@
     "check_id": "ECS-002",
     "status": "suppressed",
     "suppressionReason": "RECORDINGS_KEY_PREFIX is a naming prefix for S3 objects, not sensitive data",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "security-matrix",
@@ -1896,7 +1896,7 @@
     "priority": "HIGH",
     "check_id": "ECS-005",
     "status": "suppressed",
-    "assessmentCount": 9,
+    "assessmentCount": 12,
     "suppressionReason": "Transcribe streaming and Comprehend DetectPiiEntities require Resource: '*' (neither service supports resource-level IAM permissions). The other actions in this role (S3, Kinesis, AppSync) ARE scoped to specific resource ARNs. Same justification as the inline cfn_nag W11 and checkov:skip=CKV_AWS_111 suppressions already on this resource in the CFN template."
   },
   {
@@ -1909,7 +1909,7 @@
     "priority": "HIGH",
     "check_id": "ECS-006",
     "status": "suppressed",
-    "assessmentCount": 9,
+    "assessmentCount": 12,
     "suppressionReason": "ECS task IAM roles are scoped to the specific AWS services required by each task (Transcribe, Kinesis, DynamoDB, S3, Bedrock, AppSync, Comprehend). The 'least privilege' finding is a heuristic; the actual policies have been reviewed and are appropriately scoped. Mirrors the existing suppression on TranscriberWebsocketTaskDefTaskRole in lma-websocket-transcriber-stack."
   },
   {
@@ -2237,7 +2237,7 @@
     "check_id": "DDB-002",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. LMA DynamoDB tables store meeting transcripts and metadata; all access is via AppSync resolvers with Cognito authentication. Application-level access logging is provided by AppSync CloudWatch logs. CloudTrail data-plane logging can be enabled by operators who require it."
   },
   {
@@ -2251,7 +2251,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -2277,7 +2277,7 @@
     "check_id": "LAMBDA-002",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "Lambda environment variables contain configuration values (table names, region, stack outputs) that are not sensitive. No secrets, API keys, or credentials are stored in environment variables — these are injected via Secrets Manager or SSM at runtime."
   },
   {
@@ -2291,7 +2291,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -2485,7 +2485,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -2499,7 +2499,7 @@
     "check_id": "DDB-002",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. LMA DynamoDB tables store meeting transcripts and metadata; all access is via AppSync resolvers with Cognito authentication. Application-level access logging is provided by AppSync CloudWatch logs. CloudTrail data-plane logging can be enabled by operators who require it."
   },
   {
@@ -2513,7 +2513,7 @@
     "check_id": "DDB-002",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. LMA DynamoDB tables store meeting transcripts and metadata; all access is via AppSync resolvers with Cognito authentication. Application-level access logging is provided by AppSync CloudWatch logs. CloudTrail data-plane logging can be enabled by operators who require it."
   },
   {
@@ -2539,7 +2539,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -2553,7 +2553,7 @@
     "check_id": "ELB-002",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "ALB access logs are not enabled by default to avoid S3 storage costs for development deployments. Operators can enable ALB access logging by adding an AccessLogs attribute to the ALB resource. This is documented as a production hardening recommendation."
   },
   {
@@ -2567,7 +2567,7 @@
     "check_id": "ELB-005",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "The ALB listener is configured with the recommended TLS 1.2+ security policy (ELBSecurityPolicy-TLS13-1-2-2021-06 or equivalent). The finding may be triggered by the HTTP redirect listener (port 80 → 443) which is intentional and does not serve application traffic."
   },
   {
@@ -2581,7 +2581,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -2595,7 +2595,7 @@
     "check_id": "CFR-002",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "WAF for CloudFront (GLOBAL scope, us-east-1) is a known future enhancement documented in the Well-Architected assessment. The current WAF implementation covers REGIONAL resources (API Gateway, ALB). Adding GLOBAL WAF requires a separate us-east-1 deployment which is out of scope for this release."
   },
   {
@@ -2609,7 +2609,7 @@
     "check_id": "CFR-005",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "The CloudFront origin uses HTTPS to the S3 bucket via the OAI/OAC mechanism. The 'http-only' flag detected by this check refers to the S3 website endpoint protocol, which is an artifact of how CloudFormation expresses the S3 origin domain — the actual CloudFront-to-S3 communication uses HTTPS."
   },
   {
@@ -2623,7 +2623,7 @@
     "check_id": "ELB-002",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "ALB access logs are not enabled by default to avoid S3 storage costs for development deployments. Operators can enable ALB access logging by adding an AccessLogs attribute to the ALB resource. This is documented as a production hardening recommendation."
   },
   {
@@ -2637,7 +2637,7 @@
     "check_id": "ELB-005",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "The ALB listener is configured with the recommended TLS 1.2+ security policy (ELBSecurityPolicy-TLS13-1-2-2021-06 or equivalent). The finding may be triggered by the HTTP redirect listener (port 80 → 443) which is intentional and does not serve application traffic."
   },
   {
@@ -2721,7 +2721,7 @@
     "check_id": "EC2-002",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "The EC2/ECS instance role is scoped to the specific AWS services required by the Virtual Participant (ECS, ECR, CloudWatch Logs, SSM). The 'least privilege' finding is a heuristic check; the actual policy has been reviewed and is appropriately scoped for the VP workload."
   },
   {
@@ -2774,7 +2774,7 @@
     "check_id": "IAM-009",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "IAM roles that create other IAM roles (e.g., the CloudFormation service role) require IAM-mutating permissions by design. The InstallationPermissionsBoundaryArn parameter applies a permissions boundary to all roles created during installation, constraining the blast radius of any role created by the stack."
   },
   {
@@ -2812,7 +2812,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -2825,7 +2825,7 @@
     "priority": "High",
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "Empty string '' is the default value for an optional meeting password parameter. Not a hardcoded credential — it is the documented default for meetings that have no password."
   },
   {
@@ -3221,7 +3221,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "suppressionReason": "CloudWatch alarms are an observability preference, not a security requirement",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "security-matrix",
@@ -3235,7 +3235,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "suppressionReason": "Data plane logging disabled due to cost; control plane logging via CloudTrail is sufficient for security auditing",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "security-matrix",
@@ -3249,7 +3249,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "suppressionReason": "CloudWatch alarms are an observability preference, not a security requirement",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "Checkov",
@@ -3473,7 +3473,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "suppressionReason": "CloudWatch alarms are an observability preference, not a security requirement",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "Checkov",
@@ -3773,7 +3773,7 @@
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "suppressionReason": "False positive - ZIP_WITH_TOKEN_REPLACE is a StackPackageType enum value, not a hardcoded password",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "Bandit",
@@ -3995,7 +3995,7 @@
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "suppressionReason": "False positive - Mock test API key in unit test file (not a real credential)",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "Bandit",
@@ -4008,7 +4008,7 @@
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "suppressionReason": "False positive - Mock test API key in unit test file (not a real credential)",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "Bandit",
@@ -4021,7 +4021,7 @@
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "suppressionReason": "False positive - Mock test API key in unit test file (not a real credential)",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "Bandit",
@@ -4034,7 +4034,7 @@
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "suppressionReason": "False positive - Mock test API key in unit test file (not a real credential)",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "Bandit",
@@ -4047,7 +4047,7 @@
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "suppressionReason": "False positive - Mock test API key in unit test file (not a real credential)",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "Bandit",
@@ -4060,7 +4060,7 @@
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "suppressionReason": "False positive - Mock test API key in unit test file (not a real credential)",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "Bandit",
@@ -4073,7 +4073,7 @@
     "references": "https://bandit.readthedocs.io/en/1.8.6/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "suppressionReason": "False positive - Mock test API key in unit test file (not a real credential)",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "Checkov",
@@ -4241,7 +4241,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "suppressionReason": "Cost decision - DynamoDB data plane event logging is expensive and not required for this operational table. Table management events are already captured in standard CloudTrail.",
-    "assessmentCount": 11
+    "assessmentCount": 14
   },
   {
     "source": "security-matrix",
@@ -4266,7 +4266,7 @@
     "check_id": "API-GW-001",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "The AppSync GraphQL API uses AppSync-native CloudWatch logging (configured via AWS::AppSync::GraphQLApi LogConfig), not API Gateway access logging. This check does not apply to AppSync APIs."
   },
   {
@@ -4280,7 +4280,7 @@
     "check_id": "API-GW-003",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "WAF protection for the MCP API Gateway is available via the WAFAllowedIPv4Ranges CloudFormation parameter. When set to specific CIDR ranges, a WAFv2 WebACL is created and associated. The default (0.0.0.0/0) disables WAF for cost reasons; operators requiring WAF can enable it at deploy time."
   },
   {
@@ -4294,7 +4294,7 @@
     "check_id": "API-GW-006",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "The AppSync GraphQL API uses AppSync-native CloudWatch logging (configured via AWS::AppSync::GraphQLApi LogConfig), not API Gateway execution logging. This check does not apply to AppSync APIs."
   },
   {
@@ -4571,7 +4571,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "isCustomResource": false,
-    "assessmentCount": 11,
+    "assessmentCount": 14,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
   },
   {
@@ -5832,7 +5832,7 @@
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.354Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "False positive. The logger.warning call logs the word 'nextToken' in a format string and a boto3 decode-exception message — no actual token value is logged. The logger.info call replaces the nextToken value with the literal string 'yes' or 'no' before logging. Both are documented in .ash.yaml suppressions."
   },
   {
@@ -5845,7 +5845,7 @@
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.356Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "False positive. The logger.warning call logs the word 'nextToken' in a format string and a boto3 decode-exception message — no actual token value is logged. The logger.info call replaces the nextToken value with the literal string 'yes' or 'no' before logging. Both are documented in .ash.yaml suppressions."
   },
   {
@@ -5858,7 +5858,7 @@
     "references": "https://stackoverflow.com/questions/3172470/actual-meaning-of-shell-true-in-subprocess | https://docs.python.org/3/library/subprocess.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.356Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Hardcoded shell command with no user-controlled input. The command string is constructed entirely from Path objects and fixed flags. nosec B602 annotation already present in the source."
   },
   {
@@ -5871,7 +5871,7 @@
     "references": "https://cwe.mitre.org/data/definitions/939.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.356Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "The URL is constructed from the GitHub API response (tag_name from api.github.com/repos/aws-samples/sample-security-review-tool/releases/latest) and a hardcoded base URL. The domain is always github.com; no user-controlled input reaches the URL. nosec B310 annotation already present in the source."
   },
   {
@@ -5884,7 +5884,7 @@
     "references": "https://cwe.mitre.org/data/definitions/939.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.356Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "The URL is constructed from the GitHub API response (tag_name from api.github.com/repos/aws-samples/sample-security-review-tool/releases/latest) and a hardcoded base URL. The domain is always github.com; no user-controlled input reaches the URL. nosec B310 annotation already present in the source."
   },
   {
@@ -5897,7 +5897,7 @@
     "references": "",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.357Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "LMA requires Python 3.9+ (AWS Lambda runtime). importlib.resources is available in all supported Python versions. Python 3.6 compatibility is not a requirement."
   },
   {
@@ -5910,7 +5910,7 @@
     "references": "",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.357Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "LMA requires Python 3.9+ (AWS Lambda runtime). importlib.resources is available in all supported Python versions. Python 3.6 compatibility is not a requirement."
   },
   {
@@ -5924,7 +5924,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.359Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -5938,7 +5938,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.359Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -5952,7 +5952,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.359Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -5966,7 +5966,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.359Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -5980,7 +5980,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.359Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -5994,7 +5994,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.359Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6008,7 +6008,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.359Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6022,7 +6022,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.359Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6036,7 +6036,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.360Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6050,7 +6050,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.360Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6064,7 +6064,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.360Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6078,7 +6078,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.360Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6092,7 +6092,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.360Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6106,7 +6106,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.360Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6120,7 +6120,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.360Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6134,7 +6134,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.360Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess imported for hardcoded AWS CLI / SAM CLI invocations. No user-controlled input reaches subprocess calls."
   },
   {
@@ -6148,7 +6148,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.360Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Partial executable path (aws, sam) is a standard CLI invocation pattern. PATH is controlled by the deployment environment."
   },
   {
@@ -6162,7 +6162,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.360Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run called with hardcoded list arguments (aws, sam, bash). No user-controlled input; nosec annotations present."
   },
   {
@@ -6176,7 +6176,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.361Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Partial executable path (aws, sam) is a standard CLI invocation pattern. PATH is controlled by the deployment environment."
   },
   {
@@ -6190,7 +6190,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.361Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run called with hardcoded list arguments (aws, sam, bash). No user-controlled input; nosec annotations present."
   },
   {
@@ -6204,7 +6204,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.361Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Partial executable path (aws, sam) is a standard CLI invocation pattern. PATH is controlled by the deployment environment."
   },
   {
@@ -6218,7 +6218,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.361Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run called with hardcoded list arguments (aws, sam, bash). No user-controlled input; nosec annotations present."
   },
   {
@@ -6232,7 +6232,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.361Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Partial executable path (aws, sam) is a standard CLI invocation pattern. PATH is controlled by the deployment environment."
   },
   {
@@ -6246,7 +6246,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.361Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run called with hardcoded list arguments (aws, sam, bash). No user-controlled input; nosec annotations present."
   },
   {
@@ -6260,7 +6260,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.361Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run called with hardcoded list arguments (aws, sam, bash). No user-controlled input; nosec annotations present."
   },
   {
@@ -6274,7 +6274,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b107_hardcoded_password_default.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.361Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Empty string default for optional meeting password parameter. Not a hardcoded credential — it is the documented default for meetings that have no password."
   },
   {
@@ -6288,7 +6288,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6302,7 +6302,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6316,7 +6316,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6330,7 +6330,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6344,7 +6344,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6358,7 +6358,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6372,7 +6372,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6386,7 +6386,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6400,7 +6400,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6414,7 +6414,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6428,7 +6428,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6442,7 +6442,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6456,7 +6456,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6470,7 +6470,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6484,7 +6484,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess imported in test file for mocking publish operations. No production risk."
   },
   {
@@ -6498,7 +6498,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6512,7 +6512,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6526,7 +6526,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.362Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6540,7 +6540,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6554,7 +6554,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6568,7 +6568,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6582,7 +6582,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6596,7 +6596,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6610,7 +6610,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6624,7 +6624,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6638,7 +6638,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6652,7 +6652,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6666,7 +6666,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6680,7 +6680,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6694,7 +6694,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6708,7 +6708,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6722,7 +6722,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6736,7 +6736,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6750,7 +6750,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6764,7 +6764,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6778,7 +6778,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6792,7 +6792,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.363Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Partial executable path in test file. Standard test pattern for CLI invocation mocking."
   },
   {
@@ -6806,7 +6806,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run in test file with hardcoded mock commands. No user-controlled input."
   },
   {
@@ -6820,7 +6820,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Partial executable path in test file. Standard test pattern for CLI invocation mocking."
   },
   {
@@ -6834,7 +6834,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run in test file with hardcoded mock commands. No user-controlled input."
   },
   {
@@ -6848,7 +6848,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Partial executable path in test file. Standard test pattern for CLI invocation mocking."
   },
   {
@@ -6862,7 +6862,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run in test file with hardcoded mock commands. No user-controlled input."
   },
   {
@@ -6876,7 +6876,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Partial executable path in test file. Standard test pattern for CLI invocation mocking."
   },
   {
@@ -6890,7 +6890,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run in test file with hardcoded mock commands. No user-controlled input."
   },
   {
@@ -6904,7 +6904,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6918,7 +6918,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6932,7 +6932,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6946,7 +6946,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -6960,7 +6960,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Partial executable path in test file. Standard test pattern for CLI invocation mocking."
   },
   {
@@ -6974,7 +6974,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run in test file with hardcoded mock commands. No user-controlled input."
   },
   {
@@ -6988,7 +6988,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7002,7 +7002,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7016,7 +7016,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7030,7 +7030,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7044,7 +7044,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7058,7 +7058,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Partial executable path in test file. Standard test pattern for CLI invocation mocking."
   },
   {
@@ -7072,7 +7072,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run in test file with hardcoded mock commands. No user-controlled input."
   },
   {
@@ -7086,7 +7086,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b607_start_process_with_partial_path.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Partial executable path in test file. Standard test pattern for CLI invocation mocking."
   },
   {
@@ -7100,7 +7100,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run in test file with hardcoded mock commands. No user-controlled input."
   },
   {
@@ -7114,7 +7114,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7128,7 +7128,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7142,7 +7142,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7156,7 +7156,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7170,7 +7170,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7184,7 +7184,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.364Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7198,7 +7198,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7212,7 +7212,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7226,7 +7226,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7240,7 +7240,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7254,7 +7254,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7268,7 +7268,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7282,7 +7282,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7296,7 +7296,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7310,7 +7310,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7324,7 +7324,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7338,7 +7338,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7352,7 +7352,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7366,7 +7366,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7380,7 +7380,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7394,7 +7394,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7408,7 +7408,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7422,7 +7422,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7436,7 +7436,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7450,7 +7450,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7464,7 +7464,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7478,7 +7478,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7492,7 +7492,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7506,7 +7506,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7520,7 +7520,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.365Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7534,7 +7534,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7548,7 +7548,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7562,7 +7562,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b107_hardcoded_password_default.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Empty string used as a test fixture value for an API key field. Test-only code, not a production credential."
   },
   {
@@ -7576,7 +7576,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "try/except pass used to gracefully handle optional MCP server connection failures during startup. Failure is logged at a higher level; suppressing the exception here is intentional."
   },
   {
@@ -7590,7 +7590,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Empty string '' is the default value for an optional meeting password parameter, not a hardcoded credential. The parameter is passed through to the VP join URL only when provided by the caller."
   },
   {
@@ -7604,7 +7604,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "try/except pass used for optional browser-open and srt-status fallback paths. Failure is non-fatal by design — the script prints the dashboard path as a fallback."
   },
   {
@@ -7618,7 +7618,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "try/except pass used for optional browser-open and srt-status fallback paths. Failure is non-fatal by design — the script prints the dashboard path as a fallback."
   },
   {
@@ -7632,7 +7632,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "subprocess.run called with our own SRT binary path (a Path object). No user-controlled input; nosec B603 annotation present in source."
   },
   {
@@ -7646,7 +7646,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 8,
+    "assessmentCount": 11,
     "suppressionReason": "Best-effort version probe of our own srt binary (get_installed_version). On any failure it returns None, which simply triggers a clean reinstall — non-fatal and not security-relevant. Broad except is intentional and already annotated # noqa: BLE001."
   },
   {
@@ -7660,7 +7660,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "random module used for load-test distribution (jitter, random meeting selection, concurrent scheduling). This is not a security-sensitive context — cryptographic randomness is not required for load simulation."
   },
   {
@@ -7674,7 +7674,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "random module used for load-test distribution (jitter, random meeting selection, concurrent scheduling). This is not a security-sensitive context — cryptographic randomness is not required for load simulation."
   },
   {
@@ -7688,7 +7688,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "random module used for load-test distribution (jitter, random meeting selection, concurrent scheduling). This is not a security-sensitive context — cryptographic randomness is not required for load simulation."
   },
   {
@@ -7702,7 +7702,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Empty string '' is the default value for optional WebSocket authentication fields in the load simulator. These are test/load-generation defaults, not production credentials."
   },
   {
@@ -7716,7 +7716,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Empty string '' is the default value for optional WebSocket authentication fields in the load simulator. These are test/load-generation defaults, not production credentials."
   },
   {
@@ -7730,7 +7730,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "random module used for load-test distribution (jitter, random meeting selection, concurrent scheduling). This is not a security-sensitive context — cryptographic randomness is not required for load simulation."
   },
   {
@@ -7744,7 +7744,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b311-random",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.366Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "random module used for load-test distribution (jitter, random meeting selection, concurrent scheduling). This is not a security-sensitive context — cryptographic randomness is not required for load simulation."
   },
   {
@@ -7758,7 +7758,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7772,7 +7772,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7786,7 +7786,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7800,7 +7800,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7814,7 +7814,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7828,7 +7828,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7842,7 +7842,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7856,7 +7856,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7870,7 +7870,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7884,7 +7884,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7898,7 +7898,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7912,7 +7912,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7926,7 +7926,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7940,7 +7940,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7954,7 +7954,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7968,7 +7968,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7982,7 +7982,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -7996,7 +7996,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8010,7 +8010,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8024,7 +8024,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8038,7 +8038,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8052,7 +8052,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8066,7 +8066,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8080,7 +8080,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8094,7 +8094,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.367Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8108,7 +8108,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8122,7 +8122,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8136,7 +8136,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8150,7 +8150,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8164,7 +8164,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8178,7 +8178,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8192,7 +8192,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8206,7 +8206,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8220,7 +8220,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8234,7 +8234,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8248,7 +8248,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8262,7 +8262,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8276,7 +8276,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8290,7 +8290,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8304,7 +8304,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8318,7 +8318,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8332,7 +8332,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8346,7 +8346,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8360,7 +8360,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8374,7 +8374,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8388,7 +8388,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8402,7 +8402,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8416,7 +8416,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8430,7 +8430,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.368Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8444,7 +8444,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8458,7 +8458,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8472,7 +8472,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8486,7 +8486,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8500,7 +8500,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8514,7 +8514,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8528,7 +8528,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8542,7 +8542,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8556,7 +8556,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8570,7 +8570,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8584,7 +8584,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8598,7 +8598,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8612,7 +8612,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8626,7 +8626,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8640,7 +8640,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8654,7 +8654,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8668,7 +8668,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8682,7 +8682,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8696,7 +8696,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8710,7 +8710,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8724,7 +8724,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8738,7 +8738,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8752,7 +8752,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8766,7 +8766,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8780,7 +8780,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8794,7 +8794,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.369Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8808,7 +8808,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.370Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8822,7 +8822,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.370Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Use of assert in test files is the standard pytest pattern. These assertions are intentional and only present in test code, not production Lambda functions."
   },
   {
@@ -8839,7 +8839,7 @@
     "resourceName": "LambdaCodeBuildStartBuild",
     "isCustomResource": false,
     "firstDetectedAt": "2026-05-19T21:29:45.397Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Lambda environment variables are encrypted at rest using the stack-level customer-managed KMS key (LMAEncryptionKey) applied via the Lambda function's KmsKeyArn property. Checkov does not detect KMS encryption applied at the function level when the key is referenced via a parameter or cross-stack output."
   },
   {
@@ -8854,7 +8854,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-05-19T21:29:45.398Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Unrestricted outbound access is required for Lambda functions and ECS Fargate tasks to reach AWS service endpoints (Transcribe, Bedrock, DynamoDB, Kinesis, etc.) and the internet (for VP browser automation). Restricting outbound would require VPC endpoints for every AWS service used, which is a cost/complexity tradeoff documented in the Well-Architected assessment as a future enhancement."
   },
   {
@@ -8941,7 +8941,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-05-19T21:29:45.401Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "The MCP API Gateway is intentionally REGIONAL and publicly accessible — it is the external endpoint for MCP clients. Access is controlled by a custom Lambda authorizer that validates SHA-256-hashed API keys. Optional WAF IP allow-listing is available via the WAFAllowedIPv4Ranges parameter."
   },
   {
@@ -8956,7 +8956,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-05-19T21:29:45.402Z",
-    "assessmentCount": 10,
+    "assessmentCount": 13,
     "suppressionReason": "Unrestricted outbound access is required for Lambda functions and ECS Fargate tasks to reach AWS service endpoints (Transcribe, Bedrock, DynamoDB, Kinesis, etc.) and the internet (for VP browser automation). Restricting outbound would require VPC endpoints for every AWS service used, which is a cost/complexity tradeoff documented in the Well-Architected assessment as a future enhancement."
   },
   {
@@ -8970,7 +8970,7 @@
     "check_id": "CFR-006",
     "status": "suppressed",
     "firstDetectedAt": "2026-05-19T21:29:45.402Z",
-    "assessmentCount": 16,
+    "assessmentCount": 19,
     "suppressionReason": "The CloudFront distribution uses Origin Access Identity (OAI) for the S3 origin, which is the legacy mechanism. Migrating to Origin Access Control (OAC) is a known future enhancement documented in the Well-Architected assessment. OAI still provides access control; the S3 bucket policy restricts access to the CloudFront OAI principal."
   },
   {
@@ -8983,7 +8983,7 @@
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
     "status": "Open",
     "firstDetectedAt": "2026-06-02T16:32:15.099Z",
-    "assessmentCount": 8
+    "assessmentCount": 11
   },
   {
     "source": "Semgrep",
@@ -8995,7 +8995,7 @@
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
     "status": "Open",
     "firstDetectedAt": "2026-06-02T16:32:15.100Z",
-    "assessmentCount": 8
+    "assessmentCount": 11
   },
   {
     "source": "Semgrep",
@@ -9007,7 +9007,7 @@
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
     "status": "Open",
     "firstDetectedAt": "2026-06-02T16:32:15.100Z",
-    "assessmentCount": 8
+    "assessmentCount": 11
   },
   {
     "source": "Semgrep",
@@ -9019,7 +9019,7 @@
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
     "status": "Open",
     "firstDetectedAt": "2026-06-02T16:32:15.100Z",
-    "assessmentCount": 8
+    "assessmentCount": 11
   },
   {
     "source": "Semgrep",
@@ -9029,9 +9029,10 @@
     "check_id": "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure",
     "priority": "MEDIUM",
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.100Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.615Z"
   },
   {
     "source": "Semgrep",
@@ -9041,9 +9042,10 @@
     "check_id": "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure",
     "priority": "MEDIUM",
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.100Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Semgrep",
@@ -9055,7 +9057,7 @@
     "references": "https://cwe.mitre.org/data/definitions/134.html",
     "status": "Open",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 11
   },
   {
     "source": "Semgrep",
@@ -9067,7 +9069,7 @@
     "references": "https://cwe.mitre.org/data/definitions/134.html",
     "status": "Open",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 11
   },
   {
     "source": "Semgrep",
@@ -9079,7 +9081,7 @@
     "references": "https://cwe.mitre.org/data/definitions/134.html",
     "status": "Open",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 11
   },
   {
     "source": "Semgrep",
@@ -9091,7 +9093,7 @@
     "references": "https://cwe.mitre.org/data/definitions/134.html",
     "status": "Open",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 11
   },
   {
     "source": "Semgrep",
@@ -9103,7 +9105,7 @@
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
     "status": "Open",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 11
   },
   {
     "source": "Semgrep",
@@ -9113,9 +9115,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Semgrep",
@@ -9125,9 +9128,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Semgrep",
@@ -9137,9 +9141,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Semgrep",
@@ -9149,9 +9154,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Semgrep",
@@ -9161,9 +9167,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Semgrep",
@@ -9173,9 +9180,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Semgrep",
@@ -9185,9 +9193,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Semgrep",
@@ -9197,9 +9206,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Semgrep",
@@ -9209,9 +9219,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Semgrep",
@@ -9221,9 +9232,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 16
+    "assessmentCount": 16,
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Semgrep",
@@ -9233,10 +9245,11 @@
     "check_id": "javascript.lang.security.detect-child-process.detect-child-process",
     "priority": "HIGH",
     "references": "https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html#do-not-use-dangerous-functions",
-    "status": "suppressed",
+    "status": "resolved",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
     "assessmentCount": 8,
-    "suppressionReason": "False positive. The flagged spawn(cmd, args, ...) call is invoked WITHOUT shell: true, so cmd is exec()-ed directly with no shell parsing — there is no command-injection surface. The only callers of runShell() pass the literal string 'tar' (lines 145 and 211); the path arguments are server-side values derived from os.tmpdir() and are not user-controlled. Semgrep's detect-child-process rule does not model the shell/no-shell distinction."
+    "suppressionReason": "False positive. The flagged spawn(cmd, args, ...) call is invoked WITHOUT shell: true, so cmd is exec()-ed directly with no shell parsing — there is no command-injection surface. The only callers of runShell() pass the literal string 'tar' (lines 145 and 211); the path arguments are server-side values derived from os.tmpdir() and are not user-controlled. Semgrep's detect-child-process rule does not model the shell/no-shell distinction.",
+    "resolvedAt": "2026-06-16T19:33:04.616Z"
   },
   {
     "source": "Bandit",
@@ -24284,7 +24297,7 @@
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
     "status": "Open",
     "firstDetectedAt": "2026-06-02T16:32:15.138Z",
-    "assessmentCount": 8
+    "assessmentCount": 11
   },
   {
     "source": "Bandit",
@@ -43616,13 +43629,14 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-main",
     "resourceType": "Serverless Function",
     "resourceName": "KMSKeyMonitoringFunction",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.197Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.617Z"
   },
   {
     "source": "Checkov",
@@ -43632,13 +43646,14 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-main",
     "resourceType": "Lambda Function",
     "resourceName": "RecordingsBucketNotificationFunction",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.198Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.617Z"
   },
   {
     "source": "Checkov",
@@ -44431,7 +44446,7 @@
     "resourceName": "LambdaCodeBuildStartBuild",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.218Z",
-    "assessmentCount": 8
+    "assessmentCount": 11
   },
   {
     "source": "Checkov",
@@ -44441,13 +44456,14 @@
     "check_id": "CKV_AWS_18",
     "priority": "INFO",
     "fix": "Enable access logging for your S3 bucket by adding the 'LoggingConfiguration' property to your AWS::S3::Bucket resource, specifying a destination bucket and optional prefix. Example: \"LoggingConfiguration\": { \"DestinationBucketName\": \"my-log-bucket\", \"LogFilePrefix\": \"logs/\" }. Access logging provides detailed records of requests made to your bucket, which is useful for security audits, compliance verification, and troubleshooting.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "S3 Bucket",
     "resourceName": "VPProfilesBucket",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.218Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.617Z"
   },
   {
     "source": "Checkov",
@@ -44457,13 +44473,14 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "resolved",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "EdgeAuthDeployerFunction",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.218Z",
-    "assessmentCount": 8
+    "assessmentCount": 8,
+    "resolvedAt": "2026-06-16T19:33:04.617Z"
   },
   {
     "source": "security-matrix",
@@ -44477,7 +44494,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.219Z",
-    "assessmentCount": 8,
+    "assessmentCount": 11,
     "suppressionReason": "Access logging would target a separate access-logs bucket; this would increase storage cost without proportional security benefit because objects in this bucket are scoped per-user via the profiles/<user>/ prefix and the bucket is already protected by KMS-CMK encryption, BlockPublicAccess, BucketOwnerEnforced ACLs, versioning, lifecycle expiry, and a DenyInsecureTransport bucket policy. Mirrors the existing inline cfn_nag W35 suppression on this resource."
   },
   {
@@ -44492,7 +44509,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.219Z",
-    "assessmentCount": 8,
+    "assessmentCount": 11,
     "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. LMA DynamoDB tables store meeting transcripts and metadata; all access is via AppSync resolvers with Cognito authentication. Application-level access logging is provided by AppSync CloudWatch logs. CloudTrail data-plane logging can be enabled by operators who require it. Same rationale as the existing 10 DDB-002 suppressions on sister tables in this codebase."
   },
   {
@@ -45158,7 +45175,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.225Z",
-    "assessmentCount": 8,
+    "assessmentCount": 11,
     "suppressionReason": "X-Ray tracing is not enabled by default to keep the stack cost-efficient for development deployments. The VPTaskReaperFunction is a small, EventBridge-driven reaper that fires on ECS task-state-change events; it is observable via CloudWatch logs. Operators can enable X-Ray by setting TracingConfig.Mode = Active and adding AWSXRayDaemonWriteAccess to the VPTaskReaperRole. Documented as a production hardening recommendation in docs/well-architected.md."
   },
   {
@@ -45173,7 +45190,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.225Z",
-    "assessmentCount": 8,
+    "assessmentCount": 11,
     "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment. Same rationale as the existing 21 LAMBDA-011 suppressions on sister Lambdas in this codebase."
   },
   {
@@ -45205,5 +45222,325 @@
     "firstDetectedAt": "2026-06-02T16:50:47.081Z",
     "assessmentCount": 1,
     "resolvedAt": "2026-06-02T17:13:58.865Z"
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-ai-stack/source/lambda_functions/zoom_credentials_manager/index.py",
+    "line": 295,
+    "issue": "Detected a python logger call with a potential hardcoded secret \"Failed to delete secret %s: %s\" being logged. This may lead to secret credentials being exposed. Make sure that the logger is not logging  sensitive information.",
+    "check_id": "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.569Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-ai-stack/source/lambda_functions/zoom_credentials_manager/index.py",
+    "line": 302,
+    "issue": "Detected a python logger call with a potential hardcoded secret \"ZoomCredentialsManager - Field: %s\" being logged. This may lead to secret credentials being exposed. Make sure that the logger is not logging  sensitive information.",
+    "check_id": "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.570Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/lib/profile.ts",
+    "line": 91,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.571Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/lib/profile.ts",
+    "line": 133,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.571Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/lib/profile.ts",
+    "line": 134,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.571Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/lib/profile.ts",
+    "line": 220,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.572Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/lib/profile.ts",
+    "line": 232,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.572Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/lib/profile.ts",
+    "line": 235,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.572Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/lib/profile.ts",
+    "line": 287,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.572Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/profile-store.ts",
+    "line": 69,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.572Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/profile-store.ts",
+    "line": 70,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.572Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/profile-store.ts",
+    "line": 151,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.573Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/profile-store.ts",
+    "line": 266,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.573Z",
+    "assessmentCount": 6
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/profile-store.ts",
+    "line": 273,
+    "issue": "Detected calls to child_process from a function argument `cmd`. This could lead to a command injection if the input is user controllable. Try to avoid calls to child_process, and if it is needed ensure user input is correctly sanitized or sandboxed. ",
+    "check_id": "javascript.lang.security.detect-child-process.detect-child-process",
+    "priority": "HIGH",
+    "references": "https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html#do-not-use-dangerous-functions",
+    "status": "resolved",
+    "firstDetectedAt": "2026-06-16T19:33:04.573Z",
+    "assessmentCount": 1,
+    "resolvedAt": "2026-06-16T19:42:04.136Z"
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/teams.ts",
+    "line": 219,
+    "issue": "Detected string concatenation with a non-literal variable in a util.format / console.log function. If an attacker injects a format specifier in the string, it will forge the log message. Try to use constant values for the format string.",
+    "check_id": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring",
+    "priority": "LOW",
+    "references": "https://cwe.mitre.org/data/definitions/134.html",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.573Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/video-recorder.ts",
+    "line": 106,
+    "issue": "Detected calls to child_process from a function argument `sinkName`. This could lead to a command injection if the input is user controllable. Try to avoid calls to child_process, and if it is needed ensure user input is correctly sanitized or sandboxed. ",
+    "check_id": "javascript.lang.security.detect-child-process.detect-child-process",
+    "priority": "HIGH",
+    "references": "https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html#do-not-use-dangerous-functions",
+    "status": "resolved",
+    "firstDetectedAt": "2026-06-16T19:33:04.573Z",
+    "assessmentCount": 1,
+    "resolvedAt": "2026-06-16T19:42:04.136Z"
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/video-recorder.ts",
+    "line": 405,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "resolved",
+    "firstDetectedAt": "2026-06-16T19:33:04.574Z",
+    "assessmentCount": 1,
+    "resolvedAt": "2026-06-16T19:42:04.136Z"
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/zoom-sdk-server.ts",
+    "line": 295,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.574Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/zoom-sdk.ts",
+    "line": 69,
+    "issue": "RegExp() called with a `args` function argument, this might allow an attacker to cause a Regular Expression Denial-of-Service (ReDoS) within your application as RegExP blocks the main thread. For this reason, it is recommended to use hardcoded regexes instead. If your regex is run on user-controlled input, consider performing input validation or use a regex checking/sanitization library such as https://www.npmjs.com/package/recheck to verify that the regex does not appear vulnerable to ReDoS.",
+    "check_id": "javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Regular_expression_Denial_of_Service_-_ReDoS",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:33:04.574Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-main.yaml",
+    "line": 1183,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "Open",
+    "stack": "lma-main",
+    "resourceType": "Serverless Function",
+    "resourceName": "KMSKeyMonitoringFunction",
+    "isCustomResource": false,
+    "firstDetectedAt": "2026-06-16T19:33:04.591Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-main.yaml",
+    "line": 2120,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "Open",
+    "stack": "lma-main",
+    "resourceType": "Lambda Function",
+    "resourceName": "RecordingsBucketNotificationFunction",
+    "isCustomResource": false,
+    "firstDetectedAt": "2026-06-16T19:33:04.592Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 5459,
+    "issue": "Ensure the S3 bucket has access logging enabled",
+    "check_id": "CKV_AWS_18",
+    "priority": "INFO",
+    "fix": "Enable access logging for your S3 bucket by adding the 'LoggingConfiguration' property to your AWS::S3::Bucket resource, specifying a destination bucket and optional prefix. Example: \"LoggingConfiguration\": { \"DestinationBucketName\": \"my-log-bucket\", \"LogFilePrefix\": \"logs/\" }. Access logging provides detailed records of requests made to your bucket, which is useful for security audits, compliance verification, and troubleshooting.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "S3 Bucket",
+    "resourceName": "VPProfilesBucket",
+    "isCustomResource": false,
+    "firstDetectedAt": "2026-06-16T19:33:04.613Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Checkov",
+    "path": "lma-ai-stack/deployment/lma-ai-stack.yaml",
+    "line": 6737,
+    "issue": "Check encryption settings for Lambda environment variable",
+    "check_id": "CKV_AWS_173",
+    "priority": "LOW",
+    "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
+    "status": "Open",
+    "stack": "lma-ai-stack-deployment-lma-ai-stack",
+    "resourceType": "Serverless Function",
+    "resourceName": "EdgeAuthDeployerFunction",
+    "isCustomResource": false,
+    "firstDetectedAt": "2026-06-16T19:33:04.613Z",
+    "assessmentCount": 3
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/video-recorder.ts",
+    "line": 107,
+    "issue": "Detected calls to child_process from a function argument `sinkName`. This could lead to a command injection if the input is user controllable. Try to avoid calls to child_process, and if it is needed ensure user input is correctly sanitized or sandboxed. ",
+    "check_id": "javascript.lang.security.detect-child-process.detect-child-process",
+    "priority": "HIGH",
+    "references": "https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html#do-not-use-dangerous-functions",
+    "status": "resolved",
+    "firstDetectedAt": "2026-06-16T19:42:04.113Z",
+    "assessmentCount": 1,
+    "resolvedAt": "2026-06-16T19:44:33.387Z"
+  },
+  {
+    "source": "Semgrep",
+    "path": "lma-virtual-participant-stack/backend/src/video-recorder.ts",
+    "line": 406,
+    "issue": "Detected possible user input going into a `path.join` or `path.resolve` function. This could possibly lead to a path traversal vulnerability,  where the attacker can access arbitrary files stored in the file system. Instead, be sure to sanitize or validate user input first.",
+    "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+    "priority": "MEDIUM",
+    "references": "https://owasp.org/www-community/attacks/Path_Traversal",
+    "status": "Open",
+    "firstDetectedAt": "2026-06-16T19:42:04.115Z",
+    "assessmentCount": 2
   }
 ]

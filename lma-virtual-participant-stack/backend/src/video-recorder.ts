@@ -103,6 +103,7 @@ class VideoRecorder {
     while (Date.now() < deadline) {
       try {
         const result = execSync(
+          // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process -- sinkName is always the hardcoded AUDIO_SINK constant (not user input); the PulseAudio sink name is defined in-process, so no command injection is possible
           `pactl list short sources 2>/dev/null | grep ${sinkName}`,
           { encoding: 'utf-8', timeout: 2000 }
         );
