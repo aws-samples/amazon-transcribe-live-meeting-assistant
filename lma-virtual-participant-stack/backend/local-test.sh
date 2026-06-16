@@ -61,6 +61,12 @@ if [ $# -lt 3 ]; then
     echo "Example:"
     echo "  $0 LMA-dev-stack-2 WEBEX 25523622514"
     echo "  $0 --dev LMA-dev-stack-2 WEBEX 25523622514"
+    echo ""
+    echo "Zoom Meeting SDK (optional): export both before running to join Zoom"
+    echo "via the Web SDK instead of the public web client:"
+    echo "  export ZOOM_MEETING_SDK_CLIENT_ID=...      # pragma: allowlist secret"
+    echo "  export ZOOM_MEETING_SDK_CLIENT_SECRET=...  # pragma: allowlist secret"
+    echo "  $0 --dev LMA-dev-stack-2 ZOOM 98765432101 mypass"
     exit 1
 fi
 
@@ -361,6 +367,17 @@ NOVA_SONIC_CONFIG_TABLE_NAME=${NOVA_SONIC_CONFIG_TABLE_NAME:-}
 SIMLI_API_KEY=${SIMLI_API_KEY:-}
 SIMLI_FACE_ID=${SIMLI_FACE_ID:-}
 SIMLI_TRANSPORT_MODE=${SIMLI_TRANSPORT_MODE:-livekit}
+
+# Zoom Meeting SDK Configuration
+# When both client ID and secret are set, Zoom meetings join via the Zoom
+# Meeting Web SDK instead of the public web client. Set them before running:
+#   export ZOOM_MEETING_SDK_CLIENT_ID="your-client-id"  # pragma: allowlist secret
+#   export ZOOM_MEETING_SDK_CLIENT_SECRET="your-client-secret"  # pragma: allowlist secret
+# MEETING_ZOOM_METHOD can force "dom" or "sdk"; "auto" (default) picks sdk when
+# both credentials are present.
+ZOOM_MEETING_SDK_CLIENT_ID=${ZOOM_MEETING_SDK_CLIENT_ID:-}
+ZOOM_MEETING_SDK_CLIENT_SECRET=${ZOOM_MEETING_SDK_CLIENT_SECRET:-}
+MEETING_ZOOM_METHOD=${MEETING_ZOOM_METHOD:-auto}
 
 # Display Configuration (for local testing)
 DISPLAY=:99

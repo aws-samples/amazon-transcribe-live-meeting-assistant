@@ -28,6 +28,7 @@
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@smithy/protocol-http": "^5.3.5",
     "@smithy/signature-v4": "^5.3.5",
+    "@zoom/meetingsdk": "4.1.0",
     "aws-amplify": "^6.0.0",
     "aws-sigv4-fetch": "^4.3.0",
     "axios": "^1.16.0",

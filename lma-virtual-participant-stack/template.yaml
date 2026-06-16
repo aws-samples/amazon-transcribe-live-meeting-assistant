@@ -142,6 +142,25 @@ Parameters:
       meeting will not be recorded.
       If set to true, the meeting will be recorded.
 
+  ZoomMeetingSdkClientId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Zoom Meeting SDK app Client ID. When both ZoomMeetingSdkClientId
+      and ZoomMeetingSdkClientSecret are provided, the Virtual Participant joins
+      Zoom meetings via the Zoom Meeting Web SDK instead of automating the public
+      web client. Requires Zoom approval/allowlist of the SDK app for meetings
+      outside the app owner's own account. Leave both blank to use the default
+      web-client join.
+
+  ZoomMeetingSdkClientSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional) Zoom Meeting SDK app Client Secret. Paired with
+      ZoomMeetingSdkClientId. Used to sign the SDK join signature.
+
   EnableVideoRecording:
     Type: String
     Default: "true"
@@ -1635,6 +1654,10 @@ Resources:
             # Overridden at task launch by Step Functions when the user opts in.
             - Name: ZOOM_CREDENTIALS_SECRET_NAME
               Value: ""
+            - Name: ZOOM_MEETING_SDK_CLIENT_ID
+              Value: !Ref ZoomMeetingSdkClientId
+            - Name: ZOOM_MEETING_SDK_CLIENT_SECRET
+              Value: !Ref ZoomMeetingSdkClientSecret
             - Name: LMA_USER_SUB
               Value: ""
             - Name: DYNAMODB_TABLE_NAME

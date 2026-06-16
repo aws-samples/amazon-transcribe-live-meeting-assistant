@@ -33,7 +33,9 @@ export interface MeetingInitOptions {
 export interface MeetingDetails {
   // Meeting Configuration
   invite: MeetingInvite;
-  
+
+  zoomMethod: 'dom' | 'sdk';
+
   // LMA Configuration
   lmaIdentity: string;
   lmaUser: string;
@@ -127,6 +129,13 @@ class DetailsManager {
       process.env.EXIT_MESSAGE || 'Live Meeting Assistant has left the room.'
     );
 
+    const zoomSdkCredsPresent = !!((process.env.ZOOM_MEETING_SDK_CLIENT_ID || '').trim() && (process.env.ZOOM_MEETING_SDK_CLIENT_SECRET || '').trim());
+    const zoomMethodOverride = (process.env.MEETING_ZOOM_METHOD || 'auto').toLowerCase();
+    const zoomMethod: 'dom' | 'sdk' =
+      zoomMethodOverride === 'sdk' ? 'sdk'
+      : zoomMethodOverride === 'dom' ? 'dom'
+      : zoomSdkCredsPresent ? 'sdk' : 'dom';
+
     this._details = {
       // Meeting Configuration
       invite: {
@@ -138,6 +147,8 @@ class DetailsManager {
         userName,
         virtualParticipantId,
       },
+
+      zoomMethod,
 
       // LMA Configuration
       lmaIdentity: replacePlaceholders(lmaIdentity),
