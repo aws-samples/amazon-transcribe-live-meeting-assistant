@@ -96,6 +96,7 @@ CALL_EVENT_TYPE_TO_STATUS = {
     "START": "STARTED",
     "END": "ENDED",
     "ADD_S3_RECORDING_URL": "ENDED",
+    "ADD_S3_VIDEO_RECORDING_URL": "ENDED",
 }
 
 # DEFAULT_CUSTOMER_PHONE_NUMBER used to replace an invalid CustomerPhoneNumber
@@ -645,6 +646,39 @@ async def execute_add_s3_recording_mutation(
         DSLMutation(
             schema.Mutation.updateRecordingUrl.args(
                 input={**message, "RecordingUrl": recording_url}
+            ).select(*call_fields(schema))
+        )
+    )
+
+    result = await execute_gql_query_with_retries(
+        query,
+        client_session=appsync_session,
+        logger=LOGGER,
+    )
+
+    query_string = print_ast(query)
+    LOGGER.debug("query result", extra=dict(query=query_string, result=result))
+
+    return result
+
+
+async def execute_add_s3_video_recording_mutation(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Dict:
+    video_recording_url = message.get("VideoRecordingUrl")
+    if not video_recording_url:
+        error_message = "video recording url doesn't exist in add s3 video recording url event"
+        raise TypeError(error_message)
+
+    if not appsync_session.client.schema:
+        raise ValueError("invalid AppSync schema")
+    schema = DSLSchema(appsync_session.client.schema)
+
+    query = dsl_gql(
+        DSLMutation(
+            schema.Mutation.updateVideoRecordingUrl.args(
+                input={**message, "VideoRecordingUrl": video_recording_url}
             ).select(*call_fields(schema))
         )
     )
@@ -1321,6 +1355,7 @@ async def execute_process_event_api_mutation(
         ADD_AGENT_ASSIST="ADD_AGENT_ASSIST",
         ADD_CALL_CATEGORY="ADD_CALL_CATEGORY",
         ADD_S3_RECORDING_URL="ADD_S3_RECORDING_URL",
+        ADD_S3_VIDEO_RECORDING_URL="ADD_S3_VIDEO_RECORDING_URL",
         ADD_PCA_URL="ADD_PCA_URL",
         CALL_ANALYTICS_METADATA="CALL_ANALYTICS_METADATA",
     )
@@ -1566,6 +1601,17 @@ async def execute_process_event_api_mutation(
         # ADD S3 RECORDING URL
         LOGGER.debug("Add recording url")
         response = await execute_add_s3_recording_mutation(
+            message=message, appsync_session=appsync_session
+        )
+        if isinstance(response, Exception):
+            return_value["errors"].append(response)
+        else:
+            return_value["successes"].append(response)
+
+    elif event_type == "ADD_S3_VIDEO_RECORDING_URL":
+        # ADD S3 VIDEO RECORDING URL
+        LOGGER.debug("Add video recording url")
+        response = await execute_add_s3_video_recording_mutation(
             message=message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):
