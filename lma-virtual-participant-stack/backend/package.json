@@ -40,7 +40,7 @@
     "playwright-core": "^1.53.0",
     "simli-client": "^3.0.1",
     "uuid": "^14.0.0",
-    "ws": "^8.20.1"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.7",
