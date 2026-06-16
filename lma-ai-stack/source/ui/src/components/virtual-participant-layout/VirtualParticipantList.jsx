@@ -883,8 +883,8 @@ const VirtualParticipantList = () => {
             <FormField
               label="Stored browser profile (Optional)"
               description={
-                'LMA reuses a saved browser profile across meetings so cookies and trusted-device markers ' +
-                'persist. For Teams, this lets a CAPTCHA you solve once carry over to later joins. ' +
+                'LMA reuses a saved browser profile for this meeting platform so cookies and trusted-device ' +
+                'markers persist. For Teams, this lets a CAPTCHA you solve once carry over to later joins. ' +
                 'Remove it to start fresh.'
               }
               stretch

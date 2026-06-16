@@ -147,8 +147,8 @@ export async function acquireProfile(opts: { cognitoSub: string; platform?: stri
     const platform = normalizePlatform(opts.platform);
     const userHash = createHash('sha256').update(sub.toLowerCase()).digest('hex');
     handle.enabled = true;
-    handle.s3Key = `${S3_PREFIX}${userHash}/${TAR_NAME}`;
-    handle.localDir = join(PROFILE_ROOT, userHash.slice(0, 16));
+    handle.s3Key = `${S3_PREFIX}${userHash}/${platform}/${TAR_NAME}`;
+    handle.localDir = join(PROFILE_ROOT, `${userHash.slice(0, 16)}-${platform}`);
     await fs.mkdir(handle.localDir, { recursive: true });
 
     console.log(`[profile-store] user hash (sha256) : ${userHash.slice(0, 16)}...`);

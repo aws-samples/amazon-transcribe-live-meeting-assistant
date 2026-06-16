@@ -196,6 +196,8 @@ def _normalize_platform(platform: Optional[str]) -> str:
 
 def _user_profile_prefix(sub: str, platform: Optional[str] = None) -> str:
     user_hash = hashlib.sha256(sub.lower().encode("utf-8")).hexdigest()
+    if platform:
+        return f"profiles/{user_hash}/{_normalize_platform(platform)}/"
     return f"profiles/{user_hash}/"
 
 
@@ -294,6 +296,9 @@ def delete_my_zoom_credentials(event: Dict[str, Any]) -> bool:
         if code != "ResourceNotFoundException":
             logger.error("Failed to delete secret %s: %s", secret_name, exc)
             raise
+    deleted = _delete_user_profiles(sub, "zoom")
+    if deleted:
+        logger.info("Wiped %d Zoom profile object(s) for user sub=%s", deleted, sub)
     return True
 
 
