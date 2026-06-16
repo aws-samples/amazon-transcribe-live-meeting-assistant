@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-06-16
+
 ### Added
 
 - **Virtual Participant meeting video recording** — The VP can now capture the meeting screen (screen shares, slides, participant video, platform UI) as an MP4 alongside the existing audio recording. It records its own X11 display with FFmpeg, uploads 60-second `.ts` segments to S3 incrementally (so a container crash loses at most the last segment), and assembles a single seekable `.mp4` (with `+faststart`) on meeting end. The final URL is sent to Kinesis as an `ADD_S3_VIDEO_RECORDING_URL` event and persisted on the call record's new `Call.VideoRecordingUrl` field (separate from the audio `RecordingUrl`), so a new **Recording Video** player in the meeting detail view presigns and plays it back with the user's Cognito credentials — no S3 listing or public access. Recording is controlled by a per-meeting **Record meeting video** toggle in the Create Virtual Participant modal (default **on**) and a deployment-wide `EnableVideoRecording` CloudFormation parameter (default `true`). In-progress segments are deleted after assembly, with a 1-day S3 lifecycle backstop for crash-orphaned chunks; final videos follow the audio retention period. Capture runs at 5 fps / `libx264 -preset ultrafast` (~5-10% CPU; tunable via `VIDEO_FRAMERATE` / `VIDEO_RESOLUTION` / `VIDEO_SEGMENT_DURATION`). See [Virtual Participant → Meeting Video Recording](docs/virtual-participant.md#meeting-video-recording).
