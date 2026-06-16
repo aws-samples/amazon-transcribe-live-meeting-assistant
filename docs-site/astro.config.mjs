@@ -169,6 +169,7 @@ export default defineConfig({
             { label: "Upload Audio", slug: "upload-audio" },
             { label: "Virtual Participant Local Dev", slug: "virtual-participant-local-dev" },
             { label: "Zoom Credentials And Join Reliability", slug: "zoom-credentials-and-join-reliability" },
+            { label: "Zoom Meeting Sdk", slug: "zoom-meeting-sdk" },
           ],
         },
         // AUTO-SIDEBAR-END
