@@ -22,6 +22,7 @@ import {
   DatePicker,
   TimeInput,
   Checkbox,
+  Toggle,
   Textarea,
   Pagination,
   TextFilter,
@@ -113,6 +114,10 @@ const VirtualParticipantList = () => {
   });
   const [meetingTimeError, setMeetingTimeError] = useState('');
   const [consentChecked, setConsentChecked] = useState(false);
+  // Per-VP screen-recording toggle. Default ON (matches the ENABLE_VIDEO_RECORDING
+  // task-definition default); users untick to launch a VP that records audio +
+  // transcript only.
+  const [enableVideoRecording, setEnableVideoRecording] = useState(true);
   const [notification, setNotification] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
   const [creatingType, setCreatingType] = useState(null);
@@ -528,6 +533,10 @@ const VirtualParticipantList = () => {
         meetingId: createForm.meetingId.replace(/ /g, ''),
         meetingPassword: effectivePassword,
         status: isScheduled ? 'SCHEDULED' : 'INITIALIZING',
+        // Persisted on the row so the VPScheduler Lambda can plumb
+        // ENABLE_VIDEO_RECORDING to scheduled launches. Immediate launches
+        // carry it via the Step Functions input below.
+        enableVideoRecording,
       };
 
       // Add scheduling fields if this is a scheduled VP
@@ -572,6 +581,8 @@ const VirtualParticipantList = () => {
               virtualParticipantId,
               userSub,
               userZoomSub,
+              // ECS container Environment values must be strings, not booleans.
+              enableVideoRecording: enableVideoRecording ? 'true' : 'false',
               accessToken: (await fetchAuthSession()).tokens?.accessToken?.toString() || '',
               idToken: (await fetchAuthSession()).tokens?.idToken?.toString() || '',
               rereshToken: '', // Amplify v6 does not expose refresh tokens directly
@@ -617,6 +628,7 @@ const VirtualParticipantList = () => {
       });
       setMeetingTimeError('');
       setConsentChecked(false);
+      setEnableVideoRecording(true);
 
       loadParticipants();
 
@@ -915,6 +927,19 @@ const VirtualParticipantList = () => {
                 />
               </SpaceBetween>
               {meetingTimeError && <Alert type="error">{meetingTimeError}</Alert>}
+            </FormField>
+
+            <FormField
+              label="Video recording"
+              description={
+                'Capture the meeting screen (screen shares, slides, participants) as an MP4 alongside the audio ' +
+                'recording. Adds CPU/storage cost. Turn off to record audio and transcript only.'
+              }
+              stretch
+            >
+              <Toggle checked={enableVideoRecording} onChange={({ detail }) => setEnableVideoRecording(detail.checked)}>
+                Record meeting video
+              </Toggle>
             </FormField>
 
             <Checkbox onChange={({ detail }) => setConsentChecked(detail.checked)} checked={consentChecked}>

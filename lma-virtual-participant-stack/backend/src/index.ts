@@ -9,6 +9,7 @@ import { details, ExitInfo, formatExitMessage, didJoinMeeting } from './details.
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
+import { videoRecorder } from './video-recorder.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
@@ -620,6 +621,14 @@ const main = async (): Promise<void> => {
         // Start recording service
         recordingService.startRecording();
 
+        // Start screen (video) recording in parallel with audio. No-op unless
+        // ENABLE_VIDEO_RECORDING is set; runs independently of audio recording.
+        try {
+            await videoRecorder.start(process.env.VP_CALL_ID || '');
+        } catch (error) {
+            console.error('Error starting video recording:', error);
+        }
+
         // Join the meeting and wait for it to end. The platform handler
         // returns a structured ExitInfo describing WHY the meeting ended;
         // we log it canonically and persist a human-readable form alongside
@@ -684,6 +693,20 @@ const main = async (): Promise<void> => {
                 const { kinesisStreamManager } = await import('./kinesis-stream.js');
                 await kinesisStreamManager.sendCallRecording(recordingUrl);
             }
+
+            // Stop screen (video) recording and upload to S3. Independent of
+            // audio: a video failure must not block the END event below.
+            try {
+                const videoRecordingUrl = await videoRecorder.stop();
+                if (videoRecordingUrl) {
+                    console.log(`Video recording uploaded: ${videoRecordingUrl}`);
+                    const { kinesisStreamManager } = await import('./kinesis-stream.js');
+                    await kinesisStreamManager.sendCallVideoRecording(videoRecordingUrl);
+                }
+            } catch (videoError) {
+                console.error('Error handling video recording cleanup:', videoError);
+            }
+
             // Always send END event
             await sendEndMeeting();
         } catch (error) {

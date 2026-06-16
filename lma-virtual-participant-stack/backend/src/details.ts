@@ -85,6 +85,7 @@ export interface MeetingDetails {
   
   // Recording Configuration
   enableAudioRecording: boolean;
+  enableVideoRecording: boolean;
   tmpRecordingFilename: string;
   meetingMode?: string;
 }
@@ -203,6 +204,9 @@ class DetailsManager {
 
       // Recording Configuration
       enableAudioRecording: process.env.ENABLE_AUDIO_RECORDING !== 'false',
+      // Video recording defaults ON; the per-VP UI toggle and task-definition
+      // default set ENABLE_VIDEO_RECORDING='false' to opt out.
+      enableVideoRecording: process.env.ENABLE_VIDEO_RECORDING !== 'false',
       tmpRecordingFilename: `/tmp/${meetingName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.wav`,
     };
   }

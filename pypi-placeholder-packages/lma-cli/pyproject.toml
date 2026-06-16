@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lma-cli"
+version = "0.3.4"
+description = "Reserved placeholder package for AWS Live Meeting Assistant internal CLI"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Amazon Web Services" },
+]
+requires-python = ">=3.10"
+
+[project.urls]
+Homepage = "https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant"

@@ -3740,6 +3740,17 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/updateCall.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
+  UpdateVideoRecordingUrlAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: updateVideoRecordingUrl
+      RequestMappingTemplateS3Location: ../source/appsync/updateCall.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
   UpdatePcaUrlAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -5107,6 +5118,13 @@ Resources:
         #end
         #if(!$util.isNullOrBlank($ctx.args.input.userZoomSub))
           $util.qr($input.put("userZoomSub", $ctx.args.input.userZoomSub))
+        #end
+
+        ## Per-VP video-recording toggle (Boolean, default true). Persisted so
+        ## the VPScheduler Lambda can plumb ENABLE_VIDEO_RECORDING to scheduled
+        ## launches; immediate launches also pass it via the Step Functions input.
+        #if(!$util.isNull($ctx.args.input.enableVideoRecording))
+          $util.qr($input.put("enableVideoRecording", $ctx.args.input.enableVideoRecording))
         #end
 
         {

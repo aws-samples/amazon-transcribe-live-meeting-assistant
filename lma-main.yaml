@@ -504,6 +504,18 @@ Parameters:
       (Optional) Zoom Meeting SDK app Client Secret. Paired with
       ZoomMeetingSdkClientId. Used to sign the SDK join signature.
 
+  EnableVideoRecording:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Default for capturing meeting video (screen recording) by the Virtual
+      Participant, in addition to audio. This is the deployment-wide default;
+      users can override it per meeting with the "Record meeting video" toggle in
+      the LMA UI. Video recordings consume additional CPU and S3 storage.
+
   AudioRecordingExpirationInDays:
     Type: Number
     Description:
@@ -794,6 +806,7 @@ Metadata:
           default: Retention Settings
         Parameters:
           - EnableAudioRecording
+          - EnableVideoRecording
           - MeetingRecordExpirationInDays
           - TranscriptionExpirationInDays
           - AudioRecordingExpirationInDays
@@ -1983,6 +1996,17 @@ Resources:
             Status: Enabled
             Prefix: "lma-audio-recordings/"
             ExpirationInDays: !Ref AudioRecordingExpirationInDays
+          - Id: VideoRetention
+            Status: Enabled
+            Prefix: "lma-video-recordings/"
+            ExpirationInDays: !Ref AudioRecordingExpirationInDays
+          - Id: VideoChunkCleanup
+            Status: Enabled
+            # In-progress video segments are deleted by the VP after the final
+            # .mp4 is assembled; this rule is a backstop for chunks orphaned by a
+            # container crash so they never accumulate cost.
+            Prefix: "lma-video-chunks/"
+            ExpirationInDays: 1
           - Id: TranscriptRetention
             Status: Enabled
             Prefix: "lma-transcripts/"
@@ -2549,6 +2573,7 @@ Resources:
         EnableAudioRecording: !Ref EnableAudioRecording
         ZoomMeetingSdkClientId: !Ref ZoomMeetingSdkClientId
         ZoomMeetingSdkClientSecret: !Ref ZoomMeetingSdkClientSecret
+        EnableVideoRecording: !Ref EnableVideoRecording
         ElevenLabsApiKey: !Ref ElevenLabsApiKey
         ElevenLabsAgentId: !Ref ElevenLabsAgentId
         SimliApiKey: !Ref SimliApiKey

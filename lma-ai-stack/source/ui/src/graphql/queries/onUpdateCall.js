@@ -20,6 +20,7 @@ export default /* GraphQL */ `
       CustomerPhoneNumber
       SystemPhoneNumber
       RecordingUrl
+      VideoRecordingUrl
       PcaUrl
       Owner
       SharedWith
