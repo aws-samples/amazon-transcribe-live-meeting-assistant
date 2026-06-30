@@ -45,7 +45,8 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz"
   },
   "overrides": {
-    "fast-xml-builder": "^1.1.7"
+    "fast-xml-builder": "^1.1.7",
+    "form-data@4": "^4.0.6"
   },
   "scripts": {
     "dev": "vite",
@@ -82,7 +83,7 @@
     "eslint-plugin-react-hooks": "^4.6.2",
     "jsdom": "^26.1.0",
     "prettier": "^2.8.8",
-    "vite": "^7.3.2",
+    "vite": "^7.3.5",
     "vitest": "^3.1.0"
   }
 }
