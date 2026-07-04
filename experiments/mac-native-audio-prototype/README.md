@@ -202,6 +202,81 @@ recent macOS. To distribute outside the Mac App Store you need the full chain.
 8. **Package for download** — ship a `.dmg` or `.pkg`. Sign **and** notarize the
    container too (staple the outer artifact), not just the inner `.app`.
 
+### Ad-hoc signing vs notarization — and "can users sign it themselves?"
+
+There's a local/self-signing command — **ad-hoc signing** — but it solves a
+*different* problem than notarization, so it does **not** let you skip the chain
+above for a polished download.
+
+```bash
+codesign -s - /path/to/LMAAudioClient    # "-s -" = ad-hoc: no cert, no Apple account
+```
+
+Two separate problems, and ad-hoc only fixes the first:
+
+| | Ad-hoc `codesign -s -` | Developer ID + notarization |
+|---|:---:|:---:|
+| Makes an **arm64** binary executable at all | ✅ | ✅ |
+| Passes **Gatekeeper** on a downloaded file | ❌ | ✅ |
+| Suppresses "developer cannot be verified" | ❌ | ✅ |
+
+Key facts:
+- On **Apple Silicon, a signature is mandatory** — arm64 code won't run unsigned.
+  `swift build` applies an ad-hoc signature automatically, which is why a
+  locally-built binary "just runs".
+- What actually blocks a *downloaded* file is the **`com.apple.quarantine`**
+  extended attribute Gatekeeper adds to browser downloads. A user's ad-hoc
+  signature does **not** remove it and is **not** a substitute for Apple
+  notarization.
+
+So the "ship unsigned, user signs after download" idea works only as this
+two-command dance the user runs post-download:
+
+```bash
+xattr -dr com.apple.quarantine ~/Downloads/LMAAudioClient  # strip download quarantine
+codesign -s - ~/Downloads/LMAAudioClient                   # ad-hoc sign (if shipped unsigned on arm64)
+```
+
+That's acceptable for a **CLI aimed at technical users** (many OSS Mac CLIs ship
+this way). It's poor, slightly alarming UX for a **GUI app aimed at
+non-technical users** — pasting `xattr`/`codesign` from a website is exactly
+what notarization exists to avoid.
+
+### ⚠️ The existing LMA CodeBuild pipeline cannot build this
+
+`publish.sh` / the LMA CodeBuild pipeline is **Linux** (SAM, Docker, npm). A
+native macOS Swift app using ScreenCaptureKit **cannot be cross-compiled from
+Linux**, and `codesign` / `notarytool` are **macOS-only** tools. Therefore:
+- The current Linux CodeBuild **cannot produce this artifact at all** — signed
+  or unsigned. "Build unsigned in CodeBuild during deploy" is not a small tweak.
+- Building it requires a **macOS build lane**: EC2 Mac, a CodeBuild macOS fleet,
+  a GitHub Actions macOS runner, or a developer's Mac.
+
+### Distribution options, ranked
+
+1. **Build-from-source on the user's Mac (recommended for prototype / v1).**
+   User runs `swift build`. The toolchain ad-hoc-signs automatically and there's
+   no quarantine attribute (nothing was downloaded), so it *just runs* — no
+   `xattr`, no Apple account, no CI changes, $0. Only cost: users need Xcode
+   command-line tools. Fits "buildable/downloadable from the LMA site" directly.
+
+2. **Prebuilt in a macOS lane, shipped unsigned/ad-hoc; user strips quarantine.**
+   Add a macOS runner, build, upload to the site/S3 bucket. User runs the two
+   `xattr`/`codesign` commands above. Fine for a CLI + technical users; weak for
+   a GUI.
+
+3. **Prebuilt + Developer ID + notarization (best UX, real cost).**
+   Same macOS lane plus the $99/yr Apple account, Developer ID cert, and notary
+   credentials in CI secrets (`codesign --options runtime` → `notarytool submit`
+   → `stapler staple`). Users double-click, no warnings. The only pleasant path
+   for non-technical users — but requires standing up macOS build infra separate
+   from the existing Linux pipeline.
+
+**Recommendation:** option 1 for the prototype and first internal release
+(zero infra, zero cost, sidesteps signing entirely); optionally add option 2 as
+a convenience prebuilt. Move to option 3 only for a public, non-technical-user
+release.
+
 ### Gotchas
 - **Sign inside-out**: sign nested frameworks/helpers/dylibs before the outer
   bundle, then the `.dmg`/`.pkg` last.
