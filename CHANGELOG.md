@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Upgraded the web UI build toolchain to Vite 8 / Vitest 4** (`lma-ai-stack/source/ui`). Vite 8's Rolldown + Oxc pipeline no longer honors the Vite 7 `esbuild` / `optimizeDeps.esbuildOptions` config the UI used to transform JSX inside plain `.js` files (the legacy CRA convention), so `vite.config.js` was migrated: a small `enforce: 'pre'` plugin now runs `transformWithOxc` with `lang: 'jsx'` over `src/**/*.js`, dep pre-bundling uses `optimizeDeps.rolldownOptions`, and `build.rollupOptions.output.manualChunks` was converted from an object to a function (same aws-amplify / aws-sdk / cloudscape / react-vendor groupings). Production build and the Vitest suite both pass unchanged.
+
 ## [0.3.5] - 2026-06-16
 
 ### Added
