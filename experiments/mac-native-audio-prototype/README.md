@@ -1,0 +1,225 @@
+# LMA Native macOS Audio Client — Prototype & Plan
+
+Streams **microphone + system audio** from a Mac directly to the LMA WebSocket
+transcriber, so a user can transcribe a meeting they joined from a **native
+desktop app** (Zoom / Teams / Meet / Slack huddle / phone bridge) — no Chrome
+tab sharing, no Virtual Participant bot.
+
+> ⚠️ **Status: untested spike.** This code was written on a Linux dev box and
+> has **not** been compiled or run on a Mac. Treat it as a starting point:
+> the protocol framing and audio pipeline shape are correct against the LMA
+> server contract, but expect to fix small ScreenCaptureKit / AVFoundation API
+> details on first build (those frameworks aren't available off-macOS to verify).
+
+---
+
+## Why this is the right approach
+
+The browser "Stream Audio" tab gets incoming meeting audio from
+`getDisplayMedia({video:true, audio:true})` — Chrome/Edge-only, and it can only
+hear audio playing **inside a browser tab**. It cannot hear a native Zoom/Teams
+client. macOS **system-audio loopback** (ScreenCaptureKit) captures whatever is
+playing on the machine regardless of the source app — exactly what screen
+recorders use. That removes the browser dependency entirely.
+
+The server side needs **no changes**: the transcriber is a plain WebSocket that
+takes a JSON `START` frame then raw interleaved 16-bit PCM binary frames. We're
+just a third client (alongside the browser and the existing Node reference
+client at `utilities/websocket-client/`).
+
+## The wire protocol (what this client implements)
+
+1. `wss://<cloudfront-domain>/api/v1/ws`, Cognito **access token** in the
+   `Authorization: Bearer` header (native clients can set headers; browsers use
+   a query param instead — the server accepts both).
+2. One JSON text frame: `{callId, agentId, fromNumber, toNumber, samplingRate, callEvent:"START"}`.
+3. Raw **16-bit LE PCM, 2-channel interleaved**, ~100 ms binary frames.
+   **ch0 = meeting/system audio (→ CALLER), ch1 = mic (→ AGENT).**
+4. JSON `{..., callEvent:"END"}`, then close.
+
+Source layout:
+- `Config.swift`         — CLI/env config parsing.
+- `TranscriberSocket.swift` — WebSocket + START/PCM/END framing (URLSession, no deps).
+- `AudioCapture.swift`   — ScreenCaptureKit (system audio) + AVAudioEngine (mic).
+- `StereoMixer.swift`    — align two mono streams → interleaved int16 chunks.
+- `main.swift`           — wire-up + Ctrl-C shutdown.
+
+## Build & run (on a Mac)
+
+Requires macOS 13+ and Xcode command-line tools (`xcode-select --install`).
+
+```bash
+cd experiments/mac-native-audio-prototype
+swift build
+
+# First run: macOS will prompt for Microphone AND Screen Recording permission.
+# Screen Recording is required even for audio-only SCK capture. Grant both,
+# then re-run (Screen Recording usually needs a relaunch to take effect).
+
+swift run LMAAudioClient \
+  --endpoint  wss://<your-cloudfront-domain>/api/v1/ws \
+  --token     <cognito-access-token> \
+  --id-token  <cognito-id-token> \
+  --call-id   "Native Mac test $(date +%H:%M)"
+```
+
+### Getting a token for the spike
+
+Fastest path: log into the LMA web UI in Chrome, open DevTools → Application →
+Session/Local Storage, and copy the Cognito **access token** and **id token**
+(keys under `CognitoIdentityServiceProvider.<clientId>.<user>.accessToken` /
+`.idToken`). Paste into `--token` / `--id-token`. Tokens expire in ~1 hour —
+fine for a spike; production needs the OAuth flow below.
+
+### Permission prompts during the spike (important)
+
+A bare `swift run` executable has **no app bundle / Info.plist**, so macOS
+attributes its Microphone and Screen Recording access to the **parent process —
+i.e. Terminal.app (or iTerm)** — not to "LMAAudioClient". Practical consequence:
+grant **Terminal** both Microphone and Screen Recording in
+System Settings › Privacy & Security, relaunch Terminal, then re-run. If SCK
+still fails, wrap the binary in a minimal `.app` bundle (with the usage-string
+`Info.plist`) so it gets its own TCC identity — that's what the production build
+does anyway. This is a spike-only wrinkle, not a design problem.
+
+### Verifying it works
+
+Start a meeting in the **native Zoom/Teams app**, run the client, and watch the
+LMA web UI meeting list — a new meeting (your `--call-id`) should appear with
+live transcript segments, with your speech on the AGENT channel and the remote
+participants on the CALLER channel. Also check the transcriber's CloudWatch logs
+for the `START` event and Transcribe session.
+
+---
+
+## Production plan
+
+Rough phasing; each builds on the prior.
+
+### Phase 1 — Core capture app (the spike, hardened)
+- Fix any first-build SCK/AVFoundation API issues; handle device changes
+  (default output/input switching mid-meeting), sample-rate mismatches, and
+  under/overflow when one source stalls.
+- Robust reconnect: on WS drop, re-open and send a **fresh START** (server does
+  not support client session resume). Buffer briefly during reconnect.
+- Mic-mute toggle; VU meters so users can confirm both channels are live.
+
+### Phase 2 — Auth (replaces pasted tokens)
+- **OAuth Authorization Code + PKCE** against the Cognito Hosted UI: open the
+  system browser, catch the redirect on `http://127.0.0.1:<port>` (or a custom
+  URL scheme), exchange the code for tokens.
+- **Refresh-token handling**: access tokens expire (~1 h); refresh before
+  reconnect. Store the refresh token in the **macOS Keychain**.
+- Fetch `WSEndpoint` + Cognito App Client ID / Hosted-UI domain from a small
+  bootstrap config (today those live in SSM; expose a tiny unauthenticated
+  config endpoint or ship a downloadable `.lmaconfig` file from the LMA site).
+
+### Phase 3 — App shell & UX
+- Menu-bar app (tray) with: sign-in, endpoint/config, meeting name, start/stop,
+  mute, live status + VU meters, "recording in progress" indicator.
+- Recommended stack: **native Swift + SwiftUI** (keeps the SCK/Core Audio path
+  first-class and the bundle small). Avoid Electron — it re-imports the exact
+  Chromium `getDisplayMedia` limitation we're escaping.
+- First-run permission wizard (Microphone + Screen Recording) with deep links
+  into System Settings and clear "why we need this" copy.
+
+### Phase 4 — Distribution
+- **Developer ID signing + Apple notarization** (see below) — mandatory for a
+  downloadable app.
+- Auto-update (Sparkle) or "check for updates" against the LMA site.
+- Offer both a signed `.dmg`/`.pkg` download **and** buildable source.
+- Windows counterpart later: WASAPI loopback (built into the OS — easier than
+  macOS), same protocol client; Authenticode signing.
+
+### Cross-platform note
+If a shared codebase becomes a priority, a **Rust core** (`cpal` for WASAPI
+loopback on Windows; a thin ScreenCaptureKit shim on macOS) with per-OS UI is
+the natural consolidation. For a macOS-first launch, native Swift is faster.
+
+---
+
+## macOS code signing & notarization — what you're signing up for
+
+This is the biggest non-code cost of shipping a downloadable Mac app. Summary:
+**an unsigned/un-notarized app is effectively undistributable** — Gatekeeper
+will block it with "cannot be opened because the developer cannot be verified"
+and, for quarantined downloads, users can't even right-click-open it cleanly on
+recent macOS. To distribute outside the Mac App Store you need the full chain.
+
+### The chain
+
+1. **Apple Developer Program membership** — $99/year. Gives you the ability to
+   create signing certificates and notarize.
+
+2. **Developer ID Application certificate** — this is the identity you sign the
+   app with for **outside-the-App-Store** distribution. (The "Apple
+   Development" / "Mac App Store" certs are different and won't work for a
+   website download.) Created in the Apple Developer portal or via Xcode;
+   the private key lives in your login Keychain / CI keychain.
+
+3. **Sign the app bundle** with `codesign`, using the **hardened runtime**
+   (`--options runtime`) — notarization *requires* hardened runtime:
+   ```bash
+   codesign --deep --force --options runtime \
+     --entitlements LMAAudioClient.entitlements \
+     --sign "Developer ID Application: Your Org (TEAMID)" \
+     LMAAudioClient.app
+   ```
+
+4. **Entitlements** — the hardened runtime blocks capabilities unless you
+   declare them. For this app you need at least:
+   - `com.apple.security.device.audio-input` (microphone)
+   - Screen Recording is **not** an entitlement — it's a **TCC user consent**
+     prompt driven by an `Info.plist` usage string (see below).
+   - If you later sandbox for other reasons, more entitlements apply; a plain
+     Developer ID app does **not** have to be sandboxed.
+
+5. **Info.plist usage-description strings** — required or the app crashes when
+   it hits the API instead of prompting:
+   - `NSMicrophoneUsageDescription` — "LMA needs the microphone to transcribe
+     your side of the meeting."
+   - **Screen Recording**: there is no dedicated plist key; the prompt is
+     triggered by ScreenCaptureKit at runtime. You should still explain it in
+     onboarding because audio-only capture confusingly requires the *Screen
+     Recording* permission on macOS.
+
+6. **Notarization** — upload the signed app to Apple's notary service; Apple
+   scans it for malware and returns a ticket, usually within minutes:
+   ```bash
+   # Zip or wrap in a signed .dmg/.pkg first, then:
+   xcrun notarytool submit LMAAudioClient.zip \
+     --apple-id you@org.com --team-id TEAMID --password <app-specific-pw> \
+     --wait
+   ```
+   Use an **app-specific password** (or an API key) — not your Apple ID password.
+
+7. **Staple the ticket** so the app validates offline (users may run it with no
+   network on first launch):
+   ```bash
+   xcrun stapler staple LMAAudioClient.app     # or the .dmg / .pkg
+   ```
+
+8. **Package for download** — ship a `.dmg` or `.pkg`. Sign **and** notarize the
+   container too (staple the outer artifact), not just the inner `.app`.
+
+### Gotchas
+- **Sign inside-out**: sign nested frameworks/helpers/dylibs before the outer
+  bundle, then the `.dmg`/`.pkg` last.
+- **CI signing** needs the Developer ID cert imported into a temporary keychain
+  and unlocked; store the cert (`.p12`) and notary credentials as CI secrets.
+- **Certificates expire** (Developer ID Application: ~5 years) and depend on
+  active membership — a lapsed $99 renewal breaks your ability to notarize new
+  builds (already-notarized builds keep working).
+- **Timestamping**: `codesign` uses Apple's secure timestamp by default; keep it
+  (needed so signatures stay valid after the cert expires).
+- **First-launch permission dance**: Screen Recording usually requires the user
+  to toggle the app in System Settings and **relaunch** — build that into
+  onboarding; you can't fully script it away.
+- **`spctl -a -vvv LMAAudioClient.app`** and `codesign -dv --verbose=4` are your
+  verification tools before publishing.
+
+### Windows (for later)
+Analogous but simpler audio (WASAPI loopback is built in). Signing uses an
+**Authenticode** code-signing certificate; modern practice is an **OV/EV cert
+on a hardware token or cloud HSM** (CAs stopped issuing file-based certs).
+EV certs clear SmartScreen reputation faster. Budget ~$100–400/yr for the cert.
