@@ -1,0 +1,4 @@
+.env.local
+build/
+.build/
+lma-config.json

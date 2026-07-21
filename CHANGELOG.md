@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Audio Capture App (Native macOS) — a new meeting source** — A native macOS menu-bar app that streams your microphone **and** your computer's system (meeting) audio to LMA, so meetings joined from a **native desktop app** (Zoom, Teams, Webex, Slack, phone bridges, …) can be transcribed with **no browser tab and no Virtual Participant bot**. It captures system audio via ScreenCaptureKit loopback + the mic via AVAudioEngine, interleaves them into the same 2-channel PCM the browser sources send, and feeds the unchanged transcriber (mic → "My Mic"/AGENT, system → "Meeting Audio"/CALLER). Signs in with your normal LMA username/password via a dependency-free Cognito SRP implementation (validated against a reference impl offline). The menu-bar UI provides start/stop/pause, mute mic/system, live per-channel level meters, a red recording indicator, "Open in LMA", remember-email, and start-at-login; it also runs headless as a CLI (any `--flag`). Distributed from the web UI's new **Sources ▸ Audio Capture App (Native)** page as a preconfigured source zip (a new `lma-audio-capture-app-stack` runs a CodeBuild that bakes this deployment's endpoint + Cognito settings into `lma-config.json` and zips the source; the user builds locally with `install-macos.sh` — a macOS/ScreenCaptureKit app can't be cross-compiled by the Linux pipeline). macOS is available now; Windows and iOS/Android are on the roadmap. See [Audio Capture App (Native)](docs/audio-capture-app.md) and the updated [Meeting Sources](docs/meeting-sources.md) comparison.
+
 ### Changed
 
 - **Upgraded the web UI build toolchain to Vite 8 / Vitest 4** (`lma-ai-stack/source/ui`). Vite 8's Rolldown + Oxc pipeline no longer honors the Vite 7 `esbuild` / `optimizeDeps.esbuildOptions` config the UI used to transform JSX inside plain `.js` files (the legacy CRA convention), so `vite.config.js` was migrated: a small `enforce: 'pre'` plugin now runs `transformWithOxc` with `lang: 'jsx'` over `src/**/*.js`, dep pre-bundling uses `optimizeDeps.rolldownOptions`, and `build.rollupOptions.output.manualChunks` was converted from an object to a function (same aws-amplify / aws-sdk / cloudscape / react-vendor groupings). Production build and the Vitest suite both pass unchanged.
+
+### Fixed
+
+- **Blank meeting-detail page after the Vite 8 upgrade** — Opening any meeting that had a recording rendered a blank screen (React error #130, "Element type is invalid"). Vite 8's Rolldown bundler resolves the CommonJS default export of `react-audio-player` (an old webpack UMD bundle) to a module object rather than the component, so the audio player wasn't a valid element and crashed `CallPanel` once the recording's presigned URL loaded. Replaced it with a native `<audio controls>` element and removed the dependency (it was a thin `<audio>` shim), which also clears its `direct-eval` build warning.
+- **Blank Stream Audio page (and embed variants) after the Vite 8 upgrade** — `/#/stream` rendered blank with `useWebSocket is not a function`. Rolldown "double-wraps" the CommonJS default export of `react-use-websocket` (exports the `module.exports` object as the ESM default), so `import useWebSocket from 'react-use-websocket'` was an object, not the hook. `StreamAudio`, `EmbedStreamAudio`, and `EmbedMeetingLoader` now unwrap to whichever nesting level is the function, bundler-interop-agnostic.
 
 ## [0.3.5] - 2026-06-16
 
