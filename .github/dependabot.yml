@@ -1,0 +1,100 @@
+# Dependabot configuration for LMA.
+#
+# Keeps npm and pip dependencies patched automatically via grouped PRs against
+# `develop`. Grouping batches minor/patch bumps into a single PR per ecosystem
+# area (weekly) to avoid the PR pile-up that accumulated before this config
+# existed, while still surfacing major bumps individually for manual review.
+#
+# `directories:` globs let one entry cover the many Lambda / package manifests
+# without listing each dir. Security updates are always raised regardless of the
+# schedule.
+version: 2
+updates:
+  # ── npm: web UI ───────────────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /lma-ai-stack/source/ui
+    schedule:
+      interval: weekly
+    target-branch: develop
+    open-pull-requests-limit: 10
+    groups:
+      ui-minor-patch:
+        update-types: [minor, patch]
+
+  # ── npm: internet-facing WebSocket transcriber (highest-priority runtime) ──
+  - package-ecosystem: npm
+    directories:
+      - /lma-websocket-transcriber-stack/source/app
+      - /lma-websocket-transcriber-stack/source/lambda_functions/pca_integration
+    schedule:
+      interval: weekly
+    target-branch: develop
+    open-pull-requests-limit: 10
+    groups:
+      transcriber-minor-patch:
+        update-types: [minor, patch]
+
+  # ── npm: Virtual Participant backend ──────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /lma-virtual-participant-stack/backend
+    schedule:
+      interval: weekly
+    target-branch: develop
+    open-pull-requests-limit: 10
+    groups:
+      vp-minor-patch:
+        update-types: [minor, patch]
+
+  # ── npm: browser extension (build/dev-heavy) ──────────────────────────────
+  - package-ecosystem: npm
+    directory: /lma-browser-extension-stack
+    schedule:
+      interval: weekly
+    target-branch: develop
+    open-pull-requests-limit: 10
+    groups:
+      browser-ext-minor-patch:
+        update-types: [minor, patch]
+
+  # ── npm: misc tooling (docs site, CDK helpers, utilities, root) ───────────
+  - package-ecosystem: npm
+    directories:
+      - /
+      - /docs-site
+      - /lma-ai-stack
+      - /lma-ai-stack/deployment/manifest-generator
+      - /utilities/websocket-client
+    schedule:
+      interval: weekly
+    target-branch: develop
+    open-pull-requests-limit: 10
+    groups:
+      tooling-minor-patch:
+        update-types: [minor, patch]
+
+  # ── pip: AI stack Lambda functions + layers ───────────────────────────────
+  - package-ecosystem: pip
+    directories:
+      - /lma-ai-stack/requirements
+      - /lma-ai-stack/source/lambda_functions/*
+      - /lma-ai-stack/source/lambda_layers/*
+      - /lma-websocket-transcriber-stack/source/lambda_functions/*
+      - /lma-meetingassist-setup-stack/*
+    schedule:
+      interval: weekly
+    target-branch: develop
+    open-pull-requests-limit: 10
+    groups:
+      python-minor-patch:
+        update-types: [minor, patch]
+
+  # ── GitHub Actions ────────────────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: develop
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        update-types: [minor, patch]
