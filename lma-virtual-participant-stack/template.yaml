@@ -1529,6 +1529,110 @@ Resources:
         - Key: Name
           Value: !Sub "${AWS::StackName}-VP-Instance"
           PropagateAtLaunch: true
+        # Patch group tag consumed by VPPatchBaseline / VPPatchMaintenanceWindow
+        # below. This is what wires these hosts into SSM Patch Manager so OS
+        # security updates are applied on a schedule (the UserData intentionally
+        # does NOT patch at boot, to avoid startup slowdown and mid-meeting
+        # reboots). Without a Patch Manager configuration referencing this tag,
+        # nothing patches these hosts and they drift out of Mirador SLA.
+        - Key: LMA-VP-PatchGroup
+          Value: !Sub "${AWS::StackName}-VP"
+          PropagateAtLaunch: true
+
+  # ---------------------------------------------------------------------------
+  # SSM Patch Manager — owns OS security patching for the VP EC2 hosts.
+  #
+  # The VP LaunchTemplate pins the AMI to the SSM "recommended" ECS-optimized
+  # AL2 parameter, so a fresh launch is patched-at-launch. But long-lived hosts
+  # still accrue OS CVEs between launches, and the UserData deliberately does
+  # not run `yum update` at boot (it slowed launch and caused kernel-reboot
+  # mid-meeting task kills). These resources apply security patches during a
+  # scheduled maintenance window instead — no container-startup cost, and the
+  # reboot cadence is governed by the window rather than an ad-hoc boot-time
+  # kernel install.
+  # ---------------------------------------------------------------------------
+  VPPatchBaseline:
+    Type: AWS::SSM::PatchBaseline
+    Condition: UseEC2LaunchType
+    Properties:
+      Name: !Sub "${AWS::StackName}-VP-PatchBaseline"
+      Description: "Security patch baseline for LMA Virtual Participant EC2 hosts (Amazon Linux 2)"
+      OperatingSystem: AMAZON_LINUX_2
+      ApprovalRules:
+        PatchRules:
+          - PatchFilterGroup:
+              PatchFilters:
+                - Key: CLASSIFICATION
+                  Values:
+                    - Security
+                    - Bugfix
+                - Key: SEVERITY
+                  Values:
+                    - Critical
+                    - Important
+                    - Medium
+            # Auto-approve after 0 days so security/bugfix updates are applied
+            # at the next maintenance window rather than waiting out a delay.
+            ApproveAfterDays: 0
+            ComplianceLevel: HIGH
+      PatchGroups:
+        - !Sub "${AWS::StackName}-VP"
+
+  VPPatchMaintenanceWindow:
+    Type: AWS::SSM::MaintenanceWindow
+    Condition: UseEC2LaunchType
+    Properties:
+      Name: !Sub "${AWS::StackName}-VP-PatchWindow"
+      Description: "Weekly maintenance window to apply OS security patches to VP EC2 hosts"
+      # Sundays 08:00 UTC — off-peak for meetings. Adjust per your ops calendar.
+      Schedule: "cron(0 8 ? * SUN *)"
+      ScheduleTimezone: "UTC"
+      Duration: 2
+      Cutoff: 1
+      AllowUnassociatedTargets: false
+
+  VPPatchMaintenanceWindowTarget:
+    Type: AWS::SSM::MaintenanceWindowTarget
+    Condition: UseEC2LaunchType
+    Properties:
+      WindowId: !Ref VPPatchMaintenanceWindow
+      Name: !Sub "${AWS::StackName}-VP-PatchTargets"
+      Description: "VP EC2 hosts selected by patch group tag"
+      ResourceType: INSTANCE
+      Targets:
+        - Key: "tag:LMA-VP-PatchGroup"
+          Values:
+            - !Sub "${AWS::StackName}-VP"
+
+  VPPatchMaintenanceWindowTask:
+    Type: AWS::SSM::MaintenanceWindowTask
+    Condition: UseEC2LaunchType
+    Properties:
+      WindowId: !Ref VPPatchMaintenanceWindow
+      Name: !Sub "${AWS::StackName}-VP-RunPatchBaseline"
+      Description: "Run AWS-RunPatchBaseline (Install) on VP EC2 hosts"
+      TaskType: RUN_COMMAND
+      TaskArn: AWS-RunPatchBaseline
+      Priority: 1
+      # 100% so a single-host ASG is still patched; raise MaxErrors tolerance so
+      # one unreachable host doesn't fail the whole window.
+      MaxConcurrency: "100%"
+      MaxErrors: "100%"
+      Targets:
+        - Key: WindowTargetIds
+          Values:
+            - !Ref VPPatchMaintenanceWindowTarget
+      TaskInvocationParameters:
+        MaintenanceWindowRunCommandParameters:
+          Parameters:
+            Operation:
+              - Install
+            # RebootIfNeeded lets kernel/security updates take effect. It runs
+            # only inside the maintenance window, so any task-killing reboot is
+            # confined to the off-peak window rather than happening at boot.
+            RebootOption:
+              - RebootIfNeeded
+          Comment: "LMA VP scheduled security patching"
 
   VPCapacityProvider:
     Type: AWS::ECS::CapacityProvider

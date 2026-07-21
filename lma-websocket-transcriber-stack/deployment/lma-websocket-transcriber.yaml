@@ -651,7 +651,14 @@ Resources:
                 - echo Building websocket container image
                 - cd $CODEBUILD_SRC_DIR
                 - echo `pwd`
-                - docker build -t "${REPOSITORY_URI}:${IMAGE_TAG}" source/app/
+                # --pull + --no-cache force a fresh base-image pull and a re-run
+                # of the Dockerfile's `apt-get upgrade` security-patch layer on
+                # every build. Without these, CodeBuild can reuse a cached base
+                # layer and re-bake stale OS packages (e.g. the vulnerable
+                # liblzma5 5.4.1-1 flagged by Mirador/CVE-2026-34743) even though
+                # the Dockerfile already applies the fix. Patching happens here at
+                # build time, so it adds zero container-startup cost.
+                - docker build --pull --no-cache -t "${REPOSITORY_URI}:${IMAGE_TAG}" source/app/
                 - >
                   printf '{"RepositoryUri":"%s","ProjectName":"%s","ArtifactBucket":"%s"}'
                   $REPOSITORY_URI $PROJECT_NAME $ARTIFACT_BUCKET > build.json
