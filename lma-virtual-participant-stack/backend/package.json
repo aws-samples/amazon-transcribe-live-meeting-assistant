@@ -31,7 +31,7 @@
     "@zoom/meetingsdk": "4.1.0",
     "aws-amplify": "^6.0.0",
     "aws-sigv4-fetch": "^4.3.0",
-    "axios": "^1.16.0",
+    "axios": "^1.18.0",
     "cloakbrowser": "0.3.31",
     "graphql": "^16.8.1",
     "graphql-tag": "^2.12.6",
