@@ -315,8 +315,7 @@ const AudioCaptureApp = () => {
           <ul>
             <li>
               <strong>Left-click</strong> the <strong>LMA</strong> menu-bar item (top-right) for controls.{' '}
-              <strong>Right-click</strong> it for <strong>Quit</strong> (kept out of the popover so it isn&apos;t
-              confused with Stop).
+              <strong>Right-click</strong> it for <strong>Quit</strong>.
             </li>
             <li>
               <strong>Start automatically at login:</strong> move the app to <code>/Applications</code>, then turn on
