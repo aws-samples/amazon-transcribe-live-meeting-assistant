@@ -4,8 +4,12 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
+    "setup": "bash ./setup.sh",
+    "predev": "npm run setup",
     "dev": "astro dev",
+    "prestart": "npm run setup",
     "start": "astro dev",
+    "prebuild": "npm run setup",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"
