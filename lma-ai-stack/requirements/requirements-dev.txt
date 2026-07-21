@@ -15,4 +15,4 @@ boto3-stubs[comprehend,codebuild,dynamodb,lambda,lexv2-runtime,s3,sqs,sns]~=1.22
 gql[botocore,aiohttp,requests]~=3.2.0
 aws-lambda-powertools~=1.25.10
 phonenumbers~=8.12.51
-crhelper~=2.0.10
+crhelper~=2.0.12
