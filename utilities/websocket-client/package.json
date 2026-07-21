@@ -19,7 +19,7 @@
   "dependencies": {
     "amazon-cognito-srp": "^1.0.1",
     "commander": "^9.4.0",
-    "dotenv": "^16.3.1",
+    "dotenv": "^17.4.2",
     "stream-chain": "^2.2.5",
     "@aws-sdk/client-kinesis": "^3.1031.0",
     "@aws-sdk/client-transcribe-streaming": "^3.1031.0",
