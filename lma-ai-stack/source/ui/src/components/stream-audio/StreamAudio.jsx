@@ -25,7 +25,7 @@ import {
   Alert,
 } from '@cloudscape-design/components';
 import '@cloudscape-design/global-styles/index.css';
-import useWebSocket from 'react-use-websocket';
+import * as ReactUseWebSocket from 'react-use-websocket';
 import { generateClient } from 'aws-amplify/api';
 import { fetchUserAttributes } from 'aws-amplify/auth';
 
@@ -34,6 +34,14 @@ import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
 import createUploadMeeting from '../../graphql/queries/createUploadMeeting';
+
+// react-use-websocket ships a CJS bundle. Vite 8 / rolldown exports the CJS
+// module.exports OBJECT as the ESM default (a "double-wrapped default"), so the
+// hook is not the default itself but one level in. Unwrap to whichever level is
+// actually the function so this works regardless of bundler interop. (Same
+// interop class as the react-audio-player fix; blanks the page if wrong.)
+const useWebSocket =
+  typeof ReactUseWebSocket.default === 'function' ? ReactUseWebSocket.default : ReactUseWebSocket.default.default;
 
 let SOURCE_SAMPLING_RATE;
 const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if left blank.';

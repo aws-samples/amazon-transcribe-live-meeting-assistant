@@ -29,11 +29,15 @@ import {
   Link,
 } from '@cloudscape-design/components';
 import '@cloudscape-design/global-styles/index.css';
-import useWebSocket from 'react-use-websocket';
+import * as ReactUseWebSocket from 'react-use-websocket';
 import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '../common/constants';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
+
+// See StreamAudio.jsx: unwrap the double-wrapped CJS default for Vite 8 interop.
+const useWebSocket =
+  typeof ReactUseWebSocket.default === 'function' ? ReactUseWebSocket.default : ReactUseWebSocket.default.default;
 
 const logger = new ConsoleLogger('EmbedStreamAudio');
 
