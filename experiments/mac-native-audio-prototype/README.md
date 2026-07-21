@@ -5,11 +5,23 @@ transcriber, so a user can transcribe a meeting they joined from a **native
 desktop app** (Zoom / Teams / Meet / Slack huddle / phone bridge) — no Chrome
 tab sharing, no Virtual Participant bot.
 
-> ⚠️ **Status: untested spike.** This code was written on a Linux dev box and
-> has **not** been compiled or run on a Mac. Treat it as a starting point:
-> the protocol framing and audio pipeline shape are correct against the LMA
-> server contract, but expect to fix small ScreenCaptureKit / AVFoundation API
-> details on first build (those frameworks aren't available off-macOS to verify).
+> ✅ **Status: builds, runs, and streams on macOS.** First brought up on macOS
+> 26 / Swift 6.3 (2026-07). The SCK/AVFoundation code compiled unchanged; the
+> one real bug was **auth** (see below). Audio pipeline verified end-to-end at
+> the byte level (per-channel WAV tee + RMS): ch0=system, ch1=mic, correctly
+> separated, aligned, and not swapped. Still **pending: a live meeting** through
+> a native Zoom/Teams client to confirm transcript segments in the LMA UI.
+>
+> **⚠️ AUTH — do NOT switch back to header auth.** The original spike sent the
+> Cognito token in an `Authorization: Bearer` header ("native clients can set
+> headers"). That yields **401** here: the transcriber sits behind a CloudFront
+> distribution whose `OriginRequestPolicy` header whitelist does **not** include
+> `Authorization`, so CloudFront strips it before the origin. `QueryStringBehavior`
+> is `all`, so we authenticate the **browser's way — query params**
+> (`?authorization=Bearer%20...&id_token=...`). The Node CLI at
+> `utilities/websocket-client` gets away with headers only because it hits the
+> origin/ALB directly, bypassing CloudFront. See the AUTH NOTE in
+> `TranscriberSocket.swift`.
 
 ---
 
@@ -48,20 +60,84 @@ Source layout:
 
 Requires macOS 13+ and Xcode command-line tools (`xcode-select --install`).
 
+> **Downloaded this from the LMA web UI?** Run `./install-macos.sh` — it clears
+> the macOS download quarantine, checks prerequisites, builds, and bundles the
+> app in one step. If you double-click something first and hit *"Apple could not
+> verify … is free of malware"*, that's Gatekeeper's download-quarantine flag;
+> clear it from the unzipped folder with `xattr -dr com.apple.quarantine .` and
+> re-run. (Building locally means nothing is downloaded pre-built, so once
+> quarantine is cleared the freshly built binary is ad-hoc signed and just runs.)
+
+### Recommended: run as a `.app` bundle (own TCC identity)
+
+`swift run` has no bundle, so macOS attributes Mic/Screen-Recording to the
+**parent process (Terminal)**. `make-app.sh` wraps the release binary in a
+minimal `.app` with an `Info.plist` (mic usage string) so permissions are
+attributed to **"LMA Audio Client"** — the way the production build will behave.
+
 ```bash
 cd experiments/mac-native-audio-prototype
-swift build
+./make-app.sh                       # swift build -c release + assemble build/LMAAudioClient.app
 
-# First run: macOS will prompt for Microphone AND Screen Recording permission.
-# Screen Recording is required even for audio-only SCK capture. Grant both,
-# then re-run (Screen Recording usually needs a relaunch to take effect).
+# Pass config via env vars (keeps tokens out of shell history & `ps` output).
+export LMA_WS_ENDPOINT="wss://<your-cloudfront-domain>/api/v1/ws"
+export LMA_ACCESS_TOKEN="<cognito-access-token>"
+export LMA_ID_TOKEN="<cognito-id-token>"
+export LMA_CALL_ID="Native Mac test $(date +%H:%M)"
+export LMA_DEBUG_WAV="/tmp/lma-debug.wav"   # optional: tee streamed PCM for offline verify
 
-swift run LMAAudioClient \
-  --endpoint  wss://<your-cloudfront-domain>/api/v1/ws \
-  --token     <cognito-access-token> \
-  --id-token  <cognito-id-token> \
-  --call-id   "Native Mac test $(date +%H:%M)"
+./build/LMAAudioClient.app/Contents/MacOS/LMAAudioClient
 ```
+
+Plain `swift run LMAAudioClient --endpoint ... --token ... --id-token ...` also
+works for a quick spike, but grant permissions to *Terminal* in that case.
+
+### Menu-bar (tray) app
+
+Launched with **no CLI flags**, the app runs as a **menu-bar app** (an
+`LSUIElement` agent — no Dock icon). Any `--flag` runs the headless CLI instead,
+so the two modes coexist in one binary.
+
+```bash
+open build/LMAAudioClient.app          # or double-click it in Finder
+```
+
+An **"LMA"** item appears in the menu bar (top-right). **Left-click** it for the
+popover: sign in, start/stop/pause, mute mic, mute system audio, live level
+meters, and **Open in LMA**. While recording, the icon and label turn **red
+(`●REC`)**. **Right-click** the item for **Quit** (kept out of the popover so it
+can't be confused with *Stop*).
+
+Options in the popover:
+- **Remember my email** — prefills your login next launch (email only; never the
+  password).
+- **Start automatically at login** — registers the app as a macOS login item
+  (`SMAppService`). For this to work the app must live in a stable location, so
+  **move it to `/Applications` first**:
+  ```bash
+  cp -R build/LMAAudioClient.app /Applications/
+  open /Applications/LMAAudioClient.app
+  ```
+  Toggle it off in the popover, or in **System Settings ▸ General ▸ Login Items**.
+
+**Run it in the background.** It uses no audio/CPU when idle, so the intended
+usage is: sign in once, enable *Start at login*, and leave it in the menu bar —
+click **Start** when a meeting begins. **To relaunch after quitting**, press
+**⌘-Space** (Spotlight), type **"LMA Audio Client"**, and hit Return — or
+`open -a LMAAudioClient`.
+
+### Live controls & diagnostics
+- **Per-channel VU meters** print ~1×/sec: `ch0 meeting [##--] rms .. | ch1 mic
+  [###-] rms ..` — confirms both channels are live and not swapped. A
+  `⚠️ no audio drained` line means one source is dead.
+- **Mic mute:** `kill -USR1 <pid>` toggles mute (or press `m`+Enter on a TTY).
+  Muting streams true digital silence on ch1 while keeping channels aligned.
+- **Reconnect:** on any WS drop the client reopens with capped backoff and sends
+  a **fresh START** (the server has no session resume).
+- **Device changes:** switching the default input/output mid-meeting rebuilds
+  the mic tap automatically.
+- **`--debug-wav` / `LMA_DEBUG_WAV`:** writes the exact streamed stereo PCM to a
+  WAV so you can verify channels offline (`ch0`=Left=system, `ch1`=Right=mic).
 
 ### Getting a token for the spike
 

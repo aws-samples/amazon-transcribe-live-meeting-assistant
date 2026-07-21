@@ -40,19 +40,54 @@ final class AudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func start() async throws {
         try startMic()
+        observeDeviceChanges()
         try await startSystemAudio()
     }
 
     func stop() {
+        NotificationCenter.default.removeObserver(self)
+        engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         scStream?.stopCapture { _ in }
+    }
+
+    // MARK: - Device changes (default input/output switched mid-meeting)
+
+    /// AVAudioEngine posts `configurationChange` when the audio graph is
+    /// invalidated — e.g. the user switches the default input (unplugs a
+    /// headset) or output device. The installed tap goes silent until the
+    /// engine is rebuilt, so we tear the tap down and reinstall it against the
+    /// NEW input format. Mic samples briefly pause but channel alignment holds
+    /// (the mixer only drains frames both channels can supply).
+    private func observeDeviceChanges() {
+        NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine, queue: nil
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            print("⟳ audio device/config changed — rebuilding mic tap")
+            self.engine.inputNode.removeTap(onBus: 0)
+            do {
+                try self.startMic() // reinstalls tap against the new input format
+            } catch {
+                FileHandle.standardError.write("mic restart after device change failed: \(error)\n".data(using: .utf8)!)
+            }
+        }
     }
 
     // MARK: - Microphone via AVAudioEngine
 
     private func startMic() throws {
         let input = engine.inputNode
+        // Re-read the CURRENT hardware input format each call so this also works
+        // when re-invoked after a device change (new default input, new rate).
         let inputFormat = input.inputFormat(forBus: 0)
+        // A 0-channel/0-rate format means the input device is momentarily absent
+        // (e.g. mid-switch). Skip; the next configurationChange will retry.
+        guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
+            FileHandle.standardError.write("mic input format not ready (\(inputFormat)); will retry on next device change\n".data(using: .utf8)!)
+            return
+        }
         micConverter = AVAudioConverter(from: inputFormat, to: targetFormat)
 
         input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
@@ -62,7 +97,9 @@ final class AudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             }
         }
         engine.prepare()
-        try engine.start()
+        if !engine.isRunning {
+            try engine.start()
+        }
         print("✓ Microphone capture started (input rate \(inputFormat.sampleRate) Hz → \(targetRate) Hz)")
     }
 
@@ -154,6 +191,10 @@ final class AudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         let floatCount = byteCount / MemoryLayout<Float>.size
         let ptr = data.assumingMemoryBound(to: Float.self)
         let interleaved = Array(UnsafeBufferPointer(start: ptr, count: floatCount))
+        // Note: `blockBuffer` is returned +1 by …WithRetainedBlockBuffer, but as
+        // an imported Swift `CMBlockBuffer?` it is ARC-managed and released when
+        // this local goes out of scope — no manual CFRelease needed here.
+        _ = blockBuffer
 
         if channels <= 1 { return interleaved }
         // Downmix interleaved multichannel → mono average.
