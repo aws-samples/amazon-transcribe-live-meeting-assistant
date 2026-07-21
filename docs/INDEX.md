@@ -32,6 +32,7 @@ title: "LMA Documentation"
 - [Stream Audio](stream-audio.md) — Browser-based audio capture from your microphone and any Chrome tab
 - [Upload Audio](upload-audio.md) — Upload a pre-recorded audio/video file for batch transcription and summary
 - [Browser Extension](browser-extension.md) — Chrome extension for capturing browser tab audio from any meeting platform
+- [Audio Capture App (Native)](audio-capture-app.md) — Native macOS menu-bar app that captures system + mic audio for meetings joined from native desktop apps (no browser, no bot)
 - [Virtual Participant](virtual-participant.md) — Headless Chrome bot that joins Zoom, Teams, Chime, Google Meet, and WebEx meetings
 - [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md) — Per-user Zoom credentials, AI-driven sign-in loop, persistent Chromium profiles, AI DOM resolver fallback
 - [Zoom Meeting SDK Join](zoom-meeting-sdk.md) — Join Zoom via the Zoom Meeting Web SDK (alternative to web-client automation), credentials, and approval requirements
