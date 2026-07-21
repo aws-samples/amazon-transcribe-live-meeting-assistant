@@ -21,6 +21,7 @@ cd "$(dirname "$0")"
 APP_NAME="LMAAudioClient"
 APP_DIR="build/${APP_NAME}.app"
 MACOS_DIR="${APP_DIR}/Contents/MacOS"
+RESOURCES_DIR="${APP_DIR}/Contents/Resources"
 
 echo "==> swift build -c release"
 swift build -c release
@@ -28,19 +29,26 @@ BIN_PATH="$(swift build -c release --show-bin-path)/${APP_NAME}"
 
 echo "==> assembling ${APP_DIR}"
 rm -rf "${APP_DIR}"
-mkdir -p "${MACOS_DIR}"
+mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 cp "${BIN_PATH}" "${MACOS_DIR}/${APP_NAME}"
 cp Info.plist "${APP_DIR}/Contents/Info.plist"
 
-# Bake the deployment config next to the executable so the app (CLI or GUI)
-# auto-loads it — without this a make-app.sh build has NO endpoint/pool/client
-# and silently fails to connect. (install-macos.sh / CodeBuild also do this.)
+# Bake the deployment config into Contents/Resources/ (NOT Contents/MacOS/).
+# codesign REJECTS any non-code file placed alongside the executable in MacOS/
+# ("code object is not signed at all"), which aborted this script under
+# `set -e` and left the app unsigned. Config.swift's loadConfigFile() already
+# looks in ../Resources/ relative to the executable, so no code change needed.
 if [[ -f lma-config.json ]]; then
-  cp lma-config.json "${MACOS_DIR}/lma-config.json"
-  echo "    baked lma-config.json into the bundle"
+  cp lma-config.json "${RESOURCES_DIR}/lma-config.json"
+  echo "    baked lma-config.json into Contents/Resources/"
 else
   echo "    WARNING: no lma-config.json to bake — the app will have no endpoint/pool/client"
 fi
+
+# Strip any quarantine the copied inputs carried in (macOS `cp` preserves the
+# com.apple.quarantine xattr), so the assembled bundle is clean before signing
+# and won't trip Gatekeeper when launched.
+xattr -dr com.apple.quarantine "${APP_DIR}" 2>/dev/null || true
 
 # Ad-hoc sign the bundle with entitlements. On Apple Silicon a signature is
 # mandatory just to run; the entitlements match what a notarized build needs.

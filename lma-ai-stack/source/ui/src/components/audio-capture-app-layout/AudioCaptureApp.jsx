@@ -44,8 +44,10 @@ const resolveVersion = (settings) => {
   return raw.startsWith('v') ? raw : `v${raw}`;
 };
 
-// Platform catalog. macOS is available today; the others are planned and shown
-// as "Coming soon" so the roadmap is visible without implying they work yet.
+// Platform catalog. Three states: 'available' (works today), 'planned' (on the
+// roadmap → "Coming soon"), and 'considering' (being evaluated, no commitment →
+// "Under consideration"). Only macOS is available; Windows is planned; mobile
+// is under consideration.
 const PLATFORMS = [
   {
     key: 'mac',
@@ -57,11 +59,18 @@ const PLATFORMS = [
   {
     key: 'ios',
     name: 'iPhone / iPad',
-    status: 'planned',
+    status: 'considering',
     note: 'ReplayKit / broadcast-upload capture. Under consideration.',
   },
-  { key: 'android', name: 'Android', status: 'planned', note: 'AudioPlaybackCapture API. Under consideration.' },
+  { key: 'android', name: 'Android', status: 'considering', note: 'AudioPlaybackCapture API. Under consideration.' },
 ];
+
+// Badge label + color per platform status (avoids nested ternaries in JSX).
+const STATUS_BADGE = {
+  available: { color: 'green', label: 'Available' },
+  planned: { color: 'grey', label: 'Coming soon' },
+  considering: { color: 'grey', label: 'Under consideration' },
+};
 
 // Audio Capture App vs Virtual Participant — an honest side-by-side so users
 // pick the right tool. "app" = this Audio Capture App; "vp" = Virtual Participant.
@@ -206,11 +215,7 @@ const AudioCaptureApp = () => {
             <Box key={p.key} padding={{ vertical: 'xs' }}>
               <SpaceBetween direction="horizontal" size="s">
                 <Box variant="strong">{p.name}</Box>
-                {p.status === 'available' ? (
-                  <Badge color="green">Available</Badge>
-                ) : (
-                  <Badge color="grey">Coming soon</Badge>
-                )}
+                <Badge color={STATUS_BADGE[p.status].color}>{STATUS_BADGE[p.status].label}</Badge>
                 {p.key === os && p.status === 'available' && <Badge color="blue">Your system</Badge>}
               </SpaceBetween>
               <Box variant="small" color="text-body-secondary">
@@ -220,8 +225,9 @@ const AudioCaptureApp = () => {
           ))}
           {os !== 'mac' && (
             <Alert type="warning" header="macOS is the only platform available today">
-              You appear to be on a non-macOS system. The Windows and mobile apps are planned but not yet available. In
-              the meantime, use the <Link href={`#${BROWSER_EXTENSION_PATH}`}>Chrome Extension</Link>,{' '}
+              You appear to be on a non-macOS system. A Windows app is planned and mobile is under consideration &mdash;
+              neither is available yet. In the meantime, use the{' '}
+              <Link href={`#${BROWSER_EXTENSION_PATH}`}>Chrome Extension</Link>,{' '}
               <Link href={`#${STREAM_AUDIO_PATH}`}>Stream Audio</Link>, or{' '}
               <Link href={`#${VIRTUAL_PARTICIPANT_PATH}`}>Virtual Participant</Link>.
             </Alert>
