@@ -76,7 +76,7 @@ minimal `.app` with an `Info.plist` (mic usage string) so permissions are
 attributed to **"LMA Audio Client"** — the way the production build will behave.
 
 ```bash
-cd experiments/mac-native-audio-prototype
+cd lma-audio-capture-app-stack/source/macos
 ./make-app.sh                       # swift build -c release + assemble build/LMAAudioClient.app
 
 # Pass config via env vars (keeps tokens out of shell history & `ps` output).

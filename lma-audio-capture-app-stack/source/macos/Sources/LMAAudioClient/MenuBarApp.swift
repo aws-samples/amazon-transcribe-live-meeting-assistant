@@ -252,13 +252,11 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
     init(state: MenuBarAppState) { self.state = state }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        FileHandle.standardError.write("LMA: applicationDidFinishLaunching\n".data(using: .utf8)!)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // Always give the button a visible text title as a fallback so the item
         // is never zero-width even if the SF Symbol image fails to load.
         statusItem.button?.title = "LMA"
         updateIcon()
-        FileHandle.standardError.write("LMA: status item created, button=\(statusItem.button != nil)\n".data(using: .utf8)!)
 
         popover = NSPopover()
         popover.contentSize = NSSize(width: 300, height: 360)

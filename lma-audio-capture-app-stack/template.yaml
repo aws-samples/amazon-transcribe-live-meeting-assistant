@@ -186,7 +186,7 @@ Resources:
                 - cat ./lma-config.json
                 # Zip the whole preconfigured source tree (source + install scripts
                 # + baked config). Exclude any build artifacts that slipped in.
-                - zipfile=lma-audio-capture-app-v<VERSION_TOKEN>.zip
+                - zipfile=lma-audio-capture-app-macos-v<VERSION_TOKEN>.zip
                 - rm -rf .build build .git
                 - zip -r ../${zipfile} . -x '*.build/*' -x '*/build/*'
                 - aws s3 cp ../${zipfile} s3://${WEBAPP_BUCKET}/
@@ -322,4 +322,4 @@ Resources:
 Outputs:
   AudioCaptureAppDownloadLocation:
     Description: LMA Native Audio Capture App download location
-    Value: !Sub '${CloudfrontEndpoint}lma-audio-capture-app-v<VERSION_TOKEN>.zip'
+    Value: !Sub '${CloudfrontEndpoint}lma-audio-capture-app-macos-v<VERSION_TOKEN>.zip'

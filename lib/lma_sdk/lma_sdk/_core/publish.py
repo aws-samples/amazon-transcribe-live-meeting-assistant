@@ -60,9 +60,11 @@ STACK_DEFINITIONS: list[StackDefinition] = [
         name="lma-audio-capture-app-stack",
         package_type=StackPackageType.ZIP_APP_SRC_WITH_TOKEN_REPLACE,
         template_file="template.yaml",
-        # The downloadable app source lives outside the stack dir (it's the
-        # native prototype); zip that tree, not the stack's own directory.
-        source_dir="../experiments/mac-native-audio-prototype",
+        # The downloadable macOS app source lives under the stack's own
+        # source/macos/ subdir; zip that tree (not the stack root, so the
+        # CloudFormation template itself is excluded from the download). A
+        # future Windows app will live under source/windows/ with its own zip.
+        source_dir="source/macos",
         supports_change_detection=False,  # Always publish (fast, small)
     ),
     StackDefinition(
@@ -792,10 +794,12 @@ class Publisher:
     def _publish_zip_app_src_with_token_replace(
         self, *, stack_def, project_dir, bucket, prefix_and_version, region, version, tmpdir, **_kw
     ) -> dict:
-        """Zip an app source tree that lives OUTSIDE the stack dir (source_dir),
-        with <VERSION_TOKEN> replacement, and upload both the zip and the stack's
-        template. Used by lma-audio-capture-app-stack (source = native app under
-        experiments/). CodeBuild later bakes deployment config into the zip.
+        """Zip an app source subtree (source_dir, relative to the stack dir) with
+        <VERSION_TOKEN> replacement, and upload both the zip and the stack's
+        template. Used by lma-audio-capture-app-stack, whose downloadable app
+        lives under source/macos/ (kept separate from the stack's template.yaml
+        so the template isn't shipped in the download). CodeBuild later bakes the
+        deployment config into the zip.
         """
         stack_dir = project_dir / stack_def.name
         src_dir = (stack_dir / stack_def.source_dir).resolve()

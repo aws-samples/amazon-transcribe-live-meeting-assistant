@@ -146,8 +146,9 @@ const AudioCaptureApp = () => {
 
   // The macOS download URL is published by the audio-capture-app stack and
   // surfaced in settings as AudioCaptureAppDownloadUrl. Fall back to the
-  // conventional versioned filename served from the web root if absent.
-  const macZipName = version ? `lma-audio-capture-app-${version}.zip` : 'lma-audio-capture-app.zip';
+  // conventional versioned filename served from the web root if absent. The
+  // "-macos" segment leaves room for a future "-windows" package alongside it.
+  const macZipName = version ? `lma-audio-capture-app-macos-${version}.zip` : 'lma-audio-capture-app-macos.zip';
   const macDownloadHref = settings?.AudioCaptureAppDownloadUrl || `/${macZipName}`;
 
   const copyToClipboard = (text) => {
