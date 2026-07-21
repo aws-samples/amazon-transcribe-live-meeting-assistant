@@ -45,7 +45,7 @@
   },
   "devDependencies": {
     "@types/chrome": "^0.0.261",
-    "eslint": "^8.57.0",
+    "eslint": "^10.7.0",
     "eslint-plugin-react": "^7.34.1",
     "typescript-eslint": "^7.6.0"
   },
