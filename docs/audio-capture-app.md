@@ -12,8 +12,8 @@ Teams, Cisco Webex, Slack huddles, phone bridges, …), which the
 [Chrome Extension](browser-extension.md) and [Stream Audio](stream-audio.md)
 options cannot. It adds **no bot** or extra attendee to the meeting.
 
-> **Status:** macOS is available today. Windows and iOS/Android are on the
-> roadmap (see [Roadmap](#roadmap)). The app is distributed as source that you
+> **Status:** macOS is available today. A Windows app is planned; iOS/Android
+> are under consideration (see [Roadmap](#roadmap)). The app is distributed as source that you
 > build locally with a one-step installer — a native macOS app using
 > ScreenCaptureKit cannot be cross-compiled by LMA's Linux build pipeline, and
 > Apple's signing tools are macOS-only, so building on your own Mac is both

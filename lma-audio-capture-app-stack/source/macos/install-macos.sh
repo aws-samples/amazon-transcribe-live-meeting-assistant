@@ -33,11 +33,15 @@ err() { printf "\n\033[31m✗ %s\033[0m\n" "$*" >&2; }
 # build can proceed. (You can inspect every file here — it is all plain source.)
 if [[ "$(uname)" == "Darwin" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-  if xattr -r -p com.apple.quarantine "$SCRIPT_DIR" >/dev/null 2>&1; then
-    say "Clearing macOS download quarantine on this folder"
-    xattr -dr com.apple.quarantine "$SCRIPT_DIR" 2>/dev/null || true
-    echo "  • Quarantine cleared (this is why Gatekeeper warned about the download)"
-  fi
+  # Run the clear UNCONDITIONALLY. Do NOT gate on `xattr -r -p`: it exits
+  # non-zero whenever ANY node in the tree lacks the attribute — the normal case
+  # when a browser download is unzipped with the CLI `unzip` (only files get
+  # tagged, not directories). Gating therefore skipped the clear and the
+  # Gatekeeper "cannot verify malware" popup kept firing. `xattr -dr` is safe and
+  # exits 0 even on an already-clean tree.
+  say "Clearing macOS download quarantine on this folder"
+  xattr -dr com.apple.quarantine "$SCRIPT_DIR" 2>/dev/null || true
+  echo "  • Quarantine cleared (this is what triggers Gatekeeper's download warning)"
 fi
 
 # ── 1. Prerequisites ─────────────────────────────────────────────────────────
@@ -81,18 +85,12 @@ fi
 
 # ── 2. Build + bundle ────────────────────────────────────────────────────────
 say "Building the app (this may take a minute on first run)"
-# make-app.sh does the release build + .app assembly + ad-hoc signing.
+# make-app.sh does the release build, .app assembly, bakes lma-config.json into
+# Contents/Resources/, strips quarantine, and ad-hoc signs. (Config must NOT go
+# in Contents/MacOS/ — codesign rejects non-code files there.)
 ./make-app.sh
 
-# ── 3. Place config next to the executable so the app auto-loads it ──────────
 APP="build/LMAAudioClient.app"
-if [[ -f lma-config.json ]]; then
-  cp lma-config.json "${APP}/Contents/MacOS/lma-config.json"
-  # Re-sign after adding the resource so the signature stays valid.
-  codesign --force --sign - --entitlements LMAAudioClient.entitlements --options runtime "${APP}" >/dev/null 2>&1 || true
-  echo "  • Baked lma-config.json into the app bundle"
-fi
-
 BIN="${APP}/Contents/MacOS/LMAAudioClient"
 say "Done"
 cat <<EOF
