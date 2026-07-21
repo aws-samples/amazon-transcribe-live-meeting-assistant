@@ -25,7 +25,7 @@
     "@aws-sdk/client-transcribe-streaming": "^3.1031.0",
     "wav": "^1.0.2",
     "ws": "^8.21.0",
-    "wscat": "^5.2.0"
+    "wscat": "^6.1.0"
   },
   "devDependencies": {
     "@types/node": "^16.18.54",
