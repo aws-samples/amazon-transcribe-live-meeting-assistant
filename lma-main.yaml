@@ -2661,6 +2661,25 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
+  AUDIOCAPTUREAPPSTACK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-audio-capture-app-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        LMAStackName: !Ref AWS::StackName
+        WebSocketEndpoint: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
+        CognitoUserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
+        CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
+        Region: !Ref AWS::Region
+        CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
+        WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
+        WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
+        SourceCodeLocation: <AUDIO_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+
 Outputs:
   QuickSightManifestUrl:
     Description: S3 URL for QuickSight manifest file to import recordings bucket data
@@ -2673,6 +2692,10 @@ Outputs:
   ChromeExtensionDownloadUrl:
     Description: LMA Chrome Browser extension download link
     Value: !GetAtt BROWSEREXTENSIONSTACK.Outputs.ExtensionDownloadLocation
+
+  AudioCaptureAppDownloadUrl:
+    Description: LMA Native Audio Capture App (macOS) download link
+    Value: !GetAtt AUDIOCAPTUREAPPSTACK.Outputs.AudioCaptureAppDownloadLocation
 
   LMAWebsocketEndpoint:
     Description: Websocket endpoint for websocket integration
