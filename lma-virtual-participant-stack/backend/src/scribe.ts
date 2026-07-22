@@ -16,11 +16,35 @@ let currentSpeaker = "none";
 // Local testing mode - skip AWS services
 const isLocalTest = process.env.LOCAL_TEST === 'true';
 
+// True when a Transcribe streaming error indicates the SessionId we tried to
+// resume is no longer valid (expired / closed / unknown), so the next attempt
+// must start a fresh session rather than reuse the stale id. Kept in sync with
+// the equivalent check in the WebSocket transcriber (transcribe.ts).
+const isStaleSessionError = (error: any): boolean => {
+    const message = (error?.message ?? '').toLowerCase();
+    return (
+        message.includes('has expired') ||
+        (message.includes('session') &&
+            (message.includes('expired') ||
+                message.includes('not found') ||
+                message.includes('invalid'))) ||
+        error?.name === 'SessionExpiredException'
+    );
+};
+
 export class TranscriptionService {
     private process: ChildProcess | null = null;           // FFmpeg: combined_audio.monitor → Transcribe
     private novaAudioProcess: ChildProcess | null = null;  // FFmpeg: meeting_audio.monitor → Nova/recording
     private meetingToCombinedPipe: ChildProcess | null = null; // pacat: meeting audio → combined_audio sink
     private startTime: number | null = null;
+    // Cumulative timeline offset (seconds) applied to Transcribe timestamps.
+    // Amazon Transcribe resets Item.StartTime/EndTime to 0 on every new
+    // StartStreamTranscription request (reusing SessionId does NOT resume the
+    // timeline). On each reconnect we advance this by the highest EndTime seen
+    // so transcript segments continue the meeting timeline instead of jumping
+    // back to 0 and overlapping earlier segments (GitHub #292). Kept consistent
+    // with the WebSocket transcriber (transcribe.ts).
+    private transcribeTimeOffsetSeconds = 0;
     private readonly channels = 1;
     private readonly sampleRate = 16000; // in hertz
     private transcribeClient: TranscribeStreamingClient;
@@ -294,9 +318,13 @@ export class TranscriptionService {
                     error.message?.includes('validation error') ||
                     error.message?.includes('non-retryable streaming request');
 
-                // If the session has expired, clear the session ID so next retry starts fresh
-                if (error.message?.includes('has expired')) {
-                    console.log('Transcribe session expired - will start a new session on retry');
+                // If the resumed SessionId is no longer valid (expired / closed /
+                // not found / invalid), clear it so the next retry starts a FRESH
+                // session; the cumulative time offset keeps the timeline continuous.
+                // Kept consistent with isStaleSessionError() in the WebSocket
+                // transcriber (transcribe.ts).
+                if (isStaleSessionError(error)) {
+                    console.log(`Transcribe SessionId '${sessionId}' is stale/expired - will start a new session on retry`);
                     sessionId = undefined;
                 }
                 
@@ -386,7 +414,10 @@ export class TranscriptionService {
             const wordType = item.Type;
             
             if (wordType === 'pronunciation') {
-                const timestamp = this.startTime! + (item.StartTime! * 1000);
+                // Add the cumulative reconnect offset (see transcribeTimeOffsetSeconds)
+                // so captions stay on the meeting timeline after a session restart.
+                const timestamp =
+                    this.startTime! + ((item.StartTime! + this.transcribeTimeOffsetSeconds) * 1000);
                 const speaker = this.getCurrentSpeaker();
                 
                 const formattedTime = this.formatTimestamp(timestamp);
@@ -684,14 +715,25 @@ export class TranscriptionService {
                             }
                         }
                         try {
-                            kinesisStreamManager.syncTranscriptSegmentState(currentSpeaker, result);
+                            kinesisStreamManager.syncTranscriptSegmentState(
+                                currentSpeaker,
+                                result,
+                                this.transcribeTimeOffsetSeconds,
+                            );
                         } catch (error) {
                             console.error('Failed to sync transcript segment state during suppression:', error);
                         }
                     } else {
                         // Send all results to Kinesis
                         try {
-                            await sendAddTranscriptSegment(currentSpeaker, result);
+                            const segMaxEndTime = await sendAddTranscriptSegment(
+                                currentSpeaker,
+                                result,
+                                this.transcribeTimeOffsetSeconds,
+                            );
+                            if (segMaxEndTime > this.transcribeTimeOffsetSeconds) {
+                                this.transcribeTimeOffsetSeconds = segMaxEndTime;
+                            }
                         } catch (error) {
                             console.error('Failed to send transcript to Kinesis:', error);
                         }
