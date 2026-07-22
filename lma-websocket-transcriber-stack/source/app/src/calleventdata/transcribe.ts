@@ -48,26 +48,28 @@ const formatPath = function (path: string) {
 };
 
 import dotenv from 'dotenv';
-dotenv.config();
+// dotenv v17 prints an "injected env" banner to stdout by default; quiet
+// suppresses it to keep production logs clean.
+dotenv.config({ quiet: true });
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const TRANSCRIBE_API_MODE = process.env['TRANSCRIBE_API_MODE'] || 'standard';
 const isTCAEnabled = TRANSCRIBE_API_MODE === 'analytics';
 const TRANSCRIBE_LANGUAGE_CODE =
-  process.env['TRANSCRIBE_LANGUAGE_CODE'] || 'en-US';
+    process.env['TRANSCRIBE_LANGUAGE_CODE'] || 'en-US';
 const TRANSCRIBE_LANGUAGE_OPTIONS =
-  process.env['TRANSCRIBE_LANGUAGE_OPTIONS'] || undefined;
+    process.env['TRANSCRIBE_LANGUAGE_OPTIONS'] || undefined;
 const TRANSCRIBE_PREFERRED_LANGUAGE =
-  process.env['TRANSCRIBE_PREFERRED_LANGUAGE'] || 'None';
+    process.env['TRANSCRIBE_PREFERRED_LANGUAGE'] || 'None';
 const CUSTOM_VOCABULARY_NAME =
-  process.env['CUSTOM_VOCABULARY_NAME'] || undefined;
+    process.env['CUSTOM_VOCABULARY_NAME'] || undefined;
 const CUSTOM_LANGUAGE_MODEL_NAME =
-  process.env['CUSTOM_LANGUAGE_MODEL_NAME'] || undefined;
+    process.env['CUSTOM_LANGUAGE_MODEL_NAME'] || undefined;
 const IS_CONTENT_REDACTION_ENABLED =
-  (process.env['IS_CONTENT_REDACTION_ENABLED'] || '') === 'true';
+    (process.env['IS_CONTENT_REDACTION_ENABLED'] || '') === 'true';
 const CONTENT_REDACTION_TYPE = process.env['CONTENT_REDACTION_TYPE'] || 'PII';
 const TRANSCRIBE_PII_ENTITY_TYPES =
-  process.env['TRANSCRIBE_PII_ENTITY_TYPES'] || undefined;
+    process.env['TRANSCRIBE_PII_ENTITY_TYPES'] || undefined;
 const TCA_DATA_ACCESS_ROLE_ARN = process.env['TCA_DATA_ACCESS_ROLE_ARN'] || '';
 const CALL_ANALYTICS_FILE_PREFIX = formatPath(
     process.env['CALL_ANALYTICS_FILE_PREFIX'] || 'lca-call-analytics-json/'
@@ -75,10 +77,10 @@ const CALL_ANALYTICS_FILE_PREFIX = formatPath(
 const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || null;
 // optional - disable post call analytics output
 const IS_TCA_POST_CALL_ANALYTICS_ENABLED =
-  (process.env['IS_TCA_POST_CALL_ANALYTICS_ENABLED'] || 'false') === 'true';
+    (process.env['IS_TCA_POST_CALL_ANALYTICS_ENABLED'] || 'false') === 'true';
 // optional - when redaction is enabled, choose 'redacted' only (dafault), or 'redacted_and_unredacted' for both
 const POST_CALL_CONTENT_REDACTION_OUTPUT =
-  process.env['POST_CALL_CONTENT_REDACTION_OUTPUT'] || 'redacted';
+    process.env['POST_CALL_CONTENT_REDACTION_OUTPUT'] || 'redacted';
 const kdsStreamName = process.env['KINESIS_STREAM_NAME'] || '';
 const showSpeakerLabel =
     (process.env['SHOW_SPEAKER_LABEL'] || 'true') === 'true';
@@ -217,7 +219,7 @@ export const startTranscribe = async (
                         };
                         if (IS_CONTENT_REDACTION_ENABLED) {
                             configuration_event.PostCallAnalyticsSettings.ContentRedactionOutput =
-                    POST_CALL_CONTENT_REDACTION_OUTPUT as ContentRedactionOutput;
+                                POST_CALL_CONTENT_REDACTION_OUTPUT as ContentRedactionOutput;
                         }
                     }
                     yield { ConfigurationEvent: configuration_event };
@@ -266,7 +268,7 @@ export const startTranscribe = async (
                     tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
                     if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
                         tsParams.PreferredLanguage =
-                  TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
+                            TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
                     }
                 }
             } else if (TRANSCRIBE_LANGUAGE_CODE === 'identify-multiple-languages') {
@@ -275,7 +277,7 @@ export const startTranscribe = async (
                     tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
                     if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
                         tsParams.PreferredLanguage =
-                  TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
+                            TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
                     }
                 }
             } else {
@@ -290,7 +292,7 @@ export const startTranscribe = async (
               TRANSCRIBE_LANGUAGE_CODE === 'es-US')
             ) {
                 tsParams.ContentRedactionType =
-              CONTENT_REDACTION_TYPE as ContentRedactionType;
+                    CONTENT_REDACTION_TYPE as ContentRedactionType;
                 if (TRANSCRIBE_PII_ENTITY_TYPES) {
                     tsParams.PiiEntityTypes = TRANSCRIBE_PII_ENTITY_TYPES;
                 }
@@ -490,9 +492,9 @@ export const writeTranscriptionSegment = async function (
         const result = transcribeMessageJson.Transcript.Results[0];
         if (result.Alternatives && result.Alternatives.length > 0) {
             const speakerName =
-        result.ChannelId === 'ch_0'
-            ? callMetadata.activeSpeaker
-            : callMetadata?.agentId ?? 'n/a';
+                result.ChannelId === 'ch_0'
+                    ? callMetadata.activeSpeaker
+                    : callMetadata?.agentId ?? 'n/a';
             const segments = processTranscriptionResults(
                 speakerName,
                 result,

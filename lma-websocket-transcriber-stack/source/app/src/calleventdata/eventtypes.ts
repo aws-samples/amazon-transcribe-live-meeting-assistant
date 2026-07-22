@@ -107,4 +107,4 @@ export type SocketCallData = {
     startStreamTime: Date,
     speakerEvents: [],
     ended: boolean
-}
+};
