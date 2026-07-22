@@ -28,7 +28,11 @@ S3_BATCH_DELETE_LIMIT = 1000
 
 
 APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
-appsync_client = AppsyncRequestsGqlClient(url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
+# fetch_schema_from_transport must be False for AppSync: gql 4's introspection
+# query requests `includeDeprecated` on directive args, which AppSync rejects,
+# breaking every session. We send static GraphQL documents and don't need
+# client-side schema validation.
+appsync_client = AppsyncRequestsGqlClient(url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=False)
 
 # grab environment variables
 LCA_CALL_EVENTS_TABLE = environ["LCA_CALL_EVENTS_TABLE"]
