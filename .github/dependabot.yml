@@ -146,6 +146,17 @@ updates:
         versions: [">=1"]
       - dependency-name: cfn-policy-validator
         versions: [">=0.0.32"]
+      # gql 4.x is incompatible with AWS AppSync. LMA builds mutations with gql's
+      # DSL, which requires a client-side schema, and the only way it obtains one
+      # is runtime introspection (fetch_schema_from_transport=True). gql 4's
+      # introspection query requests `includeDeprecated` on directive args, which
+      # AppSync rejects ("Unknown field argument includeDeprecated"), so every
+      # session fails and the Call Event Processor writes no meetings. Disabling
+      # introspection isn't an option (DSL then errors "invalid AppSync schema").
+      # Held on 3.5.x until gql supports an AppSync-compatible introspection or
+      # LMA switches off DSL / loads a local schema.
+      - dependency-name: gql
+        versions: [">=4"]
 
   # ── GitHub Actions ────────────────────────────────────────────────────────
   - package-ecosystem: github-actions

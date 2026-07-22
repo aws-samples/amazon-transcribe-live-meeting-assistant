@@ -46,11 +46,7 @@ else:
     SSMClient = object
 
 APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
-# fetch_schema_from_transport must be False for AppSync: gql 4's introspection
-# query requests `includeDeprecated` on directive args, which AppSync rejects
-# ("Unknown field argument includeDeprecated"), breaking every session. We send
-# known, static GraphQL documents and don't need client-side schema validation.
-APPSYNC_CLIENT = AppsyncAioGqlClient(url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=False)
+APPSYNC_CLIENT = AppsyncAioGqlClient(url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
 
 BOTO3_SESSION: Boto3Session = boto3.Session()
 CLIENT_CONFIG = BotoCoreConfig(
