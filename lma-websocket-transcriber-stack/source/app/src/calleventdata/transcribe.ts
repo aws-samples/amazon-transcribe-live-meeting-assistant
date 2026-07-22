@@ -178,14 +178,49 @@ export const startTranscribe = async (
 ) => {
     const callMetaData = socketCallMap.callMetadata;
     const audioInputStream = socketCallMap.audioInputStream;
+    // MAX_RETRIES bounds *consecutive* failures, not cumulative ones over the
+    // life of the meeting (see HEALTHY_SESSION_MS below). A session that has
+    // streamed successfully resets the counter, so a long meeting is not
+    // aborted merely because it accumulated a handful of transient
+    // reconnects spread across an hour (GitHub #292).
     const MAX_RETRIES = 5;
+    // A session that ran at least this long, or produced any transcript event,
+    // is treated as "healthy" — the next restart starts from retryCount 0.
+    const HEALTHY_SESSION_MS = 10_000;
+    // Backoff between consecutive failed restarts (linear, capped).
+    const RETRY_BACKOFF_MS = 2_000;
+    const MAX_BACKOFF_MS = 10_000;
     let sessionId: string | undefined;
 
     const startTranscribeSession = async (retryCount = 0): Promise<void> => {
-        if (retryCount >= MAX_RETRIES) {
-            server.log.error(`[TRANSCRIBING]: [${callMetaData.callId}] - Max retries reached. Aborting transcription.`);
+        // Stop retrying once the call has legitimately ended (socket closed /
+        // end event) — otherwise we'd spin forever after a normal hang-up.
+        if (socketCallMap.ended) {
+            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Call ended; not (re)starting transcription session.`);
             return;
         }
+        if (retryCount >= MAX_RETRIES) {
+            server.log.error(`[TRANSCRIBING]: [${callMetaData.callId}] - Max consecutive retries (${MAX_RETRIES}) reached. Aborting transcription.`);
+            return;
+        }
+
+        const attemptStartMs = Date.now();
+        let receivedTranscriptEvent = false;
+        // Recompute retryCount for the *next* attempt: reset to 0 if this
+        // attempt was healthy, otherwise increment. Centralised so both the
+        // clean-close and the error paths stay consistent.
+        const nextRetryCount = (): number => {
+            const healthy =
+                receivedTranscriptEvent || Date.now() - attemptStartMs >= HEALTHY_SESSION_MS;
+            return healthy ? 0 : retryCount + 1;
+        };
+        const backoff = async (attempt: number): Promise<void> => {
+            if (attempt <= 0) {
+                return;
+            }
+            const delay = Math.min(attempt * RETRY_BACKOFF_MS, MAX_BACKOFF_MS);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+        };
 
         try {
             server.log.debug(
@@ -358,6 +393,7 @@ export const startTranscribe = async (
             if (tsStream) {
                 for await (const event of tsStream) {
                     if (event.TranscriptEvent) {
+                        receivedTranscriptEvent = true;
                         await writeTranscriptionSegment(
                             event.TranscriptEvent,
                             callMetaData,
@@ -368,14 +404,33 @@ export const startTranscribe = async (
             } else {
                 throw new Error('Transcribe stream is empty');
             }
+
+            // The results stream completed WITHOUT throwing. Amazon Transcribe
+            // closes the HTTP/2 stream server-side on its own schedule (idle
+            // behaviour, session duration limits, transient server close) — the
+            // `for await` above then simply ends. Previously this returned and
+            // transcription stopped permanently while the client kept streaming
+            // audio into a dead pipe (GitHub #292). Unless the call has ended,
+            // treat an unexpected clean close as a reconnect: reuse the existing
+            // sessionId (Transcribe supports resuming) and restart.
+            if (!socketCallMap.ended) {
+                const next = nextRetryCount();
+                server.log.info(
+                    `[TRANSCRIBING]: [${callMetaData.callId}] - Transcribe result stream closed unexpectedly; reconnecting. Retry count: ${next}`
+                );
+                await backoff(next);
+                await startTranscribeSession(next);
+            }
         } catch (error) {
             server.log.error(
                 `[TRANSCRIBING]: [${
                     callMetaData.callId
                 }] - Error in transcription session: ${normalizeErrorForLogging(error)}`
             );
-            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Attempting to restart session. Retry count: ${retryCount + 1}`);
-            await startTranscribeSession(retryCount + 1);
+            const next = nextRetryCount();
+            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Attempting to restart session. Retry count: ${next}`);
+            await backoff(next);
+            await startTranscribeSession(next);
         }
     };
 
