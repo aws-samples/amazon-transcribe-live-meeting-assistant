@@ -12,6 +12,7 @@
     "build": "tsc --project tsconfig.json --pretty && npm run lint",
     "buildcheck": "tsc --project tsconfig.json --pretty --noEmit && npm run lint",
     "lint": "eslint . --ext .ts --cache --max-warnings 0",
+    "smoke": "ts-node test/fastify5-websocket.smoke.ts",
     "test": "jest",
     "update": "ncu -t minor -u && npm install",
     "clean": "rm -r dist/"
