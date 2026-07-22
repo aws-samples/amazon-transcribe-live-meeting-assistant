@@ -43,13 +43,22 @@ options cannot. It adds **no bot** or extra attendee to the meeting.
    ```bash
    xcode-select --install
    ```
-4. In Terminal, `cd` into the unzipped folder and run the installer:
+4. In Terminal, `cd` into the unzipped folder and run the installer **with
+   `bash`** (not `./`):
    ```bash
-   ./install-macos.sh
+   bash install-macos.sh
    ```
    It clears the macOS download quarantine, checks prerequisites, builds the
    app, and installs it to `/Applications/LMAAudioClient.app`. (Terminal is only
    used to build and install — you won't run the app from Terminal.)
+
+   > ⚠️ **Use `bash install-macos.sh`, not `./install-macos.sh`.** On recent
+   > macOS, running a freshly downloaded script directly makes the kernel
+   > `execve()` a quarantined file, which Gatekeeper blocks with *"Apple could
+   > not verify … is free of malware"* **before the script runs** — so its own
+   > quarantine-clearing never happens. Running it via `bash` reads the script as
+   > data (no `execve` on a quarantined file), so it runs and clears the flag
+   > from the rest of the folder itself.
 5. **Launch it like a normal app.** Press **⌘-Space** (Spotlight), type **LMA
    Audio Client** and press Return — or double-click it in Finder. An **LMA**
    item appears in the menu bar (top-right).
@@ -73,9 +82,17 @@ options cannot. It adds **no bot** or extra attendee to the meeting.
 
 ### "Apple could not verify… is free of malware" (Gatekeeper)
 
-macOS flags files downloaded from a browser. The installer clears this
-automatically, but if you hit the warning before running it, clear the quarantine
-flag from the unzipped folder and re-run:
+macOS flags files downloaded from a browser, and on recent versions it **blocks
+running a downloaded script directly** (`./install-macos.sh`) — the kernel
+`execve()`s a quarantined file, Gatekeeper kills it, and the script's own
+quarantine-clearing never gets to run. Run it via `bash` instead, which isn't
+blocked:
+
+```bash
+bash install-macos.sh
+```
+
+To clear the whole folder up front instead (then either form works):
 
 ```bash
 xattr -dr com.apple.quarantine .
@@ -150,7 +167,7 @@ voice assistant, screen/video capture, or hands-off unattended recording.
   not apply — use the [Chrome Extension](browser-extension.md) instead.
 - **Build errors / `xcode-select: command not found`.** Install Apple's
   command-line tools (`xcode-select --install`), complete the popup, and re-run
-  `./install-macos.sh`.
+  `bash install-macos.sh`.
 
 ## See also
 

@@ -263,18 +263,26 @@ const AudioCaptureApp = () => {
             </li>
             <li>
               <Box variant="p">
-                In Terminal, <code>cd</code> into the unzipped folder and run the installer:{' '}
-                <code>./install-macos.sh</code>{' '}
+                In Terminal, <code>cd</code> into the unzipped folder and run the installer with{' '}
+                <strong>
+                  <code>bash install-macos.sh</code>
+                </strong>{' '}
                 <Button
                   variant="inline-icon"
                   iconName="copy"
-                  ariaLabel="Copy ./install-macos.sh"
-                  onClick={() => copyToClipboard('./install-macos.sh')}
+                  ariaLabel="Copy bash install-macos.sh"
+                  onClick={() => copyToClipboard('bash install-macos.sh')}
                 />
                 . It checks prerequisites, builds the app, and installs it to{' '}
                 <code>/Applications/LMAAudioClient.app</code>. (Terminal is only used to build/install &mdash; you
                 won&apos;t run the app from Terminal.)
               </Box>
+              <Alert type="info" header="Run it with “bash”, not “./install-macos.sh”">
+                On recent macOS, launching a freshly downloaded script directly (<code>./install-macos.sh</code>) is
+                blocked by Gatekeeper with <em>“Apple could not verify … is free of malware.”</em> Running{' '}
+                <code>bash install-macos.sh</code> sidesteps that &mdash; the script then clears the download flag from
+                the rest of the folder itself. (Or clear it first with the command in Troubleshooting below.)
+              </Alert>
             </li>
             <li>
               <Box variant="p">
@@ -384,8 +392,10 @@ const AudioCaptureApp = () => {
         <SpaceBetween size="s">
           <Box variant="p">
             <strong>&quot;Apple could not verify … is free of malware&quot; (Gatekeeper).</strong> macOS flags files
-            downloaded from a browser. The installer clears this automatically. If you hit the warning first, clear it
-            from the unzipped folder and re-run: <code>xattr -dr com.apple.quarantine .</code>
+            downloaded from a browser, and on recent versions it blocks running a downloaded script <em>directly</em> (
+            <code>./install-macos.sh</code>). Run it as <code>bash install-macos.sh</code> instead &mdash; that
+            isn&apos;t blocked, and the script clears the flag from the rest of the folder. To clear the whole folder up
+            front instead, run: <code>xattr -dr com.apple.quarantine .</code>
             <Button
               variant="inline-icon"
               iconName="copy"
@@ -396,7 +406,7 @@ const AudioCaptureApp = () => {
           <Box variant="p">
             <strong>&quot;xcode-select: command not found&quot; or build errors.</strong> Install Apple&apos;s
             command-line tools with <code>xcode-select --install</code>, complete the popup, and re-run{' '}
-            <code>./install-macos.sh</code>.
+            <code>bash install-macos.sh</code>.
           </Box>
           <Box variant="p">
             <strong>No remote-participant audio in the transcript.</strong> Grant <strong>Screen Recording</strong> to

@@ -11,11 +11,20 @@
 #      Spotlight (Cmd-Space) and eligible for Start-at-login — with its own
 #      privacy (TCC) identity ("LMA Audio Client").
 #
-# Usage:
-#   ./install-macos.sh              # build + install to /Applications
-#   ./install-macos.sh --run        # build + install, then launch it
-#   ./install-macos.sh --no-install # build into ./build only (don't copy to /Applications)
-#   INSTALL_DIR=~/Applications ./install-macos.sh   # override install location
+# Usage (IMPORTANT — invoke with `bash`, not `./`):
+#   bash install-macos.sh              # build + install to /Applications
+#   bash install-macos.sh --run        # build + install, then launch it
+#   bash install-macos.sh --no-install # build into ./build only (don't copy to /Applications)
+#   INSTALL_DIR=~/Applications bash install-macos.sh   # override install location
+#
+# Why `bash install-macos.sh` and NOT `./install-macos.sh`:
+#   On recent macOS, running a freshly downloaded script DIRECTLY (`./…`) makes
+#   the kernel execve() a quarantined file, which Gatekeeper blocks — it SIGKILLs
+#   the process and shows "Apple could not verify … is free of malware" BEFORE
+#   line 1 runs, so this script's own quarantine-clearing never gets a chance.
+#   `bash install-macos.sh` reads the script as DATA (no execve on a quarantined
+#   file), so it runs, and then clears the quarantine flag from the rest of the
+#   folder itself. (Equivalently: `xattr -dr com.apple.quarantine .` first.)
 #
 # This is intentionally source-based: a macOS app using ScreenCaptureKit cannot
 # be cross-compiled by the (Linux) LMA build pipeline, and Apple signing tools

@@ -60,13 +60,20 @@ Source layout:
 
 Requires macOS 13+ and Xcode command-line tools (`xcode-select --install`).
 
-> **Downloaded this from the LMA web UI?** Run `./install-macos.sh` — it clears
-> the macOS download quarantine, checks prerequisites, builds, and bundles the
-> app in one step. If you double-click something first and hit *"Apple could not
-> verify … is free of malware"*, that's Gatekeeper's download-quarantine flag;
-> clear it from the unzipped folder with `xattr -dr com.apple.quarantine .` and
-> re-run. (Building locally means nothing is downloaded pre-built, so once
-> quarantine is cleared the freshly built binary is ad-hoc signed and just runs.)
+> **Downloaded this from the LMA web UI?** Run **`bash install-macos.sh`** — it
+> clears the macOS download quarantine, checks prerequisites, builds, and bundles
+> the app in one step.
+>
+> ⚠️ **Use `bash install-macos.sh`, not `./install-macos.sh`.** On recent macOS,
+> running a freshly downloaded script *directly* (`./…`) makes the kernel
+> `execve()` a quarantined file, which Gatekeeper blocks — it kills the process
+> and shows *"Apple could not verify … is free of malware"* **before line 1
+> runs**, so the script's own quarantine-clearing never happens. Invoking it as
+> `bash install-macos.sh` reads the script as data (no `execve` on a quarantined
+> file), so it runs and then clears the flag from the rest of the folder.
+> Equivalently, clear it yourself first with `xattr -dr com.apple.quarantine .`
+> then `./install-macos.sh`. (Building locally means nothing is downloaded
+> pre-built, so once quarantine is cleared the ad-hoc-signed binary just runs.)
 
 ### Recommended: run as a `.app` bundle launched with `open` (own TCC identity)
 
