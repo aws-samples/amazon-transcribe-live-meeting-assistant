@@ -11,30 +11,31 @@
     "start": "ts-node src/index.ts",
     "build": "tsc --project tsconfig.json --pretty && npm run lint",
     "buildcheck": "tsc --project tsconfig.json --pretty --noEmit && npm run lint",
-    "lint": "eslint . --ext .ts --cache --max-warnings 0",
+    "lint": "eslint . --cache --max-warnings 0",
     "update": "ncu -t minor -u && npm install",
     "clean": "rm -r dist/"
   },
   "keywords": [],
   "dependencies": {
+    "@aws-sdk/client-kinesis": "^3.1092.0",
+    "@aws-sdk/client-transcribe-streaming": "^3.1092.0",
     "amazon-cognito-srp": "^1.0.1",
     "commander": "^9.4.0",
-    "dotenv": "^16.3.1",
+    "dotenv": "^17.4.2",
     "stream-chain": "^2.2.5",
-    "@aws-sdk/client-kinesis": "^3.1031.0",
-    "@aws-sdk/client-transcribe-streaming": "^3.1031.0",
     "wav": "^1.0.2",
-    "ws": "^8.21.0",
-    "wscat": "^5.2.0"
+    "ws": "^8.21.1",
+    "wscat": "^6.1.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^16.18.54",
     "@types/stream-chain": "^2.0.1",
-    "@types/ws": "^8.5.3",
-    "@typescript-eslint/eslint-plugin": "^5.35.1",
-    "@typescript-eslint/parser": "^5.35.1",
-    "eslint": "^8.23.0",
-    "ts-node": "^10.9.1",
+    "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "@typescript-eslint/parser": "^8.65.0",
+    "eslint": "^10.7.0",
+    "ts-node": "^10.9.2",
     "typescript": "^4.8.2"
   },
   "overrides": {
