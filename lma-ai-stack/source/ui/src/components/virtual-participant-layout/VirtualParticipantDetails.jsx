@@ -273,7 +273,7 @@ StatusBadge.propTypes = {
   status: PropTypes.string.isRequired,
 };
 
-export const StatusDetails = ({ status, updatedAt, scheduledFor, statusMessage, launchType }) => {
+export const StatusDetails = ({ status, updatedAt, scheduledFor = null, statusMessage = null, launchType = null }) => {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.FAILED;
   const isInProgress = [
     'INITIALIZING',
@@ -328,12 +328,6 @@ StatusDetails.propTypes = {
   statusMessage: PropTypes.string,
   // Deployment hosting mode ('FARGATE' | 'EC2') so startup copy matches reality.
   launchType: PropTypes.string,
-};
-
-StatusDetails.defaultProps = {
-  scheduledFor: null,
-  statusMessage: null,
-  launchType: null,
 };
 
 export const ConnectionDetails = ({ vpDetails }) => {
@@ -412,7 +406,14 @@ ConnectionDetails.propTypes = {
   }).isRequired,
 };
 
-const ErrorTroubleshooting = ({ status, errorDetails, errorMessage, vpId, vncReady, userAcknowledgedFailure }) => {
+const ErrorTroubleshooting = ({
+  status,
+  errorDetails = null,
+  errorMessage = null,
+  vpId = null,
+  vncReady = false,
+  userAcknowledgedFailure = false,
+}) => {
   const [acking, setAcking] = useState(false);
   const [ackError, setAckError] = useState(null);
   const [ackedLocal, setAckedLocal] = useState(false);
@@ -551,14 +552,6 @@ ErrorTroubleshooting.propTypes = {
   vpId: PropTypes.string,
   vncReady: PropTypes.bool,
   userAcknowledgedFailure: PropTypes.bool,
-};
-
-ErrorTroubleshooting.defaultProps = {
-  errorDetails: null,
-  errorMessage: null,
-  vpId: null,
-  vncReady: false,
-  userAcknowledgedFailure: false,
 };
 
 const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule }) => {

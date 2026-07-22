@@ -42,9 +42,8 @@ const formatError = (err) => {
   return String(err);
 };
 
-const RoleBadge = ({ role }) => <Badge color={role === 'Admin' ? 'red' : 'blue'}>{role}</Badge>;
+const RoleBadge = ({ role = 'User' }) => <Badge color={role === 'Admin' ? 'red' : 'blue'}>{role}</Badge>;
 RoleBadge.propTypes = { role: PropTypes.string };
-RoleBadge.defaultProps = { role: 'User' };
 
 const COLUMN_DEFINITIONS = [
   {
