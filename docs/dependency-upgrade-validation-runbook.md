@@ -41,6 +41,19 @@ functional; slated for a fastify-6 follow-up) — not a failure.
 
 ---
 
+## Step 0.5 — Docker build check (no deploy, ~1–2 min)
+
+The transcriber and VP images build via in-stack CodeBuild during deploy, so a
+Dockerfile regression only surfaces mid-deploy and rolls the stack back. Catch
+it locally first:
+
+```bash
+make docker-build-check        # transcriber (runs tsc + eslint 10 at build)
+make docker-build-check-all    # + Virtual Participant (heavy)
+```
+**Pass:** both images build. (This is what caught the eslint-flat-config
+Dockerfile `COPY` regression during this batch.)
+
 ## Step 1 — Deploy the batch to a test stack (~35–40 min)
 
 Deploying **is the highest-value validation** — it's the only way to exercise

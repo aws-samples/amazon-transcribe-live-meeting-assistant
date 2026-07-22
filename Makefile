@@ -307,6 +307,32 @@ test-ui-force: ## Run React UI tests (ignore checksum, always run)
 	@find $(UI_DIR)/src $(UI_DIR)/public -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}' > $(UI_TEST_CHECKSUM_FILE)
 	@echo -e "$(GREEN)✅ UI tests passed!$(NC)"
 
+##@ Docker Build Checks
+# Build the container images the SAME way the in-stack CodeBuild projects do,
+# locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
+# renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then
+# rolls back. The transcriber image runs 'tsc && eslint' at build time, so this
+# also catches missing lint/build config. Requires a running Docker daemon.
+docker-build-check: docker-build-check-transcriber ## Build container images locally as CodeBuild does (transcriber; use docker-build-check-all for VP too)
+	@echo -e "$(GREEN)✅ Docker build check passed!$(NC)"
+
+docker-build-check-transcriber: ## Build the WebSocket transcriber image (fast; runs tsc + eslint 10)
+	@command -v docker >/dev/null 2>&1 || { echo -e "$(RED)ERROR: docker not found / daemon not running.$(NC)"; exit 1; }
+	@echo -e "$(CYAN)Building transcriber image (source/app/)...$(NC)"
+	@cd $(WEBSOCKET_APP_DIR) && docker build --pull -t lma-transcriber-buildcheck:local . \
+		&& docker rmi lma-transcriber-buildcheck:local >/dev/null 2>&1 || true
+	@echo -e "$(GREEN)✅ Transcriber image built.$(NC)"
+
+docker-build-check-vp: ## Build the Virtual Participant image (heavy; downloads CloakBrowser Chromium)
+	@command -v docker >/dev/null 2>&1 || { echo -e "$(RED)ERROR: docker not found / daemon not running.$(NC)"; exit 1; }
+	@echo -e "$(CYAN)Building Virtual Participant image (backend/) — this is heavy...$(NC)"
+	@cd $(VP_BACKEND_DIR) && docker build --pull -t lma-vp-buildcheck:local . \
+		&& docker rmi lma-vp-buildcheck:local >/dev/null 2>&1 || true
+	@echo -e "$(GREEN)✅ Virtual Participant image built.$(NC)"
+
+docker-build-check-all: docker-build-check-transcriber docker-build-check-vp ## Build BOTH container images locally
+	@echo -e "$(GREEN)✅ All Docker build checks passed!$(NC)"
+
 ##@ Integration Testing
 # End-to-end tests against a LIVE deployed stack (see integ-tests/README.md and
 # the 'integ-tests' Claude skill). Requires the LMA SDK installed in the venv

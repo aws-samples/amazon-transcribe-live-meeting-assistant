@@ -18,6 +18,21 @@ originally added to validate the PR #400 dependency batch:
 - **Virtual Participant** — registry CRUD lifecycle always; and an **opt-in**
   real meeting join that exercises the `@zoom/meetingsdk` path end to end.
 
+## Pre-deploy guard (run this BEFORE deploying)
+
+The transcriber and VP images are built by in-stack CodeBuild during deploy, so a
+Dockerfile/build-context regression (e.g. a `COPY` of a renamed file) only shows
+up ~15 min into a deploy and then rolls the whole stack back. Catch it locally in
+~1-2 min first:
+
+```bash
+make docker-build-check        # transcriber image (fast; runs tsc + eslint 10)
+make docker-build-check-all    # + Virtual Participant image (heavy)
+```
+
+Run this whenever you change a Dockerfile, delete/rename a file a Dockerfile
+COPYs (eslint config, tsconfig, package.json), or bump build-time deps.
+
 ## Prerequisites
 
 1. A deployed stack. To create a throwaway one from local code:
