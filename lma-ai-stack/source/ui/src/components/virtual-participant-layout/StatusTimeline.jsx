@@ -131,7 +131,12 @@ TimelineEntry.propTypes = {
   isLast: PropTypes.bool.isRequired,
 };
 
-const StatusTimeline = ({ history, currentStatus, currentTimestamp, currentStatusMessage }) => {
+const StatusTimeline = ({
+  history = [],
+  currentStatus = null,
+  currentTimestamp = null,
+  currentStatusMessage = null,
+}) => {
   // Create timeline entries from history and current status
   const timelineEntries = React.useMemo(() => {
     const entries = [...(history || [])];
@@ -191,13 +196,6 @@ StatusTimeline.propTypes = {
   currentStatus: PropTypes.string,
   currentTimestamp: PropTypes.string,
   currentStatusMessage: PropTypes.string,
-};
-
-StatusTimeline.defaultProps = {
-  history: [],
-  currentStatus: null,
-  currentStatusMessage: null,
-  currentTimestamp: null,
 };
 
 export default StatusTimeline;

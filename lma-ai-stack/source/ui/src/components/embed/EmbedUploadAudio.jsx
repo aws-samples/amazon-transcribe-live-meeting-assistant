@@ -13,7 +13,7 @@ import PropTypes from 'prop-types';
 
 import StreamAudio from '../stream-audio/StreamAudio';
 
-const EmbedUploadAudio = ({ sendToParent }) => {
+const EmbedUploadAudio = ({ sendToParent = null }) => {
   const sentLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -32,10 +32,6 @@ const EmbedUploadAudio = ({ sendToParent }) => {
 
 EmbedUploadAudio.propTypes = {
   sendToParent: PropTypes.func,
-};
-
-EmbedUploadAudio.defaultProps = {
-  sendToParent: null,
 };
 
 export default EmbedUploadAudio;

@@ -33,7 +33,7 @@ const SERVERS_PER_PAGE = 50;
 /**
  * Public Registry Tab - Browse and install MCP servers from official registry
  */
-const PublicRegistryTab = ({ onInstall, installedServers = [] }) => {
+const PublicRegistryTab = ({ onInstall = () => {}, installedServers = [] }) => {
   const [servers, setServers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -607,11 +607,6 @@ PublicRegistryTab.propTypes = {
       Status: PropTypes.string,
     }),
   ),
-};
-
-PublicRegistryTab.defaultProps = {
-  onInstall: () => {},
-  installedServers: [],
 };
 
 export default PublicRegistryTab;

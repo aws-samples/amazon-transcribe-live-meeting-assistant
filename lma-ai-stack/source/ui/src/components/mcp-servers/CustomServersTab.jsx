@@ -28,7 +28,7 @@ const logger = new ConsoleLogger('CustomServersTab');
 /**
  * Custom Servers Tab - Add custom HTTP MCP server endpoints
  */
-const CustomServersTab = ({ onInstall }) => {
+const CustomServersTab = ({ onInstall = () => {} }) => {
   const [serverName, setServerName] = useState('');
   const [serverUrl, setServerUrl] = useState('');
   const [description, setDescription] = useState('');
@@ -339,10 +339,6 @@ const CustomServersTab = ({ onInstall }) => {
 
 CustomServersTab.propTypes = {
   onInstall: PropTypes.func,
-};
-
-CustomServersTab.defaultProps = {
-  onInstall: () => {},
 };
 
 export default CustomServersTab;

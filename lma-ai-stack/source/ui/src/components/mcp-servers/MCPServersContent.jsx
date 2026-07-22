@@ -32,7 +32,7 @@ const logger = new ConsoleLogger('MCPServersContent');
  * MCP Servers Content - Reusable component for managing MCP servers
  * Shows Lambda MCP servers (always available) and VP MCP (active meetings only)
  */
-const MCPServersContent = ({ vpData }) => {
+const MCPServersContent = ({ vpData = null }) => {
   const [installedServers, setInstalledServers] = useState([]);
   const [loadingInstalled, setLoadingInstalled] = useState(false);
   const [installedError, setInstalledError] = useState(null);
@@ -472,10 +472,6 @@ MCPServersContent.propTypes = {
     vncReady: PropTypes.bool,
     status: PropTypes.string,
   }),
-};
-
-MCPServersContent.defaultProps = {
-  vpData: null,
 };
 
 export default MCPServersContent;

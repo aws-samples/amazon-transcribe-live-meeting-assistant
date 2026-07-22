@@ -86,7 +86,7 @@ const onUpdateVirtualParticipantDetailed = `
  * by composing the exported `StatusDetails` + `ConnectionDetails` cards so the
  * embed view matches the host application's design.
  */
-const VPDetailsPanel = ({ vpDetails, launchType }) => (
+const VPDetailsPanel = ({ vpDetails, launchType = null }) => (
   <SpaceBetween direction="vertical" size="l">
     <VPStatusDetails
       status={vpDetails.status}
@@ -112,10 +112,6 @@ VPDetailsPanel.propTypes = {
   }).isRequired,
   // Deployment hosting mode ('FARGATE' | 'EC2') for launch-type-aware copy.
   launchType: PropTypes.string,
-};
-
-VPDetailsPanel.defaultProps = {
-  launchType: null,
 };
 
 const EmbedVirtualParticipant = ({ params, sendToParent }) => {

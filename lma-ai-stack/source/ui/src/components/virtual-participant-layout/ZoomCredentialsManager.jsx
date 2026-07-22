@@ -47,7 +47,7 @@ const M_DELETE_CREDS = /* GraphQL */ `
   }
 `;
 
-const ZoomCredentialsManager = ({ onChange }) => {
+const ZoomCredentialsManager = ({ onChange = undefined }) => {
   const [creds, setCreds] = useState({ present: false, username: null, lastUpdatedAt: null });
   const [loading, setLoading] = useState(true);
   const [editVisible, setEditVisible] = useState(false);
@@ -267,10 +267,6 @@ const ZoomCredentialsManager = ({ onChange }) => {
 
 ZoomCredentialsManager.propTypes = {
   onChange: PropTypes.func,
-};
-
-ZoomCredentialsManager.defaultProps = {
-  onChange: undefined,
 };
 
 export default ZoomCredentialsManager;
