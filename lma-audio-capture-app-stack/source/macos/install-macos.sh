@@ -5,13 +5,17 @@
 # Ships inside the "Download Audio Capture App" zip from the LMA web UI. It:
 #   1. checks/points you at prerequisites (Xcode command-line tools),
 #   2. builds the Swift app in release mode,
-#   3. wraps it in a signed .app bundle with its own TCC (privacy) identity,
-#   4. leaves an lma-config.json (your deployment's endpoint + Cognito ids)
-#      next to the executable so you only need to sign in with username/password.
+#   3. wraps it in a signed .app bundle with an lma-config.json (your
+#      deployment's endpoint + Cognito ids) baked into Contents/Resources/,
+#   4. installs it to /Applications so it's a first-class app — launchable from
+#      Spotlight (Cmd-Space) and eligible for Start-at-login — with its own
+#      privacy (TCC) identity ("LMA Audio Client").
 #
 # Usage:
-#   ./install-macos.sh              # build into ./build/LMAAudioClient.app
-#   ./install-macos.sh --run        # build, then launch (prompts for login)
+#   ./install-macos.sh              # build + install to /Applications
+#   ./install-macos.sh --run        # build + install, then launch it
+#   ./install-macos.sh --no-install # build into ./build only (don't copy to /Applications)
+#   INSTALL_DIR=~/Applications ./install-macos.sh   # override install location
 #
 # This is intentionally source-based: a macOS app using ScreenCaptureKit cannot
 # be cross-compiled by the (Linux) LMA build pipeline, and Apple signing tools
@@ -20,7 +24,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 RUN_AFTER=false
-[[ "${1:-}" == "--run" ]] && RUN_AFTER=true
+NO_INSTALL=false
+for arg in "$@"; do
+  case "$arg" in
+    --run) RUN_AFTER=true ;;
+    --no-install) NO_INSTALL=true ;;
+  esac
+done
 
 say() { printf "\n\033[1m==> %s\033[0m\n" "$*"; }
 err() { printf "\n\033[31m✗ %s\033[0m\n" "$*" >&2; }
@@ -91,26 +101,66 @@ say "Building the app (this may take a minute on first run)"
 ./make-app.sh
 
 APP="build/LMAAudioClient.app"
-BIN="${APP}/Contents/MacOS/LMAAudioClient"
+
+# ── 3. Install into /Applications ────────────────────────────────────────────
+# Installing to /Applications makes it a first-class app: launchable from
+# Spotlight (Cmd-Space → "LMA Audio Client"), eligible for Start-at-login, and
+# stable for macOS's privacy (TCC) records. Pass --no-install to skip and just
+# leave the build in ./build. Set INSTALL_DIR to override the destination.
+INSTALL_DIR="${INSTALL_DIR:-/Applications}"
+INSTALLED_APP="${INSTALL_DIR}/LMAAudioClient.app"
+if $NO_INSTALL; then
+  INSTALLED_APP="$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
+  say "Skipping install (--no-install); app left at ${INSTALLED_APP}"
+else
+  say "Installing to ${INSTALL_DIR}"
+  rm -rf "${INSTALLED_APP}"
+  if cp -R "${APP}" "${INSTALLED_APP}" 2>/dev/null; then
+    xattr -dr com.apple.quarantine "${INSTALLED_APP}" 2>/dev/null || true
+    # Refresh LaunchServices so Spotlight indexes it immediately.
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+      -f "${INSTALLED_APP}" 2>/dev/null || true
+    echo "  • Installed: ${INSTALLED_APP}"
+  else
+    INSTALLED_APP="$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
+    err "Couldn't copy to ${INSTALL_DIR} (permission?). Leaving it at ${INSTALLED_APP}."
+    echo "    To install manually: cp -R \"${INSTALLED_APP}\" /Applications/"
+  fi
+fi
+
 say "Done"
 cat <<EOF
-The app is built at:
-  ${APP}
+LMA Audio Capture App is installed at:
+  ${INSTALLED_APP}
 
-First run — grant permissions:
-  1. Launch it (below). macOS will prompt for Microphone; approve it.
-  2. Open System Settings ▸ Privacy & Security ▸ Screen Recording, enable
-     "LMA Audio Client", then relaunch (Screen Recording needs a restart).
-  3. It will ask for your LMA username and password (the same ones you use for
-     the LMA web app), sign in, and start streaming.
+▶ HOW TO LAUNCH IT (do NOT run it from Terminal):
+  • Press Cmd-Space (Spotlight), type "LMA Audio Client", press Return, OR
+  • double-click it in Finder / Launchpad, OR
+  • run:  open -a "LMA Audio Client"
 
-Run it now with:
-  ${BIN} --username you@example.com
+  Launching this way is REQUIRED: it goes through macOS LaunchServices so the
+  app gets its own privacy identity. If you instead run the binary inside
+  Contents/MacOS from Terminal, macOS attributes Microphone / Screen Recording
+  to *Terminal* and system-audio capture will NOT work (you'd see "Terminal"
+  in the recording indicator).
+
+▶ FIRST RUN — grant permissions:
+  1. Launch it (Spotlight/Finder). A menu-bar item "LMA" appears (top-right).
+     Approve the Microphone prompt.
+  2. System Settings ▸ Privacy & Security ▸ Screen Recording → enable
+     "LMA Audio Client". Then QUIT it (right-click the "LMA" menu-bar item ▸
+     Quit) and launch it again — Screen Recording only takes effect after a
+     relaunch. This is what lets it capture meeting/system audio.
+  3. Left-click the "LMA" menu-bar item, sign in with your LMA username/password,
+     and click Start.
+
+▶ START AUTOMATICALLY AT LOGIN:
+  Left-click the "LMA" menu-bar item and enable "Start automatically at login"
+  (or System Settings ▸ General ▸ Login Items ▸ add LMA Audio Client).
 
 EOF
 
 if $RUN_AFTER; then
-  say "Launching (you'll be prompted for username/password)"
-  read -r -p "LMA username (email): " LMA_USER
-  exec "${BIN}" --username "${LMA_USER}"
+  say "Launching via Spotlight/LaunchServices (menu-bar app; sign in from the 'LMA' item)"
+  open "${INSTALLED_APP}"
 fi

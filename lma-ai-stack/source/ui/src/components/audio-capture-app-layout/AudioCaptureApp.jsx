@@ -271,21 +271,39 @@ const AudioCaptureApp = () => {
                   ariaLabel="Copy ./install-macos.sh"
                   onClick={() => copyToClipboard('./install-macos.sh')}
                 />
-                . It checks prerequisites, builds the app, and bundles it as <code>LMAAudioClient.app</code>.
+                . It checks prerequisites, builds the app, and installs it to{' '}
+                <code>/Applications/LMAAudioClient.app</code>. (Terminal is only used to build/install &mdash; you
+                won&apos;t run the app from Terminal.)
               </Box>
             </li>
             <li>
               <Box variant="p">
-                Launch the app. macOS prompts for <strong>Microphone</strong> access &mdash; approve it. Then open{' '}
+                <strong>Launch it like a normal app.</strong> Press <strong>⌘-Space</strong> (Spotlight), type{' '}
+                <strong>LMA Audio Client</strong> and press Return (or double-click it in Finder). An{' '}
+                <strong>LMA</strong> item appears in the menu bar (top-right).
+              </Box>
+              <Alert type="warning" header="Don't launch it from Terminal">
+                Always launch via Spotlight, Finder, or <code>open -a &quot;LMA Audio Client&quot;</code> &mdash; never
+                the binary inside <code>Contents/MacOS</code>. Only launching through macOS gives the app its own
+                privacy identity; running it from Terminal makes macOS attribute Microphone / Screen Recording to{' '}
+                <strong>Terminal</strong>, and system-audio capture silently won&apos;t work (you&apos;ll see
+                &quot;Terminal&quot; where the app should be).
+              </Alert>
+            </li>
+            <li>
+              <Box variant="p">
+                Approve the <strong>Microphone</strong> prompt. Then open{' '}
                 <strong>System Settings &rsaquo; Privacy &amp; Security &rsaquo; Screen Recording</strong>, enable{' '}
-                <strong>LMA Audio Client</strong>, and relaunch (Screen Recording requires a restart to take effect).
-                Screen Recording is what lets macOS capture system/meeting audio.
+                <strong>LMA Audio Client</strong>, then <strong>quit and relaunch</strong> it (right-click the LMA
+                menu-bar item &rsaquo; Quit, then reopen via Spotlight) &mdash; Screen Recording only takes effect after
+                a relaunch. Screen Recording is what lets macOS capture system/meeting audio.
               </Box>
             </li>
             <li>
               <Box variant="p">
-                Enter your LMA username and password when prompted. The app signs in, starts streaming, and your meeting
-                appears in the <Link href="#/calls">Meetings List</Link> with a live transcript.
+                Left-click the <strong>LMA</strong> menu-bar item, sign in with your LMA username and password, and
+                click <strong>Start</strong>. Your meeting appears in the <Link href="#/calls">Meetings List</Link> with
+                a live transcript.
               </Box>
             </li>
           </ol>
@@ -325,13 +343,14 @@ const AudioCaptureApp = () => {
               <strong>Right-click</strong> it for <strong>Quit</strong>.
             </li>
             <li>
-              <strong>Start automatically at login:</strong> move the app to <code>/Applications</code>, then turn on
-              the <strong>Start automatically at login</strong> toggle in the popover (or System Settings &rsaquo;
-              General &rsaquo; Login Items).
+              <strong>Start automatically at login:</strong> turn on the login toggle in the popover (or System Settings
+              &rsaquo; General &rsaquo; Login Items). The installer already placed the app in <code>/Applications</code>
+              , so this works out of the box.
             </li>
             <li>
-              <strong>Relaunch after quitting:</strong> press <strong>⌘-Space</strong>, type{' '}
-              <strong>LMA Audio Client</strong>, and press Return &mdash; or run <code>open -a LMAAudioClient</code>.
+              <strong>Launch or relaunch:</strong> press <strong>⌘-Space</strong>, type{' '}
+              <strong>LMA Audio Client</strong>, and press Return &mdash; or run{' '}
+              <code>open -a &quot;LMA Audio Client&quot;</code>.
             </li>
           </ul>
         </SpaceBetween>

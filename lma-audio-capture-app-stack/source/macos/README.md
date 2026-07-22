@@ -68,29 +68,45 @@ Requires macOS 13+ and Xcode command-line tools (`xcode-select --install`).
 > re-run. (Building locally means nothing is downloaded pre-built, so once
 > quarantine is cleared the freshly built binary is ad-hoc signed and just runs.)
 
-### Recommended: run as a `.app` bundle (own TCC identity)
+### Recommended: run as a `.app` bundle launched with `open` (own TCC identity)
 
-`swift run` has no bundle, so macOS attributes Mic/Screen-Recording to the
-**parent process (Terminal)**. `make-app.sh` wraps the release binary in a
-minimal `.app` with an `Info.plist` (mic usage string) so permissions are
-attributed to **"LMA Audio Client"** — the way the production build will behave.
+`make-app.sh` wraps the release binary in a minimal `.app` with an `Info.plist`
+(mic usage string) so privacy permissions can be attributed to **"LMA Audio
+Client"**.
+
+> **Critical:** launch it with **`open`** (or double-click in Finder), **not** by
+> running `.../Contents/MacOS/LMAAudioClient` directly. Only `open` goes through
+> macOS **LaunchServices**, which gives the app its own TCC (privacy) identity.
+> Exec'ing the inner binary from a shell makes the process a **child of
+> Terminal**, so macOS attributes Microphone / Screen Recording to *Terminal* —
+> and system-audio capture silently won't work. (This is why `swift run` and the
+> inner-binary path only ever grant Terminal the permissions.)
 
 ```bash
 cd lma-audio-capture-app-stack/source/macos
 ./make-app.sh                       # swift build -c release + assemble build/LMAAudioClient.app
+open build/LMAAudioClient.app       # launches the menu-bar app with its own identity
+```
 
-# Pass config via env vars (keeps tokens out of shell history & `ps` output).
+Then use the **"LMA" menu-bar item** (top-right) to sign in and Start — see
+[Menu-bar (tray) app](#menu-bar-tray-app) below.
+
+#### Headless / CLI mode (dev + debugging only)
+
+Running the inner binary directly (or `swift run`) with `--flag`s runs the
+**headless CLI**. This is useful for scripted testing and the `--debug-wav` tee,
+but macOS attributes Mic/Screen-Recording to **Terminal** in this mode, so grant
+Terminal those permissions if you use it for real capture.
+
+```bash
 export LMA_WS_ENDPOINT="wss://<your-cloudfront-domain>/api/v1/ws"
 export LMA_ACCESS_TOKEN="<cognito-access-token>"
 export LMA_ID_TOKEN="<cognito-id-token>"
 export LMA_CALL_ID="Native Mac test $(date +%H:%M)"
 export LMA_DEBUG_WAV="/tmp/lma-debug.wav"   # optional: tee streamed PCM for offline verify
 
-./build/LMAAudioClient.app/Contents/MacOS/LMAAudioClient
+./build/LMAAudioClient.app/Contents/MacOS/LMAAudioClient --cli   # headless (grants Terminal identity)
 ```
-
-Plain `swift run LMAAudioClient --endpoint ... --token ... --id-token ...` also
-works for a quick spike, but grant permissions to *Terminal* in that case.
 
 ### Menu-bar (tray) app
 
