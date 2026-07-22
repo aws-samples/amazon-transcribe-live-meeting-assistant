@@ -47,11 +47,22 @@ Stack resolution order: `--stack-name` / `STACK=` → `$LMA_STACK_NAME` → `LMA
 | `test_transcriber_alb_targets_healthy` | transcriber ALB target group has a HEALTHY target (server passing `/health/check`) | **Fastify 3→5 boot** |
 | `test_transcriber_ecs_service_running` | transcriber ECS service has running tasks, not crash-looping | **Fastify 5 runtime stability** |
 | `test_appsync_reachable` | IAM-signed GraphQL query succeeds | AppSync data plane |
+| `test_kds_pipeline_creates_meeting` | synthetic START on Kinesis → CallEventProcessor → meeting row in DynamoDB | **gql/AppSync introspection (the gql 4 regression)** |
 | `test_vp_registry_lifecycle` | VP create → get → list → end via AppSync (no meeting) | VP CRUD surface |
 | `test_vp_live_join` *(opt-in)* | VP actually joins a real meeting and leaves `INITIALIZING` | **@zoom/meetingsdk 4→6** |
 
 `test_vp_live_join` is marked `live` and **skipped** unless `--vp-meeting-id`
 (`MEETING_ID=`) is provided.
+
+`test_kds_pipeline_creates_meeting` puts a synthetic `START` event on the
+CallDataStream (empty AccessToken → the processor uses `AgentId` as Owner, the
+documented Virtual-Participant service-call path) and polls the EventSourcing
+DynamoDB table for the resulting call record, then deletes it. It is the
+regression guard for the gql 4 → AppSync incompatibility: the CallEventProcessor
+introspects the AppSync schema to build its DSL mutations, gql 4's introspection
+query is rejected by AppSync, so `createCall` never ran and meetings never
+appeared in the UI. The probe is reusable standalone:
+`AWS_PROFILE=default python integ-tests/kds_pipeline_probe.py <stack-name>`.
 
 ## Notes
 

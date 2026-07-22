@@ -158,6 +158,38 @@ def test_appsync_reachable(client: LMAClient) -> None:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# 3b. End-to-end KDS pipeline: Kinesis -> CallEventProcessor -> DynamoDB
+# ────────────────────────────────────────────────────────────────────────────
+
+def test_kds_pipeline_creates_meeting(client: LMAClient) -> None:
+    """Put a synthetic START on the CallDataStream and confirm a meeting is created.
+
+    This is the regression test for the gql 4 -> AppSync incompatibility that
+    silently broke production: the CallEventProcessor fetches the AppSync schema
+    via introspection to build DSL mutations, gql 4's introspection query is
+    rejected by AppSync, so createCall never ran and NO meeting appeared in the
+    UI (for both StreamAudio and the Virtual Participant). Neither unit tests nor
+    the reachability checks above exercise this Kinesis -> Lambda -> DynamoDB
+    path; only driving a real event through it catches the break.
+
+    See integ-tests/kds_pipeline_probe.py for the mechanics. Self-cleaning.
+    """
+    from kds_pipeline_probe import cleanup, run_probe
+
+    result = run_probe(client.stack_name, region=client.region, timeout_s=90.0)
+    try:
+        assert result["created"], (
+            f"synthetic START on {result['stream']} did not produce a meeting "
+            f"row in {result['table']} within the timeout — the "
+            f"Kinesis->CallEventProcessor->DynamoDB pipeline is broken "
+            f"(callId={result['call_id']}). Check the CallEventProcessor logs; a "
+            f"gql/AppSync schema-introspection failure is the usual cause."
+        )
+    finally:
+        cleanup(client.stack_name, result["call_id"], region=client.region)
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # 4. Virtual Participant lifecycle (Zoom SDK 6 code path)
 # ────────────────────────────────────────────────────────────────────────────
 
