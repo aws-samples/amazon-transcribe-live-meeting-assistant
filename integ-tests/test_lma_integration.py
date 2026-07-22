@@ -22,13 +22,6 @@ Test tiers:
 
 from __future__ import annotations
 
-import json
-import socket
-import ssl
-import urllib.error
-import urllib.request
-from urllib.parse import urlparse
-
 import pytest
 
 from lma_sdk import LMAClient
@@ -48,14 +41,15 @@ REQUIRED_OUTPUTS = [
 
 def test_stack_status_is_complete(client: LMAClient) -> None:
     """The stack exists and is in a COMPLETE (not failed/in-progress) state."""
-    status = client.stack.status()
-    assert status.status.endswith("_COMPLETE"), (
-        f"stack {client.stack_name!r} status is {status.status!r}, "
-        f"expected a *_COMPLETE state"
+    result = client.stack.status()
+    assert result.exists and result.stack is not None, (
+        f"stack {client.stack_name!r} not found"
     )
-    assert "ROLLBACK" not in status.status, (
-        f"stack is in a rollback state: {status.status!r}"
+    state = result.stack.status
+    assert state.endswith("_COMPLETE"), (
+        f"stack {client.stack_name!r} status is {state!r}, expected a *_COMPLETE state"
     )
+    assert "ROLLBACK" not in state, f"stack is in a rollback state: {state!r}"
 
 
 @pytest.mark.parametrize("key", REQUIRED_OUTPUTS)
@@ -70,46 +64,44 @@ def test_required_output_present(outputs: dict[str, str], key: str) -> None:
 # 2. WebSocket transcriber — Fastify 5 (internet-facing runtime)
 # ────────────────────────────────────────────────────────────────────────────
 
-def _health_url(outputs: dict[str, str]) -> str:
-    """Derive the transcriber health URL from LMAWebsocketEndpoint.
+def test_transcriber_alb_targets_healthy(client: LMAClient) -> None:
+    """The transcriber ALB target group reports at least one HEALTHY target.
 
-    Endpoint is ``wss://<domain>/api/v1/ws`` -> health is
-    ``https://<domain>/health/check``.
+    ``/health/check`` is the ALB target-group health path and is intentionally
+    NOT routed through the public CloudFront distribution (which only forwards
+    ``/api/v1/ws``), so it can't be probed over the internet. The authoritative
+    signal that the Fastify 5 server booted and is serving that route is the ALB
+    marking its ECS target HEALTHY — a boot failure or crash loop leaves targets
+    ``unhealthy``/``draining`` or the group empty. We locate the transcriber
+    target group by its CloudFormation stack-name tag.
     """
-    ep = outputs["LMAWebsocketEndpoint"]
-    parsed = urlparse(ep)
-    host = parsed.netloc or parsed.path  # tolerate scheme-less values
-    return f"https://{host}/health/check"
+    elbv2 = client.session.client("elbv2", region_name=client.region)
+    stack_lc = client.stack_name.lower()
 
+    matched_arn = None
+    paginator = elbv2.get_paginator("describe_target_groups")
+    for page in paginator.paginate():
+        for tg in page.get("TargetGroups", []):
+            if tg.get("HealthCheckPath") != "/health/check":
+                continue
+            arn = tg["TargetGroupArn"]
+            tags = elbv2.describe_tags(ResourceArns=[arn])["TagDescriptions"][0]["Tags"]
+            stack = next((t["Value"] for t in tags if t["Key"] == "aws:cloudformation:stack-name"), "")
+            if stack_lc in stack.lower():
+                matched_arn = arn
+                break
+        if matched_arn:
+            break
 
-def test_transcriber_health_check(outputs: dict[str, str]) -> None:
-    """The Fastify 5 server answers /health/check with the expected JSON.
+    if not matched_arn:
+        pytest.skip("no transcriber target group (/health/check) found for this stack")
 
-    Proves the fastify 3->5 boot (logger.transport config) succeeded and the
-    ECS task is serving — a boot failure would crash-loop the task and this
-    would connection-error or 5xx.
-    """
-    url = _health_url(outputs)
-    ctx = ssl.create_default_context()
-    req = urllib.request.Request(url, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
-            status = resp.status
-            body = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as err:
-        # 503 = server up but CPU-unhealthy; still proves it booted & routes.
-        status = err.code
-        body = err.read().decode("utf-8", "replace")
-    except (urllib.error.URLError, TimeoutError, ssl.SSLError, socket.error) as err:
-        pytest.fail(
-            f"transcriber health check at {url} was unreachable: {err}. "
-            f"The Fastify 5 ECS service may be down or crash-looping."
-        )
-
-    assert status in (200, 503), f"unexpected health status {status} from {url}"
-    payload = json.loads(body)
-    assert "Healthy" in payload and "Http-Status" in payload, (
-        f"health body missing expected keys: {payload!r}"
+    health = elbv2.describe_target_health(TargetGroupArn=matched_arn)
+    states = [d["TargetHealth"]["State"] for d in health.get("TargetHealthDescriptions", [])]
+    assert states, "transcriber target group has no registered targets (ECS task not attached)"
+    assert "healthy" in states, (
+        f"transcriber ALB targets not healthy: {states}. The Fastify 5 server "
+        f"may have failed to boot or is failing /health/check."
     )
 
 

@@ -44,7 +44,7 @@ Stack resolution order: `--stack-name` / `STACK=` → `$LMA_STACK_NAME` → `LMA
 |------|-----------|----------------------|
 | `test_stack_status_is_complete` | stack is in a `*_COMPLETE` (non-rollback) state | deploy sanity |
 | `test_required_output_present[*]` | key CFN outputs exist & non-empty | UI/extension wiring |
-| `test_transcriber_health_check` | `GET /health/check` returns 200/503 with expected JSON | **Fastify 3→5 boot** |
+| `test_transcriber_alb_targets_healthy` | transcriber ALB target group has a HEALTHY target (server passing `/health/check`) | **Fastify 3→5 boot** |
 | `test_transcriber_ecs_service_running` | transcriber ECS service has running tasks, not crash-looping | **Fastify 5 runtime stability** |
 | `test_appsync_reachable` | IAM-signed GraphQL query succeeds | AppSync data plane |
 | `test_vp_registry_lifecycle` | VP create → get → list → end via AppSync (no meeting) | VP CRUD surface |
@@ -55,6 +55,10 @@ Stack resolution order: `--stack-name` / `STACK=` → `$LMA_STACK_NAME` → `LMA
 
 ## Notes
 
+- `/health/check` is the **ALB target-group** health path and is deliberately
+  NOT routed through the public CloudFront distribution (which only forwards
+  `/api/v1/ws`), so it can't be probed over the internet. The transcriber health
+  test therefore asserts on ALB **target health** (via `elbv2`), not an HTTP GET.
 - The default run is **idempotent and self-cleaning**: the VP registry test ends
   every row it creates in a `finally` block.
 - These are intentionally dependency-light (stdlib `urllib` + `boto3`/`lma_sdk`),
