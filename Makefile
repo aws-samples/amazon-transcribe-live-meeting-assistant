@@ -274,7 +274,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli ## Run all tests
+test: test-ui test-sdk test-cli test-lambdas ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -285,6 +285,25 @@ test-cli: ## Run LMA CLI unit tests
 	@echo "Running LMA CLI tests..."
 	cd lib/lma_cli_pkg && $(PYTHON) -m pytest tests/ -v
 	@echo -e "$(GREEN)✅ LMA CLI tests passed!$(NC)"
+
+# Lambda unit tests live next to each function's source and use local (sibling)
+# imports, so each directory must be run with that dir on sys.path — a single
+# top-level `pytest lambda_functions/` collides on duplicate module names. This
+# target discovers every dir containing test_*.py and runs pytest from within
+# it. No AWS required (the suites mock boto3 / set dummy env).
+test-lambdas: ## Run all Lambda function unit tests (no AWS; each dir isolated)
+	@echo "Running Lambda function unit tests..."
+	@FAILED=0; RAN=0; \
+	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
+		files=$$(cd "$$d" && ls test_*.py 2>/dev/null); \
+		[ -z "$$files" ] && continue; \
+		RAN=$$((RAN+1)); \
+		echo -e "$(CYAN)  pytest $$d$(NC)"; \
+		if ! ( cd "$$d" && $(PYTHON) -m pytest -q $$files ); then FAILED=1; fi; \
+	done; \
+	if [ $$RAN -eq 0 ]; then echo -e "$(YELLOW)  no lambda tests found$(NC)"; fi; \
+	if [ $$FAILED -ne 0 ]; then echo -e "$(RED)❌ Some Lambda tests failed$(NC)"; exit 1; fi; \
+	echo -e "$(GREEN)✅ Lambda function tests passed!$(NC)"
 
 # Checksum file for UI test change detection
 UI_TEST_CHECKSUM_FILE := .ui-test-checksum
