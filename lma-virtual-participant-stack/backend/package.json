@@ -38,7 +38,7 @@
     "jsonwebtoken": "^9.0.3",
     "nodemon": "^3.1.14",
     "playwright-core": "^1.61.1",
-    "simli-client": "^3.0.2",
+    "simli-client": "3.0.1",
     "uuid": "^14.0.1",
     "ws": "^8.21.0"
   },

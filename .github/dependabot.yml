@@ -63,6 +63,13 @@ updates:
       # on the transcriber entry above.
       - dependency-name: typescript
         versions: [">=7"]
+      # simli-client 3.0.2 ships a case-mismatched barrel export
+      # (dist/index.js does require("./Client") but the file is dist/client.js),
+      # which builds on case-insensitive macOS but FAILS the Docker image build
+      # on case-sensitive Linux (CodeBuild): "Cannot read file: .../dist/Client.js".
+      # Pinned to 3.0.1; unignore once upstream fixes the casing (>3.0.2).
+      - dependency-name: simli-client
+        versions: ["3.0.2"]
 
   # ── npm: browser extension (build/dev-heavy) ──────────────────────────────
   - package-ecosystem: npm
