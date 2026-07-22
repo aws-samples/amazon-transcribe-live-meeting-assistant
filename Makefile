@@ -307,6 +307,35 @@ test-ui-force: ## Run React UI tests (ignore checksum, always run)
 	@find $(UI_DIR)/src $(UI_DIR)/public -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}' > $(UI_TEST_CHECKSUM_FILE)
 	@echo -e "$(GREEN)✅ UI tests passed!$(NC)"
 
+##@ Integration Testing
+# End-to-end tests against a LIVE deployed stack (see integ-tests/README.md and
+# the 'integ-tests' Claude skill). Requires the LMA SDK installed in the venv
+# (make setup-cli-dev) and AWS creds (AWS_PROFILE=default). Resolves the target
+# stack from STACK, else $LMA_STACK_NAME, else 'LMA'.
+INTEG_STACK ?= $(or $(STACK),$(LMA_STACK_NAME),LMA)
+
+integ-tests: ## Run integration tests vs a live stack (Usage: make integ-tests STACK=<name>)
+	@echo -e "$(CYAN)Running LMA integration tests against stack '$(INTEG_STACK)'...$(NC)"
+	@if [ ! -x "$(VENV_DIR)/bin/pytest" ] && ! $(PYTHON) -c "import pytest" 2>/dev/null; then \
+		echo -e "$(RED)ERROR: pytest not found. Run 'make setup-cli-dev' first.$(NC)"; exit 1; \
+	fi
+	@if ! $(PYTHON) -c "import lma_sdk" 2>/dev/null; then \
+		echo -e "$(RED)ERROR: lma_sdk not importable. Run 'make setup-cli-dev' first.$(NC)"; exit 1; \
+	fi
+	$(PYTHON) -m pytest integ-tests/ --stack-name "$(INTEG_STACK)" -m "not live"
+	@echo -e "$(GREEN)✅ Integration tests passed against '$(INTEG_STACK)'!$(NC)"
+
+integ-tests-live: ## Integration tests INCLUDING a real VP meeting join (Usage: make integ-tests-live STACK=<name> PLATFORM=ZOOM MEETING_ID=<id> [MEETING_PASSWORD=<pw>])
+ifndef MEETING_ID
+	$(error MEETING_ID is not set. Usage: make integ-tests-live STACK=<name> PLATFORM=ZOOM MEETING_ID=<id> [MEETING_PASSWORD=<pw>])
+endif
+	@echo -e "$(CYAN)Running LMA integration tests (incl. live $(or $(PLATFORM),ZOOM) join) against '$(INTEG_STACK)'...$(NC)"
+	$(PYTHON) -m pytest integ-tests/ --stack-name "$(INTEG_STACK)" \
+		--vp-platform "$(or $(PLATFORM),ZOOM)" \
+		--vp-meeting-id "$(MEETING_ID)" \
+		--vp-meeting-password "$(MEETING_PASSWORD)"
+	@echo -e "$(GREEN)✅ Integration tests (incl. live join) passed against '$(INTEG_STACK)'!$(NC)"
+
 ##@ UI Development
 # Usage: make ui-start STACK_NAME=<stack-name>
 ui-start: ## Start UI dev server (requires STACK_NAME for .env generation)

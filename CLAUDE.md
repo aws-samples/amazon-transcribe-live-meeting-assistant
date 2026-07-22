@@ -111,6 +111,7 @@ patterns.
 | `.claude/skills/infrastructure.md` | CloudFormation / SAM templates, nested stacks, GovCloud rules |
 | `.claude/skills/code-review.md` | Pre-commit self-review checklist for your own changes |
 | `.claude/skills/pr-review.md` | Reviewing a GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
+| `.claude/skills/integ-tests.md` | Running end-to-end integration tests against a live deployed stack (`make integ-tests`) |
 
 When asked to `review <PR/MR URL>`, follow `.claude/skills/pr-review.md` and
 produce a structured review answering the six questions (good PR / safe /
