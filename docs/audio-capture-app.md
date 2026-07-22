@@ -48,15 +48,25 @@ options cannot. It adds **no bot** or extra attendee to the meeting.
    ./install-macos.sh
    ```
    It clears the macOS download quarantine, checks prerequisites, builds the
-   app, and bundles it as `LMAAudioClient.app`.
-5. Launch it. macOS prompts for **Microphone** access — approve it. Then open
-   **System Settings ▸ Privacy & Security ▸ Screen Recording**, enable **LMA
-   Audio Client**, and **relaunch** (Screen Recording requires a restart to take
-   effect). Screen Recording is what lets macOS capture system/meeting audio,
-   even for audio-only capture.
-6. Sign in with your LMA username and password. Click **Start**, and your
-   meeting appears in the [Meetings List](web-ui-guide.md) with a live
-   transcript.
+   app, and installs it to `/Applications/LMAAudioClient.app`. (Terminal is only
+   used to build and install — you won't run the app from Terminal.)
+5. **Launch it like a normal app.** Press **⌘-Space** (Spotlight), type **LMA
+   Audio Client** and press Return — or double-click it in Finder. An **LMA**
+   item appears in the menu bar (top-right).
+
+   > ⚠️ **Don't launch it from Terminal.** Always launch via Spotlight, Finder,
+   > or `open -a "LMA Audio Client"` — never the binary inside `Contents/MacOS`.
+   > Only launching through macOS gives the app its own privacy identity; running
+   > it from Terminal makes macOS attribute Microphone / Screen Recording to
+   > **Terminal**, and system-audio capture silently won't work.
+6. Approve the **Microphone** prompt. Then open **System Settings ▸ Privacy &
+   Security ▸ Screen Recording**, enable **LMA Audio Client**, and **quit and
+   relaunch** it (Screen Recording requires a restart to take effect). Screen
+   Recording is what lets macOS capture system/meeting audio, even for audio-only
+   capture.
+7. Left-click the **LMA** menu-bar item, sign in with your LMA username and
+   password, and click **Start**. Your meeting appears in the
+   [Meetings List](web-ui-guide.md) with a live transcript.
 
 > **Tip: use headphones.** Otherwise your speakers' meeting audio can bleed into
 > your microphone and appear faintly on both transcript channels.
@@ -90,20 +100,15 @@ Popover options:
 - **Remember my email** — prefills your login next launch (email only; the
   password is never stored).
 - **Start automatically at login** — registers the app as a macOS login item.
-  For this to work the app must live in a stable location, so move it to
-  `/Applications` first:
-  ```bash
-  cp -R build/LMAAudioClient.app /Applications/
-  open /Applications/LMAAudioClient.app
-  ```
-  You can also manage it in **System Settings ▸ General ▸ Login Items**.
+  The installer already placed the app in `/Applications`, so this works out of
+  the box. You can also manage it in **System Settings ▸ General ▸ Login Items**.
 
 ### Running it in the background
 
 The app uses no audio or CPU when idle, so the intended usage is to leave it
 running in the menu bar and click **Start** when a meeting begins. **To relaunch
 after quitting**, press **⌘-Space** (Spotlight), type **LMA Audio Client**, and
-press Return — or run `open -a LMAAudioClient`.
+press Return — or run `open -a "LMA Audio Client"`.
 
 ## Audio Capture App vs Virtual Participant
 
