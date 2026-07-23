@@ -16,6 +16,8 @@ and the Virtual Participant launch path (Zoom SDK 6).
 2. The LMA SDK + test deps installed in the repo venv:
    ```bash
    make setup-cli-dev
+   # for the opt-in WebSocket streaming test only:
+   .venv/bin/pip install -r integ-tests/requirements.txt
    ```
 3. AWS credentials for the account the stack lives in (`AWS_PROFILE=default`).
 
@@ -28,6 +30,10 @@ make integ-tests STACK=lma-integtest1
 # Include a REAL Virtual Participant join into a live meeting (Zoom SDK 6 path):
 make integ-tests-live STACK=lma-integtest1 PLATFORM=ZOOM \
     MEETING_ID=1234567890 MEETING_PASSWORD=secret
+
+# Include the live WebSocket streaming test (needs a Cognito user's creds):
+LMA_TEST_USERNAME=you@example.com LMA_TEST_PASSWORD=... \
+    make integ-tests STACK=lma-integtest1
 ```
 
 Or invoke pytest directly:
@@ -48,6 +54,7 @@ Stack resolution order: `--stack-name` / `STACK=` → `$LMA_STACK_NAME` → `LMA
 | `test_transcriber_ecs_service_running` | transcriber ECS service has running tasks, not crash-looping | **Fastify 5 runtime stability** |
 | `test_appsync_reachable` | IAM-signed GraphQL query succeeds | AppSync data plane |
 | `test_kds_pipeline_creates_meeting` | synthetic START on Kinesis → CallEventProcessor → meeting row in DynamoDB | **gql/AppSync introspection (the gql 4 regression)** |
+| `test_ws_stream_connects` *(opt-in)* | stream audio over the live `wss://.../api/v1/ws` and stay OPEN | **@fastify/websocket 11 upgrade ordering (the WS 500 regression)** |
 | `test_vp_registry_lifecycle` | VP create → get → list → end via AppSync (no meeting) | VP CRUD surface |
 | `test_vp_live_join` *(opt-in)* | VP actually joins a real meeting and leaves `INITIALIZING` | **@zoom/meetingsdk 4→6** |
 
