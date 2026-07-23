@@ -7,7 +7,7 @@ import { emitKeypressEvents } from 'readline';
 import { Command } from 'commander';
 import { WebSocket } from 'ws';
 import * as fs from 'fs';
-import Chain from 'stream-chain';
+import { chain } from 'stream-chain';
 import { randomUUID } from 'crypto';
 import { CallMetaData } from '../../../lma-websocket-transcriber-stack/source/app/src/lca';
 
@@ -73,9 +73,11 @@ new Command()
 
                 const CHUNK_SIZE = SAMPLE_RATE * (CHUNK_SIZE_IN_MS / 1000) * BYTES_PER_SAMPLE * 2;
 
-                const audiopipeline: Chain = new Chain([
+                // stream-chain v4 is ESM: the `chain` export is a factory
+                // function (not a constructable `Chain` class as in v2).
+                const audiopipeline = chain([
                     fs.createReadStream(options.wavfile as fs.PathLike, { highWaterMark: CHUNK_SIZE }),
-                    async data => {
+                    async (data: Buffer) => {
                         await timer(CHUNK_SIZE_IN_MS);
                         return data;
                     }

@@ -17,12 +17,12 @@
   },
   "keywords": [],
   "dependencies": {
-    "@aws-sdk/client-kinesis": "^3.1092.0",
-    "@aws-sdk/client-transcribe-streaming": "^3.1092.0",
+    "@aws-sdk/client-kinesis": "^3.1093.0",
+    "@aws-sdk/client-transcribe-streaming": "^3.1093.0",
     "amazon-cognito-srp": "^1.0.1",
-    "commander": "^9.4.0",
+    "commander": "^15.0.0",
     "dotenv": "^17.4.2",
-    "stream-chain": "^2.2.5",
+    "stream-chain": "^4.2.5",
     "wav": "^1.0.2",
     "ws": "^8.21.1",
     "wscat": "^6.1.0"
