@@ -53,19 +53,41 @@ async function main(): Promise<void> {
         disableRequestLogging: true,
     });
 
-    await server.register(websocket);
+    // Mirror index.ts's exact wiring so this test guards the real production
+    // setup, not an idealized one:
+    //   - register(websocket) is NOT awaited
+    //   - a global preHandler hook is added
+    //   - the websocket route is registered inside server.after()
+    // If the route were registered at top level (before the plugin's onRoute
+    // hook is wired), fastify 5 / @fastify/websocket 11 would dispatch the
+    // upgrade to the normal HTTP handler and the handler's first arg would be a
+    // FastifyRequest (no .on) instead of the socket -> "ws.on is not a function"
+    // -> HTTP 500 on every connect. The assertions below fail loudly in that case.
+    server.register(websocket);
+
+    server.addHook('preHandler', async (request) => {
+        if (!request.url.includes('health')) {
+            return; // simulate successful auth (index.ts runs jwtVerifier here)
+        }
+    });
 
     let serverSawMessage = false;
+    let handlerGotSocket = false;
 
-    // (2) @fastify/websocket v11 socket-first handler signature (index.ts:93).
-    server.get('/api/v1/ws', { websocket: true }, (socket, request) => {
-        assert.ok(typeof (socket as WebSocket).on === 'function',
-            'handler arg 1 must be the WebSocket (v11 signature), not a { socket } wrapper');
-        assert.ok(request && typeof request.url === 'string',
-            'handler arg 2 must be the FastifyRequest');
-        socket.on('message', (data: WebSocket.RawData) => {
-            serverSawMessage = true;
-            socket.send(data); // echo the audio frame back
+    server.after(() => {
+        // (2) @fastify/websocket v11 socket-first handler signature (index.ts).
+        server.get('/api/v1/ws', { websocket: true }, (socket, request) => {
+            assert.ok(typeof (socket as WebSocket).on === 'function',
+                'handler arg 1 must be the WebSocket (v11 signature) — if this is a '
+                + 'FastifyRequest, the upgrade fell through to the HTTP handler '
+                + '(register/route ordering bug)');
+            assert.ok(request && typeof request.url === 'string',
+                'handler arg 2 must be the FastifyRequest');
+            handlerGotSocket = true;
+            socket.on('message', (data: WebSocket.RawData) => {
+                serverSawMessage = true;
+                socket.send(data); // echo the audio frame back
+            });
         });
     });
 
@@ -102,6 +124,7 @@ async function main(): Promise<void> {
             ws.on('error', reject);
         });
 
+        assert.ok(handlerGotSocket, 'websocket route handler must have received the socket (upgrade recognized)');
         assert.ok(serverSawMessage, 'server-side message handler (v11 signature) must have fired');
         console.log('PASS: fastify 5 booted with pino-pretty transport, health route 200, and @fastify/websocket v11 echoed the audio frame.');
     } finally {
