@@ -36,7 +36,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-icons": "^4.12.0",
-    "react-markdown": "^9.1.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^6.30.4",
     "react-use-websocket": "^4.8.1",
     "rehype-raw": "^7.0.0",
