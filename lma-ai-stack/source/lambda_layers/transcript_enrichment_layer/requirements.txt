@@ -1,7 +1,7 @@
 # keep in sync with local dev dependencies in requirements-dev.txt
 boto3~=1.22.12
 gql[botocore,aiohttp,requests]~=3.5.0
-aws-lambda-powertools~=1.25.10
+aws-lambda-powertools~=3.31.1
 phonenumbers~=8.12.51
 pyjwt
 cryptography
