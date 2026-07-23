@@ -195,34 +195,51 @@ def test_kds_pipeline_creates_meeting(client: LMAClient) -> None:
 # 3c. WebSocket transcriber front door (Fastify 5 / @fastify/websocket 11 upgrade)
 # ────────────────────────────────────────────────────────────────────────────
 
-def test_ws_stream_connects(client: LMAClient) -> None:
-    """Stream audio over the live WebSocket exactly like the browser does.
+def test_ws_stream_transcribes_to_meeting(client: LMAClient) -> None:
+    """Full audio e2e: stream a real WAV over the live WebSocket like the browser.
 
-    Regression guard for the fastify 5 / @fastify/websocket 11 route-ordering
-    bug: WS upgrades returned HTTP 500 ("ws.on is not a function") and the
-    browser reconnect-looped, never sending START, so no meeting was created.
-    This opens wss://.../api/v1/ws with a real Cognito token, sends START +
-    synthetic audio, and asserts the socket stays OPEN for the session.
+    Mints a real Cognito token, opens wss://.../api/v1/ws, streams a real
+    two-speaker WAV (stereo-demo-call.wav) at ~real time, sends END, then asserts
+    the whole pipeline ran: the socket stayed OPEN, a meeting row was written to
+    DynamoDB, AND transcript segments were produced. In one shot this guards
+    every regression this batch hit:
+      * @fastify/websocket 11 upgrade ordering  (500 -> connection drops)
+      * fastify 5 audio handling / Transcribe streaming
+      * gql 3.5 <-> AppSync                      (gql-4 break -> no meeting/segments)
 
     Opt-in: requires LMA_TEST_USERNAME / LMA_TEST_PASSWORD (a Cognito user in the
-    stack's pool) and the pycognito + websockets libs. Skips otherwise.
+    stack's pool) and pycognito + websockets (integ-tests/requirements.txt).
+    Self-cleaning. Skips if creds or deps are absent.
     """
     if not (os.environ.get("LMA_TEST_USERNAME") and os.environ.get("LMA_TEST_PASSWORD")):
-        pytest.skip("set LMA_TEST_USERNAME / LMA_TEST_PASSWORD to run the WS stream test")
+        pytest.skip("set LMA_TEST_USERNAME / LMA_TEST_PASSWORD to run the WS audio test")
     try:
         import pycognito  # noqa: F401
         import websockets  # noqa: F401
     except ImportError:
-        pytest.skip("pycognito / websockets not installed (pip install pycognito websockets)")
+        pytest.skip("pycognito / websockets not installed (pip install -r integ-tests/requirements.txt)")
 
-    from ws_stream_probe import run_probe
+    from ws_stream_probe import cleanup, run_probe
 
     result = run_probe(client.stack_name, region=client.region)
-    assert result["connected"], (
-        f"WebSocket stream to {result['ws_endpoint']} did not stay OPEN "
-        f"(final_state={result['final_state']}). The transcriber likely 500s on "
-        f"upgrade — check the @fastify/websocket route registration ordering."
-    )
+    try:
+        assert result["connected"], (
+            f"WebSocket stream to {result['ws_endpoint']} did not stay OPEN "
+            f"(final_state={result['final_state']}). The transcriber likely 500s "
+            f"on upgrade — check the @fastify/websocket route registration ordering."
+        )
+        assert result["meeting_created"], (
+            f"no meeting row written for {result['call_id']} — the "
+            f"Kinesis->CallEventProcessor->AppSync path is broken (often a "
+            f"gql/AppSync schema-introspection failure)."
+        )
+        assert result["segment_count"] > 0, (
+            f"connected and meeting created, but 0 transcript segments for "
+            f"{result['call_id']} — Amazon Transcribe streaming or the segment "
+            f"write path is broken (check transcriber processTranscriptionResults)."
+        )
+    finally:
+        cleanup(client.stack_name, result["call_id"], region=client.region)
 
 
 # ────────────────────────────────────────────────────────────────────────────

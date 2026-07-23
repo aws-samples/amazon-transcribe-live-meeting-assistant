@@ -5,90 +5,112 @@ or **prove no regressions against a live stack** (e.g. after a dependency bump,
 a stack change, or before a release). These tests hit a **real deployed LMA
 stack**, unlike the mocked unit tests in `lib/lma_sdk/tests`.
 
-The suite lives in `integ-tests/` and is driven by `make integ-tests`.
+The suite lives in `integ-tests/`.
 
-## What it validates (and why it exists)
+## How to run it (the main flow)
 
-The tests target runtime surfaces that unit tests and `tsc`/lint can't reach —
-originally added to validate the PR #400 dependency batch:
-
-- **Fastify 5 transcriber** — `/health/check` answers, and the transcriber ECS
-  service has running (non-crash-looping) tasks.
-- **AppSync GraphQL** — an IAM-signed query succeeds (the UI's data plane).
-- **Virtual Participant** — registry CRUD lifecycle always; and an **opt-in**
-  real meeting join that exercises the `@zoom/meetingsdk` path end to end.
-
-## Pre-deploy guard (run this BEFORE deploying)
-
-The transcriber and VP images are built by in-stack CodeBuild during deploy, so a
-Dockerfile/build-context regression (e.g. a `COPY` of a renamed file) only shows
-up ~15 min into a deploy and then rolls the whole stack back. Catch it locally in
-~1-2 min first:
+**One-shot: deploy-or-update a stack, then test.** This is the default entry
+point — it updates the stack if it already exists, or creates it if it doesn't:
 
 ```bash
-make docker-build-check        # transcriber image (fast; runs tsc + eslint 10)
-make docker-build-check-all    # + Virtual Participant image (heavy)
+# Existing stack (or default 'lma-integtest1'): builds local code, UPDATES it, tests.
+AWS_PROFILE=default make integ-deploy-and-test STACK=lma-integtest1
+
+# New stack (does not exist yet): ADMIN_EMAIL is required to create it.
+AWS_PROFILE=default make integ-deploy-and-test STACK=lma-newtest ADMIN_EMAIL=you@amazon.com
 ```
 
-Run this whenever you change a Dockerfile, delete/rename a file a Dockerfile
-COPYs (eslint config, tsconfig, package.json), or bump build-time deps.
+Decision rule for the skill when asked to "run integration tests":
+- If the user names a stack → `make integ-deploy-and-test STACK=<that>` (updates it).
+- If they don't → default to `lma-integtest1`. If it exists, update+test; if not,
+  create it (needs `ADMIN_EMAIL` — ask the user for one, or reuse the repo's
+  known admin email if they've given it before).
+- Deploy takes ~35–40 min for a create, less for an update. Run it in the
+  background and report when done.
 
-## Prerequisites
-
-1. A deployed stack. To create a throwaway one from local code:
-   ```bash
-   AWS_PROFILE=default lma deploy --stack-name lma-integtest1 \
-       --from-code . --admin-email <you>@amazon.com --wait
-   ```
-   (~35–40 min. Add Zoom params `-p ZoomMeetingSdkClientId=... -p ZoomMeetingSdkClientSecret=...`
-   only if you intend to run the live Zoom join test.)
-2. SDK + test deps in the venv: `make setup-cli-dev`
-3. `AWS_PROFILE=default` (per repo convention — other profiles hit wrong accounts).
-
-## Running
-
+**Test-only (stack already deployed and current):**
 ```bash
-# Default: read-only checks + self-cleaning VP registry lifecycle. Repeatable.
-make integ-tests STACK=lma-integtest1
+AWS_PROFILE=default make integ-tests STACK=lma-integtest1
+```
 
-# Opt-in: also place a REAL Virtual Participant into a live meeting.
+**Include the opt-in tests** (real audio + real meeting join):
+```bash
+# Real WebSocket audio streaming (needs a Cognito user's creds):
+LMA_TEST_USERNAME=you@example.com LMA_TEST_PASSWORD=... \
+    AWS_PROFILE=default make integ-tests STACK=lma-integtest1
+
+# Real Virtual Participant join into a live meeting:
 make integ-tests-live STACK=lma-integtest1 PLATFORM=ZOOM \
     MEETING_ID=1234567890 MEETING_PASSWORD=secret
 ```
 
-Stack resolution: `STACK=` → `$LMA_STACK_NAME` → `LMA`.
+Stack resolution: `STACK=` → `$LMA_STACK_NAME` → `lma-integtest1` (deploy) / `LMA` (test-only).
 
-Direct pytest (finer control):
+## Prerequisites
+
+1. `make setup-cli-dev` — LMA SDK + CLI + test deps in `.venv`.
+2. For the opt-in WebSocket audio test: `.venv/bin/pip install -r integ-tests/requirements.txt`
+   (pycognito + websockets) and `LMA_TEST_USERNAME` / `LMA_TEST_PASSWORD`.
+3. `AWS_PROFILE=default` (per repo convention — other profiles hit wrong accounts).
+
+## Pre-deploy guard (run BEFORE any deploy)
+
+The transcriber and VP images are built by in-stack CodeBuild during deploy, so a
+Dockerfile/build-context regression only shows up ~15 min into a deploy and then
+rolls the whole stack back. Catch it locally in ~1–2 min first:
 ```bash
-AWS_PROFILE=default .venv/bin/python -m pytest integ-tests/ \
-    --stack-name lma-integtest1 -m "not live" -v
+make docker-build-check        # transcriber image (fast; runs tsc + eslint)
+make docker-build-check-all    # + Virtual Participant image (heavy)
 ```
 
-## Interpreting results
+## What it validates (and the regressions each guards)
 
-- **All pass** → the deployed stack's transcriber, AppSync, and VP surfaces are
-  healthy. Safe to report no regression on those paths.
-- **`test_transcriber_health_check` / `_ecs_service_running` fail** → the Fastify
-  server likely failed to boot or is crash-looping. Check its logs:
-  `lma logs --stack-name <stack>` or the transcriber ECS task in CloudWatch.
-- **`test_appsync_reachable` fails** → AppSync URL resolution or IAM auth broke;
-  confirm your creds and that the stack finished deploying.
-- **`test_vp_live_join` fails** → the VP never left `INITIALIZING`; inspect the
-  VP ECS task logs. For Zoom, cross-reference the per-signal checklist in
-  `docs/dependency-upgrade-validation-runbook.md` (SDK load, join/admit, audio,
-  active-speaker, chat, participant count, avatar).
+| Test | Validates | Guards |
+|------|-----------|--------|
+| `test_stack_status_is_complete` | stack in a `*_COMPLETE` state | deploy sanity |
+| `test_required_output_present[*]` | key CFN outputs present | UI/extension wiring |
+| `test_transcriber_alb_targets_healthy` | ALB target HEALTHY (Fastify 5 serving) | fastify 3→5 boot |
+| `test_transcriber_ecs_service_running` | ECS tasks running, not crash-looping | fastify 5 stability |
+| `test_appsync_reachable` | IAM-signed GraphQL query works | AppSync data plane |
+| `test_kds_pipeline_creates_meeting` | synthetic START → meeting in DynamoDB | **gql 4→AppSync** |
+| `test_ws_stream_transcribes_to_meeting` *(opt-in)* | stream a real WAV → meeting **+ transcript segments** | **@fastify/websocket 11 upgrade + Transcribe + gql** |
+| `test_vp_registry_lifecycle` | VP create→get→list→end (no meeting) | VP CRUD surface |
+| `test_vp_live_join` *(opt-in)* | VP joins a real meeting | `@zoom/meetingsdk` |
+
+`test_ws_stream_transcribes_to_meeting` is the strongest single check — it streams
+`utilities/load-simulator/lma_load/fixtures/stereo-demo-call.wav` (real speech; the
+sibling `stereo-16k-30s.wav` is a synthetic tone that won't transcribe) over the
+live `wss://.../api/v1/ws` and asserts the socket stays OPEN, a meeting row is
+written, and transcript segments are produced.
+
+## Interpreting failures
+
+- **`test_transcriber_alb_targets_healthy` / `_ecs_service_running`** → Fastify
+  server failed to boot or crash-loops. `lma logs --stack-name <stack>` / ECS task logs.
+- **`test_appsync_reachable`** → AppSync URL/IAM auth broke; check creds + deploy state.
+- **`test_kds_pipeline_creates_meeting`** → Kinesis→CallEventProcessor→AppSync broken
+  (usual cause: a gql/AppSync schema-introspection failure). Check CallEventProcessor logs.
+- **`test_ws_stream_transcribes_to_meeting`** → if it connects but 0 segments,
+  Transcribe streaming or `processTranscriptionResults` is broken; if it 500s on
+  connect, check the `@fastify/websocket` route registration ordering (must be in
+  `server.after()`). Cross-reference `docs/dependency-upgrade-validation-runbook.md`.
+- **`test_vp_live_join`** → VP never left `INITIALIZING`; inspect VP ECS task logs
+  and the Zoom per-signal checklist in the runbook.
 
 ## Cleanup
 
 Delete a throwaway stack when done:
 ```bash
-AWS_PROFILE=default lma delete --stack-name lma-integtest1 --wait
+AWS_PROFILE=default lma delete --stack-name lma-integtest1 --yes
 ```
+(Meeting/transcript rows created by the tests are self-cleaned by the tests.)
 
 ## Extending
 
 Add tests to `integ-tests/test_lma_integration.py`. Use the session-scoped
 `client` (a real `LMAClient`) and `outputs` fixtures from `conftest.py`. Keep
-mutating tests self-cleaning (end/delete what you create in a `finally`). Mark
-anything that touches a real meeting with `@pytest.mark.live` so the default run
-stays side-effect-free.
+mutating tests self-cleaning (delete what you create in a `finally`). Mark
+anything that needs a real meeting or user creds `@pytest.mark.live` or gate it on
+env vars + `pytest.skip` so the default `make integ-tests` run stays green and
+side-effect-free. The reusable probes are `kds_pipeline_probe.py` (Kinesis→DDB)
+and `ws_stream_probe.py` (real WAV over the WebSocket).

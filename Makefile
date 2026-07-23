@@ -330,7 +330,7 @@ test-ui-force: ## Run React UI tests (ignore checksum, always run)
 # These target names collide with real paths (e.g. the integ-tests/ dir), so
 # declare them PHONY or make treats them as up-to-date files and skips them.
 .PHONY: docker-build-check docker-build-check-transcriber docker-build-check-vp \
-        docker-build-check-all integ-tests integ-tests-live test-lambdas
+        docker-build-check-all integ-tests integ-tests-live integ-deploy-and-test test-lambdas
 # Build the container images the SAME way the in-stack CodeBuild projects do,
 # locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
 # renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then
@@ -384,6 +384,31 @@ endif
 		--vp-meeting-id "$(MEETING_ID)" \
 		--vp-meeting-password "$(MEETING_PASSWORD)"
 	@echo -e "$(GREEN)✅ Integration tests (incl. live join) passed against '$(INTEG_STACK)'!$(NC)"
+
+# Deploy (create-if-new / update-if-exists) from local code, then run the
+# integration tests. This is the one-shot entry point the 'run integration tests'
+# Claude skill uses. STACK defaults to 'lma-integtest1' here (not 'LMA') so the
+# skill never touches a prod-looking stack by accident. ADMIN_EMAIL is required
+# only when the stack does not yet exist.
+INTEG_DEPLOY_STACK ?= $(or $(STACK),$(LMA_STACK_NAME),lma-integtest1)
+integ-deploy-and-test: ## Deploy (create/update) a stack from local code, then run integ-tests (Usage: make integ-deploy-and-test [STACK=<name>] [ADMIN_EMAIL=<email>])
+	@if ! $(PYTHON) -c "import lma_sdk" 2>/dev/null; then \
+		echo -e "$(RED)ERROR: lma_sdk not importable. Run 'make setup-cli-dev' first.$(NC)"; exit 1; \
+	fi
+	@STACK_NAME="$(INTEG_DEPLOY_STACK)"; \
+	if aws cloudformation describe-stacks --stack-name "$$STACK_NAME" >/dev/null 2>&1; then \
+		echo -e "$(CYAN)Stack '$$STACK_NAME' exists — updating from local code...$(NC)"; \
+		$(VENV_DIR)/bin/lma deploy --stack-name "$$STACK_NAME" --from-code . --wait; \
+	else \
+		if [ -z "$(ADMIN_EMAIL)" ]; then \
+			echo -e "$(RED)ERROR: stack '$$STACK_NAME' does not exist and ADMIN_EMAIL is not set.$(NC)"; \
+			echo -e "$(YELLOW)Usage: make integ-deploy-and-test STACK=$$STACK_NAME ADMIN_EMAIL=you@example.com$(NC)"; \
+			exit 1; \
+		fi; \
+		echo -e "$(CYAN)Stack '$$STACK_NAME' not found — creating from local code (admin=$(ADMIN_EMAIL))...$(NC)"; \
+		$(VENV_DIR)/bin/lma deploy --stack-name "$$STACK_NAME" --from-code . --admin-email "$(ADMIN_EMAIL)" --wait; \
+	fi
+	@$(MAKE) integ-tests STACK="$(INTEG_DEPLOY_STACK)"
 
 ##@ UI Development
 # Usage: make ui-start STACK_NAME=<stack-name>
