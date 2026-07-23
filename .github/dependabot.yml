@@ -1,13 +1,19 @@
 # Dependabot configuration for LMA.
 #
 # Keeps npm and pip dependencies patched automatically via grouped PRs against
-# `develop`. Grouping batches minor/patch bumps into a single PR per ecosystem
-# area (weekly) to avoid the PR pile-up that accumulated before this config
-# existed, while still surfacing major bumps individually for manual review.
+# `develop`. Each ecosystem area has TWO groups so a weekly run yields at most
+# ~2 PRs per area instead of a pile-up:
+#   * `<area>-minor-patch` — all minor/patch bumps batched together
+#   * `<area>-major`        — all major bumps batched together (still separate
+#                             from minor/patch so majors can be reviewed/tested
+#                             as a set without blocking the safe minor/patch PR)
+# Before this, majors were surfaced one-PR-each, which produced dozens of PRs
+# after a large baseline shift. Security updates are always raised immediately
+# regardless of the schedule/grouping.
 #
 # `directories:` globs let one entry cover the many Lambda / package manifests
-# without listing each dir. Security updates are always raised regardless of the
-# schedule.
+# without listing each dir. `ignore` rules hold back specific bumps that are
+# known-incompatible with LMA (see each note) so they don't reappear weekly.
 version: 2
 updates:
   # ── npm: web UI ───────────────────────────────────────────────────────────
@@ -20,14 +26,25 @@ updates:
     groups:
       ui-minor-patch:
         update-types: [minor, patch]
+      ui-major:
+        update-types: [major]
     ignore:
-      # eslint 9/10 is flat-config-only; the UI's shareable `eslint-config-airbnb`
-      # peers eslint 7/8 only and is unmaintained for 9+. Bumping breaks lint.
+      # The UI's shareable `eslint-config-airbnb` pins the eslint 8 ecosystem
+      # (peers eslint 7/8, unmaintained for 9+), so the whole lint/format
+      # toolchain must stay on the eslint-8-compatible majors:
+      #   eslint 9/10 (flat-config-only), eslint-plugin-react-hooks 5+ (needs
+      #   eslint 9+), prettier 3 + eslint-plugin-prettier 5 (prettier-3 API),
+      #   eslint-plugin-jest 29 (needs eslint 9+). Bumping any breaks lint.
       - dependency-name: eslint
         versions: [">=9"]
-      # eslint-plugin-react-hooks 5+ requires eslint 9+ (same airbnb block above).
       - dependency-name: eslint-plugin-react-hooks
         versions: [">=5"]
+      - dependency-name: prettier
+        versions: [">=3"]
+      - dependency-name: eslint-plugin-prettier
+        versions: [">=5"]
+      - dependency-name: eslint-plugin-jest
+        versions: [">=29"]
 
   # ── npm: internet-facing WebSocket transcriber (highest-priority runtime) ──
   - package-ecosystem: npm
@@ -41,12 +58,15 @@ updates:
     groups:
       transcriber-minor-patch:
         update-types: [minor, patch]
+      transcriber-major:
+        update-types: [major]
     ignore:
-      # typescript 7.x is Microsoft's native (Go) "tsgo" preview compiler. Its
-      # npm package omits the classic JS compiler API, so ts-node (the runtime
-      # here) and typescript-eslint cannot load it. Stay on the 5.x line.
+      # typescript >=6: 7.x is Microsoft's native (Go) "tsgo" preview (no classic
+      # JS compiler API — breaks ts-node, the runtime here, and typescript-eslint);
+      # 6.x is held too until it's validated against ts-node + typescript-eslint
+      # (typescript-eslint peers <6.1 today). Stay on the 5.x line.
       - dependency-name: typescript
-        versions: [">=7"]
+        versions: [">=6"]
 
   # ── npm: Virtual Participant backend ──────────────────────────────────────
   - package-ecosystem: npm
@@ -58,11 +78,13 @@ updates:
     groups:
       vp-minor-patch:
         update-types: [minor, patch]
+      vp-major:
+        update-types: [major]
     ignore:
-      # typescript 7.x native tsgo preview — breaks ts-node dev runtime. See note
-      # on the transcriber entry above.
+      # typescript >=6 — see the note on the transcriber entry above (tsgo 7 has
+      # no JS compiler API; 6.x held pending ts-node/typescript-eslint validation).
       - dependency-name: typescript
-        versions: [">=7"]
+        versions: [">=6"]
       # simli-client 3.0.2 ships a case-mismatched barrel export
       # (dist/index.js does require("./Client") but the file is dist/client.js),
       # which builds on case-insensitive macOS but FAILS the Docker image build
@@ -81,12 +103,14 @@ updates:
     groups:
       browser-ext-minor-patch:
         update-types: [minor, patch]
+      browser-ext-major:
+        update-types: [major]
     ignore:
       # react-scripts (CRA) pins typescript <5 and the eslint 8 ecosystem via
-      # eslint-config-react-app. typescript 7 (native tsgo) and eslint 9/10
-      # (flat-config-only) both break the CRA build. Hold until CRA is replaced.
+      # eslint-config-react-app. typescript >=6 (incl. native tsgo 7) and eslint
+      # 9/10 (flat-config-only) both break the CRA build. Hold until CRA is replaced.
       - dependency-name: typescript
-        versions: [">=7"]
+        versions: [">=6"]
       - dependency-name: eslint
         versions: [">=9"]
 
@@ -103,6 +127,8 @@ updates:
     groups:
       ai-stack-tooling-minor-patch:
         update-types: [minor, patch]
+      ai-stack-tooling-major:
+        update-types: [major]
     ignore:
       - dependency-name: eslint
         versions: [">=9"]
@@ -121,6 +147,13 @@ updates:
     groups:
       tooling-minor-patch:
         update-types: [minor, patch]
+      tooling-major:
+        update-types: [major]
+    ignore:
+      # utilities/websocket-client is a small dev helper; typescript >=6 held in
+      # lockstep with the other TS packages (tsgo/ts-node compatibility).
+      - dependency-name: typescript
+        versions: [">=6"]
 
   # ── pip: AI stack Lambda functions + layers ───────────────────────────────
   - package-ecosystem: pip
@@ -137,6 +170,8 @@ updates:
     groups:
       python-minor-patch:
         update-types: [minor, patch]
+      python-major:
+        update-types: [major]
     ignore:
       # cfn-lint 1.x and cfn-policy-validator >=0.0.32 both pull an
       # aws-sam-translator / boto3 >=1.34 that conflicts with the intentional
@@ -168,3 +203,5 @@ updates:
     groups:
       actions:
         update-types: [minor, patch]
+      actions-major:
+        update-types: [major]
