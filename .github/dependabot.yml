@@ -92,6 +92,11 @@ updates:
       # Pinned to 3.0.1; unignore once upstream fixes the casing (>3.0.2).
       - dependency-name: simli-client
         versions: ["3.0.2"]
+      # @types/uuid >=10 are deprecated empty stubs (uuid ships its own types
+      # since v10). With tsconfig typeRoots including @types, the empty stub
+      # makes tsc fail "Cannot find type definition file for 'uuid'" (TS2688).
+      - dependency-name: "@types/uuid"
+        versions: [">=10"]
 
   # ── npm: browser extension (build/dev-heavy) ──────────────────────────────
   - package-ecosystem: npm
@@ -154,6 +159,11 @@ updates:
       # lockstep with the other TS packages (tsgo/ts-node compatibility).
       - dependency-name: typescript
         versions: [">=6"]
+      # @types/node >=17 use TS 5.0+ syntax (const type params in ffi.d.ts) that
+      # websocket-client's pinned typescript ^4.9 can't parse (TS1xxx, not
+      # suppressed by skipLibCheck). Held until this dir moves off TS 4.x.
+      - dependency-name: "@types/node"
+        versions: [">=17"]
 
   # ── pip: AI stack Lambda functions + layers ───────────────────────────────
   - package-ecosystem: pip
