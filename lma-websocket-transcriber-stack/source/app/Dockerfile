@@ -7,8 +7,7 @@ FROM public.ecr.aws/docker/library/node:20-bookworm AS builder
 WORKDIR /app
 
 COPY [\
-    "./.eslintrc",\
-    "./.eslintignore",\
+    "./eslint.config.mjs",\
     "./package.json",\
     "./package-lock.json",\
     "./tsconfig.json",\
