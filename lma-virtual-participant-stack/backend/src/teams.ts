@@ -831,42 +831,77 @@ export default class Teams {
         // it to FAILED). Wrap the whole block; transcription start happens after
         // it regardless.
         try {
-        // Set up simple attendee change monitoring
-        await page.exposeFunction('attendeeChange', async (hasOthers: boolean) => {
-            console.log(`DEBUG: Teams has other participants: ${hasOthers}`);
-            if (!hasOthers) {
-                console.log('LMA Virtual Participant got lonely and left.');
+        // Attendee monitoring / auto-leave watchdog.
+        //
+        // The VP should leave once everyone else has gone, but the Teams
+        // roster badge (span[data-tid="toolbar-item-badge"]) is a fragile
+        // single signal: Teams hides/re-renders it during content-share,
+        // full-screen, and gallery/speaker re-layouts, and a MutationObserver
+        // callback can observe a transient empty text node. The previous
+        // implementation fired the graceful-leave path on the FIRST reading
+        // that parsed to <=1, so one transient DOM misread ended a live
+        // meeting mid-sentence (GitHub #317, #318).
+        //
+        // Fix — mirror the debounced participants-watchdog already proven on
+        // Zoom (see zoom.ts):
+        //   - poll on a fixed interval instead of reacting to every mutation;
+        //   - require POLLS_BEFORE_END *consecutive* genuine "<=1" reads
+        //     (~60s grace) before leaving, so transient re-renders are absorbed;
+        //   - distinguish "badge missing/empty" (UNKNOWN — never a leave signal
+        //     on Teams, where the badge legitimately disappears) from a badge
+        //     that is present and genuinely reads <=1 (alone).
+        // Audio silence is deliberately NOT a leave signal (long silent
+        // document reviews are real meetings).
+        console.log("Listening for attendee changes.");
+        const POLL_MS = 20_000;
+        const POLLS_BEFORE_END = 3; // ~60s of sustained "alone" before leaving
+        let consecutiveLonely = 0;
+        const attendeeWatchdog = setInterval(async () => {
+            if (page.isClosed()) {
+                clearInterval(attendeeWatchdog);
+                return;
+            }
+            let result: { state: string; count?: number };
+            try {
+                result = await page.evaluate(() => {
+                    const badgeElement = document.querySelector('span[data-tid="toolbar-item-badge"]');
+                    if (!badgeElement) return { state: 'BADGE_MISSING' };
+                    const text = (badgeElement.textContent || '').trim();
+                    if (text === '') return { state: 'BADGE_MISSING' };
+                    const n = parseInt(text, 10);
+                    return { state: 'OK', count: Number.isFinite(n) ? n : 0 };
+                });
+            } catch {
+                // page.evaluate threw — page closed/navigated or CDP error.
+                // Treat as unknown, not a leave signal.
+                result = { state: 'BADGE_MISSING' };
+            }
+
+            if (result.state !== 'OK') {
+                // Badge missing/empty is a normal transient on Teams (collapsed
+                // roster, content-share, re-layout) — do NOT treat as alone.
+                console.log('DEBUG: Teams attendee badge missing/empty — treating as unknown (not leaving).');
+                consecutiveLonely = 0;
+                return;
+            }
+
+            const count = result.count ?? 0;
+            const hasOthers = count > 1;
+            console.log(`DEBUG: Teams attendee count: ${count}, hasOthers: ${hasOthers}, consecutiveLonely: ${hasOthers ? 0 : consecutiveLonely + 1}/${POLLS_BEFORE_END}`);
+            if (hasOthers) {
+                consecutiveLonely = 0;
+                return;
+            }
+
+            consecutiveLonely += 1;
+            if (consecutiveLonely >= POLLS_BEFORE_END) {
+                console.log(`LMA Virtual Participant got lonely and left (count<=1 for ${consecutiveLonely} consecutive polls).`);
+                clearInterval(attendeeWatchdog);
                 details.start = false;
                 this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
             }
-        });
-
-        console.log("Listening for attendee changes.");
-        await page.evaluate(() => {
-            const checkAttendeeCount = () => {
-                const badgeElement = document.querySelector('span[data-tid="toolbar-item-badge"]');
-                const hasOthers = badgeElement && parseInt(badgeElement.textContent || '0') > 1;
-                console.log(`DEBUG: Badge element found: ${!!badgeElement}, count: ${badgeElement?.textContent || 'N/A'}, hasOthers: ${hasOthers}`);
-                (window as any).attendeeChange(hasOthers);
-            };
-
-            // Check initial state
-            checkAttendeeCount();
-
-            // Monitor for badge appearance/disappearance
-            const rosterButton = document.querySelector('#roster-button, button[data-inp="roster-button"]');
-            if (rosterButton) {
-                const config = { childList: true, subtree: true, characterData: true };
-                const callback = () => {
-                    checkAttendeeCount();
-                };
-                const observer = new MutationObserver(callback);
-                observer.observe(rosterButton, config);
-                console.log('DEBUG: Teams attendee monitoring set up on roster button');
-            } else {
-                console.log('DEBUG: Teams roster button not found - attendee monitoring disabled');
-            }
-        });
+        }, POLL_MS);
+        page.once('close', () => clearInterval(attendeeWatchdog));
 
         // Speaker attribution combines two signals:
         //   1) Page-side DOM MutationObserver — identifies human speakers via
