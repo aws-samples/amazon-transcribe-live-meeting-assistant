@@ -9,7 +9,9 @@ import dotenv from 'dotenv';
 import { normalizeErrorForLogging } from './common';
 import { getClientIP } from './headers';
 
-dotenv.config();
+// dotenv v17 prints an "injected env" banner to stdout by default; quiet
+// suppresses it to keep production logs clean.
+dotenv.config({ quiet: true });
 
 const USERPOOL_ID = process.env['USERPOOL_ID'] || '';
 const cognitoJwtVerifier = CognitoJwtVerifier.create({

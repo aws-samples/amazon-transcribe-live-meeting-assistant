@@ -12,7 +12,7 @@ import MCPServersContent from './MCPServersContent';
  * MCP Servers Modal - Manage Model Context Protocol servers
  * Shows Lambda MCP servers (always available) and VP MCP (active meetings only)
  */
-const MCPServersModal = ({ visible, onDismiss, vpData }) => {
+const MCPServersModal = ({ visible, onDismiss, vpData = null }) => {
   return (
     <Modal
       visible={visible}
@@ -41,10 +41,6 @@ MCPServersModal.propTypes = {
     vncReady: PropTypes.bool,
     status: PropTypes.string,
   }),
-};
-
-MCPServersModal.defaultProps = {
-  vpData: null,
 };
 
 export default MCPServersModal;

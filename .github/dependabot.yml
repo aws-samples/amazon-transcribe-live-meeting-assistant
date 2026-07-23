@@ -20,6 +20,14 @@ updates:
     groups:
       ui-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # eslint 9/10 is flat-config-only; the UI's shareable `eslint-config-airbnb`
+      # peers eslint 7/8 only and is unmaintained for 9+. Bumping breaks lint.
+      - dependency-name: eslint
+        versions: [">=9"]
+      # eslint-plugin-react-hooks 5+ requires eslint 9+ (same airbnb block above).
+      - dependency-name: eslint-plugin-react-hooks
+        versions: [">=5"]
 
   # ── npm: internet-facing WebSocket transcriber (highest-priority runtime) ──
   - package-ecosystem: npm
@@ -33,6 +41,12 @@ updates:
     groups:
       transcriber-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # typescript 7.x is Microsoft's native (Go) "tsgo" preview compiler. Its
+      # npm package omits the classic JS compiler API, so ts-node (the runtime
+      # here) and typescript-eslint cannot load it. Stay on the 5.x line.
+      - dependency-name: typescript
+        versions: [">=7"]
 
   # ── npm: Virtual Participant backend ──────────────────────────────────────
   - package-ecosystem: npm
@@ -44,6 +58,18 @@ updates:
     groups:
       vp-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # typescript 7.x native tsgo preview — breaks ts-node dev runtime. See note
+      # on the transcriber entry above.
+      - dependency-name: typescript
+        versions: [">=7"]
+      # simli-client 3.0.2 ships a case-mismatched barrel export
+      # (dist/index.js does require("./Client") but the file is dist/client.js),
+      # which builds on case-insensitive macOS but FAILS the Docker image build
+      # on case-sensitive Linux (CodeBuild): "Cannot read file: .../dist/Client.js".
+      # Pinned to 3.0.1; unignore once upstream fixes the casing (>3.0.2).
+      - dependency-name: simli-client
+        versions: ["3.0.2"]
 
   # ── npm: browser extension (build/dev-heavy) ──────────────────────────────
   - package-ecosystem: npm
@@ -55,13 +81,37 @@ updates:
     groups:
       browser-ext-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # react-scripts (CRA) pins typescript <5 and the eslint 8 ecosystem via
+      # eslint-config-react-app. typescript 7 (native tsgo) and eslint 9/10
+      # (flat-config-only) both break the CRA build. Hold until CRA is replaced.
+      - dependency-name: typescript
+        versions: [">=7"]
+      - dependency-name: eslint
+        versions: [">=9"]
+
+  # ── npm: lint/format dev tooling for the AI stack (eslint 8 ecosystem) ─────
+  # Split from the shared tooling entry below so eslint can be pinned here
+  # (eslint-config-airbnb-base peers eslint 7/8 only) without also blocking the
+  # utilities/websocket-client dir, which runs fine on eslint 10.
+  - package-ecosystem: npm
+    directory: /lma-ai-stack
+    schedule:
+      interval: weekly
+    target-branch: develop
+    open-pull-requests-limit: 10
+    groups:
+      ai-stack-tooling-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: eslint
+        versions: [">=9"]
 
   # ── npm: misc tooling (docs site, CDK helpers, utilities, root) ───────────
   - package-ecosystem: npm
     directories:
       - /
       - /docs-site
-      - /lma-ai-stack
       - /lma-ai-stack/deployment/manifest-generator
       - /utilities/websocket-client
     schedule:
@@ -87,6 +137,26 @@ updates:
     groups:
       python-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # cfn-lint 1.x and cfn-policy-validator >=0.0.32 both pull an
+      # aws-sam-translator / boto3 >=1.34 that conflicts with the intentional
+      # `boto3~=1.22.12` pin in requirements-dev.txt. Unblock only by moving that
+      # pin first. Held to their last 0.x-compatible majors.
+      - dependency-name: cfn-lint
+        versions: [">=1"]
+      - dependency-name: cfn-policy-validator
+        versions: [">=0.0.32"]
+      # gql 4.x is incompatible with AWS AppSync. LMA builds mutations with gql's
+      # DSL, which requires a client-side schema, and the only way it obtains one
+      # is runtime introspection (fetch_schema_from_transport=True). gql 4's
+      # introspection query requests `includeDeprecated` on directive args, which
+      # AppSync rejects ("Unknown field argument includeDeprecated"), so every
+      # session fails and the Call Event Processor writes no meetings. Disabling
+      # introspection isn't an option (DSL then errors "invalid AppSync schema").
+      # Held on 3.5.x until gql supports an AppSync-compatible introspection or
+      # LMA switches off DSL / loads a local schema.
+      - dependency-name: gql
+        versions: [">=4"]
 
   # ── GitHub Actions ────────────────────────────────────────────────────────
   - package-ecosystem: github-actions

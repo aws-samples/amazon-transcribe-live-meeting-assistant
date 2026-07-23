@@ -137,7 +137,7 @@ const AuthWaitingState = () => (
 /**
  * Error state shown when authentication fails.
  */
-const AuthErrorState = ({ error }) => (
+const AuthErrorState = ({ error = 'Unknown authentication error' }) => (
   <div className="embed-auth-error">
     <Box textAlign="center" padding="xxl">
       <Box fontSize="heading-m" color="text-status-error">
@@ -152,10 +152,6 @@ const AuthErrorState = ({ error }) => (
 
 AuthErrorState.propTypes = {
   error: PropTypes.string,
-};
-
-AuthErrorState.defaultProps = {
-  error: 'Unknown authentication error',
 };
 
 /**

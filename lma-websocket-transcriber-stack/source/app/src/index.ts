@@ -37,9 +37,9 @@ import { jwtVerifier } from './utils/jwt-verifier';
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const RECORDINGS_BUCKET_NAME =
-  process.env['RECORDINGS_BUCKET_NAME'] || undefined;
+    process.env['RECORDINGS_BUCKET_NAME'] || undefined;
 const RECORDING_FILE_PREFIX =
-  process.env['RECORDING_FILE_PREFIX'] || 'lma-audio-recordings/';
+    process.env['RECORDING_FILE_PREFIX'] || 'lma-audio-recordings/';
 const CPU_HEALTH_THRESHOLD = parseInt(
     process.env['CPU_HEALTH_THRESHOLD'] || '50',
     10
@@ -57,11 +57,14 @@ const socketMap = new Map<WebSocket, SocketCallData>();
 const server = fastify({
     logger: {
         level: WS_LOG_LEVEL,
-        prettyPrint: {
-            ignore: 'pid,hostname',
-            translateTime: 'SYS:HH:MM:ss.l',
-            colorize: false,
-            levelFirst: true,
+        transport: {
+            target: 'pino-pretty',
+            options: {
+                ignore: 'pid,hostname',
+                translateTime: 'SYS:HH:MM:ss.l',
+                colorize: false,
+                levelFirst: true,
+            },
         },
     },
     disableRequestLogging: true,
@@ -83,21 +86,34 @@ server.addHook('preHandler', async (request, reply) => {
     }
 });
 
-// Setup Route for websocket connection
-server.get(
-    '/api/v1/ws',
-    { websocket: true, logLevel: 'debug' },
-    (connection, request) => {
-        const clientIP = getClientIP(request.headers);
-        server.log.debug(
-            `[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. URI: <${
-                request.url
-            }>, Headers: ${JSON.stringify(request.headers)}`
-        );
+// Setup Route for websocket connection.
+//
+// The `websocket: true` route MUST be registered only after the
+// `@fastify/websocket` plugin has finished loading — otherwise the plugin's
+// onRoute hook (which installs the HTTP-upgrade interception) isn't wired yet,
+// so upgrade requests fall through to the normal HTTP handler and the handler
+// is invoked with (request, reply) instead of (socket, request). That yields
+// `ws.on is not a function` -> HTTP 500 on every WS connect. Under Fastify 3 /
+// @fastify/websocket 5 the unawaited `server.register(websocket)` above
+// happened to order correctly; under Fastify 5 / @fastify/websocket 11 it does
+// not. `server.after()` guarantees the plugin is loaded before we add the route
+// (no top-level await needed in this module).
+server.after(() => {
+    server.get(
+        '/api/v1/ws',
+        { websocket: true, logLevel: 'debug' },
+        (socket, request) => {
+            const clientIP = getClientIP(request.headers);
+            server.log.debug(
+                `[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. URI: <${
+                    request.url
+                }>, Headers: ${JSON.stringify(request.headers)}`
+            );
 
-        registerHandlers(clientIP, connection.socket, request); // setup the handler functions for websocket events
-    }
-);
+            registerHandlers(clientIP, socket, request); // setup the handler functions for websocket events
+        }
+    );
+});
 
 type HealthCheckRemoteInfo = {
     addr: string;
@@ -238,180 +254,180 @@ const onTextMessage = async (
     data: string,
     request: FastifyRequest
 ): Promise<void> => {
-  type queryobj = {
-      authorization: string;
-      id_token: string;
-      refresh_token: string;
-  };
+    type queryobj = {
+        authorization: string;
+        id_token: string;
+        refresh_token: string;
+    };
 
-  type headersobj = {
-      authorization: string;
-      id_token: string;
-      refresh_token: string;
-  };
+    type headersobj = {
+        authorization: string;
+        id_token: string;
+        refresh_token: string;
+    };
 
-  const query = request.query as queryobj;
-  const headers = request.headers as headersobj;
-  const auth = query.authorization || headers.authorization;
-  const idToken = query.id_token || headers.id_token;
-  const refreshToken = query.refresh_token || headers.refresh_token;
+    const query = request.query as queryobj;
+    const headers = request.headers as headersobj;
+    const auth = query.authorization || headers.authorization;
+    const idToken = query.id_token || headers.id_token;
+    const refreshToken = query.refresh_token || headers.refresh_token;
 
-  const match = auth?.match(/^Bearer (.+)$/);
-  const callMetaData: CallMetaData = JSON.parse(data);
-  if (!match) {
-      server.log.error(
-          `[AUTH]: [${clientIP}] - No Bearer token found in header or query string. URI: <${
-              request.url
-          }>, Headers: ${JSON.stringify(request.headers)}`
-      );
+    const match = auth?.match(/^Bearer (.+)$/);
+    const callMetaData: CallMetaData = JSON.parse(data);
+    if (!match) {
+        server.log.error(
+            `[AUTH]: [${clientIP}] - No Bearer token found in header or query string. URI: <${
+                request.url
+            }>, Headers: ${JSON.stringify(request.headers)}`
+        );
 
-      return;
-  }
+        return;
+    }
 
-  const accessToken = match[1];
+    const accessToken = match[1];
 
-  try {
-      server.log.debug(
-          `[ON TEXT MESSAGE]: [${clientIP}][${callMetaData.callId}] - Call Metadata received from client: ${data}`
-      );
-  } catch (error) {
-      server.log.error(
-          `[ON TEXT MESSAGE]: [${clientIP}][${
-              callMetaData.callId
-          }] - Error parsing call metadata: ${data} ${normalizeErrorForLogging(
-              error
-          )}`
-      );
-      callMetaData.callId = randomUUID();
-  }
+    try {
+        server.log.debug(
+            `[ON TEXT MESSAGE]: [${clientIP}][${callMetaData.callId}] - Call Metadata received from client: ${data}`
+        );
+    } catch (error) {
+        server.log.error(
+            `[ON TEXT MESSAGE]: [${clientIP}][${
+                callMetaData.callId
+            }] - Error parsing call metadata: ${data} ${normalizeErrorForLogging(
+                error
+            )}`
+        );
+        callMetaData.callId = randomUUID();
+    }
 
-  callMetaData.accessToken = accessToken;
-  callMetaData.idToken = idToken;
-  callMetaData.refreshToken = refreshToken;
+    callMetaData.accessToken = accessToken;
+    callMetaData.idToken = idToken;
+    callMetaData.refreshToken = refreshToken;
 
-  if (callMetaData.callEvent === 'START') {
-      // generate random metadata if none is provided
-      callMetaData.callId = callMetaData.callId || randomUUID();
-      callMetaData.fromNumber = callMetaData.fromNumber || 'Customer Phone';
-      callMetaData.toNumber = callMetaData.toNumber || 'System Phone';
-      callMetaData.activeSpeaker =
-      callMetaData.activeSpeaker ?? callMetaData?.fromNumber ?? 'unknown';
+    if (callMetaData.callEvent === 'START') {
+        // generate random metadata if none is provided
+        callMetaData.callId = callMetaData.callId || randomUUID();
+        callMetaData.fromNumber = callMetaData.fromNumber || 'Customer Phone';
+        callMetaData.toNumber = callMetaData.toNumber || 'System Phone';
+        callMetaData.activeSpeaker =
+            callMetaData.activeSpeaker ?? callMetaData?.fromNumber ?? 'unknown';
 
-      // if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
-      //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);
+        // if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
+        //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);
 
-      //     callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
-      // } else {
-      //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`);
-      // }
+        //     callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
+        // } else {
+        //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`);
+        // }
 
-      callMetaData.agentId = callMetaData.agentId || randomUUID();
+        callMetaData.agentId = callMetaData.agentId || randomUUID();
 
-      await writeCallStartEvent(callMetaData, server);
-      const tempRecordingFilename = getTempRecordingFileName(callMetaData);
-      // Sanitize filename to prevent path traversal attacks
-      const sanitizedFilename = path.basename(tempRecordingFilename).replace(/[^a-zA-Z0-9._-]/g, '_');
-      if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
-          throw new Error('Invalid recording filename provided');
-      }
-      const writeRecordingStream = fs.createWriteStream(
-          path.resolve(LOCAL_TEMP_DIR, sanitizedFilename)
-      );
-      const recordingFileSize = 0;
+        await writeCallStartEvent(callMetaData, server);
+        const tempRecordingFilename = getTempRecordingFileName(callMetaData);
+        // Sanitize filename to prevent path traversal attacks
+        const sanitizedFilename = path.basename(tempRecordingFilename).replace(/[^a-zA-Z0-9._-]/g, '_');
+        if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
+            throw new Error('Invalid recording filename provided');
+        }
+        const writeRecordingStream = fs.createWriteStream(
+            path.resolve(LOCAL_TEMP_DIR, sanitizedFilename)
+        );
+        const recordingFileSize = 0;
 
-      const highWaterMarkSize = (callMetaData.samplingRate / 10) * 2 * 2;
-      const audioInputStream = new BlockStream({ size: highWaterMarkSize });
-      const socketCallMap: SocketCallData = {
-          callMetadata: {
-              callId: callMetaData.callId,
-              callEvent: callMetaData.callEvent,
-              fromNumber: callMetaData.fromNumber,
-              toNumber: callMetaData.toNumber,
-              activeSpeaker: callMetaData.activeSpeaker,
-              agentId: callMetaData.agentId,
-              accessToken: callMetaData.accessToken,
-              idToken: callMetaData.idToken,
-              refreshToken: callMetaData.refreshToken,
-              shouldRecordCall: callMetaData.shouldRecordCall,
-              samplingRate: callMetaData.samplingRate,
-              channels: callMetaData.channels
-          },
-          audioInputStream: audioInputStream,
-          writeRecordingStream: writeRecordingStream,
-          recordingFileSize: recordingFileSize,
-          startStreamTime: new Date(),
-          speakerEvents: [],
-          ended: false,
-      };
-      socketMap.set(ws, socketCallMap);
-      startTranscribe(socketCallMap, server);
-  } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
-      const socketData = socketMap.get(ws);
-      server.log.debug(
-          `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Received speaker change. Active speaker = ${callMetaData.activeSpeaker}`
-      );
+        const highWaterMarkSize = (callMetaData.samplingRate / 10) * 2 * 2;
+        const audioInputStream = new BlockStream({ size: highWaterMarkSize });
+        const socketCallMap: SocketCallData = {
+            callMetadata: {
+                callId: callMetaData.callId,
+                callEvent: callMetaData.callEvent,
+                fromNumber: callMetaData.fromNumber,
+                toNumber: callMetaData.toNumber,
+                activeSpeaker: callMetaData.activeSpeaker,
+                agentId: callMetaData.agentId,
+                accessToken: callMetaData.accessToken,
+                idToken: callMetaData.idToken,
+                refreshToken: callMetaData.refreshToken,
+                shouldRecordCall: callMetaData.shouldRecordCall,
+                samplingRate: callMetaData.samplingRate,
+                channels: callMetaData.channels
+            },
+            audioInputStream: audioInputStream,
+            writeRecordingStream: writeRecordingStream,
+            recordingFileSize: recordingFileSize,
+            startStreamTime: new Date(),
+            speakerEvents: [],
+            ended: false,
+        };
+        socketMap.set(ws, socketCallMap);
+        startTranscribe(socketCallMap, server);
+    } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
+        const socketData = socketMap.get(ws);
+        server.log.debug(
+            `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Received speaker change. Active speaker = ${callMetaData.activeSpeaker}`
+        );
 
-      if (socketData && socketData.callMetadata) {
-      // We already know speaker name for the microphone channel (ch_1) - represented in callMetaData.agentId.
-      // We should only use SPEAKER_CHANGE to track who is speaking on the incoming meeting channel (ch_0)
-      // If the speaker is the same as the agentId, then we should ignore the event.
-          const mic_channel_speaker = callMetaData.agentId;
-          const activeSpeaker = callMetaData.activeSpeaker;
-          if (activeSpeaker !== mic_channel_speaker) {
-              server.log.debug(
-                  `[${callMetaData.callEvent}]: [${callMetaData.callId}] - active speaker '${activeSpeaker}' assigned to meeting channel (ch_0) as name does not match mic channel (ch_1) speaker '${mic_channel_speaker}'`
-              );
-              // set active speaker in the socketData structure being used by startTranscribe results loop.
-              socketData.callMetadata.activeSpeaker = callMetaData.activeSpeaker;
-          } else {
-              server.log.debug(
-                  `[${callMetaData.callEvent}]: [${callMetaData.callId}] - active speaker '${activeSpeaker}' not assigned to meeting channel (ch_0) as name matches mic channel (ch_1) speaker '${mic_channel_speaker}'`
-              );
-          }
-      } else {
-      // this is not a valid call metadata
-          server.log.error(
-              `[${callMetaData.callEvent}]: [${
-                  callMetaData.callId
-              }] - Invalid call metadata: ${JSON.stringify(callMetaData)}`
-          );
-      }
-  } else if (callMetaData.callEvent === 'END') {
-      const socketData = socketMap.get(ws);
-      if (!socketData || !socketData.callMetadata) {
-          server.log.error(
-              `[${callMetaData.callEvent}]: [${
-                  callMetaData.callId
-              }] - Received END without starting a call:  ${JSON.stringify(
-                  callMetaData
-              )}`
-          );
-          return;
-      }
-      server.log.debug(
-          `[${callMetaData.callEvent}]: [${
-              callMetaData.callId
-          }] - Received call end event from client, writing it to KDS:  ${JSON.stringify(
-              callMetaData
-          )}`
-      );
+        if (socketData && socketData.callMetadata) {
+            // We already know speaker name for the microphone channel (ch_1) - represented in callMetaData.agentId.
+            // We should only use SPEAKER_CHANGE to track who is speaking on the incoming meeting channel (ch_0)
+            // If the speaker is the same as the agentId, then we should ignore the event.
+            const mic_channel_speaker = callMetaData.agentId;
+            const activeSpeaker = callMetaData.activeSpeaker;
+            if (activeSpeaker !== mic_channel_speaker) {
+                server.log.debug(
+                    `[${callMetaData.callEvent}]: [${callMetaData.callId}] - active speaker '${activeSpeaker}' assigned to meeting channel (ch_0) as name does not match mic channel (ch_1) speaker '${mic_channel_speaker}'`
+                );
+                // set active speaker in the socketData structure being used by startTranscribe results loop.
+                socketData.callMetadata.activeSpeaker = callMetaData.activeSpeaker;
+            } else {
+                server.log.debug(
+                    `[${callMetaData.callEvent}]: [${callMetaData.callId}] - active speaker '${activeSpeaker}' not assigned to meeting channel (ch_0) as name matches mic channel (ch_1) speaker '${mic_channel_speaker}'`
+                );
+            }
+        } else {
+            // this is not a valid call metadata
+            server.log.error(
+                `[${callMetaData.callEvent}]: [${
+                    callMetaData.callId
+                }] - Invalid call metadata: ${JSON.stringify(callMetaData)}`
+            );
+        }
+    } else if (callMetaData.callEvent === 'END') {
+        const socketData = socketMap.get(ws);
+        if (!socketData || !socketData.callMetadata) {
+            server.log.error(
+                `[${callMetaData.callEvent}]: [${
+                    callMetaData.callId
+                }] - Received END without starting a call:  ${JSON.stringify(
+                    callMetaData
+                )}`
+            );
+            return;
+        }
+        server.log.debug(
+            `[${callMetaData.callEvent}]: [${
+                callMetaData.callId
+            }] - Received call end event from client, writing it to KDS:  ${JSON.stringify(
+                callMetaData
+            )}`
+        );
 
-      if (
-          typeof callMetaData.shouldRecordCall === 'undefined' ||
+        if (
+            typeof callMetaData.shouldRecordCall === 'undefined' ||
       callMetaData.shouldRecordCall === null
-      ) {
-          server.log.debug(
-              `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`
-          );
+        ) {
+            server.log.debug(
+                `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`
+            );
 
-          callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
-      } else {
-          server.log.debug(
-              `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`
-          );
-      }
-      await endCall(ws, socketData, callMetaData);
-  }
+            callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
+        } else {
+            server.log.debug(
+                `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`
+            );
+        }
+        await endCall(ws, socketData, callMetaData);
+    }
 };
 
 const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {

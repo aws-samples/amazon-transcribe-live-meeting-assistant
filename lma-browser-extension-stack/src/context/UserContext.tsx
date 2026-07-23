@@ -63,7 +63,7 @@ function UserProvider({ children }: any) {
   // Load user
   useEffect(() => {
     if (chrome.storage) {
-      chrome.storage.local.get('authTokens', (result) => {
+      chrome.storage.local.get('authTokens', (result: { authTokens?: User }) => {
         if (result.authTokens && result.authTokens.access_token) {
           const isExpired = isTokenExpired(result.authTokens.access_token);
           if (isExpired) {
@@ -71,7 +71,9 @@ function UserProvider({ children }: any) {
             setUser({});
             setLoggedIn(false);
             // try to refresh anyway
-            exchangeCodeForToken(result.authTokens.refresh_token, 'refresh_token');
+            if (result.authTokens.refresh_token) {
+              exchangeCodeForToken(result.authTokens.refresh_token, 'refresh_token');
+            }
           } else {
             setUser(result.authTokens);
             setLoggedIn(true);

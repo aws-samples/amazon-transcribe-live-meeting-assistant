@@ -75,7 +75,7 @@ const appsyncClient = generateClient();
  *     - 'select'  → shows the Input mode Tiles switcher (previous behavior)
  *     - undefined → defaults to 'select' (preserves legacy standalone use)
  */
-const StreamAudio = ({ mode: modeProp }) => {
+const StreamAudio = ({ mode: modeProp = undefined }) => {
   const { currentSession, user, authState } = useAppContext();
   const { settings } = useSettingsContext();
   // Amplify v6 exposes tokens as currentSession.tokens.{accessToken,idToken}.toString().
@@ -847,10 +847,6 @@ const StreamAudio = ({ mode: modeProp }) => {
 
 StreamAudio.propTypes = {
   mode: PropTypes.oneOf([MODE_STREAM, MODE_UPLOAD, MODE_SELECT]),
-};
-
-StreamAudio.defaultProps = {
-  mode: undefined,
 };
 
 export default StreamAudio;
