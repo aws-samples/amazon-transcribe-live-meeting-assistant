@@ -2,7 +2,7 @@
 bandit~=1.7.4
 black~=26.5.1
 cfn-lint~=0.77.5
-cfn-policy-validator~=0.0.13
+cfn-policy-validator~=0.0.31
 flake8~=4.0.1
 mypy~=2.3
 pylint~=4.0.6
