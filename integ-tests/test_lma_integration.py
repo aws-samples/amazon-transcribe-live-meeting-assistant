@@ -22,6 +22,8 @@ Test tiers:
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from lma_sdk import LMAClient
@@ -187,6 +189,40 @@ def test_kds_pipeline_creates_meeting(client: LMAClient) -> None:
         )
     finally:
         cleanup(client.stack_name, result["call_id"], region=client.region)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 3c. WebSocket transcriber front door (Fastify 5 / @fastify/websocket 11 upgrade)
+# ────────────────────────────────────────────────────────────────────────────
+
+def test_ws_stream_connects(client: LMAClient) -> None:
+    """Stream audio over the live WebSocket exactly like the browser does.
+
+    Regression guard for the fastify 5 / @fastify/websocket 11 route-ordering
+    bug: WS upgrades returned HTTP 500 ("ws.on is not a function") and the
+    browser reconnect-looped, never sending START, so no meeting was created.
+    This opens wss://.../api/v1/ws with a real Cognito token, sends START +
+    synthetic audio, and asserts the socket stays OPEN for the session.
+
+    Opt-in: requires LMA_TEST_USERNAME / LMA_TEST_PASSWORD (a Cognito user in the
+    stack's pool) and the pycognito + websockets libs. Skips otherwise.
+    """
+    if not (os.environ.get("LMA_TEST_USERNAME") and os.environ.get("LMA_TEST_PASSWORD")):
+        pytest.skip("set LMA_TEST_USERNAME / LMA_TEST_PASSWORD to run the WS stream test")
+    try:
+        import pycognito  # noqa: F401
+        import websockets  # noqa: F401
+    except ImportError:
+        pytest.skip("pycognito / websockets not installed (pip install pycognito websockets)")
+
+    from ws_stream_probe import run_probe
+
+    result = run_probe(client.stack_name, region=client.region)
+    assert result["connected"], (
+        f"WebSocket stream to {result['ws_endpoint']} did not stay OPEN "
+        f"(final_state={result['final_state']}). The transcriber likely 500s on "
+        f"upgrade — check the @fastify/websocket route registration ordering."
+    )
 
 
 # ────────────────────────────────────────────────────────────────────────────
