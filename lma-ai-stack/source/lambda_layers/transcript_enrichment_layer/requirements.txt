@@ -2,6 +2,6 @@
 boto3~=1.22.12
 gql[botocore,aiohttp,requests]~=3.5.0
 aws-lambda-powertools~=1.25.10
-phonenumbers~=8.12.51
+phonenumbers~=9.0.34
 pyjwt
 cryptography
