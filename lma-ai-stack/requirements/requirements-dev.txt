@@ -12,7 +12,7 @@ yamllint~=1.38.0
 # runtime and typing dependencies included to hint IDEs and make it easier to test/debug locally
 boto3~=1.22.12
 boto3-stubs[comprehend,codebuild,dynamodb,lambda,lexv2-runtime,s3,sqs,sns]~=1.22.12
-gql[botocore,aiohttp,requests]~=3.2.0
+gql[botocore,aiohttp,requests]~=3.5.3
 aws-lambda-powertools~=1.25.10
 phonenumbers~=8.12.51
 crhelper~=2.0.12
