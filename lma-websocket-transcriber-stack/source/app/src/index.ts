@@ -86,21 +86,34 @@ server.addHook('preHandler', async (request, reply) => {
     }
 });
 
-// Setup Route for websocket connection
-server.get(
-    '/api/v1/ws',
-    { websocket: true, logLevel: 'debug' },
-    (socket, request) => {
-        const clientIP = getClientIP(request.headers);
-        server.log.debug(
-            `[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. URI: <${
-                request.url
-            }>, Headers: ${JSON.stringify(request.headers)}`
-        );
+// Setup Route for websocket connection.
+//
+// The `websocket: true` route MUST be registered only after the
+// `@fastify/websocket` plugin has finished loading — otherwise the plugin's
+// onRoute hook (which installs the HTTP-upgrade interception) isn't wired yet,
+// so upgrade requests fall through to the normal HTTP handler and the handler
+// is invoked with (request, reply) instead of (socket, request). That yields
+// `ws.on is not a function` -> HTTP 500 on every WS connect. Under Fastify 3 /
+// @fastify/websocket 5 the unawaited `server.register(websocket)` above
+// happened to order correctly; under Fastify 5 / @fastify/websocket 11 it does
+// not. `server.after()` guarantees the plugin is loaded before we add the route
+// (no top-level await needed in this module).
+server.after(() => {
+    server.get(
+        '/api/v1/ws',
+        { websocket: true, logLevel: 'debug' },
+        (socket, request) => {
+            const clientIP = getClientIP(request.headers);
+            server.log.debug(
+                `[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. URI: <${
+                    request.url
+                }>, Headers: ${JSON.stringify(request.headers)}`
+            );
 
-        registerHandlers(clientIP, socket, request); // setup the handler functions for websocket events
-    }
-);
+            registerHandlers(clientIP, socket, request); // setup the handler functions for websocket events
+        }
+    );
+});
 
 type HealthCheckRemoteInfo = {
     addr: string;
