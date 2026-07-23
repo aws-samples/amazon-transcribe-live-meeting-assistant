@@ -111,11 +111,12 @@ updates:
       browser-ext-major:
         update-types: [major]
     ignore:
-      # react-scripts (CRA) pins typescript <5 and the eslint 8 ecosystem via
-      # eslint-config-react-app. typescript >=6 (incl. native tsgo 7) and eslint
-      # 9/10 (flat-config-only) both break the CRA build. Hold until CRA is replaced.
+      # react-scripts 5.0.1 (CRA) hard-pins `typescript ^3.2.1 || ^4` as a peer
+      # and the eslint 8 ecosystem via eslint-config-react-app. typescript >=5
+      # (verified: npm ERESOLVE, react-scripts won't install) and eslint 9/10
+      # (flat-config-only) both break the CRA build. Hold until CRA is replaced.
       - dependency-name: typescript
-        versions: [">=6"]
+        versions: [">=5"]
       - dependency-name: eslint
         versions: [">=9"]
 
@@ -183,14 +184,13 @@ updates:
       python-major:
         update-types: [major]
     ignore:
-      # cfn-lint 1.x and cfn-policy-validator >=0.0.32 both pull an
-      # aws-sam-translator / boto3 >=1.34 that conflicts with the intentional
-      # `boto3~=1.22.12` pin in requirements-dev.txt. Unblock only by moving that
-      # pin first. Held to their last 0.x-compatible majors.
-      - dependency-name: cfn-lint
-        versions: [">=1"]
-      - dependency-name: cfn-policy-validator
-        versions: [">=0.0.32"]
+      # (cfn-lint >=1 and cfn-policy-validator >=0.0.32 were previously held here
+      # because the legacy `boto3~=1.22.12` pin conflicted with their
+      # aws-sam-translator/boto3 >=1.34 requirement. That pin has been lifted to
+      # ~=1.43.54 — boto3 1.43 already ran in the deployed lambdas — so those
+      # tools now resolve cleanly and are no longer ignored; dependabot may raise
+      # them as normal PRs.)
+      #
       # gql 4.x is incompatible with AWS AppSync. LMA builds mutations with gql's
       # DSL, which requires a client-side schema, and the only way it obtains one
       # is runtime introspection (fetch_schema_from_transport=True). gql 4's

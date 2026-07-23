@@ -7,7 +7,7 @@ import { emitKeypressEvents } from 'readline';
 import { Command } from 'commander';
 import { WebSocket } from 'ws';
 import * as fs from 'fs';
-import { chain } from 'stream-chain';
+import { chainUnchecked } from 'stream-chain';
 import { randomUUID } from 'crypto';
 import { CallMetaData } from '../../../lma-websocket-transcriber-stack/source/app/src/lca';
 
@@ -73,14 +73,18 @@ new Command()
 
                 const CHUNK_SIZE = SAMPLE_RATE * (CHUNK_SIZE_IN_MS / 1000) * BYTES_PER_SAMPLE * 2;
 
-                // stream-chain v4 is ESM: the `chain` export is a factory
-                // function (not a constructable `Chain` class as in v2).
-                const audiopipeline = chain([
+                // stream-chain v4 is ESM: `chain`/`chainUnchecked` are factory
+                // functions (not a constructable `Chain` class as in v2). The
+                // pipeline mixes a ReadStream with an async transform; under TS
+                // 5.x `chain()`'s tuple inference rejects that heterogeneous
+                // array, so use `chainUnchecked` — the library's supported escape
+                // hatch for dynamically-typed pipelines.
+                const audiopipeline = chainUnchecked([
                     fs.createReadStream(options.wavfile as fs.PathLike, { highWaterMark: CHUNK_SIZE }),
                     async (data: Buffer) => {
                         await timer(CHUNK_SIZE_IN_MS);
                         return data;
-                    }
+                    },
                 ]);
 
                 console.log('Sending the audio data chunks');
