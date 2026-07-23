@@ -174,20 +174,83 @@ export const writeCallRecordingEvent = async (
     await writeCallEvent(callRecordingEvent, server);
 };
 
+// True when a Transcribe streaming error indicates the SessionId we tried to
+// resume is no longer valid (expired / closed / unknown), so the next attempt
+// must start a fresh session rather than reuse the stale id. Kept in sync with
+// the equivalent check in the Virtual Participant scribe (scribe.ts).
+const isStaleSessionError = (error: unknown): boolean => {
+    const err = error as { name?: string; message?: string };
+    const message = (err?.message ?? '').toLowerCase();
+    return (
+        message.includes('has expired') ||
+        (message.includes('session') &&
+            (message.includes('expired') ||
+                message.includes('not found') ||
+                message.includes('invalid'))) ||
+        err?.name === 'SessionExpiredException'
+    );
+};
+
 export const startTranscribe = async (
     socketCallMap: SocketCallData,
     server: FastifyInstance
 ) => {
     const callMetaData = socketCallMap.callMetadata;
     const audioInputStream = socketCallMap.audioInputStream;
+    // MAX_RETRIES bounds *consecutive* failures, not cumulative ones over the
+    // life of the meeting (see HEALTHY_SESSION_MS below). A session that has
+    // streamed successfully resets the counter, so a long meeting is not
+    // aborted merely because it accumulated a handful of transient
+    // reconnects spread across an hour (GitHub #292).
     const MAX_RETRIES = 5;
+    // A session that ran at least this long, or produced any transcript event,
+    // is treated as "healthy" — the next restart starts from retryCount 0.
+    const HEALTHY_SESSION_MS = 10_000;
+    // Backoff between consecutive failed restarts (linear, capped).
+    const RETRY_BACKOFF_MS = 2_000;
+    const MAX_BACKOFF_MS = 10_000;
     let sessionId: string | undefined;
 
-    const startTranscribeSession = async (retryCount = 0): Promise<void> => {
-        if (retryCount >= MAX_RETRIES) {
-            server.log.error(`[TRANSCRIBING]: [${callMetaData.callId}] - Max retries reached. Aborting transcription.`);
+    // Amazon Transcribe streaming timestamps (Item.StartTime / EndTime) are
+    // relative to the audio sent in EACH StartStreamTranscription request and
+    // reset to 0 on every (re)connect — reusing SessionId does NOT resume the
+    // timeline (it is only an identifier). So each time we reconnect we carry a
+    // cumulative offset (seconds) equal to the highest segment EndTime seen so
+    // far, keeping the meeting transcript timeline monotonic instead of
+    // restarting at 0 and overlapping earlier segments (GitHub #292).
+    const startTranscribeSession = async (retryCount = 0, timeOffsetSeconds = 0): Promise<void> => {
+        // Stop retrying once the call has legitimately ended (socket closed /
+        // end event) — otherwise we'd spin forever after a normal hang-up.
+        if (socketCallMap.ended) {
+            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Call ended; not (re)starting transcription session.`);
             return;
         }
+        if (retryCount >= MAX_RETRIES) {
+            server.log.error(`[TRANSCRIBING]: [${callMetaData.callId}] - Max consecutive retries (${MAX_RETRIES}) reached. Aborting transcription.`);
+            return;
+        }
+
+        const attemptStartMs = Date.now();
+        let receivedTranscriptEvent = false;
+        // Highest absolute segment EndTime observed during this attempt; seeds
+        // the next reconnect's offset. Starts at the incoming offset so an
+        // attempt that produces nothing still carries the timeline forward.
+        let observedMaxEndTime = timeOffsetSeconds;
+        // Recompute retryCount for the *next* attempt: reset to 0 if this
+        // attempt was healthy, otherwise increment. Centralised so both the
+        // clean-close and the error paths stay consistent.
+        const nextRetryCount = (): number => {
+            const healthy =
+                receivedTranscriptEvent || Date.now() - attemptStartMs >= HEALTHY_SESSION_MS;
+            return healthy ? 0 : retryCount + 1;
+        };
+        const backoff = async (attempt: number): Promise<void> => {
+            if (attempt <= 0) {
+                return;
+            }
+            const delay = Math.min(attempt * RETRY_BACKOFF_MS, MAX_BACKOFF_MS);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+        };
 
         try {
             server.log.debug(
@@ -360,15 +423,36 @@ export const startTranscribe = async (
             if (tsStream) {
                 for await (const event of tsStream) {
                     if (event.TranscriptEvent) {
-                        await writeTranscriptionSegment(
+                        receivedTranscriptEvent = true;
+                        const segmentMaxEndTime = await writeTranscriptionSegment(
                             event.TranscriptEvent,
                             callMetaData,
-                            server
+                            server,
+                            timeOffsetSeconds
                         );
+                        if (segmentMaxEndTime > observedMaxEndTime) {
+                            observedMaxEndTime = segmentMaxEndTime;
+                        }
                     }
                 }
             } else {
                 throw new Error('Transcribe stream is empty');
+            }
+
+            // The results stream completed WITHOUT throwing. Amazon Transcribe
+            // closes the HTTP/2 stream server-side on its own schedule (idle
+            // behaviour, session duration limits, transient server close) — the
+            // `for await` above then simply ends. Previously this returned and
+            // transcription stopped permanently while the client kept streaming
+            // audio into a dead pipe (GitHub #292). Unless the call has ended,
+            // treat an unexpected clean close as a reconnect.
+            if (!socketCallMap.ended) {
+                const next = nextRetryCount();
+                server.log.info(
+                    `[TRANSCRIBING]: [${callMetaData.callId}] - Transcribe result stream closed unexpectedly; reconnecting. Retry count: ${next}, timeOffset: ${observedMaxEndTime.toFixed(2)}s`
+                );
+                await backoff(next);
+                await startTranscribeSession(next, observedMaxEndTime);
             }
         } catch (error) {
             server.log.error(
@@ -376,8 +460,22 @@ export const startTranscribe = async (
                     callMetaData.callId
                 }] - Error in transcription session: ${normalizeErrorForLogging(error)}`
             );
-            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Attempting to restart session. Retry count: ${retryCount + 1}`);
-            await startTranscribeSession(retryCount + 1);
+            // A reused SessionId can be rejected once Transcribe has closed the
+            // session server-side (e.g. "session ... has expired" / not found).
+            // Reusing a stale id then fails every retry until MAX_RETRIES aborts
+            // the whole meeting. Detect that class of error and drop the id so
+            // the next attempt starts a FRESH session; the cumulative time
+            // offset (below) keeps the transcript timeline continuous.
+            if (isStaleSessionError(error)) {
+                server.log.warn(
+                    `[TRANSCRIBING]: [${callMetaData.callId}] - Transcribe SessionId '${sessionId}' is stale/expired; starting a fresh session on retry.`
+                );
+                sessionId = undefined;
+            }
+            const next = nextRetryCount();
+            server.log.info(`[TRANSCRIBING]: [${callMetaData.callId}] - Attempting to restart session. Retry count: ${next}, timeOffset: ${observedMaxEndTime.toFixed(2)}s`);
+            await backoff(next);
+            await startTranscribeSession(next, observedMaxEndTime);
         }
     };
 
@@ -396,11 +494,12 @@ function processTranscriptionResults(
     speakerName: string,
     result: Result,
     callMetadata: CallMetaData,
-    server: FastifyInstance
+    server: FastifyInstance,
+    timeOffsetSeconds = 0
 ): Record<string, Segment> {
     const segments: Record<string, Segment> = {};
     const channelId = result.ChannelId ?? 'ch_0';
-  
+
     // Initialize channel data if it doesn't exist
     if (!callMetadata.channels) {
         callMetadata.channels = {};
@@ -412,22 +511,24 @@ function processTranscriptionResults(
             startTimes: [],
         };
     }
-  
+
     const channelData = callMetadata.channels[channelId];
-  
+
     if (channelData.currentSpeakerName !== speakerName) {
         channelData.currentSpeakerName = speakerName;
         channelData.speakers.push(speakerName);
         const lastItem = result.Alternatives?.[0]?.Items?.[result.Alternatives[0].Items.length - 1];
         if (lastItem) {
-            channelData.startTimes.push(lastItem.StartTime ?? 0);
+            // Store absolute (offset-adjusted) start time so segment ids and
+            // ordering stay monotonic across reconnects (see startTranscribe).
+            channelData.startTimes.push((lastItem.StartTime ?? 0) + timeOffsetSeconds);
         }
     }
-  
+
     const alternative = result.Alternatives?.[0];
     if (alternative?.Items) {
         for (const item of alternative.Items) {
-            addItemToSegment(item, segments, channelData, channelId);
+            addItemToSegment(item, segments, channelData, channelId, timeOffsetSeconds);
             if (DEBUG) {
                 server.log.debug(`[${callMetadata.callId}] Item ${item.StartTime}, ${item.EndTime}, ${item.Content}`);
                 server.log.debug(`[${callMetadata.callId}] Speakers ${JSON.stringify(channelData.speakers)}`);
@@ -451,10 +552,15 @@ function addItemToSegment(
     item: Item,
     segments: Record<string, Segment>,
     channelData: ChannelSpeakerData,
-    channelId: string
+    channelId: string,
+    timeOffsetSeconds = 0
 ): void {
     const { speakers, startTimes } = channelData;
-    let index = startTimes.findIndex((time) => time > (item.StartTime ?? 0));
+    // startTimes are already absolute (offset-adjusted); compare against the
+    // item's absolute start time so the speaker lookup stays correct.
+    const itemStart = (item.StartTime ?? 0) + timeOffsetSeconds;
+    const itemEnd = (item.EndTime ?? 0) + timeOffsetSeconds;
+    let index = startTimes.findIndex((time) => time > itemStart);
     if (index == -1) {
         // -1 means item.Starttime is greater than all speaker startimes, so use the last speaker
         index = startTimes.length - 1;
@@ -463,28 +569,33 @@ function addItemToSegment(
         index = index - 1;
     }
     const segmentId = `${speakers[index] ?? 'unknown'}-${startTimes[index] ?? 'unknown'}-${channelId}`;
-  
+
     if (!segments[segmentId]) {
         segments[segmentId] = {
             SegmentId: segmentId,
             Speaker: speakers[index] ?? 'unknown',
             StartTime: startTimes[index] ?? 0,
-            EndTime: item.EndTime ?? 0,
+            EndTime: itemEnd,
             Transcript: '',
         };
     } else if (item.Type === 'pronunciation') {
         segments[segmentId].Transcript += ' ';
     }
-  
-    segments[segmentId].EndTime = item.EndTime ?? 0;
+
+    segments[segmentId].EndTime = itemEnd;
     segments[segmentId].Transcript += item.Content;
 }
 
+// Returns the highest absolute segment EndTime (seconds) written by this call,
+// so the caller can advance the cumulative reconnect offset. Returns
+// timeOffsetSeconds unchanged when nothing was written.
 export const writeTranscriptionSegment = async function (
     transcribeMessageJson: TranscriptEvent,
     callMetadata: CallMetaData,
-    server: FastifyInstance
-) {
+    server: FastifyInstance,
+    timeOffsetSeconds = 0
+): Promise<number> {
+    let maxEndTime = timeOffsetSeconds;
     if (
         transcribeMessageJson.Transcript?.Results &&
     transcribeMessageJson.Transcript?.Results.length > 0
@@ -499,10 +610,14 @@ export const writeTranscriptionSegment = async function (
                 speakerName,
                 result,
                 callMetadata,
-                server
+                server,
+                timeOffsetSeconds
             );
 
             for (const segment of Object.values(segments)) {
+                if (segment.EndTime > maxEndTime) {
+                    maxEndTime = segment.EndTime;
+                }
                 const now = new Date().toISOString();
                 const kdsObject: AddTranscriptSegmentEvent = {
                     EventType: 'ADD_TRANSCRIPT_SEGMENT',
@@ -552,4 +667,5 @@ export const writeTranscriptionSegment = async function (
             }
         }
     }
+    return maxEndTime;
 };
