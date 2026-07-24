@@ -118,17 +118,24 @@ On Windows, loopback (system) audio capture is built into the OS and needs
 3. Install the **.NET 8 SDK** once from
    [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/8.0). No
    admin is required — it can install into your user folder.
-4. In **PowerShell**, `cd` into the unzipped folder and run the build script:
+4. In **PowerShell**, `cd` into the unzipped folder and run the
+   build-and-install script:
    ```powershell
-   ./build-windows.ps1 -SelfContained
+   ./build-windows.ps1 -SelfContained -Install
    ```
-   It builds a standalone `LMAAudioClient.exe` (nothing else to install) and runs
-   a built-in self-test. The executable and its `lma-config.json` land in
-   `bin\Release\net8.0-windows\win-x64\publish\`.
-5. **Launch it** by double-clicking `LMAAudioClient.exe`. An **LMA** icon appears
-   in the **system tray** (bottom-right notification area). If SmartScreen warns
-   about an unrecognized app, choose **More info ▸ Run anyway** — expected for a
-   locally built, unsigned app.
+   It builds a standalone app, runs a built-in self-test, installs it to
+   `%LOCALAPPDATA%\Programs\LMA Audio Capture` (no admin needed), and adds a
+   **Start Menu** shortcut — so you don't have to dig into the build output.
+   - Omit `-Install` to just build (the exe lands in
+     `bin\Release\net8.0-windows\win-x64\publish\`).
+   - Add `-DesktopShortcut` for a desktop icon too.
+   - Add `-ProgramFiles` to install machine-wide under `%ProgramFiles%` instead
+     (prompts for admin to do the copy).
+5. **Launch it from the Start Menu:** press the **Windows key**, type **LMA Audio
+   Capture**, and press Enter. An **LMA** icon appears in the **system tray**
+   (bottom-right notification area). If SmartScreen warns about an unrecognized
+   app, choose **More info ▸ Run anyway** — expected for a locally built,
+   unsigned app.
 6. If Windows blocks microphone access, enable it in **Settings ▸ Privacy &
    security ▸ Microphone** (turn on *Microphone access* and *Let desktop apps
    access your microphone*), then restart the app. **System/meeting audio needs
@@ -253,10 +260,17 @@ voice assistant, screen/video capture, or hands-off unattended recording.
   microphone*), then restart the app. System audio is unaffected.
 - **`dotnet` is not recognized / build errors.** Install the
   [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), open a fresh
-  PowerShell window, and re-run `./build-windows.ps1 -SelfContained`.
+  PowerShell window, and re-run `./build-windows.ps1 -SelfContained -Install`.
 - **No remote-participant audio.** Make sure meeting audio is playing through
   your default playback device (the app captures the default render endpoint).
   Switching the default device mid-meeting is handled automatically.
+- **Uninstall.** The app registers in **Settings ▸ Apps ▸ Installed apps** as
+  "LMA Audio Capture" — find it there and choose **Uninstall**. Or, from the
+  unzipped folder, run `./build-windows.ps1 -Uninstall`. Either way it removes
+  the installed app and its Start Menu / Desktop shortcuts and clears the app's
+  per-user settings (remembered email, start-at-login). If you installed
+  machine-wide with `-ProgramFiles`, run the uninstall from an elevated (admin)
+  PowerShell.
 
 ### Both platforms
 

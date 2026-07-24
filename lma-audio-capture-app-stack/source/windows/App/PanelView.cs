@@ -118,7 +118,16 @@ public sealed class PanelView : Border
 
     public void FocusFirstField()
     {
-        if (!_c.IsAuthenticated) _email.Focus();
+        if (_c.IsAuthenticated) return;
+        // Defer to Input priority so focus lands after the window has activated
+        // and the field is laid out; set both logical and keyboard focus.
+        Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.Input,
+            new Action(() =>
+            {
+                _email.Focus();
+                System.Windows.Input.Keyboard.Focus(_email);
+            }));
     }
 
     // MARK: - Engine callbacks (already marshaled onto the UI thread by TrayApp)

@@ -1,33 +1,103 @@
 <#
 .SYNOPSIS
-  Build the LMA Windows audio-capture client.
+  Build (and optionally install) the LMA Windows audio-capture client.
 
 .DESCRIPTION
-  Restores and publishes LMAAudioClient.Windows as a win-x64 executable.
+  Restores and publishes LMAAudioClient.Windows as a win-x64 executable, runs
+  the offline SRP self-test, and - with -Install - copies it to a stable
+  location and adds a Start Menu (and optional Desktop) shortcut so you don't
+  have to dig into the publish folder to launch it.
 
-  Two modes:
+  Build modes:
     -SelfContained  : bundles the .NET 8 Desktop runtime (no prerequisites on
-                      the target machine; larger output). Recommended for a
-                      download a non-developer will run.
+                      the target machine; larger output). Recommended.
     (default)       : framework-dependent (smaller; requires the .NET 8 Desktop
                       Runtime installed on the target machine).
 
-  After building it runs the offline SRP self-test so you never ship a binary
-  whose crypto can't reproduce the pycognito known-answer.
+  Install location:
+    (default)       : per-user  %LOCALAPPDATA%\Programs\LMA Audio Capture
+                      - NO admin needed; appears in the Start Menu for you.
+    -ProgramFiles   : machine-wide  %ProgramFiles%\LMA Audio Capture
+                      - needs admin; the script re-launches elevated for the copy.
 
 .EXAMPLE
-  ./build-windows.ps1                    # framework-dependent Release build
-  ./build-windows.ps1 -SelfContained     # standalone Release build
-  ./build-windows.ps1 -Configuration Debug -SkipSelfTest
+  ./build-windows.ps1 -SelfContained -Install
+      # build standalone, install to %LOCALAPPDATA%\Programs, add Start Menu shortcut
+
+.EXAMPLE
+  ./build-windows.ps1 -SelfContained -Install -ProgramFiles -DesktopShortcut
+      # install machine-wide (elevates) and also add a Desktop shortcut
+
+.EXAMPLE
+  ./build-windows.ps1                    # framework-dependent build only, no install
+
+.EXAMPLE
+  ./build-windows.ps1 -Uninstall
+      # remove the installed app + Start Menu/Desktop shortcuts (does not build)
 #>
 param(
     [string]$Configuration = "Release",
     [switch]$SelfContained,
-    [switch]$SkipSelfTest
+    [switch]$SkipSelfTest,
+    [switch]$Install,
+    [switch]$ProgramFiles,
+    [switch]$DesktopShortcut,
+    [switch]$Uninstall
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+
+# --- Uninstall: remove installed copies + shortcuts, then exit (no build) ----
+if ($Uninstall) {
+    $targets = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\LMA Audio Capture"),
+        (Join-Path $env:ProgramFiles "LMA Audio Capture")
+    )
+    $shortcuts = @(
+        (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk"),
+        (Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk"),
+        (Join-Path ([Environment]::GetFolderPath('Desktop')) "LMA Audio Capture.lnk")
+    )
+
+    # Stop a running instance so files aren't locked.
+    Get-Process -Name LMAAudioClient -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+    $removedAny = $false
+    foreach ($t in $targets) {
+        if (Test-Path $t) {
+            try {
+                Remove-Item $t -Recurse -Force -ErrorAction Stop
+                Write-Host "==> Removed $t"
+                $removedAny = $true
+            } catch {
+                Write-Warning "Couldn't remove $t ($($_.Exception.Message)). If it's the Program Files copy, re-run from an elevated (admin) PowerShell."
+            }
+        }
+    }
+    foreach ($s in $shortcuts) {
+        if (Test-Path $s) {
+            try { Remove-Item $s -Force -ErrorAction Stop; Write-Host "==> Removed shortcut $s"; $removedAny = $true }
+            catch { Write-Warning "Couldn't remove $s ($($_.Exception.Message))." }
+        }
+    }
+
+    # Per-user settings (remembered email) + start-at-login entry left by the app.
+    Remove-Item "HKCU:\Software\AmazonLMA\AudioCapture" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "LMAAudioCapture" -ErrorAction SilentlyContinue
+
+    # Apps & features (ARP) entries - HKCU (per-user) always; HKLM (machine-wide)
+    # only removable when elevated (warn otherwise).
+    Remove-Item "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture" -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture") {
+        try { Remove-Item "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture" -Recurse -Force -ErrorAction Stop }
+        catch { Write-Warning "Couldn't remove the machine-wide Apps & features entry - re-run from an elevated (admin) PowerShell." }
+    }
+
+    if ($removedAny) { Write-Host "Uninstall complete." }
+    else { Write-Host "Nothing to uninstall (no installed copy found)." }
+    return
+}
 
 Write-Host "==> Building LMA Windows client ($Configuration, self-contained=$SelfContained)"
 
@@ -52,6 +122,160 @@ if (-not $SkipSelfTest) {
     Write-Host "==> Self-test passed."
 }
 
-Write-Host ""
-Write-Host "Done. Run the tray app:      $exe"
-Write-Host "Or headless CLI, e.g.:       $exe --debug-wav out.wav --username you@example.com"
+# --- Optional install: copy to a stable folder + create shortcuts -----------
+function New-Shortcut {
+    param([string]$LinkPath, [string]$TargetPath, [string]$Arguments = "", [string]$Description = "")
+    $shell = New-Object -ComObject WScript.Shell
+    $sc = $shell.CreateShortcut($LinkPath)
+    $sc.TargetPath = $TargetPath
+    $sc.Arguments = $Arguments
+    $sc.WorkingDirectory = Split-Path $TargetPath
+    $sc.Description = $Description
+    $sc.IconLocation = "$TargetPath,0"
+    $sc.Save()
+}
+
+# Register (or refresh) the Windows "Apps & features" / Add-Remove-Programs entry
+# so the app is listed in Settings > Apps and can be uninstalled from there. The
+# UninstallString is a self-contained encoded PowerShell command (it does NOT
+# call back into build-windows.ps1, which may be deleted after install).
+function Register-Uninstall {
+    param([string]$InstallDir, [string]$InstalledExe, [bool]$MachineWide)
+
+    $arpRoot = if ($MachineWide) { "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture" }
+               else { "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture" }
+
+    # Removal script baked into UninstallString: kills a running instance, deletes
+    # the install dir + shortcuts + per-user settings, then removes this ARP key.
+    $userStart = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk'
+    $machineStart = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk'
+    $desktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'LMA Audio Capture.lnk'
+    $removal = @"
+Get-Process -Name LMAAudioClient -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath '$InstallDir' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath '$userStart' -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath '$machineStart' -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath '$desktopLnk' -Force -ErrorAction SilentlyContinue
+Remove-Item 'HKCU:\Software\AmazonLMA\AudioCapture' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'LMAAudioCapture' -ErrorAction SilentlyContinue
+Remove-Item '$arpRoot' -Recurse -Force -ErrorAction SilentlyContinue
+"@
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($removal))
+    $uninstallCmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand $enc"
+
+    # DisplayVersion from the built exe's file version, when available.
+    $ver = try { (Get-Item $InstalledExe).VersionInfo.ProductVersion } catch { $null }
+    if (-not $ver) { $ver = "1.0" }
+    # Rough install size in KB for the size column.
+    $sizeKb = try { [int]((Get-ChildItem $InstallDir -Recurse -File | Measure-Object Length -Sum).Sum / 1024) } catch { 0 }
+
+    New-Item -Path $arpRoot -Force | Out-Null
+    Set-ItemProperty $arpRoot DisplayName        "LMA Audio Capture"
+    Set-ItemProperty $arpRoot DisplayVersion     $ver
+    Set-ItemProperty $arpRoot Publisher          "Amazon Web Services"
+    Set-ItemProperty $arpRoot DisplayIcon        $InstalledExe
+    Set-ItemProperty $arpRoot InstallLocation    $InstallDir
+    Set-ItemProperty $arpRoot UninstallString    $uninstallCmd
+    Set-ItemProperty $arpRoot QuietUninstallString $uninstallCmd
+    Set-ItemProperty $arpRoot NoModify           1 -Type DWord
+    Set-ItemProperty $arpRoot NoRepair           1 -Type DWord
+    if ($sizeKb -gt 0) { Set-ItemProperty $arpRoot EstimatedSize $sizeKb -Type DWord }
+    Write-Host "==> Registered in Apps & features (uninstall from Settings > Apps)"
+}
+
+function Install-App {
+    param([string]$SourceDir, [bool]$MachineWide)
+
+    if ($MachineWide) {
+        $installDir = Join-Path $env:ProgramFiles "LMA Audio Capture"
+        $startMenuDir = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs"
+    } else {
+        $installDir = Join-Path $env:LOCALAPPDATA "Programs\LMA Audio Capture"
+        $startMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+    }
+
+    Write-Host "==> Installing to $installDir"
+    if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+    Copy-Item (Join-Path $SourceDir '*') $installDir -Recurse -Force
+
+    $installedExe = Join-Path $installDir "LMAAudioClient.exe"
+
+    $lnk = Join-Path $startMenuDir "LMA Audio Capture.lnk"
+    New-Shortcut -LinkPath $lnk -TargetPath $installedExe -Arguments "--gui" -Description "LMA Audio Capture"
+    Write-Host "==> Start Menu shortcut: $lnk"
+
+    if ($DesktopShortcut) {
+        $desktop = [Environment]::GetFolderPath('Desktop')
+        $dlnk = Join-Path $desktop "LMA Audio Capture.lnk"
+        New-Shortcut -LinkPath $dlnk -TargetPath $installedExe -Arguments "--gui" -Description "LMA Audio Capture"
+        Write-Host "==> Desktop shortcut: $dlnk"
+    }
+
+    Register-Uninstall -InstallDir $installDir -InstalledExe $installedExe -MachineWide $MachineWide
+
+    return $installedExe
+}
+
+$launchExe = $exe
+if ($Install) {
+    if ($ProgramFiles) {
+        # Program Files needs admin - re-launch this copy step elevated.
+        $isAdmin = ([Security.Principal.WindowsPrincipal] `
+            [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator)
+        if (-not $isAdmin) {
+            Write-Host "==> -ProgramFiles requires admin; re-launching the install step elevated..."
+            $installScript = @"
+`$src = '$publishDir'
+`$dst = Join-Path `$env:ProgramFiles 'LMA Audio Capture'
+if (Test-Path `$dst) { Remove-Item `$dst -Recurse -Force }
+New-Item -ItemType Directory -Path `$dst -Force | Out-Null
+Copy-Item (Join-Path `$src '*') `$dst -Recurse -Force
+`$exe = Join-Path `$dst 'LMAAudioClient.exe'
+`$sm = Join-Path `$env:ProgramData 'Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk'
+`$sh = New-Object -ComObject WScript.Shell
+`$s = `$sh.CreateShortcut(`$sm)
+`$s.TargetPath = `$exe
+`$s.Arguments = '--gui'
+`$s.WorkingDirectory = `$dst
+`$s.IconLocation = `$exe + ',0'
+`$s.Save()
+# Apps & features (ARP) entry under HKLM (machine-wide install).
+`$arp = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture'
+`$rm = "Get-Process -Name LMAAudioClient -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '`$dst' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '`$sm' -Force -ErrorAction SilentlyContinue; Remove-Item '`$arp' -Recurse -Force -ErrorAction SilentlyContinue"
+`$enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(`$rm))
+`$ucmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand `$enc"
+`$ver = try { (Get-Item `$exe).VersionInfo.ProductVersion } catch { '1.0' }
+New-Item -Path `$arp -Force | Out-Null
+Set-ItemProperty `$arp DisplayName 'LMA Audio Capture'
+Set-ItemProperty `$arp DisplayVersion `$ver
+Set-ItemProperty `$arp Publisher 'Amazon Web Services'
+Set-ItemProperty `$arp DisplayIcon `$exe
+Set-ItemProperty `$arp InstallLocation `$dst
+Set-ItemProperty `$arp UninstallString `$ucmd
+Set-ItemProperty `$arp QuietUninstallString `$ucmd
+Set-ItemProperty `$arp NoModify 1 -Type DWord
+Set-ItemProperty `$arp NoRepair 1 -Type DWord
+"@
+            $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($installScript))
+            Start-Process powershell -Verb RunAs -Wait -ArgumentList `
+                "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $enc
+            $launchExe = Join-Path (Join-Path $env:ProgramFiles "LMA Audio Capture") "LMAAudioClient.exe"
+            Write-Host "==> Installed (machine-wide): $launchExe"
+        } else {
+            $launchExe = Install-App -SourceDir $publishDir -MachineWide $true
+        }
+    } else {
+        $launchExe = Install-App -SourceDir $publishDir -MachineWide $false
+    }
+
+    Write-Host ""
+    Write-Host "Installed. Launch it from the Start Menu: search 'LMA Audio Capture'."
+    Write-Host "Or run:                                   `"$launchExe`""
+} else {
+    Write-Host ""
+    Write-Host "Done (not installed). Run the tray app:   `"$exe`""
+    Write-Host "To install + add a Start Menu shortcut:   ./build-windows.ps1 -SelfContained -Install"
+    Write-Host "Headless CLI, e.g.:                       `"$exe`" --debug-wav out.wav --username you@example.com"
+}

@@ -346,26 +346,27 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
           </li>
           <li>
             <Box variant="p">
-              In PowerShell, <code>cd</code> into the unzipped folder and run the build script:{' '}
+              In PowerShell, <code>cd</code> into the unzipped folder and run the build-and-install script:{' '}
               <strong>
-                <code>./build-windows.ps1 -SelfContained</code>
+                <code>./build-windows.ps1 -SelfContained -Install</code>
               </strong>{' '}
               <Button
                 variant="inline-icon"
                 iconName="copy"
-                ariaLabel="Copy build-windows.ps1 command"
-                onClick={() => copyToClipboard('./build-windows.ps1 -SelfContained')}
+                ariaLabel="Copy build-windows.ps1 install command"
+                onClick={() => copyToClipboard('./build-windows.ps1 -SelfContained -Install')}
               />
-              . It builds a standalone <code>LMAAudioClient.exe</code> (nothing else to install) and runs a built-in
-              self-test.
+              . It builds a standalone app, runs a built-in self-test, installs it to your user Programs folder, and adds
+              a <strong>Start Menu</strong> shortcut &mdash; no need to dig into the build output. (Omit{' '}
+              <code>-Install</code> to just build; add <code>-DesktopShortcut</code> for a desktop icon too.)
             </Box>
           </li>
           <li>
             <Box variant="p">
-              <strong>Launch it</strong> by double-clicking <code>LMAAudioClient.exe</code> in the{' '}
-              <code>...\publish\</code> folder. An <strong>LMA</strong> icon appears in the system tray (bottom-right
-              notification area). If SmartScreen warns about an unrecognized app, choose <strong>More info ▸ Run
-              anyway</strong> (expected for a locally built, unsigned app).
+              <strong>Launch it from the Start Menu:</strong> press the <strong>Windows key</strong>, type{' '}
+              <strong>LMA Audio Capture</strong>, and press Enter. An <strong>LMA</strong> icon appears in the system
+              tray (bottom-right notification area). If SmartScreen warns about an unrecognized app, choose{' '}
+              <strong>More info ▸ Run anyway</strong> (expected for a locally built, unsigned app).
             </Box>
           </li>
           <li>
@@ -430,7 +431,22 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
           <Link href="https://dotnet.microsoft.com/download/dotnet/8.0" external target="_blank">
             .NET 8 SDK
           </Link>
-          , open a fresh PowerShell window, and re-run <code>./build-windows.ps1 -SelfContained</code>.
+          , open a fresh PowerShell window, and re-run <code>./build-windows.ps1 -SelfContained -Install</code>.
+        </Box>
+        <Box variant="p">
+          <strong>Uninstall.</strong> The app registers in{' '}
+          <strong>Settings &rsaquo; Apps &rsaquo; Installed apps</strong> as &quot;LMA Audio Capture&quot; &mdash; find
+          it there and choose <strong>Uninstall</strong>. Or, from the unzipped folder, run{' '}
+          <code>./build-windows.ps1 -Uninstall</code>{' '}
+          <Button
+            variant="inline-icon"
+            iconName="copy"
+            ariaLabel="Copy uninstall command"
+            onClick={() => copyToClipboard('./build-windows.ps1 -Uninstall')}
+          />
+          . Either way it removes the installed app and its Start Menu / Desktop shortcuts and clears the app&apos;s
+          per-user settings (remembered email, start-at-login). If you installed machine-wide with{' '}
+          <code>-ProgramFiles</code>, run the uninstall from an elevated (admin) PowerShell.
         </Box>
         <Box variant="p">
           <strong>No remote-participant audio in the transcript.</strong> Make sure meeting audio is actually playing
