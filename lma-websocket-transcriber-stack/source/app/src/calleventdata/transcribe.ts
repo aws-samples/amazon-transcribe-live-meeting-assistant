@@ -181,8 +181,11 @@ export const writeCallRecordingEvent = async (
 const isStaleSessionError = (error: unknown): boolean => {
     const err = error as { name?: string; message?: string };
     const message = (err?.message ?? '').toLowerCase();
+    // Require the word "session" on every message-based match: otherwise
+    // unrelated errors that merely contain "has expired" (e.g. the STS
+    // "security token ... has expired" credential error) would be misread as a
+    // stale SessionId and needlessly discard a still-valid session.
     return (
-        message.includes('has expired') ||
         (message.includes('session') &&
             (message.includes('expired') ||
                 message.includes('not found') ||
@@ -203,12 +206,20 @@ export const startTranscribe = async (
     // aborted merely because it accumulated a handful of transient
     // reconnects spread across an hour (GitHub #292).
     const MAX_RETRIES = 5;
-    // A session that ran at least this long, or produced any transcript event,
-    // is treated as "healthy" — the next restart starts from retryCount 0.
+    // A session that ran at least this long is treated as "healthy" — the next
+    // restart starts from retryCount 0. Note: duration only. We deliberately do
+    // NOT count "received at least one transcript event" as healthy: a session
+    // that Transcribe accepts, emits a single event on, then closes almost
+    // immediately would otherwise reset the counter every time and reconnect
+    // forever, hammering StartStreamTranscription in a tight loop that never
+    // reaches MAX_RETRIES.
     const HEALTHY_SESSION_MS = 10_000;
     // Backoff between consecutive failed restarts (linear, capped).
     const RETRY_BACKOFF_MS = 2_000;
     const MAX_BACKOFF_MS = 10_000;
+    // Floor applied to EVERY reconnect (even a healthy retryCount==0 one) so a
+    // rapid clean-close/reopen cycle can never become a 0ms hot loop.
+    const MIN_BACKOFF_MS = 500;
     let sessionId: string | undefined;
 
     // Amazon Transcribe streaming timestamps (Item.StartTime / EndTime) are
@@ -231,24 +242,26 @@ export const startTranscribe = async (
         }
 
         const attemptStartMs = Date.now();
-        let receivedTranscriptEvent = false;
         // Highest absolute segment EndTime observed during this attempt; seeds
         // the next reconnect's offset. Starts at the incoming offset so an
         // attempt that produces nothing still carries the timeline forward.
         let observedMaxEndTime = timeOffsetSeconds;
         // Recompute retryCount for the *next* attempt: reset to 0 if this
-        // attempt was healthy, otherwise increment. Centralised so both the
-        // clean-close and the error paths stay consistent.
+        // attempt was healthy (ran long enough), otherwise increment.
+        // Centralised so both the clean-close and the error paths stay
+        // consistent.
         const nextRetryCount = (): number => {
-            const healthy =
-                receivedTranscriptEvent || Date.now() - attemptStartMs >= HEALTHY_SESSION_MS;
+            const healthy = Date.now() - attemptStartMs >= HEALTHY_SESSION_MS;
             return healthy ? 0 : retryCount + 1;
         };
+        // Always wait at least MIN_BACKOFF_MS between reconnects — even a
+        // healthy (attempt==0) reconnect — so a rapid clean-close/reopen cycle
+        // cannot spin into a tight loop.
         const backoff = async (attempt: number): Promise<void> => {
-            if (attempt <= 0) {
-                return;
-            }
-            const delay = Math.min(attempt * RETRY_BACKOFF_MS, MAX_BACKOFF_MS);
+            const delay = Math.max(
+                MIN_BACKOFF_MS,
+                Math.min(attempt * RETRY_BACKOFF_MS, MAX_BACKOFF_MS)
+            );
             await new Promise((resolve) => setTimeout(resolve, delay));
         };
 
@@ -287,14 +300,34 @@ export const startTranscribe = async (
                     }
                     yield { ConfigurationEvent: configuration_event };
                 }
-                if (audioInputStream != undefined) {
-                    for await (const chunk of audioInputStream) {
-                        yield { AudioEvent: { AudioChunk: chunk } };
-                    }
-                } else {
+                if (audioInputStream == undefined) {
                     server.log.error(
                         `[TRANSCRIBING]: [${callMetaData.callId}] - audioInputStream undefined`
                     );
+                    return;
+                }
+                // Do NOT iterate the shared audioInputStream directly. A
+                // for-await over it propagates .return() (Node's
+                // destroyOnReturn default) when THIS session's generator is
+                // closed — which happens every time Transcribe closes the
+                // result stream and we reconnect. That would destroy the single
+                // audioInputStream the WebSocket handler keeps writing into,
+                // throwing "Cannot call write after a stream was destroyed" and
+                // breaking every subsequent reconnect. Instead pipe the shared
+                // source into a per-session sink we own, iterate that, and on
+                // teardown detach + destroy only the sink; the shared source
+                // survives for the next session. Audio that arrives during the
+                // brief reconnect gap buffers in the source and flows once the
+                // next session re-pipes.
+                const audioSink = new stream.PassThrough();
+                audioInputStream.pipe(audioSink, { end: false });
+                try {
+                    for await (const chunk of audioSink) {
+                        yield { AudioEvent: { AudioChunk: chunk } };
+                    }
+                } finally {
+                    audioInputStream.unpipe(audioSink);
+                    audioSink.destroy();
                 }
             };
 
@@ -423,7 +456,6 @@ export const startTranscribe = async (
             if (tsStream) {
                 for await (const event of tsStream) {
                     if (event.TranscriptEvent) {
-                        receivedTranscriptEvent = true;
                         const segmentMaxEndTime = await writeTranscriptionSegment(
                             event.TranscriptEvent,
                             callMetaData,
