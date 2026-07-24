@@ -95,17 +95,28 @@ the SDK can install into a user directory (e.g. via `dotnet-install.ps1
 ```powershell
 cd lma-audio-capture-app-stack/source/windows
 
-# Standalone build (bundles the .NET runtime; nothing to install on the target):
+# Build a standalone app, then INSTALL it (per-user %LOCALAPPDATA%\Programs) and
+# add a Start Menu shortcut — recommended, no admin needed:
+./build-windows.ps1 -SelfContained -Install
+
+# Just build, no install (exe lands in the publish folder):
 ./build-windows.ps1 -SelfContained
 
-# Or a smaller framework-dependent build (target needs the .NET 8 Desktop Runtime):
+# Framework-dependent build (smaller; target needs the .NET 8 Desktop Runtime):
 ./build-windows.ps1
 ```
 
-`build-windows.ps1` publishes a `win-x64` executable and then runs `--selftest`
-so a build whose crypto can't reproduce the known-answer never ships. The
-executable and `lma-config.json` land in
-`bin/<Config>/net8.0-windows/win-x64/publish/`.
+`build-windows.ps1` publishes a `win-x64` executable and runs `--selftest` (so a
+build whose crypto can't reproduce the known-answer never ships). The executable
+and `lma-config.json` land in `bin/<Config>/net8.0-windows/win-x64/publish/`.
+
+Install flags:
+- `-Install` — copy to `%LOCALAPPDATA%\Programs\LMA Audio Capture` and add a
+  **Start Menu** shortcut (launch via the Windows key → "LMA Audio Capture"). No
+  admin required.
+- `-ProgramFiles` — install machine-wide under `%ProgramFiles%` instead (the copy
+  step re-launches elevated to get admin).
+- `-DesktopShortcut` — also drop a Desktop shortcut.
 
 You can also build by hand:
 

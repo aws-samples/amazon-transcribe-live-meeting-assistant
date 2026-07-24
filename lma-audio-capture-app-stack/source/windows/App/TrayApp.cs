@@ -21,9 +21,14 @@ public sealed class TrayApp
 {
     private readonly CaptureController _controller;
     private TaskbarIcon _tray = null!;
-    private Popup _popup = null!;
+    private Window _flyout = null!;
     private PanelView _panel = null!;
     private Application _app = null!;
+
+    // Guards the "click the tray icon to close" race: clicking the icon while the
+    // flyout is open first fires Deactivated (which hides it), then TrayLeftMouseUp
+    // — without this the toggle would immediately reopen it. Set in Deactivated.
+    private DateTime _hiddenAt = DateTime.MinValue;
 
     // Icons: a neutral (idle) and a red (recording) generated GDI+ icon.
     private System.Drawing.Icon _idleIcon = null!;
@@ -73,13 +78,27 @@ public sealed class TrayApp
 
         _panel = new PanelView(_controller);
 
-        _popup = new Popup
+        // Host the panel in a real borderless Window (NOT a Popup). A standalone
+        // WPF Popup never gets an activated top-level HWND, so TextBox/PasswordBox
+        // inside it cannot receive keyboard focus — you can click the fields but
+        // can't type. A Window gets a proper HWND and activates, so input works.
+        _flyout = new Window
         {
-            Child = _panel,
-            StaysOpen = false,
+            Content = _panel,
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
             AllowsTransparency = true,
-            PlacementTarget = null,
-            Placement = PlacementMode.AbsolutePoint,
+            Background = System.Windows.Media.Brushes.Transparent,
+            ShowInTaskbar = false,
+            Topmost = true,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            ShowActivated = true,
+        };
+        // Close when the user clicks away (flyout behavior).
+        _flyout.Deactivated += (_, _) =>
+        {
+            _hiddenAt = DateTime.Now;
+            _flyout.Hide();
         };
 
         _tray = new TaskbarIcon
@@ -100,7 +119,7 @@ public sealed class TrayApp
         _controller.OnLevels = (m, k, c, p) => _app.Dispatcher.Invoke(() => _panel.OnLevels(m, k, c, p));
         _controller.OnLog = msg => _app.Dispatcher.Invoke(() => _panel.OnLog(msg));
 
-        _panel.RequestClosePopup = () => _popup.IsOpen = false;
+        _panel.RequestClosePopup = () => _flyout.Hide();
 
         // Prefill remembered email.
         _panel.InitFromSettings();
@@ -116,6 +135,7 @@ public sealed class TrayApp
         {
             // Stop cleanly if streaming, then shut down.
             if (_controller.CurrentState.Kind == CaptureController.StateKind.Streaming) _controller.Stop();
+            try { _flyout.Close(); } catch { }
             _tray.Dispose();
             _app.Shutdown();
         };
@@ -127,23 +147,36 @@ public sealed class TrayApp
 
     private void TogglePopup()
     {
-        if (_popup.IsOpen) _popup.IsOpen = false;
+        // If we just hid it via Deactivated (from this same click on the tray
+        // icon), don't immediately reopen — treat it as a close.
+        if ((DateTime.Now - _hiddenAt).TotalMilliseconds < 250) return;
+        if (_flyout.IsVisible) _flyout.Hide();
         else ShowPopup();
     }
 
     private void ShowPopup()
     {
         _panel.Refresh();
-        // Place the popup near the cursor / tray (bottom-right corner area).
-        var pos = System.Windows.Forms.Control.MousePosition;
-        var src = PresentationSource.FromVisual(_panel) ?? null;
-        // Convert device pixels to WPF DIPs (96 dpi baseline).
+        // Show first so SizeToContent has measured the window, then position it
+        // near the tray (bottom-right), clamped to the working area.
+        _flyout.Show();
+
         double dpiScale = GetDpiScale();
-        _popup.HorizontalOffset = pos.X / dpiScale - 300;
-        _popup.VerticalOffset = pos.Y / dpiScale - 420;
-        if (_popup.HorizontalOffset < 0) _popup.HorizontalOffset = 0;
-        if (_popup.VerticalOffset < 0) _popup.VerticalOffset = 0;
-        _popup.IsOpen = true;
+        var wa = System.Windows.Forms.Screen.PrimaryScreen?.WorkingArea
+                 ?? new System.Drawing.Rectangle(0, 0, 1920, 1080);
+        double waRightDip = wa.Right / dpiScale;
+        double waBottomDip = wa.Bottom / dpiScale;
+
+        double w = _flyout.ActualWidth > 0 ? _flyout.ActualWidth : 300;
+        double h = _flyout.ActualHeight > 0 ? _flyout.ActualHeight : 420;
+        // Anchor to the bottom-right corner (above the notification area), with a
+        // small margin. Clamp so it never lands off-screen.
+        double left = Math.Max(0, waRightDip - w - 12);
+        double top = Math.Max(0, waBottomDip - h - 12);
+        _flyout.Left = left;
+        _flyout.Top = top;
+
+        _flyout.Activate();
         _panel.FocusFirstField();
     }
 
