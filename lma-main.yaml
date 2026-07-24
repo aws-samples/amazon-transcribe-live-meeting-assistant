@@ -504,6 +504,17 @@ Parameters:
       (Optional) Zoom Meeting SDK app Client Secret. Paired with
       ZoomMeetingSdkClientId. Used to sign the SDK join signature.
 
+  AcsConnectionString:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional) Azure Communication Services connection string
+      (endpoint=https://...;accesskey=...). When provided, the Virtual
+      Participant joins Microsoft Teams meetings via the ACS calling SDK
+      (Teams interoperability) instead of automating the Teams web client.
+      Leave blank to use the default web-client join.
+
   EnableVideoRecording:
     Type: String
     Default: "true"
@@ -755,6 +766,7 @@ Metadata:
           - VoiceAssistantActivationDuration
           - ZoomMeetingSdkClientId
           - ZoomMeetingSdkClientSecret
+          - AcsConnectionString
       - Label:
           default: Meeting Assist Bedrock Guardrails
         Parameters:
@@ -863,6 +875,8 @@ Metadata:
         default: Zoom Meeting SDK Client ID (Optional)
       ZoomMeetingSdkClientSecret:
         default: Zoom Meeting SDK Client Secret (Optional)
+      AcsConnectionString:
+        default: Azure Communication Services Connection String for Teams SDK Join (Optional)
       VoiceAssistantProvider:
         default: Voice Assistant Provider (none, elevenlabs, amazon_nova_sonic)
       VoiceAssistantActivationMode:
@@ -2573,6 +2587,7 @@ Resources:
         EnableAudioRecording: !Ref EnableAudioRecording
         ZoomMeetingSdkClientId: !Ref ZoomMeetingSdkClientId
         ZoomMeetingSdkClientSecret: !Ref ZoomMeetingSdkClientSecret
+        AcsConnectionString: !Ref AcsConnectionString
         EnableVideoRecording: !Ref EnableVideoRecording
         ElevenLabsApiKey: !Ref ElevenLabsApiKey
         ElevenLabsAgentId: !Ref ElevenLabsAgentId

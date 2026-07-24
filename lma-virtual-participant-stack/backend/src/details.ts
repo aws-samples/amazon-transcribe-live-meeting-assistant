@@ -35,6 +35,7 @@ export interface MeetingDetails {
   invite: MeetingInvite;
 
   zoomMethod: 'dom' | 'sdk';
+  teamsMethod: 'dom' | 'sdk';
 
   // LMA Configuration
   lmaIdentity: string;
@@ -136,6 +137,13 @@ class DetailsManager {
       : zoomMethodOverride === 'dom' ? 'dom'
       : zoomSdkCredsPresent ? 'sdk' : 'dom';
 
+    const acsConnectionStringPresent = !!(process.env.ACS_CONNECTION_STRING || '').trim();
+    const teamsMethodOverride = (process.env.MEETING_TEAMS_METHOD || 'auto').toLowerCase();
+    const teamsMethod: 'dom' | 'sdk' =
+      teamsMethodOverride === 'sdk' ? 'sdk'
+      : teamsMethodOverride === 'dom' ? 'dom'
+      : acsConnectionStringPresent ? 'sdk' : 'dom';
+
     this._details = {
       // Meeting Configuration
       invite: {
@@ -149,6 +157,7 @@ class DetailsManager {
       },
 
       zoomMethod,
+      teamsMethod,
 
       // LMA Configuration
       lmaIdentity: replacePlaceholders(lmaIdentity),

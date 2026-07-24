@@ -27,7 +27,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 // noVNC (@novnc/novnc) is distributed under the Mozilla Public License, v. 2.0.
 // Source: https://github.com/novnc/noVNC. See THIRD-PARTY-LICENSES.txt.
-import RFB from '@novnc/novnc/lib/rfb';
+// The package ships Babel-CJS only (exports.default); unwrap defensively so the
+// class survives any bundler's CJS-to-ESM interop (single or double default).
+import RFBImport from '@novnc/novnc/lib/rfb';
 import {
   Container,
   Header,
@@ -39,6 +41,8 @@ import {
   Toggle,
   Badge,
 } from '@cloudscape-design/components';
+
+const RFB = RFBImport && RFBImport.default ? RFBImport.default : RFBImport;
 
 const VNCViewer = ({
   vpId,
