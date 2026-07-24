@@ -191,6 +191,28 @@ Resources:
                 - zip -r ../${zipfile} . -x '*.build/*' -x '*/build/*'
                 - aws s3 cp ../${zipfile} s3://${WEBAPP_BUCKET}/
                 - echo Artifact Location - s3://${WEBAPP_BUCKET}/${zipfile}
+                # --- Windows package (purely additive; guarded so it is a no-op
+                # if this source tree has no Windows client, leaving the macOS
+                # behavior above completely unchanged). The Windows client is
+                # ALSO shipped as build-from-source: CodeBuild only bakes the
+                # deployment config into its lma-config.json and zips the source
+                # (a native WASAPI/WPF app cannot be cross-compiled on Linux, and
+                # Authenticode signing is Windows-only — same reasoning as macOS).
+                - |
+                  WIN_DIR=""
+                  if [ -d ./source/windows ]; then WIN_DIR=./source/windows; fi
+                  if [ -d ./windows ]; then WIN_DIR=./windows; fi
+                  if [ -n "$WIN_DIR" ]; then
+                    printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s"\n}\n' \
+                      "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" > "$WIN_DIR/lma-config.json"
+                    cat "$WIN_DIR/lma-config.json"
+                    winzip=lma-audio-capture-app-windows-v<VERSION_TOKEN>.zip
+                    (cd "$WIN_DIR" && rm -rf bin obj && zip -r "$OLDPWD/../${winzip}" . -x '*/bin/*' -x '*/obj/*')
+                    aws s3 cp ../${winzip} s3://${WEBAPP_BUCKET}/
+                    echo Artifact Location - s3://${WEBAPP_BUCKET}/${winzip}
+                  else
+                    echo "No Windows client in this source tree; skipping Windows package."
+                  fi
             post_build:
               commands:
                 - echo Invalidating CloudFront Distribution
@@ -323,3 +345,9 @@ Outputs:
   AudioCaptureAppDownloadLocation:
     Description: LMA Native Audio Capture App download location
     Value: !Sub '${CloudfrontEndpoint}lma-audio-capture-app-macos-v<VERSION_TOKEN>.zip'
+
+  # Additive: the Windows source package the same CodeBuild job emits when a
+  # source/windows client is present. Harmless if that zip isn't produced.
+  AudioCaptureAppWindowsDownloadLocation:
+    Description: LMA Native Audio Capture App (Windows) download location
+    Value: !Sub '${CloudfrontEndpoint}lma-audio-capture-app-windows-v<VERSION_TOKEN>.zip'
