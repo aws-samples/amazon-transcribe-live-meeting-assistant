@@ -313,9 +313,8 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
   </>
 );
 
-// Windows install + usage + troubleshooting. Windows is genuinely simpler than
-// macOS: WASAPI loopback needs no permission, so there is no Screen-Recording /
-// quarantine dance — only the microphone privacy toggle.
+// Windows install + usage + troubleshooting. WASAPI loopback needs no OS
+// permission, so the only OS gate is the microphone privacy toggle.
 const WindowsInstall = ({ zipName, copyToClipboard }) => (
   <>
     <Container header={<Header variant="h2">Install on Windows</Header>}>
@@ -325,10 +324,9 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
           WASAPI/WPF cannot be prebuilt by the LMA cloud Linux pipeline, and code signing is Windows-only, so building
           locally is both required and the most trustworthy option.)
         </Box>
-        <Alert type="success" header="Simpler than macOS: no system-audio permission needed">
-          On Windows, capturing system (loopback) audio is built in and needs <strong>no special permission</strong>
-          &mdash; there is no Screen-Recording toggle or download-quarantine dance. The only OS gate is the microphone
-          privacy setting, below.
+        <Alert type="success" header="No system-audio permission needed">
+          On Windows, capturing system (loopback) audio is built in and needs <strong>no special permission</strong>.
+          The only OS gate is the microphone privacy setting, below.
         </Alert>
         <ol>
           <li>

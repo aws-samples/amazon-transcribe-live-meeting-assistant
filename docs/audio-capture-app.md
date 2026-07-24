@@ -107,9 +107,8 @@ xattr -dr com.apple.quarantine .
 
 ## Download and install (Windows)
 
-Windows is **simpler than macOS**: loopback (system) audio capture is built into
-the OS, so there's no Screen-Recording permission or download-quarantine dance —
-only the microphone privacy toggle.
+On Windows, loopback (system) audio capture is built into the OS and needs
+**no special permission** — the only OS gate is the microphone privacy toggle.
 
 1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Audio Capture App
    (Native)**, choose **Windows**, and click **Download for Windows**. The zip is
