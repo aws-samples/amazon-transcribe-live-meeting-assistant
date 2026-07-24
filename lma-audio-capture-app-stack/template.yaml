@@ -171,26 +171,25 @@ Resources:
               commands:
                 - echo Packaging LMA Audio Capture App from s3://${SOURCE_CODE_LOCATION}
                 - echo `pwd` && ls -altr
-                # Bake the deployment config into the package so the end user only
+                # The source zip root is the stack's source/ dir with per-platform
+                # subdirs (macos/, windows/). Tolerate the older layout where the
+                # macOS sources were the zip root, so both zip shapes work.
+                # Bake the deployment config into each package so the end user only
                 # needs their LMA username/password. The app reads lma-config.json
                 # from next to its executable (see Config.swift loadConfigFile()).
-                - >
-                  printf '{
-                    "wssEndpoint": "%s",
-                    "webEndpoint": "%s",
-                    "userPoolId": "%s",
-                    "clientId": "%s",
-                    "region": "%s"
-                  }\n'
-                  "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" > ./lma-config.json
-                - cat ./lma-config.json
-                # Zip the whole preconfigured source tree (source + install scripts
-                # + baked config). Exclude any build artifacts that slipped in.
-                - zipfile=lma-audio-capture-app-macos-v<VERSION_TOKEN>.zip
-                - rm -rf .build build .git
-                - zip -r ../${zipfile} . -x '*.build/*' -x '*/build/*'
-                - aws s3 cp ../${zipfile} s3://${WEBAPP_BUCKET}/
-                - echo Artifact Location - s3://${WEBAPP_BUCKET}/${zipfile}
+                - |
+                  MAC_DIR=.
+                  if [ -d ./source/macos ]; then MAC_DIR=./source/macos; fi
+                  if [ -d ./macos ]; then MAC_DIR=./macos; fi
+                  printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s"\n}\n' \
+                    "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" > "$MAC_DIR/lma-config.json"
+                  cat "$MAC_DIR/lma-config.json"
+                  # Zip the preconfigured macOS source tree (source + install
+                  # scripts + baked config), excluding any build artifacts.
+                  zipfile=lma-audio-capture-app-macos-v<VERSION_TOKEN>.zip
+                  (cd "$MAC_DIR" && rm -rf .build build .git && zip -r "$CODEBUILD_SRC_DIR/../${zipfile}" . -x '*.build/*' -x '*/build/*')
+                  aws s3 cp ../${zipfile} s3://${WEBAPP_BUCKET}/
+                  echo Artifact Location - s3://${WEBAPP_BUCKET}/${zipfile}
                 # --- Windows package (purely additive; guarded so it is a no-op
                 # if this source tree has no Windows client, leaving the macOS
                 # behavior above completely unchanged). The Windows client is
