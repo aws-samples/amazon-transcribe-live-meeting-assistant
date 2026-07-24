@@ -118,17 +118,22 @@ Install flags:
   step re-launches elevated to get admin).
 - `-DesktopShortcut` — also drop a Desktop shortcut.
 
-Uninstall:
+Uninstall — two equivalent ways:
 
-```powershell
-./build-windows.ps1 -Uninstall
-```
+- **Settings ▸ Apps ▸ Installed apps** — the app registers an "Apps & features"
+  entry ("LMA Audio Capture"); find it and choose **Uninstall**. (`-Install`
+  writes this entry; per-user installs register under HKCU, `-ProgramFiles`
+  installs under HKLM.)
+- **Script:**
+  ```powershell
+  ./build-windows.ps1 -Uninstall
+  ```
 
-Removes the installed app (per-user and, if present, machine-wide) plus its Start
-Menu / Desktop shortcuts, and clears the app's per-user settings (remembered
-email, start-at-login `Run` entry). If you installed machine-wide with
-`-ProgramFiles`, run the uninstall from an elevated (admin) PowerShell so it can
-delete the `%ProgramFiles%` copy.
+Either way removes the installed app (per-user and, if present, machine-wide)
+plus its Start Menu / Desktop shortcuts, the "Apps & features" entry, and the
+app's per-user settings (remembered email, start-at-login `Run` entry). If you
+installed machine-wide with `-ProgramFiles`, run the uninstall from an elevated
+(admin) PowerShell so it can delete the `%ProgramFiles%` copy and the HKLM entry.
 
 You can also build by hand:
 
