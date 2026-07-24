@@ -433,7 +433,20 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
           <Link href="https://dotnet.microsoft.com/download/dotnet/8.0" external target="_blank">
             .NET 8 SDK
           </Link>
-          , open a fresh PowerShell window, and re-run <code>./build-windows.ps1 -SelfContained</code>.
+          , open a fresh PowerShell window, and re-run <code>./build-windows.ps1 -SelfContained -Install</code>.
+        </Box>
+        <Box variant="p">
+          <strong>Uninstall.</strong> From the unzipped folder, run{' '}
+          <code>./build-windows.ps1 -Uninstall</code>{' '}
+          <Button
+            variant="inline-icon"
+            iconName="copy"
+            ariaLabel="Copy uninstall command"
+            onClick={() => copyToClipboard('./build-windows.ps1 -Uninstall')}
+          />
+          . It removes the installed app and its Start Menu / Desktop shortcuts, and clears the app&apos;s per-user
+          settings (remembered email, start-at-login). If you installed machine-wide with <code>-ProgramFiles</code>,
+          run the uninstall from an elevated (admin) PowerShell.
         </Box>
         <Box variant="p">
           <strong>No remote-participant audio in the transcript.</strong> Make sure meeting audio is actually playing

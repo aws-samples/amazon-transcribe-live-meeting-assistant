@@ -118,6 +118,18 @@ Install flags:
   step re-launches elevated to get admin).
 - `-DesktopShortcut` — also drop a Desktop shortcut.
 
+Uninstall:
+
+```powershell
+./build-windows.ps1 -Uninstall
+```
+
+Removes the installed app (per-user and, if present, machine-wide) plus its Start
+Menu / Desktop shortcuts, and clears the app's per-user settings (remembered
+email, start-at-login `Run` entry). If you installed machine-wide with
+`-ProgramFiles`, run the uninstall from an elevated (admin) PowerShell so it can
+delete the `%ProgramFiles%` copy.
+
 You can also build by hand:
 
 ```powershell

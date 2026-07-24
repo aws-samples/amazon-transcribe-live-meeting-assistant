@@ -30,6 +30,10 @@
 
 .EXAMPLE
   ./build-windows.ps1                    # framework-dependent build only, no install
+
+.EXAMPLE
+  ./build-windows.ps1 -Uninstall
+      # remove the installed app + Start Menu/Desktop shortcuts (does not build)
 #>
 param(
     [string]$Configuration = "Release",
@@ -37,11 +41,55 @@ param(
     [switch]$SkipSelfTest,
     [switch]$Install,
     [switch]$ProgramFiles,
-    [switch]$DesktopShortcut
+    [switch]$DesktopShortcut,
+    [switch]$Uninstall
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+
+# --- Uninstall: remove installed copies + shortcuts, then exit (no build) ----
+if ($Uninstall) {
+    $targets = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\LMA Audio Capture"),
+        (Join-Path $env:ProgramFiles "LMA Audio Capture")
+    )
+    $shortcuts = @(
+        (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk"),
+        (Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk"),
+        (Join-Path ([Environment]::GetFolderPath('Desktop')) "LMA Audio Capture.lnk")
+    )
+
+    # Stop a running instance so files aren't locked.
+    Get-Process -Name LMAAudioClient -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+    $removedAny = $false
+    foreach ($t in $targets) {
+        if (Test-Path $t) {
+            try {
+                Remove-Item $t -Recurse -Force -ErrorAction Stop
+                Write-Host "==> Removed $t"
+                $removedAny = $true
+            } catch {
+                Write-Warning "Couldn't remove $t ($($_.Exception.Message)). If it's the Program Files copy, re-run from an elevated (admin) PowerShell."
+            }
+        }
+    }
+    foreach ($s in $shortcuts) {
+        if (Test-Path $s) {
+            try { Remove-Item $s -Force -ErrorAction Stop; Write-Host "==> Removed shortcut $s"; $removedAny = $true }
+            catch { Write-Warning "Couldn't remove $s ($($_.Exception.Message))." }
+        }
+    }
+
+    # Per-user settings (remembered email) + start-at-login entry left by the app.
+    Remove-Item "HKCU:\Software\AmazonLMA\AudioCapture" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "LMAAudioCapture" -ErrorAction SilentlyContinue
+
+    if ($removedAny) { Write-Host "Uninstall complete." }
+    else { Write-Host "Nothing to uninstall (no installed copy found)." }
+    return
+}
 
 Write-Host "==> Building LMA Windows client ($Configuration, self-contained=$SelfContained)"
 

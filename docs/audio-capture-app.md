@@ -261,10 +261,15 @@ voice assistant, screen/video capture, or hands-off unattended recording.
   microphone*), then restart the app. System audio is unaffected.
 - **`dotnet` is not recognized / build errors.** Install the
   [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), open a fresh
-  PowerShell window, and re-run `./build-windows.ps1 -SelfContained`.
+  PowerShell window, and re-run `./build-windows.ps1 -SelfContained -Install`.
 - **No remote-participant audio.** Make sure meeting audio is playing through
   your default playback device (the app captures the default render endpoint).
   Switching the default device mid-meeting is handled automatically.
+- **Uninstall.** From the unzipped folder, run `./build-windows.ps1 -Uninstall`.
+  It removes the installed app and its Start Menu / Desktop shortcuts and clears
+  the app's per-user settings (remembered email, start-at-login). If you
+  installed machine-wide with `-ProgramFiles`, run the uninstall from an elevated
+  (admin) PowerShell.
 
 ### Both platforms
 
