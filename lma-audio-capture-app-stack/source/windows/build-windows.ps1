@@ -5,8 +5,9 @@
 .DESCRIPTION
   Restores and publishes LMAAudioClient.Windows as a win-x64 executable, runs
   the offline SRP self-test, and - with -Install - copies it to a stable
-  location and adds a Start Menu (and optional Desktop) shortcut so you don't
-  have to dig into the publish folder to launch it.
+  location, adds a Start Menu (and optional Desktop) shortcut, and attempts to
+  pin it to the taskbar so you don't have to dig into the publish folder to
+  launch it. Pass -NoPin to skip the taskbar pin.
 
   Build modes:
     -SelfContained  : bundles the .NET 8 Desktop runtime (no prerequisites on
@@ -42,6 +43,7 @@ param(
     [switch]$Install,
     [switch]$ProgramFiles,
     [switch]$DesktopShortcut,
+    [switch]$NoPin,
     [switch]$Uninstall
 )
 
@@ -212,9 +214,34 @@ function Install-App {
         Write-Host "==> Desktop shortcut: $dlnk"
     }
 
+    if (-not $NoPin) { Add-TaskbarPin -ShortcutPath $lnk }
+
     Register-Uninstall -InstallDir $installDir -InstalledExe $installedExe -MachineWide $MachineWide
 
     return $installedExe
+}
+
+# Best-effort pin to the taskbar. Windows removed the supported "taskbarpin" verb
+# in Win10+, so there is no guaranteed API. We try the localized verb exposed on
+# the shortcut's Shell verbs; if it isn't present (most modern builds), we tell
+# the user how to pin manually. Never fails the install.
+function Add-TaskbarPin {
+    param([string]$ShortcutPath)
+    try {
+        $shell = New-Object -ComObject Shell.Application
+        $folder = $shell.Namespace((Split-Path $ShortcutPath))
+        $item = $folder.ParseName((Split-Path $ShortcutPath -Leaf))
+        $verb = $item.Verbs() | Where-Object { $_.Name -replace '&','' -match 'Pin to tas[kc]bar' } | Select-Object -First 1
+        if ($verb) {
+            $verb.DoIt()
+            Write-Host "==> Pinned to the taskbar."
+        } else {
+            Write-Host "==> Note: Windows doesn't expose a taskbar-pin command on this build."
+            Write-Host "         To pin it: open the Start Menu, right-click 'LMA Audio Capture' > More > Pin to taskbar."
+        }
+    } catch {
+        Write-Host "==> Couldn't auto-pin to the taskbar; pin it manually from the Start Menu (right-click > More > Pin to taskbar)."
+    }
 }
 
 $launchExe = $exe

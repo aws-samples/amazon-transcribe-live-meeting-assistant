@@ -111,12 +111,23 @@ build whose crypto can't reproduce the known-answer never ships). The executable
 and `lma-config.json` land in `bin/<Config>/net8.0-windows/win-x64/publish/`.
 
 Install flags:
-- `-Install` — copy to `%LOCALAPPDATA%\Programs\LMA Audio Capture` and add a
-  **Start Menu** shortcut (launch via the Windows key → "LMA Audio Capture"). No
-  admin required.
+- `-Install` — copy to `%LOCALAPPDATA%\Programs\LMA Audio Capture`, add a
+  **Start Menu** shortcut (launch via the Windows key → "LMA Audio Capture"), and
+  attempt to **pin it to the taskbar**. No admin required.
 - `-ProgramFiles` — install machine-wide under `%ProgramFiles%` instead (the copy
   step re-launches elevated to get admin).
 - `-DesktopShortcut` — also drop a Desktop shortcut.
+- `-NoPin` — skip the taskbar-pin attempt.
+
+> **Taskbar pin.** Windows removed the supported "pin to taskbar" API in Win10+,
+> so the pin is best-effort: it works on builds that still expose the shell verb,
+> otherwise the script prints how to pin manually (Start Menu → right-click →
+> More → Pin to taskbar).
+>
+> **Always-visible tray icon.** The app asks Windows to keep its tray icon out of
+> the overflow (▲) flyout so the **red recording icon stays visible** while
+> recording. If Windows still hides it, drag it onto the taskbar once, or toggle
+> it in **Settings ▸ Personalization ▸ Taskbar ▸ Other system tray icons**.
 
 Uninstall — two equivalent ways:
 

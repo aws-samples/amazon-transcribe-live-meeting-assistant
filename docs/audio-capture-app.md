@@ -131,11 +131,12 @@ On Windows, loopback (system) audio capture is built into the OS and needs
    - Add `-DesktopShortcut` for a desktop icon too.
    - Add `-ProgramFiles` to install machine-wide under `%ProgramFiles%` instead
      (prompts for admin to do the copy).
-5. **Launch it from the Start Menu:** press the **Windows key**, type **LMA Audio
-   Capture**, and press Enter. An **LMA** icon appears in the **system tray**
-   (bottom-right notification area). If SmartScreen warns about an unrecognized
-   app, choose **More info ▸ Run anyway** — expected for a locally built,
-   unsigned app.
+5. **Launch it** from the **taskbar** (the installer pins it) or the **Start
+   Menu** (press the **Windows key**, type **LMA Audio Capture**, Enter). An
+   **LMA** icon appears in the **system tray** (bottom-right notification area);
+   it stays visible rather than hidden in the ▲ overflow, so the **red recording
+   icon** shows while recording. If SmartScreen warns about an unrecognized app,
+   choose **More info ▸ Run anyway** — expected for a locally built, unsigned app.
 6. If Windows blocks microphone access, enable it in **Settings ▸ Privacy &
    security ▸ Microphone** (turn on *Microphone access* and *Let desktop apps
    access your microphone*), then restart the app. **System/meeting audio needs

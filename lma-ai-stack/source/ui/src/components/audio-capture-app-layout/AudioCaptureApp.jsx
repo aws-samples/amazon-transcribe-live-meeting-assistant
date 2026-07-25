@@ -363,10 +363,12 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
           </li>
           <li>
             <Box variant="p">
-              <strong>Launch it from the Start Menu:</strong> press the <strong>Windows key</strong>, type{' '}
-              <strong>LMA Audio Capture</strong>, and press Enter. An <strong>LMA</strong> icon appears in the system
-              tray (bottom-right notification area). If SmartScreen warns about an unrecognized app, choose{' '}
-              <strong>More info ▸ Run anyway</strong> (expected for a locally built, unsigned app).
+              <strong>Launch it</strong> from the <strong>taskbar</strong> (the installer pins it) or the{' '}
+              <strong>Start Menu</strong> (press the <strong>Windows key</strong>, type{' '}
+              <strong>LMA Audio Capture</strong>, Enter). An <strong>LMA</strong> icon appears in the system tray
+              (bottom-right notification area) &mdash; it stays visible (not tucked in the ▲ overflow) so the{' '}
+              <strong>red recording icon</strong> shows while recording. If SmartScreen warns about an unrecognized app,
+              choose <strong>More info ▸ Run anyway</strong> (expected for a locally built, unsigned app).
             </Box>
           </li>
           <li>

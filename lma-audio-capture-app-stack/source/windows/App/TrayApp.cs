@@ -109,12 +109,27 @@ public sealed class TrayApp
         _tray.TrayLeftMouseUp += (_, _) => TogglePopup();
         _tray.ContextMenu = BuildContextMenu();
 
+        // Ask Windows to keep our tray icon out of the overflow (▲) flyout so it's
+        // always visible — especially the red recording icon. Best-effort. The
+        // shell records the icon a moment after it first appears, so re-assert on
+        // short delays to catch that first registration.
+        TrayIconVisibility.PromoteToTaskbar();
+        foreach (var ms in new[] { 3000, 10000 })
+        {
+            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
+            t.Tick += (_, _) => { t.Stop(); TrayIconVisibility.PromoteToTaskbar(); };
+            t.Start();
+        }
+
         // Bind state → icon + panel refresh. Marshal engine callbacks onto the UI thread.
         _controller.OnStateChange = s => _app.Dispatcher.Invoke(() =>
         {
             _panel.OnState(s);
-            _tray.Icon = (s.Kind == CaptureController.StateKind.Streaming) ? _recordingIcon : _idleIcon;
-            _tray.ToolTipText = s.Kind == CaptureController.StateKind.Streaming ? "LMA Audio Capture — Recording" : "LMA Audio Capture";
+            bool streaming = s.Kind == CaptureController.StateKind.Streaming;
+            _tray.Icon = streaming ? _recordingIcon : _idleIcon;
+            _tray.ToolTipText = streaming ? "LMA Audio Capture — Recording" : "LMA Audio Capture";
+            // Re-assert promotion when recording starts so the red icon is visible.
+            if (streaming) TrayIconVisibility.PromoteToTaskbar();
         });
         _controller.OnLevels = (m, k, c, p) => _app.Dispatcher.Invoke(() => _panel.OnLevels(m, k, c, p));
         _controller.OnLog = msg => _app.Dispatcher.Invoke(() => _panel.OnLog(msg));
@@ -226,5 +241,58 @@ internal static class IconFactory
         var hicon = bmp.GetHicon();
         using var tmp = System.Drawing.Icon.FromHandle(hicon);
         return (System.Drawing.Icon)tmp.Clone();
+    }
+}
+
+/// <summary>
+/// Best-effort control over whether our tray icon sits on the taskbar (always
+/// visible) versus tucked into the overflow (▲) flyout.
+///
+/// Windows 11 hides newly-seen tray icons in the overflow by default. It records
+/// each icon's placement under HKCU\Control Panel\NotifyIconSettings\{hash}, keyed
+/// by the icon's ExecutablePath, with an IsPromoted DWORD (1 = shown on the
+/// taskbar). We set IsPromoted=1 for our executable so the icon — especially the
+/// red recording icon — stays visible. This is undocumented and version-specific,
+/// so it's wrapped in try/catch; if it fails, the user can still drag the icon out
+/// of the overflow or toggle it in Settings ▸ Personalization ▸ Taskbar.
+/// </summary>
+internal static class TrayIconVisibility
+{
+    public static void PromoteToTaskbar()
+    {
+        try
+        {
+            var exe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exe)) return;
+            using var root = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"Control Panel\NotifyIconSettings", writable: true);
+            if (root == null) return;
+
+            bool matchedExisting = false;
+            foreach (var subName in root.GetSubKeyNames())
+            {
+                using var sub = root.OpenSubKey(subName, writable: true);
+                var path = sub?.GetValue("ExecutablePath") as string;
+                if (path != null && string.Equals(path, exe, StringComparison.OrdinalIgnoreCase))
+                {
+                    sub!.SetValue("IsPromoted", 1, Microsoft.Win32.RegistryValueKind.DWord);
+                    matchedExisting = true;
+                }
+            }
+
+            // If Windows hasn't recorded our icon yet (first run before the shell
+            // registers it), seed an entry so the first placement is "promoted".
+            if (!matchedExisting)
+            {
+                // Key name is a shell-computed hash we can't reproduce reliably;
+                // seeding a guessable name won't be picked up, so we skip creating
+                // one and rely on the re-assert on the next launch/record. This
+                // keeps the call side-effect-free when there's nothing to update.
+            }
+        }
+        catch
+        {
+            // Undocumented/opportunistic — never let it break the tray.
+        }
     }
 }
