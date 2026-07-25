@@ -14,9 +14,10 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 - **[Stream Audio (from Mic+Browser)](stream-audio.md)** — built-in page in the
   LMA web app that streams audio from your microphone and any Chrome tab
   (meetings, softphones, YouTube, audio/video playback).
-- **[Audio Capture App (Native)](audio-capture-app.md)** — native macOS menu-bar
-  app that captures your system (meeting) audio + microphone, for meetings you
-  join from a **native desktop app** — no browser tab and no bot.
+- **[Audio Capture App (Native)](audio-capture-app.md)** — native macOS and
+  Windows app (menu bar / system tray) that captures your system (meeting) audio
+  + microphone, for meetings you join from a **native desktop app** — no browser
+  tab and no bot.
 - **[Virtual Participant](virtual-participant.md)** — headless Chrome bot that
   joins the meeting as a separate participant.
 
@@ -24,18 +25,18 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 
 | Capability                                              | Chrome Extension       | Stream Audio (from Mic+Browser) | Audio Capture App (Native) | Virtual Participant |
 | ------------------------------------------------------- | ---------------------- | ------------------------------- | -------------------------- | ------------------- |
-| One-time install required                               | Yes (Chromium only)    | No                              | Yes (build on your Mac)    | No                  |
-| Runs inside meeting tab                                 | ✅                     | ❌ (separate LMA tab)           | ❌ (menu-bar app)          | ❌ (joins as a bot) |
+| One-time install required                               | Yes (Chromium only)    | No                              | Yes (build on your computer) | No                |
+| Runs inside meeting tab                                 | ✅                     | ❌ (separate LMA tab)           | ❌ (menu-bar / tray app)   | ❌ (joins as a bot) |
 | Captures both sides of audio                            | ✅                     | ✅                              | ✅                         | ✅                  |
 | Speaker attribution from meeting platform               | ✅                     | ❌ (no meeting-app metadata)    | ❌ (no meeting-app metadata) | ✅                |
 | Invisible to other attendees                            | ✅                     | ✅                              | ✅                         | ❌ (visible bot)    |
-| Works with native desktop/mobile meeting apps           | ❌ (must join from Chrome) | ❌ (must join from Chrome)   | ✅ (macOS desktop apps)    | ✅                  |
+| Works with native desktop/mobile meeting apps           | ❌ (must join from Chrome) | ❌ (must join from Chrome)   | ✅ (macOS/Windows desktop apps) | ✅             |
 | Captures any Chrome tab audio (softphone, YouTube…)     | ❌                     | ✅                              | ✅ (any system audio)      | ❌                  |
 | Can attend meetings without you (unattended / overnight)| ❌                     | ❌                              | ❌                         | ✅                  |
 | Supports scheduling for future meetings                 | ❌                     | ❌                              | ❌                         | ✅                  |
 | Supports the Voice Assistant                            | ❌                     | ❌                              | ❌ (web-UI chat only)      | ✅                  |
 | Supports "Open VP live view" in the Meeting Assistant   | ❌                     | ❌                              | ❌                         | ✅                  |
-| Works on any modern browser                             | ❌ (Chromium only)     | ❌ (Chrome only)                | N/A (native app; macOS)    | N/A (server-side)   |
+| Works on any modern browser                             | ❌ (Chromium only)     | ❌ (Chrome only)                | N/A (native app; macOS/Windows) | N/A (server-side) |
 
 ## When to use each
 
@@ -60,15 +61,15 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 
 ### Use the **Audio Capture App (Native)** when…
 
-- You join meetings from a **native desktop app** on macOS (Zoom, Teams, Webex,
-  Slack, a phone bridge, …) rather than a Chrome tab — which rules out both the
-  Chrome Extension and Stream Audio, and you don't want a visible bot.
-- You're attending the meeting yourself and want an unobtrusive menu-bar app
-  (start/stop, pause, mute mic/system, live meters) with no extra attendee.
+- You join meetings from a **native desktop app** on macOS or Windows (Zoom,
+  Teams, Webex, Slack, a phone bridge, …) rather than a Chrome tab — which rules
+  out both the Chrome Extension and Stream Audio, and you don't want a visible bot.
+- You're attending the meeting yourself and want an unobtrusive menu-bar / tray
+  app (start/stop, pause, mute mic/system, live meters) with no extra attendee.
 - You're fine with no per-speaker names (like Stream Audio, it only distinguishes
   your microphone from the system/meeting-audio channel) and don't need the
   in-meeting Voice Assistant.
-- macOS today; Windows and mobile are on the roadmap. See
+- macOS and Windows are available today; mobile is on the roadmap. See
   [Audio Capture App](audio-capture-app.md).
 
 ### Use **Virtual Participant** when…
@@ -86,5 +87,5 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 
 - [Chrome Extension](browser-extension.md) — install and usage guide
 - [Stream Audio](stream-audio.md) — browser-based capture
-- [Audio Capture App (Native)](audio-capture-app.md) — native macOS menu-bar app
+- [Audio Capture App (Native)](audio-capture-app.md) — native macOS / Windows app
 - [Virtual Participant](virtual-participant.md) — server-side bot

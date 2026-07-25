@@ -60,11 +60,12 @@ STACK_DEFINITIONS: list[StackDefinition] = [
         name="lma-audio-capture-app-stack",
         package_type=StackPackageType.ZIP_APP_SRC_WITH_TOKEN_REPLACE,
         template_file="template.yaml",
-        # The downloadable macOS app source lives under the stack's own
-        # source/macos/ subdir; zip that tree (not the stack root, so the
-        # CloudFormation template itself is excluded from the download). A
-        # future Windows app will live under source/windows/ with its own zip.
-        source_dir="source/macos",
+        # The downloadable app sources live under the stack's own source/
+        # subdir (source/macos/ and source/windows/); zip that tree (not the
+        # stack root, so the CloudFormation template itself is excluded from
+        # the download). CodeBuild packages each platform subdir into its own
+        # per-platform download zip.
+        source_dir="source",
         supports_change_detection=False,  # Always publish (fast, small)
     ),
     StackDefinition(
