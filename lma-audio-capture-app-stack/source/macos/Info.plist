@@ -32,9 +32,14 @@
     <string>LMAAudioClient</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
-    <!-- CLI-style app: no Dock icon / menu bar; runs from Terminal. -->
-    <key>LSUIElement</key>
-    <true/>
+    <!-- Regular app: shows in the Dock (with a REC badge while recording) in
+         addition to the menu-bar item. On notched MacBooks the menu-bar icon
+         can be silently hidden when the bar is crowded — worst of all, the
+         system's orange mic indicator appears at the moment recording starts
+         and can push our icon out of view — so the Dock is the reliable,
+         always-visible control surface. -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>LMA needs the microphone to transcribe your side of the meeting.</string>
 </dict>
