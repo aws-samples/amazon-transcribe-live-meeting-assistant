@@ -125,18 +125,22 @@ On Windows, loopback (system) audio capture is built into the OS and needs
    ```
    It builds a standalone app, runs a built-in self-test, installs it to
    `%LOCALAPPDATA%\Programs\LMA Audio Capture` (no admin needed), and adds a
-   **Start Menu** shortcut — so you don't have to dig into the build output.
+   **Start Menu** shortcut — so you don't have to dig into the build output. It
+   ends with **INSTALL SUCCEEDED**; that banner is the thing to look for.
    - Omit `-Install` to just build (the exe lands in
      `bin\Release\net8.0-windows\win-x64\publish\`).
    - Add `-DesktopShortcut` for a desktop icon too.
    - Add `-ProgramFiles` to install machine-wide under `%ProgramFiles%` instead
      (prompts for admin to do the copy).
-5. **Launch it** from the **taskbar** (the installer pins it) or the **Start
-   Menu** (press the **Windows key**, type **LMA Audio Capture**, Enter). An
-   **LMA** icon appears in the **system tray** (bottom-right notification area);
-   it stays visible rather than hidden in the ▲ overflow, so the **red recording
-   icon** shows while recording. If SmartScreen warns about an unrecognized app,
-   choose **More info ▸ Run anyway** — expected for a locally built, unsigned app.
+5. **Launch it** from the **Start Menu** (press the **Windows key**, type **LMA
+   Audio Capture**, Enter). **No window opens** — the app lives in the **system
+   tray**, at the bottom-right next to the clock:
+
+   ![LMA tray icon: gray when idle, red while recording](../images/readme-audio-capture-windows-tray-icons.png)
+
+   **Left-click that icon** for the controls panel. If SmartScreen warns about an
+   unrecognized app, choose **More info ▸ Run anyway** — expected for a locally
+   built, unsigned app.
 6. If Windows blocks microphone access, enable it in **Settings ▸ Privacy &
    security ▸ Microphone** (turn on *Microphone access* and *Let desktop apps
    access your microphone*), then restart the app. **System/meeting audio needs
@@ -184,16 +188,23 @@ press Return — or run `open -a "LMA Audio Client"`.
 ## Using the system-tray app (Windows)
 
 Launched with no arguments (the normal case), the app runs as a **system-tray
-app** (no taskbar button when idle). An **LMA** icon appears in the notification
-area (bottom-right).
+app** — there is **no taskbar button and no window**. Look for the **LMA** icon
+in the notification area (bottom-right, next to the clock):
+
+![LMA tray icon: gray when idle, red while recording](../images/readme-audio-capture-windows-tray-icons.png)
 
 - **Left-click** the icon for the controls panel: sign in / out,
   **Start** / **Stop** / **Pause**, **mute mic**, **mute system audio**, live
   per-channel **level meters**, and **Open in LMA** (jumps to the live meeting in
   your browser).
-- While recording, the icon turns **red** so it's obvious at a glance.
+- While recording, the icon turns **red** so it's obvious at a glance. The app
+  asks Windows to keep it out of the ▲ overflow so the red icon stays visible; if
+  Windows still hides it, drag it onto the taskbar once.
 - **Right-click** the icon for **Quit** (kept out of the panel so it isn't
   confused with *Stop*).
+- Want it one click away? Right-click **LMA Audio Capture** in the Start Menu ▸
+  **More** ▸ **Pin to taskbar**. (Windows 10+ removed the API that would let the
+  installer do this for you.)
 
 Panel options:
 
@@ -259,6 +270,13 @@ voice assistant, screen/video capture, or hands-off unattended recording.
 - **No microphone / "access denied".** Enable **Settings ▸ Privacy & security ▸
   Microphone** (both *Microphone access* and *Let desktop apps access your
   microphone*), then restart the app. System audio is unaffected.
+- **Unfamiliar errors scroll past during install (e.g. `log4net:ERROR …
+  lockingModel`).** If the script ends with **INSTALL SUCCEEDED**, the install
+  worked. Messages like that come from **other software already on the PC** —
+  corporate sync, backup or security tools that register Windows Explorer (shell)
+  extensions and get loaded into any process that talks to the shell. LMA doesn't
+  use log4net at all. The signals that matter are `All self-tests PASSED` and
+  **INSTALL SUCCEEDED**.
 - **`dotnet` is not recognized / build errors.** Install the
   [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), open a fresh
   PowerShell window, and re-run `./build-windows.ps1 -SelfContained -Install`.

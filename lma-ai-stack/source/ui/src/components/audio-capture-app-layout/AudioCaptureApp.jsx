@@ -125,6 +125,47 @@ const COMPARISON = [
   },
 ];
 
+// What the Windows tray icon actually looks like, so users know what to hunt for
+// in the notification area (the app opens no window, which surprises people).
+// Drawn inline as SVG rather than shipping a screenshot: it stays crisp at any
+// zoom, needs no build asset, and the colors are the same ones IconFactory.Make()
+// uses in the app (idle #535B66, recording #D42A2A).
+const TrayGlyph = ({ recording }) => (
+  <svg width="34" height="34" viewBox="0 0 32 32" role="img" aria-label={recording ? 'Recording' : 'Idle'}>
+    <circle cx="16" cy="16" r="15" fill={recording ? '#D42A2A' : '#535B66'} />
+    {recording ? (
+      <circle cx="16" cy="16" r="6" fill="#FFFFFF" />
+    ) : (
+      [6, 12, 9, 14, 7].map((h, i) => (
+        // eslint-disable-next-line react/no-array-index-key
+        <rect key={i} x={7 + i * 4.5} y={(32 - h) / 2} width="3" height={h} fill="#FFFFFF" />
+      ))
+    )}
+  </svg>
+);
+TrayGlyph.propTypes = { recording: PropTypes.bool };
+TrayGlyph.defaultProps = { recording: false };
+
+// Compact "this is the icon, in both states" strip used in the Windows steps.
+const TrayIconLegend = () => (
+  <Box padding={{ top: 'xxs', bottom: 'xxs' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <TrayGlyph />
+        <Box variant="span" fontSize="body-s" color="text-body-secondary">
+          idle
+        </Box>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <TrayGlyph recording />
+        <Box variant="span" fontSize="body-s" color="text-body-secondary">
+          recording
+        </Box>
+      </div>
+    </div>
+  </Box>
+);
+
 // Defined at module scope (not inside the component) so React sees stable
 // component types — satisfies react/no-unstable-nested-components and matches
 // the codebase pattern of externalized table column configs.
@@ -363,12 +404,14 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
           </li>
           <li>
             <Box variant="p">
-              <strong>Launch it</strong> from the <strong>taskbar</strong> (the installer pins it) or the{' '}
-              <strong>Start Menu</strong> (press the <strong>Windows key</strong>, type{' '}
-              <strong>LMA Audio Capture</strong>, Enter). An <strong>LMA</strong> icon appears in the system tray
-              (bottom-right notification area) &mdash; it stays visible (not tucked in the ▲ overflow) so the{' '}
-              <strong>red recording icon</strong> shows while recording. If SmartScreen warns about an unrecognized app,
-              choose <strong>More info ▸ Run anyway</strong> (expected for a locally built, unsigned app).
+              <strong>Launch it</strong> from the <strong>Start Menu</strong> (press the <strong>Windows key</strong>,
+              type <strong>LMA Audio Capture</strong>, Enter). <strong>No window opens</strong> &mdash; look for this
+              icon in the system tray, bottom-right next to the clock, and <strong>left-click</strong> it:
+            </Box>
+            <TrayIconLegend />
+            <Box variant="p" fontSize="body-s" color="text-body-secondary">
+              If SmartScreen warns about an unrecognized app, choose <strong>More info &rsaquo; Run anyway</strong>{' '}
+              (expected for a locally built, unsigned app).
             </Box>
           </li>
           <li>
@@ -403,7 +446,13 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
         <ul>
           <li>
             <strong>Left-click</strong> the <strong>LMA</strong> tray icon for controls.{' '}
-            <strong>Right-click</strong> it for <strong>Quit</strong>.
+            <strong>Right-click</strong> it for <strong>Quit</strong>. The icon turns <strong>red</strong> while
+            recording.
+          </li>
+          <li>
+            <strong>Keep it one click away:</strong> right-click <strong>LMA Audio Capture</strong> in the Start Menu
+            &rsaquo; <strong>More</strong> &rsaquo; <strong>Pin to taskbar</strong>. (Windows 10+ removed the API that
+            would let the installer pin it for you.)
           </li>
           <li>
             <strong>Start automatically at login:</strong> turn on the login toggle in the panel &mdash; it adds a
@@ -427,6 +476,13 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
           <strong>No microphone / &quot;access denied&quot;.</strong> Enable{' '}
           <strong>Settings &rsaquo; Privacy &amp; security &rsaquo; Microphone</strong> (both <em>Microphone access</em>{' '}
           and <em>Let desktop apps access your microphone</em>), then restart the app. System audio is unaffected.
+        </Box>
+        <Box variant="p">
+          <strong>Unfamiliar errors scroll past during install (e.g. &quot;log4net:ERROR&quot;).</strong> If the script
+          ends with <strong>INSTALL SUCCEEDED</strong>, the install worked. Messages like{' '}
+          <code>log4net:ERROR ... lockingModel</code> come from other software already on your PC (corporate sync, backup,
+          or security tools that plug into Windows Explorer), not from LMA &mdash; the app doesn&apos;t use log4net. The
+          signals that matter are <strong>All self-tests PASSED</strong> and <strong>INSTALL SUCCEEDED</strong>.
         </Box>
         <Box variant="p">
           <strong>&quot;dotnet is not recognized&quot; or build errors.</strong> Install the{' '}
