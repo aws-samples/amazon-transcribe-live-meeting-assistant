@@ -130,6 +130,30 @@ else
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
       -f "${INSTALLED_APP}" 2>/dev/null || true
     echo "  • Installed: ${INSTALLED_APP}"
+
+    # ── Pin to the Dock ──────────────────────────────────────────────────────
+    # The Dock is the app's always-visible control surface (the menu-bar icon
+    # can be hidden by the notch on crowded menu bars — worst of all at the
+    # moment recording starts, when the system's orange mic indicator appears).
+    # Append a persistent-apps entry and restart the Dock, unless it's already
+    # pinned. Skip with SKIP_DOCK_PIN=1.
+    if [[ "${SKIP_DOCK_PIN:-0}" != "1" ]]; then
+      if defaults read com.apple.dock persistent-apps 2>/dev/null | grep -q "LMAAudioClient.app"; then
+        echo "  • Already pinned to the Dock"
+      else
+        defaults write com.apple.dock persistent-apps -array-add "<dict>
+          <key>tile-data</key><dict>
+            <key>file-data</key><dict>
+              <key>_CFURLString</key><string>file://${INSTALLED_APP}/</string>
+              <key>_CFURLStringType</key><integer>15</integer>
+            </dict>
+          </dict>
+        </dict>" 2>/dev/null \
+          && killall Dock 2>/dev/null \
+          && echo "  • Pinned to the Dock (the Dock will restart briefly)" \
+          || echo "  • Couldn't pin to the Dock automatically — drag ${INSTALLED_APP} there manually"
+      fi
+    fi
   else
     INSTALLED_APP="$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
     err "Couldn't copy to ${INSTALL_DIR} (permission?). Leaving it at ${INSTALLED_APP}."
@@ -154,8 +178,9 @@ LMA Audio Capture App is installed at:
   in the recording indicator).
 
 ▶ FIRST RUN — grant permissions:
-  1. Launch it (Spotlight/Finder). A menu-bar item "LMA" appears (top-right).
-     Approve the Microphone prompt.
+  1. Launch it (Dock icon, Spotlight, or Finder). A menu-bar item "LMA" appears
+     (top-right) and the Dock icon shows a red dot + "REC" badge while
+     recording. Approve the Microphone prompt.
   2. System Settings ▸ Privacy & Security ▸ Screen Recording → enable
      "LMA Audio Client". Then QUIT it (right-click the "LMA" menu-bar item ▸
      Quit) and launch it again — Screen Recording only takes effect after a

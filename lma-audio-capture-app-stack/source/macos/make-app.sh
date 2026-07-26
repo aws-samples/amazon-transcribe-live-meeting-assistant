@@ -45,6 +45,57 @@ else
   echo "    WARNING: no lma-config.json to bake — the app will have no endpoint/pool/client"
 fi
 
+# Generate the Dock icon (AppIcon.icns) — required now that the app is a
+# regular Dock app (not LSUIElement). Rendered at build time from the same
+# SF Symbol the menu bar uses, so there's no binary asset in the repo. Swift
+# is guaranteed here (we just built with it); iconutil ships with macOS.
+echo "==> generating AppIcon.icns"
+ICONSET_DIR="build/AppIcon.iconset"
+rm -rf "${ICONSET_DIR}"
+mkdir -p "${ICONSET_DIR}"
+swift - "${ICONSET_DIR}" <<'EOF'
+import AppKit
+let outDir = CommandLine.arguments[1]
+// LMA brand-ish: white waveform glyph on a rounded dark-blue tile.
+for size in [16, 32, 64, 128, 256, 512, 1024] {
+    let s = CGFloat(size)
+    let img = NSImage(size: NSSize(width: s, height: s))
+    img.lockFocus()
+    let inset = s * 0.05 // macOS icons float inside a small margin
+    let tile = NSRect(x: inset, y: inset, width: s - 2 * inset, height: s - 2 * inset)
+    NSColor(calibratedRed: 0.09, green: 0.19, blue: 0.32, alpha: 1).setFill() // AWS squid ink
+    NSBezierPath(roundedRect: tile, xRadius: s * 0.18, yRadius: s * 0.18).fill()
+    let cfg = NSImage.SymbolConfiguration(pointSize: s * 0.5, weight: .medium)
+        .applying(.init(paletteColors: [.white]))
+    if let sym = NSImage(systemSymbolName: "waveform", accessibilityDescription: nil)?
+        .withSymbolConfiguration(cfg) {
+        let r = NSRect(x: (s - sym.size.width) / 2, y: (s - sym.size.height) / 2,
+                       width: sym.size.width, height: sym.size.height)
+        sym.draw(in: r)
+    }
+    img.unlockFocus()
+    if let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+       let png = rep.representation(using: .png, properties: [:]) {
+        // Emit both scales per iconset naming convention where applicable.
+        let names: [String] = {
+            switch size {
+            case 16: return ["icon_16x16.png"]
+            case 32: return ["icon_16x16@2x.png", "icon_32x32.png"]
+            case 64: return ["icon_32x32@2x.png"]
+            case 128: return ["icon_128x128.png"]
+            case 256: return ["icon_128x128@2x.png", "icon_256x256.png"]
+            case 512: return ["icon_256x256@2x.png", "icon_512x512.png"]
+            default: return ["icon_512x512@2x.png"]
+            }
+        }()
+        for n in names { try? png.write(to: URL(fileURLWithPath: "\(outDir)/\(n)")) }
+    }
+}
+EOF
+iconutil -c icns "${ICONSET_DIR}" -o "${RESOURCES_DIR}/AppIcon.icns"
+rm -rf "${ICONSET_DIR}"
+echo "    baked AppIcon.icns into Contents/Resources/"
+
 # Strip any quarantine the copied inputs carried in (macOS `cp` preserves the
 # com.apple.quarantine xattr), so the assembled bundle is clean before signing
 # and won't trip Gatekeeper when launched.

@@ -242,10 +242,18 @@ struct LevelBar: View {
 }
 
 /// AppKit glue: creates the status-bar item + popover and hosts the SwiftUI view.
+///
+/// The app is also a REGULAR Dock app (not LSUIElement): on notched MacBooks a
+/// crowded menu bar silently hides status items — and starting a recording adds
+/// the system's orange mic indicator, which can push OUR icon out of view at
+/// the exact moment recording begins. The Dock tile is the always-visible
+/// fallback: it shows a "REC" badge while recording, its right-click menu has
+/// Start/Pause/Stop, and clicking it opens the same panel as the menu-bar icon.
 @available(macOS 13.0, *)
 final class MenuBarController: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
+    private var panelWindow: NSWindow?
     private let state: MenuBarAppState
     private var pollTimer: Timer?
 
@@ -270,10 +278,95 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
         statusItem.button?.target = self
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
-        // Repaint the menu-bar icon (red while recording) as state changes.
+        // Repaint the menu-bar icon (red while recording) + Dock badge as state
+        // changes.
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.updateIcon()
+            self?.updateDockBadge()
         }
+    }
+
+    // MARK: - Dock integration
+
+    /// Recording state on the Dock tile, visible even when the menu-bar icon is
+    /// hidden under the notch: a "REC" badge ("⏸" when paused) AND a red dot
+    /// drawn onto the icon itself, so the state change is obvious at Dock size.
+    private var lastBadge = ""
+    private var recordingDockView: RecordingDockTileView?
+    private func updateDockBadge() {
+        let badge = state.isStreaming ? (state.paused ? "⏸" : "REC") : ""
+        if badge != lastBadge {
+            NSApp.dockTile.badgeLabel = badge
+            if state.isStreaming, recordingDockView == nil {
+                let v = RecordingDockTileView(frame: NSRect(x: 0, y: 0, width: 128, height: 128))
+                recordingDockView = v
+                NSApp.dockTile.contentView = v
+            } else if !state.isStreaming {
+                recordingDockView = nil
+                NSApp.dockTile.contentView = nil // restore the normal app icon
+            }
+            NSApp.dockTile.display()
+            lastBadge = badge
+        }
+    }
+
+    /// Clicking the Dock tile (with no windows open) opens the control panel as
+    /// a regular window. The popover variant is unusable here: it anchors to the
+    /// status-item button, which may be hidden under the notch — the very
+    /// problem the Dock presence exists to solve.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { showPanelWindow() }
+        return true
+    }
+
+    /// Right-click Dock menu: recording controls that work sight-unseen.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        if state.isStreaming {
+            let pause = NSMenuItem(
+                title: state.paused ? "Resume Recording" : "Pause Recording",
+                action: #selector(dockTogglePause), keyEquivalent: "")
+            pause.target = self
+            menu.addItem(pause)
+            let stop = NSMenuItem(title: "Stop Recording", action: #selector(dockStop), keyEquivalent: "")
+            stop.target = self
+            menu.addItem(stop)
+        } else if state.controller.isAuthenticated {
+            let start = NSMenuItem(title: "Start Recording", action: #selector(dockStart), keyEquivalent: "")
+            start.target = self
+            menu.addItem(start)
+        }
+        let open = NSMenuItem(title: "Open Control Panel", action: #selector(dockOpenPanel), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+        return menu
+    }
+
+    @objc private func dockTogglePause() { state.togglePause() }
+    @objc private func dockStop() { state.stop() }
+    @objc private func dockStart() { state.start() }
+    @objc private func dockOpenPanel() { showPanelWindow() }
+
+    /// The same SwiftUI content as the popover, hosted in a small titled window
+    /// for Dock-initiated opens. Closing it leaves the app running (standard
+    /// for menu-bar/Dock hybrid utilities).
+    private func showPanelWindow() {
+        if let w = panelWindow {
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let w = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 360),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered, defer: false)
+        w.title = "LMA Audio Capture"
+        w.contentViewController = NSHostingController(rootView: MenuBarContentView(s: state))
+        w.isReleasedWhenClosed = false
+        w.center()
+        panelWindow = w
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Build the right-click menu (Quit + a hint line). Rebuilt on demand so it
@@ -352,12 +445,31 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Entry point for GUI mode. Runs a standard AppKit run loop with an
-/// LSUIElement (menu-bar-only) activation policy.
+/// Dock tile content while recording: the app icon dimmed slightly with a red
+/// recording dot in the lower-right corner. NSDockTile has no "tint" API, so a
+/// custom contentView drawing the icon + overlay is the supported way to make
+/// the Dock icon itself reflect recording state.
+@available(macOS 13.0, *)
+final class RecordingDockTileView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSApp.applicationIconImage?.draw(in: bounds)
+        let d = bounds.width * 0.30
+        let dotRect = NSRect(x: bounds.maxX - d - bounds.width * 0.06,
+                             y: bounds.width * 0.06, width: d, height: d)
+        // White ring behind the dot so it reads against any icon artwork.
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: dotRect.insetBy(dx: -2, dy: -2)).fill()
+        NSColor.systemRed.setFill()
+        NSBezierPath(ovalIn: dotRect).fill()
+    }
+}
+
+/// Entry point for GUI mode. Runs a standard AppKit run loop as a REGULAR app
+/// (Dock icon + menu bar item — see MenuBarController docs for why).
 @available(macOS 13.0, *)
 func runMenuBarApp(config: Config) -> Never {
     let app = NSApplication.shared
-    app.setActivationPolicy(.accessory) // menu-bar only, no Dock icon
+    app.setActivationPolicy(.regular) // Dock icon + menu-bar item
     let controller = CaptureController(config: config)
     let state = MenuBarAppState(controller: controller)
     let delegate = MenuBarController(state: state)
