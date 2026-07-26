@@ -19,9 +19,13 @@ public sealed class PanelView : Border
 {
     private readonly CaptureController _c;
 
+    // Light-theme text colors: a medium-dark gray for secondary text that stays
+    // readable on the near-white panel background (LightGray/Gray were too faint).
+    private static readonly Brush Secondary = new SolidColorBrush(Color.FromRgb(0x5A, 0x5A, 0x5A));
+
     // Header
     private readonly System.Windows.Shapes.Ellipse _statusDot = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBlock _statusText = new() { FontSize = 11, Foreground = Brushes.Gray, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _statusText = new() { FontSize = 11, Foreground = Secondary, VerticalAlignment = VerticalAlignment.Center };
 
     // Signed-out controls
     private readonly TextBox _email = new();
@@ -47,7 +51,7 @@ public sealed class PanelView : Border
 
     // Shared
     private readonly Button _openLma = new();
-    private readonly TextBlock _logLine = new() { Foreground = Brushes.Gray, FontSize = 10, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _logLine = new() { Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap };
 
     private readonly StackPanel _body = new();
 
@@ -58,12 +62,14 @@ public sealed class PanelView : Border
         _c = controller;
 
         Width = 300;
-        Background = new SolidColorBrush(Color.FromRgb(0x2B, 0x2B, 0x2B));
-        BorderBrush = new SolidColorBrush(Color.FromRgb(0x11, 0x11, 0x11));
+        // Light theme: dark text on a light background for readability. A near-
+        // white panel with a subtle border, near-black default text.
+        Background = new SolidColorBrush(Color.FromRgb(0xFA, 0xFA, 0xFA));
+        BorderBrush = new SolidColorBrush(Color.FromRgb(0xC8, 0xC8, 0xC8));
         BorderThickness = new Thickness(1);
         CornerRadius = new CornerRadius(8);
         Padding = new Thickness(14);
-        System.Windows.Documents.TextElement.SetForeground(this, Brushes.White);
+        System.Windows.Documents.TextElement.SetForeground(this, new SolidColorBrush(Color.FromRgb(0x1A, 0x1A, 0x1A)));
 
         var root = new StackPanel();
 
@@ -157,7 +163,9 @@ public sealed class PanelView : Border
         _sysBar.SetLevel(meeting, _c.IsMeetingMuted);
         _micBar.SetLevel(mic, _c.IsMicMuted);
         _liveStatus.Text = (connected ? "● Live" : "○ Reconnecting…") + (paused ? " · Paused" : "");
-        _liveStatus.Foreground = connected ? Brushes.LightGreen : Brushes.Orange;
+        _liveStatus.Foreground = connected
+            ? new SolidColorBrush(Color.FromRgb(0x1B, 0x8A, 0x2F))   // readable green on light bg
+            : new SolidColorBrush(Color.FromRgb(0xC0, 0x56, 0x00));  // readable orange on light bg
     }
 
     public void OnLog(string msg) => _logLine.Text = msg;
@@ -220,7 +228,7 @@ public sealed class PanelView : Border
         _body.Children.Add(new TextBlock
         {
             Text = "Right-click the tray icon to Quit. Leave it running in the background between meetings.",
-            Foreground = Brushes.Gray, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+            Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
         });
     }
 
@@ -262,12 +270,12 @@ public sealed class PanelView : Border
 
     private static TextBlock Label(string s) => new()
     {
-        Text = s, FontSize = 11, Foreground = Brushes.LightGray, Margin = new Thickness(0, 2, 0, 2),
+        Text = s, FontSize = 11, Foreground = Secondary, Margin = new Thickness(0, 2, 0, 2),
     };
 
     private static Border Sep() => new()
     {
-        Height = 1, Background = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44)),
+        Height = 1, Background = new SolidColorBrush(Color.FromRgb(0xDD, 0xDD, 0xDD)),
         Margin = new Thickness(0, 6, 0, 6),
     };
 
@@ -279,9 +287,23 @@ public sealed class PanelView : Border
         FrameworkElement fa = (FrameworkElement)a, fb = (FrameworkElement)b;
         fa.Margin = new Thickness(0, 0, 3, 0);
         fb.Margin = new Thickness(3, 0, 0, 0);
+        // These are persistent controls reused across Refresh() rebuilds. After
+        // _body.Children.Clear(), the previous Row grid is orphaned but still owns
+        // them as logical children, so re-adding here would throw "already the
+        // logical child of another element". Detach from any prior parent first.
+        Detach(a); Detach(b);
         Grid.SetColumn(a, 0); Grid.SetColumn(b, 1);
         g.Children.Add(a); g.Children.Add(b);
         return g;
+    }
+
+    /// <summary>Remove an element from its current Panel parent, if any.</summary>
+    private static void Detach(UIElement e)
+    {
+        if (e is FrameworkElement fe && fe.Parent is Panel p)
+        {
+            p.Children.Remove(e);
+        }
     }
 }
 
@@ -297,17 +319,19 @@ public sealed class LevelBar : Grid
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        var lbl = new TextBlock { Text = label, FontSize = 11, Foreground = Brushes.LightGray, VerticalAlignment = VerticalAlignment.Center };
+        var lbl = new TextBlock { Text = label, FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x5A, 0x5A, 0x5A)), VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(lbl, 0);
         Children.Add(lbl);
 
-        _fill.Fill = Brushes.LimeGreen;
+        // Readable green fill on a light gray track (the old translucent-white
+        // track was invisible on the light panel background).
+        _fill.Fill = new SolidColorBrush(Color.FromRgb(0x1B, 0x8A, 0x2F));
         _fill.Height = 8;
         _fill.RadiusX = 3; _fill.RadiusY = 3;
         _track = new Border
         {
             Height = 8,
-            Background = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)),
+            Background = new SolidColorBrush(Color.FromRgb(0xE0, 0xE0, 0xE0)),
             CornerRadius = new CornerRadius(3),
             Child = _fill,
             VerticalAlignment = VerticalAlignment.Center,
@@ -319,7 +343,7 @@ public sealed class LevelBar : Grid
     public void SetLevel(float level, bool muted)
     {
         double frac = Math.Min(1.0, Math.Max(0.0, level * 3.0)); // ×3 gain, matches macOS
-        _fill.Fill = muted ? Brushes.Gray : Brushes.LimeGreen;
+        _fill.Fill = muted ? Brushes.Gray : new SolidColorBrush(Color.FromRgb(0x1B, 0x8A, 0x2F));
         double w = _track.ActualWidth > 0 ? _track.ActualWidth : 230;
         _fill.Width = w * frac;
     }

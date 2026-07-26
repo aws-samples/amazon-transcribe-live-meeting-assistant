@@ -5,8 +5,15 @@
 .DESCRIPTION
   Restores and publishes LMAAudioClient.Windows as a win-x64 executable, runs
   the offline SRP self-test, and - with -Install - copies it to a stable
-  location and adds a Start Menu (and optional Desktop) shortcut so you don't
+  location and adds a Start Menu (and optional Desktop) shortcut, so you don't
   have to dig into the publish folder to launch it.
+
+  Note: the script deliberately does NOT try to pin to the taskbar. Windows 10+
+  removed the supported pin API, the shell verb is absent on current Win11
+  builds, and probing for it via Shell.Application loads third-party shell
+  extensions that spew their own errors (e.g. "log4net:ERROR ... lockingModel")
+  into the install output, making a successful install look broken. The app
+  lives in the system tray; users can pin it manually from the Start Menu.
 
   Build modes:
     -SelfContained  : bundles the .NET 8 Desktop runtime (no prerequisites on
@@ -117,8 +124,32 @@ Write-Host "==> Built: $exe"
 
 if (-not $SkipSelfTest) {
     Write-Host "==> Running SRP self-test (known-answer vectors, offline)"
-    & $exe --selftest
-    if ($LASTEXITCODE -ne 0) { throw "SRP self-test FAILED - do not ship this build." }
+
+    # LMAAudioClient.exe is a WinExe (GUI subsystem) so it can be a tray app with
+    # no console window. Consequences we must handle here:
+    #   * `& $exe` does NOT block - PowerShell launches it and moves on, leaving
+    #     $LASTEXITCODE empty. A plain `& $exe --selftest; if ($LASTEXITCODE -ne 0)`
+    #     gate therefore never actually gated anything, and a FAILING self-test
+    #     would not have stopped the build.
+    #   * Its console writes go straight to the inherited console handle, so they
+    #     land out of order with PowerShell's own output (self-test results
+    #     appeared after later "==> Installing ..." lines).
+    # Start-Process -Wait -PassThru with redirected stdout/stderr fixes both: we
+    # get a real exit code to gate on, and we print the output in order ourselves.
+    $stOut = [IO.Path]::GetTempFileName()
+    $stErr = [IO.Path]::GetTempFileName()
+    $proc = Start-Process $exe -ArgumentList "--selftest" -Wait -PassThru -NoNewWindow `
+                -RedirectStandardOutput $stOut -RedirectStandardError $stErr
+    # -Encoding UTF8 matches the app's Console.OutputEncoding, so any non-ASCII in
+    # a failure message (e.g. an exception string) reads back correctly.
+    Get-Content $stOut -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" }
+    $stErrText = (Get-Content $stErr -Raw -Encoding UTF8 -ErrorAction SilentlyContinue)
+    Remove-Item $stOut, $stErr -Force -ErrorAction SilentlyContinue
+
+    if ($proc.ExitCode -ne 0) {
+        if ($stErrText) { Write-Host $stErrText }
+        throw "SRP self-test FAILED (exit $($proc.ExitCode)) - do not ship this build."
+    }
     Write-Host "==> Self-test passed."
 }
 
@@ -195,7 +226,29 @@ function Install-App {
     }
 
     Write-Host "==> Installing to $installDir"
-    if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
+
+    # Upgrading over a RUNNING copy fails with "Access to the path ... is denied"
+    # because the live process holds its own DLLs open. Close it first (this is an
+    # upgrade of the same app, so stopping it is expected), then wait briefly for
+    # Windows to release the file handles.
+    $running = Get-Process -Name LMAAudioClient -ErrorAction SilentlyContinue
+    if ($running) {
+        Write-Host "==> Closing the running LMA Audio Capture to upgrade it..."
+        $running | Stop-Process -Force -ErrorAction SilentlyContinue
+        $running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+    }
+
+    if (Test-Path $installDir) {
+        # Retry: even after the process exits, handles can linger a moment.
+        $removed = $false
+        foreach ($attempt in 1..5) {
+            try { Remove-Item $installDir -Recurse -Force -ErrorAction Stop; $removed = $true; break }
+            catch { Start-Sleep -Milliseconds 500 }
+        }
+        if (-not $removed) {
+            throw "Couldn't replace $installDir - a file there is still in use. Close LMA Audio Capture (right-click the tray icon > Quit) and re-run. If you installed machine-wide with -ProgramFiles, re-run from an elevated (admin) PowerShell."
+        }
+    }
     New-Item -ItemType Directory -Path $installDir -Force | Out-Null
     Copy-Item (Join-Path $SourceDir '*') $installDir -Recurse -Force
 
@@ -229,7 +282,14 @@ if ($Install) {
             $installScript = @"
 `$src = '$publishDir'
 `$dst = Join-Path `$env:ProgramFiles 'LMA Audio Capture'
-if (Test-Path `$dst) { Remove-Item `$dst -Recurse -Force }
+# Close a running copy first, else its own DLLs are locked and the delete fails.
+`$running = Get-Process -Name LMAAudioClient -ErrorAction SilentlyContinue
+if (`$running) { `$running | Stop-Process -Force -ErrorAction SilentlyContinue; `$running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue }
+if (Test-Path `$dst) {
+  `$ok = `$false
+  foreach (`$i in 1..5) { try { Remove-Item `$dst -Recurse -Force -ErrorAction Stop; `$ok = `$true; break } catch { Start-Sleep -Milliseconds 500 } }
+  if (-not `$ok) { throw "Couldn't replace `$dst - a file there is still in use. Quit LMA Audio Capture and re-run." }
+}
 New-Item -ItemType Directory -Path `$dst -Force | Out-Null
 Copy-Item (Join-Path `$src '*') `$dst -Recurse -Force
 `$exe = Join-Path `$dst 'LMAAudioClient.exe'
@@ -271,8 +331,16 @@ Set-ItemProperty `$arp NoRepair 1 -Type DWord
     }
 
     Write-Host ""
-    Write-Host "Installed. Launch it from the Start Menu: search 'LMA Audio Capture'."
-    Write-Host "Or run:                                   `"$launchExe`""
+    Write-Host "=============================================================="
+    Write-Host " INSTALL SUCCEEDED"
+    Write-Host "=============================================================="
+    Write-Host "Launch it from the Start Menu: press the Windows key, type 'LMA Audio Capture'."
+    Write-Host "Or run: `"$launchExe`""
+    Write-Host ""
+    Write-Host "When it starts there is no window: a gray LMA icon appears in the system tray"
+    Write-Host "(bottom-right, next to the clock). Left-click that icon to sign in and start."
+    Write-Host "It turns red while recording."
+    Write-Host "Uninstall any time from Settings > Apps > Installed apps, or: ./build-windows.ps1 -Uninstall"
 } else {
     Write-Host ""
     Write-Host "Done (not installed). Run the tray app:   `"$exe`""

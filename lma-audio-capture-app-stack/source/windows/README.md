@@ -79,6 +79,7 @@ expired/invalid token, warn, and stop.
 | `App/Program.cs` | Entry point; dual-mode dispatch (GUI vs headless CLI) + `--selftest` / `--login-only` / `--capture-test` |
 | `App/TrayApp.cs`, `App/PanelView.cs` | System-tray UI (WPF + Hardcodet.NotifyIcon) |
 | `App/AppSettings.cs` | Remember-email (HKCU) + Start-at-login (HKCU `...\Run`) |
+| `tools/make-icon-images.ps1` | Regenerates the tray-icon image used in `docs/` (same geometry/colors as `IconFactory.Make`) |
 
 The engine (`Config`, `Srp`, `StereoMixer`, `TranscriberSocket`,
 `CaptureController`, `WavTee`) is UI-agnostic, so the CLI and tray share one
@@ -111,12 +112,34 @@ build whose crypto can't reproduce the known-answer never ships). The executable
 and `lma-config.json` land in `bin/<Config>/net8.0-windows/win-x64/publish/`.
 
 Install flags:
-- `-Install` — copy to `%LOCALAPPDATA%\Programs\LMA Audio Capture` and add a
-  **Start Menu** shortcut (launch via the Windows key → "LMA Audio Capture"). No
-  admin required.
+- `-Install` — copy to `%LOCALAPPDATA%\Programs\LMA Audio Capture`, add a
+  **Start Menu** shortcut (launch via the Windows key → "LMA Audio Capture"), and
+  register an "Apps & features" entry. Closes a running instance first so an
+  upgrade can't fail on locked files. No admin required.
 - `-ProgramFiles` — install machine-wide under `%ProgramFiles%` instead (the copy
   step re-launches elevated to get admin).
 - `-DesktopShortcut` — also drop a Desktop shortcut.
+
+> **No taskbar pin — deliberately.** Earlier versions tried a best-effort pin.
+> Don't add it back. Two reasons:
+> 1. Windows 10+ removed the supported pin API, and the shell verb is **absent on
+>    current Win11 builds**, so the attempt essentially always failed. Advertising
+>    a pin that doesn't happen just sets false expectations.
+> 2. Probing for the verb requires `New-Object -ComObject Shell.Application`,
+>    which loads **every in-process shell extension on the machine**. Third-party
+>    ones (corporate sync/backup/DLP tools) dump their own diagnostics straight to
+>    the console — e.g. repeated `log4net:ERROR ... Failed to create object to set
+>    param: lockingModel`. That noise isn't ours (this app has no log4net
+>    dependency) and can't be suppressed by ordinary in-process redirection, but
+>    it makes a **successful install look broken**.
+>
+> The app lives in the tray; the docs tell users to pin it themselves from the
+> Start Menu if they want it on the taskbar.
+>
+> **Always-visible tray icon.** The app asks Windows to keep its tray icon out of
+> the overflow (▲) flyout so the **red recording icon stays visible** while
+> recording. If Windows still hides it, drag it onto the taskbar once, or toggle
+> it in **Settings ▸ Personalization ▸ Taskbar ▸ Other system tray icons**.
 
 Uninstall — two equivalent ways:
 

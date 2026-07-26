@@ -16,6 +16,13 @@ namespace LMA;
 /// </summary>
 public static class SelfTest
 {
+    // Pass/fail markers are deliberately plain ASCII. When stdout is redirected
+    // (the build script captures it to gate the build, and users pipe it to a
+    // file), the console code page isn't UTF-8 and check marks came out as "?",
+    // making passing tests look broken. "[PASS]" / "[FAIL]" always survive.
+    private const string PassMark = "[PASS]";
+    private const string FailMark = "[FAIL]";
+
     public static int Run()
     {
         int failures = 0;
@@ -23,12 +30,12 @@ public static class SelfTest
         {
             if (string.Equals(got, want, StringComparison.OrdinalIgnoreCase))
             {
-                Console.WriteLine($"  ✓ {name}");
+                Console.WriteLine($"  {PassMark} {name}");
             }
             else
             {
                 failures++;
-                Console.WriteLine($"  ✗ {name}\n      got:  {got}\n      want: {want}");
+                Console.WriteLine($"  {FailMark} {name}\n      got:  {got}\n      want: {want}");
             }
         }
 
@@ -104,10 +111,10 @@ public static class SelfTest
         catch (Exception e)
         {
             failures++;
-            Console.WriteLine($"  ✗ SRP signature threw: {e}");
+            Console.WriteLine($"  {FailMark} SRP signature threw: {e}");
         }
 
-        Console.WriteLine(failures == 0 ? "\nAll self-tests PASSED ✓" : $"\n{failures} self-test(s) FAILED ✗");
+        Console.WriteLine(failures == 0 ? "\nAll self-tests PASSED" : $"\n{failures} self-test(s) FAILED");
         return failures == 0 ? 0 : 1;
     }
 }
