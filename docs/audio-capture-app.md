@@ -139,9 +139,11 @@ On Windows, loopback (system) audio capture is built into the OS and needs
 
    ![LMA tray icon: gray when idle, red while recording](../images/readme-audio-capture-windows-tray-icons.png)
 
-   **Left-click that icon** for the controls panel. If SmartScreen warns about an
-   unrecognized app, choose **More info ▸ Run anyway** — expected for a locally
-   built, unsigned app.
+   **Left-click that icon** for the controls panel. (Once you start recording, a
+   **taskbar button** appears too — see
+   [Using the system-tray + taskbar app](#using-the-system-tray--taskbar-app-windows).)
+   If SmartScreen warns about an unrecognized app, choose **More info ▸ Run
+   anyway** — expected for a locally built, unsigned app.
 6. If Windows blocks microphone access, enable it in **Settings ▸ Privacy &
    security ▸ Microphone** (turn on *Microphone access* and *Let desktop apps
    access your microphone*), then restart the app. **System/meeting audio needs
@@ -206,11 +208,14 @@ running and click **Start** when a meeting begins. **To relaunch after
 quitting**, click its Dock icon, press **⌘-Space** (Spotlight) and type **LMA
 Audio Client**, or run `open -a "LMA Audio Client"`.
 
-## Using the system-tray app (Windows)
+## Using the system-tray + taskbar app (Windows)
 
-Launched with no arguments (the normal case), the app runs as a **system-tray
-app** — there is **no taskbar button and no window**. Look for the **LMA** icon
-in the notification area (bottom-right, next to the clock):
+Launched with no arguments (the normal case), the app lives in the **system
+tray** — the notification area at the bottom-right, next to the clock — with
+**no window**. While recording, it *also* takes a **taskbar button**, so a live
+recording is always visible and always stoppable.
+
+Tray icon:
 
 ![LMA tray icon: gray when idle, red while recording](../images/readme-audio-capture-windows-tray-icons.png)
 
@@ -223,9 +228,31 @@ in the notification area (bottom-right, next to the clock):
   Windows still hides it, drag it onto the taskbar once.
 - **Right-click** the icon for **Quit** (kept out of the panel so it isn't
   confused with *Stop*).
-- Want it one click away? Right-click **LMA Audio Capture** in the Start Menu ▸
-  **More** ▸ **Pin to taskbar**. (Windows 10+ removed the API that would let the
-  installer do this for you.)
+- Want it one click away even when idle? Right-click **LMA Audio Capture** in the
+  Start Menu ▸ **More** ▸ **Pin to taskbar**. (Windows 10+ removed the API that
+  would let the installer do this for you.)
+
+Taskbar button (while recording):
+
+- A taskbar button appears when you **Start** and disappears when you **Stop** —
+  nothing clutters your taskbar between meetings.
+- Its icon carries a **red dot**, and the button glows **green while recording /
+  yellow while paused**.
+- **Hover** it for **Pause/Resume** and **Stop** buttons right in the thumbnail
+  preview — no need to open a window.
+- **Right-click** it for quick actions: **Start / Pause / Resume / Stop
+  Recording** and **Open Control Panel**.
+- **Click** it to open the control panel as a regular window (same controls as
+  the tray panel).
+- **Closing or minimizing that window does not stop the recording** — it stays in
+  the taskbar and keeps streaming. Recording only stops when you choose **Stop**.
+
+> **Why both?** Windows 11 tucks tray icons it hasn't seen before into the ▲
+> overflow flyout, and can hide them again later — potentially at the exact
+> moment you want to check or stop a recording. The taskbar button can't be
+> hidden that way, so while you're recording you always have a visible indicator
+> and a one-click Stop. When nothing is recording the app goes back to tray-only
+> and stays out of your way.
 
 Panel options:
 
@@ -235,7 +262,9 @@ Panel options:
   the tray app when you sign in; the toggle reflects the real system state.
 
 The app uses no audio or CPU when idle, so the intended usage is to leave it in
-the tray and click **Start** when a meeting begins.
+the tray and click **Start** when a meeting begins. **To relaunch after
+quitting**, press the **Windows key**, type **LMA Audio Capture**, and press
+Enter.
 
 > **Developer / headless mode.** Any command-line flag runs a headless CLI that
 > streams to stdout with a live VU meter (`--cli` forces it). `--selftest`

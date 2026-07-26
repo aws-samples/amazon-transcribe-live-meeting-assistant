@@ -446,8 +446,8 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
     <Container header={<Header variant="h2">Running it in the background (Windows)</Header>}>
       <SpaceBetween size="s">
         <Box variant="p">
-          The app is a system-tray app (no taskbar button when idle). It uses no audio or CPU when idle, so the intended
-          usage is to leave it running and click <strong>Start</strong> when a meeting begins.
+          The app lives in the system tray, with no taskbar button when idle. It uses no audio or CPU when idle, so the
+          intended usage is to leave it running and click <strong>Start</strong> when a meeting begins.
         </Box>
         <ul>
           <li>
@@ -455,9 +455,16 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
             for <strong>Quit</strong>. The icon turns <strong>red</strong> while recording.
           </li>
           <li>
-            <strong>Keep it one click away:</strong> right-click <strong>LMA Audio Capture</strong> in the Start Menu
-            &rsaquo; <strong>More</strong> &rsaquo; <strong>Pin to taskbar</strong>. (Windows 10+ removed the API that
-            would let the installer pin it for you.)
+            <strong>While recording you also get a taskbar button</strong> (it appears on Start and disappears on Stop).
+            Its icon shows a <strong>red dot</strong>, and it glows green while recording / yellow while paused. Hover
+            it for <strong>Pause/Resume</strong> and <strong>Stop</strong> buttons, right-click for quick actions, or
+            click it to open the controls in a window. Closing that window keeps recording &mdash; only{' '}
+            <strong>Stop</strong> stops it.
+          </li>
+          <li>
+            <strong>Keep it one click away when idle:</strong> right-click <strong>LMA Audio Capture</strong> in the
+            Start Menu &rsaquo; <strong>More</strong> &rsaquo; <strong>Pin to taskbar</strong>. (Windows 10+ removed the
+            API that would let the installer pin it for you.)
           </li>
           <li>
             <strong>Start automatically at login:</strong> turn on the login toggle in the panel &mdash; it adds a
@@ -689,7 +696,8 @@ const AudioCaptureApp = () => {
               ) : (
                 <>
                   The app lives in your <strong>system tray</strong> (notification area); the icon turns red while
-                  recording. Click Stop to end the meeting, which then finalizes in your Meetings List.
+                  recording, and a <strong>taskbar button</strong> appears for as long as the recording runs. Click Stop
+                  to end the meeting, which then finalizes in your Meetings List.
                 </>
               )}
             </li>

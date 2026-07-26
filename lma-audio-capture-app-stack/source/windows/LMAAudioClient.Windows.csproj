@@ -19,6 +19,13 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>LMAAudioClient</AssemblyName>
     <RootNamespace>LMA</RootNamespace>
+    <!-- Shown by Windows wherever it names the app: the taskbar button's
+         accessible name and hover thumbnail, Task Manager, and the file
+         properties dialog. Without these it reads as the bare "LMAAudioClient". -->
+    <Product>LMA Audio Capture</Product>
+    <AssemblyTitle>LMA Audio Capture</AssemblyTitle>
+    <Company>Amazon Web Services</Company>
+    <Description>Streams your microphone and system (meeting) audio to Live Meeting Assistant.</Description>
     <!-- No custom app.manifest: .NET 8 already defaults to asInvoker (no
          elevation) and WPF is per-monitor-DPI-aware by default on Win10+.
          A hand-written manifest was found to trigger an SxS load error. -->

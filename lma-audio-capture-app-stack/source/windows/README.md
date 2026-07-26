@@ -17,6 +17,9 @@ alongside the browser and the Node CLI.
 > - `--capture-test` confirmed **ch0/Left = system audio, ch1/Right = mic**,
 >   aligned and not swapped, by measuring per-channel RMS on the streamed PCM.
 > - Tray GUI and headless CLI both launch cleanly.
+> - The recording-time taskbar button was verified against the shell's own UI
+>   Automation tree: absent when idle, present while recording/paused, gone after
+>   Stop; closing its window leaves the recording running.
 > - Pending, like the macOS client: a full live meeting through a native
 >   Zoom/Teams client to confirm transcript segments in the LMA web UI (needs a
 >   deployed stack + credentials).
@@ -76,8 +79,9 @@ expired/invalid token, warn, and stop.
 | `Engine/LinearResampler.cs` | Continuous-phase mono resampler (device rate → 48 kHz) |
 | `Engine/AudioCapture.cs` | **WASAPI**: loopback on default render (system/ch0) + capture on default capture (mic/ch1), resample, mono downmix, device-change handling via `IMMNotificationClient` |
 | `Engine/CaptureController.cs` | UI-agnostic engine controller: login/start/stop/pause/mute + state machine + callbacks |
-| `App/Program.cs` | Entry point; dual-mode dispatch (GUI vs headless CLI) + `--selftest` / `--login-only` / `--capture-test` |
-| `App/TrayApp.cs`, `App/PanelView.cs` | System-tray UI (WPF + Hardcodet.NotifyIcon) |
+| `App/Program.cs` | Entry point; dual-mode dispatch (GUI vs headless CLI) + `--selftest` / `--login-only` / `--capture-test` + taskbar `--lma-*` verb relay |
+| `App/TrayApp.cs`, `App/PanelView.cs` | System-tray UI (WPF + Hardcodet.NotifyIcon) and the recording-time taskbar button |
+| `App/TaskbarStatus.cs` | Taskbar button images (icon / overlay badges / thumb-button glyphs) + the named-pipe channel that carries JumpList verbs to the running instance |
 | `App/AppSettings.cs` | Remember-email (HKCU) + Start-at-login (HKCU `...\Run`) |
 | `tools/make-icon-images.ps1` | Regenerates the tray-icon image used in `docs/` (same geometry/colors as `IconFactory.Make`) |
 
@@ -134,7 +138,9 @@ Install flags:
 >    it makes a **successful install look broken**.
 >
 > The app lives in the tray; the docs tell users to pin it themselves from the
-> Start Menu if they want it on the taskbar.
+> Start Menu if they want it on the taskbar. (Note this is about *pinning* — the
+> app does take a taskbar button of its own **while recording**; see
+> [Recording-time taskbar button](#recording-time-taskbar-button).)
 >
 > **Always-visible tray icon.** The app asks Windows to keep its tray icon out of
 > the overflow (▲) flyout so the **red recording icon stays visible** while
@@ -176,6 +182,43 @@ the macOS menu-bar `LSUIElement` behavior).
   can't be confused with *Stop*).
 - While recording, the tray icon turns **red**.
 
+### Recording-time taskbar button
+
+While recording — and **only** while recording — the app also takes a **taskbar
+button**. This is the Windows counterpart to the macOS Dock tile, and it exists
+for the same reason: the tray icon can end up in the ▲ overflow, and a live
+recording needs a way to see and stop it that Windows can't hide.
+
+- The button's icon carries a **red dot overlay** (`TaskbarItemInfo.Overlay`),
+  and the progress wash (`ProgressState`) is **green while recording / yellow
+  when paused**, so the state reads even at 16×16.
+- **Hover** it for the thumbnail toolbar: **Pause/Resume** and **Stop**
+  (`ThumbButtonInfos`) — control the recording without opening a window.
+- **Right-click** it for the **JumpList**: Start / Pause / Resume / Stop
+  Recording and Open Control Panel, matching the macOS Dock menu.
+- **Click** it to open the control panel as a regular window (the same
+  `PanelView` the tray flyout uses).
+- **Closing or minimizing that window never stops the recording** — it
+  minimizes to keep the button (and its overlay) on screen. Stopping is always
+  an explicit *Stop*.
+
+Implementation notes for anyone touching this:
+
+- The taskbar button belongs to a second `Window` that is only ever *shown*
+  while streaming; hiding it is what makes the button disappear. It must be a
+  real `Window` (not a `Popup`) for the same reason the flyout is — a `Popup`
+  gets no activated top-level HWND, so its text fields can't take keyboard
+  focus.
+- `PanelView` is a **single instance shared by both windows**. WPF allows an
+  element exactly one logical parent, so it is *moved* between them
+  (`MovePanelTo`) — never held by both, or you get "already the logical child of
+  another element".
+- A `JumpTask` can only relaunch the exe with arguments, so each task passes an
+  `--lma-*` verb. The new process forwards that verb to the running instance
+  over a per-user named pipe and exits (`TrayIpc`); it only starts a GUI itself
+  if nobody answers. Without that relay, "Stop Recording" from the taskbar would
+  spawn a second process that knows nothing about the live capture.
+
 Panel options:
 - **Remember my email** — prefills your login next launch (email only; the
   password is never stored — it stays in memory for the session).
@@ -216,6 +259,7 @@ LMAAudioClient.exe --login-only --username you@example.com   # login, print toke
 | `--login-only` | Do the SRP login, print token metadata (not the token), exit. |
 | `--capture-test <seconds> <out.wav>` | Run the **real** WASAPI capture + mixer + WavTee with **no socket**, so you can verify channel mapping offline — no token/server needed. |
 | `--debug-wav <path>` | Tee the exact streamed stereo PCM to a WAV during a live run. |
+| `--lma-start` / `--lma-pause` / `--lma-stop` / `--lma-panel` | Internal: taskbar JumpList verbs. Forwarded to the running tray app over a named pipe (see `App/TaskbarStatus.cs`); not meant to be typed by hand. |
 
 ---
 
