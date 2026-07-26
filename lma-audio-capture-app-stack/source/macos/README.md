@@ -115,11 +115,17 @@ export LMA_DEBUG_WAV="/tmp/lma-debug.wav"   # optional: tee streamed PCM for off
 ./build/LMAAudioClient.app/Contents/MacOS/LMAAudioClient --cli   # headless (grants Terminal identity)
 ```
 
-### Menu-bar (tray) app
+### Menu-bar + Dock app
 
-Launched with **no CLI flags**, the app runs as a **menu-bar app** (an
-`LSUIElement` agent — no Dock icon). Any `--flag` runs the headless CLI instead,
-so the two modes coexist in one binary.
+Launched with **no CLI flags**, the app runs as a **regular GUI app** with both
+a menu-bar item and a Dock icon. (The Dock presence exists because notched
+MacBooks silently hide menu-bar icons when the bar is crowded — worst of all at
+the moment recording starts, when the system's orange mic indicator appears and
+can push the LMA icon out of view. The Dock icon shows a red dot + **REC**
+badge while recording, its right-click menu has Start/Pause/Stop, and clicking
+it opens the control panel as a window; the installer pins it to the Dock.)
+Any `--flag` runs the headless CLI instead, so the two modes coexist in one
+binary.
 
 ```bash
 open build/LMAAudioClient.app          # or double-click it in Finder

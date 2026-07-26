@@ -65,9 +65,10 @@ options cannot. It adds **no bot** or extra attendee to the meeting.
    > quarantine-clearing never happens. Running it via `bash` reads the script as
    > data (no `execve` on a quarantined file), so it runs and clears the flag
    > from the rest of the folder itself.
-5. **Launch it like a normal app.** Press **⌘-Space** (Spotlight), type **LMA
-   Audio Client** and press Return — or double-click it in Finder. An **LMA**
-   item appears in the menu bar (top-right).
+5. **Launch it like a normal app.** Click its **Dock icon** (the installer pins
+   it), press **⌘-Space** (Spotlight) and type **LMA Audio Client**, or
+   double-click it in Finder. An **LMA** item appears in the menu bar
+   (top-right) and the app's icon appears in the Dock.
 
    > ⚠️ **Don't launch it from Terminal.** Always launch via Spotlight, Finder,
    > or `open -a "LMA Audio Client"` — never the binary inside `Contents/MacOS`.
@@ -157,10 +158,13 @@ On Windows, loopback (system) audio capture is built into the OS and needs
 Expected for a locally built, unsigned app. Click **More info**, then **Run
 anyway**. (A future release may ship an Authenticode-signed build to avoid this.)
 
-## Using the menu-bar app (macOS)
+## Using the menu-bar + Dock app (macOS)
 
-Launched with no arguments (the normal case), the app runs as a **menu-bar app**
-(no Dock icon). An **LMA** item appears at the top-right of the menu bar.
+Launched with no arguments (the normal case), the app lives in **two places**:
+an **LMA** item at the top-right of the menu bar, and an icon in the **Dock**
+(the installer pins it there).
+
+Menu-bar item:
 
 - **Left-click** the item for the controls popover: sign in / out,
   **Start** / **Stop** / **Pause**, **mute mic**, **mute system audio**, live
@@ -169,6 +173,23 @@ Launched with no arguments (the normal case), the app runs as a **menu-bar app**
 - While recording, the icon turns **red** so it's obvious at a glance.
 - **Right-click** the item for **Quit** (kept out of the popover so it isn't
   confused with *Stop*).
+
+Dock icon:
+
+- While recording, the Dock icon shows a **red dot** and a **REC** badge
+  (**⏸** while paused), and it clears when you stop.
+- **Right-click** the Dock icon for quick controls: **Start / Pause / Resume /
+  Stop Recording** and **Open Control Panel**.
+- **Click** the Dock icon to open the control panel as a regular window (same
+  controls as the popover).
+
+> **Why both?** On MacBooks with a notch, macOS silently hides menu-bar icons
+> that don't fit — and starting a recording adds the system's orange mic
+> indicator to the menu bar, which can push the LMA icon out of view at the
+> exact moment you need it. The Dock icon is always visible, so you always have
+> a way to see recording state and stop the recording. If your menu bar is
+> crowded, you can also **⌘-drag** the LMA menu-bar icon further right so it's
+> among the last to be hidden.
 
 Popover options:
 
@@ -181,9 +202,9 @@ Popover options:
 ### Running it in the background
 
 The app uses no audio or CPU when idle, so the intended usage is to leave it
-running in the menu bar and click **Start** when a meeting begins. **To relaunch
-after quitting**, press **⌘-Space** (Spotlight), type **LMA Audio Client**, and
-press Return — or run `open -a "LMA Audio Client"`.
+running and click **Start** when a meeting begins. **To relaunch after
+quitting**, click its Dock icon, press **⌘-Space** (Spotlight) and type **LMA
+Audio Client**, or run `open -a "LMA Audio Client"`.
 
 ## Using the system-tray app (Windows)
 

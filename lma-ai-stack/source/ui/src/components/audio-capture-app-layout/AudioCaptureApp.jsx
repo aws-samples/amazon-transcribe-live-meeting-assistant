@@ -252,9 +252,9 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
           </li>
           <li>
             <Box variant="p">
-              <strong>Launch it like a normal app.</strong> Press <strong>⌘-Space</strong> (Spotlight), type{' '}
-              <strong>LMA Audio Client</strong> and press Return (or double-click it in Finder). An <strong>LMA</strong>{' '}
-              item appears in the menu bar (top-right).
+              <strong>Launch it like a normal app.</strong> Click its <strong>Dock icon</strong> (the installer pins
+              it), or press <strong>⌘-Space</strong> (Spotlight) and type <strong>LMA Audio Client</strong>. An{' '}
+              <strong>LMA</strong> item appears in the menu bar (top-right) and the app&apos;s icon appears in the Dock.
             </Box>
             <Alert type="warning" header="Don't launch it from Terminal">
               Always launch via Spotlight, Finder, or <code>open -a &quot;LMA Audio Client&quot;</code> &mdash; never
@@ -275,7 +275,7 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
           </li>
           <li>
             <Box variant="p">
-              Left-click the <strong>LMA</strong> menu-bar item, sign in with your LMA username and password, and click{' '}
+              Left-click the <strong>LMA</strong> menu-bar item, sign in with your LMA credentials, and press{' '}
               <strong>Start</strong>. Your meeting appears in the <Link href="#/calls">Meetings List</Link> with a live
               transcript.
             </Box>
@@ -291,13 +291,19 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
     <Container header={<Header variant="h2">Running it in the background (macOS)</Header>}>
       <SpaceBetween size="s">
         <Box variant="p">
-          The app is a menu-bar app (no Dock icon). It uses no audio or CPU when idle, so the intended usage is to leave
-          it running and click <strong>Start</strong> when a meeting begins.
+          The app lives in the <strong>menu bar</strong> and the <strong>Dock</strong>. It uses no audio or CPU when
+          idle, so the intended usage is to leave it running and click <strong>Start</strong> when a meeting begins.
         </Box>
         <ul>
           <li>
             <strong>Left-click</strong> the <strong>LMA</strong> menu-bar item (top-right) for controls.{' '}
             <strong>Right-click</strong> it for <strong>Quit</strong>.
+          </li>
+          <li>
+            <strong>Dock icon:</strong> shows a <strong>red dot + REC badge</strong> while recording (⏸ if paused).{' '}
+            <strong>Right-click</strong> it for Start / Pause / Stop; <strong>click</strong> it to open the control
+            panel as a window. Useful on notched MacBooks, where a crowded menu bar can hide the LMA icon &mdash;
+            especially when recording starts and the system&apos;s orange mic indicator appears.
           </li>
           <li>
             <strong>Start automatically at login:</strong> turn on the login toggle in the popover (or System Settings
@@ -372,8 +378,8 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
         <ol>
           <li>
             <Box variant="p">
-              Click <strong>Download for Windows</strong> above to get <code>{zipName}</code>, then unzip it (right-click
-              &rsaquo; <strong>Extract All</strong>).
+              Click <strong>Download for Windows</strong> above to get <code>{zipName}</code>, then unzip it
+              (right-click &rsaquo; <strong>Extract All</strong>).
             </Box>
           </li>
           <li>
@@ -397,8 +403,8 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
                 ariaLabel="Copy build-windows.ps1 install command"
                 onClick={() => copyToClipboard('./build-windows.ps1 -SelfContained -Install')}
               />
-              . It builds a standalone app, runs a built-in self-test, installs it to your user Programs folder, and adds
-              a <strong>Start Menu</strong> shortcut &mdash; no need to dig into the build output. (Omit{' '}
+              . It builds a standalone app, runs a built-in self-test, installs it to your user Programs folder, and
+              adds a <strong>Start Menu</strong> shortcut &mdash; no need to dig into the build output. (Omit{' '}
               <code>-Install</code> to just build; add <code>-DesktopShortcut</code> for a desktop icon too.)
             </Box>
           </li>
@@ -445,9 +451,8 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
         </Box>
         <ul>
           <li>
-            <strong>Left-click</strong> the <strong>LMA</strong> tray icon for controls.{' '}
-            <strong>Right-click</strong> it for <strong>Quit</strong>. The icon turns <strong>red</strong> while
-            recording.
+            <strong>Left-click</strong> the <strong>LMA</strong> tray icon for controls. <strong>Right-click</strong> it
+            for <strong>Quit</strong>. The icon turns <strong>red</strong> while recording.
           </li>
           <li>
             <strong>Keep it one click away:</strong> right-click <strong>LMA Audio Capture</strong> in the Start Menu
@@ -480,9 +485,10 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
         <Box variant="p">
           <strong>Unfamiliar errors scroll past during install (e.g. &quot;log4net:ERROR&quot;).</strong> If the script
           ends with <strong>INSTALL SUCCEEDED</strong>, the install worked. Messages like{' '}
-          <code>log4net:ERROR ... lockingModel</code> come from other software already on your PC (corporate sync, backup,
-          or security tools that plug into Windows Explorer), not from LMA &mdash; the app doesn&apos;t use log4net. The
-          signals that matter are <strong>All self-tests PASSED</strong> and <strong>INSTALL SUCCEEDED</strong>.
+          <code>log4net:ERROR ... lockingModel</code> come from other software already on your PC (corporate sync,
+          backup, or security tools that plug into Windows Explorer), not from LMA &mdash; the app doesn&apos;t use
+          log4net. The signals that matter are <strong>All self-tests PASSED</strong> and{' '}
+          <strong>INSTALL SUCCEEDED</strong>.
         </Box>
         <Box variant="p">
           <strong>&quot;dotnet is not recognized&quot; or build errors.</strong> Install the{' '}
@@ -677,8 +683,8 @@ const AudioCaptureApp = () => {
             <li>
               {isMac ? (
                 <>
-                  The app lives in your <strong>menu bar</strong>; the icon turns red while recording. Click Stop to end
-                  the meeting, which then finalizes in your Meetings List.
+                  The app lives in your <strong>menu bar</strong> and <strong>Dock</strong>; both icons show red while
+                  recording. Click Stop to end the meeting, which then finalizes in your Meetings List.
                 </>
               ) : (
                 <>
