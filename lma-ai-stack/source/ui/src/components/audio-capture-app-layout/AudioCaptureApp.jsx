@@ -204,21 +204,20 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
   <>
     <Container header={<Header variant="h2">Install on macOS</Header>}>
       <SpaceBetween size="m">
-        <Box variant="p">
-          The app is distributed as source that you build on your Mac with a single script. (A native macOS app using
-          ScreenCaptureKit cannot be prebuilt by the LMA cloud pipeline, and Apple&apos;s signing tools are macOS-only,
-          so building locally is both required and the most trustworthy option &mdash; nothing to un-quarantine.)
-        </Box>
         <ol>
           <li>
             <Box variant="p">
-              Click <strong>Download for macOS</strong> above to get <code>{zipName}</code>, then unzip it.
+              Click <strong>Download for macOS</strong> above to get <code>{zipName}</code>, then double-click it to
+              unzip.
             </Box>
           </li>
           <li>
             <Box variant="p">
-              If you don&apos;t already have Apple&apos;s command-line tools, install them (one time):{' '}
-              <code>xcode-select --install</code>{' '}
+              Open <strong>Terminal</strong>, then copy and run these two commands one at a time. The first installs
+              Apple&apos;s build tools (skip if you already have them); the second builds and installs the app.
+            </Box>
+            <Box variant="code">
+              xcode-select --install{' '}
               <Button
                 variant="inline-icon"
                 iconName="copy"
@@ -226,56 +225,36 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
                 onClick={() => copyToClipboard('xcode-select --install')}
               />
             </Box>
-          </li>
-          <li>
-            <Box variant="p">
-              In Terminal, <code>cd</code> into the unzipped folder and run the installer with{' '}
-              <strong>
-                <code>bash install-macos.sh</code>
-              </strong>{' '}
+            <Box variant="code">
+              cd ~/Downloads/{zipName.replace('.zip', '')} && bash install-macos.sh{' '}
               <Button
                 variant="inline-icon"
                 iconName="copy"
-                ariaLabel="Copy bash install-macos.sh"
-                onClick={() => copyToClipboard('bash install-macos.sh')}
+                ariaLabel="Copy install command"
+                onClick={() =>
+                  copyToClipboard(`cd ~/Downloads/${zipName.replace('.zip', '')} && bash install-macos.sh`)
+                }
               />
-              . It checks prerequisites, builds the app, and installs it to{' '}
-              <code>/Applications/LMAAudioClient.app</code>. (Terminal is only used to build/install &mdash; you
-              won&apos;t run the app from Terminal.)
-            </Box>
-            <Alert type="info" header="Run it with “bash”, not “./install-macos.sh”">
-              On recent macOS, launching a freshly downloaded script directly (<code>./install-macos.sh</code>) is
-              blocked by Gatekeeper with <em>“Apple could not verify … is free of malware.”</em> Running{' '}
-              <code>bash install-macos.sh</code> sidesteps that &mdash; the script then clears the download flag from
-              the rest of the folder itself. (Or clear it first with the command in Troubleshooting below.)
-            </Alert>
-          </li>
-          <li>
-            <Box variant="p">
-              <strong>Launch it like a normal app.</strong> Click its <strong>Dock icon</strong> (the installer pins
-              it), or press <strong>⌘-Space</strong> (Spotlight) and type <strong>LMA Audio Client</strong>. An{' '}
-              <strong>LMA</strong> item appears in the menu bar (top-right) and the app&apos;s icon appears in the Dock.
-            </Box>
-            <Alert type="warning" header="Don't launch it from Terminal">
-              Always launch via Spotlight, Finder, or <code>open -a &quot;LMA Audio Client&quot;</code> &mdash; never
-              the binary inside <code>Contents/MacOS</code>. Only launching through macOS gives the app its own privacy
-              identity; running it from Terminal makes macOS attribute Microphone / Screen Recording to{' '}
-              <strong>Terminal</strong>, and system-audio capture silently won&apos;t work (you&apos;ll see
-              &quot;Terminal&quot; where the app should be).
-            </Alert>
-          </li>
-          <li>
-            <Box variant="p">
-              Approve the <strong>Microphone</strong> prompt. Then open{' '}
-              <strong>System Settings &rsaquo; Privacy &amp; Security &rsaquo; Screen Recording</strong>, enable{' '}
-              <strong>LMA Audio Client</strong>, then <strong>quit and relaunch</strong> it (right-click the LMA
-              menu-bar item &rsaquo; Quit, then reopen via Spotlight) &mdash; Screen Recording only takes effect after a
-              relaunch. Screen Recording is what lets macOS capture system/meeting audio.
             </Box>
           </li>
           <li>
             <Box variant="p">
-              Left-click the <strong>LMA</strong> menu-bar item, sign in with your LMA credentials, and press{' '}
+              <strong>Open the app</strong> from the <strong>Dock</strong> (the installer adds it there) or from
+              Spotlight (<strong>⌘-Space</strong>, type <strong>LMA Audio Client</strong>). An <strong>LMA</strong> icon
+              appears in the menu bar at the top-right.
+            </Box>
+          </li>
+          <li>
+            <Box variant="p">
+              Approve the <strong>Microphone</strong> prompt. Then go to <strong>System Settings</strong> &rsaquo;{' '}
+              <strong>Privacy &amp; Security</strong> &rsaquo; <strong>Screen Recording</strong>, turn on{' '}
+              <strong>LMA Audio Client</strong>, and <strong>quit and reopen the app</strong> (this permission only
+              takes effect after a restart). This is what lets it hear the other participants.
+            </Box>
+          </li>
+          <li>
+            <Box variant="p">
+              Click the <strong>LMA</strong> menu-bar icon, sign in with your LMA email and password, and click{' '}
               <strong>Start</strong>. Your meeting appears in the <Link href="#/calls">Meetings List</Link> with a live
               transcript.
             </Box>
@@ -383,20 +362,11 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
   <>
     <Container header={<Header variant="h2">Install on Windows</Header>}>
       <SpaceBetween size="m">
-        <Box variant="p">
-          The app is distributed as source that you build on your PC with a single script. (A native Windows app using
-          WASAPI/WPF cannot be prebuilt by the LMA cloud Linux pipeline, and code signing is Windows-only, so building
-          locally is both required and the most trustworthy option.)
-        </Box>
-        <Alert type="success" header="No system-audio permission needed">
-          On Windows, capturing system (loopback) audio is built in and needs <strong>no special permission</strong>.
-          The only OS gate is the microphone privacy setting, below.
-        </Alert>
         <ol>
           <li>
             <Box variant="p">
-              Click <strong>Download for Windows</strong> above to get <code>{zipName}</code>, then unzip it
-              (right-click &rsaquo; <strong>Extract All</strong>).
+              Click <strong>Download for Windows</strong> above to get <code>{zipName}</code>, then right-click it
+              &rsaquo; <strong>Extract All</strong>.
             </Box>
           </li>
           <li>
@@ -405,49 +375,50 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
               <Link href="https://dotnet.microsoft.com/download/dotnet/8.0" external target="_blank">
                 dotnet.microsoft.com
               </Link>{' '}
-              (no admin needed &mdash; it can install into your user folder).
+              (no admin needed).
             </Box>
           </li>
           <li>
             <Box variant="p">
-              In PowerShell, <code>cd</code> into the unzipped folder and run the build-and-install script:{' '}
-              <strong>
-                <code>./build-windows.ps1 -SelfContained -Install</code>
-              </strong>{' '}
+              Open <strong>PowerShell</strong>, then copy and run this command to build and install the app (replace the
+              path with where you extracted the folder):
+            </Box>
+            <Box variant="code">
+              cd $HOME\Downloads\{zipName.replace('.zip', '')}; ./build-windows.ps1 -SelfContained -Install{' '}
               <Button
                 variant="inline-icon"
                 iconName="copy"
-                ariaLabel="Copy build-windows.ps1 install command"
-                onClick={() => copyToClipboard('./build-windows.ps1 -SelfContained -Install')}
+                ariaLabel="Copy build-and-install command"
+                onClick={() =>
+                  copyToClipboard(
+                    `cd $HOME\\Downloads\\${zipName.replace('.zip', '')}; ./build-windows.ps1 -SelfContained -Install`,
+                  )
+                }
               />
-              . It builds a standalone app, runs a built-in self-test, installs it to your user Programs folder, and
-              adds a <strong>Start Menu</strong> shortcut &mdash; no need to dig into the build output. (Omit{' '}
-              <code>-Install</code> to just build; add <code>-DesktopShortcut</code> for a desktop icon too.)
+            </Box>
+            <Box variant="p" fontSize="body-s" color="text-body-secondary">
+              If SmartScreen warns about an unrecognized app, choose <strong>More info &rsaquo; Run anyway</strong>.
             </Box>
           </li>
           <li>
             <Box variant="p">
-              <strong>Launch it</strong> from the <strong>Start Menu</strong> (press the <strong>Windows key</strong>,
-              type <strong>LMA Audio Capture</strong>, Enter). <strong>No window opens</strong> &mdash; look for this
-              icon in the system tray, bottom-right next to the clock, and <strong>left-click</strong> it:
+              <strong>Open the app</strong> from the <strong>Start Menu</strong> (press the <strong>Windows key</strong>
+              , type <strong>LMA Audio Capture</strong>, Enter). No window opens &mdash; look for this icon in the
+              system tray at the bottom-right, next to the clock, and <strong>left-click</strong> it:
             </Box>
             <TrayIconLegend />
-            <Box variant="p" fontSize="body-s" color="text-body-secondary">
-              If SmartScreen warns about an unrecognized app, choose <strong>More info &rsaquo; Run anyway</strong>{' '}
-              (expected for a locally built, unsigned app).
+          </li>
+          <li>
+            <Box variant="p">
+              If Windows blocks the microphone, go to <strong>Settings</strong> &rsaquo;{' '}
+              <strong>Privacy &amp; security</strong> &rsaquo; <strong>Microphone</strong>, turn on{' '}
+              <em>Microphone access</em> and <em>Let desktop apps access your microphone</em>, then restart the app. (No
+              permission is needed for the other participants&apos; audio.)
             </Box>
           </li>
           <li>
             <Box variant="p">
-              If Windows blocks microphone access, enable it in{' '}
-              <strong>Settings &rsaquo; Privacy &amp; security &rsaquo; Microphone</strong> (turn on{' '}
-              <em>Microphone access</em> and <em>Let desktop apps access your microphone</em>), then restart the app.
-              System/meeting audio needs no permission.
-            </Box>
-          </li>
-          <li>
-            <Box variant="p">
-              Left-click the <strong>LMA</strong> tray icon, sign in with your LMA username and password, and click{' '}
+              Left-click the <strong>LMA</strong> tray icon, sign in with your LMA email and password, and click{' '}
               <strong>Start</strong>. Your meeting appears in the <Link href="#/calls">Meetings List</Link> with a live
               transcript.
             </Box>
