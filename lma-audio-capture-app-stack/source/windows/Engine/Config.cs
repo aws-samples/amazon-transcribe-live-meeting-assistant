@@ -42,6 +42,19 @@ public sealed class Config
     /// </summary>
     public string WebEndpoint = "";
 
+    /// <summary>
+    /// Recording-consent disclaimer shown before the first recording. Baked into
+    /// lma-config.json from the deployment's RecordingDisclaimer parameter (same
+    /// text the browser extension shows); falls back to the standard wording.
+    /// </summary>
+    public string RecordingDisclaimer = "";
+
+    /// <summary>Fallback consent text when the deployment config predates the setting.</summary>
+    public const string DefaultDisclaimer =
+        "Important: You are responsible for complying with legal, corporate, and ethical " +
+        "restrictions that apply to recording meetings and calls. Do not use this solution " +
+        "to stream, record, or transcribe calls if otherwise prohibited.";
+
     public static Config Parse(string[] argv)
     {
         var env = Environment.GetEnvironmentVariables();
@@ -92,6 +105,8 @@ public sealed class Config
             ClientId = Value("client-id", "LMA_CLIENT_ID", "clientId"),
             Region = Value("region", "LMA_REGION", "region"),
             WebEndpoint = Value("web-endpoint", "LMA_WEB_ENDPOINT", "webEndpoint"),
+            RecordingDisclaimer = Value("disclaimer", "LMA_RECORDING_DISCLAIMER", "recordingDisclaimer",
+                                        DefaultDisclaimer),
         };
     }
 

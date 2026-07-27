@@ -347,7 +347,14 @@ public sealed class PanelView : Border
         else
         {
             bool streaming = _c.CurrentState.Kind == CaptureController.StateKind.Streaming;
-            if (!streaming)
+            if (_showDisclaimer && !streaming)
+            {
+                // One-time recording-consent gate (same text and Agree/Cancel shape
+                // as the browser extension's popup). Rendered in place of the Start
+                // controls so it can't be missed or clicked past.
+                _body.Children.Add(BuildDisclaimerBlock());
+            }
+            else if (!streaming)
             {
                 _body.Children.Add(Label("Meeting name (optional)"));
                 _body.Children.Add(_meetingName);
@@ -409,12 +416,86 @@ public sealed class PanelView : Border
 
     private void DoStart()
     {
+        // One-time recording-consent gate (mirrors the browser extension): the
+        // first Start on this machine shows the disclaimer; Agree persists and
+        // proceeds, Cancel does nothing.
+        if (!AppSettings.DisclaimerAgreed)
+        {
+            _showDisclaimer = true;
+            Refresh();
+            return;
+        }
+        ReallyStart();
+    }
+
+    private void ReallyStart()
+    {
         // Push current settings (the mic label may depend on the signed-in email).
         PushSettingsToController();
         var name = string.IsNullOrEmpty(_meetingName.Text)
             ? null
             : $"{_meetingName.Text} - {DateTime.Now:yyyy-MM-dd HH:mm}";
         _c.Start(name);
+    }
+
+    /// <summary>
+    /// Whether Start would currently be gated on the consent disclaimer — used by
+    /// TrayApp so a JumpList "Start Recording" surfaces the panel with the dialog
+    /// instead of silently doing nothing.
+    /// </summary>
+    public bool NeedsDisclaimer => !AppSettings.DisclaimerAgreed;
+
+    /// <summary>Show the consent gate (for Start attempts that arrive from outside the panel).</summary>
+    public void ShowDisclaimerGate()
+    {
+        _showDisclaimer = true;
+        Refresh();
+    }
+
+    // Consent-gate UI state + block. Built fresh each Refresh (cheap, and avoids
+    // the shared-parent pitfalls of persistent controls).
+    private bool _showDisclaimer;
+
+    private Border BuildDisclaimerBlock()
+    {
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock
+        {
+            Text = "⚠ Important",
+            FontWeight = FontWeights.Bold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xB0, 0x6A, 0x00)),
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = string.IsNullOrEmpty(_c.Config.RecordingDisclaimer)
+                ? Config.DefaultDisclaimer
+                : _c.Config.RecordingDisclaimer,
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 8),
+        });
+        var cancel = new Button { Content = "Cancel" };
+        cancel.Click += (_, _) => { _showDisclaimer = false; Refresh(); };
+        var agree = new Button { Content = "Agree", FontWeight = FontWeights.Bold };
+        agree.Click += (_, _) =>
+        {
+            AppSettings.DisclaimerAgreed = true;
+            _showDisclaimer = false;
+            Refresh();
+            ReallyStart();
+        };
+        panel.Children.Add(Row(cancel, agree));
+        return new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0x14, 0xE0, 0x91, 0x00)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xE0, 0x91, 0x00)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(10),
+            Margin = new Thickness(0, 2, 0, 8),
+            Child = panel,
+        };
     }
 
     private void OpenLma()
