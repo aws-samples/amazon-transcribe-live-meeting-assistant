@@ -126,6 +126,16 @@ internal static class TaskbarImages
 /// </summary>
 internal static class TrayIpc
 {
+    // Lets the *running* instance pull its window to the front in response to a verb
+    // we forward. Windows only honors SetForegroundWindow from the process that
+    // currently owns the foreground — which is us, the freshly-launched relay, not
+    // the tray app. Calling this first hands that right over. ASFW_ANY (-1) means
+    // "any process may take it", which is the documented way to do this when you
+    // don't know the target PID.
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int dwProcessId);
+    private const int ASFW_ANY = -1;
+
     // Verbs used by both the JumpList tasks (as command-line arguments) and the
     // pipe protocol, so there's exactly one spelling of each.
     public const string CmdStart = "--lma-start";
@@ -139,16 +149,57 @@ internal static class TrayIpc
     public static string? FindCommand(string[] args) =>
         args.FirstOrDefault(a => AllCommands.Contains(a, StringComparer.OrdinalIgnoreCase));
 
-    private static string PipeName
+    private static string PipeName => $"LMAAudioCapture.control.{UserSuffix}";
+
+    /// <summary>
+    /// Pipe and mutex names are machine-global, so scope them by user; strip anything
+    /// that isn't safe in a name (domain\user, spaces, ...).
+    /// </summary>
+    private static string UserSuffix
     {
         get
         {
-            // Pipe names are machine-global, so scope by user; strip anything that
-            // isn't safe in a pipe name (domain\user, spaces, ...).
             var user = new string((Environment.UserName ?? "user")
                 .Where(char.IsLetterOrDigit).ToArray());
-            if (user.Length == 0) user = "user";
-            return $"LMAAudioCapture.control.{user}";
+            return user.Length == 0 ? "user" : user;
+        }
+    }
+
+    // Held for the process lifetime once acquired — never disposed, so the OS
+    // releases it when we exit (including a crash, unlike a lock file).
+    private static Mutex? _singleInstanceMutex;
+
+    /// <summary>
+    /// Claim the right to be *the* tray instance for this user. False means one is
+    /// already running, in which case the caller should forward what it wanted to do
+    /// (see <see cref="TrySend"/>) and exit rather than add a second tray icon.
+    ///
+    /// The mutex — not a "can I connect to the pipe?" probe — is what decides, so two
+    /// launches racing each other (double-clicked twice, or Start Menu while the app
+    /// is still starting up) can't both conclude they're first.
+    /// </summary>
+    public static bool TryAcquireSingleInstance()
+    {
+        try
+        {
+            _singleInstanceMutex = new Mutex(initiallyOwned: false, $"Local\\LMAAudioCapture.instance.{UserSuffix}");
+            // Local\ = per-session, so a second user (or an RDP session) still gets
+            // their own tray icon, matching the per-user pipe.
+            if (_singleInstanceMutex.WaitOne(TimeSpan.Zero)) return true;
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
+            return false;
+        }
+        catch (AbandonedMutexException)
+        {
+            // Previous owner died without releasing (killed / crashed). We now hold it.
+            return true;
+        }
+        catch
+        {
+            // Can't create the mutex at all — don't let single-instancing be the
+            // reason the app won't launch.
+            return true;
         }
     }
 
@@ -158,9 +209,18 @@ internal static class TrayIpc
         try
         {
             using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
-            client.Connect(500);
+            // Generous timeout: the tray app can be busy starting up (it only begins
+            // listening once its UI is built), and a premature failure here means a
+            // whole second tray icon instead of a forwarded verb.
+            client.Connect(3000);
+            // Cede our foreground right so the running instance can actually raise
+            // its window — otherwise "Open" just flashes the taskbar button.
+            try { AllowSetForegroundWindow(ASFW_ANY); } catch { }
             using var w = new StreamWriter(client) { AutoFlush = true };
             w.WriteLine(command);
+            // Wait for the reader to drain before we exit; disposing the pipe as the
+            // process dies can otherwise cut the message off mid-flight.
+            client.WaitForPipeDrain();
             return true;
         }
         catch
@@ -168,6 +228,7 @@ internal static class TrayIpc
             return false;
         }
     }
+
 
     /// <summary>
     /// Listen for forwarded verbs on a background thread. <paramref name="onCommand"/>

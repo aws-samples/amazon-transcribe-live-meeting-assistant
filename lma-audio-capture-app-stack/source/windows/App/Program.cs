@@ -9,7 +9,9 @@ namespace LMA;
 ///   • --selftest    → run SRP known-answer tests offline and exit.
 ///   • --login-only  → SRP login, print token metadata (not the token), exit.
 ///   • --lma-*       → taskbar JumpList verb: relay it to the running tray app.
-///   • no --flags    → GUI system-tray app (double-clicked .exe).
+///   • no --flags    → GUI system-tray app (double-clicked .exe). Single instance:
+///                     a relaunch raises the existing app's UI instead of adding a
+///                     second tray icon.
 ///   • any --flag    → headless CLI streaming to stdout with the VU meter line.
 ///   • --cli forces CLI, --gui forces GUI.
 ///
@@ -55,6 +57,10 @@ public static class Program
         if (taskbarCmd != null)
         {
             if (TrayIpc.TrySend(taskbarCmd)) return 0;
+            // Nobody answered. Only start a GUI if we can claim the single-instance
+            // slot — an instance that exists but isn't listening yet (still starting
+            // up) must not get a second tray icon bolted onto it.
+            if (!TrayIpc.TryAcquireSingleInstance()) return 0;
             return TrayApp.Run(Config.Parse(args), taskbarCmd);
         }
 
@@ -66,6 +72,18 @@ public static class Program
 
         if (wantGui)
         {
+            // Single instance. Launching the app again — Start Menu, a pinned taskbar
+            // shortcut, double-clicking the exe — must not add a second tray icon:
+            // they'd be indistinguishable, only one would own the recording, and the
+            // click would appear to do nothing. Instead, treat a relaunch as "show me
+            // the app": forward it as the Open-Control-Panel verb so the instance
+            // that's already there raises its UI, and exit.
+            if (!TrayIpc.TryAcquireSingleInstance())
+            {
+                TrayIpc.TrySend(TrayIpc.CmdPanel);
+                return 0;
+            }
+
             // Tray app: no console. (If started from a terminal, don't spam it.)
             return TrayApp.Run(Config.Parse(args));
         }
