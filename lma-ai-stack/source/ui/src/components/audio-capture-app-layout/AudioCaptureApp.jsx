@@ -311,9 +311,10 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
             so this works out of the box.
           </li>
           <li>
-            <strong>Settings (⚙ gear):</strong> set the transcript <strong>speaker labels</strong> for each channel
-            (your mic defaults to your email, system audio to &quot;Other participants&quot;) and pick a specific{' '}
-            <strong>microphone</strong> (or leave System Default). Changes apply to your next recording.
+            <strong>Settings (⚙ gear):</strong> set the transcript <strong>speaker labels</strong> for each channel and
+            pick a specific <strong>microphone</strong> (or leave System Default). Each label field shows its default in
+            grey &mdash; your email for the mic, &quot;Other participants&quot; for system audio &mdash; so leave it
+            blank to accept that, or type to override. Changes apply to your next recording.
           </li>
           <li>
             <strong>Launch or relaunch:</strong> press <strong>⌘-Space</strong>, type <strong>LMA Audio Client</strong>,
@@ -483,6 +484,11 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
             API that would let the installer pin it for you.)
           </li>
           <li>
+            <strong>Only one copy runs at a time.</strong> Opening the app again &mdash; from that pinned shortcut, the
+            Start Menu, or the .exe &mdash; opens the controls panel of the copy already running, rather than adding a
+            second tray icon.
+          </li>
+          <li>
             <strong>Start automatically at login:</strong> turn on the login toggle in the panel &mdash; it adds a
             per-user startup entry that launches the tray app when you sign in.
           </li>
@@ -491,9 +497,10 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
             stored).
           </li>
           <li>
-            <strong>Settings (⚙ gear):</strong> set the transcript <strong>speaker labels</strong> for each channel
-            (your mic defaults to your email, system audio to &quot;Other participants&quot;) and pick a specific{' '}
-            <strong>microphone</strong> (or leave System Default). Changes apply to your next recording.
+            <strong>Settings (⚙ gear):</strong> set the transcript <strong>speaker labels</strong> for each channel and
+            pick a specific <strong>microphone</strong> (or leave System Default). Each label field shows its default in
+            grey &mdash; your email for the mic, &quot;Other participants&quot; for system audio &mdash; so leave it
+            blank to accept that, or type to override. Changes apply to your next recording.
           </li>
         </ul>
       </SpaceBetween>

@@ -469,6 +469,11 @@ public sealed class TrayApp
     /// <summary>
     /// Bring up the controls. While recording the taskbar window already exists, so
     /// restore that (keeping the taskbar button); otherwise use the tray flyout.
+    ///
+    /// Also the "show me the app" entry point for a second launch (Start Menu, a
+    /// pinned taskbar shortcut, double-clicked exe): rather than starting a duplicate
+    /// tray icon, that process forwards Open-Control-Panel here and exits, so
+    /// clicking the app again does what the user expects — the UI appears.
     /// </summary>
     private void ShowControlPanel()
     {
@@ -477,6 +482,7 @@ public sealed class TrayApp
             MovePanelTo(_taskbarWindow);
             _taskbarWindow.WindowState = WindowState.Normal;
             _taskbarWindow.Activate();
+            ForceForeground(_taskbarWindow);
             _panel.FocusFirstField();
         }
         else
@@ -484,6 +490,26 @@ public sealed class TrayApp
             ShowPopup();
         }
     }
+
+    /// <summary>
+    /// Nudge a window to the actual foreground. Window.Activate() is a no-op when
+    /// another process owns the foreground, which is exactly the case when a relaunch
+    /// forwards Open-Control-Panel to us — so ask Win32 directly. The relaying process
+    /// calls AllowSetForegroundWindow first (see TrayIpc.TrySend), which is what makes
+    /// this permitted rather than a silent taskbar flash.
+    /// </summary>
+    private static void ForceForeground(Window w)
+    {
+        try
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(w).Handle;
+            if (hwnd != IntPtr.Zero) SetForegroundWindow(hwnd);
+        }
+        catch { /* cosmetic */ }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     private ContextMenu BuildContextMenu()
     {
@@ -540,6 +566,7 @@ public sealed class TrayApp
         _flyout.Top = top;
 
         _flyout.Activate();
+        ForceForeground(_flyout);
         _panel.FocusFirstField();
     }
 

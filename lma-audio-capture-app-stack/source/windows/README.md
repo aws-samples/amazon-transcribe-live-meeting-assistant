@@ -182,6 +182,24 @@ the macOS menu-bar `LSUIElement` behavior).
   can't be confused with *Stop*).
 - While recording, the tray icon turns **red**.
 
+**Single instance.** Launching the app again — Start Menu, a pinned taskbar
+shortcut, double-clicking the exe — does **not** add a second tray icon; it
+opens the running app's UI. The instance is claimed with a per-user named mutex
+(`Local\LMAAudioCapture.instance.<user>`), and the losing process relays
+`--lma-panel` over the pipe and exits, so a relaunch behaves like clicking the
+tray icon. Two things this must get right, both of which have bitten:
+
+- The check has to be the **mutex**, not "can I connect to the pipe?" — the pipe
+  server only starts listening once the UI is built, so a relaunch during startup
+  would otherwise conclude nobody was home and open a duplicate.
+- Raising the window needs `AllowSetForegroundWindow` in the *relaying* process
+  plus `SetForegroundWindow` in the owner (`ForceForeground`). `Window.Activate()`
+  alone is a no-op when another process owns the foreground, which is exactly the
+  case here — the symptom is a taskbar flash and no visible panel.
+
+The mutex is released by the OS on exit (including a kill or crash), so a
+relaunch after a crash correctly starts fresh.
+
 ### Recording-time taskbar button
 
 While recording — and **only** while recording — the app also takes a **taskbar
@@ -222,6 +240,14 @@ Implementation notes for anyone touching this:
 Panel options:
 - **Remember my email** — prefills your login next launch (email only; the
   password is never stored — it stays in memory for the session).
+- **Settings (⚙ gear)** — transcript speaker labels for the two channels plus a
+  microphone picker, persisted under `HKCU\...\LMAAudioCapture`. A blank label
+  field means "use the default", and that default is drawn **in grey inside the
+  field** (`PlaceholderBox` + `UpdateLabelHints`) so it's visible without
+  hovering: the mic label defaults to the signed-in email, the system label to
+  "Other participants". WPF has no built-in placeholder, and writing a watermark
+  into `Text` would get persisted as a real value, so the hint is a separate
+  non-hit-testable `TextBlock` layered over the `TextBox`.
 - **Start automatically at login** — toggles an `HKCU\...\Run` entry pointing at
   this exe (`--gui`); the checkbox reflects the real registry state, so it stays
   correct even if changed elsewhere.

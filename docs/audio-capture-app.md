@@ -239,6 +239,9 @@ Tray icon:
 - Want it one click away even when idle? Right-click **LMA Audio Capture** in the
   Start Menu ▸ **More** ▸ **Pin to taskbar**. (Windows 10+ removed the API that
   would let the installer do this for you.)
+- **Only one copy runs at a time.** Opening the app again — from that pinned
+  shortcut, the Start Menu, or the .exe — **opens the controls panel** of the copy
+  already running instead of adding a second tray icon.
 
 Taskbar button (while recording):
 
@@ -269,7 +272,9 @@ Panel options:
 - **Start automatically at login** — adds a per-user startup entry that launches
   the tray app when you sign in; the toggle reflects the real system state.
 - **Settings (⚙ gear, top-right of the panel)** — customize how the two
-  channels are labeled in the LMA transcript and which microphone is captured:
+  channels are labeled in the LMA transcript and which microphone is captured.
+  Each label field shows its **default in grey**; leave the field blank to use
+  it, or type to override.
   - **My mic** speaker label — defaults to your signed-in email address.
   - **System audio** speaker label — defaults to **"Other participants"**.
   - **Microphone** — pick a specific input device, or leave **System Default**
@@ -280,7 +285,8 @@ Panel options:
 The app uses no audio or CPU when idle, so the intended usage is to leave it in
 the tray and click **Start** when a meeting begins. **To relaunch after
 quitting**, press the **Windows key**, type **LMA Audio Capture**, and press
-Enter.
+Enter. If it's already running, that just brings up its controls panel — you
+can't accidentally end up with two.
 
 > **Developer / headless mode.** Any command-line flag runs a headless CLI that
 > streams to stdout with a live VU meter (`--cli` forces it). `--selftest`

@@ -64,6 +64,16 @@ public sealed class PanelView : Border
     private readonly TextBox _micLabel = new();
     private readonly TextBox _systemLabel = new();
     private readonly ComboBox _micPicker = new() { FontSize = 11, Margin = new Thickness(0, 0, 0, 6) };
+    // Grey placeholder showing what a blank field will actually be sent as, so the
+    // defaults are visible without having to hover a tooltip.
+    private readonly TextBlock _micHint = HintText();
+    private readonly TextBlock _systemHint = HintText();
+    private readonly Grid _micLabelBox;
+    private readonly Grid _systemLabelBox;
+    // RefreshMicPicker rebuilds the list, and setting SelectedItem fires
+    // SelectionChanged — which would persist a transient "System Default" over the
+    // saved device before the matching item is found.
+    private bool _loadingMicPicker;
 
     private readonly StackPanel _body = new();
 
@@ -128,6 +138,13 @@ public sealed class PanelView : Border
         _password.Margin = _email.Margin = _meetingName.Margin = new Thickness(0, 0, 0, 6);
         _password.Padding = new Thickness(4);
 
+        // The two label fields live inside a placeholder wrapper, which owns the
+        // bottom margin instead of the TextBox (the grey hint has to sit over the
+        // field itself, not over the gap below it).
+        _micLabel.Margin = _systemLabel.Margin = new Thickness(0);
+        _micLabelBox = PlaceholderBox(_micLabel, _micHint);
+        _systemLabelBox = PlaceholderBox(_systemLabel, _systemHint);
+
         // Settings gear: toggle the section; save on every edit (no Apply).
         // Disabled while streaming — labels ride the START frame, so mid-meeting
         // changes wouldn't take effect anyway.
@@ -137,10 +154,16 @@ public sealed class PanelView : Border
             if (_showSettings) RefreshMicPicker();
             Refresh();
         };
-        _micLabel.TextChanged += (_, _) => AppSettings.MicLabel = _micLabel.Text;
-        _systemLabel.TextChanged += (_, _) => AppSettings.SystemLabel = _systemLabel.Text;
+        _micLabel.TextChanged += (_, _) => { AppSettings.MicLabel = _micLabel.Text; UpdateLabelHints(); };
+        _systemLabel.TextChanged += (_, _) => { AppSettings.SystemLabel = _systemLabel.Text; UpdateLabelHints(); };
+        // Typing in the email field changes the mic-label default, so keep the grey
+        // hint honest while the user is still signing in.
+        _email.TextChanged += (_, _) => UpdateLabelHints();
         _micPicker.SelectionChanged += (_, _) =>
         {
+            // Ignore the churn from rebuilding the list — only persist real picks,
+            // or an unplugged device would silently erase the saved selection.
+            if (_loadingMicPicker) return;
             if (_micPicker.SelectedItem is ComboBoxItem it)
                 AppSettings.MicDeviceId = (it.Tag as string) ?? "";
         };
@@ -152,6 +175,7 @@ public sealed class PanelView : Border
         _email.Text = AppSettings.RememberLogin ? AppSettings.SavedUsername : _c.Config.Username;
         _micLabel.Text = AppSettings.MicLabel;
         _systemLabel.Text = AppSettings.SystemLabel;
+        UpdateLabelHints();
         PushSettingsToController();
         Refresh();
     }
@@ -179,22 +203,48 @@ public sealed class PanelView : Border
         return AppSettings.RememberLogin ? AppSettings.SavedUsername : _c.Config.Username;
     }
 
+    /// <summary>The label that will actually be sent for the mic channel if the field is blank.</summary>
+    private string DefaultMicLabel()
+    {
+        var email = CurrentEmail();
+        return !string.IsNullOrEmpty(email) ? email : _c.Config.AgentId;
+    }
+
+    /// <summary>
+    /// Show/hide the grey placeholder over each label field. A blank field means
+    /// "use the default", so spell that default out in the field itself rather than
+    /// leaving the user to guess (or hover a tooltip).
+    /// </summary>
+    private void UpdateLabelHints()
+    {
+        _micHint.Text = DefaultMicLabel();
+        _micHint.Visibility = string.IsNullOrEmpty(_micLabel.Text) ? Visibility.Visible : Visibility.Collapsed;
+        _systemHint.Text = AppSettings.DefaultSystemLabel;
+        _systemHint.Visibility = string.IsNullOrEmpty(_systemLabel.Text) ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     /// <summary>Repopulate the mic dropdown from live device enumeration (hotplug-friendly).</summary>
     private void RefreshMicPicker()
     {
-        _micPicker.Items.Clear();
-        var selected = AppSettings.MicDeviceId;
-        var def = new ComboBoxItem { Content = "System Default", Tag = "" };
-        _micPicker.Items.Add(def);
-        _micPicker.SelectedItem = def;
-        foreach (var (id, name) in AudioCapture.ListMicDevices())
+        _loadingMicPicker = true;
+        try
         {
-            var item = new ComboBoxItem { Content = name, Tag = id };
-            _micPicker.Items.Add(item);
-            if (id == selected) _micPicker.SelectedItem = item;
+            _micPicker.Items.Clear();
+            var selected = AppSettings.MicDeviceId;
+            var def = new ComboBoxItem { Content = "System Default", Tag = "" };
+            _micPicker.Items.Add(def);
+            _micPicker.SelectedItem = def;
+            foreach (var (id, name) in AudioCapture.ListMicDevices())
+            {
+                var item = new ComboBoxItem { Content = name, Tag = id };
+                _micPicker.Items.Add(item);
+                if (id == selected) _micPicker.SelectedItem = item;
+            }
+            // Saved device unplugged → selection shows System Default, matching the
+            // engine's fallback at capture start. The saved ID is deliberately kept,
+            // so re-plugging the device restores the choice.
         }
-        // Saved device unplugged → selection stays on System Default, matching
-        // the engine's fallback at capture start.
+        finally { _loadingMicPicker = false; }
     }
 
     public void FocusFirstField()
@@ -260,21 +310,22 @@ public sealed class PanelView : Border
         if (_showSettings && !isStreaming)
         {
             _body.Children.Add(Label("Speaker labels — shown in the LMA transcript"));
+            // Blank field = use the default, shown as grey placeholder text in the
+            // field (and echoed in the tooltip for screen readers / narrow panels).
+            UpdateLabelHints();
             _body.Children.Add(Label("My mic"));
-            // Placeholder semantics: blank = default (signed-in email).
-            if (string.IsNullOrEmpty(_micLabel.Text))
-                _micLabel.ToolTip = $"Default: {(string.IsNullOrEmpty(CurrentEmail()) ? "Me" : CurrentEmail())}";
-            _body.Children.Add(_micLabel);
+            _micLabel.ToolTip = $"Default: {DefaultMicLabel()}";
+            _body.Children.Add(_micLabelBox);
             _body.Children.Add(Label("System audio"));
-            if (string.IsNullOrEmpty(_systemLabel.Text))
-                _systemLabel.ToolTip = $"Default: {AppSettings.DefaultSystemLabel}";
-            _body.Children.Add(_systemLabel);
+            _systemLabel.ToolTip = $"Default: {AppSettings.DefaultSystemLabel}";
+            _body.Children.Add(_systemLabelBox);
             _body.Children.Add(Label("Microphone"));
             _body.Children.Add(_micPicker);
             _body.Children.Add(new TextBlock
             {
-                Text = "Leave a label blank for its default. System Default follows Windows' input device; " +
-                       "if a chosen mic is unplugged, recording falls back to the default.",
+                Text = "Greyed text is the default that will be used if you leave a label blank. " +
+                       "System Default follows Windows' input device; if a chosen mic is unplugged, " +
+                       "recording falls back to the default.",
                 Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 4),
             });
@@ -379,6 +430,34 @@ public sealed class PanelView : Border
     {
         t.Padding = new Thickness(4);
         t.Margin = new Thickness(0, 0, 0, 6);
+    }
+
+    /// <summary>The grey "this is what you'll get if you leave it blank" overlay text.</summary>
+    private static TextBlock HintText() => new()
+    {
+        FontSize = 12,
+        // Lighter than Secondary so it reads as a placeholder rather than as a
+        // value the user typed.
+        Foreground = new SolidColorBrush(Color.FromRgb(0x8C, 0x8C, 0x8C)),
+        // Line up with the TextBox's own 4px padding + border so the hint sits
+        // exactly where the caret/typed text will.
+        Margin = new Thickness(6, 0, 6, 0),
+        VerticalAlignment = VerticalAlignment.Center,
+        IsHitTestVisible = false,   // clicks fall through to the TextBox underneath
+        TextTrimming = TextTrimming.CharacterEllipsis,
+    };
+
+    /// <summary>
+    /// Stack a grey placeholder behind a TextBox. WPF has no built-in placeholder,
+    /// and a watermark written into Text would get saved as a real value — so the
+    /// hint is a separate, non-hit-testable TextBlock shown only while empty.
+    /// </summary>
+    private static Grid PlaceholderBox(TextBox box, TextBlock hint)
+    {
+        var g = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+        g.Children.Add(box);
+        g.Children.Add(hint);
+        return g;
     }
 
     private static TextBlock Label(string s) => new()
