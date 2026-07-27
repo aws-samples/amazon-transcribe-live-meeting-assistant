@@ -101,13 +101,88 @@ echo "    baked AppIcon.icns into Contents/Resources/"
 # and won't trip Gatekeeper when launched.
 xattr -dr com.apple.quarantine "${APP_DIR}" 2>/dev/null || true
 
-# Ad-hoc sign the bundle with entitlements. On Apple Silicon a signature is
-# mandatory just to run; the entitlements match what a notarized build needs.
-echo "==> ad-hoc codesign (with entitlements)"
-codesign --force --sign - \
-  --entitlements LMAAudioClient.entitlements \
-  --options runtime \
-  "${APP_DIR}"
+# Sign the bundle with a PERSISTENT SELF-SIGNED identity (created on first
+# build), NOT ad-hoc. Why this matters: an ad-hoc signature has no identity, so
+# its designated requirement is a literal cdhash of that exact binary — and TCC
+# binds the Screen Recording grant to it. Every rebuild produces a new cdhash,
+# invalidating the grant: System Settings still SHOWS the app enabled, but
+# macOS re-prompts on every capture. A certificate-backed signature (even
+# self-signed) anchors the designated requirement to the cert identity, so the
+# grant survives rebuilds on this machine. (An Apple Developer ID would also
+# fix Gatekeeper warnings; this fixes the TCC re-prompt loop without one.)
+SIGN_IDENTITY="LMA Audio Client Local Signing"
+
+ensure_signing_identity() {
+  # Already have a usable identity? Done. (find-identity only lists certs that
+  # are valid for codesigning AND have their private key in the keychain.)
+  if security find-identity -v -p codesigning 2>/dev/null | grep -q "${SIGN_IDENTITY}"; then
+    return 0
+  fi
+  echo "==> creating one-time self-signed codesigning certificate: ${SIGN_IDENTITY}"
+  # Generate the cert + key with OpenSSL, then import into the login keychain.
+  # codesign requires the extendedKeyUsage=codeSigning extension.
+  local tmp
+  tmp="$(mktemp -d)"
+  openssl req -x509 -newkey rsa:2048 -keyout "${tmp}/key.pem" -out "${tmp}/cert.pem" \
+    -days 3650 -nodes -subj "/CN=${SIGN_IDENTITY}" \
+    -addext "extendedKeyUsage=codeSigning" \
+    -addext "keyUsage=digitalSignature" 2>/dev/null
+  # OpenSSL 3.x defaults PKCS#12 to AES/PBKDF2, which `security import` can't
+  # extract the PRIVATE KEY from — the cert imports but no identity forms
+  # ("0 valid identities found"). -legacy restores compatible encryption.
+  # LibreSSL (/usr/bin/openssl) has no -legacy flag but its defaults are
+  # already compatible, so fall back to plain -export if -legacy is unknown.
+  if ! openssl pkcs12 -export -legacy -out "${tmp}/identity.p12" \
+      -inkey "${tmp}/key.pem" -in "${tmp}/cert.pem" \
+      -name "${SIGN_IDENTITY}" -passout pass:lma-local 2>/dev/null; then
+    openssl pkcs12 -export -out "${tmp}/identity.p12" \
+      -inkey "${tmp}/key.pem" -in "${tmp}/cert.pem" \
+      -name "${SIGN_IDENTITY}" -passout pass:lma-local 2>/dev/null
+  fi
+  local login_keychain
+  login_keychain="$(security default-keychain -d user | tr -d ' "')"
+  security import "${tmp}/identity.p12" -k "${login_keychain}" -P lma-local \
+    -T /usr/bin/codesign -T /usr/bin/security
+  # Trust our own cert for code signing so codesign doesn't reject it as
+  # untrusted (may prompt once for your login password — expected, one time).
+  security add-trusted-cert -p codeSign -k "${login_keychain}" "${tmp}/cert.pem" || true
+  # Let codesign use the private key without a per-build keychain prompt. The
+  # partition list MUST include codesign: — with only apple-tool:/apple:,
+  # codesign still pops the "allow signing" dialog, which hangs a headless run.
+  security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "${login_keychain}" 2>/dev/null || true
+  rm -rf "${tmp}"
+  # Verify the identity actually formed (cert + private key + trust).
+  security find-identity -v -p codesigning 2>/dev/null | grep -q "${SIGN_IDENTITY}"
+}
+
+if [[ "${LMA_ADHOC_SIGN:-0}" == "1" ]]; then
+  # Escape hatch (CI, throwaway builds): LMA_ADHOC_SIGN=1 restores old behavior.
+  echo "==> ad-hoc codesign (LMA_ADHOC_SIGN=1)"
+  codesign --force --sign - \
+    --entitlements LMAAudioClient.entitlements \
+    --options runtime \
+    "${APP_DIR}"
+elif ensure_signing_identity; then
+  echo "==> codesign with persistent identity: ${SIGN_IDENTITY}"
+  if ! codesign --force --sign "${SIGN_IDENTITY}" \
+      --entitlements LMAAudioClient.entitlements \
+      --options runtime \
+      "${APP_DIR}"; then
+    echo "    WARNING: identity signing failed — falling back to ad-hoc."
+    echo "    (Screen Recording permission will need re-granting after each rebuild.)"
+    codesign --force --sign - \
+      --entitlements LMAAudioClient.entitlements \
+      --options runtime \
+      "${APP_DIR}"
+  fi
+else
+  echo "    WARNING: couldn't create signing identity — falling back to ad-hoc."
+  echo "    (Screen Recording permission will need re-granting after each rebuild.)"
+  codesign --force --sign - \
+    --entitlements LMAAudioClient.entitlements \
+    --options runtime \
+    "${APP_DIR}"
+fi
 
 echo ""
 echo "Built ${APP_DIR}"
