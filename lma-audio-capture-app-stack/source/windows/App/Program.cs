@@ -8,6 +8,7 @@ namespace LMA;
 /// Entry point. Dual-mode dispatch (mirrors macOS main.swift):
 ///   • --selftest    → run SRP known-answer tests offline and exit.
 ///   • --login-only  → SRP login, print token metadata (not the token), exit.
+///   • --lma-*       → taskbar JumpList verb: relay it to the running tray app.
 ///   • no --flags    → GUI system-tray app (double-clicked .exe).
 ///   • any --flag    → headless CLI streaming to stdout with the VU meter line.
 ///   • --cli forces CLI, --gui forces GUI.
@@ -42,6 +43,19 @@ public static class Program
         {
             EnsureConsole();
             return RunCaptureTest(args);
+        }
+
+        // Taskbar JumpList verbs (--lma-start / --lma-pause / --lma-stop /
+        // --lma-panel). A JumpTask can only launch the exe with arguments, so these
+        // are relays: forward the verb to the already-running tray app over a named
+        // pipe and exit. Only if nobody is listening do we fall through and start
+        // the GUI ourselves (the jump list survives in the shell after the app
+        // quits, so "Start Recording" from a cold taskbar should still work).
+        var taskbarCmd = TrayIpc.FindCommand(args);
+        if (taskbarCmd != null)
+        {
+            if (TrayIpc.TrySend(taskbarCmd)) return 0;
+            return TrayApp.Run(Config.Parse(args), taskbarCmd);
         }
 
         // Mode dispatch: with NO --flags (e.g. double-clicked .exe), launch the

@@ -225,9 +225,15 @@ public sealed class PanelView : Border
         }
 
         _body.Children.Add(Sep());
+        // While recording, point at the taskbar button: it's the always-visible way
+        // back to these controls (and to Stop) if the tray icon ends up in the ▲
+        // overflow. Closing that window doesn't stop the recording, so say so.
+        bool recording = _c.CurrentState.Kind == CaptureController.StateKind.Streaming;
         _body.Children.Add(new TextBlock
         {
-            Text = "Right-click the tray icon to Quit. Leave it running in the background between meetings.",
+            Text = recording
+                ? "Hover the taskbar button for Pause/Stop, or right-click it for quick actions. Closing that window keeps recording."
+                : "Right-click the tray icon to Quit. Leave it running in the background between meetings.",
             Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
         });
     }
