@@ -19,6 +19,9 @@ options cannot. It adds **no bot** or extra attendee to the meeting.
 > pipeline, and code-signing tools are OS-specific, so building on your own
 > machine is both required and the most trustworthy option.
 
+https://github.com/user-attachments/assets/6a7c831c-bfe2-41b8-8083-2c9d6eb6b5db
+
+
 ## How it works
 
 - Your **microphone** is transcribed as the meeting owner — the **"My Mic"**
