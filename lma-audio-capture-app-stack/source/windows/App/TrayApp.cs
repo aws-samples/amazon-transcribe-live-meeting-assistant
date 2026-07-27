@@ -435,6 +435,9 @@ public sealed class TrayApp
                 if (_controller.IsAuthenticated &&
                     _controller.CurrentState.Kind != CaptureController.StateKind.Streaming)
                 {
+                    // Same settings path as the panel's Start button, so
+                    // JumpList-started recordings get the right speaker labels.
+                    _panel.PushSettingsToController();
                     _controller.Start();
                 }
                 else
