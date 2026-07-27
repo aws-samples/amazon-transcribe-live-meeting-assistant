@@ -15,6 +15,7 @@
 #   bash install-macos.sh              # build + install to /Applications
 #   bash install-macos.sh --run        # build + install, then launch it
 #   bash install-macos.sh --no-install # build into ./build only (don't copy to /Applications)
+#   bash install-macos.sh --uninstall  # remove the installed app + all traces (no build)
 #   INSTALL_DIR=~/Applications bash install-macos.sh   # override install location
 #
 # Why `bash install-macos.sh` and NOT `./install-macos.sh`:
@@ -34,15 +35,101 @@ cd "$(dirname "$0")"
 
 RUN_AFTER=false
 NO_INSTALL=false
+UNINSTALL=false
 for arg in "$@"; do
   case "$arg" in
     --run) RUN_AFTER=true ;;
     --no-install) NO_INSTALL=true ;;
+    --uninstall) UNINSTALL=true ;;
   esac
 done
 
 say() { printf "\n\033[1m==> %s\033[0m\n" "$*"; }
 err() { printf "\n\033[31m✗ %s\033[0m\n" "$*" >&2; }
+
+# ── Uninstall: remove the installed app + all traces, then exit (no build) ────
+# Mirrors the Windows client's `build-windows.ps1 -Uninstall`. Reverses exactly
+# what an install created: the .app bundle, the login item, the Dock pin, the
+# saved settings, and the macOS privacy (TCC) grants. Leaves the local signing
+# certificate in the keychain (harmless, reused on reinstall) and this source
+# folder untouched.
+if $UNINSTALL; then
+  BUNDLE_ID="com.amazon.lma.audioclient"
+  say "Uninstalling LMA Audio Capture App"
+
+  # 1. Quit any running instance so files aren't held open.
+  if pkill -x LMAAudioClient 2>/dev/null; then
+    echo "  • Quit the running app"
+    sleep 1
+  fi
+
+  # 2. Delete the .app bundle from every standard location (installed + any
+  #    override). Both /Applications and ~/Applications are checked.
+  removed_any=false
+  for dir in "${INSTALL_DIR:-/Applications}" /Applications "$HOME/Applications"; do
+    app="${dir}/LMAAudioClient.app"
+    if [[ -d "$app" ]]; then
+      if rm -rf "$app" 2>/dev/null; then
+        echo "  • Removed ${app}"; removed_any=true
+      else
+        err "Couldn't remove ${app} (permission?). Try: sudo rm -rf \"${app}\""
+      fi
+    fi
+  done
+  $removed_any || echo "  • No installed app bundle found (already removed?)"
+
+  # 3. Remove the login item (Start-at-login). Ignore if it isn't set.
+  if osascript -e 'tell application "System Events" to delete login item "LMAAudioClient"' 2>/dev/null; then
+    echo "  • Removed the Start-at-login item"
+  fi
+
+  # 4. Unpin from the Dock: drop any persistent-apps entry whose file URL points
+  #    at LMAAudioClient.app, then restart the Dock so the change shows.
+  if defaults read com.apple.dock persistent-apps 2>/dev/null | grep -q "LMAAudioClient.app"; then
+    /usr/bin/python3 - <<'PY' 2>/dev/null && { killall Dock 2>/dev/null; echo "  • Unpinned from the Dock"; }
+import subprocess, plistlib, sys
+raw = subprocess.run(["defaults", "export", "com.apple.dock", "-"],
+                     capture_output=True).stdout
+pl = plistlib.loads(raw)
+apps = pl.get("persistent-apps", [])
+kept = [a for a in apps
+        if "LMAAudioClient.app" not in
+        (a.get("tile-data", {}).get("file-data", {}).get("_CFURLString", ""))]
+if len(kept) != len(apps):
+    pl["persistent-apps"] = kept
+    subprocess.run(["defaults", "import", "com.apple.dock", "-"],
+                   input=plistlib.dumps(pl))
+else:
+    sys.exit(1)
+PY
+  fi
+
+  # 5. Remove saved settings (remembered email, speaker labels, mic choice).
+  removed_prefs=false
+  for p in "$HOME/Library/Preferences/${BUNDLE_ID}.plist" \
+           "$HOME/Library/Preferences/LMAAudioClient.plist"; do
+    [[ -f "$p" ]] && rm -f "$p" && removed_prefs=true
+  done
+  # UserDefaults is cached by cfprefsd; force-drop the domain too.
+  defaults delete "$BUNDLE_ID" 2>/dev/null && removed_prefs=true
+  $removed_prefs && echo "  • Removed saved settings"
+
+  # 6. Reset the privacy (TCC) grants so a reinstall starts clean and no stale
+  #    "LMA Audio Client" rows linger in System Settings.
+  tccutil reset ScreenCapture "$BUNDLE_ID" 2>/dev/null || true
+  tccutil reset Microphone "$BUNDLE_ID" 2>/dev/null || true
+  echo "  • Reset Screen Recording + Microphone permissions"
+
+  # 7. Deregister from LaunchServices so Spotlight forgets it immediately.
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+    -u "/Applications/LMAAudioClient.app" 2>/dev/null || true
+
+  say "Uninstall complete"
+  echo "The app and its settings/permissions are removed. This source folder is"
+  echo "untouched — delete it too if you don't plan to rebuild. (The one-time local"
+  echo "signing certificate is left in your login keychain; it's reused on reinstall.)"
+  exit 0
+fi
 
 # ── 0. Clear download quarantine ─────────────────────────────────────────────
 # When this package is downloaded via a browser, macOS tags every extracted file
@@ -194,6 +281,10 @@ LMA Audio Capture App is installed at:
 ▶ START AUTOMATICALLY AT LOGIN:
   Left-click the "LMA" menu-bar item and enable "Start automatically at login"
   (or System Settings ▸ General ▸ Login Items ▸ add LMA Audio Client).
+
+▶ TO UNINSTALL LATER:
+  bash install-macos.sh --uninstall
+  (removes the app, login item, Dock pin, saved settings, and permissions)
 
 EOF
 

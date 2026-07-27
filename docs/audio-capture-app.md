@@ -337,6 +337,14 @@ voice assistant, screen/video capture, or hands-off unattended recording.
 - **Build errors / `xcode-select: command not found`.** Install Apple's
   command-line tools (`xcode-select --install`), complete the popup, and re-run
   `bash install-macos.sh`.
+- **Uninstall.** From the unzipped folder, run `bash install-macos.sh
+  --uninstall`. It quits the app if running, deletes `LMAAudioClient.app` from
+  `/Applications`, removes the Start-at-login item, unpins it from the Dock,
+  clears the app's saved settings (remembered email, speaker labels, mic
+  choice), and resets its Screen Recording + Microphone permissions. The
+  one-time local signing certificate is left in your login keychain (harmless;
+  reused if you reinstall). To remove that too: **Keychain Access ▸ login ▸ My
+  Certificates**, delete "LMA Audio Client Local Signing".
 
 ### Windows
 
