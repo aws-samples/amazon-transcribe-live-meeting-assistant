@@ -435,6 +435,14 @@ public sealed class TrayApp
                 if (_controller.IsAuthenticated &&
                     _controller.CurrentState.Kind != CaptureController.StateKind.Streaming)
                 {
+                    // First-ever recording: gate on the consent disclaimer — show
+                    // the panel with the dialog instead of silently starting.
+                    if (_panel.NeedsDisclaimer)
+                    {
+                        _panel.ShowDisclaimerGate();
+                        ShowControlPanel();
+                        return;
+                    }
                     // Same settings path as the panel's Start button, so
                     // JumpList-started recordings get the right speaker labels.
                     _panel.PushSettingsToController();

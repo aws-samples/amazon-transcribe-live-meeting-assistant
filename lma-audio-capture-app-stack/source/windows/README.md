@@ -253,6 +253,13 @@ Panel options:
   correct even if changed elsewhere.
 - Meeting name gets a `" - yyyy-MM-dd HH:mm"` timestamp suffix when you Start,
   matching macOS.
+- **Recording-consent gate** — the first Start on a machine shows the
+  deployment's `recordingDisclaimer` (from `lma-config.json`; same text as the
+  browser extension's popup) with Agree/Cancel, rendered in place of the Start
+  controls. Agree persists (`HKCU\...\DisclaimerAgreed`) so it's one-time;
+  Cancel doesn't start. The JumpList "Start Recording" path routes through the
+  same gate (`NeedsDisclaimer` / `ShowDisclaimerGate`), surfacing the panel so
+  the dialog is visible.
 
 ### Headless CLI mode (dev + debugging)
 

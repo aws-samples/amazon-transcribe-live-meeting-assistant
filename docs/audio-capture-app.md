@@ -45,6 +45,20 @@ https://github.com/user-attachments/assets/4663740b-a0b3-45a1-b1f3-dc5461f12d18
 > **no special permission** — there is no equivalent of the macOS Screen
 > Recording prompt. The only OS gate is the microphone privacy setting.
 
+## Recording consent
+
+You are responsible for complying with the legal, corporate, and ethical
+restrictions that apply to recording meetings and calls — in many jurisdictions
+**all participants must consent** to being recorded. Do not use this app to
+stream, record, or transcribe calls if otherwise prohibited.
+
+The app shows this disclaimer **before your first recording** and requires you
+to agree (the same consent gate as the browser extension and the web UI's
+Stream Audio tab). The text is configurable per deployment via the
+`RecordingDisclaimer` CloudFormation parameter, so organizations can substitute
+their own legal wording; the app picks it up from the `lma-config.json` baked
+into the download.
+
 ## Download and install (macOS)
 
 1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Audio Capture App

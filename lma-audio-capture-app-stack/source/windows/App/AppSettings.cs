@@ -82,6 +82,20 @@ public static class AppSettings
         set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(MicDeviceValue, value, RegistryValueKind.String); }
     }
 
+    // MARK: - Recording-consent disclaimer (one-time acknowledgment)
+
+    private const string DisclaimerAgreedValue = "DisclaimerAgreed";
+
+    /// <summary>
+    /// Whether the user has acknowledged the recording-consent disclaimer (shown
+    /// once before the first recording, same pattern as the browser extension).
+    /// </summary>
+    public static bool DisclaimerAgreed
+    {
+        get { using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath); return (k?.GetValue(DisclaimerAgreedValue) as int?) == 1; }
+        set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(DisclaimerAgreedValue, value ? 1 : 0, RegistryValueKind.DWord); }
+    }
+
     // MARK: - Start at login (HKCU ...\Run)
 
     /// <summary>

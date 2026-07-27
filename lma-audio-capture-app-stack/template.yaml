@@ -56,6 +56,14 @@ Parameters:
     Type: String
     Description: S3 location (bucket/key) of the audio-capture app source zip
 
+  RecordingDisclaimer:
+    Type: String
+    Description: Disclaimer shown by the app before the first recording (same default as the browser extension)
+    Default: >-
+      Important: You are responsible for complying with legal, corporate, and ethical
+      restrictions that apply to recording meetings and calls. Do not use this solution
+      to stream, record, or transcribe calls if otherwise prohibited.
+
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
@@ -161,6 +169,8 @@ Resources:
           Value: !Ref WebAppBucket
         - Name: CLOUDFRONT_DISTRIBUTION_ID
           Value: !Ref WebAppCloudFrontDistribution
+        - Name: RECORDING_DISCLAIMER
+          Value: !Ref RecordingDisclaimer
       Source:
         Location: !Sub "arn:aws:s3:::${SourceCodeLocation}"
         Type: S3
@@ -181,8 +191,10 @@ Resources:
                   MAC_DIR=.
                   if [ -d ./source/macos ]; then MAC_DIR=./source/macos; fi
                   if [ -d ./macos ]; then MAC_DIR=./macos; fi
-                  printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s"\n}\n' \
-                    "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" > "$MAC_DIR/lma-config.json"
+                  # JSON-escape the disclaimer (free text — may contain quotes/newlines).
+                  DISCLAIMER_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("RECORDING_DISCLAIMER","")))')
+                  printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s",\n  "recordingDisclaimer": %s\n}\n' \
+                    "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" "$DISCLAIMER_JSON" > "$MAC_DIR/lma-config.json"
                   cat "$MAC_DIR/lma-config.json"
                   # Zip the preconfigured macOS source tree (source + install
                   # scripts + baked config), excluding any build artifacts.
@@ -202,8 +214,9 @@ Resources:
                   if [ -d ./source/windows ]; then WIN_DIR=./source/windows; fi
                   if [ -d ./windows ]; then WIN_DIR=./windows; fi
                   if [ -n "$WIN_DIR" ]; then
-                    printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s"\n}\n' \
-                      "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" > "$WIN_DIR/lma-config.json"
+                    DISCLAIMER_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("RECORDING_DISCLAIMER","")))')
+                    printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s",\n  "recordingDisclaimer": %s\n}\n' \
+                      "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" "$DISCLAIMER_JSON" > "$WIN_DIR/lma-config.json"
                     cat "$WIN_DIR/lma-config.json"
                     winzip=lma-audio-capture-app-windows-v<VERSION_TOKEN>.zip
                     (cd "$WIN_DIR" && rm -rf bin obj && zip -r "$OLDPWD/../${winzip}" . -x '*/bin/*' -x '*/obj/*')

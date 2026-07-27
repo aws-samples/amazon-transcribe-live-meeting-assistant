@@ -38,6 +38,11 @@ final class MenuBarAppState: ObservableObject {
     @Published var micDeviceUID = ""            // "" = System Default
     @Published var micDevices: [MicDevices.Device] = []
 
+    // Recording-consent disclaimer: shown once, before the FIRST recording ever
+    // starts on this machine (same pattern as the browser extension's popup).
+    // Agreement is persisted; Cancel just doesn't start.
+    @Published var showDisclaimer = false
+
     let controller: CaptureController
     // UserDefaults keys for the optional "remember login id" feature. Only the
     // username (email) is stored — never the password, which stays in memory.
@@ -46,6 +51,7 @@ final class MenuBarAppState: ObservableObject {
     private static let kMicLabel = "lma.micLabel"
     private static let kSystemLabel = "lma.systemLabel"
     private static let kMicDeviceUID = "lma.micDeviceUID"
+    private static let kDisclaimerAgreed = "lma.disclaimerAgreed"
 
     /// Default label for the system channel when the user hasn't set one.
     static let defaultSystemLabel = "Other participants"
@@ -149,6 +155,24 @@ final class MenuBarAppState: ObservableObject {
         }
     }
     func start() {
+        // One-time recording-consent gate (mirrors the browser extension): the
+        // first Start on this machine shows the disclaimer; Agree persists and
+        // proceeds, Cancel does nothing.
+        guard UserDefaults.standard.bool(forKey: Self.kDisclaimerAgreed) else {
+            showDisclaimer = true
+            return
+        }
+        reallyStart()
+    }
+
+    /// Agree on the consent dialog: persist and start the recording that was gated.
+    func agreeDisclaimerAndStart() {
+        UserDefaults.standard.set(true, forKey: Self.kDisclaimerAgreed)
+        showDisclaimer = false
+        reallyStart()
+    }
+
+    private func reallyStart() {
         // Push current settings (labels may depend on the signed-in email).
         pushSettingsToController()
         let name = meetingName.isEmpty ? "" : "\(meetingName) - \(Self.timestamp())"
@@ -217,7 +241,26 @@ struct MenuBarContentView: View {
                 }
             } else {
                 // Streaming controls
-                if !s.isStreaming {
+                if s.showDisclaimer {
+                    // One-time recording-consent gate (same text and Agree/Cancel
+                    // shape as the browser extension's popup). Shown in place of
+                    // the Start controls so it can't be missed or clicked past.
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Important", systemImage: "exclamationmark.triangle.fill")
+                            .font(.headline).foregroundColor(.orange)
+                        Text(s.controller.config.recordingDisclaimer)
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Spacer()
+                            Button("Cancel") { s.showDisclaimer = false }
+                            Button("Agree") { s.agreeDisclaimerAndStart() }
+                                .keyboardShortcut(.defaultAction)
+                        }
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.08)))
+                } else if !s.isStreaming {
                     TextField("Meeting name (optional)", text: $s.meetingName).textFieldStyle(.roundedBorder)
                     Button(action: s.start) {
                         Label("Start Recording", systemImage: "record.circle").frame(maxWidth: .infinity)
@@ -460,7 +503,12 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
 
     @objc private func dockTogglePause() { state.togglePause() }
     @objc private func dockStop() { state.stop() }
-    @objc private func dockStart() { state.start() }
+    @objc private func dockStart() {
+        state.start()
+        // First-ever recording: start() gates on the consent disclaimer instead
+        // of starting. Surface the panel so the dialog is actually visible.
+        if state.showDisclaimer { showPanelWindow() }
+    }
     @objc private func dockOpenPanel() { showPanelWindow() }
 
     /// The same SwiftUI content as the popover, hosted in a small titled window

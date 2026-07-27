@@ -701,6 +701,11 @@ const AudioCaptureApp = () => {
               )}
             </li>
           </ul>
+          <Alert type="warning" header="Recording consent">
+            You are responsible for complying with the legal, corporate, and ethical restrictions that apply to
+            recording meetings and calls &mdash; in many places <strong>all participants must consent</strong> to being
+            recorded. The app asks you to acknowledge this before your first recording.
+          </Alert>
         </SpaceBetween>
       </Container>
 
