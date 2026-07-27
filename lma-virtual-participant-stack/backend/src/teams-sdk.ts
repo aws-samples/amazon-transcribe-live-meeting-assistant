@@ -102,6 +102,12 @@ export default class TeamsSdk {
             const status = response.status();
             if (status >= 400) {
                 console.log(`[teams-sdk] HTTP ${status} ← ${response.url().slice(0, 300)}`);
+                response
+                    .text()
+                    .then((body) => {
+                        if (body) console.log(`[teams-sdk] HTTP ${status} body: ${body.slice(0, 600)}`);
+                    })
+                    .catch(() => {});
             }
         });
         page.on('requestfailed', (request) => {
@@ -128,10 +134,16 @@ export default class TeamsSdk {
             throw new Error('Teams SDK method selected but ACS_CONNECTION_STRING is not set');
         }
         const endpoint = endpointFromConnectionString(connectionString);
-        const meetingId = (details.invite.meetingId || '').replace(/\s/g, '');
-        if (!meetingId) {
+        const rawId = (details.invite.meetingId || '').replace(/\s/g, '').replace(/\?.*$/, '');
+        if (!rawId) {
             throw new Error('meeting not found: meeting ID is empty');
         }
+        const isNumericId = /^\d+$/.test(rawId);
+        const meetingId = isNumericId ? rawId : '';
+        const meetingLink = isNumericId
+            ? ''
+            : `https://teams.microsoft.com/meet/${rawId}${details.invite.meetingPassword ? `?p=${encodeURIComponent(details.invite.meetingPassword)}` : ''}`;
+        if (meetingLink) console.log(`[teams-sdk] non-numeric meeting id — joining via meeting link ${meetingLink}`);
 
         await substep('Authorizing with Azure Communication Services…');
         const identityClient = new CommunicationIdentityClient(connectionString);
@@ -150,6 +162,7 @@ export default class TeamsSdk {
                 acsUserId: user.communicationUserId,
                 displayName: details.scribeIdentity,
                 meetingId,
+                meetingLink,
                 passcode: details.invite.meetingPassword || '',
                 wantMic: voiceAssistant.isEnabled() || simliAvatar.isConnected(),
             },
@@ -164,6 +177,7 @@ export default class TeamsSdk {
         );
         const initError = await page.evaluate(() => (window as any).__lmaJoinError).catch(() => null);
         if (initError) {
+            if (initError.detail) console.error(`[teams-sdk] init error detail: ${initError.detail}`);
             throw new Error(`Teams SDK setup failed: ${initError.reason || 'unknown'}`);
         }
 

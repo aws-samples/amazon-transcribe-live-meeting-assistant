@@ -138,6 +138,38 @@ function participantName(identifier: any): string {
     return '';
 }
 
+const JOIN_REJECTIONS: Array<{ pattern: RegExp; reason: string }> = [
+    {
+        pattern: /AnonymousJoinDisabled|Anonymous Join is disabled/i,
+        reason:
+            'Anonymous join is disabled for this Teams tenant by policy (subCode 5723). A tenant admin must enable "Anonymous users can join a meeting" in the Teams admin center meeting settings.',
+    },
+    {
+        pattern: /not allowed to create conversation|"subCode":\s*5222/i,
+        reason:
+            'This meeting is a personal (Teams Free / teams.live.com) meeting (subCode 5222). ACS Teams interop only supports meetings organized by a Microsoft 365 work or school account on teams.microsoft.com.',
+    },
+];
+
+const origFetch = window.fetch.bind(window);
+window.fetch = async (...args: Parameters<typeof fetch>) => {
+    const res = await origFetch(...args);
+    try {
+        const url = typeof args[0] === 'string' ? args[0] : (args[0] as Request).url;
+        if (res.status === 403 && /flightproxy|conv/i.test(url)) {
+            const body = await res.clone().text();
+            const match = JOIN_REJECTIONS.find((r) => r.pattern.test(body));
+            if (match) {
+                w.__lmaJoinError = { reason: match.reason, detail: body.slice(0, 400) };
+                log(`join rejected: ${match.reason}`);
+            }
+        }
+    } catch {
+        /* diagnostic only */
+    }
+    return res;
+};
+
 function setupListeners(): void {
     adapter.on('callEnded', (e: any) => {
         w.__lmaCallEndReason = { code: e && e.code, subCode: e && e.subCode };
@@ -165,13 +197,20 @@ function setupListeners(): void {
         }
         log(`callError: ${detail.slice(0, 500)}`);
     });
-    adapter.on('diagnosticChanged', (e: any) => {
+    for (const diagEvent of ['diagnosticChanged', 'callDiagnosticChanged']) {
         try {
-            log(`diagnostic: ${JSON.stringify(e).slice(0, 300)}`);
+            adapter.on(diagEvent, (e: any) => {
+                try {
+                    log(`diagnostic(${diagEvent}): ${JSON.stringify(e).slice(0, 300)}`);
+                } catch {
+                    /* noop */
+                }
+            });
+            break;
         } catch {
-            /* noop */
+            /* this adapter build doesn't expose this event name */
         }
-    });
+    }
     adapter.on('isSpeakingChanged', (e: any) => {
         if (!e || !e.isSpeaking) return;
         const name = participantName(e.identifier);
@@ -218,6 +257,21 @@ w.__lmaTeamsJoin = () => {
     }
 };
 
+function serializeError(e: any): string {
+    try {
+        if (e instanceof Error) {
+            const props: Record<string, unknown> = { name: e.name, message: e.message, stack: (e.stack || '').split('\n').slice(0, 6).join(' | ') };
+            for (const k of Object.getOwnPropertyNames(e)) {
+                if (!(k in props)) props[k] = (e as any)[k];
+            }
+            return JSON.stringify(props);
+        }
+        return JSON.stringify(e) || String(e);
+    } catch {
+        return String(e);
+    }
+}
+
 async function init(): Promise<void> {
     const cfg = w.__lmaTeamsConfig;
     if (!cfg || !cfg.token || !cfg.endpoint || !cfg.acsUserId) {
@@ -225,11 +279,13 @@ async function init(): Promise<void> {
         log('config missing');
         return;
     }
+    let step = 'credential';
     try {
         const credential = new AzureCommunicationTokenCredential(cfg.token);
         const locator = cfg.meetingLink
             ? { meetingLink: cfg.meetingLink }
             : { meetingId: cfg.meetingId, passcode: cfg.passcode || undefined };
+        step = 'createAdapter';
         adapter = await createAzureCommunicationCallWithChatAdapter({
             endpoint: cfg.endpoint,
             userId: { communicationUserId: cfg.acsUserId },
@@ -237,8 +293,10 @@ async function init(): Promise<void> {
             credential,
             locator: locator as any,
         });
+        step = 'listeners';
         setupListeners();
 
+        step = 'render';
         const container = document.getElementById('lma-root');
         if (container) {
             const root = createRoot(container);
@@ -253,8 +311,13 @@ async function init(): Promise<void> {
         w.__lmaSdkReady = true;
         log('adapter ready');
     } catch (e: any) {
-        w.__lmaJoinError = { reason: (e && e.message) || 'adapter creation failed' };
-        log(`init error: ${e}`);
+        const detail = serializeError(e);
+        w.__lmaJoinError = {
+            reason: `${(e && e.message) || 'adapter creation failed'} [step=${step}]`,
+            detail,
+            step,
+        };
+        log(`init error at step=${step}: ${detail}`);
     }
 }
 
