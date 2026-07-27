@@ -73,13 +73,23 @@ Requires macOS 13+ and Xcode command-line tools (`xcode-select --install`).
 > file), so it runs and then clears the flag from the rest of the folder.
 > Equivalently, clear it yourself first with `xattr -dr com.apple.quarantine .`
 > then `./install-macos.sh`. (Building locally means nothing is downloaded
-> pre-built, so once quarantine is cleared the ad-hoc-signed binary just runs.)
+> pre-built, so once quarantine is cleared the locally signed binary just runs.)
 
 ### Recommended: run as a `.app` bundle launched with `open` (own TCC identity)
 
 `make-app.sh` wraps the release binary in a minimal `.app` with an `Info.plist`
 (mic usage string) so privacy permissions can be attributed to **"LMA Audio
 Client"**.
+
+It signs the bundle with a **persistent self-signed identity** ("LMA Audio
+Client Local Signing", created in your login keychain on first build — you may
+be prompted once for your login password to trust it). This matters: an ad-hoc
+signature (`codesign -s -`) pins the app's identity to a per-build hash, so
+**every rebuild invalidated the Screen Recording permission** — System Settings
+still showed it enabled, but macOS re-prompted on every capture. With the
+certificate-backed signature the TCC grant is anchored to the cert and
+survives rebuilds. Set `LMA_ADHOC_SIGN=1` to force the old ad-hoc behavior
+(e.g. throwaway CI builds).
 
 > **Critical:** launch it with **`open`** (or double-click in Finder), **not** by
 > running `.../Contents/MacOS/LMAAudioClient` directly. Only `open` goes through

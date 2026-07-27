@@ -105,8 +105,11 @@ fi
 # ── 2. Build + bundle ────────────────────────────────────────────────────────
 say "Building the app (this may take a minute on first run)"
 # make-app.sh does the release build, .app assembly, bakes lma-config.json into
-# Contents/Resources/, strips quarantine, and ad-hoc signs. (Config must NOT go
-# in Contents/MacOS/ — codesign rejects non-code files there.)
+# Contents/Resources/, strips quarantine, and signs with a persistent local
+# self-signed identity (created on first build; may prompt once for your login
+# password to trust it). This keeps the Screen Recording permission valid
+# across rebuilds — an ad-hoc signature would invalidate it every build.
+# (Config must NOT go in Contents/MacOS/ — codesign rejects non-code files there.)
 ./make-app.sh
 
 APP="build/LMAAudioClient.app"

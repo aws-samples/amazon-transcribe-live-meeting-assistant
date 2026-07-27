@@ -309,6 +309,15 @@ voice assistant, screen/video capture, or hands-off unattended recording.
 - **No remote-participant audio in the transcript.** Grant **Screen Recording**
   to "LMA Audio Client" in System Settings and relaunch. Audio-only capture
   still requires the Screen Recording permission on macOS.
+- **macOS keeps asking for Screen Recording permission even though it's
+  enabled.** This happens when the app was rebuilt with an ad-hoc signature —
+  macOS ties the permission to the exact binary, so every rebuild invalidates
+  it while System Settings still shows it "enabled". Fix: rebuild with the
+  current `install-macos.sh` (it now signs with a persistent local identity),
+  then clear the stale records and re-grant once:
+  `tccutil reset ScreenCapture com.amazon.lma.audioclient`, relaunch the app,
+  start a recording, and approve the prompt. If System Settings shows duplicate
+  "LMA Audio Client" rows, remove them with the **–** button first.
 - **Build errors / `xcode-select: command not found`.** Install Apple's
   command-line tools (`xcode-select --install`), complete the popup, and re-run
   `bash install-macos.sh`.
