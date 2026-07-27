@@ -19,7 +19,11 @@ options cannot. It adds **no bot** or extra attendee to the meeting.
 > pipeline, and code-signing tools are OS-specific, so building on your own
 > machine is both required and the most trustworthy option.
 
-https://github.com/user-attachments/assets/6a7c831c-bfe2-41b8-8083-2c9d6eb6b5db
+
+
+https://github.com/user-attachments/assets/4663740b-a0b3-45a1-b1f3-dc5461f12d18
+
+
 
 
 ## How it works
