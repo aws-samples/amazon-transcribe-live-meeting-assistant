@@ -146,8 +146,10 @@ ensure_signing_identity() {
   # Trust our own cert for code signing so codesign doesn't reject it as
   # untrusted (may prompt once for your login password — expected, one time).
   security add-trusted-cert -p codeSign -k "${login_keychain}" "${tmp}/cert.pem" || true
-  # Let codesign use the private key without a per-build password prompt.
-  security set-key-partition-list -S apple-tool:,apple: -s -k "" "${login_keychain}" 2>/dev/null || true
+  # Let codesign use the private key without a per-build keychain prompt. The
+  # partition list MUST include codesign: — with only apple-tool:/apple:,
+  # codesign still pops the "allow signing" dialog, which hangs a headless run.
+  security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "${login_keychain}" 2>/dev/null || true
   rm -rf "${tmp}"
   # Verify the identity actually formed (cert + private key + trust).
   security find-identity -v -p codesigning 2>/dev/null | grep -q "${SIGN_IDENTITY}"
