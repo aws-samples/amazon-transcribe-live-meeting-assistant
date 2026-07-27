@@ -200,6 +200,14 @@ Popover options:
 - **Start automatically at login** — registers the app as a macOS login item.
   The installer already placed the app in `/Applications`, so this works out of
   the box. You can also manage it in **System Settings ▸ General ▸ Login Items**.
+- **Settings (⚙ gear, top-right of the popover)** — customize how the two
+  channels are labeled in the LMA transcript and which microphone is captured:
+  - **My mic** speaker label — defaults to your signed-in email address.
+  - **System** speaker label — defaults to **"Other participants"**.
+  - **Microphone** — pick a specific input device, or leave **System Default**
+    to follow your Sound settings. If a chosen mic is unplugged, recording
+    falls back to the default. Changes are saved immediately and apply to the
+    **next** recording (the gear is disabled while recording).
 
 ### Running it in the background
 
@@ -260,6 +268,14 @@ Panel options:
   password is never stored).
 - **Start automatically at login** — adds a per-user startup entry that launches
   the tray app when you sign in; the toggle reflects the real system state.
+- **Settings (⚙ gear, top-right of the panel)** — customize how the two
+  channels are labeled in the LMA transcript and which microphone is captured:
+  - **My mic** speaker label — defaults to your signed-in email address.
+  - **System audio** speaker label — defaults to **"Other participants"**.
+  - **Microphone** — pick a specific input device, or leave **System Default**
+    to follow Windows' input device setting. If a chosen mic is unplugged,
+    recording falls back to the default. Changes are saved immediately and
+    apply to the **next** recording (the gear is disabled while recording).
 
 The app uses no audio or CPU when idle, so the intended usage is to leave it in
 the tray and click **Start** when a meeting begins. **To relaunch after

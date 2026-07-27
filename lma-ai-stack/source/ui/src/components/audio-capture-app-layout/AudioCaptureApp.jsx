@@ -311,6 +311,11 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
             so this works out of the box.
           </li>
           <li>
+            <strong>Settings (⚙ gear):</strong> set the transcript <strong>speaker labels</strong> for each channel
+            (your mic defaults to your email, system audio to &quot;Other participants&quot;) and pick a specific{' '}
+            <strong>microphone</strong> (or leave System Default). Changes apply to your next recording.
+          </li>
+          <li>
             <strong>Launch or relaunch:</strong> press <strong>⌘-Space</strong>, type <strong>LMA Audio Client</strong>,
             and press Return &mdash; or run <code>open -a &quot;LMA Audio Client&quot;</code>.
           </li>
@@ -473,6 +478,11 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
           <li>
             <strong>Remember my email</strong> prefills your login next launch (email only; the password is never
             stored).
+          </li>
+          <li>
+            <strong>Settings (⚙ gear):</strong> set the transcript <strong>speaker labels</strong> for each channel
+            (your mic defaults to your email, system audio to &quot;Other participants&quot;) and pick a specific{' '}
+            <strong>microphone</strong> (or leave System Default). Changes apply to your next recording.
           </li>
         </ul>
       </SpaceBetween>

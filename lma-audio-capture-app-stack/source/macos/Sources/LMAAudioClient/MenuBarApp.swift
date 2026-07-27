@@ -30,11 +30,25 @@ final class MenuBarAppState: ObservableObject {
 
     @Published var rememberLogin = false
 
+    // Settings (gear panel): per-channel speaker labels + mic device. Persisted
+    // in UserDefaults; applied to the controller so they ride the START frame.
+    @Published var showSettings = false
+    @Published var micLabel = ""
+    @Published var systemLabel = ""
+    @Published var micDeviceUID = ""            // "" = System Default
+    @Published var micDevices: [MicDevices.Device] = []
+
     let controller: CaptureController
     // UserDefaults keys for the optional "remember login id" feature. Only the
     // username (email) is stored — never the password, which stays in memory.
     private static let kRemember = "lma.rememberLogin"
     private static let kUsername = "lma.savedUsername"
+    private static let kMicLabel = "lma.micLabel"
+    private static let kSystemLabel = "lma.systemLabel"
+    private static let kMicDeviceUID = "lma.micDeviceUID"
+
+    /// Default label for the system channel when the user hasn't set one.
+    static let defaultSystemLabel = "Other participants"
 
     init(controller: CaptureController) {
         self.controller = controller
@@ -42,11 +56,52 @@ final class MenuBarAppState: ObservableObject {
         self.rememberLogin = defaults.bool(forKey: Self.kRemember)
         // Prefill the login id from the remembered value, else the config.
         self.username = rememberLogin ? (defaults.string(forKey: Self.kUsername) ?? "") : controller.config.username
+        self.micLabel = defaults.string(forKey: Self.kMicLabel) ?? ""
+        self.systemLabel = defaults.string(forKey: Self.kSystemLabel) ?? ""
+        self.micDeviceUID = defaults.string(forKey: Self.kMicDeviceUID) ?? ""
+        pushSettingsToController()
         controller.onStateChange = { [weak self] s in self?.state = s }
         controller.onLevels = { [weak self] m, k, c, p in
             self?.meetingLevel = m; self?.micLevel = k; self?.connected = c; self?.paused = p
         }
         controller.onLog = { [weak self] msg in self?.lastLog = msg }
+    }
+
+    // MARK: - Settings
+
+    /// The mic label shown/used when the user hasn't customized one: their
+    /// signed-in email, else the config's agentId ("Me").
+    var effectiveMicLabel: String {
+        if !micLabel.isEmpty { return micLabel }
+        if !username.isEmpty { return username }
+        return controller.config.agentId
+    }
+    var effectiveSystemLabel: String {
+        systemLabel.isEmpty ? Self.defaultSystemLabel : systemLabel
+    }
+
+    func saveSettings() {
+        let defaults = UserDefaults.standard
+        defaults.set(micLabel, forKey: Self.kMicLabel)
+        defaults.set(systemLabel, forKey: Self.kSystemLabel)
+        defaults.set(micDeviceUID, forKey: Self.kMicDeviceUID)
+        pushSettingsToController()
+    }
+
+    /// Refresh the device list each time the panel opens (hotplug-friendly).
+    func refreshMicDevices() {
+        micDevices = MicDevices.list()
+        // If the saved device disappeared, show System Default rather than a
+        // stale selection (capture already falls back at start).
+        if !micDeviceUID.isEmpty && !micDevices.contains(where: { $0.uid == micDeviceUID }) {
+            micDeviceUID = ""
+        }
+    }
+
+    private func pushSettingsToController() {
+        controller.micLabel = effectiveMicLabel
+        controller.systemLabel = effectiveSystemLabel
+        controller.micDeviceUID = micDeviceUID
     }
 
     var isStreaming: Bool { if case .streaming = state { return true }; return false }
@@ -94,6 +149,8 @@ final class MenuBarAppState: ObservableObject {
         }
     }
     func start() {
+        // Push current settings (labels may depend on the signed-in email).
+        pushSettingsToController()
         let name = meetingName.isEmpty ? "" : "\(meetingName) - \(Self.timestamp())"
         controller.start(callId: name.isEmpty ? nil : name)
     }
@@ -119,9 +176,27 @@ struct MenuBarContentView: View {
                 Text("LMA Audio Capture").font(.headline)
                 Spacer()
                 Text(statusText).font(.caption).foregroundColor(.secondary)
+                // Settings gear: speaker labels + mic picker. Disabled while
+                // streaming — labels ride the START frame, so mid-meeting
+                // changes wouldn't take effect anyway.
+                Button {
+                    s.showSettings.toggle()
+                    if s.showSettings { s.refreshMicDevices() }
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(s.showSettings ? .accentColor : .secondary)
+                .disabled(s.isStreaming)
+                .help(s.isStreaming ? "Stop recording to change settings" : "Settings")
             }
 
             Divider()
+
+            if s.showSettings {
+                SettingsView(s: s)
+                Divider()
+            }
 
             if !s.controller.isAuthenticated {
                 // Sign-in form
@@ -215,6 +290,47 @@ struct MenuBarContentView: View {
         case .streaming: return "Recording"
         case .stopping: return "Stopping…"
         case .error: return "Error"
+        }
+    }
+}
+
+/// Settings section (gear): speaker labels for the two channels + mic picker.
+/// Labels are applied to the next recording's START frame; the mic choice is
+/// applied when capture starts. Saved on every edit (no Apply button).
+@available(macOS 13.0, *)
+struct SettingsView: View {
+    @ObservedObject var s: MenuBarAppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Speaker labels").font(.caption).foregroundColor(.secondary)
+            HStack {
+                Text("My mic").font(.caption).frame(width: 70, alignment: .leading)
+                TextField(s.username.isEmpty ? "Me" : s.username,
+                          text: Binding(get: { s.micLabel }, set: { s.micLabel = $0; s.saveSettings() }))
+                    .textFieldStyle(.roundedBorder).font(.caption)
+            }
+            HStack {
+                Text("System").font(.caption).frame(width: 70, alignment: .leading)
+                TextField(MenuBarAppState.defaultSystemLabel,
+                          text: Binding(get: { s.systemLabel }, set: { s.systemLabel = $0; s.saveSettings() }))
+                    .textFieldStyle(.roundedBorder).font(.caption)
+            }
+            Text("These appear as the speaker names in the LMA transcript. Leave blank for the defaults shown.")
+                .font(.caption2).foregroundColor(.secondary)
+
+            Text("Microphone").font(.caption).foregroundColor(.secondary).padding(.top, 2)
+            Picker("", selection: Binding(get: { s.micDeviceUID }, set: { s.micDeviceUID = $0; s.saveSettings() })) {
+                Text("System Default").tag("")
+                ForEach(s.micDevices) { d in
+                    Text(d.name).tag(d.uid)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .font(.caption)
+            Text("System Default follows your Sound settings. If a chosen mic is unplugged, recording falls back to the default.")
+                .font(.caption2).foregroundColor(.secondary)
         }
     }
 }

@@ -111,6 +111,15 @@ public sealed class CaptureController
     /// Begin capture + streaming. Uses a fresh callId per session unless the
     /// caller set one on the config. Safe to call only when authenticated.
     /// </summary>
+    // Settings (persisted by the GUI, applied at start). Empty = use the
+    // config/CLI value, so the headless CLI path is completely unaffected.
+    /// <summary>Speaker label for the mic channel (ch_1 → AgentId). GUI default: the signed-in email.</summary>
+    public string MicLabel = "";
+    /// <summary>Speaker label for the system-audio channel (ch_0 → FromNumber).</summary>
+    public string SystemLabel = "";
+    /// <summary>MMDevice ID of the mic to capture from. Empty = system default.</summary>
+    public string MicDeviceId = "";
+
     public void Start(string? callId = null)
     {
         if (string.IsNullOrEmpty(Config.AccessToken)) { SetState(State.Err("Not signed in")); return; }
@@ -119,9 +128,14 @@ public sealed class CaptureController
         if (!string.IsNullOrEmpty(callId)) Config.CallId = callId!;
         ActiveCallId = Config.CallId;
 
+        // Apply Settings overrides: speaker labels ride the START frame as
+        // AgentId (mic/ch_1) and FromNumber (system/ch_0).
+        if (!string.IsNullOrEmpty(MicLabel)) Config.AgentId = MicLabel;
+        if (!string.IsNullOrEmpty(SystemLabel)) Config.FromNumber = SystemLabel;
+
         var sock = new TranscriberSocket(Config);
         var mix = new StereoMixer(Config.SampleRate, chunk => sock.SendPcm(chunk));
-        var cap = new AudioCapture(mix, Config.SampleRate);
+        var cap = new AudioCapture(mix, Config.SampleRate, MicDeviceId);
 
         // Optional: tee the exact streamed PCM to a local stereo WAV for offline
         // verification (per-channel RMS proves ch0=system / ch1=mic, not swapped).

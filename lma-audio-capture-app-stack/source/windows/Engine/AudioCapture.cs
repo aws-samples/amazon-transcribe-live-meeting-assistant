@@ -44,10 +44,35 @@ public sealed class AudioCapture : IMMNotificationClient
     private volatile bool _running;
     private volatile bool _rebuildScheduled;
 
-    public AudioCapture(StereoMixer mixer, int targetRate)
+    /// <summary>MMDevice ID of the mic to use; empty = system default (Settings picker).</summary>
+    private readonly string _micDeviceId;
+
+    public AudioCapture(StereoMixer mixer, int targetRate, string micDeviceId = "")
     {
         _mixer = mixer;
         _targetRate = targetRate;
+        _micDeviceId = micDeviceId;
+    }
+
+    /// <summary>
+    /// Input devices for the Settings mic picker: (MMDevice ID, friendly name).
+    /// IDs are stable across reboots/hotplug, unlike device indexes.
+    /// </summary>
+    public static List<(string Id, string Name)> ListMicDevices()
+    {
+        var result = new List<(string, string)>();
+        try
+        {
+            using var e = new MMDeviceEnumerator();
+            foreach (var d in e.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
+            {
+                result.Add((d.ID, d.FriendlyName));
+                d.Dispose();
+            }
+        }
+        catch { /* enumeration failure → empty list; picker shows only System Default */ }
+        result.Sort((a, b) => string.Compare(a.Item2, b.Item2, StringComparison.OrdinalIgnoreCase));
+        return result;
     }
 
     public void Start()
@@ -118,7 +143,23 @@ public sealed class AudioCapture : IMMNotificationClient
         {
             try
             {
-                var device = _enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+                // Settings picker: use the chosen device if it's still connected,
+                // else fall back to the system default (same as no selection).
+                MMDevice? device = null;
+                if (!string.IsNullOrEmpty(_micDeviceId))
+                {
+                    try
+                    {
+                        var d = _enumerator.GetDevice(_micDeviceId);
+                        if (d?.State == DeviceState.Active) device = d;
+                        else Console.WriteLine("⚠ selected mic not connected; using system default input");
+                    }
+                    catch
+                    {
+                        Console.WriteLine("⚠ selected mic not found; using system default input");
+                    }
+                }
+                device ??= _enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
                 var cap = new WasapiCapture(device);
                 var fmt = cap.WaveFormat;
                 _micChannels = fmt.Channels;

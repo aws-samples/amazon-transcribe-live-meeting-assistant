@@ -52,6 +52,36 @@ public static class AppSettings
             k.DeleteValue(UsernameValue, throwOnMissingValue: false);
     }
 
+    // MARK: - Settings gear (speaker labels + mic device)
+
+    private const string MicLabelValue = "MicLabel";
+    private const string SystemLabelValue = "SystemLabel";
+    private const string MicDeviceValue = "MicDeviceId";
+
+    /// <summary>Default label for the system channel when the user hasn't set one.</summary>
+    public const string DefaultSystemLabel = "Other participants";
+
+    /// <summary>Custom mic-channel speaker label ("" = default: signed-in email).</summary>
+    public static string MicLabel
+    {
+        get { using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath); return (k?.GetValue(MicLabelValue) as string) ?? ""; }
+        set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(MicLabelValue, value, RegistryValueKind.String); }
+    }
+
+    /// <summary>Custom system-channel speaker label ("" = DefaultSystemLabel).</summary>
+    public static string SystemLabel
+    {
+        get { using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath); return (k?.GetValue(SystemLabelValue) as string) ?? ""; }
+        set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(SystemLabelValue, value, RegistryValueKind.String); }
+    }
+
+    /// <summary>MMDevice ID of the chosen mic ("" = system default).</summary>
+    public static string MicDeviceId
+    {
+        get { using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath); return (k?.GetValue(MicDeviceValue) as string) ?? ""; }
+        set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(MicDeviceValue, value, RegistryValueKind.String); }
+    }
+
     // MARK: - Start at login (HKCU ...\Run)
 
     /// <summary>

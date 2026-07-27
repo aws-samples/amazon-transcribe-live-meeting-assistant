@@ -53,6 +53,18 @@ public sealed class PanelView : Border
     private readonly Button _openLma = new();
     private readonly TextBlock _logLine = new() { Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap };
 
+    // Settings gear (speaker labels + mic picker)
+    private bool _showSettings;
+    private readonly Button _gear = new()
+    {
+        Content = "⚙", FontSize = 14, Padding = new Thickness(4, 0, 4, 0),
+        Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+        VerticalAlignment = VerticalAlignment.Center, Cursor = System.Windows.Input.Cursors.Hand,
+    };
+    private readonly TextBox _micLabel = new();
+    private readonly TextBox _systemLabel = new();
+    private readonly ComboBox _micPicker = new() { FontSize = 11, Margin = new Thickness(0, 0, 0, 6) };
+
     private readonly StackPanel _body = new();
 
     public Action? RequestClosePopup;
@@ -84,8 +96,10 @@ public sealed class PanelView : Border
             VerticalAlignment = VerticalAlignment.Center,
         });
         DockPanel.SetDock(left, Dock.Left);
+        DockPanel.SetDock(_gear, Dock.Right);
         DockPanel.SetDock(_statusText, Dock.Right);
         header.Children.Add(left);
+        header.Children.Add(_gear);
         header.Children.Add(_statusText);
         root.Children.Add(header);
         root.Children.Add(Sep());
@@ -110,16 +124,77 @@ public sealed class PanelView : Border
             catch (Exception ex) { OnLog($"Couldn't change Start-at-login: {ex.Message}"); }
         };
 
-        StyleBox(_email); StyleBox(_meetingName);
+        StyleBox(_email); StyleBox(_meetingName); StyleBox(_micLabel); StyleBox(_systemLabel);
         _password.Margin = _email.Margin = _meetingName.Margin = new Thickness(0, 0, 0, 6);
         _password.Padding = new Thickness(4);
+
+        // Settings gear: toggle the section; save on every edit (no Apply).
+        // Disabled while streaming — labels ride the START frame, so mid-meeting
+        // changes wouldn't take effect anyway.
+        _gear.Click += (_, _) =>
+        {
+            _showSettings = !_showSettings;
+            if (_showSettings) RefreshMicPicker();
+            Refresh();
+        };
+        _micLabel.TextChanged += (_, _) => AppSettings.MicLabel = _micLabel.Text;
+        _systemLabel.TextChanged += (_, _) => AppSettings.SystemLabel = _systemLabel.Text;
+        _micPicker.SelectionChanged += (_, _) =>
+        {
+            if (_micPicker.SelectedItem is ComboBoxItem it)
+                AppSettings.MicDeviceId = (it.Tag as string) ?? "";
+        };
     }
 
     public void InitFromSettings()
     {
         _remember.IsChecked = AppSettings.RememberLogin;
         _email.Text = AppSettings.RememberLogin ? AppSettings.SavedUsername : _c.Config.Username;
+        _micLabel.Text = AppSettings.MicLabel;
+        _systemLabel.Text = AppSettings.SystemLabel;
+        PushSettingsToController();
         Refresh();
+    }
+
+    /// <summary>
+    /// Apply persisted settings to the controller. The effective mic label
+    /// falls back to the signed-in email (the requested default), then the
+    /// config's AgentId ("Me"); the system label falls back to
+    /// "Other participants".
+    /// </summary>
+    public void PushSettingsToController()
+    {
+        var mic = AppSettings.MicLabel;
+        if (string.IsNullOrEmpty(mic)) mic = CurrentEmail();
+        if (string.IsNullOrEmpty(mic)) mic = _c.Config.AgentId;
+        _c.MicLabel = mic;
+        var sys = AppSettings.SystemLabel;
+        _c.SystemLabel = string.IsNullOrEmpty(sys) ? AppSettings.DefaultSystemLabel : sys;
+        _c.MicDeviceId = AppSettings.MicDeviceId;
+    }
+
+    private string CurrentEmail()
+    {
+        if (!string.IsNullOrEmpty(_email.Text)) return _email.Text;
+        return AppSettings.RememberLogin ? AppSettings.SavedUsername : _c.Config.Username;
+    }
+
+    /// <summary>Repopulate the mic dropdown from live device enumeration (hotplug-friendly).</summary>
+    private void RefreshMicPicker()
+    {
+        _micPicker.Items.Clear();
+        var selected = AppSettings.MicDeviceId;
+        var def = new ComboBoxItem { Content = "System Default", Tag = "" };
+        _micPicker.Items.Add(def);
+        _micPicker.SelectedItem = def;
+        foreach (var (id, name) in AudioCapture.ListMicDevices())
+        {
+            var item = new ComboBoxItem { Content = name, Tag = id };
+            _micPicker.Items.Add(item);
+            if (id == selected) _micPicker.SelectedItem = item;
+        }
+        // Saved device unplugged → selection stays on System Default, matching
+        // the engine's fallback at capture start.
     }
 
     public void FocusFirstField()
@@ -175,6 +250,36 @@ public sealed class PanelView : Border
     public void Refresh()
     {
         _body.Children.Clear();
+
+        // Settings gear is only actionable between recordings.
+        bool isStreaming = _c.CurrentState.Kind == CaptureController.StateKind.Streaming;
+        _gear.IsEnabled = !isStreaming;
+        _gear.ToolTip = isStreaming ? "Stop recording to change settings" : "Settings";
+        _gear.Foreground = _showSettings ? Brushes.SteelBlue : Secondary;
+
+        if (_showSettings && !isStreaming)
+        {
+            _body.Children.Add(Label("Speaker labels — shown in the LMA transcript"));
+            _body.Children.Add(Label("My mic"));
+            // Placeholder semantics: blank = default (signed-in email).
+            if (string.IsNullOrEmpty(_micLabel.Text))
+                _micLabel.ToolTip = $"Default: {(string.IsNullOrEmpty(CurrentEmail()) ? "Me" : CurrentEmail())}";
+            _body.Children.Add(_micLabel);
+            _body.Children.Add(Label("System audio"));
+            if (string.IsNullOrEmpty(_systemLabel.Text))
+                _systemLabel.ToolTip = $"Default: {AppSettings.DefaultSystemLabel}";
+            _body.Children.Add(_systemLabel);
+            _body.Children.Add(Label("Microphone"));
+            _body.Children.Add(_micPicker);
+            _body.Children.Add(new TextBlock
+            {
+                Text = "Leave a label blank for its default. System Default follows Windows' input device; " +
+                       "if a chosen mic is unplugged, recording falls back to the default.",
+                Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 4),
+            });
+            _body.Children.Add(Sep());
+        }
 
         if (!_c.IsAuthenticated)
         {
@@ -253,6 +358,8 @@ public sealed class PanelView : Border
 
     private void DoStart()
     {
+        // Push current settings (the mic label may depend on the signed-in email).
+        PushSettingsToController();
         var name = string.IsNullOrEmpty(_meetingName.Text)
             ? null
             : $"{_meetingName.Text} - {DateTime.Now:yyyy-MM-dd HH:mm}";

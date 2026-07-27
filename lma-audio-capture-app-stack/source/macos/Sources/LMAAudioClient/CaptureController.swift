@@ -34,6 +34,16 @@ final class CaptureController {
     /// The callId of the active/most-recent stream (for "Open in LMA" deep link).
     private(set) var activeCallId: String = ""
 
+    // Settings (persisted by the GUI, applied at start). Empty = use the
+    // config/CLI value, so the headless CLI path is completely unaffected.
+    /// Speaker label for the mic channel (ch_1 → agentId). GUI default: the
+    /// signed-in email.
+    var micLabel: String = ""
+    /// Speaker label for the system-audio channel (ch_0 → fromNumber).
+    var systemLabel: String = ""
+    /// CoreAudio UID of the mic to capture from. Empty = system default.
+    var micDeviceUID: String = ""
+
     init(config: Config) { self.config = config }
 
     var state: State { lock.lock(); defer { lock.unlock() }; return _state }
@@ -97,9 +107,14 @@ final class CaptureController {
         if let c = callId, !c.isEmpty { config.callId = c }
         activeCallId = config.callId
 
+        // Apply Settings overrides: speaker labels ride the START frame as
+        // agentId (mic/ch_1) and fromNumber (system/ch_0).
+        if !micLabel.isEmpty { config.agentId = micLabel }
+        if !systemLabel.isEmpty { config.fromNumber = systemLabel }
+
         let sock = TranscriberSocket(config: config)
         let mix = StereoMixer(sampleRate: config.sampleRate) { [weak sock] chunk in sock?.sendPCM(chunk) }
-        let cap = AudioCapture(mixer: mix, targetRate: config.sampleRate)
+        let cap = AudioCapture(mixer: mix, targetRate: config.sampleRate, micDeviceUID: micDeviceUID)
 
         sock.onStateChange = { connected in mix.setConnected(connected) }
         mix.onLevels = { [weak self] mRMS, kRMS, connected, paused in
