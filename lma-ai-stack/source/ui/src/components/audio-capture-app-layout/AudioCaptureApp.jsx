@@ -349,6 +349,17 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
           Recording permission on macOS.
         </Box>
         <Box variant="p">
+          <strong>Uninstall.</strong> From the unzipped folder, run <code>bash install-macos.sh --uninstall</code>{' '}
+          <Button
+            variant="inline-icon"
+            iconName="copy"
+            ariaLabel="Copy uninstall command"
+            onClick={() => copyToClipboard('bash install-macos.sh --uninstall')}
+          />
+          . It removes the app from <code>/Applications</code>, the Start-at-login item, and the Dock pin, and clears
+          the app&apos;s saved settings and Screen Recording / Microphone permissions.
+        </Box>
+        <Box variant="p">
           <strong>Sign-in fails.</strong> Use the same email and password you use for this LMA web app. If your
           organization uses SSO, this app&apos;s username/password sign-in may not apply &mdash; use the{' '}
           <Link href={`#${BROWSER_EXTENSION_PATH}`}>Chrome Extension</Link> instead.
