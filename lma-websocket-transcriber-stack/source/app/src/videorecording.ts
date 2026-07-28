@@ -66,6 +66,10 @@ const FFMPEG_TIMEOUT_MS = parseInt(
     process.env['FFMPEG_TIMEOUT_MS'] || `${10 * 60 * 1000}`,
     10
 );
+// Test/debug only: keep the muxed MP4 on disk (skip the post-upload delete) so
+// local E2E harnesses can inspect it. Never set in production.
+const VIDEO_KEEP_MUXED =
+    (process.env['VIDEO_KEEP_MUXED'] || 'false') === 'true';
 // After a video socket drops without END_VIDEO, keep the session alive this
 // long for the client to reconnect (a new START_VIDEO) before finalizing.
 const VIDEO_RECONNECT_GRACE_MS = parseInt(
@@ -397,7 +401,11 @@ const muxAndUpload = async (
             );
         }
     } finally {
-        await deleteQuietly(outPath, server, callId);
+        if (VIDEO_KEEP_MUXED) {
+            server.log.info(`[VIDEO]: [${callId}] - VIDEO_KEEP_MUXED set; keeping ${outPath}`);
+        } else {
+            await deleteQuietly(outPath, server, callId);
+        }
         await cleanupSession(session, server);
     }
 };
