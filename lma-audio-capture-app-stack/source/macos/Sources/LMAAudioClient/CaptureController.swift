@@ -23,6 +23,10 @@ final class CaptureController {
     private var socket: TranscriberSocket?
     private var mixer: StereoMixer?
     private var capture: AudioCapture?
+    private var videoSocket: VideoSocket?
+    private var videoCapture: VideoCapture?
+    /// When the audio stream started — baseline for videoTimeOffsetMs.
+    private var audioStartDate: Date?
     private let lock = NSLock()
     private var _state: State = .idle
 
@@ -43,6 +47,12 @@ final class CaptureController {
     var systemLabel: String = ""
     /// CoreAudio UID of the mic to capture from. Empty = system default.
     var micDeviceUID: String = ""
+    /// Also capture and stream desktop video (screen or window). Default off.
+    var videoEnabled: Bool = false
+    /// Persisted video source id ("display:<id>" / "window:<id>"; "" = main display).
+    var videoSourceID: String = ""
+    /// True while a video stream is running for the active call (UI badge).
+    private(set) var isVideoActive: Bool = false
 
     init(config: Config) { self.config = config }
 
@@ -125,11 +135,13 @@ final class CaptureController {
 
         sock.connect()
         mix.start()
+        audioStartDate = Date()
         Task { [weak self] in
             do {
                 try await cap.start()
                 self?.log("Streaming \(self?.activeCallId ?? "")")
                 self?.setState(.streaming)
+                self?.startVideoIfEnabled()
             } catch {
                 self?.log("Capture failed: \(error)")
                 self?.setState(.error("\(error)"))
@@ -137,9 +149,71 @@ final class CaptureController {
         }
     }
 
+    /// Start the optional desktop-video lane: a second SCK stream feeding
+    /// fMP4 segments over a second websocket. Failures here never touch the
+    /// audio path — video is best-effort.
+    private func startVideoIfEnabled() {
+        guard videoEnabled else { return }
+        let vSock = VideoSocket(config: config)
+        let vCap = VideoCapture(sourceID: videoSourceID) { [weak vSock] segment in
+            vSock?.sendSegment(segment)
+        }
+        // The offset between audio-stream start and the first video frame lets
+        // the server align video with the transcript timeline when muxing.
+        vCap.onFirstFrame = { [weak self, weak vSock] in
+            guard let self = self, let start = self.audioStartDate,
+                  let first = self.videoCapture?.firstFrameDate else { return }
+            vSock?.videoTimeOffsetMs = max(0, Int(first.timeIntervalSince(start) * 1000))
+        }
+        // Buffer overflow during a long outage (or a server without video
+        // support): abandon video for this call; audio continues.
+        vSock.onOverflow = { [weak self] in
+            self?.stopVideo(sendEnd: false)
+            self?.log("Screen video stopped (connection lost); audio unaffected")
+        }
+        videoSocket = vSock
+        videoCapture = vCap
+        vSock.connect()
+        Task { [weak self] in
+            do {
+                try await vCap.start()
+                self?.isVideoActive = true
+                self?.log("Streaming with screen video")
+            } catch {
+                self?.log("Screen video failed to start (audio unaffected): \(error)")
+                self?.stopVideo(sendEnd: false)
+            }
+        }
+    }
+
+    /// Tear down the video lane. When `sendEnd`, flush the encoder's final
+    /// segments and send END_VIDEO so the server finalizes the recording.
+    private func stopVideo(sendEnd: Bool) {
+        guard videoSocket != nil || videoCapture != nil else { return }
+        isVideoActive = false
+        let vCap = videoCapture
+        let vSock = videoSocket
+        videoCapture = nil
+        videoSocket = nil
+        Task {
+            // Stopping the writer flushes remaining fMP4 segments through the
+            // onSegment callback BEFORE we send END_VIDEO/close.
+            await vCap?.stop()
+            if sendEnd {
+                vSock?.beginClose()
+                vSock?.sendEnd()
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                vSock?.close()
+            } else {
+                vSock?.close()
+            }
+        }
+    }
+
     /// Stop: send END, tear down capture + socket, return to authenticated/idle.
     func stop() {
         setState(.stopping)
+        stopVideo(sendEnd: true)
         capture?.stop()
         mixer?.stop()
         socket?.beginClose()   // mark intentional first so teardown stays quiet
@@ -154,7 +228,7 @@ final class CaptureController {
 
     // MARK: - Controls (no-ops when not streaming)
 
-    func setPaused(_ p: Bool) { mixer?.setPaused(p) }
+    func setPaused(_ p: Bool) { mixer?.setPaused(p); videoCapture?.setPaused(p) }
     func setMicMuted(_ m: Bool) { mixer?.setMicMuted(m) }
     func setMeetingMuted(_ m: Bool) { mixer?.setMeetingMuted(m) }
 

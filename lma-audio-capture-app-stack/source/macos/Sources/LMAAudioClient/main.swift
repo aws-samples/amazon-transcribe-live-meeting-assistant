@@ -131,6 +131,32 @@ let mixer = StereoMixer(sampleRate: config.sampleRate) { chunk in
 }
 let capture = AudioCapture(mixer: mixer, targetRate: config.sampleRate)
 
+// Optional desktop-video lane (--video 1 [--video-source display:<id>]):
+// second SCK stream + second websocket, fMP4 segments. Best-effort — failures
+// never affect the audio stream.
+var videoSocket: VideoSocket?
+var videoCapture: VideoCapture?
+let audioStartDate = Date()
+if config.videoEnabled {
+    let vSock = VideoSocket(config: config)
+    let vCap = VideoCapture(sourceID: config.videoSourceID) { [weak vSock] seg in
+        vSock?.sendSegment(seg)
+    }
+    vCap.onFirstFrame = { [weak vSock, weak vCap] in
+        if let first = vCap?.firstFrameDate {
+            vSock?.videoTimeOffsetMs = max(0, Int(first.timeIntervalSince(audioStartDate) * 1000))
+        }
+    }
+    vSock.onOverflow = {
+        print("✗ screen video stopped (connection lost); audio unaffected")
+        Task { await videoCapture?.stop() }
+        videoCapture = nil
+        videoSocket = nil
+    }
+    videoSocket = vSock
+    videoCapture = vCap
+}
+
 // Reflect live WS connection state in the meter so "sent" isn't misleading
 // while the socket is down (during reconnect audio is buffered, not sent).
 socket.onStateChange = { connected in mixer.setConnected(connected) }
@@ -154,9 +180,16 @@ sigHandler.setEventHandler {
     debugTee?.finish()
     socket.beginClose()   // mark intentional first so teardown stays quiet
     socket.sendEnd()
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-        socket.close()
-        exit(0)
+    Task {
+        // Flush the encoder's final fMP4 segments, then END_VIDEO.
+        await videoCapture?.stop()
+        videoSocket?.beginClose()
+        videoSocket?.sendEnd()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            videoSocket?.close()
+            socket.close()
+            exit(0)
+        }
     }
 }
 sigHandler.resume()
@@ -206,6 +239,17 @@ mixer.start()         // begins 100ms flush cadence
 Task {
     do {
         try await capture.start()
+        if let vSock = videoSocket, let vCap = videoCapture {
+            vSock.connect()
+            do {
+                try await vCap.start()
+            } catch {
+                FileHandle.standardError.write("Screen video failed to start (audio unaffected): \(error)\n".data(using: .utf8)!)
+                vSock.close()
+                videoSocket = nil
+                videoCapture = nil
+            }
+        }
         print("\nStreaming… press Ctrl-C to stop.\n")
     } catch {
         FileHandle.standardError.write("Capture failed to start: \(error)\n".data(using: .utf8)!)

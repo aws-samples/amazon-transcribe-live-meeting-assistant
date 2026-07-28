@@ -46,6 +46,11 @@ struct Config {
     /// lma-config.json from the deployment's RecordingDisclaimer parameter (same
     /// text the browser extension shows); falls back to the standard wording.
     var recordingDisclaimer: String
+    /// CLI: also capture and stream desktop video (--video / LMA_VIDEO=1). The
+    /// GUI ignores this and uses its own persisted Settings toggle instead.
+    var videoEnabled: Bool
+    /// CLI: video source id ("display:<id>" / "window:<id>"; "" = main display).
+    var videoSourceID: String
 
     /// Fallback consent text when the deployment config predates the setting.
     static let defaultDisclaimer =
@@ -95,7 +100,9 @@ struct Config {
             region: value("region", "LMA_REGION", "region"),
             webEndpoint: value("web-endpoint", "LMA_WEB_ENDPOINT", "webEndpoint"),
             recordingDisclaimer: value("disclaimer", "LMA_RECORDING_DISCLAIMER", "recordingDisclaimer",
-                                       Config.defaultDisclaimer)
+                                       Config.defaultDisclaimer),
+            videoEnabled: ["1", "true", "yes"].contains(value("video", "LMA_VIDEO").lowercased()),
+            videoSourceID: value("video-source", "LMA_VIDEO_SOURCE")
         )
     }
 

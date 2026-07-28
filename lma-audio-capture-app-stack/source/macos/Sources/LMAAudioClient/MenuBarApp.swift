@@ -38,6 +38,12 @@ final class MenuBarAppState: ObservableObject {
     @Published var micDeviceUID = ""            // "" = System Default
     @Published var micDevices: [MicDevices.Device] = []
 
+    // Optional desktop-video capture (screen recording streamed alongside
+    // audio; saved as an MP4 in LMA). Off by default — opt-in per user.
+    @Published var videoEnabled = false
+    @Published var videoSourceID = ""           // "" = main display
+    @Published var videoSources: [VideoCapture.Source] = []
+
     // Recording-consent disclaimer: shown once, before the FIRST recording ever
     // starts on this machine (same pattern as the browser extension's popup).
     // Agreement is persisted; Cancel just doesn't start.
@@ -51,6 +57,8 @@ final class MenuBarAppState: ObservableObject {
     private static let kMicLabel = "lma.micLabel"
     private static let kSystemLabel = "lma.systemLabel"
     private static let kMicDeviceUID = "lma.micDeviceUID"
+    private static let kVideoEnabled = "lma.videoEnabled"
+    private static let kVideoSourceID = "lma.videoSourceID"
     private static let kDisclaimerAgreed = "lma.disclaimerAgreed"
     private static let kDisclaimerAgreedAt = "lma.disclaimerAgreedAt"
     private static let kDisclaimerAgreedText = "lma.disclaimerAgreedText"
@@ -67,6 +75,8 @@ final class MenuBarAppState: ObservableObject {
         self.micLabel = defaults.string(forKey: Self.kMicLabel) ?? ""
         self.systemLabel = defaults.string(forKey: Self.kSystemLabel) ?? ""
         self.micDeviceUID = defaults.string(forKey: Self.kMicDeviceUID) ?? ""
+        self.videoEnabled = defaults.bool(forKey: Self.kVideoEnabled)
+        self.videoSourceID = defaults.string(forKey: Self.kVideoSourceID) ?? ""
         pushSettingsToController()
         controller.onStateChange = { [weak self] s in self?.state = s }
         controller.onLevels = { [weak self] m, k, c, p in
@@ -93,7 +103,23 @@ final class MenuBarAppState: ObservableObject {
         defaults.set(micLabel, forKey: Self.kMicLabel)
         defaults.set(systemLabel, forKey: Self.kSystemLabel)
         defaults.set(micDeviceUID, forKey: Self.kMicDeviceUID)
+        defaults.set(videoEnabled, forKey: Self.kVideoEnabled)
+        defaults.set(videoSourceID, forKey: Self.kVideoSourceID)
         pushSettingsToController()
+    }
+
+    /// Refresh capturable displays/windows when the panel opens or the video
+    /// toggle turns on (window lists go stale quickly).
+    func refreshVideoSources() {
+        Task { @MainActor in
+            let sources = await VideoCapture.listSources()
+            self.videoSources = sources
+            // If the saved source disappeared (window closed), fall back to
+            // the main display rather than showing a stale selection.
+            if !self.videoSourceID.isEmpty && !sources.contains(where: { $0.id == self.videoSourceID }) {
+                self.videoSourceID = ""
+            }
+        }
     }
 
     /// Refresh the device list each time the panel opens (hotplug-friendly).
@@ -110,6 +136,8 @@ final class MenuBarAppState: ObservableObject {
         controller.micLabel = effectiveMicLabel
         controller.systemLabel = effectiveSystemLabel
         controller.micDeviceUID = micDeviceUID
+        controller.videoEnabled = videoEnabled
+        controller.videoSourceID = videoSourceID
     }
 
     var isStreaming: Bool { if case .streaming = state { return true }; return false }
@@ -281,6 +309,11 @@ struct MenuBarContentView: View {
                         Text(s.controller.config.recordingDisclaimer)
                             .font(.caption)
                             .fixedSize(horizontal: false, vertical: true)
+                        if s.videoEnabled {
+                            Label("Screen video is ON: your selected screen or window is also recorded.",
+                                  systemImage: "video.fill")
+                                .font(.caption2).foregroundColor(.orange)
+                        }
                         HStack {
                             Spacer()
                             Button("Cancel") { s.showDisclaimer = false }
@@ -314,6 +347,10 @@ struct MenuBarContentView: View {
                         Text(s.connected ? "● Live" : "○ Reconnecting…")
                             .font(.caption).foregroundColor(s.connected ? .green : .orange)
                         if s.paused { Text("· Paused").font(.caption).foregroundColor(.orange) }
+                        if s.controller.isVideoActive {
+                            Label("Screen video", systemImage: "video.fill")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
                         Spacer()
                     }
                     HStack {
@@ -423,6 +460,29 @@ struct SettingsView: View {
             .font(.caption)
             Text("System Default follows your Sound settings. If a chosen mic is unplugged, recording falls back to the default.")
                 .font(.caption2).foregroundColor(.secondary)
+
+            // Optional desktop-video capture: streams the chosen screen/window
+            // alongside audio; LMA saves a video recording of the meeting.
+            Text("Screen video").font(.caption).foregroundColor(.secondary).padding(.top, 2)
+            Toggle(isOn: Binding(get: { s.videoEnabled }, set: { v in
+                s.videoEnabled = v; s.saveSettings()
+                if v { s.refreshVideoSources() }
+            })) {
+                Text("Also record screen video").font(.caption)
+            }
+            if s.videoEnabled {
+                Picker("", selection: Binding(get: { s.videoSourceID }, set: { s.videoSourceID = $0; s.saveSettings() })) {
+                    Text("Entire screen").tag("")
+                    ForEach(s.videoSources.filter { $0.id != "" }) { src in
+                        Text(src.name).tag(src.id)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .font(.caption)
+                Text("The selected screen or window is recorded with the meeting and saved as a video in LMA. Uses the Screen Recording permission you already granted.")
+                    .font(.caption2).foregroundColor(.secondary)
+            }
 
             // Consent record: when + what the user agreed to, so the one-time
             // acknowledgment is inspectable afterwards (auditable, not a
