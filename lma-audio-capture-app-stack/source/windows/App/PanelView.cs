@@ -358,8 +358,22 @@ public sealed class PanelView : Border
             {
                 _body.Children.Add(Label("Meeting name (optional)"));
                 _body.Children.Add(_meetingName);
-                _start.Margin = new Thickness(0, 4, 0, 8);
+                _start.Margin = new Thickness(0, 4, 0, 4);
                 _body.Children.Add(_start);
+                // Persistent consent reminder: the full disclaimer is a one-time
+                // gate, but the obligation is per-meeting — keep a one-liner next
+                // to Start. Hover shows the full deployment disclaimer text.
+                _body.Children.Add(new TextBlock
+                {
+                    Text = "✓ Ensure all participants have consented to recording.",
+                    Foreground = Secondary,
+                    FontSize = 10,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 0, 0, 8),
+                    ToolTip = string.IsNullOrEmpty(_c.Config.RecordingDisclaimer)
+                        ? Config.DefaultDisclaimer
+                        : _c.Config.RecordingDisclaimer,
+                });
             }
             else
             {

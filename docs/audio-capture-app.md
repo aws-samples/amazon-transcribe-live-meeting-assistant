@@ -54,10 +54,12 @@ stream, record, or transcribe calls if otherwise prohibited.
 
 The app shows this disclaimer **before your first recording** and requires you
 to agree (the same consent gate as the browser extension and the web UI's
-Stream Audio tab). The text is configurable per deployment via the
-`RecordingDisclaimer` CloudFormation parameter, so organizations can substitute
-their own legal wording; the app picks it up from the `lma-config.json` baked
-into the download.
+Stream Audio tab). After that, a one-line reminder — *"Ensure all participants
+have consented to recording"* — stays visible next to the **Start** button
+(hover it to re-read the full disclaimer). The text is configurable per
+deployment via the `RecordingDisclaimer` CloudFormation parameter, so
+organizations can substitute their own legal wording; the app picks it up from
+the `lma-config.json` baked into the download.
 
 ## Download and install (macOS)
 

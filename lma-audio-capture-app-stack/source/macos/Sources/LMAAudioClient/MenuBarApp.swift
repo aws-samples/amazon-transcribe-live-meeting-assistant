@@ -267,6 +267,14 @@ struct MenuBarContentView: View {
                     }
                     .disabled(s.isBusy)
                     .keyboardShortcut(.defaultAction)
+                    // Persistent consent reminder: the full disclaimer is a
+                    // one-time gate, but the obligation is per-meeting — keep a
+                    // one-liner next to Start so it stays visible. Hover shows
+                    // the full deployment disclaimer text.
+                    Label("Ensure all participants have consented to recording.",
+                          systemImage: "checkmark.shield")
+                        .font(.caption2).foregroundColor(.secondary)
+                        .help(s.controller.config.recordingDisclaimer)
                 } else {
                     // Live meters
                     LevelBar(label: "System", level: s.meetingLevel, muted: s.meetingMuted)
