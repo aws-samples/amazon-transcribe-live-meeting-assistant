@@ -119,9 +119,8 @@ const COMPARISON = [
   },
   {
     dimension: 'Video / screen recording',
-    app: 'Audio only.',
-    vp: 'Can also capture the meeting screen/video recording.',
-    appCon: true,
+    app: 'Optional: record a screen or window (off by default).',
+    vp: 'Records the meeting screen/video.',
   },
 ];
 
@@ -294,6 +293,11 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
             pick a specific <strong>microphone</strong> (or leave System Default). Each label field shows its default in
             grey &mdash; your email for the mic, &quot;Other participants&quot; for system audio &mdash; so leave it
             blank to accept that, or type to override. Changes apply to your next recording.
+          </li>
+          <li>
+            <strong>Also record screen video (optional):</strong> in Settings, turn on{' '}
+            <strong>Also record screen video</strong> and pick a screen or window. LMA then saves a video recording of
+            the meeting alongside the audio. Off by default; reuses the Screen Recording permission you already granted.
           </li>
           <li>
             <strong>Launch or relaunch:</strong> press <strong>⌘-Space</strong>, type <strong>LMA Audio Client</strong>,
@@ -472,6 +476,11 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
             pick a specific <strong>microphone</strong> (or leave System Default). Each label field shows its default in
             grey &mdash; your email for the mic, &quot;Other participants&quot; for system audio &mdash; so leave it
             blank to accept that, or type to override. Changes apply to your next recording.
+          </li>
+          <li>
+            <strong>Also record screen video (optional):</strong> in Settings, turn on{' '}
+            <strong>Also record screen video</strong> and pick a screen or window. LMA then saves a video recording of
+            the meeting alongside the audio. Off by default.
           </li>
         </ul>
       </SpaceBetween>

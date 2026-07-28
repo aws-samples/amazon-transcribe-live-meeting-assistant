@@ -45,6 +45,37 @@ https://github.com/user-attachments/assets/4663740b-a0b3-45a1-b1f3-dc5461f12d18
 > **no special permission** — there is no equivalent of the macOS Screen
 > Recording prompt. The only OS gate is the microphone privacy setting.
 
+## Optional: record screen video
+
+In addition to audio, the app can **capture and stream desktop video** — a
+screen or a specific window — so LMA saves a **video recording of the meeting**
+alongside the audio, just like the Virtual Participant does. It's **off by
+default**; turn it on per user in **Settings (⚙)**:
+
+- **macOS** encodes the chosen display/window with **ScreenCaptureKit +
+  VideoToolbox** (H.264). It reuses the **Screen Recording** permission the app
+  already needs for system audio — **no new prompt**.
+- **Windows** encodes with **Windows.Graphics.Capture + Media Foundation**
+  (H.264). No extra permission is required.
+
+The video is streamed to the transcriber over a **second WebSocket connection**
+(so it never delays real-time audio/transcription), muxed with the meeting
+audio into a single **MP4** at the end of the call, saved to the LMA recordings
+bucket, and shown in the call detail page's **Recording Video** player — the
+same place Virtual Participant recordings appear. Capture runs at ~5 fps and up
+to 1080p, which keeps CPU and bandwidth modest while staying legible for slides.
+
+When screen video is enabled, the one-time consent gate and the live recording
+view both show a **"Screen video is ON"** notice, since screen contents are more
+sensitive than audio alone. Video recording can be disabled deployment-wide with
+the `EnableVideoRecording` CloudFormation parameter (the server then discards any
+video a client sends).
+
+> **Backward compatible.** The video stream is a purely additive, second WebSocket
+> announced by a new `START_VIDEO` message. Clients that don't send it, and
+> servers that predate it, behave exactly as before — audio streaming is
+> untouched.
+
 ## Recording consent
 
 You are responsible for complying with the legal, corporate, and ethical
@@ -240,6 +271,10 @@ Popover options:
     to follow your Sound settings. If a chosen mic is unplugged, recording
     falls back to the default. Changes are saved immediately and apply to the
     **next** recording (the gear is disabled while recording).
+  - **Also record screen video** — off by default. When on, pick **Entire
+    screen** or a specific window; that screen/window is recorded with the
+    meeting and saved as a video in LMA (see
+    [Optional: record screen video](#optional-record-screen-video)).
 
 ### Running it in the background
 
@@ -313,6 +348,10 @@ Panel options:
     to follow Windows' input device setting. If a chosen mic is unplugged,
     recording falls back to the default. Changes are saved immediately and
     apply to the **next** recording (the gear is disabled while recording).
+  - **Also record screen video** — off by default. When on, pick **Entire
+    screen** or a specific window; that screen/window is recorded with the
+    meeting and saved as a video in LMA (see
+    [Optional: record screen video](#optional-record-screen-video)).
 
 The app uses no audio or CPU when idle, so the intended usage is to leave it in
 the tray and click **Start** when a meeting begins. **To relaunch after
@@ -340,12 +379,12 @@ of all capture options.
 | In-meeting voice assistant  | ❌ Web-UI chat assistant only                            | ✅ Optional Nova Sonic voice assistant in the meeting  |
 | Visible to others           | ✅ No bot / extra attendee                               | ❌ Visible bot joins the meeting                       |
 | Who must be present         | You, with the app running on your computer               | ✅ Runs unattended in the cloud                        |
-| Video / screen recording    | ❌ Audio only                                            | ✅ Can also record the meeting screen/video            |
+| Video / screen recording    | ✅ Optional (screen or window, off by default)           | ✅ Records the meeting screen/video                    |
 
 **In short:** choose the **Audio Capture App** when you're attending yourself,
 want no visible bot, or need a platform the Virtual Participant doesn't support.
 Choose the **Virtual Participant** when you need per-speaker names, an in-meeting
-voice assistant, screen/video capture, or hands-off unattended recording.
+voice assistant, or hands-off unattended recording.
 
 ## Roadmap
 
