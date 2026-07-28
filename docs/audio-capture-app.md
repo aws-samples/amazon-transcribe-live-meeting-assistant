@@ -2,22 +2,29 @@
 title: "Audio Capture App (Native)"
 ---
 
-# Audio Capture App (Native macOS)
+# Audio Capture App (Native)
 
-The **Audio Capture App** is a lightweight native macOS application that streams
-your **microphone** and your computer's **system (meeting) audio** directly to
-LMA. Because it captures the operating system's audio — not a browser tab — it
-can transcribe meetings you join from a **native desktop app** (Zoom, Microsoft
-Teams, Cisco Webex, Slack huddles, phone bridges, …), which the
+The **Audio Capture App** is a lightweight native application (macOS and Windows)
+that streams your **microphone** and your computer's **system (meeting) audio**
+directly to LMA. Because it captures the operating system's audio — not a browser
+tab — it can transcribe meetings you join from a **native desktop app** (Zoom,
+Microsoft Teams, Cisco Webex, Slack huddles, phone bridges, …), which the
 [Chrome Extension](browser-extension.md) and [Stream Audio](stream-audio.md)
 options cannot. It adds **no bot** or extra attendee to the meeting.
 
-> **Status:** macOS is available today. A Windows app is planned; iOS/Android
-> are under consideration (see [Roadmap](#roadmap)). The app is distributed as source that you
-> build locally with a one-step installer — a native macOS app using
-> ScreenCaptureKit cannot be cross-compiled by LMA's Linux build pipeline, and
-> Apple's signing tools are macOS-only, so building on your own Mac is both
-> required and the most trustworthy option.
+> **Status:** macOS and Windows are available today; iOS/Android are under
+> consideration (see [Roadmap](#roadmap)). The app is distributed as source that
+> you build locally with a one-step script — a native app using ScreenCaptureKit
+> (macOS) or WASAPI/WPF (Windows) cannot be cross-compiled by LMA's Linux build
+> pipeline, and code-signing tools are OS-specific, so building on your own
+> machine is both required and the most trustworthy option.
+
+
+
+https://github.com/user-attachments/assets/4663740b-a0b3-45a1-b1f3-dc5461f12d18
+
+
+
 
 ## How it works
 
@@ -29,8 +36,28 @@ options cannot. It adds **no bot** or extra attendee to the meeting.
   browser options use; the server is unchanged. From there it flows through the
   identical pipeline (real-time transcription, Meeting Assistant, summaries,
   knowledge base).
-- macOS captures system audio via **ScreenCaptureKit** (loopback) and the mic
-  via **AVAudioEngine**; the two are interleaved into 2-channel 16-bit PCM.
+- **macOS** captures system audio via **ScreenCaptureKit** (loopback) and the
+  mic via **AVAudioEngine**. **Windows** captures system audio via **WASAPI
+  loopback** and the mic via **WASAPI capture**. On both, the two mono sources
+  are interleaved into 2-channel 16-bit PCM.
+
+> On **Windows**, system-audio (loopback) capture is built into the OS and needs
+> **no special permission** — there is no equivalent of the macOS Screen
+> Recording prompt. The only OS gate is the microphone privacy setting.
+
+## Recording consent
+
+You are responsible for complying with the legal, corporate, and ethical
+restrictions that apply to recording meetings and calls — in many jurisdictions
+**all participants must consent** to being recorded. Do not use this app to
+stream, record, or transcribe calls if otherwise prohibited.
+
+The app shows this disclaimer **before your first recording** and requires you
+to agree (the same consent gate as the browser extension and the web UI's
+Stream Audio tab). The text is configurable per deployment via the
+`RecordingDisclaimer` CloudFormation parameter, so organizations can substitute
+their own legal wording; the app picks it up from the `lma-config.json` baked
+into the download.
 
 ## Download and install (macOS)
 
@@ -59,9 +86,10 @@ options cannot. It adds **no bot** or extra attendee to the meeting.
    > quarantine-clearing never happens. Running it via `bash` reads the script as
    > data (no `execve` on a quarantined file), so it runs and clears the flag
    > from the rest of the folder itself.
-5. **Launch it like a normal app.** Press **⌘-Space** (Spotlight), type **LMA
-   Audio Client** and press Return — or double-click it in Finder. An **LMA**
-   item appears in the menu bar (top-right).
+5. **Launch it like a normal app.** Click its **Dock icon** (the installer pins
+   it), press **⌘-Space** (Spotlight) and type **LMA Audio Client**, or
+   double-click it in Finder. An **LMA** item appears in the menu bar
+   (top-right) and the app's icon appears in the Dock.
 
    > ⚠️ **Don't launch it from Terminal.** Always launch via Spotlight, Finder,
    > or `open -a "LMA Audio Client"` — never the binary inside `Contents/MacOS`.
@@ -99,10 +127,67 @@ xattr -dr com.apple.quarantine .
 ./install-macos.sh
 ```
 
-## Using the menu-bar app
+## Download and install (Windows)
 
-Launched with no arguments (the normal case), the app runs as a **menu-bar app**
-(no Dock icon). An **LMA** item appears at the top-right of the menu bar.
+On Windows, loopback (system) audio capture is built into the OS and needs
+**no special permission** — the only OS gate is the microphone privacy toggle.
+
+1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Audio Capture App
+   (Native)**, choose **Windows**, and click **Download for Windows**. The zip is
+   **preconfigured for your deployment** (endpoint + Cognito settings baked in),
+   so you only sign in with your normal LMA username and password.
+2. Unzip it (right-click ▸ **Extract All**).
+3. Install the **.NET 8 SDK** once from
+   [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/8.0). No
+   admin is required — it can install into your user folder.
+4. In **PowerShell**, `cd` into the unzipped folder and run the
+   build-and-install script:
+   ```powershell
+   ./build-windows.ps1 -SelfContained -Install
+   ```
+   It builds a standalone app, runs a built-in self-test, installs it to
+   `%LOCALAPPDATA%\Programs\LMA Audio Capture` (no admin needed), and adds a
+   **Start Menu** shortcut — so you don't have to dig into the build output. It
+   ends with **INSTALL SUCCEEDED**; that banner is the thing to look for.
+   - Omit `-Install` to just build (the exe lands in
+     `bin\Release\net8.0-windows\win-x64\publish\`).
+   - Add `-DesktopShortcut` for a desktop icon too.
+   - Add `-ProgramFiles` to install machine-wide under `%ProgramFiles%` instead
+     (prompts for admin to do the copy).
+5. **Launch it** from the **Start Menu** (press the **Windows key**, type **LMA
+   Audio Capture**, Enter). **No window opens** — the app lives in the **system
+   tray**, at the bottom-right next to the clock:
+
+   ![LMA tray icon: gray when idle, red while recording](../images/readme-audio-capture-windows-tray-icons.png)
+
+   **Left-click that icon** for the controls panel. (Once you start recording, a
+   **taskbar button** appears too — see
+   [Using the system-tray + taskbar app](#using-the-system-tray--taskbar-app-windows).)
+   If SmartScreen warns about an unrecognized app, choose **More info ▸ Run
+   anyway** — expected for a locally built, unsigned app.
+6. If Windows blocks microphone access, enable it in **Settings ▸ Privacy &
+   security ▸ Microphone** (turn on *Microphone access* and *Let desktop apps
+   access your microphone*), then restart the app. **System/meeting audio needs
+   no permission.**
+7. Left-click the **LMA** tray icon, sign in with your LMA username and password,
+   and click **Start**. Your meeting appears in the
+   [Meetings List](web-ui-guide.md) with a live transcript.
+
+> **Tip: use headphones.** Otherwise your speakers' meeting audio can bleed into
+> your microphone and appear faintly on both transcript channels.
+
+### "Windows protected your PC" (SmartScreen)
+
+Expected for a locally built, unsigned app. Click **More info**, then **Run
+anyway**. (A future release may ship an Authenticode-signed build to avoid this.)
+
+## Using the menu-bar + Dock app (macOS)
+
+Launched with no arguments (the normal case), the app lives in **two places**:
+an **LMA** item at the top-right of the menu bar, and an icon in the **Dock**
+(the installer pins it there).
+
+Menu-bar item:
 
 - **Left-click** the item for the controls popover: sign in / out,
   **Start** / **Stop** / **Pause**, **mute mic**, **mute system audio**, live
@@ -112,6 +197,23 @@ Launched with no arguments (the normal case), the app runs as a **menu-bar app**
 - **Right-click** the item for **Quit** (kept out of the popover so it isn't
   confused with *Stop*).
 
+Dock icon:
+
+- While recording, the Dock icon shows a **red dot** and a **REC** badge
+  (**⏸** while paused), and it clears when you stop.
+- **Right-click** the Dock icon for quick controls: **Start / Pause / Resume /
+  Stop Recording** and **Open Control Panel**.
+- **Click** the Dock icon to open the control panel as a regular window (same
+  controls as the popover).
+
+> **Why both?** On MacBooks with a notch, macOS silently hides menu-bar icons
+> that don't fit — and starting a recording adds the system's orange mic
+> indicator to the menu bar, which can push the LMA icon out of view at the
+> exact moment you need it. The Dock icon is always visible, so you always have
+> a way to see recording state and stop the recording. If your menu bar is
+> crowded, you can also **⌘-drag** the LMA menu-bar icon further right so it's
+> among the last to be hidden.
+
 Popover options:
 
 - **Remember my email** — prefills your login next launch (email only; the
@@ -119,13 +221,99 @@ Popover options:
 - **Start automatically at login** — registers the app as a macOS login item.
   The installer already placed the app in `/Applications`, so this works out of
   the box. You can also manage it in **System Settings ▸ General ▸ Login Items**.
+- **Settings (⚙ gear, top-right of the popover)** — customize how the two
+  channels are labeled in the LMA transcript and which microphone is captured:
+  - **My mic** speaker label — defaults to your signed-in email address.
+  - **System** speaker label — defaults to **"Other participants"**.
+  - **Microphone** — pick a specific input device, or leave **System Default**
+    to follow your Sound settings. If a chosen mic is unplugged, recording
+    falls back to the default. Changes are saved immediately and apply to the
+    **next** recording (the gear is disabled while recording).
 
 ### Running it in the background
 
 The app uses no audio or CPU when idle, so the intended usage is to leave it
-running in the menu bar and click **Start** when a meeting begins. **To relaunch
-after quitting**, press **⌘-Space** (Spotlight), type **LMA Audio Client**, and
-press Return — or run `open -a "LMA Audio Client"`.
+running and click **Start** when a meeting begins. **To relaunch after
+quitting**, click its Dock icon, press **⌘-Space** (Spotlight) and type **LMA
+Audio Client**, or run `open -a "LMA Audio Client"`.
+
+## Using the system-tray + taskbar app (Windows)
+
+Launched with no arguments (the normal case), the app lives in the **system
+tray** — the notification area at the bottom-right, next to the clock — with
+**no window**. While recording, it *also* takes a **taskbar button**, so a live
+recording is always visible and always stoppable.
+
+Tray icon:
+
+![LMA tray icon: gray when idle, red while recording](../images/readme-audio-capture-windows-tray-icons.png)
+
+- **Left-click** the icon for the controls panel: sign in / out,
+  **Start** / **Stop** / **Pause**, **mute mic**, **mute system audio**, live
+  per-channel **level meters**, and **Open in LMA** (jumps to the live meeting in
+  your browser).
+- While recording, the icon turns **red** so it's obvious at a glance. The app
+  asks Windows to keep it out of the ▲ overflow so the red icon stays visible; if
+  Windows still hides it, drag it onto the taskbar once.
+- **Right-click** the icon for **Quit** (kept out of the panel so it isn't
+  confused with *Stop*).
+- Want it one click away even when idle? Right-click **LMA Audio Capture** in the
+  Start Menu ▸ **More** ▸ **Pin to taskbar**. (Windows 10+ removed the API that
+  would let the installer do this for you.)
+- **Only one copy runs at a time.** Opening the app again — from that pinned
+  shortcut, the Start Menu, or the .exe — **opens the controls panel** of the copy
+  already running instead of adding a second tray icon.
+
+Taskbar button (while recording):
+
+- A taskbar button appears when you **Start** and disappears when you **Stop** —
+  nothing clutters your taskbar between meetings.
+- Its icon carries a **red dot**, and the button glows **green while recording /
+  yellow while paused**.
+- **Hover** it for **Pause/Resume** and **Stop** buttons right in the thumbnail
+  preview — no need to open a window.
+- **Right-click** it for quick actions: **Start / Pause / Resume / Stop
+  Recording** and **Open Control Panel**.
+- **Click** it to open the control panel as a regular window (same controls as
+  the tray panel).
+- **Closing or minimizing that window does not stop the recording** — it stays in
+  the taskbar and keeps streaming. Recording only stops when you choose **Stop**.
+
+> **Why both?** Windows 11 tucks tray icons it hasn't seen before into the ▲
+> overflow flyout, and can hide them again later — potentially at the exact
+> moment you want to check or stop a recording. The taskbar button can't be
+> hidden that way, so while you're recording you always have a visible indicator
+> and a one-click Stop. When nothing is recording the app goes back to tray-only
+> and stays out of your way.
+
+Panel options:
+
+- **Remember my email** — prefills your login next launch (email only; the
+  password is never stored).
+- **Start automatically at login** — adds a per-user startup entry that launches
+  the tray app when you sign in; the toggle reflects the real system state.
+- **Settings (⚙ gear, top-right of the panel)** — customize how the two
+  channels are labeled in the LMA transcript and which microphone is captured.
+  Each label field shows its **default in grey**; leave the field blank to use
+  it, or type to override.
+  - **My mic** speaker label — defaults to your signed-in email address.
+  - **System audio** speaker label — defaults to **"Other participants"**.
+  - **Microphone** — pick a specific input device, or leave **System Default**
+    to follow Windows' input device setting. If a chosen mic is unplugged,
+    recording falls back to the default. Changes are saved immediately and
+    apply to the **next** recording (the gear is disabled while recording).
+
+The app uses no audio or CPU when idle, so the intended usage is to leave it in
+the tray and click **Start** when a meeting begins. **To relaunch after
+quitting**, press the **Windows key**, type **LMA Audio Capture**, and press
+Enter. If it's already running, that just brings up its controls panel — you
+can't accidentally end up with two.
+
+> **Developer / headless mode.** Any command-line flag runs a headless CLI that
+> streams to stdout with a live VU meter (`--cli` forces it). `--selftest`
+> validates the login crypto offline, and `--capture-test <seconds> <out.wav>`
+> records the exact streamed stereo PCM with no server — useful for confirming
+> **ch0/Left = system, ch1/Right = mic** by measuring per-channel RMS.
 
 ## Audio Capture App vs Virtual Participant
 
@@ -135,12 +323,12 @@ of all capture options.
 
 | Dimension                   | Audio Capture App                                        | [Virtual Participant](virtual-participant.md)          |
 | --------------------------- | -------------------------------------------------------- | ------------------------------------------------------ |
-| How it captures             | Runs on your Mac; captures OS system audio + mic locally | Headless bot joins the meeting in the cloud            |
-| Meeting platforms           | Any native or web app that plays audio on your Mac       | Only platforms it can automate (Zoom, Teams, Chime, Webex, Meet) |
+| How it captures             | Runs on your computer; captures OS system audio + mic locally | Headless bot joins the meeting in the cloud       |
+| Meeting platforms           | Any native or web app that plays audio on your computer  | Only platforms it can automate (Zoom, Teams, Chime, Webex, Meet) |
 | Speaker identification      | ❌ No per-speaker names (one "Meeting Audio" channel)    | ✅ Active-speaker names from the meeting platform      |
 | In-meeting voice assistant  | ❌ Web-UI chat assistant only                            | ✅ Optional Nova Sonic voice assistant in the meeting  |
 | Visible to others           | ✅ No bot / extra attendee                               | ❌ Visible bot joins the meeting                       |
-| Who must be present         | You, with the app running on your Mac                    | ✅ Runs unattended in the cloud                        |
+| Who must be present         | You, with the app running on your computer               | ✅ Runs unattended in the cloud                        |
 | Video / screen recording    | ❌ Audio only                                            | ✅ Can also record the meeting screen/video            |
 
 **In short:** choose the **Audio Capture App** when you're attending yourself,
@@ -153,21 +341,71 @@ voice assistant, screen/video capture, or hands-off unattended recording.
 | Platform        | Status              | Capture technology                     |
 | --------------- | ------------------- | -------------------------------------- |
 | macOS 13+       | **Available**       | ScreenCaptureKit loopback + AVAudioEngine mic |
-| Windows         | Planned             | WASAPI loopback                        |
+| Windows 10/11   | **Available**       | WASAPI loopback + WASAPI mic capture   |
 | iPhone / iPad   | Under consideration | ReplayKit / broadcast upload           |
 | Android         | Under consideration | AudioPlaybackCapture API               |
 
 ## Troubleshooting
 
+### macOS
+
 - **No remote-participant audio in the transcript.** Grant **Screen Recording**
   to "LMA Audio Client" in System Settings and relaunch. Audio-only capture
   still requires the Screen Recording permission on macOS.
-- **Sign-in fails.** Use the same email and password you use for the LMA web
-  app. If your organization uses SSO, this app's username/password sign-in may
-  not apply — use the [Chrome Extension](browser-extension.md) instead.
+- **macOS keeps asking for Screen Recording permission even though it's
+  enabled.** This happens when the app was rebuilt with an ad-hoc signature —
+  macOS ties the permission to the exact binary, so every rebuild invalidates
+  it while System Settings still shows it "enabled". Fix: rebuild with the
+  current `install-macos.sh` (it now signs with a persistent local identity),
+  then clear the stale records and re-grant once:
+  `tccutil reset ScreenCapture com.amazon.lma.audioclient`, relaunch the app,
+  start a recording, and approve the prompt. If System Settings shows duplicate
+  "LMA Audio Client" rows, remove them with the **–** button first.
 - **Build errors / `xcode-select: command not found`.** Install Apple's
   command-line tools (`xcode-select --install`), complete the popup, and re-run
   `bash install-macos.sh`.
+- **Uninstall.** From the unzipped folder, run `bash install-macos.sh
+  --uninstall`. It quits the app if running, deletes `LMAAudioClient.app` from
+  `/Applications`, removes the Start-at-login item, unpins it from the Dock,
+  clears the app's saved settings (remembered email, speaker labels, mic
+  choice), and resets its Screen Recording + Microphone permissions. The
+  one-time local signing certificate is left in your login keychain (harmless;
+  reused if you reinstall). To remove that too: **Keychain Access ▸ login ▸ My
+  Certificates**, delete "LMA Audio Client Local Signing".
+
+### Windows
+
+- **"Windows protected your PC" (SmartScreen).** Expected for a locally built,
+  unsigned app. Click **More info**, then **Run anyway**.
+- **No microphone / "access denied".** Enable **Settings ▸ Privacy & security ▸
+  Microphone** (both *Microphone access* and *Let desktop apps access your
+  microphone*), then restart the app. System audio is unaffected.
+- **Unfamiliar errors scroll past during install (e.g. `log4net:ERROR …
+  lockingModel`).** If the script ends with **INSTALL SUCCEEDED**, the install
+  worked. Messages like that come from **other software already on the PC** —
+  corporate sync, backup or security tools that register Windows Explorer (shell)
+  extensions and get loaded into any process that talks to the shell. LMA doesn't
+  use log4net at all. The signals that matter are `All self-tests PASSED` and
+  **INSTALL SUCCEEDED**.
+- **`dotnet` is not recognized / build errors.** Install the
+  [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), open a fresh
+  PowerShell window, and re-run `./build-windows.ps1 -SelfContained -Install`.
+- **No remote-participant audio.** Make sure meeting audio is playing through
+  your default playback device (the app captures the default render endpoint).
+  Switching the default device mid-meeting is handled automatically.
+- **Uninstall.** The app registers in **Settings ▸ Apps ▸ Installed apps** as
+  "LMA Audio Capture" — find it there and choose **Uninstall**. Or, from the
+  unzipped folder, run `./build-windows.ps1 -Uninstall`. Either way it removes
+  the installed app and its Start Menu / Desktop shortcuts and clears the app's
+  per-user settings (remembered email, start-at-login). If you installed
+  machine-wide with `-ProgramFiles`, run the uninstall from an elevated (admin)
+  PowerShell.
+
+### Both platforms
+
+- **Sign-in fails.** Use the same email and password you use for the LMA web
+  app. If your organization uses SSO, this app's username/password sign-in may
+  not apply — use the [Chrome Extension](browser-extension.md) instead.
 
 ## See also
 

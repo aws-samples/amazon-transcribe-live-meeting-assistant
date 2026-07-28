@@ -16,11 +16,45 @@ let currentSpeaker = "none";
 // Local testing mode - skip AWS services
 const isLocalTest = process.env.LOCAL_TEST === 'true';
 
+// True when a Transcribe streaming error indicates the SessionId we tried to
+// resume is no longer valid (expired / closed / unknown), so the next attempt
+// must start a fresh session rather than reuse the stale id. Kept in sync with
+// the equivalent check in the WebSocket transcriber (transcribe.ts).
+const isStaleSessionError = (error: any): boolean => {
+    const message = (error?.message ?? '').toLowerCase();
+    // Require the word "session" on every message-based match: otherwise
+    // unrelated errors that merely contain "has expired" (e.g. the STS
+    // "security token ... has expired" credential error) would be misread as a
+    // stale SessionId and needlessly discard a still-valid session.
+    return (
+        (message.includes('session') &&
+            (message.includes('expired') ||
+                message.includes('not found') ||
+                message.includes('invalid'))) ||
+        error?.name === 'SessionExpiredException'
+    );
+};
+
 export class TranscriptionService {
     private process: ChildProcess | null = null;           // FFmpeg: combined_audio.monitor → Transcribe
     private novaAudioProcess: ChildProcess | null = null;  // FFmpeg: meeting_audio.monitor → Nova/recording
     private meetingToCombinedPipe: ChildProcess | null = null; // pacat: meeting audio → combined_audio sink
     private startTime: number | null = null;
+    // Cumulative timeline offset (seconds) applied to Transcribe timestamps.
+    // Amazon Transcribe resets Item.StartTime/EndTime to 0 on every new
+    // StartStreamTranscription request (reusing SessionId does NOT resume the
+    // timeline). On each reconnect we advance this by the highest EndTime seen
+    // so transcript segments continue the meeting timeline instead of jumping
+    // back to 0 and overlapping earlier segments (GitHub #292). Kept consistent
+    // with the WebSocket transcriber (transcribe.ts).
+    private transcribeTimeOffsetSeconds = 0;
+    // Set by handleTranscriptEvents when Transcribe closes the result stream
+    // server-side while the meeting is still live (idle / duration limit /
+    // transient close). It unblocks writeAudio's spin loop so the session's
+    // Promise.all resolves and the retry loop reconnects instead of hanging with
+    // a dead transcription pipe (GitHub #292). Mirrors the WebSocket
+    // transcriber's clean-close reconnect (transcribe.ts).
+    private reconnectRequested = false;
     private readonly channels = 1;
     private readonly sampleRate = 16000; // in hertz
     private transcribeClient: TranscribeStreamingClient;
@@ -169,11 +203,36 @@ export class TranscriptionService {
         // In local test mode, skip Kinesis/AppSync but still run transcription if agent is enabled
         // (Transcription provides audio stream for ElevenLabs agent)
 
+        // maxRetries bounds CONSECUTIVE failed (re)connects, not the total over
+        // the life of the meeting. A session that ran long enough resets the
+        // counter (see healthySessionMs), so a long meeting is not aborted
+        // merely because it accumulated a handful of transient reconnects spread
+        // across an hour. Kept consistent with the WebSocket transcriber
+        // (transcribe.ts, GitHub #292).
         const maxRetries = 5;
         const retryDelay = 5000; // 5 seconds
+        const healthySessionMs = 10_000;
         let sessionId: string | undefined;
+        let consecutiveFailures = 0;
 
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
+        // The recording write stream spans the WHOLE meeting, not one Transcribe
+        // session. Open it ONCE in append mode and reuse it across reconnects —
+        // recreating it per session (truncate mode) would discard everything
+        // recorded before each reconnect. writeAudio no longer closes it; it is
+        // closed once when the meeting ends (below).
+        const recordingStream = createWriteStream(details.tmpRecordingFilename, { flags: 'a' });
+
+        // Loop over Transcribe sessions for the life of the meeting. Each
+        // iteration is one StartStreamTranscription session; we reconnect when a
+        // session ends unexpectedly (clean server-side close or transient error)
+        // while the meeting is still live.
+        for (;;) {
+            if (!this.isTranscribing || !details.start) {
+                console.log('Meeting ended - stopping transcription session loop');
+                break;
+            }
+            this.reconnectRequested = false;
+            const sessionStartMs = Date.now();
             try {
                 const transcriptionParams: any = {
                     AudioStream: this.audioStream(),
@@ -252,8 +311,6 @@ export class TranscriptionService {
                     }
                 }
 
-                const recordingStream = createWriteStream(details.tmpRecordingFilename);
-                
                 // In local test mode, wrap with error handlers to prevent crashes
                 // In production, let errors propagate to crash the task
                 if (isLocalTest) {
@@ -279,12 +336,42 @@ export class TranscriptionService {
                     ]);
                 }
 
+                // The session's result stream ended WITHOUT throwing. If the
+                // meeting is still live this is an unexpected server-side close
+                // (Amazon Transcribe closes streams on its own schedule — idle
+                // behaviour, session duration limits, transient close). Reconnect
+                // instead of returning, which previously left the client
+                // streaming audio into a dead transcription pipe (GitHub #292).
+                if (this.isTranscribing && details.start) {
+                    this.teardownSessionProcesses();
+                    // A session that ran long enough is healthy — reset the
+                    // consecutive-failure counter so ordinary periodic reconnects
+                    // never accumulate toward maxRetries. An immediate clean close
+                    // (<healthySessionMs) DOES count, so a session that opens and
+                    // instantly closes over and over cannot reconnect forever.
+                    if (Date.now() - sessionStartMs >= healthySessionMs) {
+                        consecutiveFailures = 0;
+                    } else {
+                        consecutiveFailures += 1;
+                        if (consecutiveFailures >= maxRetries) {
+                            console.error(`Max consecutive reconnects (${maxRetries}) reached on clean close. Transcription stopped.`);
+                            break;
+                        }
+                    }
+                    console.log(
+                        `Transcribe result stream closed while meeting is live; reconnecting. ` +
+                        `timeOffset: ${this.transcribeTimeOffsetSeconds.toFixed(2)}s`,
+                    );
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    continue;
+                }
+
                 console.log('Transcription completed successfully');
                 break;
 
             } catch (error: any) {
                 // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
-                console.error(`Transcription error (attempt ${attempt + 1}/${maxRetries}):`, error.message);
+                console.error(`Transcription error (consecutive failure ${consecutiveFailures + 1}/${maxRetries}):`, error.message);
 
                 const isNonRetryable =
                     error.name === 'BadRequestException' ||
@@ -294,31 +381,28 @@ export class TranscriptionService {
                     error.message?.includes('validation error') ||
                     error.message?.includes('non-retryable streaming request');
 
-                // If the session has expired, clear the session ID so next retry starts fresh
-                if (error.message?.includes('has expired')) {
-                    console.log('Transcribe session expired - will start a new session on retry');
+                // If the resumed SessionId is no longer valid (expired / closed /
+                // not found / invalid), clear it so the next retry starts a FRESH
+                // session; the cumulative time offset keeps the timeline continuous.
+                // Kept consistent with isStaleSessionError() in the WebSocket
+                // transcriber (transcribe.ts).
+                if (isStaleSessionError(error)) {
+                    console.log(`Transcribe SessionId '${sessionId}' is stale/expired - will start a new session on retry`);
                     sessionId = undefined;
                 }
                 
-                // Kill any lingering FFmpeg processes from the failed attempt to prevent
-                // ERR_STREAM_PREMATURE_CLOSE from bubbling up as an uncaught exception
-                if (this.process) {
-                    try { this.process.kill(); } catch (_) { /* ignore */ }
-                    this.process = null;
-                }
-                if (this.novaAudioProcess) {
-                    try { this.novaAudioProcess.kill(); } catch (_) { /* ignore */ }
-                    this.novaAudioProcess = null;
-                }
-                if (this.meetingToCombinedPipe) {
-                    try {
-                        if (this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
-                            this.meetingToCombinedPipe.stdin.end();
-                        }
-                        this.meetingToCombinedPipe.kill();
-                    } catch (_) { /* ignore */ }
-                    this.meetingToCombinedPipe = null;
-                }
+                // Promise.all rejects the instant handleTranscriptEvents throws,
+                // WITHOUT waiting for the concurrent writeAudio — so its spin
+                // loop is now orphaned. Signal it to exit (it polls every 100ms)
+                // so it can't linger as an idle timer. Safe against the loop-top
+                // reset: every retry path below waits ≥1s before the next
+                // iteration clears the flag, far longer than the poll interval.
+                this.reconnectRequested = true;
+
+                // Kill the session's FFmpeg/pacat processes to prevent
+                // ERR_STREAM_PREMATURE_CLOSE from bubbling up as an uncaught
+                // exception; they are respawned on the next (re)connect.
+                this.teardownSessionProcesses();
 
                 if (isNonRetryable) {
                     console.error(
@@ -328,15 +412,39 @@ export class TranscriptionService {
                     break;
                 }
 
-                if (attempt < maxRetries - 1) {
-                    console.log(`Retrying in ${retryDelay / 1000} seconds...`);
-                    await new Promise(resolve => setTimeout(resolve, retryDelay));
-                } else {
-                    console.error('Max retries reached. Transcription stopped.');
+                // Stop retrying once the meeting has ended — no point restarting
+                // a session for a call that is over.
+                if (!this.isTranscribing || !details.start) {
+                    console.log('Meeting ended - not retrying transcription session.');
                     break;
                 }
+
+                // Count only CONSECUTIVE failures: a session that ran long enough
+                // before failing is treated as healthy and resets the counter,
+                // so a long meeting is not aborted by transient reconnects spread
+                // across it (GitHub #292).
+                if (Date.now() - sessionStartMs >= healthySessionMs) {
+                    consecutiveFailures = 0;
+                }
+                consecutiveFailures += 1;
+
+                if (consecutiveFailures >= maxRetries) {
+                    console.error(`Max consecutive retries (${maxRetries}) reached. Transcription stopped.`);
+                    break;
+                }
+
+                console.log(`Retrying in ${retryDelay / 1000} seconds (consecutive failure ${consecutiveFailures}/${maxRetries})...`);
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
+
+        // Meeting is over: close the recording stream exactly once.
+        try {
+            recordingStream.end();
+        } catch (error: any) {
+            console.error('Failed to close recording stream:', error?.message ?? error);
+        }
+
         this.isTranscribing = false;
         console.log('Transcription service stopped');
     }
@@ -386,7 +494,10 @@ export class TranscriptionService {
             const wordType = item.Type;
             
             if (wordType === 'pronunciation') {
-                const timestamp = this.startTime! + (item.StartTime! * 1000);
+                // Add the cumulative reconnect offset (see transcribeTimeOffsetSeconds)
+                // so captions stay on the meeting timeline after a session restart.
+                const timestamp =
+                    this.startTime! + ((item.StartTime! + this.transcribeTimeOffsetSeconds) * 1000);
                 const speaker = this.getCurrentSpeaker();
                 
                 const formattedTime = this.formatTimestamp(timestamp);
@@ -428,26 +539,37 @@ export class TranscriptionService {
         return currentSpeaker;
     }
 
+    // Kill the FFmpeg/pacat trio spawned for a single Transcribe session so the
+    // next (re)connect starts them fresh. Used by the retry loop between
+    // sessions (reconnect on clean close or error) AND by stopTranscription.
+    // Deliberately does NOT touch isTranscribing, the recording stream, or the
+    // Kinesis/voice-assistant lifecycle — those span the whole meeting.
+    private teardownSessionProcesses(): void {
+        if (this.process) {
+            try { this.process.kill(); } catch (_) { /* ignore */ }
+            this.process = null;
+        }
+        if (this.novaAudioProcess) {
+            try { this.novaAudioProcess.kill(); } catch (_) { /* ignore */ }
+            this.novaAudioProcess = null;
+        }
+        if (this.meetingToCombinedPipe) {
+            try {
+                if (this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                    this.meetingToCombinedPipe.stdin.end();
+                }
+                this.meetingToCombinedPipe.kill();
+            } catch (_) { /* ignore */ }
+            this.meetingToCombinedPipe = null;
+        }
+    }
+
     async stopTranscription(): Promise<void> {
         console.log('Stopping transcription service');
         this.isTranscribing = false;
 
-        if (this.process) {
-            this.process.kill();
-            this.process = null;
-        }
-        if (this.novaAudioProcess) {
-            this.novaAudioProcess.kill();
-            this.novaAudioProcess = null;
-        }
-        if (this.meetingToCombinedPipe) {
-            if (this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
-                this.meetingToCombinedPipe.stdin.end();
-            }
-            this.meetingToCombinedPipe.kill();
-            this.meetingToCombinedPipe = null;
-        }
-        
+        this.teardownSessionProcesses();
+
         // Stop voice assistant if running
         if (voiceAssistant.isEnabled()) {
             try {
@@ -614,12 +736,17 @@ export class TranscriptionService {
                 }
             });
 
-            // Keep processing while meeting is active
-            while (details.start && this.isTranscribing) {
+            // Keep processing while the meeting is active AND this session is
+            // still current. reconnectRequested is set when Transcribe closes
+            // the result stream server-side mid-meeting; exiting here lets the
+            // session's Promise.all resolve so the retry loop can reconnect
+            // (GitHub #292). The recording stream is NOT closed here — it spans
+            // the whole meeting and is owned by startTranscription's loop.
+            while (details.start && this.isTranscribing && !this.reconnectRequested) {
                 await new Promise(resolve => setTimeout(resolve, 100)); // 100ms chunks
             }
 
-            // End stream when done
+            // End the Transcribe input stream for this session when done.
             try {
                 await transcribeResponse.input_stream?.end_stream?.();
             } catch (error: any) {
@@ -631,19 +758,7 @@ export class TranscriptionService {
                     throw error;
                 }
             }
-            
-            try {
-                recordingStream.close();
-            } catch (error: any) {
-                const msg = `Recording stream close error: ${error.message}`;
-                if (isLocalTest) {
-                    console.log(msg + ' (non-fatal in local test)');
-                } else {
-                    console.error(msg);
-                    throw error;
-                }
-            }
-            
+
         } catch (error: any) {
             const msg = `Write audio error: ${error.message || error}`;
             if (isLocalTest) {
@@ -657,6 +772,18 @@ export class TranscriptionService {
 
     // Handle transcript events
     private async handleTranscriptEvents(transcribeResponse: any): Promise<void> {
+        // The reconnect offset must stay CONSTANT for the whole session and only
+        // advance once, when this session ends (mirrors the WebSocket
+        // transcriber). Transcribe's Item.StartTime/EndTime are already
+        // monotonic WITHIN a session and only reset to 0 on a NEW request — so
+        // advancing the field per-result (the previous behaviour) compounded the
+        // offset on every event and pushed segment timestamps far past
+        // wall-clock even with zero reconnects (GitHub #292).
+        const sessionOffsetSeconds = this.transcribeTimeOffsetSeconds;
+        // Highest absolute (offset-adjusted) segment EndTime seen this session;
+        // seeds the next reconnect's offset. Starts at the session offset so a
+        // session that produces nothing still carries the timeline forward.
+        let observedMaxEndTime = sessionOffsetSeconds;
         try {
             // Process transcript results
             for await (const event of transcribeResponse.TranscriptResultStream ?? []) {
@@ -684,14 +811,25 @@ export class TranscriptionService {
                             }
                         }
                         try {
-                            kinesisStreamManager.syncTranscriptSegmentState(currentSpeaker, result);
+                            kinesisStreamManager.syncTranscriptSegmentState(
+                                currentSpeaker,
+                                result,
+                                sessionOffsetSeconds,
+                            );
                         } catch (error) {
                             console.error('Failed to sync transcript segment state during suppression:', error);
                         }
                     } else {
                         // Send all results to Kinesis
                         try {
-                            await sendAddTranscriptSegment(currentSpeaker, result);
+                            const segMaxEndTime = await sendAddTranscriptSegment(
+                                currentSpeaker,
+                                result,
+                                sessionOffsetSeconds,
+                            );
+                            if (segMaxEndTime > observedMaxEndTime) {
+                                observedMaxEndTime = segMaxEndTime;
+                            }
                         } catch (error) {
                             console.error('Failed to send transcript to Kinesis:', error);
                         }
@@ -700,6 +838,18 @@ export class TranscriptionService {
                         this.processTranscriptResult(result);
                     }
                 }
+            }
+
+            // The TranscriptResultStream ended without throwing. If the meeting
+            // is still live, Amazon Transcribe closed the session server-side
+            // (idle / duration limit / transient close). Signal writeAudio to
+            // stop its spin loop so this session's Promise.all resolves and the
+            // retry loop reconnects instead of hanging with a dead pipe
+            // (GitHub #292). Mirrors the WebSocket transcriber's clean-close
+            // reconnect.
+            if (this.isTranscribing && details.start) {
+                console.log('Transcribe result stream closed server-side while meeting is live - requesting reconnect');
+                this.reconnectRequested = true;
             }
         } catch (error: any) {
             // Classify errors as retryable (transient) vs fatal.
@@ -728,6 +878,13 @@ export class TranscriptionService {
                 // Non-retryable errors - throw to trigger retry/exit
                 console.error('Handle transcript events error (fatal in production):', error.message || error);
                 throw error;
+            }
+        } finally {
+            // Advance the cumulative offset exactly ONCE, as this session ends,
+            // so the next session's timestamps continue the meeting timeline
+            // instead of restarting at 0. Runs on both clean close and (re)throw.
+            if (observedMaxEndTime > this.transcribeTimeOffsetSeconds) {
+                this.transcribeTimeOffsetSeconds = observedMaxEndTime;
             }
         }
     }

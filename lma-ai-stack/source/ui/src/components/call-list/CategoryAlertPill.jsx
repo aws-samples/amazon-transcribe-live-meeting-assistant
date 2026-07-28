@@ -11,11 +11,9 @@ import { Popover } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 
 // eslint-disable-next-line import/prefer-default-export, arrow-body-style
-export const CategoryAlertPill = (props) => {
+export const CategoryAlertPill = ({ alertCount = 0, categories = [] }) => {
   const { settings } = useSettingsContext();
   const regex = settings.CategoryAlertRegex ?? '.*';
-
-  const { alertCount, categories } = props;
 
   const matchList = [];
   if (categories) {
@@ -43,9 +41,4 @@ export const CategoryAlertPill = (props) => {
 CategoryAlertPill.propTypes = {
   categories: PropTypes.arrayOf(PropTypes.string),
   alertCount: PropTypes.number,
-};
-
-CategoryAlertPill.defaultProps = {
-  categories: [],
-  alertCount: 0,
 };

@@ -24,7 +24,7 @@ const client = generateClient();
  * Generic Authentication Configuration Modal
  * Supports multiple auth types: Bearer Token, Custom Headers, OAuth 2.1
  */
-const AuthConfigModal = ({ visible, onDismiss, onSubmit, server }) => {
+const AuthConfigModal = ({ visible, onDismiss, onSubmit, server = null }) => {
   const [authType, setAuthType] = useState({ value: 'bearer', label: 'Bearer Token' });
   const [bearerToken, setBearerToken] = useState('');
   const [customHeaders, setCustomHeaders] = useState('{\n  "X-API-Key": "your-key-here"\n}');
@@ -614,10 +614,6 @@ AuthConfigModal.propTypes = {
     transport: PropTypes.arrayOf(PropTypes.string),
     packageType: PropTypes.string,
   }),
-};
-
-AuthConfigModal.defaultProps = {
-  server: null,
 };
 
 export default AuthConfigModal;

@@ -56,6 +56,14 @@ Parameters:
     Type: String
     Description: S3 location (bucket/key) of the audio-capture app source zip
 
+  RecordingDisclaimer:
+    Type: String
+    Description: Disclaimer shown by the app before the first recording (same default as the browser extension)
+    Default: >-
+      Important: You are responsible for complying with legal, corporate, and ethical
+      restrictions that apply to recording meetings and calls. Do not use this solution
+      to stream, record, or transcribe calls if otherwise prohibited.
+
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
@@ -161,6 +169,8 @@ Resources:
           Value: !Ref WebAppBucket
         - Name: CLOUDFRONT_DISTRIBUTION_ID
           Value: !Ref WebAppCloudFrontDistribution
+        - Name: RECORDING_DISCLAIMER
+          Value: !Ref RecordingDisclaimer
       Source:
         Location: !Sub "arn:aws:s3:::${SourceCodeLocation}"
         Type: S3
@@ -171,26 +181,50 @@ Resources:
               commands:
                 - echo Packaging LMA Audio Capture App from s3://${SOURCE_CODE_LOCATION}
                 - echo `pwd` && ls -altr
-                # Bake the deployment config into the package so the end user only
+                # The source zip root is the stack's source/ dir with per-platform
+                # subdirs (macos/, windows/). Tolerate the older layout where the
+                # macOS sources were the zip root, so both zip shapes work.
+                # Bake the deployment config into each package so the end user only
                 # needs their LMA username/password. The app reads lma-config.json
                 # from next to its executable (see Config.swift loadConfigFile()).
-                - >
-                  printf '{
-                    "wssEndpoint": "%s",
-                    "webEndpoint": "%s",
-                    "userPoolId": "%s",
-                    "clientId": "%s",
-                    "region": "%s"
-                  }\n'
-                  "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" > ./lma-config.json
-                - cat ./lma-config.json
-                # Zip the whole preconfigured source tree (source + install scripts
-                # + baked config). Exclude any build artifacts that slipped in.
-                - zipfile=lma-audio-capture-app-macos-v<VERSION_TOKEN>.zip
-                - rm -rf .build build .git
-                - zip -r ../${zipfile} . -x '*.build/*' -x '*/build/*'
-                - aws s3 cp ../${zipfile} s3://${WEBAPP_BUCKET}/
-                - echo Artifact Location - s3://${WEBAPP_BUCKET}/${zipfile}
+                - |
+                  MAC_DIR=.
+                  if [ -d ./source/macos ]; then MAC_DIR=./source/macos; fi
+                  if [ -d ./macos ]; then MAC_DIR=./macos; fi
+                  # JSON-escape the disclaimer (free text — may contain quotes/newlines).
+                  DISCLAIMER_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("RECORDING_DISCLAIMER","")))')
+                  printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s",\n  "recordingDisclaimer": %s\n}\n' \
+                    "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" "$DISCLAIMER_JSON" > "$MAC_DIR/lma-config.json"
+                  cat "$MAC_DIR/lma-config.json"
+                  # Zip the preconfigured macOS source tree (source + install
+                  # scripts + baked config), excluding any build artifacts.
+                  zipfile=lma-audio-capture-app-macos-v<VERSION_TOKEN>.zip
+                  (cd "$MAC_DIR" && rm -rf .build build .git && zip -r "$CODEBUILD_SRC_DIR/../${zipfile}" . -x '*.build/*' -x '*/build/*')
+                  aws s3 cp ../${zipfile} s3://${WEBAPP_BUCKET}/
+                  echo Artifact Location - s3://${WEBAPP_BUCKET}/${zipfile}
+                # --- Windows package (purely additive; guarded so it is a no-op
+                # if this source tree has no Windows client, leaving the macOS
+                # behavior above completely unchanged). The Windows client is
+                # ALSO shipped as build-from-source: CodeBuild only bakes the
+                # deployment config into its lma-config.json and zips the source
+                # (a native WASAPI/WPF app cannot be cross-compiled on Linux, and
+                # Authenticode signing is Windows-only — same reasoning as macOS).
+                - |
+                  WIN_DIR=""
+                  if [ -d ./source/windows ]; then WIN_DIR=./source/windows; fi
+                  if [ -d ./windows ]; then WIN_DIR=./windows; fi
+                  if [ -n "$WIN_DIR" ]; then
+                    DISCLAIMER_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("RECORDING_DISCLAIMER","")))')
+                    printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s",\n  "recordingDisclaimer": %s\n}\n' \
+                      "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" "$DISCLAIMER_JSON" > "$WIN_DIR/lma-config.json"
+                    cat "$WIN_DIR/lma-config.json"
+                    winzip=lma-audio-capture-app-windows-v<VERSION_TOKEN>.zip
+                    (cd "$WIN_DIR" && rm -rf bin obj && zip -r "$OLDPWD/../${winzip}" . -x '*/bin/*' -x '*/obj/*')
+                    aws s3 cp ../${winzip} s3://${WEBAPP_BUCKET}/
+                    echo Artifact Location - s3://${WEBAPP_BUCKET}/${winzip}
+                  else
+                    echo "No Windows client in this source tree; skipping Windows package."
+                  fi
             post_build:
               commands:
                 - echo Invalidating CloudFront Distribution
@@ -323,3 +357,9 @@ Outputs:
   AudioCaptureAppDownloadLocation:
     Description: LMA Native Audio Capture App download location
     Value: !Sub '${CloudfrontEndpoint}lma-audio-capture-app-macos-v<VERSION_TOKEN>.zip'
+
+  # Additive: the Windows source package the same CodeBuild job emits when a
+  # source/windows client is present. Harmless if that zip isn't produced.
+  AudioCaptureAppWindowsDownloadLocation:
+    Description: LMA Native Audio Capture App (Windows) download location
+    Value: !Sub '${CloudfrontEndpoint}lma-audio-capture-app-windows-v<VERSION_TOKEN>.zip'

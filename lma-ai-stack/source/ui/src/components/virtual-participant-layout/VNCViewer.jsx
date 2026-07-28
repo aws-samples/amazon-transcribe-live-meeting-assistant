@@ -27,9 +27,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 // noVNC (@novnc/novnc) is distributed under the Mozilla Public License, v. 2.0.
 // Source: https://github.com/novnc/noVNC. See THIRD-PARTY-LICENSES.txt.
-// The package ships Babel-CJS only (exports.default); unwrap defensively so the
-// class survives any bundler's CJS-to-ESM interop (single or double default).
-import RFBImport from '@novnc/novnc/lib/rfb';
+// noVNC v1.7.0 exposes the RFB module via the package-root "exports" string
+// (./core/rfb.js). The eslint-plugin-import resolver does not understand this
+// bare-string exports map, so disable the false-positive unresolved error.
+// eslint-disable-next-line import/no-unresolved
+import RFB from '@novnc/novnc';
 import {
   Container,
   Header,
@@ -42,20 +44,18 @@ import {
   Badge,
 } from '@cloudscape-design/components';
 
-const RFB = RFBImport && RFBImport.default ? RFBImport.default : RFBImport;
-
 const VNCViewer = ({
   vpId,
   vncEndpoint,
   websocketUrl,
-  status,
-  manualActionType,
-  manualActionMessage,
-  manualActionTimeoutSeconds,
-  manualActionStartTime,
-  compact,
-  onOpenNewTab,
-  showHeader,
+  status = null,
+  manualActionType = null,
+  manualActionMessage = null,
+  manualActionTimeoutSeconds = null,
+  manualActionStartTime = null,
+  compact = false,
+  onOpenNewTab = null,
+  showHeader = true,
 }) => {
   const canvasRef = useRef(null);
   const rfbRef = useRef(null);
@@ -493,17 +493,6 @@ VNCViewer.propTypes = {
   compact: PropTypes.bool,
   onOpenNewTab: PropTypes.func,
   showHeader: PropTypes.bool,
-};
-
-VNCViewer.defaultProps = {
-  status: null,
-  manualActionType: null,
-  manualActionMessage: null,
-  manualActionTimeoutSeconds: null,
-  manualActionStartTime: null,
-  compact: false,
-  onOpenNewTab: null,
-  showHeader: true,
 };
 
 export default VNCViewer;

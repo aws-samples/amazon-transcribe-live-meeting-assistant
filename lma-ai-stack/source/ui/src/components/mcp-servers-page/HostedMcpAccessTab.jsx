@@ -23,7 +23,7 @@ import useMcpConfig from '../../hooks/use-mcp-config';
  * Used to surface CloudFormation-output values that a user needs to paste
  * into an external MCP client config.
  */
-const ReadOnlyField = ({ label, value, description }) => {
+const ReadOnlyField = ({ label, value = '', description = '' }) => {
   if (!value) return null;
   return (
     <Box>
@@ -47,11 +47,6 @@ ReadOnlyField.propTypes = {
   label: PropTypes.string.isRequired,
   value: PropTypes.string,
   description: PropTypes.string,
-};
-
-ReadOnlyField.defaultProps = {
-  value: '',
-  description: '',
 };
 
 /**

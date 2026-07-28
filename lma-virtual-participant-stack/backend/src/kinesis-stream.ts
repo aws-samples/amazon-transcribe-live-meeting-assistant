@@ -301,19 +301,27 @@ class KinesisStreamManager {
     console.log(`Sent call video recording event to Kinesis.`);
   }
 
-  syncTranscriptSegmentState(speaker: string, transcriptResult: any): void {
-    this.processTranscriptionResults(speaker, transcriptResult);
+  syncTranscriptSegmentState(speaker: string, transcriptResult: any, timeOffsetSeconds = 0): void {
+    this.processTranscriptionResults(speaker, transcriptResult, timeOffsetSeconds);
   }
 
-  async sendTranscriptSegment(speaker: string, transcriptResult: any): Promise<void> {
+  // Returns the highest absolute segment EndTime (seconds) written by this call
+  // so the caller can advance the cumulative reconnect offset. Returns
+  // timeOffsetSeconds unchanged when nothing was written.
+  async sendTranscriptSegment(speaker: string, transcriptResult: any, timeOffsetSeconds = 0): Promise<number> {
     console.log("Process speaker changes to identify segments within result");
-    const segments = this.processTranscriptionResults(speaker, transcriptResult);
-    
+    const segments = this.processTranscriptionResults(speaker, transcriptResult, timeOffsetSeconds);
+    let maxEndTime = timeOffsetSeconds;
+
     for (const segment of Object.values(segments)) {
+      const segEnd = (segment as any).EndTime;
+      if (typeof segEnd === 'number' && segEnd > maxEndTime) {
+        maxEndTime = segEnd;
+      }
       if (process.env.DEBUG) {
         console.log(`Sending ADD_TRANSCRIPT_SEGMENT event to Kinesis. Segment:`, segment);
       }
-      
+
       try {
         const record: any = {
           EventType: 'ADD_TRANSCRIPT_SEGMENT',
@@ -341,22 +349,25 @@ class KinesisStreamManager {
         console.log(`Error sending ADD_TRANSCRIPT_SEGMENT event to Kinesis: ${error}`);
       }
     }
+    return maxEndTime;
   }
 
-  private processTranscriptionResults(speakerName: string, result: any): any {
+  private processTranscriptionResults(speakerName: string, result: any, timeOffsetSeconds = 0): any {
     const segments: any = {};
-    
+
     if (this.currentSpeakerName !== speakerName) {
-      // Start time of new speaker is the start time of the last item in the results
+      // Start time of new speaker is the start time of the last item in the results.
+      // Store absolute (offset-adjusted) time so ids/ordering stay monotonic across
+      // reconnects — Transcribe resets Item.StartTime to 0 on every (re)connect.
       this.currentSpeakerName = speakerName;
       this.speakers.push(speakerName);
       const lastItem = result.Alternatives[0].Items[result.Alternatives[0].Items.length - 1];
-      this.startTimes.push(lastItem.StartTime);
+      this.startTimes.push((lastItem.StartTime ?? 0) + timeOffsetSeconds);
     }
-    
+
     const alternative = result.Alternatives[0];
     for (const item of alternative.Items) {
-      this.addItemToSegment(item, segments);
+      this.addItemToSegment(item, segments, timeOffsetSeconds);
       if (process.env.DEBUG) {
         console.log(`DEBUG: Item ${item.StartTime}, ${item.EndTime}, ${item.Content}`);
         console.log(`DEBUG: Speakers ${this.speakers}`);
@@ -376,31 +387,35 @@ class KinesisStreamManager {
     return segments;
   }
 
-  private addItemToSegment(item: any, segments: any): any {
+  private addItemToSegment(item: any, segments: any, timeOffsetSeconds = 0): any {
+    // startTimes are already absolute (offset-adjusted); compare against the
+    // item's absolute start time so the speaker lookup stays correct.
+    const itemStart = (item.StartTime ?? 0) + timeOffsetSeconds;
+    const itemEnd = (item.EndTime ?? 0) + timeOffsetSeconds;
     // Find the correct segment index using binary search (matching Python bisect)
-    let segmentIndex = this.binarySearch(this.startTimes, item.StartTime) - 1;
+    let segmentIndex = this.binarySearch(this.startTimes, itemStart) - 1;
     if (segmentIndex < 0) {
       segmentIndex = 0;
     }
-    
+
     const segmentId = `${this.speakers[segmentIndex]}-${this.startTimes[segmentIndex]}`;
-    
+
     if (!(segmentId in segments)) {
       segments[segmentId] = {
         SegmentId: segmentId,
         Speaker: this.speakers[segmentIndex],
         StartTime: this.startTimes[segmentIndex],
-        EndTime: item.EndTime,
+        EndTime: itemEnd,
         Transcript: ''
       };
     } else if (item.Type === 'pronunciation') {
       // Add a space between words
       segments[segmentId].Transcript += " ";
     }
-    
-    segments[segmentId].EndTime = item.EndTime;
+
+    segments[segmentId].EndTime = itemEnd;
     segments[segmentId].Transcript += item.Content;
-    
+
     return segments;
   }
 
@@ -488,8 +503,8 @@ export const kinesisStreamManager = new KinesisStreamManager();
 // Convenience functions for backward compatibility with LMA Python code
 export const sendStartMeeting = () => kinesisStreamManager.sendStartMeeting();
 export const sendEndMeeting = (recordingUrl?: string) => kinesisStreamManager.sendEndMeeting(recordingUrl);
-export const sendAddTranscriptSegment = (speaker: string, transcriptResult: any) => 
-  kinesisStreamManager.sendTranscriptSegment(speaker, transcriptResult);
+export const sendAddTranscriptSegment = (speaker: string, transcriptResult: any, timeOffsetSeconds = 0) =>
+  kinesisStreamManager.sendTranscriptSegment(speaker, transcriptResult, timeOffsetSeconds);
 export const sendCallCategory = (category: string, score?: number) => 
   kinesisStreamManager.sendCallCategory(category, score);
 export const sendCallRecording = (url: string) => kinesisStreamManager.sendCallRecording(url);

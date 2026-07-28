@@ -30,11 +30,31 @@ final class MenuBarAppState: ObservableObject {
 
     @Published var rememberLogin = false
 
+    // Settings (gear panel): per-channel speaker labels + mic device. Persisted
+    // in UserDefaults; applied to the controller so they ride the START frame.
+    @Published var showSettings = false
+    @Published var micLabel = ""
+    @Published var systemLabel = ""
+    @Published var micDeviceUID = ""            // "" = System Default
+    @Published var micDevices: [MicDevices.Device] = []
+
+    // Recording-consent disclaimer: shown once, before the FIRST recording ever
+    // starts on this machine (same pattern as the browser extension's popup).
+    // Agreement is persisted; Cancel just doesn't start.
+    @Published var showDisclaimer = false
+
     let controller: CaptureController
     // UserDefaults keys for the optional "remember login id" feature. Only the
     // username (email) is stored — never the password, which stays in memory.
     private static let kRemember = "lma.rememberLogin"
     private static let kUsername = "lma.savedUsername"
+    private static let kMicLabel = "lma.micLabel"
+    private static let kSystemLabel = "lma.systemLabel"
+    private static let kMicDeviceUID = "lma.micDeviceUID"
+    private static let kDisclaimerAgreed = "lma.disclaimerAgreed"
+
+    /// Default label for the system channel when the user hasn't set one.
+    static let defaultSystemLabel = "Other participants"
 
     init(controller: CaptureController) {
         self.controller = controller
@@ -42,11 +62,52 @@ final class MenuBarAppState: ObservableObject {
         self.rememberLogin = defaults.bool(forKey: Self.kRemember)
         // Prefill the login id from the remembered value, else the config.
         self.username = rememberLogin ? (defaults.string(forKey: Self.kUsername) ?? "") : controller.config.username
+        self.micLabel = defaults.string(forKey: Self.kMicLabel) ?? ""
+        self.systemLabel = defaults.string(forKey: Self.kSystemLabel) ?? ""
+        self.micDeviceUID = defaults.string(forKey: Self.kMicDeviceUID) ?? ""
+        pushSettingsToController()
         controller.onStateChange = { [weak self] s in self?.state = s }
         controller.onLevels = { [weak self] m, k, c, p in
             self?.meetingLevel = m; self?.micLevel = k; self?.connected = c; self?.paused = p
         }
         controller.onLog = { [weak self] msg in self?.lastLog = msg }
+    }
+
+    // MARK: - Settings
+
+    /// The mic label shown/used when the user hasn't customized one: their
+    /// signed-in email, else the config's agentId ("Me").
+    var effectiveMicLabel: String {
+        if !micLabel.isEmpty { return micLabel }
+        if !username.isEmpty { return username }
+        return controller.config.agentId
+    }
+    var effectiveSystemLabel: String {
+        systemLabel.isEmpty ? Self.defaultSystemLabel : systemLabel
+    }
+
+    func saveSettings() {
+        let defaults = UserDefaults.standard
+        defaults.set(micLabel, forKey: Self.kMicLabel)
+        defaults.set(systemLabel, forKey: Self.kSystemLabel)
+        defaults.set(micDeviceUID, forKey: Self.kMicDeviceUID)
+        pushSettingsToController()
+    }
+
+    /// Refresh the device list each time the panel opens (hotplug-friendly).
+    func refreshMicDevices() {
+        micDevices = MicDevices.list()
+        // If the saved device disappeared, show System Default rather than a
+        // stale selection (capture already falls back at start).
+        if !micDeviceUID.isEmpty && !micDevices.contains(where: { $0.uid == micDeviceUID }) {
+            micDeviceUID = ""
+        }
+    }
+
+    private func pushSettingsToController() {
+        controller.micLabel = effectiveMicLabel
+        controller.systemLabel = effectiveSystemLabel
+        controller.micDeviceUID = micDeviceUID
     }
 
     var isStreaming: Bool { if case .streaming = state { return true }; return false }
@@ -94,6 +155,26 @@ final class MenuBarAppState: ObservableObject {
         }
     }
     func start() {
+        // One-time recording-consent gate (mirrors the browser extension): the
+        // first Start on this machine shows the disclaimer; Agree persists and
+        // proceeds, Cancel does nothing.
+        guard UserDefaults.standard.bool(forKey: Self.kDisclaimerAgreed) else {
+            showDisclaimer = true
+            return
+        }
+        reallyStart()
+    }
+
+    /// Agree on the consent dialog: persist and start the recording that was gated.
+    func agreeDisclaimerAndStart() {
+        UserDefaults.standard.set(true, forKey: Self.kDisclaimerAgreed)
+        showDisclaimer = false
+        reallyStart()
+    }
+
+    private func reallyStart() {
+        // Push current settings (labels may depend on the signed-in email).
+        pushSettingsToController()
         let name = meetingName.isEmpty ? "" : "\(meetingName) - \(Self.timestamp())"
         controller.start(callId: name.isEmpty ? nil : name)
     }
@@ -119,9 +200,27 @@ struct MenuBarContentView: View {
                 Text("LMA Audio Capture").font(.headline)
                 Spacer()
                 Text(statusText).font(.caption).foregroundColor(.secondary)
+                // Settings gear: speaker labels + mic picker. Disabled while
+                // streaming — labels ride the START frame, so mid-meeting
+                // changes wouldn't take effect anyway.
+                Button {
+                    s.showSettings.toggle()
+                    if s.showSettings { s.refreshMicDevices() }
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(s.showSettings ? .accentColor : .secondary)
+                .disabled(s.isStreaming)
+                .help(s.isStreaming ? "Stop recording to change settings" : "Settings")
             }
 
             Divider()
+
+            if s.showSettings {
+                SettingsView(s: s)
+                Divider()
+            }
 
             if !s.controller.isAuthenticated {
                 // Sign-in form
@@ -142,7 +241,26 @@ struct MenuBarContentView: View {
                 }
             } else {
                 // Streaming controls
-                if !s.isStreaming {
+                if s.showDisclaimer {
+                    // One-time recording-consent gate (same text and Agree/Cancel
+                    // shape as the browser extension's popup). Shown in place of
+                    // the Start controls so it can't be missed or clicked past.
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Important", systemImage: "exclamationmark.triangle.fill")
+                            .font(.headline).foregroundColor(.orange)
+                        Text(s.controller.config.recordingDisclaimer)
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Spacer()
+                            Button("Cancel") { s.showDisclaimer = false }
+                            Button("Agree") { s.agreeDisclaimerAndStart() }
+                                .keyboardShortcut(.defaultAction)
+                        }
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.08)))
+                } else if !s.isStreaming {
                     TextField("Meeting name (optional)", text: $s.meetingName).textFieldStyle(.roundedBorder)
                     Button(action: s.start) {
                         Label("Start Recording", systemImage: "record.circle").frame(maxWidth: .infinity)
@@ -219,6 +337,47 @@ struct MenuBarContentView: View {
     }
 }
 
+/// Settings section (gear): speaker labels for the two channels + mic picker.
+/// Labels are applied to the next recording's START frame; the mic choice is
+/// applied when capture starts. Saved on every edit (no Apply button).
+@available(macOS 13.0, *)
+struct SettingsView: View {
+    @ObservedObject var s: MenuBarAppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Speaker labels").font(.caption).foregroundColor(.secondary)
+            HStack {
+                Text("My mic").font(.caption).frame(width: 70, alignment: .leading)
+                TextField(s.username.isEmpty ? "Me" : s.username,
+                          text: Binding(get: { s.micLabel }, set: { s.micLabel = $0; s.saveSettings() }))
+                    .textFieldStyle(.roundedBorder).font(.caption)
+            }
+            HStack {
+                Text("System").font(.caption).frame(width: 70, alignment: .leading)
+                TextField(MenuBarAppState.defaultSystemLabel,
+                          text: Binding(get: { s.systemLabel }, set: { s.systemLabel = $0; s.saveSettings() }))
+                    .textFieldStyle(.roundedBorder).font(.caption)
+            }
+            Text("These appear as the speaker names in the LMA transcript. Leave blank for the defaults shown.")
+                .font(.caption2).foregroundColor(.secondary)
+
+            Text("Microphone").font(.caption).foregroundColor(.secondary).padding(.top, 2)
+            Picker("", selection: Binding(get: { s.micDeviceUID }, set: { s.micDeviceUID = $0; s.saveSettings() })) {
+                Text("System Default").tag("")
+                ForEach(s.micDevices) { d in
+                    Text(d.name).tag(d.uid)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .font(.caption)
+            Text("System Default follows your Sound settings. If a chosen mic is unplugged, recording falls back to the default.")
+                .font(.caption2).foregroundColor(.secondary)
+        }
+    }
+}
+
 @available(macOS 13.0, *)
 struct LevelBar: View {
     let label: String
@@ -242,10 +401,18 @@ struct LevelBar: View {
 }
 
 /// AppKit glue: creates the status-bar item + popover and hosts the SwiftUI view.
+///
+/// The app is also a REGULAR Dock app (not LSUIElement): on notched MacBooks a
+/// crowded menu bar silently hides status items — and starting a recording adds
+/// the system's orange mic indicator, which can push OUR icon out of view at
+/// the exact moment recording begins. The Dock tile is the always-visible
+/// fallback: it shows a "REC" badge while recording, its right-click menu has
+/// Start/Pause/Stop, and clicking it opens the same panel as the menu-bar icon.
 @available(macOS 13.0, *)
 final class MenuBarController: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
+    private var panelWindow: NSWindow?
     private let state: MenuBarAppState
     private var pollTimer: Timer?
 
@@ -270,10 +437,100 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
         statusItem.button?.target = self
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
-        // Repaint the menu-bar icon (red while recording) as state changes.
+        // Repaint the menu-bar icon (red while recording) + Dock badge as state
+        // changes.
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.updateIcon()
+            self?.updateDockBadge()
         }
+    }
+
+    // MARK: - Dock integration
+
+    /// Recording state on the Dock tile, visible even when the menu-bar icon is
+    /// hidden under the notch: a "REC" badge ("⏸" when paused) AND a red dot
+    /// drawn onto the icon itself, so the state change is obvious at Dock size.
+    private var lastBadge = ""
+    private var recordingDockView: RecordingDockTileView?
+    private func updateDockBadge() {
+        let badge = state.isStreaming ? (state.paused ? "⏸" : "REC") : ""
+        if badge != lastBadge {
+            NSApp.dockTile.badgeLabel = badge
+            if state.isStreaming, recordingDockView == nil {
+                let v = RecordingDockTileView(frame: NSRect(x: 0, y: 0, width: 128, height: 128))
+                recordingDockView = v
+                NSApp.dockTile.contentView = v
+            } else if !state.isStreaming {
+                recordingDockView = nil
+                NSApp.dockTile.contentView = nil // restore the normal app icon
+            }
+            NSApp.dockTile.display()
+            lastBadge = badge
+        }
+    }
+
+    /// Clicking the Dock tile (with no windows open) opens the control panel as
+    /// a regular window. The popover variant is unusable here: it anchors to the
+    /// status-item button, which may be hidden under the notch — the very
+    /// problem the Dock presence exists to solve.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { showPanelWindow() }
+        return true
+    }
+
+    /// Right-click Dock menu: recording controls that work sight-unseen.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        if state.isStreaming {
+            let pause = NSMenuItem(
+                title: state.paused ? "Resume Recording" : "Pause Recording",
+                action: #selector(dockTogglePause), keyEquivalent: "")
+            pause.target = self
+            menu.addItem(pause)
+            let stop = NSMenuItem(title: "Stop Recording", action: #selector(dockStop), keyEquivalent: "")
+            stop.target = self
+            menu.addItem(stop)
+        } else if state.controller.isAuthenticated {
+            let start = NSMenuItem(title: "Start Recording", action: #selector(dockStart), keyEquivalent: "")
+            start.target = self
+            menu.addItem(start)
+        }
+        let open = NSMenuItem(title: "Open Control Panel", action: #selector(dockOpenPanel), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+        return menu
+    }
+
+    @objc private func dockTogglePause() { state.togglePause() }
+    @objc private func dockStop() { state.stop() }
+    @objc private func dockStart() {
+        state.start()
+        // First-ever recording: start() gates on the consent disclaimer instead
+        // of starting. Surface the panel so the dialog is actually visible.
+        if state.showDisclaimer { showPanelWindow() }
+    }
+    @objc private func dockOpenPanel() { showPanelWindow() }
+
+    /// The same SwiftUI content as the popover, hosted in a small titled window
+    /// for Dock-initiated opens. Closing it leaves the app running (standard
+    /// for menu-bar/Dock hybrid utilities).
+    private func showPanelWindow() {
+        if let w = panelWindow {
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let w = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 360),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered, defer: false)
+        w.title = "LMA Audio Capture"
+        w.contentViewController = NSHostingController(rootView: MenuBarContentView(s: state))
+        w.isReleasedWhenClosed = false
+        w.center()
+        panelWindow = w
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Build the right-click menu (Quit + a hint line). Rebuilt on demand so it
@@ -352,12 +609,31 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Entry point for GUI mode. Runs a standard AppKit run loop with an
-/// LSUIElement (menu-bar-only) activation policy.
+/// Dock tile content while recording: the app icon dimmed slightly with a red
+/// recording dot in the lower-right corner. NSDockTile has no "tint" API, so a
+/// custom contentView drawing the icon + overlay is the supported way to make
+/// the Dock icon itself reflect recording state.
+@available(macOS 13.0, *)
+final class RecordingDockTileView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSApp.applicationIconImage?.draw(in: bounds)
+        let d = bounds.width * 0.30
+        let dotRect = NSRect(x: bounds.maxX - d - bounds.width * 0.06,
+                             y: bounds.width * 0.06, width: d, height: d)
+        // White ring behind the dot so it reads against any icon artwork.
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: dotRect.insetBy(dx: -2, dy: -2)).fill()
+        NSColor.systemRed.setFill()
+        NSBezierPath(ovalIn: dotRect).fill()
+    }
+}
+
+/// Entry point for GUI mode. Runs a standard AppKit run loop as a REGULAR app
+/// (Dock icon + menu bar item — see MenuBarController docs for why).
 @available(macOS 13.0, *)
 func runMenuBarApp(config: Config) -> Never {
     let app = NSApplication.shared
-    app.setActivationPolicy(.accessory) // menu-bar only, no Dock icon
+    app.setActivationPolicy(.regular) // Dock icon + menu-bar item
     let controller = CaptureController(config: config)
     let state = MenuBarAppState(controller: controller)
     let delegate = MenuBarController(state: state)

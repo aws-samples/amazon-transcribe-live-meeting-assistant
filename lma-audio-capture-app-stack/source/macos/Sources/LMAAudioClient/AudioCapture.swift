@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import ScreenCaptureKit
 import CoreMedia
+import AudioToolbox
 
 /// Captures the two audio sources and feeds mono Float samples (resampled to the
 /// target rate) into a StereoMixer.
@@ -32,16 +33,40 @@ final class AudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         interleaved: false
     )!
 
-    init(mixer: StereoMixer, targetRate: Int) {
+    /// CoreAudio UID of the mic to use; empty = system default (Settings picker).
+    private let micDeviceUID: String
+
+    init(mixer: StereoMixer, targetRate: Int, micDeviceUID: String = "") {
         self.mixer = mixer
         self.targetRate = Double(targetRate)
+        self.micDeviceUID = micDeviceUID
         super.init()
     }
 
     func start() async throws {
+        applyMicDeviceSelection()
         try startMic()
         observeDeviceChanges()
         try await startSystemAudio()
+    }
+
+    /// Point AVAudioEngine's input AUHAL at the chosen device (Settings picker).
+    /// No-op for "" (system default) or if the device is unplugged — both fall
+    /// back to the default input, matching the pre-Settings behavior.
+    private func applyMicDeviceSelection() {
+        guard !micDeviceUID.isEmpty, var devId = MicDevices.deviceID(forUID: micDeviceUID) else {
+            if !micDeviceUID.isEmpty {
+                print("⚠ selected mic not connected; using system default input")
+            }
+            return
+        }
+        let au = engine.inputNode.audioUnit!
+        let err = AudioUnitSetProperty(
+            au, kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global, 0, &devId, UInt32(MemoryLayout<AudioDeviceID>.size))
+        if err != noErr {
+            print("⚠ couldn't select mic (\(err)); using system default input")
+        }
     }
 
     func stop() {

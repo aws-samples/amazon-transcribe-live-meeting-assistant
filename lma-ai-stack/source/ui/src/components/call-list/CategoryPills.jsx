@@ -12,8 +12,7 @@ import useSettingsContext from '../../contexts/settings';
 import './CategoryPill.css';
 
 // eslint-disable-next-line import/prefer-default-export, arrow-body-style
-export const CategoryPills = (props) => {
-  const { categories } = props;
+export const CategoryPills = ({ categories = [] }) => {
   const { settings } = useSettingsContext();
 
   const regex = settings.CategoryAlertRegex ?? '.*';
@@ -59,8 +58,4 @@ export const CategoryPills = (props) => {
 
 CategoryPills.propTypes = {
   categories: PropTypes.arrayOf(PropTypes.string),
-};
-
-CategoryPills.defaultProps = {
-  categories: [],
 };

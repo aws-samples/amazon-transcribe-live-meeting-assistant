@@ -42,6 +42,16 @@ struct Config {
     /// DIFFERENT CloudFront distribution than the WebSocket endpoint, so it must
     /// be configured explicitly rather than derived from `endpoint`.
     var webEndpoint: String
+    /// Recording-consent disclaimer shown before the first recording. Baked into
+    /// lma-config.json from the deployment's RecordingDisclaimer parameter (same
+    /// text the browser extension shows); falls back to the standard wording.
+    var recordingDisclaimer: String
+
+    /// Fallback consent text when the deployment config predates the setting.
+    static let defaultDisclaimer =
+        "Important: You are responsible for complying with legal, corporate, and ethical "
+        + "restrictions that apply to recording meetings and calls. Do not use this solution "
+        + "to stream, record, or transcribe calls if otherwise prohibited."
 
     static func parse() -> Config {
         let env = ProcessInfo.processInfo.environment
@@ -83,7 +93,9 @@ struct Config {
             userPoolId: value("user-pool-id", "LMA_USER_POOL_ID", "userPoolId"),
             clientId: value("client-id", "LMA_CLIENT_ID", "clientId"),
             region: value("region", "LMA_REGION", "region"),
-            webEndpoint: value("web-endpoint", "LMA_WEB_ENDPOINT", "webEndpoint")
+            webEndpoint: value("web-endpoint", "LMA_WEB_ENDPOINT", "webEndpoint"),
+            recordingDisclaimer: value("disclaimer", "LMA_RECORDING_DISCLAIMER", "recordingDisclaimer",
+                                       Config.defaultDisclaimer)
         )
     }
 

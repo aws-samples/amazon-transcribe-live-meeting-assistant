@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    LMA native Windows audio client. Single project, dual-mode:
+      launched with NO CLI flags  -> WPF system-tray app (GUI)
+      launched with any CLI flag   -> headless CLI streaming to stdout
+    (mirrors the macOS app's main.swift dispatch).
+
+    OutputType=WinExe so the tray app has no console window when idle; the CLI
+    path re-attaches to the parent console via AttachConsole (see Program.cs).
+    UseWPF so we can build the tray popup panel + NotifyIcon.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>LMAAudioClient</AssemblyName>
+    <RootNamespace>LMA</RootNamespace>
+    <!-- Shown by Windows wherever it names the app: the taskbar button's
+         accessible name and hover thumbnail, Task Manager, and the file
+         properties dialog. Without these it reads as the bare "LMAAudioClient". -->
+    <Product>LMA Audio Capture</Product>
+    <AssemblyTitle>LMA Audio Capture</AssemblyTitle>
+    <Company>Amazon Web Services</Company>
+    <Description>Streams your microphone and system (meeting) audio to Live Meeting Assistant.</Description>
+    <!-- No custom app.manifest: .NET 8 already defaults to asInvoker (no
+         elevation) and WPF is per-monitor-DPI-aware by default on Win10+.
+         A hand-written manifest was found to trigger an SxS load error. -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- We build the UI in code (no XAML markup) so there is no App.xaml entry
+         point; Program.Main is our explicit entry point. -->
+    <StartupObject>LMA.Program</StartupObject>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WASAPI loopback (system audio) + capture (mic) + resampling. -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- WPF tray icon helper (NotifyIcon for WPF). -->
+    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="1.1.0" />
+  </ItemGroup>
+
+  <!-- Ship the sample config next to the exe (the packaging pipeline overwrites
+       it with the deployment's real values — see build-windows.ps1 / template). -->
+  <ItemGroup>
+    <None Include="lma-config.json" Condition="Exists('lma-config.json')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
