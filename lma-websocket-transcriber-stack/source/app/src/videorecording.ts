@@ -142,15 +142,25 @@ export const startVideoSession = (
     }
 
     if (session && !session.videoEnded && !session.muxStarted) {
-        // Reconnect: rotate to a fresh segment file (the client re-sends the
-        // fMP4 init segment on a new connection).
         if (session.graceTimer) {
             clearTimeout(session.graceTimer);
             session.graceTimer = undefined;
         }
         session.writeStream?.end();
+        if (callMetaData.videoResume === true && session.segmentPaths.length > 0) {
+            // Reconnect of the SAME client encoder session: the incoming bytes
+            // continue the same fMP4 stream, so append to the current file.
+            const segPath = session.segmentPaths[session.segmentPaths.length - 1];
+            session.writeStream = fs.createWriteStream(segPath, { flags: 'a' });
+            server.log.info(
+                `[START_VIDEO]: [${callId}] - Video stream reconnected (resume); appending to current segment.`
+            );
+            return session;
+        }
+        // Fresh client encoder session (e.g. app restarted mid-call): rotate
+        // to a new segment file — it begins with its own fMP4 init segment.
         server.log.info(
-            `[START_VIDEO]: [${callId}] - Video stream reconnected; starting segment ${
+            `[START_VIDEO]: [${callId}] - Video stream restarted; starting segment ${
                 session.segmentPaths.length + 1
             }`
         );

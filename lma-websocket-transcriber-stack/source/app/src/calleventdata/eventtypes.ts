@@ -104,6 +104,11 @@ export type CallMetaData = {
     // START_VIDEO only: ms between audio-stream start and video-stream start,
     // applied as an offset when muxing so video aligns with audio/transcript.
     videoTimeOffsetMs?: number,
+    // START_VIDEO only: true when this is a socket RECONNECT for a video
+    // stream whose client-side encoder session never restarted — the bytes
+    // continue the same fMP4 stream, so the server appends to the same file
+    // instead of rotating to a new segment.
+    videoResume?: boolean,
     channels: {
         [channelId: string]: ChannelSpeakerData;
     };
