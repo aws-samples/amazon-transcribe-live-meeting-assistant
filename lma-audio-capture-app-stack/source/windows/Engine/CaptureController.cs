@@ -32,6 +32,9 @@ public sealed class CaptureController
     private StereoMixer? _mixer;
     private AudioCapture? _capture;
     private WavTee? _tee;
+    private VideoSocket? _videoSocket;
+    private VideoCapture? _videoCapture;
+    private DateTime _audioStartUtc;
     private readonly object _lock = new();
     private State _state = State.Idle;
 
@@ -119,6 +122,12 @@ public sealed class CaptureController
     public string SystemLabel = "";
     /// <summary>MMDevice ID of the mic to capture from. Empty = system default.</summary>
     public string MicDeviceId = "";
+    /// <summary>Also capture and stream desktop video (screen or window). Default off.</summary>
+    public bool VideoEnabled = false;
+    /// <summary>Persisted video source id ("display:&lt;name&gt;" / "window:&lt;handle&gt;"; "" = primary display).</summary>
+    public string VideoSourceId = "";
+    /// <summary>True while a video stream is running for the active call (UI badge).</summary>
+    public bool IsVideoActive { get; private set; }
 
     public void Start(string? callId = null)
     {
@@ -154,11 +163,13 @@ public sealed class CaptureController
 
         sock.Connect();
         mix.Start();
+        _audioStartUtc = DateTime.UtcNow;
         try
         {
             cap.Start();
             Log($"Streaming {ActiveCallId}");
             SetState(State.Streaming);
+            StartVideoIfEnabled();
         }
         catch (Exception e)
         {
@@ -167,10 +178,83 @@ public sealed class CaptureController
         }
     }
 
+    /// <summary>
+    /// Start the optional desktop-video lane: a second capture (screen/window)
+    /// feeding fMP4 fragments over a second websocket. Best-effort — failures
+    /// here never touch the audio path.
+    /// </summary>
+    private void StartVideoIfEnabled()
+    {
+        if (!VideoEnabled) return;
+        var vSock = new VideoSocket(Config);
+        var vCap = new VideoCapture(VideoSourceId, seg => vSock.SendSegment(seg));
+        vCap.OnFirstFrame = () =>
+        {
+            if (vCap.FirstFrameDate is { } first)
+                vSock.VideoTimeOffsetMs = Math.Max(0, (int)(first - _audioStartUtc).TotalMilliseconds);
+        };
+        vSock.OnOverflow = () =>
+        {
+            StopVideo(sendEnd: false);
+            Log("Screen video stopped (connection lost); audio unaffected");
+        };
+        vCap.OnFailed = msg =>
+        {
+            Log($"Screen video failed (audio unaffected): {msg}");
+            StopVideo(sendEnd: false);
+        };
+        _videoSocket = vSock;
+        _videoCapture = vCap;
+        vSock.Connect();
+        try
+        {
+            vCap.Start();
+            IsVideoActive = true;
+            Log("Streaming with screen video");
+        }
+        catch (Exception e)
+        {
+            Log($"Screen video failed to start (audio unaffected): {e.Message}");
+            StopVideo(sendEnd: false);
+        }
+    }
+
+    /// <summary>
+    /// Tear down the video lane. When sendEnd, flush the encoder's final
+    /// fragments and send END_VIDEO so the server finalizes the recording.
+    /// </summary>
+    private void StopVideo(bool sendEnd)
+    {
+        var vCap = _videoCapture;
+        var vSock = _videoSocket;
+        if (vCap == null && vSock == null) return;
+        IsVideoActive = false;
+        _videoCapture = null;
+        _videoSocket = null;
+        _ = Task.Run(async () =>
+        {
+            // Stopping the recorder flushes remaining fMP4 fragments through the
+            // callback stream BEFORE we send END_VIDEO/close.
+            if (vCap != null) await vCap.StopAsync();
+            if (sendEnd)
+            {
+                vSock?.BeginClose();
+                vSock?.SendEnd();
+                await Task.Delay(TimeSpan.FromMilliseconds(400));
+                vSock?.Close();
+            }
+            else
+            {
+                vSock?.Close();
+            }
+        });
+    }
+
     /// <summary>Stop: send END, tear down capture + socket, return to authenticated/idle.</summary>
     public void Stop()
     {
         SetState(State.Stopping);
+        StopVideo(sendEnd: true);
         _capture?.Stop();
         _mixer?.Stop();
         _tee?.Finish();
@@ -187,7 +271,7 @@ public sealed class CaptureController
 
     // MARK: - Controls (no-ops when not streaming)
 
-    public void SetPaused(bool p) => _mixer?.SetPaused(p);
+    public void SetPaused(bool p) { _mixer?.SetPaused(p); _videoCapture?.SetPaused(p); }
     public void SetMicMuted(bool m) => _mixer?.SetMicMuted(m);
     public void SetMeetingMuted(bool m) => _mixer?.SetMeetingMuted(m);
 

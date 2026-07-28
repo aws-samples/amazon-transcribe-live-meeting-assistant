@@ -82,6 +82,25 @@ public static class AppSettings
         set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(MicDeviceValue, value, RegistryValueKind.String); }
     }
 
+    // MARK: - Optional desktop-video capture (screen recording)
+
+    private const string VideoEnabledValue = "VideoEnabled";
+    private const string VideoSourceValue = "VideoSourceId";
+
+    /// <summary>Whether to also capture and stream desktop video. Default off.</summary>
+    public static bool VideoEnabled
+    {
+        get { using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath); return (k?.GetValue(VideoEnabledValue) as int?) == 1; }
+        set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(VideoEnabledValue, value ? 1 : 0, RegistryValueKind.DWord); }
+    }
+
+    /// <summary>Chosen video source id ("display:&lt;name&gt;" / "window:&lt;handle&gt;"; "" = primary display).</summary>
+    public static string VideoSourceId
+    {
+        get { using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath); return (k?.GetValue(VideoSourceValue) as string) ?? ""; }
+        set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(VideoSourceValue, value, RegistryValueKind.String); }
+    }
+
     // MARK: - Recording-consent disclaimer (one-time acknowledgment)
 
     private const string DisclaimerAgreedValue = "DisclaimerAgreed";

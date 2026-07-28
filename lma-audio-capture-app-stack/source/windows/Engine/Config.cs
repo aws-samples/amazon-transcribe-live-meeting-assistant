@@ -49,6 +49,12 @@ public sealed class Config
     /// </summary>
     public string RecordingDisclaimer = "";
 
+    /// <summary>CLI: also capture and stream desktop video (--video 1 / LMA_VIDEO). The
+    /// GUI ignores this and uses its own persisted Settings toggle instead.</summary>
+    public bool VideoEnabled = false;
+    /// <summary>CLI: video source id ("display:&lt;name&gt;" / "window:&lt;handle&gt;"; "" = primary display).</summary>
+    public string VideoSourceId = "";
+
     /// <summary>Fallback consent text when the deployment config predates the setting.</summary>
     public const string DefaultDisclaimer =
         "Important: You are responsible for complying with legal, corporate, and ethical " +
@@ -107,6 +113,8 @@ public sealed class Config
             WebEndpoint = Value("web-endpoint", "LMA_WEB_ENDPOINT", "webEndpoint"),
             RecordingDisclaimer = Value("disclaimer", "LMA_RECORDING_DISCLAIMER", "recordingDisclaimer",
                                         DefaultDisclaimer),
+            VideoEnabled = new[] { "1", "true", "yes" }.Contains(Value("video", "LMA_VIDEO").ToLowerInvariant()),
+            VideoSourceId = Value("video-source", "LMA_VIDEO_SOURCE"),
         };
     }
 

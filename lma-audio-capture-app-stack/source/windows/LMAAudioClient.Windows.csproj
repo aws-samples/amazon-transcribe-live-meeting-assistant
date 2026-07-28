@@ -43,6 +43,12 @@
     <PackageReference Include="NAudio" Version="2.2.1" />
     <!-- WPF tray icon helper (NotifyIcon for WPF). -->
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="1.1.0" />
+    <!-- Optional desktop-video capture: wraps Windows.Graphics.Capture +
+         Media Foundation H.264 encoding with display/window selection and
+         fragmented-MP4 output to a Stream (what we forward to the socket).
+         MIT-licensed. Only exercised when the user enables "Also record
+         screen video" — audio-only usage never loads it. -->
+    <PackageReference Include="ScreenRecorderLib" Version="6.2.0" />
   </ItemGroup>
 
   <!-- Ship the sample config next to the exe (the packaging pipeline overwrites

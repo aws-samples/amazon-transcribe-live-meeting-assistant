@@ -64,6 +64,10 @@ public sealed class PanelView : Border
     private readonly TextBox _micLabel = new();
     private readonly TextBox _systemLabel = new();
     private readonly ComboBox _micPicker = new() { FontSize = 11, Margin = new Thickness(0, 0, 0, 6) };
+    // Optional desktop-video capture.
+    private readonly CheckBox _videoEnabled = new() { Content = "Also record screen video", FontSize = 11 };
+    private readonly ComboBox _videoPicker = new() { FontSize = 11, Margin = new Thickness(0, 0, 0, 6) };
+    private bool _loadingVideoPicker;
     // Grey placeholder showing what a blank field will actually be sent as, so the
     // defaults are visible without having to hover a tooltip.
     private readonly TextBlock _micHint = HintText();
@@ -167,6 +171,19 @@ public sealed class PanelView : Border
             if (_micPicker.SelectedItem is ComboBoxItem it)
                 AppSettings.MicDeviceId = (it.Tag as string) ?? "";
         };
+        _videoEnabled.Click += (_, _) =>
+        {
+            AppSettings.VideoEnabled = _videoEnabled.IsChecked ?? false;
+            if (_videoEnabled.IsChecked ?? false) RefreshVideoPicker();
+            PushSettingsToController();
+            Refresh();
+        };
+        _videoPicker.SelectionChanged += (_, _) =>
+        {
+            if (_loadingVideoPicker) return;
+            if (_videoPicker.SelectedItem is ComboBoxItem it)
+                AppSettings.VideoSourceId = (it.Tag as string) ?? "";
+        };
     }
 
     public void InitFromSettings()
@@ -195,6 +212,31 @@ public sealed class PanelView : Border
         var sys = AppSettings.SystemLabel;
         _c.SystemLabel = string.IsNullOrEmpty(sys) ? AppSettings.DefaultSystemLabel : sys;
         _c.MicDeviceId = AppSettings.MicDeviceId;
+        _c.VideoEnabled = AppSettings.VideoEnabled;
+        _c.VideoSourceId = AppSettings.VideoSourceId;
+    }
+
+    /// <summary>Repopulate the video source dropdown (displays + titled windows).</summary>
+    private void RefreshVideoPicker()
+    {
+        _loadingVideoPicker = true;
+        try
+        {
+            _videoPicker.Items.Clear();
+            var selected = AppSettings.VideoSourceId;
+            var def = new ComboBoxItem { Content = "Entire screen", Tag = "" };
+            _videoPicker.Items.Add(def);
+            _videoPicker.SelectedItem = def;
+            foreach (var src in VideoCapture.ListSources())
+            {
+                var item = new ComboBoxItem { Content = src.Name, Tag = src.Id };
+                _videoPicker.Items.Add(item);
+                if (src.Id == selected) _videoPicker.SelectedItem = item;
+            }
+            // Saved source gone (window closed) → selection shows Entire screen,
+            // matching the engine's fallback at capture start.
+        }
+        finally { _loadingVideoPicker = false; }
     }
 
     private string CurrentEmail()
@@ -329,6 +371,24 @@ public sealed class PanelView : Border
                 Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 4),
             });
+
+            // Optional desktop-video capture: stream the chosen screen/window
+            // alongside audio; LMA saves a video recording of the meeting.
+            _body.Children.Add(Label("Screen video"));
+            _videoEnabled.IsChecked = AppSettings.VideoEnabled;
+            _body.Children.Add(_videoEnabled);
+            if (AppSettings.VideoEnabled)
+            {
+                RefreshVideoPicker();
+                _body.Children.Add(_videoPicker);
+                _body.Children.Add(new TextBlock
+                {
+                    Text = "The selected screen or window is recorded with the meeting and saved as a " +
+                           "video in LMA.",
+                    Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 0, 0, 4),
+                });
+            }
             // Consent record: when + what the user agreed to, so the one-time
             // acknowledgment is inspectable afterwards (auditable, not a
             // fire-and-forget dialog). Collapsed by default; absent until agreed.
@@ -409,6 +469,15 @@ public sealed class PanelView : Border
                 _body.Children.Add(_micBar);
                 _liveStatus.Margin = new Thickness(0, 4, 0, 4);
                 _body.Children.Add(_liveStatus);
+                if (_c.IsVideoActive)
+                {
+                    _body.Children.Add(new TextBlock
+                    {
+                        Text = "🎥 Screen video",
+                        Foreground = Secondary, FontSize = 10,
+                        Margin = new Thickness(0, 0, 0, 4),
+                    });
+                }
                 _pause.Content = _c.IsPaused ? "Resume" : "Pause";
                 _body.Children.Add(Row(_pause, _stop));
                 _muteMic.IsChecked = _c.IsMicMuted;
@@ -523,6 +592,17 @@ public sealed class PanelView : Border
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 8),
         });
+        if (AppSettings.VideoEnabled)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = "🎥 Screen video is ON: your selected screen or window is also recorded.",
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xB0, 0x6A, 0x00)),
+                Margin = new Thickness(0, 0, 0, 8),
+            });
+        }
         var cancel = new Button { Content = "Cancel" };
         cancel.Click += (_, _) => { _showDisclaimer = false; Refresh(); };
         var agree = new Button { Content = "Agree", FontWeight = FontWeights.Bold };
