@@ -13,6 +13,7 @@
     "buildcheck": "tsc --project tsconfig.json --pretty --noEmit && npm run lint",
     "lint": "eslint . --ext .ts --cache --max-warnings 0",
     "smoke": "ts-node test/fastify5-websocket.smoke.ts",
+    "smoke-video": "ts-node test/video-recording.smoke.ts",
     "test": "jest",
     "update": "ncu -t minor -u && npm install",
     "clean": "rm -r dist/"

@@ -35,11 +35,25 @@ import {
 
 import { jwtVerifier } from './utils/jwt-verifier';
 
+import {
+    VideoSession,
+    startVideoSession,
+    endVideoSession,
+    videoSocketDropped,
+    writeVideoChunk,
+    notifyAudioRecordingDone,
+} from './videorecording';
+
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const RECORDINGS_BUCKET_NAME =
     process.env['RECORDINGS_BUCKET_NAME'] || undefined;
+// RECORDINGS_KEY_PREFIX is what the CFN task definition sets (AudioFilePrefix
+// parameter); RECORDING_FILE_PREFIX kept for backward compatibility with any
+// standalone deployments that set the old (previously ignored) name.
 const RECORDING_FILE_PREFIX =
-    process.env['RECORDING_FILE_PREFIX'] || 'lma-audio-recordings/';
+    process.env['RECORDINGS_KEY_PREFIX'] ||
+    process.env['RECORDING_FILE_PREFIX'] ||
+    'lma-audio-recordings/';
 const CPU_HEALTH_THRESHOLD = parseInt(
     process.env['CPU_HEALTH_THRESHOLD'] || '50',
     10
@@ -52,6 +66,9 @@ const SHOULD_RECORD_CALL = (process.env['SHOULD_RECORD_CALL'] || '') === 'true';
 const s3Client = new S3Client({ region: AWS_REGION });
 
 const socketMap = new Map<WebSocket, SocketCallData>();
+// Sockets dedicated to a video stream (announced by START_VIDEO). Binary
+// frames on these sockets are fragmented-MP4 chunks, not audio PCM.
+const videoSocketMap = new Map<WebSocket, VideoSession>();
 
 // create fastify server (with logging enabled for non-PROD environments)
 const server = fastify({
@@ -230,6 +247,13 @@ const onBinaryMessage = async (
     ws: WebSocket,
     data: Uint8Array
 ): Promise<void> => {
+    // Video sockets carry fragmented-MP4 chunks, never audio PCM.
+    const videoSession = videoSocketMap.get(ws);
+    if (videoSession !== undefined) {
+        writeVideoChunk(videoSession, data, server);
+        return;
+    }
+
     const socketData = socketMap.get(ws);
 
     if (
@@ -392,6 +416,28 @@ const onTextMessage = async (
                 }] - Invalid call metadata: ${JSON.stringify(callMetaData)}`
             );
         }
+    } else if (callMetaData.callEvent === 'START_VIDEO') {
+        // Second socket dedicated to a fragmented-MP4 video stream for an
+        // audio call with the same callId. Servers without video support
+        // ignore this event (unknown callEvent) and drop the binary frames.
+        if (!callMetaData.callId) {
+            server.log.error(
+                `[START_VIDEO]: [${clientIP}] - START_VIDEO missing callId; ignoring.`
+            );
+            return;
+        }
+        const session = startVideoSession(callMetaData, server);
+        videoSocketMap.set(ws, session);
+    } else if (callMetaData.callEvent === 'END_VIDEO') {
+        const session = videoSocketMap.get(ws);
+        if (!session) {
+            server.log.error(
+                `[END_VIDEO]: [${clientIP}][${callMetaData.callId}] - END_VIDEO without START_VIDEO on this socket; ignoring.`
+            );
+            return;
+        }
+        videoSocketMap.delete(ws);
+        await endVideoSession(session.callId, server);
     } else if (callMetaData.callEvent === 'END') {
         const socketData = socketMap.get(ws);
         if (!socketData || !socketData.callMetadata) {
@@ -432,6 +478,18 @@ const onTextMessage = async (
 
 const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
     ws.close(code);
+    const videoSession = videoSocketMap.get(ws);
+    if (videoSession) {
+        // Video socket closed without END_VIDEO (crash / network drop). The
+        // session survives a grace period for a client reconnect (fresh
+        // START_VIDEO), then finalizes with whatever was received.
+        server.log.debug(
+            `[ON WSCLOSE]: [${videoSession.callId}] - Video socket closed without END_VIDEO.`
+        );
+        videoSocketMap.delete(ws);
+        videoSocketDropped(videoSession.callId, server);
+        return;
+    }
     const socketData = socketMap.get(ws);
     if (socketData) {
         server.log.debug(
@@ -495,7 +553,11 @@ const endCall = async (
                     for await (const chunk of readStream) {
                         writeStream.write(chunk);
                     }
-                    writeStream.end();
+                    // Await the flush: the file is read back for the S3 upload
+                    // and (when video was recorded) by the ffmpeg mux.
+                    await new Promise<void>((resolve) =>
+                        writeStream.end(() => resolve())
+                    );
 
                     await writeToS3(callMetaData, sanitizedTempFilename);
                     await writeToS3(callMetaData, sanitizedWavFilename);
@@ -503,15 +565,27 @@ const endCall = async (
                         callMetaData,
                         path.resolve(LOCAL_TEMP_DIR, sanitizedTempFilename)
                     );
-                    await deleteTempFile(
-                        callMetaData,
-                        path.resolve(LOCAL_TEMP_DIR, sanitizedWavFilename)
+
+                    // If a video stream was recorded for this call, hand the
+                    // WAV over so it can be muxed into the video MP4 (the
+                    // video session deletes it when done). Otherwise delete.
+                    const wavPath = path.resolve(LOCAL_TEMP_DIR, sanitizedWavFilename);
+                    const wavAdopted = notifyAudioRecordingDone(
+                        callMetaData.callId,
+                        wavPath,
+                        server
                     );
+                    if (!wavAdopted) {
+                        await deleteTempFile(callMetaData, wavPath);
+                    }
 
                     const recordingUrl = `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${RECORDING_FILE_PREFIX}${wavRecordingFilename}`;
 
                     await writeCallRecordingEvent(callMetaData, recordingUrl, server);
                 } else {
+                    // No audio WAV to mux; let any video session finalize
+                    // video-only.
+                    notifyAudioRecordingDone(callMetaData.callId, undefined, server);
                     server.log.debug(
                         `[${callMetaData.callEvent}]: [${
                             callMetaData.callId
@@ -520,6 +594,10 @@ const endCall = async (
                         )}`
                     );
                 }
+            } else {
+                // No audio recording was produced (e.g. no audio bytes ever
+                // arrived); let any video session finalize video-only.
+                notifyAudioRecordingDone(callMetaData.callId, undefined, server);
             }
 
             if (socketData.audioInputStream) {

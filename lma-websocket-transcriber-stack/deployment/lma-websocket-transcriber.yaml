@@ -303,6 +303,24 @@ Parameters:
       meeting will not be recorded.
       If set to true, the meeting will be recorded.
 
+  EnableVideoRecording:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable or disable server-side handling of the optional desktop-video
+      stream sent by the native audio capture apps. If set to false, any video
+      streamed by clients is discarded.
+
+  VideoRecordingsPrefix:
+    Type: String
+    Default: "lma-video-recordings/"
+    Description: >-
+      The Amazon S3 prefix where muxed video recordings (MP4) will be saved
+      (must end in "/")
+
   PermissionsBoundaryArn:
     Type: String
     Default: ""
@@ -1166,6 +1184,10 @@ Resources:
               Value: !Ref CustomLanguageModelName
             - Name: SHOULD_RECORD_CALL
               Value: !Ref EnableAudioRecording
+            - Name: ENABLE_VIDEO_RECORDING
+              Value: !Ref EnableVideoRecording
+            - Name: VIDEO_RECORDINGS_KEY_PREFIX
+              Value: !Ref VideoRecordingsPrefix
             - Name: CodeLocation
               Value: !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
             - Name: WS_LOG_LEVEL
@@ -1186,10 +1208,13 @@ Resources:
           PortMappings:
             - ContainerPort: 8080
               Protocol: tcp
-      Cpu: 256
+      # 1 vCPU / 2 GB: sized for the optional desktop-video lane (streaming
+      # fMP4 to disk during calls + ffmpeg mux at call end) on top of the
+      # original audio workload (which fit in 256/1024).
+      Cpu: 1024
       ExecutionRoleArn: !GetAtt TranscriberWebsocketTaskDefExecutionRole.Arn
       Family: !Sub ${AWS::StackName}TranscriberWebsocketTaskDef
-      Memory: 1024
+      Memory: 2048
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
