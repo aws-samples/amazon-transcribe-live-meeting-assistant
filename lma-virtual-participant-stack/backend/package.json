@@ -44,8 +44,8 @@
     "jsonwebtoken": "^9.0.3",
     "nodemon": "^3.1.14",
     "playwright-core": "^1.61.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
     "simli-client": "3.0.1",
     "uuid": "^14.0.1",
     "ws": "^8.21.0"
@@ -53,8 +53,8 @@
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^26.1.1",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
     "@types/uuid": "^9.0.8",
     "@types/ws": "^8.5.13",
     "esbuild": "^0.28.1",
