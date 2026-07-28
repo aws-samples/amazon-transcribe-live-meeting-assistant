@@ -85,6 +85,8 @@ public static class AppSettings
     // MARK: - Recording-consent disclaimer (one-time acknowledgment)
 
     private const string DisclaimerAgreedValue = "DisclaimerAgreed";
+    private const string DisclaimerAgreedAtValue = "DisclaimerAgreedAt";
+    private const string DisclaimerAgreedTextValue = "DisclaimerAgreedText";
 
     /// <summary>
     /// Whether the user has acknowledged the recording-consent disclaimer (shown
@@ -93,7 +95,32 @@ public static class AppSettings
     public static bool DisclaimerAgreed
     {
         get { using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath); return (k?.GetValue(DisclaimerAgreedValue) as int?) == 1; }
-        set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(DisclaimerAgreedValue, value ? 1 : 0, RegistryValueKind.DWord); }
+    }
+
+    /// <summary>When consent was recorded, or null (also null for consents that predate timestamping).</summary>
+    public static DateTime? DisclaimerAgreedAt
+    {
+        get
+        {
+            using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath);
+            var s = k?.GetValue(DisclaimerAgreedAtValue) as string;
+            return DateTime.TryParse(s, null, System.Globalization.DateTimeStyles.RoundtripKind, out var d) ? d : null;
+        }
+    }
+
+    /// <summary>The exact disclaimer text the user agreed to (for the consent record).</summary>
+    public static string DisclaimerAgreedText
+    {
+        get { using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath); return (k?.GetValue(DisclaimerAgreedTextValue) as string) ?? ""; }
+    }
+
+    /// <summary>Record consent: the flag, WHEN it happened, and WHAT text was shown.</summary>
+    public static void RecordDisclaimerConsent(string disclaimerText)
+    {
+        using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath);
+        k.SetValue(DisclaimerAgreedValue, 1, RegistryValueKind.DWord);
+        k.SetValue(DisclaimerAgreedAtValue, DateTime.Now.ToString("o"), RegistryValueKind.String);
+        k.SetValue(DisclaimerAgreedTextValue, disclaimerText, RegistryValueKind.String);
     }
 
     // MARK: - Start at login (HKCU ...\Run)
