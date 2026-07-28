@@ -329,6 +329,30 @@ public sealed class PanelView : Border
                 Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 4),
             });
+            // Consent record: when + what the user agreed to, so the one-time
+            // acknowledgment is inspectable afterwards (auditable, not a
+            // fire-and-forget dialog). Collapsed by default; absent until agreed.
+            if (AppSettings.DisclaimerAgreedAt is DateTime consentAt)
+            {
+                _body.Children.Add(Label("Recording consent"));
+                var record = new Expander
+                {
+                    Header = new TextBlock
+                    {
+                        Text = $"✓ Agreed {consentAt:g}",
+                        Foreground = Secondary, FontSize = 10,
+                    },
+                    Content = new TextBlock
+                    {
+                        Text = string.IsNullOrEmpty(AppSettings.DisclaimerAgreedText)
+                            ? EffectiveDisclaimer : AppSettings.DisclaimerAgreedText,
+                        Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+                        Margin = new Thickness(4, 2, 0, 2),
+                    },
+                    Margin = new Thickness(0, 0, 0, 4),
+                };
+                _body.Children.Add(record);
+            }
             _body.Children.Add(Sep());
         }
 
@@ -362,7 +386,13 @@ public sealed class PanelView : Border
                 _body.Children.Add(_start);
                 // Persistent consent reminder: the full disclaimer is a one-time
                 // gate, but the obligation is per-meeting — keep a one-liner next
-                // to Start. Hover shows the full deployment disclaimer text.
+                // to Start. Hover shows the consent record (when + the exact text
+                // agreed to); the full record also lives in Settings (⚙).
+                var agreedAt = AppSettings.DisclaimerAgreedAt;
+                var agreedText = AppSettings.DisclaimerAgreedText;
+                var tooltip = string.IsNullOrEmpty(agreedText) ? EffectiveDisclaimer : agreedText;
+                if (agreedAt is DateTime at)
+                    tooltip = $"You agreed to this on {at:g}:\n\n{tooltip}";
                 _body.Children.Add(new TextBlock
                 {
                     Text = "✓ Ensure all participants have consented to recording.",
@@ -370,9 +400,7 @@ public sealed class PanelView : Border
                     FontSize = 10,
                     TextWrapping = TextWrapping.Wrap,
                     Margin = new Thickness(0, 0, 0, 8),
-                    ToolTip = string.IsNullOrEmpty(_c.Config.RecordingDisclaimer)
-                        ? Config.DefaultDisclaimer
-                        : _c.Config.RecordingDisclaimer,
+                    ToolTip = tooltip,
                 });
             }
             else
@@ -433,7 +461,7 @@ public sealed class PanelView : Border
         // One-time recording-consent gate (mirrors the browser extension): the
         // first Start on this machine shows the disclaimer; Agree persists and
         // proceeds, Cancel does nothing.
-        if (!AppSettings.DisclaimerAgreed)
+        if (NeedsDisclaimer)
         {
             _showDisclaimer = true;
             Refresh();
@@ -441,6 +469,10 @@ public sealed class PanelView : Border
         }
         ReallyStart();
     }
+
+    /// <summary>The disclaimer text currently in effect for this deployment.</summary>
+    private string EffectiveDisclaimer =>
+        string.IsNullOrEmpty(_c.Config.RecordingDisclaimer) ? Config.DefaultDisclaimer : _c.Config.RecordingDisclaimer;
 
     private void ReallyStart()
     {
@@ -455,9 +487,13 @@ public sealed class PanelView : Border
     /// <summary>
     /// Whether Start would currently be gated on the consent disclaimer — used by
     /// TrayApp so a JumpList "Start Recording" surfaces the panel with the dialog
-    /// instead of silently doing nothing.
+    /// instead of silently doing nothing. Also true when the DEPLOYMENT'S
+    /// DISCLAIMER TEXT changed since consent — the recorded consent covers the
+    /// text the user actually saw, not later revisions. (Consents that predate
+    /// text recording re-consent once.)
     /// </summary>
-    public bool NeedsDisclaimer => !AppSettings.DisclaimerAgreed;
+    public bool NeedsDisclaimer =>
+        !AppSettings.DisclaimerAgreed || AppSettings.DisclaimerAgreedText != EffectiveDisclaimer;
 
     /// <summary>Show the consent gate (for Start attempts that arrive from outside the panel).</summary>
     public void ShowDisclaimerGate()
@@ -482,9 +518,7 @@ public sealed class PanelView : Border
         });
         panel.Children.Add(new TextBlock
         {
-            Text = string.IsNullOrEmpty(_c.Config.RecordingDisclaimer)
-                ? Config.DefaultDisclaimer
-                : _c.Config.RecordingDisclaimer,
+            Text = EffectiveDisclaimer,
             FontSize = 11,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 8),
@@ -494,7 +528,8 @@ public sealed class PanelView : Border
         var agree = new Button { Content = "Agree", FontWeight = FontWeights.Bold };
         agree.Click += (_, _) =>
         {
-            AppSettings.DisclaimerAgreed = true;
+            // Record WHAT was agreed to and WHEN (shown in Settings afterwards).
+            AppSettings.RecordDisclaimerConsent(EffectiveDisclaimer);
             _showDisclaimer = false;
             Refresh();
             ReallyStart();

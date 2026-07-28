@@ -52,6 +52,8 @@ final class MenuBarAppState: ObservableObject {
     private static let kSystemLabel = "lma.systemLabel"
     private static let kMicDeviceUID = "lma.micDeviceUID"
     private static let kDisclaimerAgreed = "lma.disclaimerAgreed"
+    private static let kDisclaimerAgreedAt = "lma.disclaimerAgreedAt"
+    private static let kDisclaimerAgreedText = "lma.disclaimerAgreedText"
 
     /// Default label for the system channel when the user hasn't set one.
     static let defaultSystemLabel = "Other participants"
@@ -157,19 +159,47 @@ final class MenuBarAppState: ObservableObject {
     func start() {
         // One-time recording-consent gate (mirrors the browser extension): the
         // first Start on this machine shows the disclaimer; Agree persists and
-        // proceeds, Cancel does nothing.
-        guard UserDefaults.standard.bool(forKey: Self.kDisclaimerAgreed) else {
+        // proceeds, Cancel does nothing. The gate returns if the DEPLOYMENT'S
+        // DISCLAIMER TEXT has changed since consent — the recorded consent
+        // covers the text the user actually saw, not later revisions. (Users
+        // who agreed before the text was recorded re-consent once.)
+        let defaults = UserDefaults.standard
+        let agreed = defaults.bool(forKey: Self.kDisclaimerAgreed)
+        let agreedText = defaults.string(forKey: Self.kDisclaimerAgreedText)
+        guard agreed, agreedText == controller.config.recordingDisclaimer else {
             showDisclaimer = true
             return
         }
         reallyStart()
     }
 
-    /// Agree on the consent dialog: persist and start the recording that was gated.
+    /// Agree on the consent dialog: record WHAT was agreed to and WHEN, then
+    /// start the recording that was gated.
     func agreeDisclaimerAndStart() {
-        UserDefaults.standard.set(true, forKey: Self.kDisclaimerAgreed)
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: Self.kDisclaimerAgreed)
+        defaults.set(Date(), forKey: Self.kDisclaimerAgreedAt)
+        defaults.set(controller.config.recordingDisclaimer, forKey: Self.kDisclaimerAgreedText)
         showDisclaimer = false
+        objectWillChange.send()   // consent record shown in Settings/reminder
         reallyStart()
+    }
+
+    /// When the user acknowledged the disclaimer, or nil if not yet (or if the
+    /// consent predates timestamp recording).
+    var disclaimerAgreedDate: Date? {
+        UserDefaults.standard.object(forKey: Self.kDisclaimerAgreedAt) as? Date
+    }
+
+    /// The exact disclaimer text the user agreed to (for the consent record).
+    var disclaimerAgreedText: String? {
+        UserDefaults.standard.string(forKey: Self.kDisclaimerAgreedText)
+    }
+
+    static func consentDateString(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateStyle = .medium; f.timeStyle = .short
+        return f.string(from: d)
     }
 
     private func reallyStart() {
@@ -269,12 +299,13 @@ struct MenuBarContentView: View {
                     .keyboardShortcut(.defaultAction)
                     // Persistent consent reminder: the full disclaimer is a
                     // one-time gate, but the obligation is per-meeting — keep a
-                    // one-liner next to Start so it stays visible. Hover shows
-                    // the full deployment disclaimer text.
+                    // one-liner next to Start so it stays visible. It reflects
+                    // the recorded consent (date on hover, alongside the exact
+                    // text agreed to); the full record lives in Settings (⚙).
                     Label("Ensure all participants have consented to recording.",
                           systemImage: "checkmark.shield")
                         .font(.caption2).foregroundColor(.secondary)
-                        .help(s.controller.config.recordingDisclaimer)
+                        .help(consentTooltip)
                 } else {
                     // Live meters
                     LevelBar(label: "System", level: s.meetingLevel, muted: s.meetingMuted)
@@ -332,6 +363,16 @@ struct MenuBarContentView: View {
         .frame(width: 300)
     }
 
+    /// Hover text for the standing reminder: the full disclaimer, prefixed with
+    /// the recorded consent date when we have one.
+    private var consentTooltip: String {
+        let text = s.disclaimerAgreedText ?? s.controller.config.recordingDisclaimer
+        if let d = s.disclaimerAgreedDate {
+            return "You agreed to this on \(MenuBarAppState.consentDateString(d)):\n\n\(text)"
+        }
+        return text
+    }
+
     private var statusText: String {
         switch s.state {
         case .idle: return "Not signed in"
@@ -382,6 +423,23 @@ struct SettingsView: View {
             .font(.caption)
             Text("System Default follows your Sound settings. If a chosen mic is unplugged, recording falls back to the default.")
                 .font(.caption2).foregroundColor(.secondary)
+
+            // Consent record: when + what the user agreed to, so the one-time
+            // acknowledgment is inspectable afterwards (auditable, not a
+            // fire-and-forget dialog). Collapsed by default to keep the panel
+            // compact; absent entirely until the user has agreed.
+            if let d = s.disclaimerAgreedDate {
+                Text("Recording consent").font(.caption).foregroundColor(.secondary).padding(.top, 2)
+                DisclosureGroup {
+                    Text(s.disclaimerAgreedText ?? s.controller.config.recordingDisclaimer)
+                        .font(.caption2).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                } label: {
+                    Label("Agreed \(MenuBarAppState.consentDateString(d))", systemImage: "checkmark.seal")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }
         }
     }
 }
