@@ -165,12 +165,18 @@ permission again, because to the OS it is a different app.
    > data (no `execve` on a quarantined file), so it runs and clears the flag
    > from the rest of the folder itself.
 5. **Launch it like a normal app.** Click its **Dock icon** (the installer pins
-   it), press **⌘-Space** (Spotlight) and type **LMA Capture Client**, or
+   it), press **⌘-Space** (Spotlight) and type **LMACaptureClient**, or
    double-click it in Finder. An **LMA** item appears in the menu bar
    (top-right) and the app's icon appears in the Dock.
 
+   > **Searching for it:** in the Dock and menu bar the app is labelled
+   > **LMA Capture Client (&lt;Stack&gt;)**, but Spotlight and `open -a` match the
+   > bundle's *filename* — `LMACaptureClient-&lt;stack&gt;` — so search for that (the
+   > installer prints the exact name when it finishes).
+
    > ⚠️ **Don't launch it from Terminal.** Always launch via Spotlight, Finder,
-   > or `open -a "LMA Capture Client"` — never the binary inside `Contents/MacOS`.
+   > or `open /Applications/LMACaptureClient-<stack>.app` — never the binary
+   > inside `Contents/MacOS`.
    > Only launching through macOS gives the app its own privacy identity; running
    > it from Terminal makes macOS attribute Microphone / Screen Recording to
    > **Terminal**, and system-audio capture silently won't work.
@@ -325,8 +331,8 @@ Popover options:
 
 The app uses no audio or CPU when idle, so the intended usage is to leave it
 running and click **Start** when a meeting begins. **To relaunch after
-quitting**, click its Dock icon, press **⌘-Space** (Spotlight) and type **LMA
-Capture Client**, or run `open -a "LMA Capture Client"`.
+quitting**, click its Dock icon, press **⌘-Space** (Spotlight) and type
+**LMACaptureClient**, or run `open /Applications/LMACaptureClient-<stack>.app`.
 
 ## Using the system-tray + taskbar app (Windows)
 

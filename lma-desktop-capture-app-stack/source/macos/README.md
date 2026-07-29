@@ -169,8 +169,11 @@ Options in the popover:
 **Run it in the background.** It uses no audio/CPU when idle, so the intended
 usage is: sign in once, enable *Start at login*, and leave it in the menu bar —
 click **Start** when a meeting begins. **To relaunch after quitting**, press
-**⌘-Space** (Spotlight), type **"LMA Capture Client"**, and hit Return — or
-`open -a "LMA Capture Client"`.
+**⌘-Space** (Spotlight) and type the bundle's filename —
+`LMACaptureClient-<stack-slug>` (or just `LMACaptureClient` for a dev build) —
+or run `open /Applications/LMACaptureClient-<stack-slug>.app`. Spotlight and
+`open -a` match the FILENAME, not the "LMA Capture Client (<Stack>)" display
+name you see in the Dock.
 
 ### Live controls & diagnostics
 - **Per-channel VU meters** print ~1×/sec: `ch0 meeting [##--] rms .. | ch1 mic

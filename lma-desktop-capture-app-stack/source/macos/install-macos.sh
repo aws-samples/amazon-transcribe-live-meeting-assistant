@@ -280,9 +280,13 @@ ${APP_DISPLAY_NAME} is installed at:
   ${INSTALLED_APP}
 
 ▶ HOW TO LAUNCH IT (do NOT run it from Terminal):
-  • Press Cmd-Space (Spotlight), type "${APP_DISPLAY_NAME}", press Return, OR
+  • Press Cmd-Space (Spotlight), type "${APP_BASENAME}", press Return, OR
   • double-click it in Finder / Launchpad, OR
-  • run:  open -a "${APP_DISPLAY_NAME}"
+  • run:  open "${INSTALLED_APP}"
+
+  (In the Dock and menu bar the app shows as "${APP_DISPLAY_NAME}", but
+  Spotlight and "open -a" match the bundle's FILENAME — ${APP_FILENAME} — so use
+  the name above when searching or scripting.)
 
   Launching this way is REQUIRED: it goes through macOS LaunchServices so the
   app gets its own privacy identity. If you instead run the binary inside

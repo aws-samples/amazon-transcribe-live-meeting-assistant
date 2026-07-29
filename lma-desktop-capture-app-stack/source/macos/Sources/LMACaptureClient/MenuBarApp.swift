@@ -64,19 +64,31 @@ final class MenuBarAppState: ObservableObject {
 
     let controller: CaptureController
 
-    /// Per-stack preferences store. Each LMA stack's app gets its OWN bundle id
-    /// (see make-app.sh), so the standard suite would already be separate for
-    /// packaged builds — but hand-built dev copies share a bundle id, and the
-    /// CLI has none at all. Using an explicit stack-suffixed suite makes the
-    /// separation unconditional: settings, remembered email, and the recording
-    /// consent record never leak between stacks.
+    /// Per-stack preferences store, so settings, the remembered email, and the
+    /// recording-consent record never leak between LMA deployments.
+    ///
+    /// IMPORTANT: the suite name must NOT equal the app's own bundle identifier.
+    /// macOS explicitly rejects that ("Using your own bundle identifier as an
+    /// NSUserDefaults suite name does not make sense and will not work") and
+    /// `UserDefaults(suiteName:)` returns nil — which would silently fall back to
+    /// `.standard` and defeat the separation entirely. Hence the `.settings.`
+    /// infix: it keeps the suite distinct from the bundle id that make-app.sh
+    /// assigns (com.amazon.lma.captureclient.<slug>).
     private let defaults: UserDefaults
 
     private static func defaultsSuite(for config: Config) -> UserDefaults {
         let slug = config.stackSlug
-        guard !slug.isEmpty,
-              let suite = UserDefaults(suiteName: "com.amazon.lma.captureclient.\(slug)")
-        else { return .standard }
+        guard !slug.isEmpty else { return .standard }
+        let suiteName = "com.amazon.lma.captureclient.settings.\(slug)"
+        guard let suite = UserDefaults(suiteName: suiteName) else {
+            // Should not happen now that the name differs from the bundle id,
+            // but never fail silently: say so, because the fallback shares
+            // settings across stacks.
+            FileHandle.standardError.write(
+                "⚠ couldn't open preferences suite \(suiteName); settings will not be per-stack\n"
+                    .data(using: .utf8)!)
+            return .standard
+        }
         return suite
     }
 
@@ -377,7 +389,16 @@ final class MenuBarAppState: ObservableObject {
 enum Notifier {
     private static var requested = false
 
+    /// UNUserNotificationCenter.current() raises NSInternalInconsistencyException
+    /// ("bundleProxyForCurrentProcess is nil") when the process has no bundle —
+    /// e.g. running .build/release/LMACaptureClient directly, which the README
+    /// describes for development. That is an Objective-C exception, so it CANNOT
+    /// be caught by Swift do/catch: it aborts the process (SIGABRT). Notifications
+    /// are a nicety, so skip them entirely rather than crash mid-recording.
+    static var isAvailable: Bool { Bundle.main.bundleIdentifier != nil }
+
     static func notify(title: String, body: String, openURL: URL? = nil) {
+        guard isAvailable else { return }
         let center = UNUserNotificationCenter.current()
         let deliver = {
             let content = UNMutableNotificationContent()
@@ -793,8 +814,11 @@ final class MenuBarController: NSObject, NSApplicationDelegate, UNUserNotificati
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Clicking a start/stop notification should bring up the app (and for
-        // the post-stop one, open the meeting in LMA).
-        UNUserNotificationCenter.current().delegate = self
+        // the post-stop one, open the meeting in LMA). Guarded for the same
+        // reason as Notifier.notify: current() aborts without a bundle id.
+        if Notifier.isAvailable {
+            UNUserNotificationCenter.current().delegate = self
+        }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // Always give the button a visible text title as a fallback so the item
