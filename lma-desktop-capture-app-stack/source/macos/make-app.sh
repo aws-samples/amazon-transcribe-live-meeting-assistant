@@ -35,7 +35,8 @@ if [[ -f lma-config.json ]]; then
   cfg_ver="$(python3 -c 'import json,sys; d=json.load(open("lma-config.json")); print(d.get("appVersion",""))' 2>/dev/null || echo "")"
   [[ -n "${cfg_ver}" ]] && APP_VERSION="${cfg_ver}"
 fi
-# Slug: lowercase alphanumerics + dashes (matches Config.swift's stackSlug).
+# Slug: lowercase alphanumerics + dashes. MUST match Config.swift's stackSlug,
+# install-macos.sh, and the Windows AppIdentity.Slugify (see Config.swift).
 STACK_SLUG="$(printf '%s' "${STACK_NAME}" | tr '[:upper:]' '[:lower:]' \
   | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')"
 

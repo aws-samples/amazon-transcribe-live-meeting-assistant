@@ -1,7 +1,7 @@
 import Foundation
 import AVFoundation
 
-// LMA native macOS audio client — PROTOTYPE.
+// LMA native macOS capture client (audio + optional screen video).
 //
 // Captures microphone + system audio, interleaves to 2-channel 16-bit PCM, and
 // streams to the LMA WebSocket transcriber. Proves that a native app can feed
@@ -118,7 +118,7 @@ guard #available(macOS 13.0, *) else {
     exit(1)
 }
 
-print("LMA native audio client (prototype)")
+print("LMA Capture Client (macOS)")
 print("  endpoint : \(config.endpoint)")
 print("  callId   : \(config.callId)")
 print("  rate     : \(config.sampleRate) Hz, 2ch interleaved 16-bit PCM")

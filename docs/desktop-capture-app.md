@@ -101,6 +101,42 @@ CloudFormation parameter, so organizations can substitute their own legal
 wording; the app picks it up from the `lma-config.json` baked into the
 download.
 
+## Upgrading from an earlier build
+
+The app was previously called **LMA Audio Client** / **LMA Audio Capture**. The
+rename also changed the identifiers macOS and Windows use to track the app
+(bundle id, registry key, start-at-login entry, install path), so a new install
+does **not** replace an old one — you would end up with both.
+
+**Uninstall the old version first**, using the installer from the package you
+originally downloaded:
+
+```bash
+# macOS — from the OLD (previously downloaded) package folder
+bash install-macos.sh --uninstall
+```
+
+```powershell
+# Windows — from the OLD (previously downloaded) package folder
+./build-windows.ps1 -Uninstall
+```
+
+If you no longer have the old package, remove it manually:
+
+- **macOS:** delete `/Applications/LMAAudioClient.app`, remove it from the Dock
+  and from **System Settings ▸ General ▸ Login Items**, then run
+  `tccutil reset ScreenCapture com.amazon.lma.audioclient` and
+  `tccutil reset Microphone com.amazon.lma.audioclient`.
+- **Windows:** uninstall **LMA Audio Capture** from **Settings ▸ Apps ▸ Installed
+  apps**, then delete the `HKCU\Software\AmazonLMA\AudioCapture` key and the
+  `LMAAudioCapture` value under
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+
+Your saved settings (speaker labels, microphone choice) and the recording-consent
+record do not carry over — the new app will ask you to acknowledge the recording
+disclaimer once, and macOS will ask for Microphone and Screen Recording
+permission again, because to the OS it is a different app.
+
 ## Download and install (macOS)
 
 1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Desktop Capture App
@@ -290,7 +326,7 @@ Popover options:
 The app uses no audio or CPU when idle, so the intended usage is to leave it
 running and click **Start** when a meeting begins. **To relaunch after
 quitting**, click its Dock icon, press **⌘-Space** (Spotlight) and type **LMA
-Audio Client**, or run `open -a "LMA Capture Client"`.
+Capture Client**, or run `open -a "LMA Capture Client"`.
 
 ## Using the system-tray + taskbar app (Windows)
 

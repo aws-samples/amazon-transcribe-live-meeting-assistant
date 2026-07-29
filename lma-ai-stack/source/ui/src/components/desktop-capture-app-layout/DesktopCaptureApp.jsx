@@ -562,7 +562,7 @@ const DesktopCaptureApp = () => {
   const defaultPlatform = AVAILABLE_KEYS.includes(detected) ? detected : 'mac';
   const [platform, setPlatform] = useState(defaultPlatform);
 
-  // Download URLs are published by the audio-capture-app stack under the
+  // Download URLs are published by the desktop-capture-app stack under the
   // conventional versioned filename served from the web root. The "-macos" /
   // "-windows" segment selects the per-platform package the CodeBuild job emits.
   const zipName = (osKey) => {

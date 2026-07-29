@@ -178,7 +178,7 @@ dotnet publish -c Release -r win-x64 --self-contained true
 
 ### Run the tray app
 
-Double-click `LMAAudioClient.exe` (or run it with **no arguments**, or `--gui`).
+Double-click `LMACaptureClient.exe` (or run it with **no arguments**, or `--gui`).
 It appears as a **system-tray icon** with no taskbar window when idle (mirrors
 the macOS menu-bar `LSUIElement` behavior).
 
@@ -191,7 +191,7 @@ the macOS menu-bar `LSUIElement` behavior).
 **Single instance.** Launching the app again — Start Menu, a pinned taskbar
 shortcut, double-clicking the exe — does **not** add a second tray icon; it
 opens the running app's UI. The instance is claimed with a per-user named mutex
-(`Local\LMAAudioCapture.instance.<user>`), and the losing process relays
+(`Local\LMACaptureClient.<stack-slug>.instance.<user>`), and the losing process relays
 `--lma-panel` over the pipe and exits, so a relaunch behaves like clicking the
 tray icon. Two things this must get right, both of which have bitten:
 
@@ -247,7 +247,7 @@ Panel options:
 - **Remember my email** — prefills your login next launch (email only; the
   password is never stored — it stays in memory for the session).
 - **Settings (⚙ gear)** — transcript speaker labels for the two channels plus a
-  microphone picker, persisted under `HKCU\...\LMAAudioCapture`. A blank label
+  microphone picker, persisted under `HKCU\...\LMACaptureClient`. A blank label
   field means "use the default", and that default is drawn **in grey inside the
   field** (`PlaceholderBox` + `UpdateLabelHints`) so it's visible without
   hovering: the mic label defaults to the signed-in email, the system label to
@@ -277,7 +277,7 @@ $env:LMA_WS_ENDPOINT="wss://<your-cloudfront-domain>/api/v1/ws"
 $env:LMA_ACCESS_TOKEN="<cognito-access-token>"
 $env:LMA_ID_TOKEN="<cognito-id-token>"
 $env:LMA_CALL_ID="Native Windows test $(Get-Date -f HH:mm)"
-LMAAudioClient.exe --cli
+LMACaptureClient.exe --cli
 ```
 
 Interactive controls on a TTY: press **m** to toggle mic mute, **q** (or
@@ -286,8 +286,8 @@ Ctrl-C) to stop.
 Or sign in with SRP instead of pasting tokens:
 
 ```powershell
-LMAAudioClient.exe --username you@example.com          # prompts for password
-LMAAudioClient.exe --login-only --username you@example.com   # login, print token metadata, exit
+LMACaptureClient.exe --username you@example.com          # prompts for password
+LMACaptureClient.exe --login-only --username you@example.com   # login, print token metadata, exit
 ```
 
 ### Subcommands
@@ -307,7 +307,7 @@ LMAAudioClient.exe --login-only --username you@example.com   # login, print toke
 ### 1. SRP crypto (offline)
 
 ```powershell
-LMAAudioClient.exe --selftest
+LMACaptureClient.exe --selftest
 # → "All self-tests PASSED"
 ```
 
@@ -316,7 +316,7 @@ LMAAudioClient.exe --selftest
 Play some audio (YouTube / a media file) and speak into the mic while running:
 
 ```powershell
-LMAAudioClient.exe --capture-test 6 out.wav
+LMACaptureClient.exe --capture-test 6 out.wav
 ```
 
 Then measure per-channel RMS on `out.wav` — **ch0/Left should carry the system

@@ -8,11 +8,11 @@ import { BreadcrumbGroup } from '@cloudscape-design/components';
 
 import { DESKTOP_CAPTURE_APP_PATH, DEFAULT_PATH } from '../../routes/constants';
 
-export const audioCaptureAppBreadcrumbItems = [
+export const desktopCaptureAppBreadcrumbItems = [
   { text: 'Meeting Assistant', href: `#${DEFAULT_PATH}` },
   { text: 'Desktop Capture App', href: `#${DESKTOP_CAPTURE_APP_PATH}` },
 ];
 
-const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={audioCaptureAppBreadcrumbItems} />;
+const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={desktopCaptureAppBreadcrumbItems} />;
 
 export default Breadcrumbs;

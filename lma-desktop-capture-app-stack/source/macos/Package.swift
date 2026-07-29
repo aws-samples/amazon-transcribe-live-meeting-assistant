@@ -1,7 +1,7 @@
 // swift-tools-version:5.9
 import PackageDescription
 
-// LMA native macOS audio client — PROTOTYPE / spike.
+// LMA native macOS capture client (audio + optional screen video).
 // Dependency-free on purpose: everything below is a system framework
 // (Foundation / AVFoundation / ScreenCaptureKit / CoreMedia), so this
 // builds offline with just the Xcode command-line tools installed.

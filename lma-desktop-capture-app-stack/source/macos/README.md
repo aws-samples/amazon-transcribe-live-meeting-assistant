@@ -1,9 +1,16 @@
-# LMA Native macOS Audio Client — Prototype & Plan
+# LMA Capture Client (macOS)
 
-Streams **microphone + system audio** from a Mac directly to the LMA WebSocket
-transcriber, so a user can transcribe a meeting they joined from a **native
-desktop app** (Zoom / Teams / Meet / Slack huddle / phone bridge) — no Chrome
-tab sharing, no Virtual Participant bot.
+Streams **microphone + system audio** — and, optionally, **screen video** — from
+a Mac directly to the LMA WebSocket transcriber, so a user can transcribe a
+meeting they joined from a **native desktop app** (Zoom / Teams / Meet / Slack
+huddle / phone bridge) — no Chrome tab sharing, no Virtual Participant bot.
+
+> **The app is namespaced per LMA stack.** The `.app` name, bundle id, settings,
+> and macOS privacy grants all include the stack this package was downloaded
+> from (from `stackName` in `lma-config.json`), so the clients for several LMA
+> deployments can be installed side by side. Commands below use
+> `LMACaptureClient-<slug>.app`; run `ls build` after building to see the exact
+> name (a copy built with no `lma-config.json` is plain `LMACaptureClient.app`).
 
 > ✅ **Status: builds, runs, and streams on macOS.** First brought up on macOS
 > 26 / Swift 6.3 (2026-07). The SCK/AVFoundation code compiled unchanged; the
@@ -92,7 +99,7 @@ survives rebuilds. Set `LMA_ADHOC_SIGN=1` to force the old ad-hoc behavior
 (e.g. throwaway CI builds).
 
 > **Critical:** launch it with **`open`** (or double-click in Finder), **not** by
-> running `.../Contents/MacOS/LMAAudioClient` directly. Only `open` goes through
+> running `.../Contents/MacOS/LMACaptureClient` directly. Only `open` goes through
 > macOS **LaunchServices**, which gives the app its own TCC (privacy) identity.
 > Exec'ing the inner binary from a shell makes the process a **child of
 > Terminal**, so macOS attributes Microphone / Screen Recording to *Terminal* —
@@ -101,8 +108,8 @@ survives rebuilds. Set `LMA_ADHOC_SIGN=1` to force the old ad-hoc behavior
 
 ```bash
 cd lma-desktop-capture-app-stack/source/macos
-./make-app.sh                       # swift build -c release + assemble build/LMAAudioClient.app
-open build/LMAAudioClient.app       # launches the menu-bar app with its own identity
+./make-app.sh                       # swift build -c release + assemble build/LMACaptureClient*.app
+open build/LMACaptureClient*.app       # launches the menu-bar app with its own identity
 ```
 
 Then use the **"LMA" menu-bar item** (top-right) to sign in and Start — see
@@ -122,7 +129,7 @@ export LMA_ID_TOKEN="<cognito-id-token>"
 export LMA_CALL_ID="Native Mac test $(date +%H:%M)"
 export LMA_DEBUG_WAV="/tmp/lma-debug.wav"   # optional: tee streamed PCM for offline verify
 
-./build/LMAAudioClient.app/Contents/MacOS/LMAAudioClient --cli   # headless (grants Terminal identity)
+./build/LMACaptureClient*.app/Contents/MacOS/LMACaptureClient --cli   # headless (grants Terminal identity)
 ```
 
 ### Menu-bar + Dock app
@@ -138,7 +145,7 @@ Any `--flag` runs the headless CLI instead, so the two modes coexist in one
 binary.
 
 ```bash
-open build/LMAAudioClient.app          # or double-click it in Finder
+open build/LMACaptureClient*.app          # or double-click it in Finder
 ```
 
 An **"LMA"** item appears in the menu bar (top-right). **Left-click** it for the
@@ -154,16 +161,16 @@ Options in the popover:
   (`SMAppService`). For this to work the app must live in a stable location, so
   **move it to `/Applications` first**:
   ```bash
-  cp -R build/LMAAudioClient.app /Applications/
-  open /Applications/LMAAudioClient.app
+  cp -R build/LMACaptureClient*.app /Applications/
+  open /Applications/LMACaptureClient*.app
   ```
   Toggle it off in the popover, or in **System Settings ▸ General ▸ Login Items**.
 
 **Run it in the background.** It uses no audio/CPU when idle, so the intended
 usage is: sign in once, enable *Start at login*, and leave it in the menu bar —
 click **Start** when a meeting begins. **To relaunch after quitting**, press
-**⌘-Space** (Spotlight), type **"LMA Audio Client"**, and hit Return — or
-`open -a LMAAudioClient`.
+**⌘-Space** (Spotlight), type **"LMA Capture Client"**, and hit Return — or
+`open -a "LMA Capture Client"`.
 
 ### Live controls & diagnostics
 - **Per-channel VU meters** print ~1×/sec: `ch0 meeting [##--] rms .. | ch1 mic
@@ -190,7 +197,7 @@ fine for a spike; production needs the OAuth flow below.
 
 A bare `swift run` executable has **no app bundle / Info.plist**, so macOS
 attributes its Microphone and Screen Recording access to the **parent process —
-i.e. Terminal.app (or iTerm)** — not to "LMAAudioClient". Practical consequence:
+i.e. Terminal.app (or iTerm)** — not to "LMACaptureClient". Practical consequence:
 grant **Terminal** both Microphone and Screen Recording in
 System Settings › Privacy & Security, relaunch Terminal, then re-run. If SCK
 still fails, wrap the binary in a minimal `.app` bundle (with the usage-string
@@ -276,9 +283,9 @@ recent macOS. To distribute outside the Mac App Store you need the full chain.
    (`--options runtime`) — notarization *requires* hardened runtime:
    ```bash
    codesign --deep --force --options runtime \
-     --entitlements LMAAudioClient.entitlements \
+     --entitlements LMACaptureClient.entitlements \
      --sign "Developer ID Application: Your Org (TEAMID)" \
-     LMAAudioClient.app
+     LMACaptureClient.app
    ```
 
 4. **Entitlements** — the hardened runtime blocks capabilities unless you
@@ -302,7 +309,7 @@ recent macOS. To distribute outside the Mac App Store you need the full chain.
    scans it for malware and returns a ticket, usually within minutes:
    ```bash
    # Zip or wrap in a signed .dmg/.pkg first, then:
-   xcrun notarytool submit LMAAudioClient.zip \
+   xcrun notarytool submit LMACaptureClient.zip \
      --apple-id you@org.com --team-id TEAMID --password <app-specific-pw> \
      --wait
    ```
@@ -311,7 +318,7 @@ recent macOS. To distribute outside the Mac App Store you need the full chain.
 7. **Staple the ticket** so the app validates offline (users may run it with no
    network on first launch):
    ```bash
-   xcrun stapler staple LMAAudioClient.app     # or the .dmg / .pkg
+   xcrun stapler staple LMACaptureClient.app     # or the .dmg / .pkg
    ```
 
 8. **Package for download** — ship a `.dmg` or `.pkg`. Sign **and** notarize the
@@ -324,7 +331,7 @@ There's a local/self-signing command — **ad-hoc signing** — but it solves a
 above for a polished download.
 
 ```bash
-codesign -s - /path/to/LMAAudioClient    # "-s -" = ad-hoc: no cert, no Apple account
+codesign -s - /path/to/LMACaptureClient    # "-s -" = ad-hoc: no cert, no Apple account
 ```
 
 Two separate problems, and ad-hoc only fixes the first:
@@ -348,8 +355,8 @@ So the "ship unsigned, user signs after download" idea works only as this
 two-command dance the user runs post-download:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/LMAAudioClient  # strip download quarantine
-codesign -s - ~/Downloads/LMAAudioClient                   # ad-hoc sign (if shipped unsigned on arm64)
+xattr -dr com.apple.quarantine ~/Downloads/LMACaptureClient  # strip download quarantine
+codesign -s - ~/Downloads/LMACaptureClient                   # ad-hoc sign (if shipped unsigned on arm64)
 ```
 
 That's acceptable for a **CLI aimed at technical users** (many OSS Mac CLIs ship
@@ -405,7 +412,7 @@ release.
 - **First-launch permission dance**: Screen Recording usually requires the user
   to toggle the app in System Settings and **relaunch** — build that into
   onboarding; you can't fully script it away.
-- **`spctl -a -vvv LMAAudioClient.app`** and `codesign -dv --verbose=4` are your
+- **`spctl -a -vvv LMACaptureClient.app`** and `codesign -dv --verbose=4` are your
   verification tools before publishing.
 
 ### Windows (for later)

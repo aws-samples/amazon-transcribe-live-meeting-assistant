@@ -5,17 +5,18 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Amazon Transcribe Live Meeting Assist - Desktop Capture App (downloadable source package)
 
-# This stack packages the NATIVE desktop capture client (macOS today; Windows /
-# iOS / Android later) as a downloadable source zip served from the web bucket,
-# analogous to the browser-extension download.
+# This stack packages the NATIVE desktop capture client (macOS and Windows) as
+# downloadable source zips served from the web bucket, analogous to the
+# browser-extension download.
 #
 # Why source (not a prebuilt binary): a macOS app using ScreenCaptureKit cannot
 # be cross-compiled by the Linux LMA build pipeline, and Apple's signing tools
 # are macOS-only. So CodeBuild here does NOT compile the app — it only bakes the
 # deployment's endpoint + Cognito identifiers into lma-config.json and zips the
 # source + install scripts. The user runs the included install script on their
-# own machine to build and install. (Same reasoning applies to the Windows/
-# mobile packages when they are added.)
+# own machine to build and install. (The same reasoning applies to the Windows
+# package: a WASAPI/WPF app can't be cross-compiled on Linux and Authenticode
+# signing is Windows-only.)
 
 Parameters:
 
@@ -365,11 +366,11 @@ Resources:
 
 Outputs:
   DesktopCaptureAppDownloadLocation:
-    Description: LMA Native Audio Capture App download location
+    Description: LMA Desktop Capture App (macOS) download location
     Value: !Sub '${CloudfrontEndpoint}lma-desktop-capture-app-macos-v<VERSION_TOKEN>.zip'
 
   # Additive: the Windows source package the same CodeBuild job emits when a
   # source/windows client is present. Harmless if that zip isn't produced.
   DesktopCaptureAppWindowsDownloadLocation:
-    Description: LMA Native Audio Capture App (Windows) download location
+    Description: LMA Desktop Capture App (Windows) download location
     Value: !Sub '${CloudfrontEndpoint}lma-desktop-capture-app-windows-v<VERSION_TOKEN>.zip'

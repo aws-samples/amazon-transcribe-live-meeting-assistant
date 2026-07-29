@@ -209,7 +209,7 @@ public static class Program
             return 2;
         }
 
-        Console.WriteLine("LMA native audio client (Windows)");
+        Console.WriteLine("LMA Capture Client (Windows)");
         Console.WriteLine($"  endpoint : {config.Endpoint}");
         Console.WriteLine($"  callId   : {config.CallId}");
         Console.WriteLine($"  rate     : {config.SampleRate} Hz, 2ch interleaved 16-bit PCM");

@@ -56,7 +56,8 @@ param(
 # The client is namespaced by the LMA stack it was downloaded from so the apps
 # for multiple LMA deployments can be installed side by side (separate install
 # dir, shortcut, registry key, start-at-login entry, single-instance mutex).
-# Derived from lma-config.json exactly as AppIdentity.cs / make-app.sh do.
+# Derived from lma-config.json exactly as AppIdentity.cs, make-app.sh, and
+# install-macos.sh do — all four must stay in sync (see AppIdentity.StackSlug).
 $stackName = ""
 $cfgPath = Join-Path $PSScriptRoot "lma-config.json"
 if (Test-Path $cfgPath) {

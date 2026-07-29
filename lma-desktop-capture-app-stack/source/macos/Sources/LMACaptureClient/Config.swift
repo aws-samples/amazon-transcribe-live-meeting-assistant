@@ -62,6 +62,11 @@ struct Config {
 
     /// The stack name reduced to a safe identifier fragment: alphanumerics and
     /// dashes only, lowercased. Used in the bundle id / defaults suite / paths.
+    ///
+    /// The same algorithm exists in make-app.sh, install-macos.sh, and the
+    /// Windows AppIdentity.Slugify — all four must agree, or the installer and
+    /// the app would disagree about which identifiers to use. ASCII-only by
+    /// design (CloudFormation stack names are [A-Za-z][A-Za-z0-9-]*).
     /// Empty when no stack name is configured (dev builds), in which case the
     /// callers fall back to their unsuffixed defaults.
     var stackSlug: String {

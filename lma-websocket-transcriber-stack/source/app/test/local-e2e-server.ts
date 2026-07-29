@@ -15,7 +15,7 @@
  * in this file (it copies the mux output before videorecording.ts cleanup).
  *
  * Run:  LOCAL_TEMP_DIR=/tmp/lma-e2e/ npx ts-node test/local-e2e-server.ts
- * Then: LMAAudioClient --endpoint ws://127.0.0.1:8082/api/v1/ws \
+ * Then: LMACaptureClient --endpoint ws://127.0.0.1:8082/api/v1/ws \
  *         --token dummy --call-id "local video test" --video 1
  * Stop the client (Ctrl-C); the harness logs the muxed MP4 path + ffprobe.
  */

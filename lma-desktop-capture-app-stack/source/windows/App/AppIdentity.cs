@@ -32,8 +32,14 @@ public static class AppIdentity
 
     /// <summary>
     /// Lowercase alphanumerics-and-dashes form of the stack name, used inside
-    /// identifiers. Empty when there is no stack name. Mirrors Config.swift's
-    /// stackSlug and make-app.sh — keep the three in sync.
+    /// identifiers. Empty when there is no stack name.
+    ///
+    /// The same algorithm (lowercase, map anything outside [a-z0-9-] to '-',
+    /// collapse runs, trim ends) exists in FOUR places and they must agree, or
+    /// the installer and the app would use different identifiers and settings /
+    /// OS permissions wouldn't line up: Config.swift's `stackSlug`,
+    /// macos/make-app.sh, macos/install-macos.sh, and build-windows.ps1.
+    /// ASCII-only by design — CloudFormation stack names are [A-Za-z][A-Za-z0-9-]*.
     /// </summary>
     public static string StackSlug { get; private set; } = "";
 
