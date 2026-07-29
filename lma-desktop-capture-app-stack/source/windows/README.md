@@ -1,9 +1,10 @@
-# LMA Native Windows Audio Client
+# LMA Capture Client (Windows)
 
-Streams **microphone + system (loopback) audio** from a Windows PC directly to
-the LMA WebSocket transcriber, so a user can transcribe a meeting they joined
-from a **native desktop app** (Zoom / Teams / Meet / Slack huddle / phone
-bridge) — no Chrome tab sharing, no Virtual Participant bot.
+Streams **microphone + system (loopback) audio** — and, optionally, **screen
+video** — from a Windows PC directly to the LMA WebSocket transcriber, so a user
+can transcribe a meeting they joined from a **native desktop app** (Zoom / Teams
+/ Meet / Slack huddle / phone bridge) — no Chrome tab sharing, no Virtual
+Participant bot.
 
 This is the Windows counterpart to the macOS client in
 `../macos/`. It speaks the **same wire protocol**, uses the **same Cognito SRP
@@ -11,7 +12,7 @@ login**, and shares the same UI-agnostic engine split between a **system-tray
 app** and a **headless CLI**. The server is unchanged; this is a third client
 alongside the browser and the Node CLI.
 
-> ✅ **Status: builds, runs, and verified on Windows 11.**
+> ✅ **Verified on Windows 11** (audio client):
 > - `--selftest` reproduces the pycognito SRP known-answer byte-for-byte (incl.
 >   the 3072-bit `g^x mod N` modpow).
 > - `--capture-test` confirmed **ch0/Left = system audio, ch1/Right = mic**,
@@ -20,19 +21,24 @@ alongside the browser and the Node CLI.
 > - The recording-time taskbar button was verified against the shell's own UI
 >   Automation tree: absent when idle, present while recording/paused, gone after
 >   Stop; closing its window leaves the recording running.
-> - Pending, like the macOS client: a full live meeting through a native
->   Zoom/Teams client to confirm transcript segments in the LMA web UI (needs a
->   deployed stack + credentials).
+>
+> ⚠️ **Not yet built or run on Windows:** optional screen-video capture
+> (ScreenRecorderLib + the video WebSocket), the rename to LMACaptureClient with
+> per-stack identifiers, the window/layout fixes, and the new UX (elapsed timer,
+> notifications, recent meeting names, separate Settings window). These were
+> written on macOS — where there is no .NET SDK — and need a build + smoke test
+> on a Windows machine. Expect the ScreenRecorderLib 6.x API surface (exact
+> option property names) to be the most likely thing needing adjustment.
 
 ---
 
-## Why Windows is simpler than macOS here
+## Windows platform notes
 
 - **System (loopback) audio needs no special permission.** WASAPI loopback on
   the default render endpoint is built into Windows — no equivalent of macOS's
-  "Screen Recording" TCC prompt and relaunch dance. This is a genuine Windows
-  advantage: the app can capture whatever is playing (a native Zoom/Teams
-  client) with zero permission friction.
+  "Screen Recording" TCC prompt and relaunch dance, so the app can capture
+  whatever is playing (a native Zoom/Teams client) with zero permission
+  friction. Screen-video capture likewise needs no permission grant.
 - **Microphone** is the only OS gate: Windows 10/11 has a
   **Settings ▸ Privacy & security ▸ Microphone** toggle (and a separate "Let
   desktop apps access your microphone"). If mic capture is denied, the app logs
