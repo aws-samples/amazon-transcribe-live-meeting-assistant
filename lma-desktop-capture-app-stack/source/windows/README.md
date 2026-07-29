@@ -98,7 +98,7 @@ the SDK can install into a user directory (e.g. via `dotnet-install.ps1
 -InstallDir $HOME\dotnet`).
 
 ```powershell
-cd lma-audio-capture-app-stack/source/windows
+cd lma-desktop-capture-app-stack/source/windows
 
 # Build a standalone app, then INSTALL it (per-user %LOCALAPPDATA%\Programs) and
 # add a Start Menu shortcut — recommended, no admin needed:

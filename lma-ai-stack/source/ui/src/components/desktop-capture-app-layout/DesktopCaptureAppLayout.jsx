@@ -11,12 +11,12 @@ import useAppContext from '../../contexts/app';
 
 import { appLayoutLabels } from '../common/labels';
 
-import AudioCaptureApp from './AudioCaptureApp';
+import DesktopCaptureApp from './DesktopCaptureApp';
 import Navigation from './navigation';
 import Breadcrumbs from './breadcrumbs';
 import ToolsPanel from './tools-panel';
 
-const AudioCaptureAppLayout = () => {
+const DesktopCaptureAppLayout = () => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const notifications = useNotifications();
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -32,10 +32,10 @@ const AudioCaptureAppLayout = () => {
       tools={<ToolsPanel />}
       toolsOpen={toolsOpen}
       onToolsChange={({ detail }) => setToolsOpen(detail.open)}
-      content={<AudioCaptureApp />}
+      content={<DesktopCaptureApp />}
       ariaLabels={appLayoutLabels}
     />
   );
 };
 
-export default AudioCaptureAppLayout;
+export default DesktopCaptureAppLayout;

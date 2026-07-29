@@ -4,14 +4,14 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import AudioCaptureAppLayout from '../components/audio-capture-app-layout';
+import DesktopCaptureAppLayout from '../components/desktop-capture-app-layout';
 import CallAnalyticsTopNavigation from '../components/call-analytics-top-navigation';
 
-const AudioCaptureAppRoutes = () => (
+const DesktopCaptureAppRoutes = () => (
   <div>
     <CallAnalyticsTopNavigation />
-    <AudioCaptureAppLayout />
+    <DesktopCaptureAppLayout />
   </div>
 );
 
-export default AudioCaptureAppRoutes;
+export default DesktopCaptureAppRoutes;

@@ -8,11 +8,11 @@ import { HelpPanel, Icon } from '@cloudscape-design/components';
 
 const DOCS_BASE = 'https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant';
 
-const header = <h2>Audio Capture App</h2>;
+const header = <h2>Desktop Capture App</h2>;
 const content = (
   <>
     <p>
-      The LMA Audio Capture App is a native application that streams your microphone and your computer&apos;s system
+      The LMA Desktop Capture App is a native application that streams your microphone and your computer&apos;s system
       (meeting) audio to LMA. Because it captures operating-system audio rather than a browser tab, it can transcribe
       meetings joined from native desktop apps &mdash; Zoom, Microsoft Teams, Cisco Webex, Slack huddles, or phone
       bridges &mdash; with no bot or extra attendee.
@@ -41,7 +41,7 @@ const content = (
       <a href={`${DOCS_BASE}/meeting-sources/`} target="_blank" rel="noopener noreferrer">
         <Icon name="external" /> Meeting Sources comparison
       </a>{' '}
-      for a side-by-side of the Audio Capture App, Chrome Extension, Stream Audio, and Virtual Participant.
+      for a side-by-side of the Desktop Capture App, Chrome Extension, Stream Audio, and Virtual Participant.
     </p>
     <h3>Documentation</h3>
     <ul>

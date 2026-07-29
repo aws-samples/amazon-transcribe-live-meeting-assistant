@@ -1,23 +1,23 @@
 ---
-title: "Audio Capture App (Native)"
+title: "Desktop Capture App"
 ---
 
-# Audio Capture App (Native)
+# Desktop Capture App
 
-The **Audio Capture App** is a lightweight native application (macOS and Windows)
-that streams your **microphone** and your computer's **system (meeting) audio**
-directly to LMA. Because it captures the operating system's audio — not a browser
-tab — it can transcribe meetings you join from a **native desktop app** (Zoom,
-Microsoft Teams, Cisco Webex, Slack huddles, phone bridges, …), which the
+The **Desktop Capture App** (**LMA Capture Client**) is a lightweight native
+application (macOS and Windows) that streams your **microphone**, your computer's
+**system (meeting) audio**, and — optionally — your **screen video** directly to
+LMA. Because it captures the operating system's audio, not a browser tab, it can
+transcribe meetings you join from a **native desktop app** (Zoom, Microsoft Teams,
+Cisco Webex, Slack huddles, phone bridges, …), which the
 [Chrome Extension](browser-extension.md) and [Stream Audio](stream-audio.md)
 options cannot. It adds **no bot** or extra attendee to the meeting.
 
-> **Status:** macOS and Windows are available today; iOS/Android are under
-> consideration (see [Roadmap](#roadmap)). The app is distributed as source that
-> you build locally with a one-step script — a native app using ScreenCaptureKit
-> (macOS) or WASAPI/WPF (Windows) cannot be cross-compiled by LMA's Linux build
-> pipeline, and code-signing tools are OS-specific, so building on your own
-> machine is both required and the most trustworthy option.
+> **Status:** macOS and Windows are available today. The app is distributed as
+> source that you build locally with a one-step script — a native app using
+> ScreenCaptureKit (macOS) or WASAPI/WPF (Windows) cannot be cross-compiled by
+> LMA's Linux build pipeline, and code-signing tools are OS-specific, so building
+> on your own machine is both required and the most trustworthy option.
 
 
 
@@ -103,7 +103,7 @@ download.
 
 ## Download and install (macOS)
 
-1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Audio Capture App
+1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Desktop Capture App
    (Native)** and click **Download for macOS**. The zip is **preconfigured for
    your deployment** (endpoint + Cognito settings baked in), so you only sign in
    with your normal LMA username and password.
@@ -118,7 +118,7 @@ download.
    bash install-macos.sh
    ```
    It clears the macOS download quarantine, checks prerequisites, builds the
-   app, and installs it to `/Applications/LMAAudioClient.app`. (Terminal is only
+   app, and installs it to `/Applications/LMACaptureClient.app`. (Terminal is only
    used to build and install — you won't run the app from Terminal.)
 
    > ⚠️ **Use `bash install-macos.sh`, not `./install-macos.sh`.** On recent
@@ -129,17 +129,17 @@ download.
    > data (no `execve` on a quarantined file), so it runs and clears the flag
    > from the rest of the folder itself.
 5. **Launch it like a normal app.** Click its **Dock icon** (the installer pins
-   it), press **⌘-Space** (Spotlight) and type **LMA Audio Client**, or
+   it), press **⌘-Space** (Spotlight) and type **LMA Capture Client**, or
    double-click it in Finder. An **LMA** item appears in the menu bar
    (top-right) and the app's icon appears in the Dock.
 
    > ⚠️ **Don't launch it from Terminal.** Always launch via Spotlight, Finder,
-   > or `open -a "LMA Audio Client"` — never the binary inside `Contents/MacOS`.
+   > or `open -a "LMA Capture Client"` — never the binary inside `Contents/MacOS`.
    > Only launching through macOS gives the app its own privacy identity; running
    > it from Terminal makes macOS attribute Microphone / Screen Recording to
    > **Terminal**, and system-audio capture silently won't work.
 6. Approve the **Microphone** prompt. Then open **System Settings ▸ Privacy &
-   Security ▸ Screen Recording**, enable **LMA Audio Client**, and **quit and
+   Security ▸ Screen Recording**, enable **LMA Capture Client**, and **quit and
    relaunch** it (Screen Recording requires a restart to take effect). Screen
    Recording is what lets macOS capture system/meeting audio, even for audio-only
    capture.
@@ -174,7 +174,7 @@ xattr -dr com.apple.quarantine .
 On Windows, loopback (system) audio capture is built into the OS and needs
 **no special permission** — the only OS gate is the microphone privacy toggle.
 
-1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Audio Capture App
+1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Desktop Capture App
    (Native)**, choose **Windows**, and click **Download for Windows**. The zip is
    **preconfigured for your deployment** (endpoint + Cognito settings baked in),
    so you only sign in with your normal LMA username and password.
@@ -263,8 +263,17 @@ Popover options:
 - **Start automatically at login** — registers the app as a macOS login item.
   The installer already placed the app in `/Applications`, so this works out of
   the box. You can also manage it in **System Settings ▸ General ▸ Login Items**.
-- **Settings (⚙ gear, top-right of the popover)** — customize how the two
-  channels are labeled in the LMA transcript and which microphone is captured:
+- **Elapsed time** — while recording, the panel and the menu-bar item show how
+  long the recording has been running (also in the icon's hover text).
+- **Notifications** — macOS notifies you when recording starts and stops; the
+  stop notification opens the meeting in LMA when clicked. You are also notified
+  if a window you chose for screen video closes and capture falls back to the
+  whole screen.
+- **Recent meeting names** — the clock button beside the meeting-name field
+  re-uses a recent name (handy for recurring meetings).
+- **Settings (⚙ gear, top-right of the popover)** — opens a separate, resizable
+  **Settings window** where you customize how the two channels are labeled in the
+  LMA transcript, which microphone is captured, and screen video:
   - **My mic** speaker label — defaults to your signed-in email address.
   - **System** speaker label — defaults to **"Other participants"**.
   - **Microphone** — pick a specific input device, or leave **System Default**
@@ -281,7 +290,7 @@ Popover options:
 The app uses no audio or CPU when idle, so the intended usage is to leave it
 running and click **Start** when a meeting begins. **To relaunch after
 quitting**, click its Dock icon, press **⌘-Space** (Spotlight) and type **LMA
-Audio Client**, or run `open -a "LMA Audio Client"`.
+Audio Client**, or run `open -a "LMA Capture Client"`.
 
 ## Using the system-tray + taskbar app (Windows)
 
@@ -338,8 +347,17 @@ Panel options:
   password is never stored).
 - **Start automatically at login** — adds a per-user startup entry that launches
   the tray app when you sign in; the toggle reflects the real system state.
-- **Settings (⚙ gear, top-right of the panel)** — customize how the two
-  channels are labeled in the LMA transcript and which microphone is captured.
+- **Elapsed time** — while recording, the panel, the tray tooltip, and the
+  taskbar button show how long the recording has been running.
+- **Notifications** — a tray balloon appears when recording starts and stops;
+  clicking the stop balloon opens the meeting in LMA. You are also notified if a
+  window you chose for screen video closes and capture falls back to the whole
+  screen.
+- **Recent meeting names** — the clock button beside the meeting-name field
+  re-uses a recent name (handy for recurring meetings).
+- **Settings (⚙ gear, top-right of the panel)** — opens a separate, resizable
+  **Settings window** where you customize how the two channels are labeled in the
+  LMA transcript, which microphone is captured, and screen video.
   Each label field shows its **default in grey**; leave the field blank to use
   it, or type to override.
   - **My mic** speaker label — defaults to your signed-in email address.
@@ -365,13 +383,32 @@ can't accidentally end up with two.
 > records the exact streamed stereo PCM with no server — useful for confirming
 > **ch0/Left = system, ch1/Right = mic** by measuring per-channel RMS.
 
-## Audio Capture App vs Virtual Participant
+## Multiple LMA deployments on one machine
+
+If you work with more than one LMA stack, you can install **one client per
+stack** and run them side by side. Each download is stamped with the stack it
+came from, and the app namespaces everything machine-scoped by that name:
+
+| What | macOS | Windows |
+| --- | --- | --- |
+| App / install name | `LMA Capture Client (<Stack>).app` | `LMA Capture Client (<Stack>)` |
+| Identity | bundle id `com.amazon.lma.captureclient.<stack>` | registry `HKCU\Software\AmazonLMA\CaptureClient\<stack>` |
+| Settings + consent record | per-stack preferences | per-stack registry key |
+| Start at login | separate login item | separate `Run` entry |
+| Single instance | separate app | separate mutex, so both can run at once |
+| OS permissions | separate Screen Recording / Microphone grants | n/a (loopback needs none) |
+
+The stack name is shown under the app title, in the window titles, in the tray /
+menu-bar tooltip, and in the About line at the bottom of the panel (alongside the
+app version) — so it's always clear which deployment you are recording into.
+
+## Desktop Capture App vs Virtual Participant
 
 Both transcribe meetings without a browser tab, but make different trade-offs.
 See the [Meeting Sources overview](meeting-sources.md) for the full comparison
 of all capture options.
 
-| Dimension                   | Audio Capture App                                        | [Virtual Participant](virtual-participant.md)          |
+| Dimension                   | Desktop Capture App                                        | [Virtual Participant](virtual-participant.md)          |
 | --------------------------- | -------------------------------------------------------- | ------------------------------------------------------ |
 | How it captures             | Runs on your computer; captures OS system audio + mic locally | Headless bot joins the meeting in the cloud       |
 | Meeting platforms           | Any native or web app that plays audio on your computer  | Only platforms it can automate (Zoom, Teams, Chime, Webex, Meet) |
@@ -381,26 +418,24 @@ of all capture options.
 | Who must be present         | You, with the app running on your computer               | ✅ Runs unattended in the cloud                        |
 | Video / screen recording    | ✅ Optional (screen or window, off by default)           | ✅ Records the meeting screen/video                    |
 
-**In short:** choose the **Audio Capture App** when you're attending yourself,
+**In short:** choose the **Desktop Capture App** when you're attending yourself,
 want no visible bot, or need a platform the Virtual Participant doesn't support.
 Choose the **Virtual Participant** when you need per-speaker names, an in-meeting
 voice assistant, or hands-off unattended recording.
 
-## Roadmap
+## Supported platforms
 
-| Platform        | Status              | Capture technology                     |
-| --------------- | ------------------- | -------------------------------------- |
-| macOS 13+       | **Available**       | ScreenCaptureKit loopback + AVAudioEngine mic |
-| Windows 10/11   | **Available**       | WASAPI loopback + WASAPI mic capture   |
-| iPhone / iPad   | Under consideration | ReplayKit / broadcast upload           |
-| Android         | Under consideration | AudioPlaybackCapture API               |
+| Platform      | Audio capture                                 | Screen video capture (optional)          |
+| ------------- | --------------------------------------------- | ---------------------------------------- |
+| macOS 13+     | ScreenCaptureKit loopback + AVAudioEngine mic  | ScreenCaptureKit + VideoToolbox (H.264)  |
+| Windows 10/11 | WASAPI loopback + WASAPI mic capture           | Windows.Graphics.Capture + Media Foundation (H.264) |
 
 ## Troubleshooting
 
 ### macOS
 
 - **No remote-participant audio in the transcript.** Grant **Screen Recording**
-  to "LMA Audio Client" in System Settings and relaunch. Audio-only capture
+  to "LMA Capture Client" in System Settings and relaunch. Audio-only capture
   still requires the Screen Recording permission on macOS.
 - **macOS keeps asking for Screen Recording permission even though it's
   enabled.** This happens when the app was rebuilt with an ad-hoc signature —
@@ -408,20 +443,20 @@ voice assistant, or hands-off unattended recording.
   it while System Settings still shows it "enabled". Fix: rebuild with the
   current `install-macos.sh` (it now signs with a persistent local identity),
   then clear the stale records and re-grant once:
-  `tccutil reset ScreenCapture com.amazon.lma.audioclient`, relaunch the app,
+  `tccutil reset ScreenCapture com.amazon.lma.captureclient.<stack>`, relaunch the app,
   start a recording, and approve the prompt. If System Settings shows duplicate
-  "LMA Audio Client" rows, remove them with the **–** button first.
+  "LMA Capture Client" rows, remove them with the **–** button first.
 - **Build errors / `xcode-select: command not found`.** Install Apple's
   command-line tools (`xcode-select --install`), complete the popup, and re-run
   `bash install-macos.sh`.
 - **Uninstall.** From the unzipped folder, run `bash install-macos.sh
-  --uninstall`. It quits the app if running, deletes `LMAAudioClient.app` from
+  --uninstall`. It quits the app if running, deletes `LMACaptureClient.app` from
   `/Applications`, removes the Start-at-login item, unpins it from the Dock,
   clears the app's saved settings (remembered email, speaker labels, mic
   choice), and resets its Screen Recording + Microphone permissions. The
   one-time local signing certificate is left in your login keychain (harmless;
   reused if you reinstall). To remove that too: **Keychain Access ▸ login ▸ My
-  Certificates**, delete "LMA Audio Client Local Signing".
+  Certificates**, delete "LMA Capture Client Local Signing".
 
 ### Windows
 

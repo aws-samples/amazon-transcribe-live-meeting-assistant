@@ -8,7 +8,7 @@ import { SideNavigation } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 import useUserGroups from '../../hooks/use-user-groups';
 import { NAV_HEADER, generateNavigationItems } from '../common/navigation-items';
-import { AUDIO_CAPTURE_APP_PATH } from '../../routes/constants';
+import { DESKTOP_CAPTURE_APP_PATH } from '../../routes/constants';
 
 export const callsNavHeader = NAV_HEADER;
 
@@ -23,7 +23,7 @@ const defaultOnFollowHandler = (ev) => {
 
 /* eslint-disable react/prop-types */
 const Navigation = ({
-  activeHref = `#${AUDIO_CAPTURE_APP_PATH}`,
+  activeHref = `#${DESKTOP_CAPTURE_APP_PATH}`,
   header = callsNavHeader,
   items,
   onFollowHandler = defaultOnFollowHandler,

@@ -8,12 +8,12 @@ title: "Blog Update Proposal — Native Audio Capture Apps"
 
 **Purpose:** the published post is built around **four** capture paths — Virtual
 Participant, Stream Audio, Browser Extension, and Upload Audio. The new native
-**Audio Capture App** (macOS and Windows) is not mentioned anywhere. This
+**Desktop Capture App** (macOS and Windows) is not mentioned anywhere. This
 document proposes the minimum set of edits to make readers aware of it, with
 drop-in prose for each location.
 
 **Editorial principle:** keep the blog prose short. Every section below defers
-detail to the docs — [Audio Capture App](audio-capture-app.md) and
+detail to the docs — [Desktop Capture App](desktop-capture-app.md) and
 [Meeting Sources](meeting-sources.md).
 
 ---
@@ -23,7 +23,7 @@ detail to the docs — [Audio Capture App](audio-capture-app.md) and
 The `Update — May 2026 (v0.3.4)` line should name the feature, since that's what
 readers skim.
 
-> …and adds the new **Audio Capture App** — a native macOS and Windows app that
+> …and adds the new **Desktop Capture App** — a native macOS and Windows app that
 > streams your system audio and microphone to LMA, so you can transcribe
 > meetings you join from a native desktop client.
 
@@ -51,7 +51,7 @@ and add this item between *Browser Extension* and *Upload Audio*:
 Placing it beside Virtual Participant is deliberate: they are the two "no browser
 tab" options, and readers need the contrast immediately.
 
-> ### Audio Capture App (Native)
+> ### Desktop Capture App
 >
 > A lightweight native app for **macOS and Windows** that runs in the menu bar or
 > system tray. It captures your computer's **system (meeting) audio** on one
@@ -71,7 +71,7 @@ tab" options, and readers need the contrast immediately.
 > attendance. On macOS the app needs the Screen Recording permission (that's how
 > macOS grants system-audio capture, even audio-only); on Windows loopback
 > capture needs no permission at all. See
-> [Audio Capture App](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/audio-capture-app/)
+> [Desktop Capture App](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/desktop-capture-app/)
 > for install steps and the full comparison.
 
 ## 5. Getting Started ▸ Other Ways to Capture Meeting Audio — new subsection
@@ -111,7 +111,7 @@ existing ~250-word, numbered-steps format.
 > voice assistant or video recording. Because a locally built app is unsigned,
 > macOS Gatekeeper or Windows SmartScreen may warn on first launch. Headphones
 > are recommended so speaker audio doesn't bleed into your mic. Full details:
-> [Audio Capture App](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/audio-capture-app/)
+> [Desktop Capture App](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/desktop-capture-app/)
 > and
 > [Meeting Sources](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/meeting-sources/).
 
@@ -186,6 +186,6 @@ trade-offs — but useful when reviewing the edits.
 
 ## See also
 
-- [Audio Capture App (Native)](audio-capture-app.md)
+- [Desktop Capture App](desktop-capture-app.md)
 - [Meeting Sources](meeting-sources.md)
 - [Virtual Participant](virtual-participant.md)

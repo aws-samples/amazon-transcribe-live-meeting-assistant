@@ -6,11 +6,11 @@
 import React from 'react';
 import { BreadcrumbGroup } from '@cloudscape-design/components';
 
-import { AUDIO_CAPTURE_APP_PATH, DEFAULT_PATH } from '../../routes/constants';
+import { DESKTOP_CAPTURE_APP_PATH, DEFAULT_PATH } from '../../routes/constants';
 
 export const audioCaptureAppBreadcrumbItems = [
   { text: 'Meeting Assistant', href: `#${DEFAULT_PATH}` },
-  { text: 'Audio Capture App', href: `#${AUDIO_CAPTURE_APP_PATH}` },
+  { text: 'Desktop Capture App', href: `#${DESKTOP_CAPTURE_APP_PATH}` },
 ];
 
 const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={audioCaptureAppBreadcrumbItems} />;

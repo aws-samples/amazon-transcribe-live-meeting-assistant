@@ -47,29 +47,24 @@ const resolveVersion = (settings) => {
   return raw.startsWith('v') ? raw : `v${raw}`;
 };
 
-// Platform catalog. Two states: 'available' (works today) and 'considering'
-// (being evaluated, no commitment → "Under consideration"). macOS and Windows
-// are available; mobile is under consideration.
+// Supported desktop platforms.
 const PLATFORMS = [
   {
     key: 'mac',
     name: 'macOS',
     status: 'available',
-    note: 'Captures native app audio via ScreenCaptureKit + your microphone. Requires macOS 13 (Ventura) or later.',
+    note:
+      'Captures native app audio via ScreenCaptureKit + your microphone, and optionally your screen. ' +
+      'Requires macOS 13 (Ventura) or later.',
   },
   {
     key: 'windows',
     name: 'Windows',
     status: 'available',
-    note: 'Captures native app audio via WASAPI loopback + your microphone. Requires Windows 10 or 11.',
+    note:
+      'Captures native app audio via WASAPI loopback + your microphone, and optionally your screen. ' +
+      'Requires Windows 10 or 11.',
   },
-  {
-    key: 'ios',
-    name: 'iPhone / iPad',
-    status: 'considering',
-    note: 'ReplayKit / broadcast-upload capture. Under consideration.',
-  },
-  { key: 'android', name: 'Android', status: 'considering', note: 'AudioPlaybackCapture API. Under consideration.' },
 ];
 
 const AVAILABLE_KEYS = PLATFORMS.filter((p) => p.status === 'available').map((p) => p.key);
@@ -77,11 +72,10 @@ const AVAILABLE_KEYS = PLATFORMS.filter((p) => p.status === 'available').map((p)
 // Badge label + color per platform status (avoids nested ternaries in JSX).
 const STATUS_BADGE = {
   available: { color: 'green', label: 'Available' },
-  considering: { color: 'grey', label: 'Under consideration' },
 };
 
-// Audio Capture App vs Virtual Participant — an honest side-by-side so users
-// pick the right tool. "app" = this Audio Capture App; "vp" = Virtual Participant.
+// Desktop Capture App vs Virtual Participant — an honest side-by-side so users
+// pick the right tool. "app" = this Desktop Capture App; "vp" = Virtual Participant.
 const COMPARISON = [
   {
     dimension: 'How it captures',
@@ -177,7 +171,7 @@ const COMPARISON_COLUMNS = [
   },
   {
     id: 'app',
-    header: 'Audio Capture App (this tool)',
+    header: 'Desktop Capture App (this tool)',
     cell: (e) => (
       <Box>
         {e.appPro && <Badge color="green">Pro</Badge>}
@@ -239,7 +233,7 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
           <li>
             <Box variant="p">
               <strong>Open the app</strong> from the <strong>Dock</strong> (the installer adds it there) or from
-              Spotlight (<strong>⌘-Space</strong>, type <strong>LMA Audio Client</strong>). An <strong>LMA</strong> icon
+              Spotlight (<strong>⌘-Space</strong>, type <strong>LMA Capture Client</strong>). An <strong>LMA</strong> icon
               appears in the menu bar at the top-right.
             </Box>
           </li>
@@ -247,7 +241,7 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
             <Box variant="p">
               Approve the <strong>Microphone</strong> prompt. Then go to <strong>System Settings</strong> &rsaquo;{' '}
               <strong>Privacy &amp; Security</strong> &rsaquo; <strong>Screen Recording</strong>, turn on{' '}
-              <strong>LMA Audio Client</strong>, and <strong>quit and reopen the app</strong> (this permission only
+              <strong>LMA Capture Client</strong>, and <strong>quit and reopen the app</strong> (this permission only
               takes effect after a restart). This is what lets it hear the other participants.
             </Box>
           </li>
@@ -300,8 +294,8 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
             the meeting alongside the audio. Off by default; reuses the Screen Recording permission you already granted.
           </li>
           <li>
-            <strong>Launch or relaunch:</strong> press <strong>⌘-Space</strong>, type <strong>LMA Audio Client</strong>,
-            and press Return &mdash; or run <code>open -a &quot;LMA Audio Client&quot;</code>.
+            <strong>Launch or relaunch:</strong> press <strong>⌘-Space</strong>, type <strong>LMA Capture Client</strong>,
+            and press Return &mdash; or run <code>open -a &quot;LMA Capture Client&quot;</code>.
           </li>
         </ul>
       </SpaceBetween>
@@ -329,7 +323,7 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
         </Box>
         <Box variant="p">
           <strong>No remote-participant audio in the transcript.</strong> Grant <strong>Screen Recording</strong> to
-          &quot;LMA Audio Client&quot; in System Settings and relaunch. Audio-only capture still requires the Screen
+          &quot;LMA Capture Client&quot; in System Settings and relaunch. Audio-only capture still requires the Screen
           Recording permission on macOS.
         </Box>
         <Box variant="p">
@@ -407,7 +401,7 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
           <li>
             <Box variant="p">
               <strong>Open the app</strong> from the <strong>Start Menu</strong> (press the <strong>Windows key</strong>
-              , type <strong>LMA Audio Capture</strong>, Enter). No window opens &mdash; look for this icon in the
+              , type <strong>LMA Capture Client</strong>, Enter). No window opens &mdash; look for this icon in the
               system tray at the bottom-right, next to the clock, and <strong>left-click</strong> it:
             </Box>
             <TrayIconLegend />
@@ -454,7 +448,7 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
             <strong>Stop</strong> stops it.
           </li>
           <li>
-            <strong>Keep it one click away when idle:</strong> right-click <strong>LMA Audio Capture</strong> in the
+            <strong>Keep it one click away when idle:</strong> right-click <strong>LMA Capture Client</strong> in the
             Start Menu &rsaquo; <strong>More</strong> &rsaquo; <strong>Pin to taskbar</strong>. (Windows 10+ removed the
             API that would let the installer pin it for you.)
           </li>
@@ -514,7 +508,7 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
         </Box>
         <Box variant="p">
           <strong>Uninstall.</strong> The app registers in{' '}
-          <strong>Settings &rsaquo; Apps &rsaquo; Installed apps</strong> as &quot;LMA Audio Capture&quot; &mdash; find
+          <strong>Settings &rsaquo; Apps &rsaquo; Installed apps</strong> as &quot;LMA Capture Client&quot; &mdash; find
           it there and choose <strong>Uninstall</strong>. Or, from the unzipped folder, run{' '}
           <code>./build-windows.ps1 -Uninstall</code>{' '}
           <Button
@@ -556,7 +550,7 @@ const installPropTypes = {
 MacInstall.propTypes = installPropTypes;
 WindowsInstall.propTypes = installPropTypes;
 
-const AudioCaptureApp = () => {
+const DesktopCaptureApp = () => {
   const { settings } = useSettingsContext() || {};
   const version = useMemo(() => resolveVersion(settings), [settings]);
   const detected = useMemo(() => detectOS(), []);
@@ -572,11 +566,11 @@ const AudioCaptureApp = () => {
   // conventional versioned filename served from the web root. The "-macos" /
   // "-windows" segment selects the per-platform package the CodeBuild job emits.
   const zipName = (osKey) => {
-    const base = `lma-audio-capture-app-${osKey}`;
+    const base = `lma-desktop-capture-app-${osKey}`;
     return version ? `${base}-${version}.zip` : `${base}.zip`;
   };
-  const macDownloadHref = settings?.AudioCaptureAppDownloadUrl || `/${zipName('macos')}`;
-  const winDownloadHref = settings?.AudioCaptureAppWindowsDownloadUrl || `/${zipName('windows')}`;
+  const macDownloadHref = settings?.DesktopCaptureAppDownloadUrl || `/${zipName('macos')}`;
+  const winDownloadHref = settings?.DesktopCaptureAppWindowsDownloadUrl || `/${zipName('windows')}`;
 
   const isMac = platform === 'mac';
   const osZipName = isMac ? zipName('macos') : zipName('windows');
@@ -585,8 +579,8 @@ const AudioCaptureApp = () => {
   // Only apply the download filename hint for the web-root fallback (not for an
   // absolute settings URL, which may be cross-origin).
   const osDownloadIsFallback = isMac
-    ? !settings?.AudioCaptureAppDownloadUrl
-    : !settings?.AudioCaptureAppWindowsDownloadUrl;
+    ? !settings?.DesktopCaptureAppDownloadUrl
+    : !settings?.DesktopCaptureAppWindowsDownloadUrl;
 
   const copyToClipboard = (text) => {
     try {
@@ -618,13 +612,13 @@ const AudioCaptureApp = () => {
               </Button>
             }
           >
-            Audio Capture App
+            Desktop Capture App
           </Header>
         }
       >
         <SpaceBetween size="m">
           <Box variant="p">
-            The LMA Audio Capture App is a lightweight native application that streams your microphone and your
+            The LMA Desktop Capture App is a lightweight native application that streams your microphone and your
             computer&apos;s system (meeting) audio directly to LMA. Because it captures the operating system&apos;s
             audio &mdash; not a browser tab &mdash; it can transcribe meetings you join from a{' '}
             <strong>native Zoom, Teams, Webex, Slack, or phone-bridge app</strong>, which the{' '}
@@ -641,7 +635,7 @@ const AudioCaptureApp = () => {
 
       <Container
         header={
-          <Header variant="h2" description="macOS and Windows are available today; mobile is under consideration.">
+          <Header variant="h2" description="Available for macOS and Windows.">
             Choose your platform
           </Header>
         }
@@ -654,7 +648,6 @@ const AudioCaptureApp = () => {
             options={[
               { id: 'mac', text: 'macOS' },
               { id: 'windows', text: 'Windows' },
-              { id: 'mobile', text: 'Mobile', disabled: true },
             ]}
           />
           {PLATFORMS.filter((p) => p.key === platform).map((p) => (
@@ -671,8 +664,8 @@ const AudioCaptureApp = () => {
           ))}
           {detected !== 'mac' && detected !== 'windows' && (
             <Alert type="info" header="Desktop only today">
-              You appear to be on a mobile or unrecognized system. The Audio Capture App is available for{' '}
-              <strong>macOS and Windows</strong>; mobile is under consideration. On this device, use the{' '}
+              You appear to be on an unrecognized system. The Desktop Capture App is available for{' '}
+              <strong>macOS and Windows</strong>. On this device, use the{' '}
               <Link href={`#${STREAM_AUDIO_PATH}`}>Stream Audio</Link> page or the{' '}
               <Link href={`#${VIRTUAL_PARTICIPANT_PATH}`}>Virtual Participant</Link>.
             </Alert>
@@ -722,7 +715,7 @@ const AudioCaptureApp = () => {
       <Container
         header={
           <Header variant="h2" description="Both transcribe without a browser tab, but make different trade-offs.">
-            Audio Capture App vs Virtual Participant
+            Desktop Capture App vs Virtual Participant
           </Header>
         }
       >
@@ -732,10 +725,10 @@ const AudioCaptureApp = () => {
             columnDefinitions={COMPARISON_COLUMNS}
             items={COMPARISON}
             wrapLines
-            ariaLabels={{ tableLabel: 'Audio Capture App versus Virtual Participant comparison' }}
+            ariaLabels={{ tableLabel: 'Desktop Capture App versus Virtual Participant comparison' }}
           />
           <Box variant="small" color="text-body-secondary">
-            In short: choose the <strong>Audio Capture App</strong> when you&apos;re attending yourself, want no visible
+            In short: choose the <strong>Desktop Capture App</strong> when you&apos;re attending yourself, want no visible
             bot, need a platform the Virtual Participant doesn&apos;t support, or prefer to keep audio on your machine.
             Choose the <Link href={`#${VIRTUAL_PARTICIPANT_PATH}`}>Virtual Participant</Link> when you need per-speaker
             names, an in-meeting voice assistant, screen/video capture, or hands-off unattended recording.
@@ -746,4 +739,4 @@ const AudioCaptureApp = () => {
   );
 };
 
-export default AudioCaptureApp;
+export default DesktopCaptureApp;

@@ -100,7 +100,7 @@ survives rebuilds. Set `LMA_ADHOC_SIGN=1` to force the old ad-hoc behavior
 > inner-binary path only ever grant Terminal the permissions.)
 
 ```bash
-cd lma-audio-capture-app-stack/source/macos
+cd lma-desktop-capture-app-stack/source/macos
 ./make-app.sh                       # swift build -c release + assemble build/LMAAudioClient.app
 open build/LMAAudioClient.app       # launches the menu-bar app with its own identity
 ```
