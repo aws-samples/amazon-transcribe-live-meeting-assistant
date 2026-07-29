@@ -39,6 +39,8 @@ process.env['LOCAL_TEMP_DIR'] = TEST_TMP + path.sep;
 process.env['ENABLE_VIDEO_RECORDING'] = 'true';
 process.env['RECORDINGS_BUCKET_NAME'] = 'smoke-test-bucket-does-not-exist';
 process.env['VIDEO_MUX_WAIT_FOR_AUDIO_MS'] = '5000';
+// Keep muxed output so the reconnect test can probe it (test-only flag).
+process.env['VIDEO_KEEP_MUXED'] = 'true';
 process.env['AWS_REGION'] = process.env['AWS_REGION'] || 'us-east-1';
 
 import fastify from 'fastify';
@@ -117,6 +119,7 @@ async function main(): Promise<void> {
             audioWavPath: wav,
             muxStarted: false,
             discarding: false,
+            finalized: false,
             tokens: {},
         };
         const out = path.join(TEST_TMP, 'muxed.mp4');
@@ -137,7 +140,7 @@ async function main(): Promise<void> {
     }
 
     // ---- Part 2: full websocket protocol flow, wired as in index.ts ----
-    const server = fastify({ logger: { level: 'warn' } });
+    const server = fastify({ logger: { level: process.env['SMOKE_LOG'] ?? 'warn' } });
     server.register(websocket);
     const videoSocketMap = new Map<WebSocket, VideoSession>();
 
@@ -306,6 +309,88 @@ async function main(): Promise<void> {
 
         victimWs.close();
         audioWs.close();
+
+        // ---- Part 2c: RECONNECT (videoResume) — parts are byte-joined ----
+        // A reconnect that continues the same client encoder session splits one
+        // fMP4 byte stream across part files. They must be joined byte-wise (only
+        // part 1 has the init segment), so the result must still be a decodable
+        // MP4 of the FULL duration — not just the pre-drop portion.
+        const RESUME_CALL = 'resume-parts-call';
+        liveCalls.set(RESUME_CALL, 'alice');
+        const srcBytes = fs.readFileSync(fmp4);
+        const splitAt = Math.floor(srcBytes.length / 2);
+
+        const rs1 = new WebSocket(`ws://${HOST}:${PORT}/api/v1/ws?user=alice`);
+        await new Promise<void>((res, rej) => {
+            rs1.on('open', () => res()); rs1.on('error', rej); 
+        });
+        rs1.send(JSON.stringify({ callEvent: 'START_VIDEO', callId: RESUME_CALL }));
+        await new Promise((r) => setTimeout(r, 100));
+        rs1.send(srcBytes.subarray(0, splitAt), { binary: true });
+        await new Promise((r) => setTimeout(r, 200));
+        rs1.close(); // drop WITHOUT END_VIDEO -> grace period, session survives
+        // Real clients reconnect after backoff; allow part 1's async flush to
+        // complete so the byte accounting is deterministic in the test.
+        await new Promise((r) => setTimeout(r, 800));
+
+        const rs2 = new WebSocket(`ws://${HOST}:${PORT}/api/v1/ws?user=alice`);
+        await new Promise<void>((res, rej) => {
+            rs2.on('open', () => res()); rs2.on('error', rej); 
+        });
+        rs2.send(JSON.stringify({ callEvent: 'START_VIDEO', callId: RESUME_CALL, videoResume: true }));
+        await new Promise((r) => setTimeout(r, 100));
+        rs2.send(srcBytes.subarray(splitAt), { binary: true });
+        await new Promise((r) => setTimeout(r, 200));
+        rs2.send(JSON.stringify({ callEvent: 'END_VIDEO', callId: RESUME_CALL }));
+        await new Promise((r) => setTimeout(r, 300));
+        rs2.close();
+
+        const resumeWav = path.join(TEST_TMP, `${RESUME_CALL}.wav`);
+        fs.copyFileSync(wav, resumeWav);
+        notifyAudioRecordingDone(RESUME_CALL, resumeWav, server);
+        const resumeOut = path.join(TEST_TMP, `${RESUME_CALL.replace(/-/g, '_')}.mp4`);
+        // Frame count is the unambiguous measure of "did we keep everything?".
+        // (Stream *duration* metadata on a fragmented MP4 is not a reliable
+        // proxy — it reads short even for a byte-perfect stream.)
+        const countFrames = (f: string): number => {
+            const out = sh('ffprobe', [
+                '-v', 'error', '-select_streams', 'v:0',
+                '-count_frames', '-show_entries', 'stream=nb_read_frames',
+                '-of', 'csv=p=0', f,
+            ]).trim();
+            return Number(out);
+        };
+        const sourceFrames = countFrames(fmp4);
+        await pollUntil(
+            () => {
+                // Must be COMPLETE, not merely present: ffmpeg writes the file
+                // incrementally, so a half-written file decodes to fewer frames.
+                if (!fs.existsSync(resumeOut)) {
+                    return false;
+                }
+                try {
+                    return countFrames(resumeOut) >= sourceFrames;
+                } catch {
+                    return false; // still being written
+                }
+            },
+            20_000,
+            'resumed parts should produce a COMPLETE muxed mp4 (VIDEO_KEEP_MUXED is set)'
+        );
+        const resumeCodecs = ffprobeCodecs(resumeOut);
+        assert.ok(
+            resumeCodecs.some((c) => c.startsWith('h264,video')),
+            `rejoined video must decode as h264 (got: ${resumeCodecs.join(' | ')})`
+        );
+        // Every frame of the source must survive the split+rejoin — this is what
+        // proves the post-reconnect bytes were kept rather than dropped.
+        const outFrames = countFrames(resumeOut);
+        assert.strictEqual(
+            outFrames,
+            sourceFrames,
+            `rejoined video must keep ALL ${sourceFrames} source frames, got ${outFrames} (post-reconnect bytes lost?)`
+        );
+        console.log(`PASS: reconnect (videoResume) parts byte-joined; all ${outFrames} frames preserved`);
 
         // ---- Part 3: disabled + discard paths ----
         process.env['ENABLE_VIDEO_RECORDING'] = 'false'; // note: module read at import; runtime check below
