@@ -83,6 +83,9 @@ public sealed class TrayApp
     // URL carried by the most recent notification, opened if the user clicks it.
     private string? _pendingNotifyUrl;
 
+    // True while a DragMove loop is running, so Deactivated doesn't hide the panel.
+    private bool _dragging;
+
     private TrayApp(Config config, string? pendingCommand)
     {
         _controller = new CaptureController(config);
@@ -158,15 +161,21 @@ public sealed class TrayApp
             ShowActivated = true,
         };
         // Borderless windows have no title bar to drag, which left a clipped or
-        // awkwardly-placed panel stuck where it was. Dragging anywhere on the
-        // panel chrome moves it.
-        _flyout.MouseLeftButtonDown += (_, e) =>
+        // awkwardly-placed panel stuck where it was. Dragging is offered from the
+        // panel's HEADER only (dragging from anywhere would start a window move
+        // when the user clicks body text), and the deactivate-to-hide behaviour is
+        // suppressed for the duration — DragMove runs a modal move loop that can
+        // itself raise Deactivated, which would make the panel vanish mid-drag.
+        _panel.DragHandle.MouseLeftButtonDown += (_, e) =>
         {
+            if (e.ButtonState != System.Windows.Input.MouseButtonState.Pressed) return;
             try
             {
-                if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed) _flyout.DragMove();
+                _dragging = true;
+                _flyout.DragMove();
             }
             catch { /* DragMove throws if the button was already released */ }
+            finally { _dragging = false; }
         };
         // Close when the user clicks away (flyout behavior). Not while the panel has
         // been handed to the taskbar window — then the flyout owns nothing and any
@@ -174,6 +183,7 @@ public sealed class TrayApp
         _flyout.Deactivated += (_, _) =>
         {
             if (_panelHost != _flyout) return;
+            if (_dragging) return; // a window move can deactivate; don't vanish
             _hiddenAt = DateTime.Now;
             _flyout.Hide();
         };
@@ -232,11 +242,15 @@ public sealed class TrayApp
 
         // Route notifications through the tray icon's balloon. Clicking the
         // balloon opens the meeting in LMA when a URL was supplied.
+        // Only ONE balloon can be pending at a time and clicks carry no identity,
+        // so a later URL-less notification must not clobber a pending "your
+        // recording is ready" link (and vice versa). Keep the most recent URL,
+        // but never let a URL-less balloon erase one that is still actionable.
         Notifier.Sink = (title, body, url) =>
         {
             try
             {
-                _pendingNotifyUrl = url;
+                if (!string.IsNullOrEmpty(url)) _pendingNotifyUrl = url;
                 _tray.ShowBalloonTip(title, body, BalloonIcon.Info);
             }
             catch { /* balloons can be suppressed by policy; never fatal */ }
@@ -248,6 +262,9 @@ public sealed class TrayApp
             if (!string.IsNullOrEmpty(url)) OpenUrl(url!);
             else ShowControlPanel();
         };
+        // A dismissed/expired balloon should not leave its URL armed for the next
+        // unrelated one.
+        _tray.TrayBalloonTipClosed += (_, _) => _pendingNotifyUrl = null;
 
         _panel.RequestClosePopup = () => { if (_panelHost == _flyout) _flyout.Hide(); };
 
@@ -319,6 +336,9 @@ public sealed class TrayApp
             if (_taskbarWindow.WindowState == WindowState.Normal)
             {
                 MovePanelTo(_taskbarWindow);
+                // Bound the height for THIS window too; otherwise it inherits
+                // whatever the last flyout show computed and clips its content.
+                _panel.MaxHeight = MaxFlyoutHeight();
                 _panel.FocusFirstField();
             }
         };
@@ -681,6 +701,30 @@ public sealed class TrayApp
     /// The screen containing the mouse cursor — i.e. the one whose tray icon was
     /// just clicked. Falls back to the primary screen.
     /// </summary>
+    /// <summary>
+    /// DPI scale without an instance (used by the static work-area helper).
+    /// Falls back to 1.0, which is correct for 100% displays.
+    /// </summary>
+    private static double GetDpiScaleStatic()
+    {
+        try
+        {
+            var w = System.Windows.Application.Current?.Windows;
+            if (w != null)
+            {
+                foreach (Window candidate in w)
+                {
+                    if (System.Windows.PresentationSource.FromVisual(candidate) != null)
+                    {
+                        return VisualTreeHelper.GetDpi(candidate).DpiScaleX;
+                    }
+                }
+            }
+        }
+        catch { /* fall through */ }
+        return 1.0;
+    }
+
     private static System.Windows.Forms.Screen ScreenUnderCursor()
     {
         try
@@ -704,7 +748,7 @@ public sealed class TrayApp
         try
         {
             var wa = ScreenUnderCursor().WorkingArea;
-            return Math.Max(320, (wa.Height / GetDpiScale()) - 40);
+            return Math.Max(320, (wa.Height / GetDpiScaleStatic()) - 40);
         }
         catch
         {
@@ -712,10 +756,24 @@ public sealed class TrayApp
         }
     }
 
-    private static double GetDpiScale()
+    /// <summary>
+    /// DPI scale of the flyout's screen. The previous implementation looked at
+    /// Application.Current.MainWindow — never set here (ShutdownMode is
+    /// OnExplicitShutdown) — so it allocated a throwaway Window, got null from
+    /// FromVisual, and ALWAYS returned 1.0, mis-positioning the panel on every
+    /// non-100% display. VisualTreeHelper.GetDpi works off a real visual.
+    /// </summary>
+    private double GetDpiScale()
     {
-        var src = System.Windows.PresentationSource.FromVisual(System.Windows.Application.Current.MainWindow ?? new Window());
-        return src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+        try
+        {
+            if (_flyout != null && System.Windows.PresentationSource.FromVisual(_flyout) != null)
+            {
+                return VisualTreeHelper.GetDpi(_flyout).DpiScaleX;
+            }
+        }
+        catch { /* fall through to the neutral default */ }
+        return 1.0;
     }
 }
 

@@ -54,7 +54,11 @@ final class MenuBarAppState: ObservableObject {
     /// Wall-clock seconds since the current recording started (0 when idle).
     /// Drives the elapsed-time readout in the panel and the menu-bar tooltip.
     @Published var elapsedSeconds = 0
-    private var recordingStartedAt: Date?
+    // Elapsed RECORDED time, which excludes paused spans — the audio recording
+    // skips paused audio, so wall-clock would overstate the recording's length
+    // (a 10-minute meeting paused for 8 would have reported 10:00).
+    private var segmentStartedAt: Date?
+    private var accumulatedSeconds = 0
     private var elapsedTimer: Timer?
 
     /// Recently used meeting names (most recent first), for quick re-selection.
@@ -136,7 +140,11 @@ final class MenuBarAppState: ObservableObject {
             if nowStreaming && !wasStreaming {
                 self.beginElapsedTimer()
             } else if !nowStreaming && wasStreaming {
-                self.endElapsedTimer()
+                // An error (bad token, capture failure) or sign-out means nothing
+                // was uploaded — don't tell the user a recording is on its way.
+                let failed: Bool
+                if case .error = s { failed = true } else { failed = false }
+                self.endElapsedTimer(succeeded: !failed)
             }
         }
         controller.onLevels = { [weak self] m, k, c, p in
@@ -298,7 +306,11 @@ final class MenuBarAppState: ObservableObject {
         controller.start(callId: name.isEmpty ? nil : name)
     }
     func stop() { controller.stop() }
-    func togglePause() { paused.toggle(); controller.setPaused(paused) }
+    func togglePause() {
+        paused.toggle()
+        controller.setPaused(paused)
+        pauseElapsed(paused)
+    }
     func toggleMic() { micMuted.toggle(); controller.setMicMuted(micMuted) }
     func toggleMeeting() { meetingMuted.toggle(); controller.setMeetingMuted(meetingMuted) }
     func openLMA() { if let u = controller.lmaURL() { NSWorkspace.shared.open(u) } }
@@ -310,12 +322,13 @@ final class MenuBarAppState: ObservableObject {
     // MARK: - Elapsed recording time
 
     private func beginElapsedTimer() {
-        recordingStartedAt = Date()
+        segmentStartedAt = Date()
+        accumulatedSeconds = 0
         elapsedSeconds = 0
         elapsedTimer?.invalidate()
         elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self = self, let start = self.recordingStartedAt else { return }
-            self.elapsedSeconds = Int(Date().timeIntervalSince(start))
+            guard let self = self else { return }
+            self.elapsedSeconds = self.currentElapsedSeconds()
         }
         Notifier.notify(
             title: "Recording started",
@@ -324,12 +337,17 @@ final class MenuBarAppState: ObservableObject {
                 : "LMA is recording this meeting's audio.")
     }
 
-    private func endElapsedTimer() {
+    /// Ends the timer. `succeeded` is false when the recording stopped because of
+    /// an error or sign-out, in which case nothing was uploaded and promising the
+    /// user a recording would be a lie.
+    private func endElapsedTimer(succeeded: Bool) {
         elapsedTimer?.invalidate()
         elapsedTimer = nil
-        let duration = Self.formatElapsed(elapsedSeconds)
-        recordingStartedAt = nil
+        let duration = Self.formatElapsed(currentElapsedSeconds())
+        segmentStartedAt = nil
+        accumulatedSeconds = 0
         elapsedSeconds = 0
+        guard succeeded else { return }
         // The recording lands in LMA shortly after END (the server uploads and
         // muxes at call end), so point the user at it rather than claiming it's
         // ready this instant.
@@ -337,6 +355,25 @@ final class MenuBarAppState: ObservableObject {
             title: "Recording stopped (\(duration))",
             body: "Your meeting is being processed. Click to open it in LMA.",
             openURL: controller.lmaURL())
+    }
+
+    /// Recorded seconds so far: banked time plus the current unpaused span.
+    private func currentElapsedSeconds() -> Int {
+        guard let start = segmentStartedAt else { return accumulatedSeconds }
+        return accumulatedSeconds + Int(Date().timeIntervalSince(start))
+    }
+
+    /// Called by togglePause so the clock tracks RECORDED time, not wall clock.
+    private func pauseElapsed(_ paused: Bool) {
+        if paused {
+            if let start = segmentStartedAt {
+                accumulatedSeconds += Int(Date().timeIntervalSince(start))
+                segmentStartedAt = nil
+            }
+        } else if segmentStartedAt == nil {
+            segmentStartedAt = Date()
+        }
+        elapsedSeconds = currentElapsedSeconds()
     }
 
     /// "7:12" / "1:03:44" — compact elapsed time.

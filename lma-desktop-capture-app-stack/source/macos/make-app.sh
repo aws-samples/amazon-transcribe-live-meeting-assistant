@@ -35,10 +35,21 @@ if [[ -f lma-config.json ]]; then
   cfg_ver="$(python3 -c 'import json,sys; d=json.load(open("lma-config.json")); print(d.get("appVersion",""))' 2>/dev/null || echo "")"
   [[ -n "${cfg_ver}" ]] && APP_VERSION="${cfg_ver}"
 fi
-# Slug: lowercase alphanumerics + dashes. MUST match Config.swift's stackSlug,
-# install-macos.sh, and the Windows AppIdentity.Slugify (see Config.swift).
-STACK_SLUG="$(printf '%s' "${STACK_NAME}" | tr '[:upper:]' '[:lower:]' \
-  | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')"
+# Slug: lowercase alphanumerics + dashes, plus a 6-hex-char digest of the EXACT
+# stack name. The digest matters: the character mapping is lossy, so "LMA-Bob"
+# and "lma-bob" (both legal CloudFormation names, so both can exist at once)
+# would otherwise produce the same slug and the two stacks' clients would share
+# settings, TCC grants, and identity. MUST match Config.swift's stackSlug,
+# install-macos.sh, and the Windows AppIdentity.Slugify / build-windows.ps1.
+lma_stack_slug() {
+  local name="$1" base digest
+  [[ -z "${name}" ]] && { printf ''; return; }
+  base="$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')"
+  digest="$(printf '%s' "${name}" | shasum -a 256 | cut -c1-6)"
+  if [[ -z "${base}" ]]; then printf '%s' "${digest}"; else printf '%s-%s' "${base}" "${digest}"; fi
+}
+STACK_SLUG="$(lma_stack_slug "${STACK_NAME}")"
 
 if [[ -n "${STACK_SLUG}" ]]; then
   APP_NAME="LMACaptureClient-${STACK_SLUG}"

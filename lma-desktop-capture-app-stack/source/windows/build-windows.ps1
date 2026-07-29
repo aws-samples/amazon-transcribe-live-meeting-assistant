@@ -64,8 +64,20 @@ if (Test-Path $cfgPath) {
     try { $stackName = (Get-Content $cfgPath -Raw | ConvertFrom-Json).stackName } catch { $stackName = "" }
 }
 if (-not $stackName) { $stackName = "" }
-$stackSlug = ($stackName.ToLowerInvariant() -replace '[^a-z0-9-]', '-') -replace '-+', '-'
-$stackSlug = $stackSlug.Trim('-')
+# Lossy mapping + a digest of the EXACT name, so case-only variants of a stack
+# name ("LMA-Bob" vs "lma-bob") don't collide. MUST match AppIdentity.Slugify,
+# Config.swift's stackSlug, make-app.sh, and install-macos.sh.
+$stackSlug = ''
+if ($stackName) {
+    $stackBase = ([string]$stackName).ToLowerInvariant() -replace '[^a-z0-9-]', '-'
+    $stackBase = ($stackBase -replace '-+', '-').Trim('-')
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes([string]$stackName))
+    } finally { $sha.Dispose() }
+    $stackDigest = ((($hashBytes | ForEach-Object { $_.ToString('x2') }) -join '')).Substring(0, 6)
+    if ($stackBase) { $stackSlug = "$stackBase-$stackDigest" } else { $stackSlug = $stackDigest }
+}
 if ($stackSlug) {
     $appDisplayName = "LMA Capture Client ($stackName)"
     $installFolder  = "LMA Capture Client ($stackName)"

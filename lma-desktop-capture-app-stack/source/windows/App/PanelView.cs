@@ -31,7 +31,8 @@ public sealed class PanelView : Border
     private readonly TextBox _email = new();
     private readonly PasswordBox _password = new();
     private readonly CheckBox _remember = new() { Content = "Remember my email" };
-    private readonly Button _signIn = new() { Content = "Sign In" };
+    // IsDefault: Enter submits, matching the macOS panel's default-action button.
+    private readonly Button _signIn = new() { Content = "Sign In", IsDefault = true };
     private readonly TextBlock _error = new() { Foreground = Brushes.Red, TextWrapping = TextWrapping.Wrap, FontSize = 11 };
 
     // Authenticated / not streaming
@@ -74,7 +75,11 @@ public sealed class PanelView : Border
     // Elapsed recording time (UX: see at a glance how long you've been recording).
     private readonly System.Windows.Threading.DispatcherTimer _elapsedTimer =
         new() { Interval = TimeSpan.FromSeconds(1) };
-    private DateTime? _recordingStartedAt;
+    // Elapsed RECORDED time, excluding paused spans: the audio recording skips
+    // paused audio, so wall-clock would overstate it (a 10-minute meeting paused
+    // for 8 previously reported 10:00).
+    private DateTime? _segmentStartedAt;
+    private TimeSpan _accumulated = TimeSpan.Zero;
     private readonly TextBlock _elapsedText = new()
     {
         FontSize = 11,
@@ -88,16 +93,51 @@ public sealed class PanelView : Border
     {
         get
         {
-            if (_recordingStartedAt is not DateTime start) return "";
-            var span = DateTime.Now - start;
+            var span = CurrentElapsed;
+            if (span == TimeSpan.MinValue) return "";
             return span.TotalHours >= 1
                 ? $"{(int)span.TotalHours}:{span.Minutes:D2}:{span.Seconds:D2}"
                 : $"{span.Minutes}:{span.Seconds:D2}";
         }
     }
 
+    /// <summary>Recorded time so far, or TimeSpan.MinValue when not recording.</summary>
+    private TimeSpan CurrentElapsed
+    {
+        get
+        {
+            if (_segmentStartedAt is DateTime start) return _accumulated + (DateTime.Now - start);
+            return _accumulated > TimeSpan.Zero ? _accumulated : TimeSpan.MinValue;
+        }
+    }
+
+    /// <summary>Stop/start the recorded-time clock when the user pauses/resumes.</summary>
+    public void SetPausedForElapsed(bool paused)
+    {
+        if (paused)
+        {
+            if (_segmentStartedAt is DateTime start)
+            {
+                _accumulated += DateTime.Now - start;
+                _segmentStartedAt = null;
+            }
+        }
+        else if (_segmentStartedAt == null)
+        {
+            _segmentStartedAt = DateTime.Now;
+        }
+        _elapsedText.Text = ElapsedText;
+    }
+
     /// <summary>Opens the standalone Settings window (wired by TrayApp).</summary>
     public Action? OpenSettingsWindow;
+
+    /// <summary>
+    /// The element TrayApp attaches window-drag handling to (the panel header).
+    /// Exposed so the borderless flyout can be moved without making every click
+    /// on body text start a drag.
+    /// </summary>
+    public UIElement DragHandle { get; private set; } = null!;
 
     /// <summary>Recent meeting names (most recent first), persisted per stack.</summary>
     private readonly Button _recentMeetings = new()
@@ -149,8 +189,11 @@ public sealed class PanelView : Border
 
         var root = new StackPanel();
 
-        // Header row: recording dot + title (+ stack) + status text.
+        // Header row: recording dot + title (+ stack) + status text. Also the
+        // drag surface for the borderless flyout (see TrayApp): dragging from
+        // anywhere would start a window move when the user clicks body text.
         var header = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 8) };
+        DragHandle = header;
         var left = new StackPanel { Orientation = Orientation.Horizontal };
         left.Children.Add(_statusDot);
         var titleStack = new StackPanel { Margin = new Thickness(6, 0, 0, 0) };
@@ -212,7 +255,12 @@ public sealed class PanelView : Border
         _signOut.Click += (_, _) => { _c.Logout(); _password.Clear(); if (!_remember.IsChecked!.Value) _email.Clear(); Refresh(); };
         _start.Click += (_, _) => DoStart();
         _stop.Click += (_, _) => _c.Stop();
-        _pause.Click += (_, _) => { _c.SetPaused(!_c.IsPaused); _pause.Content = _c.IsPaused ? "Resume" : "Pause"; };
+        _pause.Click += (_, _) =>
+        {
+            _c.SetPaused(!_c.IsPaused);
+            _pause.Content = _c.IsPaused ? "Resume" : "Pause";
+            SetPausedForElapsed(_c.IsPaused);
+        };
         _muteMic.Click += (_, _) => _c.SetMicMuted(_muteMic.IsChecked ?? false);
         _muteSys.Click += (_, _) => _c.SetMeetingMuted(_muteSys.IsChecked ?? false);
         _openLma.Click += (_, _) => OpenLma();
@@ -271,6 +319,11 @@ public sealed class PanelView : Border
             // window now, so there's no panel rebuild to piggyback on).
             SyncVideoSourceHost();
         };
+        // A ComboBox inside a ScrollViewer takes the wheel and changes its
+        // SELECTION, which here persists a different device to the registry.
+        // Swallow the wheel over the pickers and let the ScrollViewer scroll.
+        _micPicker.PreviewMouseWheel += SwallowWheel;
+        _videoPicker.PreviewMouseWheel += SwallowWheel;
         _videoPicker.SelectionChanged += (_, _) =>
         {
             if (_loadingVideoPicker) return;
@@ -417,9 +470,9 @@ public sealed class PanelView : Border
             _error.Text = s.Message;
 
         // Elapsed-time tracking + start/stop notifications on the transitions.
-        if (streaming && _recordingStartedAt == null)
+        if (streaming && _segmentStartedAt == null && _accumulated == TimeSpan.Zero)
         {
-            _recordingStartedAt = DateTime.Now;
+            _segmentStartedAt = DateTime.Now;
             _elapsedText.Text = ElapsedText;
             _elapsedTimer.Start();
             Notifier.Notify("Recording started",
@@ -427,18 +480,25 @@ public sealed class PanelView : Border
                     ? "LMA is recording this meeting's audio and screen video."
                     : "LMA is recording this meeting's audio.");
         }
-        else if (!streaming && _recordingStartedAt != null)
+        else if (!streaming && (_segmentStartedAt != null || _accumulated > TimeSpan.Zero))
         {
             var duration = ElapsedText;
             _elapsedTimer.Stop();
-            _recordingStartedAt = null;
+            _segmentStartedAt = null;
+            _accumulated = TimeSpan.Zero;
             _elapsedText.Text = "";
-            // The recording lands in LMA shortly after END (the server uploads
-            // and muxes at call end), so point at it rather than claiming it's
-            // ready this instant.
-            Notifier.Notify($"Recording stopped ({duration})",
-                "Your meeting is being processed. Open it in LMA when ready.",
-                _c.LmaUrl());
+            // Only promise a recording when the stop was clean. An error (bad
+            // token, capture failure) or sign-out uploaded nothing, and telling
+            // the user their meeting "is being processed" would be false.
+            if (s.Kind != CaptureController.StateKind.Error)
+            {
+                // The recording lands in LMA shortly after END (the server
+                // uploads and muxes at call end), so point at it rather than
+                // claiming it's ready this instant.
+                Notifier.Notify($"Recording stopped ({duration})",
+                    "Your meeting is being processed. Open it in LMA when ready.",
+                    _c.LmaUrl());
+            }
         }
         Refresh();
     }
@@ -674,6 +734,27 @@ public sealed class PanelView : Border
     /// Recent meeting names — recurring meetings are the norm, so re-picking one
     /// should be a click rather than retyping it.
     /// </summary>
+    /// <summary>
+    /// Prevent a ComboBox from consuming the mouse wheel (which would silently
+    /// change the persisted selection) and hand the scroll to the ScrollViewer.
+    /// </summary>
+    private static void SwallowWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        if (sender is not FrameworkElement el) return;
+        e.Handled = true;
+        // Re-raise on the parent so the enclosing ScrollViewer still scrolls.
+        // Parent is a DependencyObject, so narrow it to UIElement before raising.
+        if (el.Parent is UIElement parent)
+        {
+            parent.RaiseEvent(new System.Windows.Input.MouseWheelEventArgs(
+                e.MouseDevice, e.Timestamp, e.Delta)
+            {
+                RoutedEvent = UIElement.MouseWheelEvent,
+                Source = sender,
+            });
+        }
+    }
+
     private void ShowRecentMeetingsMenu()
     {
         var names = AppSettings.RecentMeetingNames;

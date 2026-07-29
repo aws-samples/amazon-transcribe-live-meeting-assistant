@@ -433,8 +433,8 @@ came from, and the app namespaces everything machine-scoped by that name:
 
 | What | macOS | Windows |
 | --- | --- | --- |
-| App / install name | `LMA Capture Client (<Stack>).app` | `LMA Capture Client (<Stack>)` |
-| Identity | bundle id `com.amazon.lma.captureclient.<stack>` | registry `HKCU\Software\AmazonLMA\CaptureClient\<stack>` |
+| App / install name | `LMACaptureClient-<slug>.app` (shown as `LMA Capture Client (<Stack>)`) | `LMA Capture Client (<Stack>)` |
+| Identity | bundle id `com.amazon.lma.captureclient.<slug>` | registry `HKCU\Software\AmazonLMA\CaptureClient\<slug>` |
 | Settings + consent record | per-stack preferences | per-stack registry key |
 | Start at login | separate login item | separate `Run` entry |
 | Single instance | separate app | separate mutex, so both can run at once |
@@ -443,6 +443,12 @@ came from, and the app namespaces everything machine-scoped by that name:
 The stack name is shown under the app title, in the window titles, in the tray /
 menu-bar tooltip, and in the About line at the bottom of the panel (alongside the
 app version) — so it's always clear which deployment you are recording into.
+
+`<slug>` is the stack name lowercased with non-alphanumerics replaced by dashes,
+plus a short hash of the exact name — e.g. `LMA-VideoTest` becomes
+`lma-videotest-4581d5`. The hash is what keeps stacks whose names differ only in
+case or punctuation (`LMA-Bob` and `lma-bob` are both valid CloudFormation names)
+from sharing settings, permissions, or the single-instance lock.
 
 ## Desktop Capture App vs Virtual Participant
 

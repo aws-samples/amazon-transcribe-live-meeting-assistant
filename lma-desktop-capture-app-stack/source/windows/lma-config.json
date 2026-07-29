@@ -4,6 +4,6 @@
   "userPoolId": "us-east-1_REPLACEME",
   "clientId": "REPLACEMECLIENTID",
   "region": "us-east-1",
-  "stackName": "REPLACE-ME-StackName",
+  "stackName": "",
   "appVersion": "0.0.0"
 }

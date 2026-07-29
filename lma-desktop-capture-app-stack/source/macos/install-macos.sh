@@ -56,8 +56,15 @@ STACK_NAME=""
 if [[ -f lma-config.json ]]; then
   STACK_NAME="$(python3 -c 'import json; print(json.load(open("lma-config.json")).get("stackName",""))' 2>/dev/null || echo "")"
 fi
-STACK_SLUG="$(printf '%s' "${STACK_NAME}" | tr '[:upper:]' '[:lower:]' \
-  | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')"
+lma_stack_slug() {
+  local name="$1" base digest
+  [[ -z "${name}" ]] && { printf ''; return; }
+  base="$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')"
+  digest="$(printf '%s' "${name}" | shasum -a 256 | cut -c1-6)"
+  if [[ -z "${base}" ]]; then printf '%s' "${digest}"; else printf '%s-%s' "${base}" "${digest}"; fi
+}
+STACK_SLUG="$(lma_stack_slug "${STACK_NAME}")"
 if [[ -n "${STACK_SLUG}" ]]; then
   APP_BASENAME="LMACaptureClient-${STACK_SLUG}"
   APP_DISPLAY_NAME="LMA Capture Client (${STACK_NAME})"

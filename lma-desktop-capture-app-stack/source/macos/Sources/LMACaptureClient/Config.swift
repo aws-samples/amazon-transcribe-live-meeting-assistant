@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Runtime configuration. Values are resolved with this precedence (first wins):
 ///   1. CLI flag        (e.g. --endpoint ...)
@@ -70,6 +71,7 @@ struct Config {
     /// Empty when no stack name is configured (dev builds), in which case the
     /// callers fall back to their unsuffixed defaults.
     var stackSlug: String {
+        guard !stackName.isEmpty else { return "" }
         let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789-")
         let lowered = stackName.lowercased()
         let mapped = lowered.map { allowed.contains($0) ? $0 : "-" }
@@ -85,7 +87,21 @@ struct Config {
                 lastWasDash = false
             }
         }
-        return out.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let base = out.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        // The mapping above is LOSSY: "LMA-Bob" and "lma-bob" (both legal
+        // CloudFormation stack names, so both can exist at once) would otherwise
+        // collapse to the same slug and the two stacks' clients would SHARE
+        // settings, TCC grants, and the single-instance identity. Append a short
+        // digest of the exact stack name to keep distinct stacks distinct.
+        return base.isEmpty ? Self.stackDigest(stackName)
+                            : "\(base)-\(Self.stackDigest(stackName))"
+    }
+
+    /// First 6 hex chars of SHA-256(stackName). Must match the shell/PowerShell
+    /// and C# implementations exactly — see the note on stackSlug.
+    static func stackDigest(_ stackName: String) -> String {
+        let digest = SHA256.hash(data: Data(stackName.utf8))
+        return digest.compactMap { String(format: "%02x", $0) }.joined().prefix(6).lowercased()
     }
 
     /// Human-readable app label, stack-qualified when known:

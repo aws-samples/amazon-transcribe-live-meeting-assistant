@@ -35,10 +35,12 @@ public static class AppIdentity
     /// identifiers. Empty when there is no stack name.
     ///
     /// The same algorithm (lowercase, map anything outside [a-z0-9-] to '-',
-    /// collapse runs, trim ends) exists in FOUR places and they must agree, or
+    /// collapse runs, trim ends, append a 6-char digest) exists in FIVE places
+    /// and they must agree, or
     /// the installer and the app would use different identifiers and settings /
     /// OS permissions wouldn't line up: Config.swift's `stackSlug`,
-    /// macos/make-app.sh, macos/install-macos.sh, and build-windows.ps1.
+    /// macos/make-app.sh, macos/install-macos.sh, build-windows.ps1, and this
+    /// file — FIVE copies in total.
     /// ASCII-only by design — CloudFormation stack names are [A-Za-z][A-Za-z0-9-]*.
     /// </summary>
     public static string StackSlug { get; private set; } = "";
@@ -74,7 +76,26 @@ public static class AppIdentity
                 lastDash = false;
             }
         }
-        return collapsed.ToString().Trim('-');
+        var b = collapsed.ToString().Trim('-');
+        // The character mapping is LOSSY, so append a digest of the EXACT stack
+        // name: "LMA-Bob" and "lma-bob" are both legal CloudFormation names and
+        // can coexist, but would otherwise collapse to one slug — making the two
+        // stacks' clients share the registry key, the Run entry, and (worst) the
+        // single-instance mutex, so launching one would just raise the other.
+        var d = StackDigest(value);
+        return b.Length == 0 ? d : $"{b}-{d}";
+    }
+
+    /// <summary>
+    /// First 6 hex chars of SHA-256(stackName), lowercase. MUST match
+    /// Config.swift's stackDigest, make-app.sh, install-macos.sh, and
+    /// build-windows.ps1 — the app and the installer have to agree.
+    /// </summary>
+    internal static string StackDigest(string value)
+    {
+        var bytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(bytes).ToLowerInvariant().Substring(0, 6);
     }
 
     /// <summary>Human-readable name, stack-qualified when known.</summary>
