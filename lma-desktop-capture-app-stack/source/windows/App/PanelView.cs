@@ -53,8 +53,7 @@ public sealed class PanelView : Border
     private readonly Button _openLma = new();
     private readonly TextBlock _logLine = new() { Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap };
 
-    // Settings gear (speaker labels + mic picker)
-    private bool _showSettings;
+    // Settings gear — opens the standalone Settings window.
     private readonly Button _gear = new()
     {
         Content = "⚙", FontSize = 14, Padding = new Thickness(4, 0, 4, 0),
@@ -67,7 +66,48 @@ public sealed class PanelView : Border
     // Optional desktop-video capture.
     private readonly CheckBox _videoEnabled = new() { Content = "Also record screen video", FontSize = 11 };
     private readonly ComboBox _videoPicker = new() { FontSize = 11, Margin = new Thickness(0, 0, 0, 6) };
+    // Holds the source picker + help text so toggling "Also record screen video"
+    // can show/hide them without rebuilding the whole settings window.
+    private readonly StackPanel _videoSourceHost = new();
     private bool _loadingVideoPicker;
+
+    // Elapsed recording time (UX: see at a glance how long you've been recording).
+    private readonly System.Windows.Threading.DispatcherTimer _elapsedTimer =
+        new() { Interval = TimeSpan.FromSeconds(1) };
+    private DateTime? _recordingStartedAt;
+    private readonly TextBlock _elapsedText = new()
+    {
+        FontSize = 11,
+        Foreground = Secondary,
+        Margin = new Thickness(6, 0, 0, 0),
+        VerticalAlignment = VerticalAlignment.Center,
+    };
+
+    /// <summary>Elapsed recording time as "7:12" / "1:03:44" ("" when idle).</summary>
+    public string ElapsedText
+    {
+        get
+        {
+            if (_recordingStartedAt is not DateTime start) return "";
+            var span = DateTime.Now - start;
+            return span.TotalHours >= 1
+                ? $"{(int)span.TotalHours}:{span.Minutes:D2}:{span.Seconds:D2}"
+                : $"{span.Minutes}:{span.Seconds:D2}";
+        }
+    }
+
+    /// <summary>Opens the standalone Settings window (wired by TrayApp).</summary>
+    public Action? OpenSettingsWindow;
+
+    /// <summary>Recent meeting names (most recent first), persisted per stack.</summary>
+    private readonly Button _recentMeetings = new()
+    {
+        Content = "🕘",
+        FontSize = 11,
+        Padding = new Thickness(4, 0, 4, 0),
+        Margin = new Thickness(4, 0, 0, 0),
+        ToolTip = "Recent meeting names",
+    };
     // Grey placeholder showing what a blank field will actually be sent as, so the
     // defaults are visible without having to hover a tooltip.
     private readonly TextBlock _micHint = HintText();
@@ -87,7 +127,9 @@ public sealed class PanelView : Border
     {
         _c = controller;
 
-        Width = 300;
+        // Minimum width, not a fixed one, so the window can be resized wider and
+        // long text (labels, stack names, error messages) has room to wrap.
+        MinWidth = 300;
         // Light theme: dark text on a light background for readability. A near-
         // white panel with a subtle border, near-black default text.
         Background = new SolidColorBrush(Color.FromRgb(0xFA, 0xFA, 0xFA));
@@ -99,16 +141,31 @@ public sealed class PanelView : Border
 
         var root = new StackPanel();
 
-        // Header row: recording dot + title + status text.
+        // Header row: recording dot + title (+ stack) + status text.
         var header = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 8) };
         var left = new StackPanel { Orientation = Orientation.Horizontal };
         left.Children.Add(_statusDot);
-        left.Children.Add(new TextBlock
+        var titleStack = new StackPanel { Margin = new Thickness(6, 0, 0, 0) };
+        titleStack.Children.Add(new TextBlock
         {
-            Text = "  LMA Audio Capture",
+            Text = "LMA Capture",
             FontWeight = FontWeights.Bold,
             VerticalAlignment = VerticalAlignment.Center,
         });
+        // Which LMA deployment this app talks to — essential once a user has the
+        // clients for more than one stack installed.
+        if (!string.IsNullOrEmpty(AppIdentity.StackName))
+        {
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = AppIdentity.StackName,
+                Foreground = Secondary,
+                FontSize = 10,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxWidth = 170,
+            });
+        }
+        left.Children.Add(titleStack);
         DockPanel.SetDock(left, Dock.Left);
         DockPanel.SetDock(_gear, Dock.Right);
         DockPanel.SetDock(_statusText, Dock.Right);
@@ -119,8 +176,28 @@ public sealed class PanelView : Border
         root.Children.Add(Sep());
         root.Children.Add(_body);
         root.Children.Add(_logLine);
+        // About line: version + stack, so support questions ("which build/which
+        // deployment?") are answerable at a glance.
+        root.Children.Add(new TextBlock
+        {
+            Text = AppIdentity.AboutLine,
+            Foreground = Secondary,
+            FontSize = 10,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 0),
+        });
 
-        Child = root;
+        // Wrap in a ScrollViewer: the body's height varies with state (consent
+        // gate, expanded sections, error text). Without this the content was
+        // clipped at the top/bottom of a fixed window with no way to reach it.
+        // TrayApp sets MaxHeight from the screen work area.
+        Child = new ScrollViewer
+        {
+            Content = root,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Padding = new Thickness(0),
+        };
 
         // Wire controls.
         _signIn.Click += (_, _) => DoLogin();
@@ -152,12 +229,12 @@ public sealed class PanelView : Border
         // Settings gear: toggle the section; save on every edit (no Apply).
         // Disabled while streaming — labels ride the START frame, so mid-meeting
         // changes wouldn't take effect anyway.
-        _gear.Click += (_, _) =>
-        {
-            _showSettings = !_showSettings;
-            if (_showSettings) RefreshMicPicker();
-            Refresh();
-        };
+        // Settings live in their OWN window: the popup stays small and
+        // predictable (expanding it inline used to overflow the screen), and
+        // settings get room for the growing set of options.
+        _gear.Click += (_, _) => OpenSettingsWindow?.Invoke();
+        _recentMeetings.Click += (_, _) => ShowRecentMeetingsMenu();
+        _elapsedTimer.Tick += (_, _) => _elapsedText.Text = ElapsedText;
         _micLabel.TextChanged += (_, _) => { AppSettings.MicLabel = _micLabel.Text; UpdateLabelHints(); };
         _systemLabel.TextChanged += (_, _) => { AppSettings.SystemLabel = _systemLabel.Text; UpdateLabelHints(); };
         // Typing in the email field changes the mic-label default, so keep the grey
@@ -173,10 +250,24 @@ public sealed class PanelView : Border
         };
         _videoEnabled.Click += (_, _) =>
         {
-            AppSettings.VideoEnabled = _videoEnabled.IsChecked ?? false;
-            if (_videoEnabled.IsChecked ?? false) RefreshVideoPicker();
+            bool on = _videoEnabled.IsChecked ?? false;
+            AppSettings.VideoEnabled = on;
             PushSettingsToController();
-            Refresh();
+            // Show/hide the source picker in place (the settings live in their
+            // own window now, so there's no panel rebuild to piggyback on).
+            _videoSourceHost.Children.Clear();
+            if (on)
+            {
+                RefreshVideoPicker();
+                _videoSourceHost.Children.Add(_videoPicker);
+                _videoSourceHost.Children.Add(new TextBlock
+                {
+                    Text = "The selected screen or window is recorded with the meeting and saved as a " +
+                           "video in LMA.",
+                    Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 0, 0, 4),
+                });
+            }
         };
         _videoPicker.SelectionChanged += (_, _) =>
         {
@@ -322,6 +413,31 @@ public sealed class PanelView : Border
         _statusDot.Fill = streaming ? Brushes.Red : Brushes.Gray;
         if (s.Kind == CaptureController.StateKind.Error && !string.IsNullOrEmpty(s.Message))
             _error.Text = s.Message;
+
+        // Elapsed-time tracking + start/stop notifications on the transitions.
+        if (streaming && _recordingStartedAt == null)
+        {
+            _recordingStartedAt = DateTime.Now;
+            _elapsedText.Text = ElapsedText;
+            _elapsedTimer.Start();
+            Notifier.Notify("Recording started",
+                AppSettings.VideoEnabled
+                    ? "LMA is recording this meeting's audio and screen video."
+                    : "LMA is recording this meeting's audio.");
+        }
+        else if (!streaming && _recordingStartedAt != null)
+        {
+            var duration = ElapsedText;
+            _elapsedTimer.Stop();
+            _recordingStartedAt = null;
+            _elapsedText.Text = "";
+            // The recording lands in LMA shortly after END (the server uploads
+            // and muxes at call end), so point at it rather than claiming it's
+            // ready this instant.
+            Notifier.Notify($"Recording stopped ({duration})",
+                "Your meeting is being processed. Open it in LMA when ready.",
+                _c.LmaUrl());
+        }
         Refresh();
     }
 
@@ -343,78 +459,12 @@ public sealed class PanelView : Border
     {
         _body.Children.Clear();
 
-        // Settings gear is only actionable between recordings.
+        // Settings gear is only actionable between recordings (labels ride the
+        // START frame, so mid-meeting changes wouldn't take effect anyway).
         bool isStreaming = _c.CurrentState.Kind == CaptureController.StateKind.Streaming;
         _gear.IsEnabled = !isStreaming;
-        _gear.ToolTip = isStreaming ? "Stop recording to change settings" : "Settings";
-        _gear.Foreground = _showSettings ? Brushes.SteelBlue : Secondary;
-
-        if (_showSettings && !isStreaming)
-        {
-            _body.Children.Add(Label("Speaker labels — shown in the LMA transcript"));
-            // Blank field = use the default, shown as grey placeholder text in the
-            // field (and echoed in the tooltip for screen readers / narrow panels).
-            UpdateLabelHints();
-            _body.Children.Add(Label("My mic"));
-            _micLabel.ToolTip = $"Default: {DefaultMicLabel()}";
-            _body.Children.Add(_micLabelBox);
-            _body.Children.Add(Label("System audio"));
-            _systemLabel.ToolTip = $"Default: {AppSettings.DefaultSystemLabel}";
-            _body.Children.Add(_systemLabelBox);
-            _body.Children.Add(Label("Microphone"));
-            _body.Children.Add(_micPicker);
-            _body.Children.Add(new TextBlock
-            {
-                Text = "Greyed text is the default that will be used if you leave a label blank. " +
-                       "System Default follows Windows' input device; if a chosen mic is unplugged, " +
-                       "recording falls back to the default.",
-                Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 0, 0, 4),
-            });
-
-            // Optional desktop-video capture: stream the chosen screen/window
-            // alongside audio; LMA saves a video recording of the meeting.
-            _body.Children.Add(Label("Screen video"));
-            _videoEnabled.IsChecked = AppSettings.VideoEnabled;
-            _body.Children.Add(_videoEnabled);
-            if (AppSettings.VideoEnabled)
-            {
-                RefreshVideoPicker();
-                _body.Children.Add(_videoPicker);
-                _body.Children.Add(new TextBlock
-                {
-                    Text = "The selected screen or window is recorded with the meeting and saved as a " +
-                           "video in LMA.",
-                    Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
-                    Margin = new Thickness(0, 0, 0, 4),
-                });
-            }
-            // Consent record: when + what the user agreed to, so the one-time
-            // acknowledgment is inspectable afterwards (auditable, not a
-            // fire-and-forget dialog). Collapsed by default; absent until agreed.
-            if (AppSettings.DisclaimerAgreedAt is DateTime consentAt)
-            {
-                _body.Children.Add(Label("Recording consent"));
-                var record = new Expander
-                {
-                    Header = new TextBlock
-                    {
-                        Text = $"✓ Agreed {consentAt:g}",
-                        Foreground = Secondary, FontSize = 10,
-                    },
-                    Content = new TextBlock
-                    {
-                        Text = string.IsNullOrEmpty(AppSettings.DisclaimerAgreedText)
-                            ? EffectiveDisclaimer : AppSettings.DisclaimerAgreedText,
-                        Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
-                        Margin = new Thickness(4, 2, 0, 2),
-                    },
-                    Margin = new Thickness(0, 0, 0, 4),
-                };
-                _body.Children.Add(record);
-            }
-            _body.Children.Add(Sep());
-        }
+        _gear.ToolTip = isStreaming ? "Stop recording to change settings" : "Settings…";
+        _gear.Foreground = Secondary;
 
         if (!_c.IsAuthenticated)
         {
@@ -441,7 +491,13 @@ public sealed class PanelView : Border
             else if (!streaming)
             {
                 _body.Children.Add(Label("Meeting name (optional)"));
-                _body.Children.Add(_meetingName);
+                var nameRow = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, 2) };
+                DockPanel.SetDock(_recentMeetings, Dock.Right);
+                _recentMeetings.Visibility = AppSettings.RecentMeetingNames.Count > 0
+                    ? Visibility.Visible : Visibility.Collapsed;
+                nameRow.Children.Add(_recentMeetings);
+                nameRow.Children.Add(_meetingName);
+                _body.Children.Add(nameRow);
                 _start.Margin = new Thickness(0, 4, 0, 4);
                 _body.Children.Add(_start);
                 // Persistent consent reminder: the full disclaimer is a one-time
@@ -468,7 +524,11 @@ public sealed class PanelView : Border
                 _body.Children.Add(_sysBar);
                 _body.Children.Add(_micBar);
                 _liveStatus.Margin = new Thickness(0, 4, 0, 4);
-                _body.Children.Add(_liveStatus);
+                var liveRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
+                liveRow.Children.Add(_liveStatus);
+                _elapsedText.Text = ElapsedText;
+                liveRow.Children.Add(_elapsedText);
+                _body.Children.Add(liveRow);
                 if (_c.IsVideoActive)
                 {
                     _body.Children.Add(new TextBlock
@@ -512,6 +572,112 @@ public sealed class PanelView : Border
         });
     }
 
+    /// <summary>
+    /// The settings controls, for hosting in the standalone Settings window.
+    /// These are the SAME control instances the panel owns (WPF allows one
+    /// parent, so they live in exactly one place — the settings window).
+    /// </summary>
+    public UIElement BuildSettingsContent()
+    {
+        RefreshMicPicker();
+        var v = new StackPanel();
+        v.Children.Add(Label("Speaker labels — shown in the LMA transcript"));
+        // Blank field = use the default, shown as grey placeholder text in the
+        // field (and echoed in the tooltip for screen readers / narrow panels).
+        UpdateLabelHints();
+        v.Children.Add(Label("My mic"));
+        _micLabel.ToolTip = $"Default: {DefaultMicLabel()}";
+        v.Children.Add(_micLabelBox);
+        v.Children.Add(Label("System audio"));
+        _systemLabel.ToolTip = $"Default: {AppSettings.DefaultSystemLabel}";
+        v.Children.Add(_systemLabelBox);
+        v.Children.Add(Label("Microphone"));
+        v.Children.Add(_micPicker);
+        v.Children.Add(new TextBlock
+        {
+            Text = "Greyed text is the default that will be used if you leave a label blank. " +
+                   "System Default follows Windows' input device; if a chosen mic is unplugged, " +
+                   "recording falls back to the default.",
+            Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+
+        // Optional desktop-video capture: stream the chosen screen/window
+        // alongside audio; LMA saves a video recording of the meeting.
+        v.Children.Add(Label("Screen video"));
+        _videoEnabled.IsChecked = AppSettings.VideoEnabled;
+        v.Children.Add(_videoEnabled);
+        _videoSourceHost.Children.Clear();
+        if (AppSettings.VideoEnabled)
+        {
+            RefreshVideoPicker();
+            _videoSourceHost.Children.Add(_videoPicker);
+            _videoSourceHost.Children.Add(new TextBlock
+            {
+                Text = "The selected screen or window is recorded with the meeting and saved as a " +
+                       "video in LMA.",
+                Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 4),
+            });
+        }
+        v.Children.Add(_videoSourceHost);
+
+        // Consent record: when + what the user agreed to, so the one-time
+        // acknowledgment is inspectable afterwards (auditable, not a
+        // fire-and-forget dialog). Collapsed by default; absent until agreed.
+        if (AppSettings.DisclaimerAgreedAt is DateTime consentAt)
+        {
+            v.Children.Add(Label("Recording consent"));
+            v.Children.Add(new Expander
+            {
+                Header = new TextBlock
+                {
+                    Text = $"✓ Agreed {consentAt:g}",
+                    Foreground = Secondary, FontSize = 10,
+                },
+                Content = new TextBlock
+                {
+                    Text = string.IsNullOrEmpty(AppSettings.DisclaimerAgreedText)
+                        ? EffectiveDisclaimer : AppSettings.DisclaimerAgreedText,
+                    Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(4, 2, 0, 2),
+                },
+                Margin = new Thickness(0, 0, 0, 4),
+            });
+        }
+        return v;
+    }
+
+    /// <summary>
+    /// Recent meeting names — recurring meetings are the norm, so re-picking one
+    /// should be a click rather than retyping it.
+    /// </summary>
+    private void ShowRecentMeetingsMenu()
+    {
+        var names = AppSettings.RecentMeetingNames;
+        var menu = new ContextMenu();
+        if (names.Count == 0)
+        {
+            menu.Items.Add(new MenuItem { Header = "(no recent meetings)", IsEnabled = false });
+        }
+        else
+        {
+            foreach (var name in names)
+            {
+                var item = new MenuItem { Header = name };
+                var captured = name;
+                item.Click += (_, _) => _meetingName.Text = captured;
+                menu.Items.Add(item);
+            }
+            menu.Items.Add(new Separator());
+            var clear = new MenuItem { Header = "Clear recent" };
+            clear.Click += (_, _) => { AppSettings.ClearRecentMeetingNames(); Refresh(); };
+            menu.Items.Add(clear);
+        }
+        menu.PlacementTarget = _recentMeetings;
+        menu.IsOpen = true;
+    }
+
     // MARK: - Actions
 
     private void DoLogin()
@@ -547,6 +713,7 @@ public sealed class PanelView : Border
     {
         // Push current settings (the mic label may depend on the signed-in email).
         PushSettingsToController();
+        AppSettings.RememberMeetingName(_meetingName.Text);
         var name = string.IsNullOrEmpty(_meetingName.Text)
             ? null
             : $"{_meetingName.Text} - {DateTime.Now:yyyy-MM-dd HH:mm}";

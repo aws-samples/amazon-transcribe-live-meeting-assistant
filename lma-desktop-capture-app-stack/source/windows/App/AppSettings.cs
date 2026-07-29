@@ -14,9 +14,11 @@ namespace LMA;
 /// </summary>
 public static class AppSettings
 {
-    private const string SettingsKeyPath = @"Software\AmazonLMA\AudioCapture";
+    // Per-stack so the clients for multiple LMA deployments don't share
+    // settings, consent records, or the start-at-login entry (see AppIdentity).
+    private static string SettingsKeyPath => AppIdentity.SettingsKeyPath;
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string RunValueName = "LMAAudioCapture";
+    private static string RunValueName => AppIdentity.RunValueName;
 
     private const string RememberValue = "RememberLogin";
     private const string UsernameValue = "SavedUsername";
@@ -99,6 +101,40 @@ public static class AppSettings
     {
         get { using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath); return (k?.GetValue(VideoSourceValue) as string) ?? ""; }
         set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(VideoSourceValue, value, RegistryValueKind.String); }
+    }
+
+    // MARK: - Recent meeting names
+
+    private const string RecentMeetingsValue = "RecentMeetingNames";
+    private const int MaxRecentMeetings = 8;
+
+    /// <summary>Recently used meeting names, most recent first (per stack).</summary>
+    public static List<string> RecentMeetingNames
+    {
+        get
+        {
+            using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath);
+            var raw = k?.GetValue(RecentMeetingsValue) as string[];
+            return raw?.ToList() ?? new List<string>();
+        }
+    }
+
+    /// <summary>Record a meeting name as most-recently-used (no-op when blank).</summary>
+    public static void RememberMeetingName(string name)
+    {
+        var trimmed = (name ?? "").Trim();
+        if (string.IsNullOrEmpty(trimmed)) return;
+        var list = RecentMeetingNames.Where(n => n != trimmed).ToList();
+        list.Insert(0, trimmed);
+        if (list.Count > MaxRecentMeetings) list = list.Take(MaxRecentMeetings).ToList();
+        using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath);
+        k.SetValue(RecentMeetingsValue, list.ToArray(), RegistryValueKind.MultiString);
+    }
+
+    public static void ClearRecentMeetingNames()
+    {
+        using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath);
+        k.DeleteValue(RecentMeetingsValue, throwOnMissingValue: false);
     }
 
     // MARK: - Recording-consent disclaimer (one-time acknowledgment)

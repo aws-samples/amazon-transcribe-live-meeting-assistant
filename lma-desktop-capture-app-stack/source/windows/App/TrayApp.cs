@@ -9,7 +9,7 @@ using Hardcodet.Wpf.TaskbarNotification;
 namespace LMA;
 
 /// <summary>
-/// System-tray UI for the LMA Audio Capture App — mirrors macOS MenuBarApp.swift.
+/// System-tray UI for the LMA Desktop Capture App — mirrors macOS MenuBarApp.swift.
 ///
 /// Tray-only when idle (no taskbar button, no window). Left-click the tray icon →
 /// popup panel; right-click → context menu with Quit (kept out of the panel so it
@@ -77,6 +77,12 @@ public sealed class TrayApp
     // (see Program.Main); applied once the UI is up.
     private readonly string? _pendingCommand;
 
+    // Settings lives in its own window (opened from the panel's gear).
+    private SettingsWindow? _settingsWindow;
+
+    // URL carried by the most recent notification, opened if the user clicks it.
+    private string? _pendingNotifyUrl;
+
     private TrayApp(Config config, string? pendingCommand)
     {
         _controller = new CaptureController(config);
@@ -128,6 +134,8 @@ public sealed class TrayApp
         _thumbResumeImage = TaskbarImages.ThumbResume();
 
         _panel = new PanelView(_controller);
+        // The gear opens a dedicated Settings window (see SettingsWindow).
+        _panel.OpenSettingsWindow = ShowSettingsWindow;
 
         // Host the panel in a real borderless Window (NOT a Popup). A standalone
         // WPF Popup never gets an activated top-level HWND, so TextBox/PasswordBox
@@ -136,13 +144,29 @@ public sealed class TrayApp
         _flyout = new Window
         {
             WindowStyle = WindowStyle.None,
-            ResizeMode = ResizeMode.NoResize,
+            // CanResizeWithGrip (not NoResize): the panel's height varies a lot
+            // (consent gate, meters, errors) and a fixed flyout clipped content
+            // with no way to get at it. Combined with the panel's ScrollViewer
+            // and MaxHeight, content is always reachable — and the user can make
+            // the window bigger if they prefer.
+            ResizeMode = ResizeMode.CanResizeWithGrip,
             AllowsTransparency = true,
             Background = System.Windows.Media.Brushes.Transparent,
             ShowInTaskbar = false,
             Topmost = true,
             SizeToContent = SizeToContent.WidthAndHeight,
             ShowActivated = true,
+        };
+        // Borderless windows have no title bar to drag, which left a clipped or
+        // awkwardly-placed panel stuck where it was. Dragging anywhere on the
+        // panel chrome moves it.
+        _flyout.MouseLeftButtonDown += (_, e) =>
+        {
+            try
+            {
+                if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed) _flyout.DragMove();
+            }
+            catch { /* DragMove throws if the button was already released */ }
         };
         // Close when the user clicks away (flyout behavior). Not while the panel has
         // been handed to the taskbar window — then the flyout owns nothing and any
@@ -159,7 +183,7 @@ public sealed class TrayApp
         _tray = new TaskbarIcon
         {
             Icon = _idleIcon,
-            ToolTipText = "LMA Audio Capture",
+            ToolTipText = AppIdentity.DisplayName,
         };
         _tray.TrayLeftMouseUp += (_, _) => TogglePopup();
         _tray.ContextMenu = BuildContextMenu();
@@ -182,7 +206,9 @@ public sealed class TrayApp
             _panel.OnState(s);
             bool streaming = s.Kind == CaptureController.StateKind.Streaming;
             _tray.Icon = streaming ? _recordingIcon : _idleIcon;
-            _tray.ToolTipText = streaming ? "LMA Audio Capture — Recording" : "LMA Audio Capture";
+            _tray.ToolTipText = streaming
+                ? $"{AppIdentity.DisplayName} — {(_controller.IsPaused ? "paused" : "recording")} {_panel.ElapsedText}"
+                : AppIdentity.DisplayName;
             // Re-assert promotion when recording starts so the red icon is visible.
             if (streaming) TrayIconVisibility.PromoteToTaskbar();
             SyncTaskbar();
@@ -196,6 +222,32 @@ public sealed class TrayApp
             SyncTaskbar();
         });
         _controller.OnLog = msg => _app.Dispatcher.Invoke(() => _panel.OnLog(msg));
+        // Surface a video-source fallback (chosen window closed -> whole screen):
+        // privacy-relevant, so it gets a notification, not just a log line.
+        _controller.OnVideoFallback = msg => _app.Dispatcher.Invoke(() =>
+        {
+            _panel.OnLog(msg);
+            Notifier.Notify("Screen video changed", msg);
+        });
+
+        // Route notifications through the tray icon's balloon. Clicking the
+        // balloon opens the meeting in LMA when a URL was supplied.
+        Notifier.Sink = (title, body, url) =>
+        {
+            try
+            {
+                _pendingNotifyUrl = url;
+                _tray.ShowBalloonTip(title, body, BalloonIcon.Info);
+            }
+            catch { /* balloons can be suppressed by policy; never fatal */ }
+        };
+        _tray.TrayBalloonTipClicked += (_, _) =>
+        {
+            var url = _pendingNotifyUrl;
+            _pendingNotifyUrl = null;
+            if (!string.IsNullOrEmpty(url)) OpenUrl(url!);
+            else ShowControlPanel();
+        };
 
         _panel.RequestClosePopup = () => { if (_panelHost == _flyout) _flyout.Hide(); };
 
@@ -243,13 +295,13 @@ public sealed class TrayApp
         };
         _thumbStop.Click += (_, _) => StopRecording();
 
-        _taskbarInfo = new TaskbarItemInfo { Description = "LMA Audio Capture" };
+        _taskbarInfo = new TaskbarItemInfo { Description = AppIdentity.DisplayName };
         _taskbarInfo.ThumbButtonInfos.Add(_thumbPause);
         _taskbarInfo.ThumbButtonInfos.Add(_thumbStop);
 
         _taskbarWindow = new Window
         {
-            Title = "LMA Audio Capture",
+            Title = AppIdentity.DisplayName,
             Icon = _iconIdleImage,
             ResizeMode = ResizeMode.CanMinimize,
             SizeToContent = SizeToContent.WidthAndHeight,
@@ -312,8 +364,9 @@ public sealed class TrayApp
             _taskbarInfo.ProgressValue = 1.0;
             _taskbarInfo.ProgressState = paused ? TaskbarItemProgressState.Paused
                                                 : TaskbarItemProgressState.Normal;
-            _taskbarInfo.Description = paused ? "LMA Audio Capture — Paused"
-                                              : "LMA Audio Capture — Recording";
+            _taskbarInfo.Description = paused
+                ? $"{AppIdentity.DisplayName} — Paused {_panel.ElapsedText}"
+                : $"{AppIdentity.DisplayName} — Recording {_panel.ElapsedText}";
             _taskbarWindow.Title = _taskbarInfo.Description;
             _taskbarWindow.Icon = _iconRecordingImage;
             _thumbPause.ImageSource = paused ? _thumbResumeImage : _thumbPauseImage;
@@ -325,8 +378,8 @@ public sealed class TrayApp
             _taskbarInfo.Overlay = null;
             _taskbarInfo.ProgressState = TaskbarItemProgressState.None;
             _taskbarInfo.ProgressValue = 0;
-            _taskbarInfo.Description = "LMA Audio Capture";
-            _taskbarWindow.Title = "LMA Audio Capture";
+            _taskbarInfo.Description = AppIdentity.DisplayName;
+            _taskbarWindow.Title = AppIdentity.DisplayName;
             _taskbarWindow.Icon = _iconIdleImage;
             HideTaskbarButton();
         }
@@ -413,7 +466,7 @@ public sealed class TrayApp
             {
                 list.JumpItems.Add(Task("Start Recording", TrayIpc.CmdStart, "Start capturing this meeting"));
             }
-            list.JumpItems.Add(Task("Open Control Panel", TrayIpc.CmdPanel, "Show the LMA Audio Capture controls"));
+            list.JumpItems.Add(Task("Open Control Panel", TrayIpc.CmdPanel, $"Show the {AppIdentity.DisplayName} controls"));
 
             JumpList.SetJumpList(_app, list);
             list.Apply();
@@ -483,6 +536,39 @@ public sealed class TrayApp
     /// tray icon, that process forwards Open-Control-Panel here and exits, so
     /// clicking the app again does what the user expects — the UI appears.
     /// </summary>
+    /// <summary>
+    /// Show (or re-focus) the Settings window. The settings controls are owned by
+    /// PanelView and re-parented into this window, so there is one implementation
+    /// of each setting; the window is rebuilt if it was closed.
+    /// </summary>
+    private void ShowSettingsWindow()
+    {
+        if (_settingsWindow != null)
+        {
+            if (_settingsWindow.WindowState == WindowState.Minimized)
+                _settingsWindow.WindowState = WindowState.Normal;
+            _settingsWindow.Activate();
+            ForceForeground(_settingsWindow);
+            return;
+        }
+        var w = new SettingsWindow(_panel.BuildSettingsContent());
+        w.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow = w;
+        w.Show();
+        w.Activate();
+        ForceForeground(w);
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch { /* no browser / blocked — nothing useful to do */ }
+    }
+
     private void ShowControlPanel()
     {
         if (_taskbarWindow.IsVisible)
@@ -522,9 +608,9 @@ public sealed class TrayApp
     private ContextMenu BuildContextMenu()
     {
         var menu = new ContextMenu();
-        var open = new MenuItem { Header = "Open LMA Audio Capture" };
+        var open = new MenuItem { Header = $"Open {AppIdentity.DisplayName}" };
         open.Click += (_, _) => ShowControlPanel();
-        var quit = new MenuItem { Header = "Quit LMA Audio Capture" };
+        var quit = new MenuItem { Header = $"Quit {AppIdentity.DisplayName}" };
         quit.Click += (_, _) =>
         {
             // Stop cleanly if streaming, then shut down.
@@ -553,29 +639,77 @@ public sealed class TrayApp
     private void ShowPopup()
     {
         MovePanelTo(_flyout);
+        // Bound the height to the screen's work area so tall content scrolls
+        // inside the panel rather than running off the screen.
+        _panel.MaxHeight = MaxFlyoutHeight();
         _panel.Refresh();
         // Show first so SizeToContent has measured the window, then position it
-        // near the tray (bottom-right), clamped to the working area.
+        // near the tray, clamped to the working area of the screen the tray is on.
         _flyout.Show();
 
         double dpiScale = GetDpiScale();
-        var wa = System.Windows.Forms.Screen.PrimaryScreen?.WorkingArea
-                 ?? new System.Drawing.Rectangle(0, 0, 1920, 1080);
+        // Use the screen under the cursor (that's where the tray icon just got
+        // clicked) rather than always the primary — otherwise the panel jumps to
+        // another monitor, or is positioned off-screen entirely.
+        var screen = ScreenUnderCursor();
+        var wa = screen.WorkingArea;
+        // The working area does NOT start at (0,0) when the taskbar is on the
+        // top/left edge, or on secondary monitors with negative coordinates. All
+        // four edges must come from the work area, or the window lands under the
+        // taskbar / off the top of the screen and can't be moved back.
+        double waLeftDip = wa.Left / dpiScale;
+        double waTopDip = wa.Top / dpiScale;
         double waRightDip = wa.Right / dpiScale;
         double waBottomDip = wa.Bottom / dpiScale;
 
-        double w = _flyout.ActualWidth > 0 ? _flyout.ActualWidth : 300;
+        double w = _flyout.ActualWidth > 0 ? _flyout.ActualWidth : 320;
         double h = _flyout.ActualHeight > 0 ? _flyout.ActualHeight : 420;
-        // Anchor to the bottom-right corner (above the notification area), with a
-        // small margin. Clamp so it never lands off-screen.
-        double left = Math.Max(0, waRightDip - w - 12);
-        double top = Math.Max(0, waBottomDip - h - 12);
-        _flyout.Left = left;
-        _flyout.Top = top;
+
+        // Anchor near the notification area with a small margin, then clamp to
+        // the work area on BOTH axes so no edge is ever off-screen. Clamping the
+        // lower bound to the work-area origin (not 0) is what keeps the title/top
+        // of the panel reachable when the taskbar is at the top of the screen.
+        _flyout.Left = Math.Max(waLeftDip, waRightDip - w - 12);
+        _flyout.Top = Math.Max(waTopDip, waBottomDip - h - 12);
 
         _flyout.Activate();
         ForceForeground(_flyout);
         _panel.FocusFirstField();
+    }
+
+    /// <summary>
+    /// The screen containing the mouse cursor — i.e. the one whose tray icon was
+    /// just clicked. Falls back to the primary screen.
+    /// </summary>
+    private static System.Windows.Forms.Screen ScreenUnderCursor()
+    {
+        try
+        {
+            return System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position);
+        }
+        catch
+        {
+            return System.Windows.Forms.Screen.PrimaryScreen
+                   ?? System.Windows.Forms.Screen.AllScreens[0];
+        }
+    }
+
+    /// <summary>
+    /// Largest height the flyout may occupy on the screen it is being shown on,
+    /// so tall content scrolls inside the window instead of overflowing the
+    /// screen (the panel's ScrollViewer honours this via MaxHeight).
+    /// </summary>
+    private static double MaxFlyoutHeight()
+    {
+        try
+        {
+            var wa = ScreenUnderCursor().WorkingArea;
+            return Math.Max(320, (wa.Height / GetDpiScale()) - 40);
+        }
+        catch
+        {
+            return 720;
+        }
     }
 
     private static double GetDpiScale()

@@ -42,6 +42,13 @@ public sealed class CaptureController
     public Action<State>? OnStateChange;
     public Action<float, float, bool, bool>? OnLevels; // meetingRMS, micRMS, connected, paused
     public Action<string>? OnLog;
+    /// <summary>
+    /// Fired when the chosen video source became unavailable and capture fell
+    /// back to something else (e.g. the selected window closed, so the whole
+    /// display is now being recorded). Privacy-relevant, so it is surfaced
+    /// rather than logged quietly.
+    /// </summary>
+    public Action<string>? OnVideoFallback;
 
     /// <summary>The callId of the active/most-recent stream (for "Open in LMA" deep link).</summary>
     public string ActiveCallId { get; private set; } = "";
@@ -198,6 +205,7 @@ public sealed class CaptureController
             StopVideo(sendEnd: false);
             Log("Screen video stopped (connection lost); audio unaffected");
         };
+        vCap.OnFallback = msg => OnVideoFallback?.Invoke(msg);
         vCap.OnFailed = msg =>
         {
             Log($"Screen video failed (audio unaffected): {msg}");

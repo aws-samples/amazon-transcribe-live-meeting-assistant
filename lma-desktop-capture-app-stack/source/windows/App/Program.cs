@@ -47,6 +47,14 @@ public static class Program
             return RunCaptureTest(args);
         }
 
+        // Resolve the deployment config ONCE, up front: every machine-scoped
+        // name below (single-instance mutex, control pipe, registry key,
+        // start-at-login entry) is namespaced by the LMA stack this package came
+        // from, so AppIdentity must be initialized before any of them are
+        // touched — otherwise the client for stack B would collide with stack A.
+        var config = Config.Parse(args);
+        AppIdentity.Initialize(config);
+
         // Taskbar JumpList verbs (--lma-start / --lma-pause / --lma-stop /
         // --lma-panel). A JumpTask can only launch the exe with arguments, so these
         // are relays: forward the verb to the already-running tray app over a named
@@ -61,7 +69,7 @@ public static class Program
             // slot — an instance that exists but isn't listening yet (still starting
             // up) must not get a second tray icon bolted onto it.
             if (!TrayIpc.TryAcquireSingleInstance()) return 0;
-            return TrayApp.Run(Config.Parse(args), taskbarCmd);
+            return TrayApp.Run(config, taskbarCmd);
         }
 
         // Mode dispatch: with NO --flags (e.g. double-clicked .exe), launch the
@@ -85,7 +93,7 @@ public static class Program
             }
 
             // Tray app: no console. (If started from a terminal, don't spam it.)
-            return TrayApp.Run(Config.Parse(args));
+            return TrayApp.Run(config);
         }
 
         EnsureConsole();

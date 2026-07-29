@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    LMA native Windows audio client. Single project, dual-mode:
+    LMA native Windows desktop capture client. Single project, dual-mode:
       launched with NO CLI flags  -> WPF system-tray app (GUI)
       launched with any CLI flag   -> headless CLI streaming to stdout
     (mirrors the macOS app's main.swift dispatch).
@@ -17,15 +17,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>LMAAudioClient</AssemblyName>
+    <AssemblyName>LMACaptureClient</AssemblyName>
     <RootNamespace>LMA</RootNamespace>
     <!-- Shown by Windows wherever it names the app: the taskbar button's
          accessible name and hover thumbnail, Task Manager, and the file
-         properties dialog. Without these it reads as the bare "LMAAudioClient". -->
-    <Product>LMA Audio Capture</Product>
-    <AssemblyTitle>LMA Audio Capture</AssemblyTitle>
+         properties dialog. Without these it reads as the bare "LMACaptureClient". -->
+    <Product>LMA Capture Client</Product>
+    <AssemblyTitle>LMA Capture Client</AssemblyTitle>
     <Company>Amazon Web Services</Company>
-    <Description>Streams your microphone and system (meeting) audio to Live Meeting Assistant.</Description>
+    <Description>Streams your microphone, system (meeting) audio, and optionally your screen to Live Meeting Assistant.</Description>
     <!-- No custom app.manifest: .NET 8 already defaults to asInvoker (no
          elevation) and WPF is per-monitor-DPI-aware by default on Win10+.
          A hand-written manifest was found to trigger an SxS load error. -->

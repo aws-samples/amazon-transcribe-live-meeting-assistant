@@ -46,6 +46,12 @@ public sealed class VideoCapture
     public Action<string>? OnFailed;
     /// <summary>Fired when the first frame is written (offset reporting).</summary>
     public Action? OnFirstFrame;
+    /// <summary>
+    /// Fired when the requested source wasn't available and capture fell back to
+    /// a different one (privacy-relevant: a window choice becoming a whole
+    /// display). Passes a user-facing message.
+    /// </summary>
+    public Action<string>? OnFallback;
     private bool _firstFrameSeen;
     public DateTime? FirstFrameDate { get; private set; }
 
@@ -196,14 +202,16 @@ public sealed class VideoCapture
             {
                 var win = Recorder.GetWindows().FirstOrDefault(w => w.Handle == (IntPtr)handle);
                 if (win != null) return new WindowRecordingSource(win.Handle);
-                Console.Error.WriteLine($"⚠ video window '{id}' not found; recording the primary display");
+                // Falling back from a window to the WHOLE SCREEN changes what
+                // gets recorded — tell the user instead of doing it silently.
+                Report("The window you chose for screen video is no longer open — recording the whole screen instead.");
             }
             else if (id.StartsWith("display:"))
             {
                 var name = id.Substring("display:".Length);
                 var disp = Recorder.GetDisplays().FirstOrDefault(d => d.DeviceName == name);
                 if (disp != null) return new DisplayRecordingSource(disp.DeviceName);
-                Console.Error.WriteLine($"⚠ video display '{id}' not found; recording the primary display");
+                Report("The display you chose for screen video isn't available — recording the main display instead.");
             }
         }
         catch (Exception e)
@@ -211,6 +219,12 @@ public sealed class VideoCapture
             Console.Error.WriteLine($"video source resolve failed ({e.Message}); using primary display");
         }
         return new DisplayRecordingSource(DisplayRecordingSource.MainMonitor);
+    }
+
+    private void Report(string message)
+    {
+        Console.Error.WriteLine($"⚠ {message}");
+        OnFallback?.Invoke(message);
     }
 
     private void OnChunk(byte[] data)

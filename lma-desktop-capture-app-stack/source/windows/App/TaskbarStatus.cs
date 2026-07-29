@@ -149,7 +149,7 @@ internal static class TrayIpc
     public static string? FindCommand(string[] args) =>
         args.FirstOrDefault(a => AllCommands.Contains(a, StringComparer.OrdinalIgnoreCase));
 
-    private static string PipeName => $"LMAAudioCapture.control.{UserSuffix}";
+    private static string PipeName => AppIdentity.PipeName(UserSuffix);
 
     /// <summary>
     /// Pipe and mutex names are machine-global, so scope them by user; strip anything
@@ -182,7 +182,7 @@ internal static class TrayIpc
     {
         try
         {
-            _singleInstanceMutex = new Mutex(initiallyOwned: false, $"Local\\LMAAudioCapture.instance.{UserSuffix}");
+            _singleInstanceMutex = new Mutex(initiallyOwned: false, AppIdentity.MutexName(UserSuffix));
             // Local\ = per-session, so a second user (or an RDP session) still gets
             // their own tray icon, matching the per-user pipe.
             if (_singleInstanceMutex.WaitOne(TimeSpan.Zero)) return true;

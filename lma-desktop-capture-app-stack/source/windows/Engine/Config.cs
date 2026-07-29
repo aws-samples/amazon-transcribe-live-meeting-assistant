@@ -55,6 +55,16 @@ public sealed class Config
     /// <summary>CLI: video source id ("display:&lt;name&gt;" / "window:&lt;handle&gt;"; "" = primary display).</summary>
     public string VideoSourceId = "";
 
+    /// <summary>
+    /// Name of the LMA CloudFormation stack this download came from. Shown in
+    /// the UI and used to namespace every machine-scoped identifier (registry
+    /// key, mutex, pipe, start-at-login entry) so the clients for multiple LMA
+    /// stacks can coexist. Empty for hand-built dev copies. See AppIdentity.
+    /// </summary>
+    public string StackName = "";
+    /// <summary>LMA version this package was built from (shown in About lines).</summary>
+    public string AppVersion = "";
+
     /// <summary>Fallback consent text when the deployment config predates the setting.</summary>
     public const string DefaultDisclaimer =
         "Important: You are responsible for complying with legal, corporate, and ethical " +
@@ -115,6 +125,8 @@ public sealed class Config
                                         DefaultDisclaimer),
             VideoEnabled = new[] { "1", "true", "yes" }.Contains(Value("video", "LMA_VIDEO").ToLowerInvariant()),
             VideoSourceId = Value("video-source", "LMA_VIDEO_SOURCE"),
+            StackName = Value("stack-name", "LMA_STACK_NAME", "stackName"),
+            AppVersion = Value("app-version", "LMA_APP_VERSION", "appVersion"),
         };
     }
 

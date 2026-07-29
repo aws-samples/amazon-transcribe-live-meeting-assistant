@@ -3,7 +3,7 @@
   Build (and optionally install) the LMA Windows audio-capture client.
 
 .DESCRIPTION
-  Restores and publishes LMAAudioClient.Windows as a win-x64 executable, runs
+  Restores and publishes LMACaptureClient.Windows as a win-x64 executable, runs
   the offline SRP self-test, and - with -Install - copies it to a stable
   location and adds a Start Menu (and optional Desktop) shortcut, so you don't
   have to dig into the publish folder to launch it.
@@ -22,9 +22,9 @@
                       Runtime installed on the target machine).
 
   Install location:
-    (default)       : per-user  %LOCALAPPDATA%\Programs\LMA Audio Capture
+    (default)       : per-user  %LOCALAPPDATA%\Programs\LMA Capture Client (<Stack>)
                       - NO admin needed; appears in the Start Menu for you.
-    -ProgramFiles   : machine-wide  %ProgramFiles%\LMA Audio Capture
+    -ProgramFiles   : machine-wide  %ProgramFiles%\LMA Capture Client (<Stack>)
                       - needs admin; the script re-launches elevated for the copy.
 
 .EXAMPLE
@@ -52,23 +52,50 @@ param(
     [switch]$Uninstall
 )
 
+# --- Per-stack identity -------------------------------------------------------
+# The client is namespaced by the LMA stack it was downloaded from so the apps
+# for multiple LMA deployments can be installed side by side (separate install
+# dir, shortcut, registry key, start-at-login entry, single-instance mutex).
+# Derived from lma-config.json exactly as AppIdentity.cs / make-app.sh do.
+$stackName = ""
+$cfgPath = Join-Path $PSScriptRoot "lma-config.json"
+if (Test-Path $cfgPath) {
+    try { $stackName = (Get-Content $cfgPath -Raw | ConvertFrom-Json).stackName } catch { $stackName = "" }
+}
+if (-not $stackName) { $stackName = "" }
+$stackSlug = ($stackName.ToLowerInvariant() -replace '[^a-z0-9-]', '-') -replace '-+', '-'
+$stackSlug = $stackSlug.Trim('-')
+if ($stackSlug) {
+    $appDisplayName = "LMA Capture Client ($stackName)"
+    $installFolder  = "LMA Capture Client ($stackName)"
+    $runValueName   = "LMACaptureClient-$stackSlug"
+    $settingsKey    = "HKCU:\Software\AmazonLMA\CaptureClient\$stackSlug"
+    $arpKey         = "LMACaptureClient-$stackSlug"
+} else {
+    $appDisplayName = "LMA Capture Client"
+    $installFolder  = "LMA Capture Client"
+    $runValueName   = "LMACaptureClient"
+    $settingsKey    = "HKCU:\Software\AmazonLMA\CaptureClient"
+    $arpKey         = "LMACaptureClient"
+}
+
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
 # --- Uninstall: remove installed copies + shortcuts, then exit (no build) ----
 if ($Uninstall) {
     $targets = @(
-        (Join-Path $env:LOCALAPPDATA "Programs\LMA Audio Capture"),
-        (Join-Path $env:ProgramFiles "LMA Audio Capture")
+        (Join-Path $env:LOCALAPPDATA "Programs\$installFolder"),
+        (Join-Path $env:ProgramFiles "$installFolder")
     )
     $shortcuts = @(
-        (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk"),
-        (Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk"),
-        (Join-Path ([Environment]::GetFolderPath('Desktop')) "LMA Audio Capture.lnk")
+        (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$appDisplayName.lnk"),
+        (Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\$appDisplayName.lnk"),
+        (Join-Path ([Environment]::GetFolderPath('Desktop')) "$appDisplayName.lnk")
     )
 
     # Stop a running instance so files aren't locked.
-    Get-Process -Name LMAAudioClient -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -Name LMACaptureClient -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
     $removedAny = $false
     foreach ($t in $targets) {
@@ -90,14 +117,14 @@ if ($Uninstall) {
     }
 
     # Per-user settings (remembered email) + start-at-login entry left by the app.
-    Remove-Item "HKCU:\Software\AmazonLMA\AudioCapture" -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "LMAAudioCapture" -ErrorAction SilentlyContinue
+    Remove-Item $settingsKey -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name $runValueName -ErrorAction SilentlyContinue
 
     # Apps & features (ARP) entries - HKCU (per-user) always; HKLM (machine-wide)
     # only removable when elevated (warn otherwise).
-    Remove-Item "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture" -Recurse -Force -ErrorAction SilentlyContinue
-    if (Test-Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture") {
-        try { Remove-Item "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture" -Recurse -Force -ErrorAction Stop }
+    Remove-Item "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$arpKey" -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$arpKey") {
+        try { Remove-Item "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$arpKey" -Recurse -Force -ErrorAction Stop }
         catch { Write-Warning "Couldn't remove the machine-wide Apps & features entry - re-run from an elevated (admin) PowerShell." }
     }
 
@@ -106,11 +133,11 @@ if ($Uninstall) {
     return
 }
 
-Write-Host "==> Building LMA Windows client ($Configuration, self-contained=$SelfContained)"
+Write-Host "==> Building $appDisplayName ($Configuration, self-contained=$SelfContained)"
 
 $publishArgs = @(
     "publish",
-    "LMAAudioClient.Windows.csproj",
+    "LMACaptureClient.Windows.csproj",
     "-c", $Configuration,
     "-r", "win-x64",
     "--self-contained", $($SelfContained.IsPresent.ToString().ToLower())
@@ -118,14 +145,14 @@ $publishArgs = @(
 dotnet @publishArgs
 
 $publishDir = Join-Path $PSScriptRoot "bin/$Configuration/net8.0-windows/win-x64/publish"
-$exe = Join-Path $publishDir "LMAAudioClient.exe"
+$exe = Join-Path $publishDir "LMACaptureClient.exe"
 if (-not (Test-Path $exe)) { throw "Build did not produce $exe" }
 Write-Host "==> Built: $exe"
 
 if (-not $SkipSelfTest) {
     Write-Host "==> Running SRP self-test (known-answer vectors, offline)"
 
-    # LMAAudioClient.exe is a WinExe (GUI subsystem) so it can be a tray app with
+    # LMACaptureClient.exe is a WinExe (GUI subsystem) so it can be a tray app with
     # no console window. Consequences we must handle here:
     #   * `& $exe` does NOT block - PowerShell launches it and moves on, leaving
     #     $LASTEXITCODE empty. A plain `& $exe --selftest; if ($LASTEXITCODE -ne 0)`
@@ -173,22 +200,22 @@ function New-Shortcut {
 function Register-Uninstall {
     param([string]$InstallDir, [string]$InstalledExe, [bool]$MachineWide)
 
-    $arpRoot = if ($MachineWide) { "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture" }
-               else { "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture" }
+    $arpRoot = if ($MachineWide) { "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$arpKey" }
+               else { "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$arpKey" }
 
     # Removal script baked into UninstallString: kills a running instance, deletes
     # the install dir + shortcuts + per-user settings, then removes this ARP key.
-    $userStart = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk'
-    $machineStart = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk'
-    $desktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'LMA Audio Capture.lnk'
+    $userStart = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$appDisplayName.lnk"
+    $machineStart = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\$appDisplayName.lnk"
+    $desktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) "$appDisplayName.lnk"
     $removal = @"
-Get-Process -Name LMAAudioClient -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name LMACaptureClient -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath '$InstallDir' -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath '$userStart' -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath '$machineStart' -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath '$desktopLnk' -Force -ErrorAction SilentlyContinue
-Remove-Item 'HKCU:\Software\AmazonLMA\AudioCapture' -Recurse -Force -ErrorAction SilentlyContinue
-Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'LMAAudioCapture' -ErrorAction SilentlyContinue
+Remove-Item '$settingsKey' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name '$runValueName' -ErrorAction SilentlyContinue
 Remove-Item '$arpRoot' -Recurse -Force -ErrorAction SilentlyContinue
 "@
     $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($removal))
@@ -201,7 +228,7 @@ Remove-Item '$arpRoot' -Recurse -Force -ErrorAction SilentlyContinue
     $sizeKb = try { [int]((Get-ChildItem $InstallDir -Recurse -File | Measure-Object Length -Sum).Sum / 1024) } catch { 0 }
 
     New-Item -Path $arpRoot -Force | Out-Null
-    Set-ItemProperty $arpRoot DisplayName        "LMA Audio Capture"
+    Set-ItemProperty $arpRoot DisplayName        $appDisplayName
     Set-ItemProperty $arpRoot DisplayVersion     $ver
     Set-ItemProperty $arpRoot Publisher          "Amazon Web Services"
     Set-ItemProperty $arpRoot DisplayIcon        $InstalledExe
@@ -218,10 +245,10 @@ function Install-App {
     param([string]$SourceDir, [bool]$MachineWide)
 
     if ($MachineWide) {
-        $installDir = Join-Path $env:ProgramFiles "LMA Audio Capture"
+        $installDir = Join-Path $env:ProgramFiles "$installFolder"
         $startMenuDir = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs"
     } else {
-        $installDir = Join-Path $env:LOCALAPPDATA "Programs\LMA Audio Capture"
+        $installDir = Join-Path $env:LOCALAPPDATA "Programs\$installFolder"
         $startMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
     }
 
@@ -231,9 +258,9 @@ function Install-App {
     # because the live process holds its own DLLs open. Close it first (this is an
     # upgrade of the same app, so stopping it is expected), then wait briefly for
     # Windows to release the file handles.
-    $running = Get-Process -Name LMAAudioClient -ErrorAction SilentlyContinue
+    $running = Get-Process -Name LMACaptureClient -ErrorAction SilentlyContinue
     if ($running) {
-        Write-Host "==> Closing the running LMA Audio Capture to upgrade it..."
+        Write-Host "==> Closing the running $appDisplayName to upgrade it..."
         $running | Stop-Process -Force -ErrorAction SilentlyContinue
         $running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
     }
@@ -246,22 +273,22 @@ function Install-App {
             catch { Start-Sleep -Milliseconds 500 }
         }
         if (-not $removed) {
-            throw "Couldn't replace $installDir - a file there is still in use. Close LMA Audio Capture (right-click the tray icon > Quit) and re-run. If you installed machine-wide with -ProgramFiles, re-run from an elevated (admin) PowerShell."
+            throw "Couldn't replace $installDir - a file there is still in use. Close $appDisplayName (right-click the tray icon > Quit) and re-run. If you installed machine-wide with -ProgramFiles, re-run from an elevated (admin) PowerShell."
         }
     }
     New-Item -ItemType Directory -Path $installDir -Force | Out-Null
     Copy-Item (Join-Path $SourceDir '*') $installDir -Recurse -Force
 
-    $installedExe = Join-Path $installDir "LMAAudioClient.exe"
+    $installedExe = Join-Path $installDir "LMACaptureClient.exe"
 
-    $lnk = Join-Path $startMenuDir "LMA Audio Capture.lnk"
-    New-Shortcut -LinkPath $lnk -TargetPath $installedExe -Arguments "--gui" -Description "LMA Audio Capture"
+    $lnk = Join-Path $startMenuDir "$appDisplayName.lnk"
+    New-Shortcut -LinkPath $lnk -TargetPath $installedExe -Arguments "--gui" -Description $appDisplayName
     Write-Host "==> Start Menu shortcut: $lnk"
 
     if ($DesktopShortcut) {
         $desktop = [Environment]::GetFolderPath('Desktop')
-        $dlnk = Join-Path $desktop "LMA Audio Capture.lnk"
-        New-Shortcut -LinkPath $dlnk -TargetPath $installedExe -Arguments "--gui" -Description "LMA Audio Capture"
+        $dlnk = Join-Path $desktop "$appDisplayName.lnk"
+        New-Shortcut -LinkPath $dlnk -TargetPath $installedExe -Arguments "--gui" -Description $appDisplayName
         Write-Host "==> Desktop shortcut: $dlnk"
     }
 
@@ -281,19 +308,19 @@ if ($Install) {
             Write-Host "==> -ProgramFiles requires admin; re-launching the install step elevated..."
             $installScript = @"
 `$src = '$publishDir'
-`$dst = Join-Path `$env:ProgramFiles 'LMA Audio Capture'
+`$dst = Join-Path `$env:ProgramFiles '$installFolder'
 # Close a running copy first, else its own DLLs are locked and the delete fails.
-`$running = Get-Process -Name LMAAudioClient -ErrorAction SilentlyContinue
+`$running = Get-Process -Name LMACaptureClient -ErrorAction SilentlyContinue
 if (`$running) { `$running | Stop-Process -Force -ErrorAction SilentlyContinue; `$running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue }
 if (Test-Path `$dst) {
   `$ok = `$false
   foreach (`$i in 1..5) { try { Remove-Item `$dst -Recurse -Force -ErrorAction Stop; `$ok = `$true; break } catch { Start-Sleep -Milliseconds 500 } }
-  if (-not `$ok) { throw "Couldn't replace `$dst - a file there is still in use. Quit LMA Audio Capture and re-run." }
+  if (-not `$ok) { throw "Couldn't replace `$dst - a file there is still in use. Quit $appDisplayName and re-run." }
 }
 New-Item -ItemType Directory -Path `$dst -Force | Out-Null
 Copy-Item (Join-Path `$src '*') `$dst -Recurse -Force
-`$exe = Join-Path `$dst 'LMAAudioClient.exe'
-`$sm = Join-Path `$env:ProgramData 'Microsoft\Windows\Start Menu\Programs\LMA Audio Capture.lnk'
+`$exe = Join-Path `$dst 'LMACaptureClient.exe'
+`$sm = Join-Path `$env:ProgramData 'Microsoft\Windows\Start Menu\Programs\$appDisplayName.lnk'
 `$sh = New-Object -ComObject WScript.Shell
 `$s = `$sh.CreateShortcut(`$sm)
 `$s.TargetPath = `$exe
@@ -302,13 +329,13 @@ Copy-Item (Join-Path `$src '*') `$dst -Recurse -Force
 `$s.IconLocation = `$exe + ',0'
 `$s.Save()
 # Apps & features (ARP) entry under HKLM (machine-wide install).
-`$arp = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LMAAudioCapture'
-`$rm = "Get-Process -Name LMAAudioClient -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '`$dst' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '`$sm' -Force -ErrorAction SilentlyContinue; Remove-Item '`$arp' -Recurse -Force -ErrorAction SilentlyContinue"
+`$arp = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$arpKey'
+`$rm = "Get-Process -Name LMACaptureClient -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '`$dst' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '`$sm' -Force -ErrorAction SilentlyContinue; Remove-Item '`$arp' -Recurse -Force -ErrorAction SilentlyContinue"
 `$enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(`$rm))
 `$ucmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand `$enc"
 `$ver = try { (Get-Item `$exe).VersionInfo.ProductVersion } catch { '1.0' }
 New-Item -Path `$arp -Force | Out-Null
-Set-ItemProperty `$arp DisplayName 'LMA Audio Capture'
+Set-ItemProperty `$arp DisplayName '$appDisplayName'
 Set-ItemProperty `$arp DisplayVersion `$ver
 Set-ItemProperty `$arp Publisher 'Amazon Web Services'
 Set-ItemProperty `$arp DisplayIcon `$exe
@@ -321,7 +348,7 @@ Set-ItemProperty `$arp NoRepair 1 -Type DWord
             $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($installScript))
             Start-Process powershell -Verb RunAs -Wait -ArgumentList `
                 "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $enc
-            $launchExe = Join-Path (Join-Path $env:ProgramFiles "LMA Audio Capture") "LMAAudioClient.exe"
+            $launchExe = Join-Path (Join-Path $env:ProgramFiles "$installFolder") "LMACaptureClient.exe"
             Write-Host "==> Installed (machine-wide): $launchExe"
         } else {
             $launchExe = Install-App -SourceDir $publishDir -MachineWide $true
@@ -334,7 +361,7 @@ Set-ItemProperty `$arp NoRepair 1 -Type DWord
     Write-Host "=============================================================="
     Write-Host " INSTALL SUCCEEDED"
     Write-Host "=============================================================="
-    Write-Host "Launch it from the Start Menu: press the Windows key, type 'LMA Audio Capture'."
+    Write-Host "Launch it from the Start Menu: press the Windows key, type '$appDisplayName'."
     Write-Host "Or run: `"$launchExe`""
     Write-Host ""
     Write-Host "When it starts there is no window: a gray LMA icon appears in the system tray"
