@@ -33,7 +33,7 @@ import {
     getClientIP,
 } from './utils';
 
-import { jwtVerifier } from './utils/jwt-verifier';
+import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
 
 import {
     VideoSession,
@@ -69,6 +69,26 @@ const socketMap = new Map<WebSocket, SocketCallData>();
 // Sockets dedicated to a video stream (announced by START_VIDEO). Binary
 // frames on these sockets are fragmented-MP4 chunks, not audio PCM.
 const videoSocketMap = new Map<WebSocket, VideoSession>();
+
+/**
+ * The live audio session for a callId, if any. Used to authorize START_VIDEO:
+ * a video stream may only join a call that is currently streaming audio, and
+ * only for the user who started it.
+ *
+ * Linear scan over socketMap — one entry per concurrent call on this task, so
+ * a handful to low hundreds, and this runs once per video stream (not per
+ * frame).
+ */
+const findAudioSessionByCallId = (
+    callId: string
+): SocketCallData | undefined => {
+    for (const data of socketMap.values()) {
+        if (!data.ended && data.callMetadata?.callId === callId) {
+            return data;
+        }
+    }
+    return undefined;
+};
 
 // create fastify server (with logging enabled for non-PROD environments)
 const server = fastify({
@@ -382,6 +402,9 @@ const onTextMessage = async (
             startStreamTime: new Date(),
             speakerEvents: [],
             ended: false,
+            // From the VERIFIED token, not the message body — this is what
+            // later authorizes START_VIDEO for the same callId.
+            ownerSub: getAuthenticatedCaller(request)?.sub,
         };
         socketMap.set(ws, socketCallMap);
         startTranscribe(socketCallMap, server);
@@ -424,6 +447,33 @@ const onTextMessage = async (
             server.log.error(
                 `[START_VIDEO]: [${clientIP}] - START_VIDEO missing callId; ignoring.`
             );
+            return;
+        }
+        // AUTHORIZATION. callId comes from the client and is guessable (the web
+        // UI builds it as "<meeting topic> - <timestamp>"), so accepting it on
+        // faith would let ANY authenticated user attach video to someone else's
+        // call — and, because the mux pulls in that call's audio WAV, would
+        // publish the victim's audio under an object the attacker can read.
+        // Require a LIVE audio session for this callId, owned by the same
+        // verified Cognito subject that opened it.
+        const caller = getAuthenticatedCaller(request);
+        const audioSession = findAudioSessionByCallId(callMetaData.callId);
+        if (!audioSession) {
+            server.log.error(
+                `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - No active audio call for this callId; refusing video stream.`
+            );
+            ws.close(1008, 'no active call for callId');
+            return;
+        }
+        if (
+            !caller?.sub ||
+            !audioSession.ownerSub ||
+            audioSession.ownerSub !== caller.sub
+        ) {
+            server.log.error(
+                `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - Caller does not own this call; refusing video stream.`
+            );
+            ws.close(1008, 'not authorized for callId');
             return;
         }
         const session = startVideoSession(callMetaData, server);

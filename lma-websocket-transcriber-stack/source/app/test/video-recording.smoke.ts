@@ -52,10 +52,13 @@ import {
     writeVideoChunk,
     notifyAudioRecordingDone,
     runFfmpegMux,
+    getVideoSession,
 } from '../src/videorecording';
 import { CallMetaData } from '../src/calleventdata/eventtypes';
 
 const PORT = parseInt(process.env['SMOKE_PORT'] ?? '38081', 10);
+// Sampling rate is irrelevant to the video lane; the audio START just needs one.
+const SR_UNUSED = 48000;
 const HOST = '127.0.0.1';
 
 const sh = (cmd: string, args: string[]): string =>
@@ -138,8 +141,18 @@ async function main(): Promise<void> {
     server.register(websocket);
     const videoSocketMap = new Map<WebSocket, VideoSession>();
 
+    // Mirror of index.ts's authorization state: which user owns each live call.
+    // START_VIDEO is only accepted for a call that is live AND owned by the
+    // same verified subject. The test drives it via a per-connection "user"
+    // query param standing in for the JWT subject.
+    const liveCalls = new Map<string, string>(); // callId -> ownerSub
+    const authDenials: string[] = [];
+
     server.after(() => {
-        server.get('/api/v1/ws', { websocket: true }, (socket) => {
+        server.get('/api/v1/ws', { websocket: true }, (socket, request) => {
+            const callerSub = String(
+                (request.query as { user?: string } | undefined)?.user ?? ''
+            );
             socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
                 if (isBinary) {
                     const session = videoSocketMap.get(socket as WebSocket);
@@ -151,7 +164,23 @@ async function main(): Promise<void> {
                 const meta = JSON.parse(
                     Buffer.from(data as Buffer).toString('utf8')
                 ) as CallMetaData;
-                if (meta.callEvent === 'START_VIDEO') {
+                if (meta.callEvent === 'START') {
+                    liveCalls.set(meta.callId, callerSub);
+                } else if (meta.callEvent === 'END') {
+                    liveCalls.delete(meta.callId);
+                } else if (meta.callEvent === 'START_VIDEO') {
+                    // Same two checks as index.ts.
+                    const ownerSub = liveCalls.get(meta.callId);
+                    if (!ownerSub) {
+                        authDenials.push(`no-live-call:${meta.callId}`);
+                        socket.close(1008, 'no active call for callId');
+                        return;
+                    }
+                    if (!callerSub || ownerSub !== callerSub) {
+                        authDenials.push(`not-owner:${meta.callId}`);
+                        socket.close(1008, 'not authorized for callId');
+                        return;
+                    }
                     const session = startVideoSession(meta, server);
                     videoSocketMap.set(socket as WebSocket, session);
                 } else if (meta.callEvent === 'END_VIDEO') {
@@ -177,9 +206,19 @@ async function main(): Promise<void> {
     const CALL_ID = 'smoke-ws-video-call';
 
     try {
+        // The owner's AUDIO socket declares the call (index.ts records the
+        // verified subject as its owner). Video authorization depends on it.
+        const audioWs = new WebSocket(`ws://${HOST}:${PORT}/api/v1/ws?user=alice`);
+        await new Promise<void>((res, rej) => {
+            audioWs.on('open', () => res());
+            audioWs.on('error', rej);
+        });
+        audioWs.send(JSON.stringify({ callEvent: 'START', callId: CALL_ID, samplingRate: SR_UNUSED }));
+        await new Promise((r) => setTimeout(r, 100));
+
         // Stream the fMP4 over the socket in 32KiB chunks, then END_VIDEO.
         await new Promise<void>((resolve, reject) => {
-            const ws = new WebSocket(`ws://${HOST}:${PORT}/api/v1/ws`);
+            const ws = new WebSocket(`ws://${HOST}:${PORT}/api/v1/ws?user=alice`);
             const timer = setTimeout(
                 () => reject(new Error('WS video stream timed out (15s)')),
                 15_000
@@ -224,6 +263,50 @@ async function main(): Promise<void> {
         );
         console.log('PASS: websocket START_VIDEO/fMP4/END_VIDEO flow muxed and cleaned up temp files');
 
+        // ---- Part 2b: AUTHORIZATION — the cross-tenant attack must fail ----
+        // Victim starts a call; attacker (different subject) tries to attach a
+        // video stream to it. Without the ownership check the attacker's video
+        // session would adopt the victim's audio WAV at end of call and publish
+        // the victim's audio under an object the attacker can read.
+        const VICTIM_CALL = 'victim-private-meeting';
+        const victimWs = new WebSocket(`ws://${HOST}:${PORT}/api/v1/ws?user=victim`);
+        await new Promise<void>((res, rej) => {
+            victimWs.on('open', () => res());
+            victimWs.on('error', rej);
+        });
+        victimWs.send(JSON.stringify({ callEvent: 'START', callId: VICTIM_CALL, samplingRate: SR_UNUSED }));
+        await new Promise((r) => setTimeout(r, 100));
+
+        const attackerClosed = await attemptVideo(`ws://${HOST}:${PORT}/api/v1/ws?user=attacker`, VICTIM_CALL);
+        assert.ok(
+            attackerClosed,
+            'attacker START_VIDEO on the victim\'s callId must be rejected (socket closed)'
+        );
+        assert.ok(
+            authDenials.includes(`not-owner:${VICTIM_CALL}`),
+            `expected a not-owner denial, got: ${authDenials.join(', ')}`
+        );
+        assert.strictEqual(
+            getVideoSession(VICTIM_CALL),
+            undefined,
+            'no video session may exist for the victim call after a rejected attempt'
+        );
+        console.log('PASS: START_VIDEO by a non-owner is rejected and creates no session');
+
+        // A callId with no live audio call at all is also refused (this is what
+        // closes the "START_VIDEO after the call ended" session leak).
+        const ghostClosed = await attemptVideo(`ws://${HOST}:${PORT}/api/v1/ws?user=alice`, 'no-such-call');
+        assert.ok(ghostClosed, 'START_VIDEO for an unknown callId must be rejected');
+        assert.ok(
+            authDenials.includes('no-live-call:no-such-call'),
+            `expected a no-live-call denial, got: ${authDenials.join(', ')}`
+        );
+        assert.strictEqual(getVideoSession('no-such-call'), undefined, 'no session for an unknown callId');
+        console.log('PASS: START_VIDEO for a callId with no live audio call is rejected');
+
+        victimWs.close();
+        audioWs.close();
+
         // ---- Part 3: disabled + discard paths ----
         process.env['ENABLE_VIDEO_RECORDING'] = 'false'; // note: module read at import; runtime check below
         const disabledMeta = {
@@ -242,6 +325,33 @@ async function main(): Promise<void> {
         fs.rmSync(TEST_TMP, { recursive: true, force: true });
     }
 }
+
+/**
+ * Open a video socket, send START_VIDEO for `callId`, and resolve true if the
+ * server closed the connection (i.e. refused it) within a short window.
+ */
+const attemptVideo = (url: string, callId: string): Promise<boolean> =>
+    new Promise<boolean>((resolve) => {
+        const ws = new WebSocket(url);
+        let closed = false;
+        const done = setTimeout(() => {
+            try {
+                ws.close(); 
+            } catch { /* already closing */ }
+            resolve(closed);
+        }, 1500);
+        ws.on('open', () => {
+            ws.send(JSON.stringify({ callEvent: 'START_VIDEO', callId }));
+            // Send a frame too: a server that accepted this would buffer it.
+            ws.send(Buffer.alloc(64), { binary: true });
+        });
+        ws.on('close', () => {
+            closed = true;
+            clearTimeout(done);
+            resolve(true);
+        });
+        ws.on('error', () => { /* close handler resolves */ });
+    });
 
 const pollUntil = async (
     cond: () => boolean,

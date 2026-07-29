@@ -124,5 +124,13 @@ export type SocketCallData = {
     recordingFileSize?: number
     startStreamTime: Date,
     speakerEvents: [],
-    ended: boolean
+    ended: boolean,
+    /**
+     * Cognito `sub` of the user whose verified token opened this call's audio
+     * socket. Used to authorize later actions on the same callId (notably
+     * START_VIDEO on a SECOND socket) so one user cannot attach media to, or
+     * pull audio out of, another user's call. Undefined only for connections
+     * that predate the check (defensive; the handler treats that as a denial).
+     */
+    ownerSub?: string
 };
