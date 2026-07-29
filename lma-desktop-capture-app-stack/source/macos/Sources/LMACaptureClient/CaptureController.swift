@@ -34,6 +34,11 @@ final class CaptureController {
     var onStateChange: ((State) -> Void)?
     var onLevels: ((_ meetingRMS: Float, _ micRMS: Float, _ connected: Bool, _ paused: Bool) -> Void)?
     var onLog: ((String) -> Void)?
+    /// Fired when the chosen video source became unavailable and capture fell
+    /// back to something else (e.g. the selected window closed, so the whole
+    /// display is now being recorded). Privacy-relevant, so it is surfaced
+    /// rather than logged quietly.
+    var onVideoFallback: ((String) -> Void)?
 
     /// The callId of the active/most-recent stream (for "Open in LMA" deep link).
     private(set) var activeCallId: String = ""
@@ -164,6 +169,10 @@ final class CaptureController {
             guard let self = self, let start = self.audioStartDate,
                   let first = self.videoCapture?.firstFrameDate else { return }
             vSock?.videoTimeOffsetMs = max(0, Int(first.timeIntervalSince(start) * 1000))
+        }
+        // Surface a source fallback (chosen window gone → whole screen).
+        vCap.onFallback = { [weak self] message in
+            self?.onVideoFallback?(message)
         }
         // Buffer overflow during a long outage (or a server without video
         // support): abandon video for this call; audio continues.

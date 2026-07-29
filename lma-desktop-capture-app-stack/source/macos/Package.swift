@@ -8,12 +8,12 @@ import PackageDescription
 //
 // ScreenCaptureKit audio capture requires macOS 13 (Ventura) or later.
 let package = Package(
-    name: "LMAAudioClient",
+    name: "LMACaptureClient",
     platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
-            name: "LMAAudioClient",
-            path: "Sources/LMAAudioClient"
+            name: "LMACaptureClient",
+            path: "Sources/LMACaptureClient"
         )
     ]
 )

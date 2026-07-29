@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# install-macos.sh — one-shot installer for the LMA Audio Capture App (macOS).
+# install-macos.sh — one-shot installer for the LMA Desktop Capture App (macOS).
 #
-# Ships inside the "Download Audio Capture App" zip from the LMA web UI. It:
+# Ships inside the "Download Desktop Capture App" zip from the LMA web UI. It:
 #   1. checks/points you at prerequisites (Xcode command-line tools),
 #   2. builds the Swift app in release mode,
 #   3. wraps it in a signed .app bundle with an lma-config.json (your
 #      deployment's endpoint + Cognito ids) baked into Contents/Resources/,
 #   4. installs it to /Applications so it's a first-class app — launchable from
 #      Spotlight (Cmd-Space) and eligible for Start-at-login — with its own
-#      privacy (TCC) identity ("LMA Audio Client").
+#      privacy (TCC) identity, namespaced per LMA stack.
 #
 # Usage (IMPORTANT — invoke with `bash`, not `./`):
 #   bash install-macos.sh              # build + install to /Applications
@@ -47,6 +47,29 @@ done
 say() { printf "\n\033[1m==> %s\033[0m\n" "$*"; }
 err() { printf "\n\033[31m✗ %s\033[0m\n" "$*" >&2; }
 
+# ── Per-stack identity ───────────────────────────────────────────────────────
+# The app is namespaced by the LMA stack it was downloaded from, so the clients
+# for multiple LMA deployments can be installed side by side without colliding
+# (separate .app, bundle id, TCC grants, preferences, Dock pin, login item).
+# Derived from lma-config.json exactly as make-app.sh does — keep in sync.
+STACK_NAME=""
+if [[ -f lma-config.json ]]; then
+  STACK_NAME="$(python3 -c 'import json; print(json.load(open("lma-config.json")).get("stackName",""))' 2>/dev/null || echo "")"
+fi
+STACK_SLUG="$(printf '%s' "${STACK_NAME}" | tr '[:upper:]' '[:lower:]' \
+  | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')"
+if [[ -n "${STACK_SLUG}" ]]; then
+  APP_BASENAME="LMACaptureClient-${STACK_SLUG}"
+  APP_DISPLAY_NAME="LMA Capture Client (${STACK_NAME})"
+  BUNDLE_ID="com.amazon.lma.captureclient.${STACK_SLUG}"
+else
+  APP_BASENAME="LMACaptureClient"
+  APP_DISPLAY_NAME="LMA Capture Client"
+  BUNDLE_ID="com.amazon.lma.captureclient"
+fi
+APP_FILENAME="${APP_BASENAME}.app"
+BIN_NAME="LMACaptureClient"
+
 # ── Uninstall: remove the installed app + all traces, then exit (no build) ────
 # Mirrors the Windows client's `build-windows.ps1 -Uninstall`. Reverses exactly
 # what an install created: the .app bundle, the login item, the Dock pin, the
@@ -54,11 +77,10 @@ err() { printf "\n\033[31m✗ %s\033[0m\n" "$*" >&2; }
 # certificate in the keychain (harmless, reused on reinstall) and this source
 # folder untouched.
 if $UNINSTALL; then
-  BUNDLE_ID="com.amazon.lma.audioclient"
-  say "Uninstalling LMA Audio Capture App"
+  say "Uninstalling ${APP_DISPLAY_NAME}"
 
   # 1. Quit any running instance so files aren't held open.
-  if pkill -x LMAAudioClient 2>/dev/null; then
+  if pkill -x "${BIN_NAME}" 2>/dev/null; then
     echo "  • Quit the running app"
     sleep 1
   fi
@@ -67,7 +89,7 @@ if $UNINSTALL; then
   #    override). Both /Applications and ~/Applications are checked.
   removed_any=false
   for dir in "${INSTALL_DIR:-/Applications}" /Applications "$HOME/Applications"; do
-    app="${dir}/LMAAudioClient.app"
+    app="${dir}/${APP_FILENAME}"
     if [[ -d "$app" ]]; then
       if rm -rf "$app" 2>/dev/null; then
         echo "  • Removed ${app}"; removed_any=true
@@ -79,21 +101,22 @@ if $UNINSTALL; then
   $removed_any || echo "  • No installed app bundle found (already removed?)"
 
   # 3. Remove the login item (Start-at-login). Ignore if it isn't set.
-  if osascript -e 'tell application "System Events" to delete login item "LMAAudioClient"' 2>/dev/null; then
+  if osascript -e "tell application \"System Events\" to delete login item \"${APP_BASENAME}\"" 2>/dev/null; then
     echo "  • Removed the Start-at-login item"
   fi
 
   # 4. Unpin from the Dock: drop any persistent-apps entry whose file URL points
-  #    at LMAAudioClient.app, then restart the Dock so the change shows.
-  if defaults read com.apple.dock persistent-apps 2>/dev/null | grep -q "LMAAudioClient.app"; then
-    /usr/bin/python3 - <<'PY' 2>/dev/null && { killall Dock 2>/dev/null; echo "  • Unpinned from the Dock"; }
+  #    at our .app, then restart the Dock so the change shows.
+  if defaults read com.apple.dock persistent-apps 2>/dev/null | grep -q "${APP_FILENAME}"; then
+    /usr/bin/python3 - "${APP_FILENAME}" <<'PY' 2>/dev/null && { killall Dock 2>/dev/null; echo "  • Unpinned from the Dock"; }
 import subprocess, plistlib, sys
+app_filename = sys.argv[1]
 raw = subprocess.run(["defaults", "export", "com.apple.dock", "-"],
                      capture_output=True).stdout
 pl = plistlib.loads(raw)
 apps = pl.get("persistent-apps", [])
 kept = [a for a in apps
-        if "LMAAudioClient.app" not in
+        if app_filename not in
         (a.get("tile-data", {}).get("file-data", {}).get("_CFURLString", ""))]
 if len(kept) != len(apps):
     pl["persistent-apps"] = kept
@@ -107,7 +130,7 @@ PY
   # 5. Remove saved settings (remembered email, speaker labels, mic choice).
   removed_prefs=false
   for p in "$HOME/Library/Preferences/${BUNDLE_ID}.plist" \
-           "$HOME/Library/Preferences/LMAAudioClient.plist"; do
+           "$HOME/Library/Preferences/${APP_BASENAME}.plist"; do
     [[ -f "$p" ]] && rm -f "$p" && removed_prefs=true
   done
   # UserDefaults is cached by cfprefsd; force-drop the domain too.
@@ -115,14 +138,14 @@ PY
   $removed_prefs && echo "  • Removed saved settings"
 
   # 6. Reset the privacy (TCC) grants so a reinstall starts clean and no stale
-  #    "LMA Audio Client" rows linger in System Settings.
+  #    "${APP_DISPLAY_NAME}" rows linger in System Settings.
   tccutil reset ScreenCapture "$BUNDLE_ID" 2>/dev/null || true
   tccutil reset Microphone "$BUNDLE_ID" 2>/dev/null || true
   echo "  • Reset Screen Recording + Microphone permissions"
 
   # 7. Deregister from LaunchServices so Spotlight forgets it immediately.
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-    -u "/Applications/LMAAudioClient.app" 2>/dev/null || true
+    -u "/Applications/${APP_FILENAME}" 2>/dev/null || true
 
   say "Uninstall complete"
   echo "The app and its settings/permissions are removed. This source folder is"
@@ -199,15 +222,15 @@ say "Building the app (this may take a minute on first run)"
 # (Config must NOT go in Contents/MacOS/ — codesign rejects non-code files there.)
 ./make-app.sh
 
-APP="build/LMAAudioClient.app"
+APP="build/${APP_FILENAME}"
 
 # ── 3. Install into /Applications ────────────────────────────────────────────
 # Installing to /Applications makes it a first-class app: launchable from
-# Spotlight (Cmd-Space → "LMA Audio Client"), eligible for Start-at-login, and
+# Spotlight (Cmd-Space → the app name), eligible for Start-at-login, and
 # stable for macOS's privacy (TCC) records. Pass --no-install to skip and just
 # leave the build in ./build. Set INSTALL_DIR to override the destination.
 INSTALL_DIR="${INSTALL_DIR:-/Applications}"
-INSTALLED_APP="${INSTALL_DIR}/LMAAudioClient.app"
+INSTALLED_APP="${INSTALL_DIR}/${APP_FILENAME}"
 if $NO_INSTALL; then
   INSTALLED_APP="$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
   say "Skipping install (--no-install); app left at ${INSTALLED_APP}"
@@ -228,7 +251,7 @@ else
     # Append a persistent-apps entry and restart the Dock, unless it's already
     # pinned. Skip with SKIP_DOCK_PIN=1.
     if [[ "${SKIP_DOCK_PIN:-0}" != "1" ]]; then
-      if defaults read com.apple.dock persistent-apps 2>/dev/null | grep -q "LMAAudioClient.app"; then
+      if defaults read com.apple.dock persistent-apps 2>/dev/null | grep -q "${APP_FILENAME}"; then
         echo "  • Already pinned to the Dock"
       else
         defaults write com.apple.dock persistent-apps -array-add "<dict>
@@ -253,13 +276,13 @@ fi
 
 say "Done"
 cat <<EOF
-LMA Audio Capture App is installed at:
+${APP_DISPLAY_NAME} is installed at:
   ${INSTALLED_APP}
 
 ▶ HOW TO LAUNCH IT (do NOT run it from Terminal):
-  • Press Cmd-Space (Spotlight), type "LMA Audio Client", press Return, OR
+  • Press Cmd-Space (Spotlight), type "${APP_DISPLAY_NAME}", press Return, OR
   • double-click it in Finder / Launchpad, OR
-  • run:  open -a "LMA Audio Client"
+  • run:  open -a "${APP_DISPLAY_NAME}"
 
   Launching this way is REQUIRED: it goes through macOS LaunchServices so the
   app gets its own privacy identity. If you instead run the binary inside
@@ -272,7 +295,7 @@ LMA Audio Capture App is installed at:
      (top-right) and the Dock icon shows a red dot + "REC" badge while
      recording. Approve the Microphone prompt.
   2. System Settings ▸ Privacy & Security ▸ Screen Recording → enable
-     "LMA Audio Client". Then QUIT it (right-click the "LMA" menu-bar item ▸
+     "${APP_DISPLAY_NAME}". Then QUIT it (right-click the "LMA" menu-bar item ▸
      Quit) and launch it again — Screen Recording only takes effect after a
      relaunch. This is what lets it capture meeting/system audio.
   3. Left-click the "LMA" menu-bar item, sign in with your LMA username/password,
@@ -280,7 +303,7 @@ LMA Audio Capture App is installed at:
 
 ▶ START AUTOMATICALLY AT LOGIN:
   Left-click the "LMA" menu-bar item and enable "Start automatically at login"
-  (or System Settings ▸ General ▸ Login Items ▸ add LMA Audio Client).
+  (or System Settings ▸ General ▸ Login Items ▸ add ${APP_DISPLAY_NAME}).
 
 ▶ TO UNINSTALL LATER:
   bash install-macos.sh --uninstall

@@ -2,13 +2,15 @@
 import SwiftUI
 import AppKit
 import ServiceManagement
+import UserNotifications
 
-/// Menu-bar (tray) UI for the LMA Audio Capture App — MVP.
+/// Menu-bar (tray) UI for the LMA Desktop Capture App.
 ///
 /// Lives in the macOS menu bar via NSStatusItem. Clicking the icon opens a
 /// popover with: sign in/out, start/stop/pause, mute mic, mute system audio,
-/// live per-channel level meters, and "Open in LMA". While streaming, the
-/// menu-bar icon turns red so recording is obvious at a glance.
+/// live per-channel level meters, elapsed recording time, and "Open in LMA".
+/// While streaming, the menu-bar icon turns red (with the elapsed time beside
+/// it) so recording is obvious at a glance. Settings live in their own window.
 ///
 /// This is a thin view layer over CaptureController (the same engine the CLI
 /// uses). It is only compiled/launched when the app starts with NO CLI args
@@ -30,9 +32,9 @@ final class MenuBarAppState: ObservableObject {
 
     @Published var rememberLogin = false
 
-    // Settings (gear panel): per-channel speaker labels + mic device. Persisted
-    // in UserDefaults; applied to the controller so they ride the START frame.
-    @Published var showSettings = false
+    // Settings (own window, opened from the gear): per-channel speaker labels,
+    // mic device, screen video. Persisted in UserDefaults; applied to the
+    // controller so they ride the START frame.
     @Published var micLabel = ""
     @Published var systemLabel = ""
     @Published var micDeviceUID = ""            // "" = System Default
@@ -49,7 +51,35 @@ final class MenuBarAppState: ObservableObject {
     // Agreement is persisted; Cancel just doesn't start.
     @Published var showDisclaimer = false
 
+    /// Wall-clock seconds since the current recording started (0 when idle).
+    /// Drives the elapsed-time readout in the panel and the menu-bar tooltip.
+    @Published var elapsedSeconds = 0
+    private var recordingStartedAt: Date?
+    private var elapsedTimer: Timer?
+
+    /// Recently used meeting names (most recent first), for quick re-selection.
+    @Published var recentMeetingNames: [String] = []
+    private static let kRecentMeetings = "lma.recentMeetingNames"
+    private static let maxRecentMeetings = 8
+
     let controller: CaptureController
+
+    /// Per-stack preferences store. Each LMA stack's app gets its OWN bundle id
+    /// (see make-app.sh), so the standard suite would already be separate for
+    /// packaged builds — but hand-built dev copies share a bundle id, and the
+    /// CLI has none at all. Using an explicit stack-suffixed suite makes the
+    /// separation unconditional: settings, remembered email, and the recording
+    /// consent record never leak between stacks.
+    private let defaults: UserDefaults
+
+    private static func defaultsSuite(for config: Config) -> UserDefaults {
+        let slug = config.stackSlug
+        guard !slug.isEmpty,
+              let suite = UserDefaults(suiteName: "com.amazon.lma.captureclient.\(slug)")
+        else { return .standard }
+        return suite
+    }
+
     // UserDefaults keys for the optional "remember login id" feature. Only the
     // username (email) is stored — never the password, which stays in memory.
     private static let kRemember = "lma.rememberLogin"
@@ -68,7 +98,8 @@ final class MenuBarAppState: ObservableObject {
 
     init(controller: CaptureController) {
         self.controller = controller
-        let defaults = UserDefaults.standard
+        let defaults = Self.defaultsSuite(for: controller.config)
+        self.defaults = defaults
         self.rememberLogin = defaults.bool(forKey: Self.kRemember)
         // Prefill the login id from the remembered value, else the config.
         self.username = rememberLogin ? (defaults.string(forKey: Self.kUsername) ?? "") : controller.config.username
@@ -77,8 +108,25 @@ final class MenuBarAppState: ObservableObject {
         self.micDeviceUID = defaults.string(forKey: Self.kMicDeviceUID) ?? ""
         self.videoEnabled = defaults.bool(forKey: Self.kVideoEnabled)
         self.videoSourceID = defaults.string(forKey: Self.kVideoSourceID) ?? ""
+        self.recentMeetingNames = defaults.stringArray(forKey: Self.kRecentMeetings) ?? []
         pushSettingsToController()
-        controller.onStateChange = { [weak self] s in self?.state = s }
+        // The video source can vanish mid-recording (window closed) — surface
+        // that rather than silently falling back to the full screen.
+        controller.onVideoFallback = { [weak self] message in
+            self?.lastLog = message
+            Notifier.notify(title: "Screen video changed", body: message)
+        }
+        controller.onStateChange = { [weak self] s in
+            guard let self = self else { return }
+            let wasStreaming = self.isStreaming
+            self.state = s
+            let nowStreaming = self.isStreaming
+            if nowStreaming && !wasStreaming {
+                self.beginElapsedTimer()
+            } else if !nowStreaming && wasStreaming {
+                self.endElapsedTimer()
+            }
+        }
         controller.onLevels = { [weak self] m, k, c, p in
             self?.meetingLevel = m; self?.micLevel = k; self?.connected = c; self?.paused = p
         }
@@ -99,7 +147,7 @@ final class MenuBarAppState: ObservableObject {
     }
 
     func saveSettings() {
-        let defaults = UserDefaults.standard
+        let defaults = self.defaults
         defaults.set(micLabel, forKey: Self.kMicLabel)
         defaults.set(systemLabel, forKey: Self.kSystemLabel)
         defaults.set(micDeviceUID, forKey: Self.kMicDeviceUID)
@@ -159,7 +207,7 @@ final class MenuBarAppState: ObservableObject {
     /// Save (or clear) the remembered login id per the toggle. Called on login
     /// and whenever the toggle changes.
     func persistLoginPreference() {
-        let defaults = UserDefaults.standard
+        let defaults = self.defaults
         defaults.set(rememberLogin, forKey: Self.kRemember)
         if rememberLogin {
             defaults.set(username, forKey: Self.kUsername)
@@ -191,7 +239,7 @@ final class MenuBarAppState: ObservableObject {
         // DISCLAIMER TEXT has changed since consent — the recorded consent
         // covers the text the user actually saw, not later revisions. (Users
         // who agreed before the text was recorded re-consent once.)
-        let defaults = UserDefaults.standard
+        let defaults = self.defaults
         let agreed = defaults.bool(forKey: Self.kDisclaimerAgreed)
         let agreedText = defaults.string(forKey: Self.kDisclaimerAgreedText)
         guard agreed, agreedText == controller.config.recordingDisclaimer else {
@@ -204,7 +252,7 @@ final class MenuBarAppState: ObservableObject {
     /// Agree on the consent dialog: record WHAT was agreed to and WHEN, then
     /// start the recording that was gated.
     func agreeDisclaimerAndStart() {
-        let defaults = UserDefaults.standard
+        let defaults = self.defaults
         defaults.set(true, forKey: Self.kDisclaimerAgreed)
         defaults.set(Date(), forKey: Self.kDisclaimerAgreedAt)
         defaults.set(controller.config.recordingDisclaimer, forKey: Self.kDisclaimerAgreedText)
@@ -216,12 +264,12 @@ final class MenuBarAppState: ObservableObject {
     /// When the user acknowledged the disclaimer, or nil if not yet (or if the
     /// consent predates timestamp recording).
     var disclaimerAgreedDate: Date? {
-        UserDefaults.standard.object(forKey: Self.kDisclaimerAgreedAt) as? Date
+        defaults.object(forKey: Self.kDisclaimerAgreedAt) as? Date
     }
 
     /// The exact disclaimer text the user agreed to (for the consent record).
     var disclaimerAgreedText: String? {
-        UserDefaults.standard.string(forKey: Self.kDisclaimerAgreedText)
+        defaults.string(forKey: Self.kDisclaimerAgreedText)
     }
 
     static func consentDateString(_ d: Date) -> String {
@@ -233,6 +281,7 @@ final class MenuBarAppState: ObservableObject {
     private func reallyStart() {
         // Push current settings (labels may depend on the signed-in email).
         pushSettingsToController()
+        rememberMeetingName(meetingName)
         let name = meetingName.isEmpty ? "" : "\(meetingName) - \(Self.timestamp())"
         controller.start(callId: name.isEmpty ? nil : name)
     }
@@ -245,40 +294,167 @@ final class MenuBarAppState: ObservableObject {
     static func timestamp() -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"; return f.string(from: Date())
     }
+
+    // MARK: - Elapsed recording time
+
+    private func beginElapsedTimer() {
+        recordingStartedAt = Date()
+        elapsedSeconds = 0
+        elapsedTimer?.invalidate()
+        elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self = self, let start = self.recordingStartedAt else { return }
+            self.elapsedSeconds = Int(Date().timeIntervalSince(start))
+        }
+        Notifier.notify(
+            title: "Recording started",
+            body: videoEnabled
+                ? "LMA is recording this meeting's audio and screen video."
+                : "LMA is recording this meeting's audio.")
+    }
+
+    private func endElapsedTimer() {
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
+        let duration = Self.formatElapsed(elapsedSeconds)
+        recordingStartedAt = nil
+        elapsedSeconds = 0
+        // The recording lands in LMA shortly after END (the server uploads and
+        // muxes at call end), so point the user at it rather than claiming it's
+        // ready this instant.
+        Notifier.notify(
+            title: "Recording stopped (\(duration))",
+            body: "Your meeting is being processed. Click to open it in LMA.",
+            openURL: controller.lmaURL())
+    }
+
+    /// "7:12" / "1:03:44" — compact elapsed time.
+    static func formatElapsed(_ seconds: Int) -> String {
+        let h = seconds / 3600, m = (seconds % 3600) / 60, sec = seconds % 60
+        return h > 0
+            ? String(format: "%d:%02d:%02d", h, m, sec)
+            : String(format: "%d:%02d", m, sec)
+    }
+
+    var elapsedText: String { Self.formatElapsed(elapsedSeconds) }
+
+    // MARK: - Recent meeting names
+
+    func clearRecentMeetingNames() {
+        recentMeetingNames = []
+        defaults.removeObject(forKey: Self.kRecentMeetings)
+    }
+
+    /// "LMA Capture Client v0.3.6.dev16 · stack LMA-Bob" — shown in the panel
+    /// footer and the Settings window.
+    var aboutLine: String {
+        var parts: [String] = ["LMA Capture Client"]
+        let v = controller.config.appVersion
+        if !v.isEmpty { parts.append("v\(v)") }
+        let stack = controller.config.stackName
+        if !stack.isEmpty { parts.append("· stack \(stack)") }
+        return parts.joined(separator: " ")
+    }
+
+    private func rememberMeetingName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var list = recentMeetingNames.filter { $0 != trimmed }
+        list.insert(trimmed, at: 0)
+        if list.count > Self.maxRecentMeetings { list = Array(list.prefix(Self.maxRecentMeetings)) }
+        recentMeetingNames = list
+        defaults.set(list, forKey: Self.kRecentMeetings)
+    }
+}
+
+/// Thin wrapper over UserNotifications so start/stop events are visible even
+/// when the app has no window open — reinforcing that recording is in progress
+/// (you can't record without noticing) and surfacing the finished recording.
+///
+/// Authorization is requested lazily on the first notification; if the user
+/// declines, every call is a silent no-op (never an error path that could
+/// interfere with recording).
+@available(macOS 13.0, *)
+enum Notifier {
+    private static var requested = false
+
+    static func notify(title: String, body: String, openURL: URL? = nil) {
+        let center = UNUserNotificationCenter.current()
+        let deliver = {
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            if let u = openURL {
+                content.userInfo = ["lmaURL": u.absoluteString]
+            }
+            let req = UNNotificationRequest(
+                identifier: UUID().uuidString, content: content, trigger: nil)
+            center.add(req)
+        }
+        if requested {
+            deliver()
+            return
+        }
+        requested = true
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            if granted { deliver() }
+        }
+    }
 }
 
 @available(macOS 13.0, *)
 struct MenuBarContentView: View {
     @ObservedObject var s: MenuBarAppState
 
+    /// Opens the standalone Settings window (set by MenuBarController).
+    var openSettings: () -> Void = {}
+
     var body: some View {
+        // Scrollable body with a bounded height: the content grows (consent
+        // gate, error text, meters), and a fixed-height container would clip it
+        // with no way to reach the rest. ScrollView + a max height means content
+        // is always reachable, never truncated.
+        ScrollView {
+            content
+                .padding(14)
+                // Let the width be driven by the container so the standalone
+                // window can be resized wider; keep a sane minimum.
+                .frame(minWidth: 280, maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minWidth: 300, maxHeight: 620)
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Circle().fill(s.isStreaming ? .red : .secondary).frame(width: 10, height: 10)
-                Text("LMA Audio Capture").font(.headline)
-                Spacer()
-                Text(statusText).font(.caption).foregroundColor(.secondary)
-                // Settings gear: speaker labels + mic picker. Disabled while
-                // streaming — labels ride the START frame, so mid-meeting
-                // changes wouldn't take effect anyway.
-                Button {
-                    s.showSettings.toggle()
-                    if s.showSettings { s.refreshMicDevices() }
-                } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("LMA Capture").font(.headline)
+                    // Which LMA deployment this app talks to — essential once a
+                    // user has the clients for more than one stack installed.
+                    if !s.controller.config.stackName.isEmpty {
+                        Text(s.controller.config.stackName)
+                            .font(.caption2).foregroundColor(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 4)
+                Text(statusText)
+                    .font(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.trailing)
+                // Settings lives in its OWN window: the popover stays small and
+                // predictable (it used to grow past the screen edge when the
+                // settings section expanded), and settings get room to breathe.
+                Button(action: openSettings) {
                     Image(systemName: "gearshape")
                 }
                 .buttonStyle(.plain)
-                .foregroundColor(s.showSettings ? .accentColor : .secondary)
+                .foregroundColor(.secondary)
                 .disabled(s.isStreaming)
-                .help(s.isStreaming ? "Stop recording to change settings" : "Settings")
+                .help(s.isStreaming ? "Stop recording to change settings" : "Settings…")
             }
 
             Divider()
-
-            if s.showSettings {
-                SettingsView(s: s)
-                Divider()
-            }
 
             if !s.controller.isAuthenticated {
                 // Sign-in form
@@ -324,7 +500,26 @@ struct MenuBarContentView: View {
                     .padding(10)
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.08)))
                 } else if !s.isStreaming {
-                    TextField("Meeting name (optional)", text: $s.meetingName).textFieldStyle(.roundedBorder)
+                    HStack(spacing: 4) {
+                        TextField("Meeting name (optional)", text: $s.meetingName)
+                            .textFieldStyle(.roundedBorder)
+                        // Recent meeting names — recurring meetings are the norm,
+                        // so make re-picking one a click instead of retyping.
+                        if !s.recentMeetingNames.isEmpty {
+                            Menu {
+                                ForEach(s.recentMeetingNames, id: \.self) { name in
+                                    Button(name) { s.meetingName = name }
+                                }
+                                Divider()
+                                Button("Clear recent") { s.clearRecentMeetingNames() }
+                            } label: {
+                                Image(systemName: "clock.arrow.circlepath")
+                            }
+                            .menuStyle(.borderlessButton)
+                            .frame(width: 24)
+                            .help("Recent meeting names")
+                        }
+                    }
                     Button(action: s.start) {
                         Label("Start Recording", systemImage: "record.circle").frame(maxWidth: .infinity)
                     }
@@ -346,10 +541,16 @@ struct MenuBarContentView: View {
                     HStack {
                         Text(s.connected ? "● Live" : "○ Reconnecting…")
                             .font(.caption).foregroundColor(s.connected ? .green : .orange)
+                        // Elapsed recording time — monospaced so the width
+                        // doesn't jitter as the digits change.
+                        Text(s.elapsedText)
+                            .font(.caption.monospacedDigit())
+                            .foregroundColor(.secondary)
                         if s.paused { Text("· Paused").font(.caption).foregroundColor(.orange) }
                         if s.controller.isVideoActive {
-                            Label("Screen video", systemImage: "video.fill")
+                            Image(systemName: "video.fill")
                                 .font(.caption).foregroundColor(.secondary)
+                                .help("Screen video is being recorded")
                         }
                         Spacer()
                     }
@@ -386,7 +587,9 @@ struct MenuBarContentView: View {
             }
 
             if !s.lastLog.isEmpty {
-                Text(s.lastLog).font(.caption2).foregroundColor(.secondary).lineLimit(2)
+                Text(s.lastLog)
+                    .font(.caption2).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()
@@ -395,9 +598,14 @@ struct MenuBarContentView: View {
             // meetings; it uses no audio/CPU when idle.
             Text("Right-click the menu-bar icon to Quit. Leave it running in the background between meetings.")
                 .font(.caption2).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            // About line: version + stack, so support questions ("which build /
+            // which deployment?") are answerable at a glance.
+            Text(s.aboutLine)
+                .font(.caption2).foregroundColor(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(14)
-        .frame(width: 300)
     }
 
     /// Hover text for the standing reminder: the full disclaimer, prefixed with
@@ -423,9 +631,35 @@ struct MenuBarContentView: View {
     }
 }
 
-/// Settings section (gear): speaker labels for the two channels + mic picker.
-/// Labels are applied to the next recording's START frame; the mic choice is
-/// applied when capture starts. Saved on every edit (no Apply button).
+/// Settings, hosted in its OWN resizable window (opened from the gear).
+///
+/// Why a separate window rather than an expanding section in the popover: the
+/// settings surface keeps growing (labels, mic, video source, consent record),
+/// and inline expansion pushed the popover past the screen edge with no way to
+/// scroll or resize. A window is also the platform-native place for settings.
+@available(macOS 13.0, *)
+struct SettingsWindowView: View {
+    @ObservedObject var s: MenuBarAppState
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                SettingsView(s: s)
+                Divider()
+                Text(s.aboutLine)
+                    .font(.caption2).foregroundColor(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(18)
+            .frame(minWidth: 320, maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minWidth: 360, minHeight: 320)
+    }
+}
+
+/// Settings body: speaker labels for the two channels, mic picker, screen-video
+/// options, and the recording-consent record. Saved on every edit (no Apply).
 @available(macOS 13.0, *)
 struct SettingsView: View {
     @ObservedObject var s: MenuBarAppState
@@ -447,6 +681,7 @@ struct SettingsView: View {
             }
             Text("These appear as the speaker names in the LMA transcript. Leave blank for the defaults shown.")
                 .font(.caption2).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text("Microphone").font(.caption).foregroundColor(.secondary).padding(.top, 2)
             Picker("", selection: Binding(get: { s.micDeviceUID }, set: { s.micDeviceUID = $0; s.saveSettings() })) {
@@ -460,6 +695,7 @@ struct SettingsView: View {
             .font(.caption)
             Text("System Default follows your Sound settings. If a chosen mic is unplugged, recording falls back to the default.")
                 .font(.caption2).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             // Optional desktop-video capture: streams the chosen screen/window
             // alongside audio; LMA saves a video recording of the meeting.
@@ -482,6 +718,7 @@ struct SettingsView: View {
                 .font(.caption)
                 Text("The selected screen or window is recorded with the meeting and saved as a video in LMA. Uses the Screen Recording permission you already granted.")
                     .font(.caption2).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             // Consent record: when + what the user agreed to, so the one-time
@@ -535,16 +772,30 @@ struct LevelBar: View {
 /// fallback: it shows a "REC" badge while recording, its right-click menu has
 /// Start/Pause/Stop, and clicking it opens the same panel as the menu-bar icon.
 @available(macOS 13.0, *)
-final class MenuBarController: NSObject, NSApplicationDelegate {
+final class MenuBarController: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var panelWindow: NSWindow?
+    private var settingsWindow: NSWindow?
     private let state: MenuBarAppState
     private var pollTimer: Timer?
 
     init(state: MenuBarAppState) { self.state = state }
 
+    /// The content view, with the Settings action wired to open the standalone
+    /// settings window (each host — popover and panel window — gets its own
+    /// instance, so the closure is attached per construction).
+    private func makeContentView() -> MenuBarContentView {
+        var v = MenuBarContentView(s: state)
+        v.openSettings = { [weak self] in self?.showSettingsWindow() }
+        return v
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Clicking a start/stop notification should bring up the app (and for
+        // the post-stop one, open the meeting in LMA).
+        UNUserNotificationCenter.current().delegate = self
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // Always give the button a visible text title as a fallback so the item
         // is never zero-width even if the SF Symbol image fails to load.
@@ -552,9 +803,15 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
         updateIcon()
 
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 300, height: 360)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: MenuBarContentView(s: state))
+        // Size the popover to its CONTENT rather than a fixed 300x360 box: the
+        // panel grows (consent gate, errors, meters) and a fixed height clipped
+        // the top/bottom with no way to scroll or resize. NSHostingController
+        // reports a SwiftUI-derived fitting size, and the view's own ScrollView
+        // caps how tall that can get.
+        let host = NSHostingController(rootView: makeContentView())
+        host.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = host
 
         // Left-click opens the popover; right-click (or control-click) shows a
         // small menu with Quit — kept OUT of the popover so it can't be confused
@@ -637,9 +894,13 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
     }
     @objc private func dockOpenPanel() { showPanelWindow() }
 
-    /// The same SwiftUI content as the popover, hosted in a small titled window
-    /// for Dock-initiated opens. Closing it leaves the app running (standard
-    /// for menu-bar/Dock hybrid utilities).
+    /// The same SwiftUI content as the popover, hosted in a titled, RESIZABLE
+    /// window for Dock-initiated opens. Closing it leaves the app running
+    /// (standard for menu-bar/Dock hybrid utilities).
+    ///
+    /// `.resizable` matters: content height varies with state, and a fixed
+    /// window clipped the top/bottom with no recourse. The view also scrolls, so
+    /// between the two the content is always reachable.
     private func showPanelWindow() {
         if let w = panelWindow {
             w.makeKeyAndOrderFront(nil)
@@ -647,14 +908,41 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
             return
         }
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 300, height: 360),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 340, height: 460),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
-        w.title = "LMA Audio Capture"
-        w.contentViewController = NSHostingController(rootView: MenuBarContentView(s: state))
+        w.title = state.controller.config.appDisplayName
+        w.contentViewController = NSHostingController(rootView: makeContentView())
+        w.contentMinSize = NSSize(width: 300, height: 240)
         w.isReleasedWhenClosed = false
         w.center()
         panelWindow = w
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Settings in a dedicated, resizable window (opened from the gear). Keeps
+    /// the popover small and gives the growing settings surface room.
+    private func showSettingsWindow() {
+        state.refreshMicDevices()
+        if state.videoEnabled { state.refreshVideoSources() }
+        if let w = settingsWindow {
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let w = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 480),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered, defer: false)
+        w.title = state.controller.config.stackName.isEmpty
+            ? "LMA Capture Settings"
+            : "LMA Capture Settings — \(state.controller.config.stackName)"
+        w.contentViewController = NSHostingController(rootView: SettingsWindowView(s: state))
+        w.contentMinSize = NSSize(width: 360, height: 280)
+        w.isReleasedWhenClosed = false
+        w.center()
+        settingsWindow = w
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -663,14 +951,46 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
     /// stays simple; also reachable if the popover is ever unavailable.
     private func makeContextMenu() -> NSMenu {
         let menu = NSMenu()
-        let openItem = NSMenuItem(title: "Open LMA Audio Capture", action: #selector(openPopoverFromMenu), keyEquivalent: "")
+        let name = state.controller.config.appDisplayName
+        let openItem = NSMenuItem(title: "Open \(name)", action: #selector(openPopoverFromMenu), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ",")
+        settingsItem.target = self
+        settingsItem.isEnabled = !state.isStreaming
+        menu.addItem(settingsItem)
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit LMA Audio Capture", action: #selector(quitApp), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit \(name)", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
         return menu
+    }
+
+    @objc private func openSettingsFromMenu() { showSettingsWindow() }
+
+    // MARK: - Notification clicks
+
+    /// Tapping a notification opens the panel; the post-stop notification also
+    /// carries the meeting's LMA URL so "your recording is ready" is one click
+    /// from actually seeing it.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let urlString = response.notification.request.content.userInfo["lmaURL"] as? String,
+           let url = URL(string: urlString) {
+            NSWorkspace.shared.open(url)
+        } else {
+            showPanelWindow()
+        }
+        completionHandler()
+    }
+
+    /// Show our notifications even when the app is frontmost — the recording
+    /// start/stop signal is the point, and suppressing it would defeat it.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }
@@ -695,15 +1015,30 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
             button.image = img
             button.contentTintColor = .systemRed
         } else {
-            let img = NSImage(systemSymbolName: "waveform.circle", accessibilityDescription: "LMA Audio Capture")
+            let img = NSImage(systemSymbolName: "waveform.circle",
+                              accessibilityDescription: state.controller.config.appDisplayName)
             img?.isTemplate = true
             button.image = img
             button.contentTintColor = nil
         }
+        // While recording, the title carries the elapsed time so you can see how
+        // long you've been recording without opening anything.
         button.attributedTitle = NSAttributedString(
-            string: " LMA",
+            string: recording ? " LMA \(state.elapsedText)" : " LMA",
             attributes: [.font: NSFont.menuBarFont(ofSize: 0)])
         button.imagePosition = .imageLeading
+        // Hover text names the stack (which deployment is this?) and the
+        // recording state/duration.
+        let stack = state.controller.config.stackName
+        var tip = state.controller.config.appDisplayName
+        if recording {
+            tip += state.paused
+                ? " — paused at \(state.elapsedText)"
+                : " — recording \(state.elapsedText)"
+        } else if !stack.isEmpty {
+            tip += " — idle"
+        }
+        button.toolTip = tip
     }
 
     @objc private func statusButtonClicked() {

@@ -7,31 +7,69 @@
 # attributes Microphone + Screen Recording to the parent process (Terminal).
 # A .app with an Info.plist (NSMicrophoneUsageDescription) is treated as its
 # own app by TCC — the permission prompts and System Settings toggles then say
-# "LMAAudioClient", which is how the eventual production build behaves too.
+# "LMA Capture Client (<Stack>)", which is how the production build behaves too.
+#
+# PER-STACK IDENTITY: the bundle id, display name, and .app filename are all
+# derived from the `stackName` baked into lma-config.json, so the clients for
+# two different LMA deployments are separate apps to macOS — separate TCC
+# grants, preferences, Dock tiles, and login items. Hand-built dev copies (no
+# stackName) fall back to the unsuffixed names.
 #
 # Usage:
-#   ./make-app.sh                 # build release + assemble ./build/LMAAudioClient.app
-#   ./build/LMAAudioClient.app/Contents/MacOS/LMAAudioClient --endpoint ... --token ...
+#   ./make-app.sh                 # build release + assemble ./build/<AppName>.app
+#   ./build/<AppName>.app/Contents/MacOS/LMACaptureClient --endpoint ... --token ...
 #
-# Re-run after any code change. The bundle is ad-hoc signed (required on Apple
-# Silicon just to execute); that is NOT Apple notarization — fine for local use.
+# Re-run after any code change.
 set -euo pipefail
 
 cd "$(dirname "$0")"
-APP_NAME="LMAAudioClient"
+BIN_NAME="LMACaptureClient"
+
+# --- Derive per-stack identity from the baked deployment config --------------
+# Read stackName/appVersion out of lma-config.json (present in downloaded
+# packages; absent for hand-built dev copies).
+STACK_NAME=""
+APP_VERSION="0.0.0-dev"
+if [[ -f lma-config.json ]]; then
+  STACK_NAME="$(python3 -c 'import json,sys; d=json.load(open("lma-config.json")); print(d.get("stackName",""))' 2>/dev/null || echo "")"
+  cfg_ver="$(python3 -c 'import json,sys; d=json.load(open("lma-config.json")); print(d.get("appVersion",""))' 2>/dev/null || echo "")"
+  [[ -n "${cfg_ver}" ]] && APP_VERSION="${cfg_ver}"
+fi
+# Slug: lowercase alphanumerics + dashes (matches Config.swift's stackSlug).
+STACK_SLUG="$(printf '%s' "${STACK_NAME}" | tr '[:upper:]' '[:lower:]' \
+  | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')"
+
+if [[ -n "${STACK_SLUG}" ]]; then
+  APP_NAME="LMACaptureClient-${STACK_SLUG}"
+  DISPLAY_NAME="LMA Capture Client (${STACK_NAME})"
+  BUNDLE_ID="com.amazon.lma.captureclient.${STACK_SLUG}"
+  echo "==> building for stack '${STACK_NAME}' (bundle id ${BUNDLE_ID})"
+else
+  APP_NAME="LMACaptureClient"
+  DISPLAY_NAME="LMA Capture Client"
+  BUNDLE_ID="com.amazon.lma.captureclient"
+  echo "==> no stackName in lma-config.json — building unsuffixed dev bundle"
+fi
+
 APP_DIR="build/${APP_NAME}.app"
 MACOS_DIR="${APP_DIR}/Contents/MacOS"
 RESOURCES_DIR="${APP_DIR}/Contents/Resources"
 
 echo "==> swift build -c release"
 swift build -c release
-BIN_PATH="$(swift build -c release --show-bin-path)/${APP_NAME}"
+BIN_PATH="$(swift build -c release --show-bin-path)/${BIN_NAME}"
 
 echo "==> assembling ${APP_DIR}"
 rm -rf "${APP_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
-cp "${BIN_PATH}" "${MACOS_DIR}/${APP_NAME}"
-cp Info.plist "${APP_DIR}/Contents/Info.plist"
+cp "${BIN_PATH}" "${MACOS_DIR}/${BIN_NAME}"
+# Substitute the per-stack identity into the Info.plist template. sed with a
+# distinct delimiter so names containing '/' can't break the expression.
+sed -e "s|__LMA_BUNDLE_NAME__|${APP_NAME}|g" \
+    -e "s|__LMA_DISPLAY_NAME__|${DISPLAY_NAME}|g" \
+    -e "s|__LMA_BUNDLE_ID__|${BUNDLE_ID}|g" \
+    -e "s|__LMA_APP_VERSION__|${APP_VERSION}|g" \
+    Info.plist > "${APP_DIR}/Contents/Info.plist"
 
 # Bake the deployment config into Contents/Resources/ (NOT Contents/MacOS/).
 # codesign REJECTS any non-code file placed alongside the executable in MacOS/
@@ -110,7 +148,7 @@ xattr -dr com.apple.quarantine "${APP_DIR}" 2>/dev/null || true
 # self-signed) anchors the designated requirement to the cert identity, so the
 # grant survives rebuilds on this machine. (An Apple Developer ID would also
 # fix Gatekeeper warnings; this fixes the TCC re-prompt loop without one.)
-SIGN_IDENTITY="LMA Audio Client Local Signing"
+SIGN_IDENTITY="LMA Capture Client Local Signing"
 
 ensure_signing_identity() {
   # Already have a usable identity? Done. (find-identity only lists certs that
@@ -159,19 +197,19 @@ if [[ "${LMA_ADHOC_SIGN:-0}" == "1" ]]; then
   # Escape hatch (CI, throwaway builds): LMA_ADHOC_SIGN=1 restores old behavior.
   echo "==> ad-hoc codesign (LMA_ADHOC_SIGN=1)"
   codesign --force --sign - \
-    --entitlements LMAAudioClient.entitlements \
+    --entitlements LMACaptureClient.entitlements \
     --options runtime \
     "${APP_DIR}"
 elif ensure_signing_identity; then
   echo "==> codesign with persistent identity: ${SIGN_IDENTITY}"
   if ! codesign --force --sign "${SIGN_IDENTITY}" \
-      --entitlements LMAAudioClient.entitlements \
+      --entitlements LMACaptureClient.entitlements \
       --options runtime \
       "${APP_DIR}"; then
     echo "    WARNING: identity signing failed — falling back to ad-hoc."
     echo "    (Screen Recording permission will need re-granting after each rebuild.)"
     codesign --force --sign - \
-      --entitlements LMAAudioClient.entitlements \
+      --entitlements LMACaptureClient.entitlements \
       --options runtime \
       "${APP_DIR}"
   fi
@@ -179,15 +217,15 @@ else
   echo "    WARNING: couldn't create signing identity — falling back to ad-hoc."
   echo "    (Screen Recording permission will need re-granting after each rebuild.)"
   codesign --force --sign - \
-    --entitlements LMAAudioClient.entitlements \
+    --entitlements LMACaptureClient.entitlements \
     --options runtime \
     "${APP_DIR}"
 fi
 
 echo ""
-echo "Built ${APP_DIR}"
+echo "Built ${APP_DIR}  (${DISPLAY_NAME}, ${BUNDLE_ID})"
 echo "Run it with:"
-echo "  ${MACOS_DIR}/${APP_NAME} \\"
+echo "  ${MACOS_DIR}/${BIN_NAME} \\"
 echo "    --endpoint wss://<cloudfront-domain>/api/v1/ws \\"
 echo "    --token <cognito-access-token> --id-token <cognito-id-token> \\"
 echo "    --call-id \"Native Mac test\""

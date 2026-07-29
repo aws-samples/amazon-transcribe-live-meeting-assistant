@@ -52,6 +52,44 @@ struct Config {
     /// CLI: video source id ("display:<id>" / "window:<id>"; "" = main display).
     var videoSourceID: String
 
+    /// Name of the LMA CloudFormation stack this download came from. Shown in
+    /// the UI and — critically — used to namespace all per-machine identifiers
+    /// (bundle id, preferences, install path) so the apps for two different LMA
+    /// stacks can coexist. Empty for hand-built dev copies.
+    var stackName: String
+    /// LMA version this package was built from (shown in the About footer).
+    var appVersion: String
+
+    /// The stack name reduced to a safe identifier fragment: alphanumerics and
+    /// dashes only, lowercased. Used in the bundle id / defaults suite / paths.
+    /// Empty when no stack name is configured (dev builds), in which case the
+    /// callers fall back to their unsuffixed defaults.
+    var stackSlug: String {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789-")
+        let lowered = stackName.lowercased()
+        let mapped = lowered.map { allowed.contains($0) ? $0 : "-" }
+        // Collapse runs of dashes and trim them from the ends.
+        var out = ""
+        var lastWasDash = false
+        for ch in mapped {
+            if ch == "-" {
+                if !lastWasDash { out.append(ch) }
+                lastWasDash = true
+            } else {
+                out.append(ch)
+                lastWasDash = false
+            }
+        }
+        return out.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    /// Human-readable app label, stack-qualified when known:
+    /// "LMA Capture Client (LMA-Bob)" — so multiple copies are distinguishable
+    /// in the Dock, window titles, and menu bar.
+    var appDisplayName: String {
+        stackName.isEmpty ? "LMA Capture Client" : "LMA Capture Client (\(stackName))"
+    }
+
     /// Fallback consent text when the deployment config predates the setting.
     static let defaultDisclaimer =
         "Important: You are responsible for complying with legal, corporate, and ethical "
@@ -102,7 +140,9 @@ struct Config {
             recordingDisclaimer: value("disclaimer", "LMA_RECORDING_DISCLAIMER", "recordingDisclaimer",
                                        Config.defaultDisclaimer),
             videoEnabled: ["1", "true", "yes"].contains(value("video", "LMA_VIDEO").lowercased()),
-            videoSourceID: value("video-source", "LMA_VIDEO_SOURCE")
+            videoSourceID: value("video-source", "LMA_VIDEO_SOURCE"),
+            stackName: value("stack-name", "LMA_STACK_NAME", "stackName"),
+            appVersion: value("app-version", "LMA_APP_VERSION", "appVersion")
         )
     }
 

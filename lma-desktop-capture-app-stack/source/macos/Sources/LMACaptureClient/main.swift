@@ -10,7 +10,7 @@ import AVFoundation
 // Zoom/Teams/Meet desktop client via system-audio loopback.
 //
 // Usage:
-//   swift run LMAAudioClient \
+//   swift run LMACaptureClient \
 //     --endpoint wss://<cloudfront-domain>/api/v1/ws \
 //     --token <cognito-access-token> \
 //     --id-token <cognito-id-token> \

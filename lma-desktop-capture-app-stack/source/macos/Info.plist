@@ -1,35 +1,42 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Info.plist for the .app bundle wrapper (see make-app.sh).
+  Info.plist TEMPLATE for the .app bundle wrapper (see make-app.sh).
 
   A bare `swift run` / `swift build` executable has NO bundle, so macOS
   attributes its Microphone + Screen Recording access to the PARENT process
   (Terminal / iTerm). Wrapping the binary in a minimal .app with this plist
-  gives the client its OWN TCC identity ("LMAAudioClient") so the permission
-  prompts and System Settings toggles are attributed to the app, not Terminal.
+  gives the client its OWN TCC identity so the permission prompts and System
+  Settings toggles are attributed to the app, not Terminal.
 
   NSMicrophoneUsageDescription is REQUIRED — without it the process is killed
   the instant it touches the microphone API (TCC crash, not a prompt).
   Screen Recording has no plist key; ScreenCaptureKit triggers that prompt at
   runtime and the toggle appears under Privacy & Security > Screen Recording.
+
+  PER-STACK IDENTITY: make-app.sh substitutes the __LMA_* placeholders below
+  from the stack name baked into lma-config.json, so the app for each LMA
+  deployment gets its own bundle id, display name, and therefore its own TCC
+  grants, preferences, and Dock/login-item identity. That is what lets the
+  clients for two different LMA stacks coexist on one machine. Do NOT hardcode
+  these values back — the placeholders are load-bearing.
 -->
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>LMAAudioClient</string>
+    <string>__LMA_BUNDLE_NAME__</string>
     <key>CFBundleDisplayName</key>
-    <string>LMA Audio Client</string>
+    <string>__LMA_DISPLAY_NAME__</string>
     <key>CFBundleIdentifier</key>
-    <string>com.amazon.lma.audioclient</string>
+    <string>__LMA_BUNDLE_ID__</string>
     <key>CFBundleVersion</key>
-    <string>0.1.0</string>
+    <string>__LMA_APP_VERSION__</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>__LMA_APP_VERSION__</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
-    <string>LMAAudioClient</string>
+    <string>LMACaptureClient</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <!-- Regular app: shows in the Dock (with a REC badge while recording) in

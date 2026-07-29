@@ -55,6 +55,10 @@ final class VideoCapture: NSObject, SCStreamOutput, SCStreamDelegate, AVAssetWri
     private(set) var firstFrameDate: Date?
     /// Called once when the first frame is captured (offset reporting).
     var onFirstFrame: (() -> Void)?
+    /// Called when the requested source wasn't available and capture fell back
+    /// to a different one (privacy-relevant: a window choice becoming a whole
+    /// display). Passes a user-facing message.
+    var onFallback: ((String) -> Void)?
 
     private let encodeQueue = DispatchQueue(label: "lma.sck.video")
     private var stopped = false
@@ -127,8 +131,16 @@ final class VideoCapture: NSObject, SCStreamOutput, SCStreamDelegate, AVAssetWri
                let did = UInt32(sourceID.dropFirst("display:".count)),
                let d = content.displays.first(where: { $0.displayID == did }) {
                 display = d
-            } else if !sourceID.isEmpty && !sourceID.hasPrefix("display:") {
-                print("⚠ video source '\(sourceID)' not found; recording the main display")
+            } else if !sourceID.isEmpty {
+                // Requested source is gone (window closed, display unplugged).
+                // Falling back from a window to the WHOLE SCREEN changes what
+                // gets recorded, so tell the user instead of doing it silently.
+                let msg = sourceID.hasPrefix("window:")
+                    ? "The window you chose for screen video is no longer open — recording the whole screen instead."
+                    : "The display you chose for screen video isn't available — recording the main display instead."
+                print("⚠ \(msg)")
+                let cb = onFallback
+                DispatchQueue.main.async { cb?(msg) }
             }
             guard let d = display else {
                 throw NSError(domain: "LMA", code: 2, userInfo: [
