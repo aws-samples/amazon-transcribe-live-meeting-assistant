@@ -22,31 +22,73 @@ RUN npm run build
 
 RUN npm prune --production
 
+# Static ffmpeg builder. Produces ONE self-contained binary with only the
+# features the mux needs, so the runtime image keeps its full security purge
+# (see the note in the runtime stage). Pinned by digest for reproducibility.
+FROM public.ecr.aws/docker/library/debian:bookworm-slim AS ffmpeg-build
+ARG FFMPEG_VERSION=6.1.1
+RUN set -eux; \
+    apt-get update; \
+    apt-get -y install --no-install-recommends \
+        build-essential curl ca-certificates xz-utils nasm pkg-config; \
+    curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o /tmp/ffmpeg.tar.xz; \
+    mkdir -p /tmp/ffmpeg && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
+    cd /tmp/ffmpeg; \
+    # --disable-everything, then enable ONLY what the mux uses: read fragmented
+    # MP4 + WAV, write MP4, copy H.264, encode AAC. No network protocols, no
+    # external libs, so nothing links gnutls/gcrypt.
+    ./configure \
+        --disable-everything \
+        --disable-shared --enable-static \
+        --disable-doc --disable-debug \
+        --disable-network --disable-autodetect \
+        --enable-protocol=file,pipe \
+        --enable-demuxer=mov,mp4,m4v,wav,concat \
+        --enable-muxer=mp4 \
+        --enable-decoder=h264,aac,pcm_s16le \
+        --enable-encoder=aac \
+        --enable-parser=h264,aac \
+        --enable-bsf=h264_mp4toannexb,extract_extradata \
+        --enable-filter=aresample,anull,null \
+        --disable-ffplay --disable-ffprobe; \
+    make -j"$(nproc)"; \
+    strip ffmpeg; \
+    ./ffmpeg -version
+
 # Now create the runtime image and copy the build artifacts into it
 FROM public.ecr.aws/docker/library/node:20-slim AS runtime
 
 # Apply all pending security patches to resolve Mirador/ECR container findings.
-# ffmpeg is installed here (before apt is purged below) — used to mux the
-# optional desktop-video stream with the call audio into a single MP4.
-# NOTE: ffmpeg's Debian build links the gnutls stack (libgnutls30, libnettle8,
-# libhogweed6, libp11-kit0, libtasn1-6) and, via libssh-gcrypt, libgcrypt20 +
-# libgpg-error0 — so those libraries, previously purged outright, are now
-# retained at their fully-patched (post-upgrade) versions. The rest of the
-# hardening purge (systemd, apt itself, gpgv) stands.
+#
+# The ORIGINAL hardening purge is restored in full here (including libgnutls30,
+# libgcrypt20, libnettle8, libhogweed6, libp11-kit0, libtasn1-6, libgpg-error0)
+# because ffmpeg is NOT installed from apt. Installing Debian's ffmpeg would
+# link that whole gnutls/gcrypt stack — the recurring high-severity CVE surface
+# this purge exists to remove — and pull ~250 MB of codecs, SDL2, Vulkan, etc.
+# into an internet-facing container that only needs a stream copy plus one AAC
+# encode. Instead a STATIC ffmpeg is built in the stage above and copied in as a
+# single self-contained binary: no shared-library footprint, no CVE surface, and
+# the purge below can stay exactly as it was before video support existed.
 RUN set -eux; \
     apt-get update; \
     apt-get -y upgrade; \
-    apt-get -y install --no-install-recommends ffmpeg; \
     apt-get -y --purge remove systemd libsystemd-shared || true; \
     apt-get -y autoremove --purge || true; \
     apt-get -y clean || true; \
     dpkg --purge --force-remove-essential --force-depends \
         apt apt-utils libapt-pkg6.0 \
+        libgnutls30 libhogweed6 libnettle8 libp11-kit0 libtasn1-6 \
+        libgcrypt20 libgpg-error0 \
         gpgv \
         || true; \
     rm -rf /var/lib/apt /var/lib/dpkg/info/apt.* /var/lib/dpkg/info/libapt-pkg*.* \
            /var/cache/apt /var/cache/debconf/* \
+           /usr/lib/*/libgnutls.so.* /usr/lib/*/libgcrypt.so.* \
+           /usr/lib/*/libhogweed.so.* /usr/lib/*/libnettle.so.* \
+           /usr/lib/*/libp11-kit.so.* /usr/lib/*/libtasn1.so.* \
+           /usr/lib/*/libgpg-error.so.* \
            /usr/bin/apt /usr/bin/apt-* /usr/bin/gpgv \
+           /usr/share/doc/libgnutls30 /usr/share/doc/libgcrypt20 \
            /usr/share/doc/apt /usr/share/doc/libapt-pkg* \
            2>/dev/null || true
 
@@ -59,6 +101,8 @@ EXPOSE $SERVERPORT
 
 COPY --from=builder "/app/node_modules/" "/app/node_modules"
 COPY --from=builder "/app/dist" "/app/dist"
+# Static, dependency-free ffmpeg for the end-of-call video mux (see note above).
+COPY --from=ffmpeg-build /tmp/ffmpeg/ffmpeg /usr/local/bin/ffmpeg
 
 USER node
 ENTRYPOINT ["node", "/app/dist/index.js"]

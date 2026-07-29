@@ -42,6 +42,9 @@ import { writeCallVideoRecordingEvent } from './calleventdata/transcribe';
 import { posixifyFilename, normalizeErrorForLogging } from './utils/common';
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
+// Partition-aware S3 hostname suffix (amazonaws.com, amazonaws.com.cn, ...),
+// supplied by the task definition. Falls back to the commercial suffix.
+const AWS_URL_SUFFIX = process.env['AWS_URL_SUFFIX'] || 'amazonaws.com';
 const RECORDINGS_BUCKET_NAME =
     process.env['RECORDINGS_BUCKET_NAME'] || undefined;
 const VIDEO_RECORDINGS_KEY_PREFIX =
@@ -119,6 +122,39 @@ const VIDEO_WAIT_FOR_END_AFTER_AUDIO_MS = numericEnv(
 /** Total bytes currently written to disk across all live video sessions. */
 let videoTotalBytes = 0;
 
+/** In-flight mux/upload promises, awaited on shutdown (see awaitPendingMuxes). */
+const pendingMuxes = new Set<Promise<void>>();
+
+/**
+ * Resolve once every in-flight mux/upload has finished (or the deadline passes).
+ *
+ * muxAndUpload is deliberately fire-and-forget from the request paths, so on
+ * SIGTERM (any deploy, scale-in, or health-check replacement) ffmpeg would
+ * otherwise be SIGKILLed mid-mux: the user's video is lost silently, with no
+ * ADD_S3_VIDEO_RECORDING_URL and no explanation. index.ts awaits this before
+ * closing the server.
+ */
+export const awaitPendingMuxes = async (
+    server: FastifyInstance,
+    deadlineMs: number
+): Promise<void> => {
+    if (pendingMuxes.size === 0) {
+        return;
+    }
+    server.log.info(
+        `[VIDEO]: Waiting up to ${deadlineMs}ms for ${pendingMuxes.size} in-flight video mux(es) to finish.`
+    );
+    await Promise.race([
+        Promise.allSettled([...pendingMuxes]),
+        new Promise((resolve) => setTimeout(resolve, deadlineMs)),
+    ]);
+    if (pendingMuxes.size > 0) {
+        server.log.error(
+            `[VIDEO]: ${pendingMuxes.size} video mux(es) did not finish before shutdown; those recordings are lost.`
+        );
+    }
+};
+
 const s3Client = new S3Client({ region: AWS_REGION });
 
 export type VideoSession = {
@@ -169,8 +205,6 @@ export type VideoSession = {
 // only after the mux/upload completes (or is abandoned).
 const videoSessions = new Map<string, VideoSession>();
 
-export const isVideoRecordingEnabled = (): boolean => ENABLE_VIDEO_RECORDING;
-
 export const getVideoSession = (callId: string): VideoSession | undefined =>
     videoSessions.get(callId);
 
@@ -210,8 +244,17 @@ const createSegmentStream = (
 const segmentFileName = (callId: string, index: number): string =>
     `${posixifyFilename(callId)}_video_${index}.mp4`;
 
-const muxedFileName = (callId: string): string =>
-    `${posixifyFilename(callId)}.mp4`;
+/**
+ * S3 object name for the muxed recording. Includes a timestamp because
+ * posixifyFilename is lossy (every character outside [A-Za-z0-9_.] becomes
+ * '_'), so two differently-titled meetings — or the same meeting recorded
+ * twice — would otherwise collide and silently overwrite each other. The
+ * Virtual Participant uses the same convention.
+ */
+const muxedFileName = (callId: string): string => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `${posixifyFilename(callId)}_${stamp}.mp4`;
+};
 
 /**
  * Handle a START_VIDEO event. Returns the session the socket should be bound
@@ -321,10 +364,12 @@ const newSession = (
     segmentPaths: [],
     fileSize: 0,
     sizeCapReached: false,
+    // Client-supplied; clamp to a sane range so a bogus value can't produce an
+    // 11-day timeline that makes the player useless.
     videoTimeOffsetMs:
         typeof callMetaData.videoTimeOffsetMs === 'number' &&
         isFinite(callMetaData.videoTimeOffsetMs)
-            ? Math.max(0, callMetaData.videoTimeOffsetMs)
+            ? Math.min(Math.max(0, callMetaData.videoTimeOffsetMs), 60 * 60 * 1000)
             : 0,
     videoEnded: false,
     audioDone: false,
@@ -550,12 +595,26 @@ const muxAndUpload = async (
     session: VideoSession,
     server: FastifyInstance
 ): Promise<void> => {
-    // Node is single-threaded: this check-and-set is atomic w.r.t. the other
-    // trigger paths (END_VIDEO handler, audio-done callback, safety timer).
+    // Node is single-threaded and there is no await between the check and the
+    // set, so exactly one caller can win the race to start a mux. NOTE: this
+    // guarantee covers only THIS function — callers must not assume it protects
+    // work they do around their own await points (endVideoSession's zero-byte
+    // branch, for example, has to re-check muxStarted after its flush await).
     if (session.muxStarted) {
         return;
     }
     session.muxStarted = true;
+    // Registered so shutdown can wait for it (see awaitPendingMuxes).
+    const tracked = muxAndUploadInner(session, server);
+    pendingMuxes.add(tracked);
+    tracked.finally(() => pendingMuxes.delete(tracked));
+    return tracked;
+};
+
+const muxAndUploadInner = async (
+    session: VideoSession,
+    server: FastifyInstance
+): Promise<void> => {
     if (session.safetyTimer) {
         clearTimeout(session.safetyTimer);
         session.safetyTimer = undefined;
@@ -742,15 +801,23 @@ export const runFfmpegMux = (
         const killTimer = setTimeout(() => {
             proc.kill('SIGKILL');
         }, FFMPEG_TIMEOUT_MS);
+        // Clean up the concat list on EVERY exit path. It previously leaked on
+        // the 'error' path (ffmpeg missing, ENOENT, EAGAIN), accumulating files
+        // on the same volume the video budget is trying to protect.
+        const cleanupList = () => {
+            if (concatListPath) {
+                fs.promises.unlink(concatListPath).catch(() => undefined);
+                concatListPath = undefined;
+            }
+        };
         proc.on('error', (err) => {
             clearTimeout(killTimer);
+            cleanupList();
             reject(err);
         });
         proc.on('close', (code) => {
             clearTimeout(killTimer);
-            if (concatListPath) {
-                fs.promises.unlink(concatListPath).catch(() => undefined);
-            }
+            cleanupList();
             if (code === 0) {
                 resolve();
             } else {
@@ -780,7 +847,7 @@ const uploadVideo = async (
         );
         // Same URL shape as the audio recording and the Virtual Participant:
         // the UI presigns it client-side for playback.
-        return `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${VIDEO_RECORDINGS_KEY_PREFIX}${fileName}`;
+        return `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.${AWS_URL_SUFFIX}/${VIDEO_RECORDINGS_KEY_PREFIX}${fileName}`;
     } catch (err) {
         server.log.error(
             `[VIDEO]: [${callId}] - Error uploading video recording to S3: ${normalizeErrorForLogging(

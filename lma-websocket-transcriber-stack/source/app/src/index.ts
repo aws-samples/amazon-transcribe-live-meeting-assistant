@@ -42,6 +42,7 @@ import {
     videoSocketDropped,
     writeVideoChunk,
     notifyAudioRecordingDone,
+    awaitPendingMuxes,
 } from './videorecording';
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
@@ -227,12 +228,22 @@ const registerHandlers = (
                 );
             }
         } catch (error) {
+            // Close THIS socket; do not exit. This task multiplexes many
+            // concurrent calls, so terminating the process because one client
+            // sent a malformed frame (or one recording hit an I/O error) would
+            // drop every other meeting in progress too.
             server.log.error(
-                `[ON MESSAGE]: [${clientIP}] - Error processing message: ${normalizeErrorForLogging(
+                `[ON MESSAGE]: [${clientIP}] - Error processing message; closing this connection: ${normalizeErrorForLogging(
                     error
                 )}`
             );
-            process.exit(1);
+            try {
+                ws.close(1011, 'internal error processing message');
+            } catch (closeErr) {
+                server.log.error(
+                    `[ON MESSAGE]: [${clientIP}] - Error closing connection: ${normalizeErrorForLogging(closeErr)}`
+                );
+            }
         }
     });
 
@@ -317,7 +328,17 @@ const onTextMessage = async (
     const refreshToken = query.refresh_token || headers.refresh_token;
 
     const match = auth?.match(/^Bearer (.+)$/);
-    const callMetaData: CallMetaData = JSON.parse(data);
+    let callMetaData: CallMetaData;
+    try {
+        callMetaData = JSON.parse(data) as CallMetaData;
+    } catch (parseErr) {
+        // A truncated/garbled control frame is the client's problem, not grounds
+        // for tearing down every other call on this task.
+        server.log.error(
+            `[ON TEXT MESSAGE]: [${clientIP}] - Ignoring unparseable control frame: ${normalizeErrorForLogging(parseErr)}`
+        );
+        return;
+    }
     if (!match) {
         server.log.error(
             `[AUTH]: [${clientIP}] - No Bearer token found in header or query string. URI: <${
@@ -778,3 +799,43 @@ server.listen(
         server.log.info(`[[WS SERVER STARTUP]]: Routes: \n${server.printRoutes()}`);
     }
 );
+
+/**
+ * Graceful shutdown. ECS sends SIGTERM on every deploy, scale-in, and
+ * health-check replacement, then SIGKILLs after StopTimeout. End-of-call video
+ * muxes run detached from the request path, so without this they are killed
+ * mid-ffmpeg and the user's recording vanishes with no event and no error.
+ *
+ * We stop accepting new work, give in-flight muxes a bounded window to finish,
+ * then exit. Keep SHUTDOWN_MUX_GRACE_MS below the container's StopTimeout.
+ */
+const SHUTDOWN_MUX_GRACE_MS = parseInt(
+    process.env['SHUTDOWN_MUX_GRACE_MS'] || '90000',
+    10
+);
+let shuttingDown = false;
+const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) {
+        return;
+    }
+    shuttingDown = true;
+    server.log.info(`[SHUTDOWN]: Received ${signal}; finishing in-flight work.`);
+    try {
+        await awaitPendingMuxes(server, SHUTDOWN_MUX_GRACE_MS);
+    } catch (err) {
+        server.log.error(
+            `[SHUTDOWN]: Error waiting for in-flight video muxes: ${normalizeErrorForLogging(err)}`
+        );
+    }
+    try {
+        await server.close();
+    } catch (err) {
+        server.log.error(
+            `[SHUTDOWN]: Error closing server: ${normalizeErrorForLogging(err)}`
+        );
+    }
+    server.log.info('[SHUTDOWN]: Complete.');
+    process.exit(0);
+};
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));

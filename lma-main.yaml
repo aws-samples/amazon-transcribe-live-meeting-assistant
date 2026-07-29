@@ -511,10 +511,14 @@ Parameters:
       - "true"
       - "false"
     Description: >-
-      Default for capturing meeting video (screen recording) by the Virtual
-      Participant, in addition to audio. This is the deployment-wide default;
-      users can override it per meeting with the "Record meeting video" toggle in
-      the LMA UI. Video recordings consume additional CPU and S3 storage.
+      Enables meeting video (screen recording) in addition to audio, for BOTH
+      video sources: the Virtual Participant and the Desktop Capture App. For the
+      Virtual Participant this is the deployment-wide default and users can
+      override it per meeting with the "Record meeting video" toggle in the LMA
+      UI; for the Desktop Capture App it is a hard on/off (users opt in per
+      machine in the app's Settings, and the server discards video when this is
+      false). Video recordings consume additional CPU, ephemeral storage, and S3
+      storage.
 
   AudioRecordingExpirationInDays:
     Type: Number

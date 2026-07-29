@@ -348,7 +348,15 @@ async function main(): Promise<void> {
         const resumeWav = path.join(TEST_TMP, `${RESUME_CALL}.wav`);
         fs.copyFileSync(wav, resumeWav);
         notifyAudioRecordingDone(RESUME_CALL, resumeWav, server);
-        const resumeOut = path.join(TEST_TMP, `${RESUME_CALL.replace(/-/g, '_')}.mp4`);
+        // The muxed name now carries a timestamp (so re-recorded meetings can't
+        // overwrite each other in S3), so discover it rather than hardcoding.
+        const findMuxed = (): string | undefined => {
+            const prefix = `${RESUME_CALL.replace(/-/g, '_')}_`;
+            const hit = fs
+                .readdirSync(TEST_TMP)
+                .find((f) => f.startsWith(prefix) && f.endsWith('.mp4') && !f.includes('_video_'));
+            return hit ? path.join(TEST_TMP, hit) : undefined;
+        };
         // Frame count is the unambiguous measure of "did we keep everything?".
         // (Stream *duration* metadata on a fragmented MP4 is not a reliable
         // proxy — it reads short even for a byte-perfect stream.)
@@ -365,11 +373,12 @@ async function main(): Promise<void> {
             () => {
                 // Must be COMPLETE, not merely present: ffmpeg writes the file
                 // incrementally, so a half-written file decodes to fewer frames.
-                if (!fs.existsSync(resumeOut)) {
+                const f = findMuxed();
+                if (!f) {
                     return false;
                 }
                 try {
-                    return countFrames(resumeOut) >= sourceFrames;
+                    return countFrames(f) >= sourceFrames;
                 } catch {
                     return false; // still being written
                 }
@@ -377,6 +386,7 @@ async function main(): Promise<void> {
             20_000,
             'resumed parts should produce a COMPLETE muxed mp4 (VIDEO_KEEP_MUXED is set)'
         );
+        const resumeOut = findMuxed() as string;
         const resumeCodecs = ffprobeCodecs(resumeOut);
         assert.ok(
             resumeCodecs.some((c) => c.startsWith('h264,video')),

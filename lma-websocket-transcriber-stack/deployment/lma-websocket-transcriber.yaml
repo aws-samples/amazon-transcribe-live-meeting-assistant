@@ -337,9 +337,13 @@ Parameters:
   VideoRecordingsPrefix:
     Type: String
     Default: "lma-video-recordings/"
+    AllowedPattern: ".*/$"
+    ConstraintDescription: must end with a forward slash (/)
     Description: >-
-      The Amazon S3 prefix where muxed video recordings (MP4) will be saved
-      (must end in "/")
+      The Amazon S3 prefix where muxed video recordings (MP4) will be saved.
+      MUST end in "/" — the enforcing pattern matters because the parent stack's
+      lifecycle rule keys off this exact prefix, so a mismatched value would
+      leave recordings that never expire.
 
   PermissionsBoundaryArn:
     Type: String
@@ -1216,6 +1220,10 @@ Resources:
             # audio .raw/.wav files and the muxed output always have room.
             - Name: VIDEO_MAX_TOTAL_BYTES
               Value: !Ref VideoMaxTotalBytes
+            # Partition-correct S3 hostname suffix (amazonaws.com,
+            # amazonaws.com.cn, ...) for the recording URLs the UI presigns.
+            - Name: AWS_URL_SUFFIX
+              Value: !Ref AWS::URLSuffix
             - Name: CodeLocation
               Value: !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
             - Name: WS_LOG_LEVEL
@@ -1236,6 +1244,10 @@ Resources:
           PortMappings:
             - ContainerPort: 8080
               Protocol: tcp
+          # ECS SIGKILLs this many seconds after SIGTERM. The app uses the window
+          # to finish in-flight end-of-call video muxes (see SHUTDOWN_MUX_GRACE_MS
+          # in index.ts); without the headroom a deploy silently loses recordings.
+          StopTimeout: 120
       # Sized for the workload actually enabled. The desktop-video lane streams
       # fMP4 to disk during calls and runs an ffmpeg mux at call end, which needs
       # ~1 vCPU / 2 GB; audio alone fit comfortably in 256/1024. Keeping the
