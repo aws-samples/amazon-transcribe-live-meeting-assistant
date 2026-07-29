@@ -121,6 +121,14 @@ public sealed class PanelView : Border
 
     private readonly StackPanel _body = new();
 
+    // Rows that CONTAIN long-lived controls must themselves be long-lived.
+    // Refresh() calls _body.Children.Clear(), which only detaches the row — the
+    // controls inside remain that row's logical children, so building a fresh row
+    // each Refresh and re-adding them would throw ("already the logical child of
+    // another element"). Building the rows once and re-adding the ROW is safe.
+    private readonly DockPanel _meetingNameRow = new() { LastChildFill = true, Margin = new Thickness(0, 0, 0, 2) };
+    private readonly StackPanel _liveRow = new() { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
+
     public Action? RequestClosePopup;
 
     public PanelView(CaptureController controller)
@@ -226,6 +234,13 @@ public sealed class PanelView : Border
         _micLabelBox = PlaceholderBox(_micLabel, _micHint);
         _systemLabelBox = PlaceholderBox(_systemLabel, _systemHint);
 
+        // Assemble the persistent rows once (see the field comment).
+        DockPanel.SetDock(_recentMeetings, Dock.Right);
+        _meetingNameRow.Children.Add(_recentMeetings);
+        _meetingNameRow.Children.Add(_meetingName);
+        _liveRow.Children.Add(_liveStatus);
+        _liveRow.Children.Add(_elapsedText);
+
         // Settings gear: toggle the section; save on every edit (no Apply).
         // Disabled while streaming — labels ride the START frame, so mid-meeting
         // changes wouldn't take effect anyway.
@@ -250,24 +265,11 @@ public sealed class PanelView : Border
         };
         _videoEnabled.Click += (_, _) =>
         {
-            bool on = _videoEnabled.IsChecked ?? false;
-            AppSettings.VideoEnabled = on;
+            AppSettings.VideoEnabled = _videoEnabled.IsChecked ?? false;
             PushSettingsToController();
-            // Show/hide the source picker in place (the settings live in their
-            // own window now, so there's no panel rebuild to piggyback on).
-            _videoSourceHost.Children.Clear();
-            if (on)
-            {
-                RefreshVideoPicker();
-                _videoSourceHost.Children.Add(_videoPicker);
-                _videoSourceHost.Children.Add(new TextBlock
-                {
-                    Text = "The selected screen or window is recorded with the meeting and saved as a " +
-                           "video in LMA.",
-                    Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
-                    Margin = new Thickness(0, 0, 0, 4),
-                });
-            }
+            // Show/hide the source picker in place (settings live in their own
+            // window now, so there's no panel rebuild to piggyback on).
+            SyncVideoSourceHost();
         };
         _videoPicker.SelectionChanged += (_, _) =>
         {
@@ -491,13 +493,9 @@ public sealed class PanelView : Border
             else if (!streaming)
             {
                 _body.Children.Add(Label("Meeting name (optional)"));
-                var nameRow = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, 2) };
-                DockPanel.SetDock(_recentMeetings, Dock.Right);
                 _recentMeetings.Visibility = AppSettings.RecentMeetingNames.Count > 0
                     ? Visibility.Visible : Visibility.Collapsed;
-                nameRow.Children.Add(_recentMeetings);
-                nameRow.Children.Add(_meetingName);
-                _body.Children.Add(nameRow);
+                _body.Children.Add(_meetingNameRow);
                 _start.Margin = new Thickness(0, 4, 0, 4);
                 _body.Children.Add(_start);
                 // Persistent consent reminder: the full disclaimer is a one-time
@@ -524,11 +522,8 @@ public sealed class PanelView : Border
                 _body.Children.Add(_sysBar);
                 _body.Children.Add(_micBar);
                 _liveStatus.Margin = new Thickness(0, 4, 0, 4);
-                var liveRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
-                liveRow.Children.Add(_liveStatus);
                 _elapsedText.Text = ElapsedText;
-                liveRow.Children.Add(_elapsedText);
-                _body.Children.Add(liveRow);
+                _body.Children.Add(_liveRow);
                 if (_c.IsVideoActive)
                 {
                     _body.Children.Add(new TextBlock
@@ -572,14 +567,33 @@ public sealed class PanelView : Border
         });
     }
 
+    // The settings content is built ONCE and reused: it contains long-lived
+    // controls (label boxes, pickers), and rebuilding the container on every
+    // Settings-window open would try to re-parent controls that still belong to
+    // the previous container — WPF throws on that.
+    private StackPanel? _settingsContent;
+
     /// <summary>
     /// The settings controls, for hosting in the standalone Settings window.
-    /// These are the SAME control instances the panel owns (WPF allows one
-    /// parent, so they live in exactly one place — the settings window).
+    /// These are the SAME control instances the panel owns (WPF allows exactly
+    /// one parent, so they live in one place — the settings window). Cached, so
+    /// closing and reopening the window re-hosts the same panel.
     /// </summary>
     public UIElement BuildSettingsContent()
     {
         RefreshMicPicker();
+        if (_settingsContent != null)
+        {
+            // Refresh the dynamic bits, then hand back the existing panel. It
+            // must be detached from the closed window first, or adding it to the
+            // new window throws.
+            UpdateLabelHints();
+            _videoEnabled.IsChecked = AppSettings.VideoEnabled;
+            SyncVideoSourceHost();
+            if (_settingsContent.Parent is ScrollViewer sv) sv.Content = null;
+            else if (_settingsContent.Parent is Panel parent) parent.Children.Remove(_settingsContent);
+            return _settingsContent;
+        }
         var v = new StackPanel();
         v.Children.Add(Label("Speaker labels — shown in the LMA transcript"));
         // Blank field = use the default, shown as grey placeholder text in the
@@ -607,19 +621,7 @@ public sealed class PanelView : Border
         v.Children.Add(Label("Screen video"));
         _videoEnabled.IsChecked = AppSettings.VideoEnabled;
         v.Children.Add(_videoEnabled);
-        _videoSourceHost.Children.Clear();
-        if (AppSettings.VideoEnabled)
-        {
-            RefreshVideoPicker();
-            _videoSourceHost.Children.Add(_videoPicker);
-            _videoSourceHost.Children.Add(new TextBlock
-            {
-                Text = "The selected screen or window is recorded with the meeting and saved as a " +
-                       "video in LMA.",
-                Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 0, 0, 4),
-            });
-        }
+        SyncVideoSourceHost();
         v.Children.Add(_videoSourceHost);
 
         // Consent record: when + what the user agreed to, so the one-time
@@ -645,7 +647,27 @@ public sealed class PanelView : Border
                 Margin = new Thickness(0, 0, 0, 4),
             });
         }
+        _settingsContent = v;
         return v;
+    }
+
+    /// <summary>
+    /// Show or hide the video source picker + help text in place, matching the
+    /// "Also record screen video" toggle.
+    /// </summary>
+    private void SyncVideoSourceHost()
+    {
+        _videoSourceHost.Children.Clear();
+        if (!AppSettings.VideoEnabled) return;
+        RefreshVideoPicker();
+        _videoSourceHost.Children.Add(_videoPicker);
+        _videoSourceHost.Children.Add(new TextBlock
+        {
+            Text = "The selected screen or window is recorded with the meeting and saved as a " +
+                   "video in LMA.",
+            Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 4),
+        });
     }
 
     /// <summary>
