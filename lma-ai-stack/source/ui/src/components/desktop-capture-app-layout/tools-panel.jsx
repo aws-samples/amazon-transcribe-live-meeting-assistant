@@ -12,29 +12,30 @@ const header = <h2>Desktop Capture App</h2>;
 const content = (
   <>
     <p>
-      The LMA Desktop Capture App is a native application that streams your microphone and your computer&apos;s system
-      (meeting) audio to LMA. Because it captures operating-system audio rather than a browser tab, it can transcribe
-      meetings joined from native desktop apps &mdash; Zoom, Microsoft Teams, Cisco Webex, Slack huddles, or phone
-      bridges &mdash; with no bot or extra attendee.
+      The LMA Capture Client is a native application that streams your microphone, your computer&apos;s system (meeting)
+      audio, and optionally your screen to LMA. Because it captures operating-system audio rather than a browser tab, it
+      can transcribe meetings joined from native desktop apps &mdash; Zoom, Microsoft Teams, Cisco Webex, Slack huddles,
+      or phone bridges &mdash; with no bot or extra attendee.
     </p>
     <h3>Features</h3>
     <ul>
       <li>Transcribes native (non-browser) meeting apps</li>
       <li>Captures your mic (AGENT) and system/meeting audio (CALLER) as separate channels</li>
+      <li>Optional screen-video recording (a screen or a single window), saved as an MP4 in LMA</li>
       <li>No bot or extra attendee in the meeting</li>
       <li>Preconfigured for this deployment; sign in with your LMA username/password</li>
+      <li>One client per LMA stack &mdash; install several side by side if you use multiple deployments</li>
     </ul>
     <h3>Availability</h3>
     <ul>
-      <li>macOS 13+ &mdash; available now</li>
-      <li>Windows &mdash; planned</li>
-      <li>iPhone / iPad, Android &mdash; under consideration</li>
-    </ul>
-    <h3>Requirements (macOS)</h3>
-    <ul>
       <li>macOS 13 (Ventura) or later</li>
-      <li>Apple command-line tools (the installer prompts you if missing)</li>
-      <li>Microphone and Screen Recording permissions (Screen Recording enables system-audio capture)</li>
+      <li>Windows 10 or 11</li>
+    </ul>
+    <h3>Requirements</h3>
+    <ul>
+      <li>macOS: Apple command-line tools (the installer prompts you if missing)</li>
+      <li>macOS: Microphone and Screen Recording permissions (Screen Recording enables system-audio capture)</li>
+      <li>Windows: .NET 8 Desktop Runtime unless you build the self-contained package</li>
     </ul>
     <p>
       <strong>Not sure which option to use?</strong> See the{' '}
