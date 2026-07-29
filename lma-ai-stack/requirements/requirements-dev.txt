@@ -1,7 +1,7 @@
 # development dependencies
 bandit~=1.9.4
 black~=26.5.1
-cfn-lint~=0.87.11
+cfn-lint~=1.53.3
 cfn-policy-validator~=0.0.31
 flake8~=7.3.0
 mypy~=2.3
