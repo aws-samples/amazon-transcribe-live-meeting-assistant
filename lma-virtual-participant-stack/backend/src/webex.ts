@@ -304,6 +304,7 @@ export default class Webex {
         const passwordCheckEl = await Promise.any([
             frame.waitForSelector('input[aria-label="Meeting password"]', { timeout: 30000 }).then((el: any) => ({ source: 'password', el })).catch(() => null),
             frame.waitForSelector('input[data-test="Name (required)"]', { timeout: 30000 }).then((el: any) => ({ source: 'name', el })).catch(() => null),
+            frame.waitForSelector('mdc-input[data-test="Name"]', { timeout: 30000 }).then((el: any) => ({ source: 'name', el })).catch(() => null),
             frame.waitForSelector('input[aria-labelledby="nameLabel"]', { timeout: 30000 }).then((el: any) => ({ source: 'enterprise-name', el })).catch(() => null)
         ]).catch(() => null);
     
@@ -341,7 +342,7 @@ export default class Webex {
                 console.log('Waiting for CAPTCHA to be solved (up to 2 minutes)...');
                 await Promise.race([
                     // Wait for name input to appear (successful CAPTCHA solve + Next click)
-                    frame.waitForSelector('input[data-test="Name (required)"]', {
+                    frame.waitForSelector('input[data-test="Name (required)"], mdc-input[data-test="Name"]', {
                         timeout: 120000,
                         state: 'visible'
                     }),
@@ -425,8 +426,18 @@ export default class Webex {
                 }
             }
         } else {
-            const nameInputElement = (passwordCheckEl && passwordCheckEl.source === 'name') ? passwordCheckEl.el : await frame.waitForSelector('input[data-test="Name (required)"]',{ timeout: 30000 });
-            await nameInputElement?.type(details.scribeIdentity);
+            const nameInputElement = (passwordCheckEl && passwordCheckEl.source === 'name') ? passwordCheckEl.el : await frame.waitForSelector('input[data-test="Name (required)"], mdc-input[data-test="Name"] >>> input"]',{ timeout: 30000 });
+            if (nameInputElement) {
+                // Clean input first - Webex keeps it from previous session
+                await nameInputElement.evaluate((node: HTMLInputElement) => {
+                    node.focus();
+                    node.value = '';
+                    node.dispatchEvent(new Event('input', { bubbles: true }));
+                    node.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+                await new Promise(r => setTimeout(r, 0));
+                await nameInputElement.type(details.scribeIdentity);
+            }
         }
 
         // Wait for the meeting interface (interstitial / pre-join) to load.
