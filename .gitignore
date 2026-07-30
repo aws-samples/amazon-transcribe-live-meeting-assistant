@@ -76,3 +76,8 @@ docs-site/public/*.html
 scratch
 
 utilities/load-simulator/examples/bobmeetings.yaml
+
+# Swift package build output. The per-directory .gitignore only helps if git is
+# run from that directory; anchor it at the repo root so `git add -A` from
+# anywhere (or after a directory rename) can never pick these up again.
+**/.build/

@@ -33,13 +33,28 @@ import {
     getClientIP,
 } from './utils';
 
-import { jwtVerifier } from './utils/jwt-verifier';
+import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
+
+import {
+    VideoSession,
+    startVideoSession,
+    endVideoSession,
+    videoSocketDropped,
+    writeVideoChunk,
+    notifyAudioRecordingDone,
+    awaitPendingMuxes,
+} from './videorecording';
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const RECORDINGS_BUCKET_NAME =
     process.env['RECORDINGS_BUCKET_NAME'] || undefined;
+// RECORDINGS_KEY_PREFIX is what the CFN task definition sets (AudioFilePrefix
+// parameter); RECORDING_FILE_PREFIX kept for backward compatibility with any
+// standalone deployments that set the old (previously ignored) name.
 const RECORDING_FILE_PREFIX =
-    process.env['RECORDING_FILE_PREFIX'] || 'lma-audio-recordings/';
+    process.env['RECORDINGS_KEY_PREFIX'] ||
+    process.env['RECORDING_FILE_PREFIX'] ||
+    'lma-audio-recordings/';
 const CPU_HEALTH_THRESHOLD = parseInt(
     process.env['CPU_HEALTH_THRESHOLD'] || '50',
     10
@@ -52,6 +67,29 @@ const SHOULD_RECORD_CALL = (process.env['SHOULD_RECORD_CALL'] || '') === 'true';
 const s3Client = new S3Client({ region: AWS_REGION });
 
 const socketMap = new Map<WebSocket, SocketCallData>();
+// Sockets dedicated to a video stream (announced by START_VIDEO). Binary
+// frames on these sockets are fragmented-MP4 chunks, not audio PCM.
+const videoSocketMap = new Map<WebSocket, VideoSession>();
+
+/**
+ * The live audio session for a callId, if any. Used to authorize START_VIDEO:
+ * a video stream may only join a call that is currently streaming audio, and
+ * only for the user who started it.
+ *
+ * Linear scan over socketMap — one entry per concurrent call on this task, so
+ * a handful to low hundreds, and this runs once per video stream (not per
+ * frame).
+ */
+const findAudioSessionByCallId = (
+    callId: string
+): SocketCallData | undefined => {
+    for (const data of socketMap.values()) {
+        if (!data.ended && data.callMetadata?.callId === callId) {
+            return data;
+        }
+    }
+    return undefined;
+};
 
 // create fastify server (with logging enabled for non-PROD environments)
 const server = fastify({
@@ -190,12 +228,22 @@ const registerHandlers = (
                 );
             }
         } catch (error) {
+            // Close THIS socket; do not exit. This task multiplexes many
+            // concurrent calls, so terminating the process because one client
+            // sent a malformed frame (or one recording hit an I/O error) would
+            // drop every other meeting in progress too.
             server.log.error(
-                `[ON MESSAGE]: [${clientIP}] - Error processing message: ${normalizeErrorForLogging(
+                `[ON MESSAGE]: [${clientIP}] - Error processing message; closing this connection: ${normalizeErrorForLogging(
                     error
                 )}`
             );
-            process.exit(1);
+            try {
+                ws.close(1011, 'internal error processing message');
+            } catch (closeErr) {
+                server.log.error(
+                    `[ON MESSAGE]: [${clientIP}] - Error closing connection: ${normalizeErrorForLogging(closeErr)}`
+                );
+            }
         }
     });
 
@@ -230,6 +278,13 @@ const onBinaryMessage = async (
     ws: WebSocket,
     data: Uint8Array
 ): Promise<void> => {
+    // Video sockets carry fragmented-MP4 chunks, never audio PCM.
+    const videoSession = videoSocketMap.get(ws);
+    if (videoSession !== undefined) {
+        writeVideoChunk(videoSession, data, server);
+        return;
+    }
+
     const socketData = socketMap.get(ws);
 
     if (
@@ -273,7 +328,17 @@ const onTextMessage = async (
     const refreshToken = query.refresh_token || headers.refresh_token;
 
     const match = auth?.match(/^Bearer (.+)$/);
-    const callMetaData: CallMetaData = JSON.parse(data);
+    let callMetaData: CallMetaData;
+    try {
+        callMetaData = JSON.parse(data) as CallMetaData;
+    } catch (parseErr) {
+        // A truncated/garbled control frame is the client's problem, not grounds
+        // for tearing down every other call on this task.
+        server.log.error(
+            `[ON TEXT MESSAGE]: [${clientIP}] - Ignoring unparseable control frame: ${normalizeErrorForLogging(parseErr)}`
+        );
+        return;
+    }
     if (!match) {
         server.log.error(
             `[AUTH]: [${clientIP}] - No Bearer token found in header or query string. URI: <${
@@ -358,6 +423,9 @@ const onTextMessage = async (
             startStreamTime: new Date(),
             speakerEvents: [],
             ended: false,
+            // From the VERIFIED token, not the message body — this is what
+            // later authorizes START_VIDEO for the same callId.
+            ownerSub: getAuthenticatedCaller(request)?.sub,
         };
         socketMap.set(ws, socketCallMap);
         startTranscribe(socketCallMap, server);
@@ -392,6 +460,55 @@ const onTextMessage = async (
                 }] - Invalid call metadata: ${JSON.stringify(callMetaData)}`
             );
         }
+    } else if (callMetaData.callEvent === 'START_VIDEO') {
+        // Second socket dedicated to a fragmented-MP4 video stream for an
+        // audio call with the same callId. Servers without video support
+        // ignore this event (unknown callEvent) and drop the binary frames.
+        if (!callMetaData.callId) {
+            server.log.error(
+                `[START_VIDEO]: [${clientIP}] - START_VIDEO missing callId; ignoring.`
+            );
+            return;
+        }
+        // AUTHORIZATION. callId comes from the client and is guessable (the web
+        // UI builds it as "<meeting topic> - <timestamp>"), so accepting it on
+        // faith would let ANY authenticated user attach video to someone else's
+        // call — and, because the mux pulls in that call's audio WAV, would
+        // publish the victim's audio under an object the attacker can read.
+        // Require a LIVE audio session for this callId, owned by the same
+        // verified Cognito subject that opened it.
+        const caller = getAuthenticatedCaller(request);
+        const audioSession = findAudioSessionByCallId(callMetaData.callId);
+        if (!audioSession) {
+            server.log.error(
+                `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - No active audio call for this callId; refusing video stream.`
+            );
+            ws.close(1008, 'no active call for callId');
+            return;
+        }
+        if (
+            !caller?.sub ||
+            !audioSession.ownerSub ||
+            audioSession.ownerSub !== caller.sub
+        ) {
+            server.log.error(
+                `[START_VIDEO]: [${clientIP}][${callMetaData.callId}] - Caller does not own this call; refusing video stream.`
+            );
+            ws.close(1008, 'not authorized for callId');
+            return;
+        }
+        const session = startVideoSession(callMetaData, server);
+        videoSocketMap.set(ws, session);
+    } else if (callMetaData.callEvent === 'END_VIDEO') {
+        const session = videoSocketMap.get(ws);
+        if (!session) {
+            server.log.error(
+                `[END_VIDEO]: [${clientIP}][${callMetaData.callId}] - END_VIDEO without START_VIDEO on this socket; ignoring.`
+            );
+            return;
+        }
+        videoSocketMap.delete(ws);
+        await endVideoSession(session.callId, server);
     } else if (callMetaData.callEvent === 'END') {
         const socketData = socketMap.get(ws);
         if (!socketData || !socketData.callMetadata) {
@@ -432,6 +549,18 @@ const onTextMessage = async (
 
 const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
     ws.close(code);
+    const videoSession = videoSocketMap.get(ws);
+    if (videoSession) {
+        // Video socket closed without END_VIDEO (crash / network drop). The
+        // session survives a grace period for a client reconnect (fresh
+        // START_VIDEO), then finalizes with whatever was received.
+        server.log.debug(
+            `[ON WSCLOSE]: [${videoSession.callId}] - Video socket closed without END_VIDEO.`
+        );
+        videoSocketMap.delete(ws);
+        videoSocketDropped(videoSession.callId, server);
+        return;
+    }
     const socketData = socketMap.get(ws);
     if (socketData) {
         server.log.debug(
@@ -495,7 +624,11 @@ const endCall = async (
                     for await (const chunk of readStream) {
                         writeStream.write(chunk);
                     }
-                    writeStream.end();
+                    // Await the flush: the file is read back for the S3 upload
+                    // and (when video was recorded) by the ffmpeg mux.
+                    await new Promise<void>((resolve) =>
+                        writeStream.end(() => resolve())
+                    );
 
                     await writeToS3(callMetaData, sanitizedTempFilename);
                     await writeToS3(callMetaData, sanitizedWavFilename);
@@ -503,15 +636,27 @@ const endCall = async (
                         callMetaData,
                         path.resolve(LOCAL_TEMP_DIR, sanitizedTempFilename)
                     );
-                    await deleteTempFile(
-                        callMetaData,
-                        path.resolve(LOCAL_TEMP_DIR, sanitizedWavFilename)
+
+                    // If a video stream was recorded for this call, hand the
+                    // WAV over so it can be muxed into the video MP4 (the
+                    // video session deletes it when done). Otherwise delete.
+                    const wavPath = path.resolve(LOCAL_TEMP_DIR, sanitizedWavFilename);
+                    const wavAdopted = notifyAudioRecordingDone(
+                        callMetaData.callId,
+                        wavPath,
+                        server
                     );
+                    if (!wavAdopted) {
+                        await deleteTempFile(callMetaData, wavPath);
+                    }
 
                     const recordingUrl = `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${RECORDING_FILE_PREFIX}${wavRecordingFilename}`;
 
                     await writeCallRecordingEvent(callMetaData, recordingUrl, server);
                 } else {
+                    // No audio WAV to mux; let any video session finalize
+                    // video-only.
+                    notifyAudioRecordingDone(callMetaData.callId, undefined, server);
                     server.log.debug(
                         `[${callMetaData.callEvent}]: [${
                             callMetaData.callId
@@ -520,6 +665,10 @@ const endCall = async (
                         )}`
                     );
                 }
+            } else {
+                // No audio recording was produced (e.g. no audio bytes ever
+                // arrived); let any video session finalize video-only.
+                notifyAudioRecordingDone(callMetaData.callId, undefined, server);
             }
 
             if (socketData.audioInputStream) {
@@ -650,3 +799,43 @@ server.listen(
         server.log.info(`[[WS SERVER STARTUP]]: Routes: \n${server.printRoutes()}`);
     }
 );
+
+/**
+ * Graceful shutdown. ECS sends SIGTERM on every deploy, scale-in, and
+ * health-check replacement, then SIGKILLs after StopTimeout. End-of-call video
+ * muxes run detached from the request path, so without this they are killed
+ * mid-ffmpeg and the user's recording vanishes with no event and no error.
+ *
+ * We stop accepting new work, give in-flight muxes a bounded window to finish,
+ * then exit. Keep SHUTDOWN_MUX_GRACE_MS below the container's StopTimeout.
+ */
+const SHUTDOWN_MUX_GRACE_MS = parseInt(
+    process.env['SHUTDOWN_MUX_GRACE_MS'] || '90000',
+    10
+);
+let shuttingDown = false;
+const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) {
+        return;
+    }
+    shuttingDown = true;
+    server.log.info(`[SHUTDOWN]: Received ${signal}; finishing in-flight work.`);
+    try {
+        await awaitPendingMuxes(server, SHUTDOWN_MUX_GRACE_MS);
+    } catch (err) {
+        server.log.error(
+            `[SHUTDOWN]: Error waiting for in-flight video muxes: ${normalizeErrorForLogging(err)}`
+        );
+    }
+    try {
+        await server.close();
+    } catch (err) {
+        server.log.error(
+            `[SHUTDOWN]: Error closing server: ${normalizeErrorForLogging(err)}`
+        );
+    }
+    server.log.info('[SHUTDOWN]: Complete.');
+    process.exit(0);
+};
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));

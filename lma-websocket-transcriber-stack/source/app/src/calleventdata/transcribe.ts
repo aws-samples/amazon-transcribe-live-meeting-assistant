@@ -31,13 +31,17 @@ import {
     CallStartEvent,
     CallEndEvent,
     CallRecordingEvent,
+    CallVideoRecordingEvent,
     AddTranscriptSegmentEvent,
     SocketCallData,
     CallMetaData,
     ChannelSpeakerData
 } from './eventtypes';
 
-import { normalizeErrorForLogging } from '../utils';
+// Import from the concrete module (not the ../utils barrel): the barrel pulls
+// in jwt-verifier, which requires USERPOOL_ID at import time and would break
+// offline tests that import this module.
+import { normalizeErrorForLogging } from '../utils/common';
 
 const formatPath = function (path: string) {
     let pathOut = path;
@@ -96,7 +100,7 @@ const kinesisClient = new KinesisClient({ region: AWS_REGION });
 const transcribeClient = new TranscribeStreamingClient({ region: AWS_REGION });
 
 export const writeCallEvent = async (
-    callEvent: CallStartEvent | CallEndEvent | CallRecordingEvent,
+    callEvent: CallStartEvent | CallEndEvent | CallRecordingEvent | CallVideoRecordingEvent,
     server: FastifyInstance
 ) => {
     const putParams = {
@@ -107,7 +111,11 @@ export const writeCallEvent = async (
 
     const putCmd = new PutRecordCommand(putParams);
     try {
-        kinesisClient.send(putCmd);
+        // MUST be awaited: without it the surrounding try/catch cannot catch a
+        // rejection (e.g. ProvisionedThroughputExceededException), and Node 20's
+        // default unhandled-rejection behaviour then kills the whole task —
+        // dropping every concurrent call.
+        await kinesisClient.send(putCmd);
         server.log.debug(
             `[${callEvent.EventType}]: ${callEvent.CallId} - Written ${
                 callEvent.EventType
@@ -172,6 +180,22 @@ export const writeCallRecordingEvent = async (
         RefreshToken: callMetaData.refreshToken,
     };
     await writeCallEvent(callRecordingEvent, server);
+};
+
+export const writeCallVideoRecordingEvent = async (
+    callMetaData: CallMetaData,
+    videoRecordingUrl: string,
+    server: FastifyInstance
+): Promise<void> => {
+    const callVideoRecordingEvent: CallVideoRecordingEvent = {
+        EventType: 'ADD_S3_VIDEO_RECORDING_URL',
+        CallId: callMetaData.callId,
+        VideoRecordingUrl: videoRecordingUrl,
+        AccessToken: callMetaData.accessToken,
+        IdToken: callMetaData.idToken,
+        RefreshToken: callMetaData.refreshToken,
+    };
+    await writeCallEvent(callVideoRecordingEvent, server);
 };
 
 // True when a Transcribe streaming error indicates the SessionId we tried to
