@@ -1,6 +1,7 @@
 #if canImport(SwiftUI) && canImport(AppKit)
 import SwiftUI
 import AppKit
+import CoreGraphics
 import ServiceManagement
 import UserNotifications
 
@@ -45,6 +46,10 @@ final class MenuBarAppState: ObservableObject {
     @Published var videoEnabled = false
     @Published var videoSourceID = ""           // "" = main display
     @Published var videoSources: [VideoCapture.Source] = []
+    /// Live previews for the source picker, keyed by source id. Populated
+    /// asynchronously (each is a screen capture), so the picker renders
+    /// immediately and thumbnails fill in — never blocking source selection.
+    @Published var videoThumbnails: [String: CGImage] = [:]
 
     // Recording-consent disclaimer: shown once, before the FIRST recording ever
     // starts on this machine (same pattern as the browser extension's popup).
@@ -178,7 +183,13 @@ final class MenuBarAppState: ObservableObject {
 
     /// Refresh capturable displays/windows when the panel opens or the video
     /// toggle turns on (window lists go stale quickly).
-    func refreshVideoSources() {
+    ///
+    /// `withThumbnails` is only for the Settings picker, where previews are the
+    /// point. Every thumbnail is a real screen capture, so the main panel's
+    /// one-line summary asks for just the SELECTED source instead — otherwise
+    /// merely opening the panel (including mid-recording) would capture a dozen
+    /// screenshots.
+    func refreshVideoSources(withThumbnails: Bool = false) {
         Task { @MainActor in
             let sources = await VideoCapture.listSources()
             self.videoSources = sources
@@ -187,7 +198,67 @@ final class MenuBarAppState: ObservableObject {
             if !self.videoSourceID.isEmpty && !sources.contains(where: { $0.id == self.videoSourceID }) {
                 self.videoSourceID = ""
             }
+            // Drop previews for sources that no longer exist, so a closed
+            // window's thumbnail can't linger and misrepresent the list.
+            let liveIDs = Set(sources.map { $0.id })
+            self.videoThumbnails = self.videoThumbnails.filter { liveIDs.contains($0.key) }
+            if withThumbnails {
+                self.loadThumbnails(for: sources)
+            } else {
+                self.loadSelectedThumbnail()
+            }
         }
+    }
+
+    /// Capture a preview for each source, sequentially. Sequential (not
+    /// concurrent) on purpose: each thumbnail is a real screen capture, and
+    /// firing dozens at once competes with the audio/video capture already
+    /// running. The `videoSources` identity check makes a stale pass abandon
+    /// itself as soon as the list changes underneath it.
+    @MainActor
+    private func loadThumbnails(for sources: [VideoCapture.Source]) {
+        Task { @MainActor in
+            for src in sources.prefix(Self.maxThumbnails) {
+                guard self.videoSources == sources else { return } // list moved on
+                if let img = await VideoCapture.thumbnail(sourceID: src.id) {
+                    self.videoThumbnails[src.id] = img
+                }
+            }
+        }
+    }
+
+    /// One preview, for the selected source only — what the main panel's summary
+    /// needs.
+    @MainActor
+    private func loadSelectedThumbnail() {
+        let id = videoSourceID
+        Task { @MainActor in
+            if let img = await VideoCapture.thumbnail(sourceID: id) {
+                // Ignore a late result for a source the user has since changed.
+                guard self.videoSourceID == id else { return }
+                self.videoThumbnails[id] = img
+            }
+        }
+    }
+
+    /// Cap on previews captured per refresh. Windows are listed in front-to-back
+    /// order, so the first ones are the ones a user is most likely to pick; the
+    /// rest still show name, size, and app icon.
+    private static let maxThumbnails = 12
+
+    /// Display name of the chosen video source, for the at-a-glance indicator on
+    /// the main panel. Falls back to a generic label before the source list has
+    /// loaded (or if the saved source has since vanished).
+    var videoSourceName: String {
+        if let s = videoSources.first(where: { $0.id == videoSourceID }) { return s.name }
+        return videoSourceID.isEmpty ? "Main display" : "Selected source"
+    }
+
+    /// Display name of the chosen microphone, for the same indicator.
+    var micDeviceName: String {
+        if micDeviceUID.isEmpty { return "System Default" }
+        if let d = micDevices.first(where: { $0.uid == micDeviceUID }) { return d.name }
+        return "System Default"    // saved device not currently connected
     }
 
     /// Refresh the device list each time the panel opens (hotplug-friendly).
@@ -466,19 +537,54 @@ struct MenuBarContentView: View {
     /// Opens the standalone Settings window (set by MenuBarController).
     var openSettings: () -> Void = {}
 
+    /// Where this instance is being displayed. The two hosts need genuinely
+    /// different sizing behaviour, and getting it wrong produced both reported
+    /// window bugs — see `body`.
+    enum Host {
+        /// Menu-bar popover: self-sizing, so the content must state an exact
+        /// width and a height ceiling.
+        case popover
+        /// Standalone resizable window: the content fills whatever size the user
+        /// chose, and only declares a floor.
+        case window
+    }
+    var host: Host = .popover
+
+    /// Popover width, and the window's opening width. Wide enough for the
+    /// meeting-name field and the capture-inputs summary without wrapping every
+    /// label.
+    static let defaultWidth: CGFloat = 340
+    /// Smallest usable window size, propagated to the window via
+    /// NSHostingSizingOptions.minSize (NSWindow.contentMinSize is IGNORED once a
+    /// contentViewController is set — verified: the window still shrank to
+    /// 50×50 with contentMinSize set, and clamps correctly with .minSize).
+    static let minWindowWidth: CGFloat = 320
+    static let minWindowHeight: CGFloat = 260
+    /// Height ceiling for the popover, so a tall state (consent gate + error +
+    /// meters) scrolls instead of running off the screen edge.
+    static let maxPopoverHeight: CGFloat = 620
+
     var body: some View {
-        // Scrollable body with a bounded height: the content grows (consent
-        // gate, error text, meters), and a fixed-height container would clip it
-        // with no way to reach the rest. ScrollView + a max height means content
-        // is always reachable, never truncated.
+        // The content grows and shrinks with state (consent gate, error text,
+        // meters), so it always scrolls — a fixed-size container clipped the
+        // top/bottom with no way to reach the rest.
+        //
+        // WIDTH is the subtle part. NSPopover adopts the hosting controller's
+        // fitting size, and with `maxWidth: .infinity` SwiftUI reports its
+        // *ideal* width — measured at 505pt for this content, which was the
+        // "opens really wide" symptom. So the popover states an exact width.
+        // A window, by contrast, should let the content fill whatever width the
+        // user resized to, and only declare a minimum.
         ScrollView {
             content
                 .padding(14)
-                // Let the width be driven by the container so the standalone
-                // window can be resized wider; keep a sane minimum.
-                .frame(minWidth: 280, maxWidth: .infinity, alignment: .leading)
+                .frame(width: host == .popover ? Self.defaultWidth : nil, alignment: .leading)
+                .frame(maxWidth: host == .window ? .infinity : nil, alignment: .leading)
         }
-        .frame(minWidth: 300, maxHeight: 620)
+        .frame(
+            minWidth: host == .window ? Self.minWindowWidth : nil,
+            minHeight: host == .window ? Self.minWindowHeight : nil,
+            maxHeight: host == .popover ? Self.maxPopoverHeight : nil)
     }
 
     private var content: some View {
@@ -578,6 +684,11 @@ struct MenuBarContentView: View {
                             .help("Recent meeting names")
                         }
                     }
+                    // What will actually be captured, BEFORE pressing Start —
+                    // the mic, and (when screen video is on) which screen or
+                    // window. Previously both lived only in Settings, so you
+                    // couldn't tell what you were about to record.
+                    CaptureInputsView(s: s)
                     Button(action: s.start) {
                         Label("Start Recording", systemImage: "record.circle").frame(maxWidth: .infinity)
                     }
@@ -593,7 +704,9 @@ struct MenuBarContentView: View {
                         .font(.caption2).foregroundColor(.secondary)
                         .help(consentTooltip)
                 } else {
-                    // Live meters
+                    // Live meters, over the same inputs summary — while recording
+                    // it answers "what is being captured right now?".
+                    CaptureInputsView(s: s)
                     LevelBar(label: "System", level: s.meetingLevel, muted: s.meetingMuted)
                     LevelBar(label: "Mic", level: s.micLevel, muted: s.micMuted)
                     HStack {
@@ -689,6 +802,89 @@ struct MenuBarContentView: View {
     }
 }
 
+/// At-a-glance summary of what this app will capture: the microphone, and —
+/// when screen video is enabled — which screen or window, with a live preview.
+///
+/// This exists because the selections live in the Settings window: without a
+/// summary on the main panel you had to open Settings to answer "which mic?" and
+/// "which screen am I about to share?". The video row deliberately includes a
+/// thumbnail: for a user with two identical monitors, a name alone doesn't
+/// distinguish them, and accidentally recording the wrong screen is a privacy
+/// problem, not just an annoyance.
+@available(macOS 13.0, *)
+struct CaptureInputsView: View {
+    @ObservedObject var s: MenuBarAppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: "mic").font(.caption2).foregroundColor(.secondary)
+                Text(s.micDeviceName)
+                    .font(.caption2).foregroundColor(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 0)
+            }
+            if s.videoEnabled {
+                HStack(spacing: 5) {
+                    Image(systemName: "video").font(.caption2).foregroundColor(.secondary)
+                    SourceThumbnail(image: s.videoThumbnails[s.videoSourceID], width: 44, height: 28)
+                    Text(s.videoSourceName)
+                        .font(.caption2).foregroundColor(.secondary)
+                        .lineLimit(2).truncationMode(.middle)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            } else {
+                HStack(spacing: 5) {
+                    Image(systemName: "video.slash").font(.caption2).foregroundColor(.secondary)
+                    Text("Screen video off").font(.caption2).foregroundColor(.secondary)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+        .help(s.videoEnabled
+              ? "Recording mic “\(s.micDeviceName)” and screen video from “\(s.videoSourceName)”. Change these in Settings (⚙)."
+              : "Recording mic “\(s.micDeviceName)”. Screen video is off — enable it in Settings (⚙).")
+        // Keep the summary honest while the panel is open: a mic can be
+        // unplugged and a chosen window closed at any moment.
+        .onAppear {
+            s.refreshMicDevices()
+            if s.videoEnabled { s.refreshVideoSources() }
+        }
+    }
+}
+
+/// A source preview, or a placeholder frame when no capture is available yet
+/// (still loading, permission not granted, or macOS 13 where the screenshot API
+/// doesn't exist). The placeholder keeps the row height stable so the list
+/// doesn't jump as thumbnails arrive.
+@available(macOS 13.0, *)
+struct SourceThumbnail: View {
+    let image: CGImage?
+    var width: CGFloat = 96
+    var height: CGFloat = 60
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 3).fill(Color.secondary.opacity(0.15))
+            if let img = image {
+                Image(decorative: img, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: "display").font(.caption2).foregroundColor(.secondary)
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.secondary.opacity(0.25)))
+        .accessibilityHidden(true)   // the adjacent name text carries the meaning
+    }
+}
+
 /// Settings, hosted in its OWN resizable window (opened from the gear).
 ///
 /// Why a separate window rather than an expanding section in the popover: the
@@ -697,6 +893,12 @@ struct MenuBarContentView: View {
 /// scroll or resize. A window is also the platform-native place for settings.
 @available(macOS 13.0, *)
 struct SettingsWindowView: View {
+    /// Smallest usable size, propagated to the window via
+    /// NSHostingSizingOptions.minSize (contentMinSize is ignored — see the note
+    /// in MenuBarController.showPanelWindow).
+    static let minWidth: CGFloat = 380
+    static let minHeight: CGFloat = 320
+
     @ObservedObject var s: MenuBarAppState
 
     var body: some View {
@@ -710,9 +912,9 @@ struct SettingsWindowView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(18)
-            .frame(minWidth: 320, maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(minWidth: 360, minHeight: 320)
+        .frame(minWidth: Self.minWidth, minHeight: Self.minHeight)
     }
 }
 
@@ -760,20 +962,12 @@ struct SettingsView: View {
             Text("Screen video").font(.caption).foregroundColor(.secondary).padding(.top, 2)
             Toggle(isOn: Binding(get: { s.videoEnabled }, set: { v in
                 s.videoEnabled = v; s.saveSettings()
-                if v { s.refreshVideoSources() }
+                if v { s.refreshVideoSources(withThumbnails: true) }
             })) {
                 Text("Also record screen video").font(.caption)
             }
             if s.videoEnabled {
-                Picker("", selection: Binding(get: { s.videoSourceID }, set: { s.videoSourceID = $0; s.saveSettings() })) {
-                    Text("Entire screen").tag("")
-                    ForEach(s.videoSources.filter { $0.id != "" }) { src in
-                        Text(src.name).tag(src.id)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .font(.caption)
+                VideoSourceListView(s: s)
                 Text("The selected screen or window is recorded with the meeting and saved as a video in LMA. Uses the Screen Recording permission you already granted.")
                     .font(.caption2).foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -796,6 +990,111 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+}
+
+/// Visual picker for the screen-video source: a scrollable list of thumbnail
+/// rows, one per display and window, with the selected row clearly marked.
+///
+/// This replaces a text-only dropdown, which couldn't answer the question that
+/// matters most here — "which of my screens is this?". Two monitors of the same
+/// model produce two indistinguishable menu entries; a thumbnail plus the System
+/// Settings display name plus the resolution makes the choice unambiguous, and
+/// recording the wrong screen is a privacy mistake worth designing out.
+@available(macOS 13.0, *)
+struct VideoSourceListView: View {
+    @ObservedObject var s: MenuBarAppState
+
+    private var displays: [VideoCapture.Source] { s.videoSources.filter { $0.isDisplay } }
+    private var windows: [VideoCapture.Source] { s.videoSources.filter { !$0.isDisplay } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Choose what to record").font(.caption2).foregroundColor(.secondary)
+                Spacer()
+                Button {
+                    s.refreshVideoSources(withThumbnails: true)
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise").font(.caption2)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.accentColor)
+                .help("Re-scan displays and windows, and refresh the previews")
+            }
+
+            if s.videoSources.isEmpty {
+                // Either the scan hasn't finished or Screen Recording permission
+                // is missing — say so rather than showing an empty box.
+                Text("Looking for screens and windows… If nothing appears, grant Screen Recording in System Settings ▸ Privacy & Security.")
+                    .font(.caption2).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        sectionLabel("Screens")
+                        ForEach(displays) { src in row(src) }
+                        if !windows.isEmpty {
+                            sectionLabel("Windows").padding(.top, 6)
+                            ForEach(windows) { src in row(src) }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                // Bounded so a machine with many open windows doesn't push the
+                // rest of Settings off-screen; the list scrolls within it.
+                .frame(maxHeight: 260)
+            }
+        }
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundColor(.secondary)
+    }
+
+    private func row(_ src: VideoCapture.Source) -> some View {
+        let selected = src.id == s.videoSourceID
+        return Button {
+            s.videoSourceID = src.id
+            s.saveSettings()
+        } label: {
+            HStack(spacing: 8) {
+                SourceThumbnail(image: s.videoThumbnails[src.id])
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(src.name)
+                        .font(.caption)
+                        .lineLimit(2).truncationMode(.middle)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 4) {
+                        Image(systemName: src.isDisplay ? "display" : "macwindow")
+                            .font(.system(size: 9))
+                        if !src.dimensionsText.isEmpty {
+                            Text(src.dimensionsText).font(.system(size: 9))
+                        }
+                    }
+                    .foregroundColor(.secondary)
+                }
+                Spacer(minLength: 4)
+                // A checkmark AND a tinted background AND a border: selection has
+                // to be obvious at caption size, not inferred from a subtle tint.
+                if selected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.accentColor)
+                }
+            }
+            .padding(6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 5)
+                .fill(selected ? Color.accentColor.opacity(0.15) : Color.clear))
+            .overlay(RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(selected ? Color.accentColor.opacity(0.6) : Color.clear))
+            .contentShape(Rectangle())   // the whole row is clickable, not just the text
+        }
+        .buttonStyle(.plain)
+        .help(src.dimensionsText.isEmpty ? src.name : "\(src.name) — \(src.dimensionsText)")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 }
 
@@ -830,11 +1129,15 @@ struct LevelBar: View {
 /// fallback: it shows a "REC" badge while recording, its right-click menu has
 /// Start/Pause/Stop, and clicking it opens the same panel as the menu-bar icon.
 @available(macOS 13.0, *)
-final class MenuBarController: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate,
+                               UNUserNotificationCenterDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var panelWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    /// True when Settings was opened from a visible panel/popover, so closing it
+    /// should bring the main panel back rather than leaving nothing on screen.
+    private var restorePanelAfterSettings = false
     private let state: MenuBarAppState
     private var pollTimer: Timer?
 
@@ -843,8 +1146,11 @@ final class MenuBarController: NSObject, NSApplicationDelegate, UNUserNotificati
     /// The content view, with the Settings action wired to open the standalone
     /// settings window (each host — popover and panel window — gets its own
     /// instance, so the closure is attached per construction).
-    private func makeContentView() -> MenuBarContentView {
-        var v = MenuBarContentView(s: state)
+    ///
+    /// `host` selects the sizing behaviour the two presentations need — see the
+    /// WIDTH note in MenuBarContentView.body.
+    private func makeContentView(host: MenuBarContentView.Host) -> MenuBarContentView {
+        var v = MenuBarContentView(s: state, host: host)
         v.openSettings = { [weak self] in self?.showSettingsWindow() }
         return v
     }
@@ -865,12 +1171,13 @@ final class MenuBarController: NSObject, NSApplicationDelegate, UNUserNotificati
 
         popover = NSPopover()
         popover.behavior = .transient
-        // Size the popover to its CONTENT rather than a fixed 300x360 box: the
+        // Size the popover to its CONTENT height rather than a fixed box: the
         // panel grows (consent gate, errors, meters) and a fixed height clipped
         // the top/bottom with no way to scroll or resize. NSHostingController
         // reports a SwiftUI-derived fitting size, and the view's own ScrollView
-        // caps how tall that can get.
-        let host = NSHostingController(rootView: makeContentView())
+        // caps how tall that can get. The WIDTH is pinned by the content view so
+        // the popover can't adopt SwiftUI's much larger ideal width.
+        let host = NSHostingController(rootView: makeContentView(host: .popover))
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
 
@@ -964,17 +1271,39 @@ final class MenuBarController: NSObject, NSApplicationDelegate, UNUserNotificati
     /// between the two the content is always reachable.
     private func showPanelWindow() {
         if let w = panelWindow {
+            // Defence in depth: if the window ever ends up degenerate (a stale
+            // frame restored by AppKit, a display reconfiguration), reopening it
+            // should still yield something usable rather than a sliver.
+            if w.contentLayoutRect.width < MenuBarContentView.minWindowWidth
+                || w.contentLayoutRect.height < MenuBarContentView.minWindowHeight {
+                w.setContentSize(Self.panelContentSize)
+                w.center()
+            }
             w.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 340, height: 460),
+            contentRect: NSRect(origin: .zero, size: Self.panelContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         w.title = state.controller.config.appDisplayName
-        w.contentViewController = NSHostingController(rootView: makeContentView())
-        w.contentMinSize = NSSize(width: 300, height: 240)
+        // sizingOptions must NOT include .preferredContentSize: that made
+        // assigning the controller immediately resize the window to SwiftUI's
+        // fitting size, which for this scrolling content is (minWidth, 0) — the
+        // "opens as a thin bar with just the app name" symptom. Verified: the
+        // window reported 300×0 on assignment with the default options.
+        //
+        // .minSize IS included, because it is what actually enforces a floor:
+        // NSWindow.contentMinSize is ignored once a contentViewController is set
+        // (verified — the window still shrank to 50×50), whereas .minSize
+        // propagates the content's declared minimum and clamps correctly.
+        let host = NSHostingController(rootView: makeContentView(host: .window))
+        host.sizingOptions = [.minSize]
+        w.contentViewController = host
+        // The explicit size is what the window opens at; it must come AFTER the
+        // controller assignment, which otherwise overrides it.
+        w.setContentSize(Self.panelContentSize)
         w.isReleasedWhenClosed = false
         w.center()
         panelWindow = w
@@ -982,30 +1311,70 @@ final class MenuBarController: NSObject, NSApplicationDelegate, UNUserNotificati
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// Opening size of the standalone panel window.
+    private static let panelContentSize = NSSize(width: 360, height: 520)
+
     /// Settings in a dedicated, resizable window (opened from the gear). Keeps
     /// the popover small and gives the growing settings surface room.
+    ///
+    /// Opening Settings from the menu-bar popover DISMISSES that popover: it is
+    /// `.transient`, so it closes as soon as the settings window takes focus.
+    /// That left the user with nothing to return to when they closed Settings,
+    /// so we remember the popover was the opener and bring the main panel back
+    /// on close (as a window — the popover's status-item anchor may be hidden
+    /// under the notch, which is exactly why the window path exists).
     private func showSettingsWindow() {
         state.refreshMicDevices()
-        if state.videoEnabled { state.refreshVideoSources() }
+        // Thumbnails here: the Settings picker is where previews are the point.
+        if state.videoEnabled { state.refreshVideoSources(withThumbnails: true) }
+        // Capture this BEFORE the window opens and steals focus from the popover.
+        restorePanelAfterSettings = popover?.isShown == true || panelWindow?.isVisible == true
         if let w = settingsWindow {
             w.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 480),
+            contentRect: NSRect(origin: .zero, size: Self.settingsContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         w.title = state.controller.config.stackName.isEmpty
             ? "LMA Capture Settings"
             : "LMA Capture Settings — \(state.controller.config.stackName)"
-        w.contentViewController = NSHostingController(rootView: SettingsWindowView(s: state))
-        w.contentMinSize = NSSize(width: 360, height: 280)
+        // Same sizing rules as the panel window: no .preferredContentSize (it
+        // collapses the window on assignment), and .minSize for the floor.
+        let host = NSHostingController(rootView: SettingsWindowView(s: state))
+        host.sizingOptions = [.minSize]
+        w.contentViewController = host
+        w.setContentSize(Self.settingsContentSize)
         w.isReleasedWhenClosed = false
+        w.delegate = self
         w.center()
         settingsWindow = w
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Opening size of the Settings window. Taller than the panel: the video
+    /// source list with thumbnails needs the room.
+    private static let settingsContentSize = NSSize(width: 440, height: 560)
+
+    // MARK: - NSWindowDelegate
+
+    /// Closing Settings returns the user to the main panel when Settings was
+    /// opened from it — otherwise closing the red X appears to close the whole
+    /// app, with no visible way back short of the menu-bar icon.
+    func windowWillClose(_ notification: Notification) {
+        guard (notification.object as? NSWindow) === settingsWindow else { return }
+        guard restorePanelAfterSettings else { return }
+        restorePanelAfterSettings = false
+        // Settings edits (mic, video source) change what the panel summarises,
+        // so refresh before showing it again.
+        state.refreshMicDevices()
+        if state.videoEnabled { state.refreshVideoSources() }
+        // Deferred: during windowWillClose the settings window is still key, and
+        // ordering another window front here can leave focus on the closing one.
+        DispatchQueue.main.async { [weak self] in self?.showPanelWindow() }
     }
 
     /// Build the right-click menu (Quit + a hint line). Rebuilt on demand so it

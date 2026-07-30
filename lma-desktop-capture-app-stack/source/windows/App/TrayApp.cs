@@ -79,6 +79,18 @@ public sealed class TrayApp
 
     // Settings lives in its own window (opened from the panel's gear).
     private SettingsWindow? _settingsWindow;
+    /// <summary>
+    /// True when Settings was opened from a visible panel, so closing Settings
+    /// should bring that panel back instead of leaving nothing on screen.
+    /// </summary>
+    private bool _restorePanelAfterSettings;
+
+    /// <summary>
+    /// Opening width for both panel hosts. Wide enough for the meeting-name row
+    /// and the capture-inputs summary without wrapping every label; see the
+    /// SizeToContent note where the windows are created.
+    /// </summary>
+    private const double DefaultPanelWidth = 360;
 
     // URL carried by the most recent notification, opened if the user clicks it.
     private string? _pendingNotifyUrl;
@@ -157,7 +169,11 @@ public sealed class TrayApp
             Background = System.Windows.Media.Brushes.Transparent,
             ShowInTaskbar = false,
             Topmost = true,
-            SizeToContent = SizeToContent.WidthAndHeight,
+            // Height only, for the same reason as the taskbar window below: with
+            // WidthAndHeight, WPF measures the wrapping TextBlocks unwrapped and
+            // the flyout opens much wider than intended.
+            SizeToContent = SizeToContent.Height,
+            Width = DefaultPanelWidth,
             ShowActivated = true,
         };
         // Borderless windows have no title bar to drag, which left a clipped or
@@ -320,8 +336,18 @@ public sealed class TrayApp
         {
             Title = AppIdentity.DisplayName,
             Icon = _iconIdleImage,
-            ResizeMode = ResizeMode.CanMinimize,
-            SizeToContent = SizeToContent.WidthAndHeight,
+            // CanResize, not CanMinimize: the panel's height varies with state and
+            // a non-resizable window left the user no recourse if it didn't fit.
+            ResizeMode = ResizeMode.CanResize,
+            // Height only. SizeToContent.WidthAndHeight measured the wrapping
+            // TextBlocks at their UNWRAPPED ideal width, so the window opened far
+            // wider than intended (the Windows twin of the macOS popover adopting
+            // SwiftUI's 505pt ideal width). Fixing the width and auto-sizing the
+            // height makes the text wrap as designed.
+            SizeToContent = SizeToContent.Height,
+            Width = DefaultPanelWidth,
+            MinWidth = 320,
+            MinHeight = 260,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
             ShowInTaskbar = true,
             TaskbarItemInfo = _taskbarInfo,
@@ -560,9 +586,17 @@ public sealed class TrayApp
     /// Show (or re-focus) the Settings window. The settings controls are owned by
     /// PanelView and re-parented into this window, so there is one implementation
     /// of each setting; the window is rebuilt if it was closed.
+    ///
+    /// Opening Settings from the tray flyout DISMISSES that flyout: it hides on
+    /// Deactivated, which is exactly what happens when the settings window takes
+    /// focus. That left the user with nothing to come back to after closing
+    /// Settings, so remember that the flyout was the opener and bring the panel
+    /// back on close. Mirrors the macOS windowWillClose handling.
     /// </summary>
     private void ShowSettingsWindow()
     {
+        // Capture BEFORE the settings window opens and steals focus.
+        _restorePanelAfterSettings = _flyout.IsVisible || _taskbarWindow.IsVisible;
         if (_settingsWindow != null)
         {
             if (_settingsWindow.WindowState == WindowState.Minimized)
@@ -572,7 +606,16 @@ public sealed class TrayApp
             return;
         }
         var w = new SettingsWindow(_panel.BuildSettingsContent());
-        w.Closed += (_, _) => _settingsWindow = null;
+        w.Closed += (_, _) =>
+        {
+            _settingsWindow = null;
+            if (!_restorePanelAfterSettings) return;
+            _restorePanelAfterSettings = false;
+            // Shows the taskbar window if one is up (recording), else the tray
+            // flyout — and refreshes the panel, so the capture-inputs summary
+            // picks up any mic/video-source change made in Settings.
+            ShowControlPanel();
+        };
         _settingsWindow = w;
         w.Show();
         w.Activate();
@@ -593,6 +636,9 @@ public sealed class TrayApp
     {
         if (_taskbarWindow.IsVisible)
         {
+            // MovePanelTo already repaints, so state changed since this window
+            // last held the panel (e.g. a mic/video-source edit in Settings) is
+            // picked up here.
             MovePanelTo(_taskbarWindow);
             _taskbarWindow.WindowState = WindowState.Normal;
             _taskbarWindow.Activate();
@@ -682,7 +728,7 @@ public sealed class TrayApp
         double waRightDip = wa.Right / dpiScale;
         double waBottomDip = wa.Bottom / dpiScale;
 
-        double w = _flyout.ActualWidth > 0 ? _flyout.ActualWidth : 320;
+        double w = _flyout.ActualWidth > 0 ? _flyout.ActualWidth : DefaultPanelWidth;
         double h = _flyout.ActualHeight > 0 ? _flyout.ActualHeight : 420;
 
         // Anchor near the notification area with a small margin, then clamp to

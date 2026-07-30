@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using ScreenRecorderLib;
 
 namespace LMA;
@@ -26,8 +27,18 @@ namespace LMA;
 /// </summary>
 public sealed class VideoCapture
 {
-    /// <summary>A capturable video source (display or window) for the picker.</summary>
-    public readonly record struct Source(string Id, string Name);
+    /// <summary>
+    /// A capturable video source (display or window) for the Settings picker.
+    /// Carries enough detail to tell two similar sources apart: whether it is a
+    /// whole display, and its pixel size. Mirrors the macOS VideoCapture.Source.
+    /// </summary>
+    public readonly record struct Source(
+        string Id, string Name, bool IsDisplay = false, int Width = 0, int Height = 0)
+    {
+        /// <summary>"2560 × 1440", or "" when the size isn't known.</summary>
+        public string DimensionsText =>
+            Width > 0 && Height > 0 ? $"{Width} × {Height}" : "";
+    }
 
     /// <summary>Frames per second — matches the macOS client and the VP.</summary>
     public const int Fps = 5;
@@ -64,9 +75,16 @@ public sealed class VideoCapture
     // MARK: - Source enumeration (Settings picker)
 
     /// <summary>
-    /// List capturable sources beyond the default: the default "Entire screen"
-    /// is the picker's built-in empty-id option; here we add any additional
-    /// displays and titled windows (untitled/system windows are noise).
+    /// List capturable sources: every display, then titled windows (untitled or
+    /// system windows are noise, not meeting content).
+    ///
+    /// The FIRST display carries the EMPTY id, which is the picker's default and
+    /// means "the primary display at capture time" — ResolveSource maps an empty
+    /// id to DisplayRecordingSource.MainMonitor, so the two must agree.
+    ///
+    /// Displays are named from the monitor's own description (e.g.
+    /// "DELL U2720Q") with their resolution, so two screens can be told apart —
+    /// "Display 2" alone is not something a user can act on.
     /// </summary>
     public static List<Source> ListSources()
     {
@@ -74,13 +92,30 @@ public sealed class VideoCapture
         try
         {
             var displays = Recorder.GetDisplays();
-            for (int i = 1; i < displays.Count; i++) // index 0 == default "Entire screen"
-                outList.Add(new Source($"display:{displays[i].DeviceName}", $"Display {i + 1}"));
-
-            foreach (var w in Recorder.GetWindows())
+            for (int i = 0; i < displays.Count; i++)
             {
-                if (string.IsNullOrWhiteSpace(w.Title)) continue;
-                outList.Add(new Source($"window:{w.Handle}", w.Title));
+                var device = displays[i].DeviceName;
+                var (w, h) = DisplayResolution(device);
+                outList.Add(new Source(
+                    // Index 0 is the picker default and takes the empty id.
+                    Id: i == 0 ? "" : $"display:{device}",
+                    Name: DisplayName(device, i),
+                    IsDisplay: true, Width: w, Height: h));
+            }
+            // Defensive: if display enumeration came back empty, the default
+            // source must still be offerable — otherwise the picker would have
+            // no Screens entry at all and nothing mapping to the empty id.
+            if (outList.Count == 0)
+                outList.Add(new Source("", "Main display", IsDisplay: true));
+
+            foreach (var win in Recorder.GetWindows())
+            {
+                if (string.IsNullOrWhiteSpace(win.Title)) continue;
+                var (w, h) = WindowSize(win.Handle);
+                // Skip tiny utility windows, matching the macOS client.
+                if (w > 0 && h > 0 && (w < 200 || h < 150)) continue;
+                outList.Add(new Source($"window:{win.Handle}", win.Title,
+                                       IsDisplay: false, Width: w, Height: h));
             }
         }
         catch (Exception e)
@@ -89,6 +124,110 @@ public sealed class VideoCapture
         }
         return outList;
     }
+
+    // MARK: - Display/window metadata (Win32)
+    //
+    // These use plain user32 P/Invoke rather than ScreenRecorderLib properties so
+    // the picker's labels don't depend on that library's surface. Each is
+    // best-effort: on failure the caller gets a positional name and no size, and
+    // the UI simply omits the resolution.
+
+    /// <summary>
+    /// The monitor's own description (what Display Settings shows), e.g.
+    /// "DELL U2720Q". Falls back to a positional label.
+    /// </summary>
+    private static string DisplayName(string deviceName, int index)
+    {
+        try
+        {
+            var dd = new DISPLAY_DEVICE { cb = Marshal.SizeOf<DISPLAY_DEVICE>() };
+            // iDevNum 0 with EDD_GET_DEVICE_INTERFACE_NAME(0) on a display name
+            // returns the MONITOR attached to that adapter output.
+            if (EnumDisplayDevices(deviceName, 0, ref dd, 0)
+                && !string.IsNullOrWhiteSpace(dd.DeviceString))
+            {
+                var name = dd.DeviceString.Trim();
+                // "Generic PnP Monitor" is the uninformative default; a
+                // positional label is no worse and stays consistent.
+                if (!name.Equals("Generic PnP Monitor", StringComparison.OrdinalIgnoreCase))
+                    return index == 0 ? $"{name} (main)" : name;
+            }
+        }
+        catch { /* fall through to the positional label */ }
+        return index == 0 ? "Main display" : $"Display {index + 1}";
+    }
+
+    /// <summary>Current mode's pixel size for a display, or (0,0) if unknown.</summary>
+    private static (int, int) DisplayResolution(string deviceName)
+    {
+        try
+        {
+            var dm = new DEVMODE { dmSize = (short)Marshal.SizeOf<DEVMODE>() };
+            if (EnumDisplaySettings(deviceName, ENUM_CURRENT_SETTINGS, ref dm))
+                return (dm.dmPelsWidth, dm.dmPelsHeight);
+        }
+        catch { /* size is optional in the UI */ }
+        return (0, 0);
+    }
+
+    /// <summary>On-screen size of a window, or (0,0) if unknown.</summary>
+    private static (int, int) WindowSize(IntPtr handle)
+    {
+        try
+        {
+            if (GetWindowRect(handle, out var r))
+                return (r.Right - r.Left, r.Bottom - r.Top);
+        }
+        catch { /* size is optional in the UI */ }
+        return (0, 0);
+    }
+
+    private const int ENUM_CURRENT_SETTINGS = -1;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DISPLAY_DEVICE
+    {
+        public int cb;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+        public int StateFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+    }
+
+    // Only the mode fields we read are named; the rest is padding laid out to
+    // match the documented DEVMODEW so dmPelsWidth/Height land at the right
+    // offsets.
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DEVMODE
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+        public short dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
+        public int dmFields;
+        public int dmPositionX, dmPositionY;
+        public int dmDisplayOrientation, dmDisplayFixedOutput;
+        public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+        public short dmLogPixels;
+        public int dmBitsPerPel, dmPelsWidth, dmPelsHeight;
+        public int dmDisplayFlags, dmDisplayFrequency;
+        public int dmICMMethod, dmICMIntent, dmMediaType, dmDitherType;
+        public int dmReserved1, dmReserved2, dmPanningWidth, dmPanningHeight;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool EnumDisplayDevices(
+        string? lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool EnumDisplaySettings(
+        string? lpszDeviceName, int iModeNum, ref DEVMODE lpDevMode);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
     // MARK: - Lifecycle
 

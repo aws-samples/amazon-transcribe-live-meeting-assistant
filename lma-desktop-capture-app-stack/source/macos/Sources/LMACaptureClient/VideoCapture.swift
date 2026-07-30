@@ -2,6 +2,10 @@ import Foundation
 import AVFoundation
 import ScreenCaptureKit
 import CoreMedia
+import CoreGraphics
+#if canImport(AppKit)
+import AppKit
+#endif
 
 /// Optional desktop-video capture: a SECOND ScreenCaptureKit stream (separate
 /// from AudioCapture's) that captures the chosen display or window at a low
@@ -34,6 +38,23 @@ final class VideoCapture: NSObject, SCStreamOutput, SCStreamDelegate, AVAssetWri
         /// Stable-ish persisted id: "display:<displayID>" or "window:<windowID>".
         let id: String
         let name: String
+        /// Whether this is a whole display (vs a single app window) — drives the
+        /// icon and the "which screen is which" resolution hint in the picker.
+        var isDisplay: Bool = false
+        /// Pixel size of the source, so the picker can say "2560 × 1440" — the
+        /// single most reliable way to tell two otherwise-identical displays
+        /// apart without a thumbnail.
+        var width: Int = 0
+        var height: Int = 0
+        /// Bundle id of the owning app (window sources only), used to show the
+        /// real app icon in the picker rows.
+        var appBundleID: String?
+
+        /// "2560 × 1440", or "" when the size is unknown.
+        var dimensionsText: String {
+            guard width > 0, height > 0 else { return "" }
+            return "\(width) × \(height)"
+        }
     }
 
     /// Frames per second. Screen content changes slowly; 5 fps matches the
@@ -88,16 +109,37 @@ final class VideoCapture: NSObject, SCStreamOutput, SCStreamDelegate, AVAssetWri
 
     // MARK: - Source enumeration (Settings picker)
 
-    /// List capturable sources beyond the default: additional displays (the
-    /// main display is the picker's built-in "Entire screen" = empty id), then
-    /// on-screen windows that have a title (untitled/system chrome windows are
-    /// noise, not meeting content).
+    /// List capturable sources: every display, then on-screen windows that have
+    /// a title (untitled/system chrome windows are noise, not meeting content).
+    ///
+    /// The FIRST display carries the empty id, which is the picker's default and
+    /// means "whichever display is primary at capture time" — start() resolves an
+    /// empty id via `content.displays.first`, so the two must agree.
+    ///
+    /// Displays are named from NSScreen (`localizedName`, e.g. "Built-in Retina
+    /// Display" / "DELL U2720Q") rather than "Display 2", and carry their pixel
+    /// size — between the name, the resolution, and the thumbnail, telling two
+    /// screens apart no longer requires guesswork.
     static func listSources() async -> [Source] {
         guard let content = try? await SCShareableContent.excludingDesktopWindows(
             true, onScreenWindowsOnly: true) else { return [] }
         var out: [Source] = []
-        for (i, d) in content.displays.enumerated().dropFirst() {
-            out.append(Source(id: "display:\(d.displayID)", name: "Display \(i + 1)"))
+        for (i, d) in content.displays.enumerated() {
+            out.append(Source(id: i == 0 ? "" : "display:\(d.displayID)",
+                              name: displayName(for: d.displayID, index: i),
+                              isDisplay: true,
+                              width: d.width, height: d.height))
+        }
+        // SCK can return windows but NO displays (observed on macOS 26 with three
+        // displays attached). The default source must still be offerable in that
+        // case, or the picker would show no Screens section at all and there
+        // would be nothing mapping to the empty id that start() falls back to.
+        if content.displays.isEmpty {
+            let main = CGMainDisplayID()
+            out.append(Source(id: "", name: displayName(for: main, index: 0),
+                              isDisplay: true,
+                              width: Int(CGDisplayPixelsWide(main)),
+                              height: Int(CGDisplayPixelsHigh(main))))
         }
         for w in content.windows {
             guard let title = w.title, !title.isEmpty,
@@ -105,9 +147,105 @@ final class VideoCapture: NSObject, SCStreamOutput, SCStreamDelegate, AVAssetWri
                   w.frame.width >= 200, w.frame.height >= 150 // skip tiny utility windows
             else { continue }
             out.append(Source(id: "window:\(w.windowID)",
-                              name: "\(app.applicationName) — \(title)"))
+                              name: "\(app.applicationName) — \(title)",
+                              isDisplay: false,
+                              width: Int(w.frame.width), height: Int(w.frame.height),
+                              appBundleID: app.bundleIdentifier))
         }
         return out
+    }
+
+    /// Human name for a display: the one macOS shows in System Settings, so it
+    /// matches what the user sees there. Falls back to a positional label when
+    /// no NSScreen matches (headless/virtual displays).
+    private static func displayName(for displayID: CGDirectDisplayID, index: Int) -> String {
+        #if canImport(AppKit)
+        let match = NSScreen.screens.first { screen in
+            (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
+                .uint32Value == displayID
+        }
+        if let name = match?.localizedName, !name.isEmpty {
+            return index == 0 ? "\(name) (main)" : name
+        }
+        #endif
+        return index == 0 ? "Main display" : "Display \(index + 1)"
+    }
+
+    // MARK: - Thumbnails (Settings picker)
+
+    /// One-shot still of a source, scaled so its longest edge is `maxPixel`, for
+    /// the picker's preview.
+    ///
+    /// Best-effort by design — returns nil when the source has gone away, when
+    /// Screen Recording permission hasn't been granted yet, or on macOS 13. The
+    /// picker treats nil as "show the icon instead", so a missing preview never
+    /// blocks choosing a source.
+    ///
+    /// Requires macOS 14 for SCScreenshotManager. The pre-SCK alternatives
+    /// (CGWindowListCreateImage / CGDisplayCreateImage) are marked obsoleted as
+    /// of macOS 15 and stop returning usable images there, so they aren't worth
+    /// carrying for a preview: on macOS 13 the picker still identifies each
+    /// source by its System Settings display name, pixel size, and app icon.
+    static func thumbnail(sourceID: String, maxPixel: Int = 320) async -> CGImage? {
+        guard #available(macOS 14.0, *) else { return nil }
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(
+            false, onScreenWindowsOnly: false) else { return nil }
+        // allowFallback: false — a stale row must show NO preview rather than a
+        // preview of the main display, which would misidentify the source.
+        guard let target = resolveTarget(sourceID: sourceID, content: content, allowFallback: false)
+        else { return nil }
+
+        let scale = min(1, CGFloat(maxPixel) / max(target.size.width, target.size.height, 1))
+        let cfg = SCStreamConfiguration()
+        cfg.width = max(2, Int(target.size.width * scale) & ~1)
+        cfg.height = max(2, Int(target.size.height * scale) & ~1)
+        cfg.showsCursor = false
+        cfg.capturesAudio = false
+        return try? await SCScreenshotManager.captureImage(
+            contentFilter: target.filter, configuration: cfg)
+    }
+
+    // MARK: - Source resolution
+
+    /// A resolved capture target: the SCK filter plus the source's pixel size.
+    private struct Target {
+        let filter: SCContentFilter
+        let size: CGSize
+    }
+
+    /// Resolve a persisted source id against the current shareable content.
+    ///
+    /// With `allowFallback` (the capture path) a missing window/display degrades
+    /// to the primary display and `onMissing` describes the substitution — which
+    /// is privacy-relevant, since a window choice becoming a whole display
+    /// records more than the user asked for. Without it (the thumbnail path) a
+    /// missing source returns nil, so a stale row simply shows no preview
+    /// instead of previewing the wrong thing.
+    private static func resolveTarget(sourceID: String,
+                                      content: SCShareableContent,
+                                      allowFallback: Bool,
+                                      onMissing: ((String) -> Void)? = nil) -> Target? {
+        if sourceID.hasPrefix("window:"), let wid = UInt32(sourceID.dropFirst("window:".count)) {
+            if let win = content.windows.first(where: { $0.windowID == wid }) {
+                return Target(filter: SCContentFilter(desktopIndependentWindow: win),
+                              size: win.frame.size)
+            }
+            guard allowFallback else { return nil }
+            onMissing?("The window you chose for screen video is no longer open — recording the whole screen instead.")
+        } else if sourceID.hasPrefix("display:"), let did = UInt32(sourceID.dropFirst("display:".count)) {
+            if let d = content.displays.first(where: { $0.displayID == did }) {
+                return Target(
+                    filter: SCContentFilter(display: d, excludingApplications: [], exceptingWindows: []),
+                    size: CGSize(width: d.width, height: d.height))
+            }
+            guard allowFallback else { return nil }
+            onMissing?("The display you chose for screen video isn't available — recording the main display instead.")
+        }
+        // Empty id (the picker's default) or a fallback from a vanished source:
+        // the primary display. listSources() gives the same display the empty id.
+        guard let d = content.displays.first else { return nil }
+        return Target(filter: SCContentFilter(display: d, excludingApplications: [], exceptingWindows: []),
+                      size: CGSize(width: d.width, height: d.height))
     }
 
     // MARK: - Lifecycle
@@ -118,42 +256,24 @@ final class VideoCapture: NSObject, SCStreamOutput, SCStreamDelegate, AVAssetWri
 
         // Resolve the persisted source id; fall back to the main display when
         // it is gone (window closed, display unplugged, stale id after reboot).
-        var filter: SCContentFilter
-        var captureSize: CGSize
-        if sourceID.hasPrefix("window:"),
-           let wid = UInt32(sourceID.dropFirst("window:".count)),
-           let win = content.windows.first(where: { $0.windowID == wid }) {
-            filter = SCContentFilter(desktopIndependentWindow: win)
-            captureSize = win.frame.size
-        } else {
-            var display = content.displays.first
-            if sourceID.hasPrefix("display:"),
-               let did = UInt32(sourceID.dropFirst("display:".count)),
-               let d = content.displays.first(where: { $0.displayID == did }) {
-                display = d
-            } else if !sourceID.isEmpty {
-                // Requested source is gone (window closed, display unplugged).
-                // Falling back from a window to the WHOLE SCREEN changes what
-                // gets recorded, so tell the user instead of doing it silently.
-                let msg = sourceID.hasPrefix("window:")
-                    ? "The window you chose for screen video is no longer open — recording the whole screen instead."
-                    : "The display you chose for screen video isn't available — recording the main display instead."
+        // Falling back changes what gets recorded, so the user is told.
+        let cb = onFallback
+        guard let target = Self.resolveTarget(
+            sourceID: sourceID, content: content, allowFallback: true,
+            onMissing: { msg in
                 print("⚠ \(msg)")
-                let cb = onFallback
                 DispatchQueue.main.async { cb?(msg) }
-            }
-            guard let d = display else {
-                throw NSError(domain: "LMA", code: 2, userInfo: [
-                    NSLocalizedDescriptionKey: "No display available for video capture."])
-            }
-            filter = SCContentFilter(display: d, excludingApplications: [], exceptingWindows: [])
-            captureSize = CGSize(width: d.width, height: d.height)
+            })
+        else {
+            throw NSError(domain: "LMA", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "No display available for video capture."])
         }
+        let filter = target.filter
 
         // Scale to cap the longest edge; encoder wants even dimensions.
-        let scale = min(1, CGFloat(Self.maxDimension) / max(captureSize.width, captureSize.height, 1))
-        let w = max(2, Int(captureSize.width * scale) & ~1)
-        let h = max(2, Int(captureSize.height * scale) & ~1)
+        let scale = min(1, CGFloat(Self.maxDimension) / max(target.size.width, target.size.height, 1))
+        let w = max(2, Int(target.size.width * scale) & ~1)
+        let h = max(2, Int(target.size.height * scale) & ~1)
 
         let cfg = SCStreamConfiguration()
         cfg.capturesAudio = false            // audio is AudioCapture's job

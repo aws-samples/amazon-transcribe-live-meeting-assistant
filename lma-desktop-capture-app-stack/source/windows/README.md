@@ -22,13 +22,19 @@ alongside the browser and the Node CLI.
 >   Automation tree: absent when idle, present while recording/paused, gone after
 >   Stop; closing its window leaves the recording running.
 >
-> ⚠️ **Not yet built or run on Windows:** optional screen-video capture
-> (ScreenRecorderLib + the video WebSocket), the rename to LMACaptureClient with
-> per-stack identifiers, the window/layout fixes, and the new UX (elapsed timer,
-> notifications, recent meeting names, separate Settings window). These were
-> written on macOS — where there is no .NET SDK — and need a build + smoke test
-> on a Windows machine. Expect the ScreenRecorderLib 6.x API surface (exact
-> option property names) to be the most likely thing needing adjustment.
+> ✅ **Type-checked, including the WPF UI:** `./tools/compile-check.sh` compiles
+> every file under `Engine/` and `App/` against the real NuGet packages
+> (ScreenRecorderLib 6.2.0, NAudio, WPF) using the .NET SDK in Docker — so the
+> ScreenRecorderLib API surface and all the newer code are confirmed to build.
+> Run it after any change to this client.
+>
+> ⚠️ **Not yet RUN on Windows:** optional screen-video capture (ScreenRecorderLib
+> + the video WebSocket), the rename to LMACaptureClient with per-stack
+> identifiers, the window/layout fixes, and the newer UX (elapsed timer,
+> notifications, recent meeting names, separate Settings window, capture-inputs
+> summary, source picker with resolutions). These were written on macOS, so while
+> they compile, their runtime behaviour still needs a smoke test on a Windows
+> machine.
 
 ---
 

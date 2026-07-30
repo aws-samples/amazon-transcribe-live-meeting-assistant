@@ -313,19 +313,31 @@ Popover options:
   whole screen.
 - **Recent meeting names** — the clock button beside the meeting-name field
   re-uses a recent name (handy for recurring meetings).
+- **What will be captured** — a summary box above **Start Recording** (and again
+  while recording) names the **microphone** in use and, when screen video is on,
+  **which screen or window** will be recorded, with a small preview of it. This
+  is deliberately on the main panel rather than buried in Settings: sharing the
+  wrong screen is easy to do and hard to undo.
 - **Settings (⚙ gear, top-right of the popover)** — opens a separate, resizable
   **Settings window** where you customize how the two channels are labeled in the
-  LMA transcript, which microphone is captured, and screen video:
+  LMA transcript, which microphone is captured, and screen video. Closing the
+  Settings window brings the main panel back.
   - **My mic** speaker label — defaults to your signed-in email address.
   - **System** speaker label — defaults to **"Other participants"**.
   - **Microphone** — pick a specific input device, or leave **System Default**
     to follow your Sound settings. If a chosen mic is unplugged, recording
     falls back to the default. Changes are saved immediately and apply to the
     **next** recording (the gear is disabled while recording).
-  - **Also record screen video** — off by default. When on, pick **Entire
-    screen** or a specific window; that screen/window is recorded with the
-    meeting and saved as a video in LMA (see
+  - **Also record screen video** — off by default. When on, choose from a list of
+    your **screens and windows**, each with a **thumbnail preview**, its name as
+    macOS reports it (e.g. *DELL U2720Q*), and its **resolution** — so two
+    similar monitors are easy to tell apart. **Refresh** re-scans and re-captures
+    the previews. The chosen screen/window is recorded with the meeting and saved
+    as a video in LMA (see
     [Optional: record screen video](#optional-record-screen-video)).
+
+    > Thumbnail previews need **macOS 14 or later**. On macOS 13 the list still
+    > shows each source's name and resolution.
 
 ### Running it in the background
 
@@ -397,9 +409,15 @@ Panel options:
   screen.
 - **Recent meeting names** — the clock button beside the meeting-name field
   re-uses a recent name (handy for recurring meetings).
+- **What will be captured** — a summary box above **Start Recording** (and again
+  while recording) names the **microphone** in use and, when screen video is on,
+  **which screen or window** will be recorded. This is deliberately on the main
+  panel rather than buried in Settings: sharing the wrong screen is easy to do
+  and hard to undo.
 - **Settings (⚙ gear, top-right of the panel)** — opens a separate, resizable
   **Settings window** where you customize how the two channels are labeled in the
-  LMA transcript, which microphone is captured, and screen video.
+  LMA transcript, which microphone is captured, and screen video. Closing the
+  Settings window brings the main panel back.
   Each label field shows its **default in grey**; leave the field blank to use
   it, or type to override.
   - **My mic** speaker label — defaults to your signed-in email address.
@@ -408,9 +426,11 @@ Panel options:
     to follow Windows' input device setting. If a chosen mic is unplugged,
     recording falls back to the default. Changes are saved immediately and
     apply to the **next** recording (the gear is disabled while recording).
-  - **Also record screen video** — off by default. When on, pick **Entire
-    screen** or a specific window; that screen/window is recorded with the
-    meeting and saved as a video in LMA (see
+  - **Also record screen video** — off by default. When on, choose from a list of
+    your **screens and windows**, each labeled with the monitor's own name (e.g.
+    *DELL U2720Q*) and its **resolution**, so two similar monitors are easy to
+    tell apart. The chosen screen/window is recorded with the meeting and saved
+    as a video in LMA (see
     [Optional: record screen video](#optional-record-screen-video)).
 
 The app uses no audio or CPU when idle, so the intended usage is to leave it in

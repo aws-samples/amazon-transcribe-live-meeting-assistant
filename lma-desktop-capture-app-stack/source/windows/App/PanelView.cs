@@ -362,7 +362,15 @@ public sealed class PanelView : Border
         _c.VideoSourceId = AppSettings.VideoSourceId;
     }
 
-    /// <summary>Repopulate the video source dropdown (displays + titled windows).</summary>
+    /// <summary>
+    /// Repopulate the video source dropdown (displays + titled windows).
+    ///
+    /// Each row shows the source name, an icon indicating display vs window, and
+    /// the pixel size — "Display 2" alone doesn't let a user tell two identical
+    /// monitors apart, and recording the wrong screen is a privacy problem.
+    /// The list now supplies its own default entry (the first display, with the
+    /// empty id), so this no longer prepends one.
+    /// </summary>
     private void RefreshVideoPicker()
     {
         _loadingVideoPicker = true;
@@ -370,19 +378,59 @@ public sealed class PanelView : Border
         {
             _videoPicker.Items.Clear();
             var selected = AppSettings.VideoSourceId;
-            var def = new ComboBoxItem { Content = "Entire screen", Tag = "" };
-            _videoPicker.Items.Add(def);
-            _videoPicker.SelectedItem = def;
-            foreach (var src in VideoCapture.ListSources())
+            ComboBoxItem? defaultItem = null;
+            var sources = VideoCapture.ListSources();
+            foreach (var src in sources)
             {
-                var item = new ComboBoxItem { Content = src.Name, Tag = src.Id };
+                var item = new ComboBoxItem { Content = SourceRow(src), Tag = src.Id };
                 _videoPicker.Items.Add(item);
+                if (src.Id.Length == 0) defaultItem ??= item;
                 if (src.Id == selected) _videoPicker.SelectedItem = item;
             }
-            // Saved source gone (window closed) → selection shows Entire screen,
+            // Saved source gone (window closed) → fall back to the default entry,
             // matching the engine's fallback at capture start.
+            _videoPicker.SelectedItem ??= defaultItem ?? _videoPicker.Items.Cast<object>().FirstOrDefault();
         }
         finally { _loadingVideoPicker = false; }
+    }
+
+    /// <summary>
+    /// One picker row: icon + name, with the resolution underneath as the
+    /// distinguishing detail.
+    /// </summary>
+    private static UIElement SourceRow(VideoCapture.Source src)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(new TextBlock
+        {
+            // Windows ships Segoe MDL2 Assets on Win10+; these two glyphs are
+            // "monitor" and "window". A missing font degrades to a box, not a
+            // crash, and the name beside it still carries the meaning.
+            Text = src.IsDisplay ? "" : "",
+            FontFamily = new System.Windows.Media.FontFamily("Segoe MDL2 Assets"),
+            FontSize = 12,
+            Foreground = Secondary,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
+        });
+        var text = new StackPanel();
+        text.Children.Add(new TextBlock
+        {
+            Text = src.Name,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxWidth = 300,
+        });
+        if (src.DimensionsText.Length > 0)
+        {
+            text.Children.Add(new TextBlock
+            {
+                Text = src.DimensionsText,
+                Foreground = Secondary,
+                FontSize = 10,
+            });
+        }
+        row.Children.Add(text);
+        return row;
     }
 
     private string CurrentEmail()
@@ -556,6 +604,11 @@ public sealed class PanelView : Border
                 _recentMeetings.Visibility = AppSettings.RecentMeetingNames.Count > 0
                     ? Visibility.Visible : Visibility.Collapsed;
                 _body.Children.Add(_meetingNameRow);
+                // What will actually be captured, BEFORE pressing Start. Both
+                // selections live in the Settings window, so without this you had
+                // to open Settings to answer "which mic?" and "which screen am I
+                // about to share?".
+                _body.Children.Add(BuildCaptureInputsBlock());
                 _start.Margin = new Thickness(0, 4, 0, 4);
                 _body.Children.Add(_start);
                 // Persistent consent reminder: the full disclaimer is a one-time
@@ -579,6 +632,9 @@ public sealed class PanelView : Border
             }
             else
             {
+                // Same summary while recording — it answers "what is being
+                // captured right now?" without opening Settings.
+                _body.Children.Add(BuildCaptureInputsBlock());
                 _body.Children.Add(_sysBar);
                 _body.Children.Add(_micBar);
                 _liveStatus.Margin = new Thickness(0, 4, 0, 4);
@@ -709,6 +765,98 @@ public sealed class PanelView : Border
         }
         _settingsContent = v;
         return v;
+    }
+
+    /// <summary>
+    /// At-a-glance summary of what will be captured: the microphone, and — when
+    /// screen video is enabled — which screen or window. The Windows counterpart
+    /// to the macOS CaptureInputsView.
+    /// </summary>
+    private UIElement BuildCaptureInputsBlock()
+    {
+        var mic = SelectedMicName();
+        var box = new StackPanel();
+        box.Children.Add(InputLine("", mic));   // microphone glyph
+        // Resolved ONCE and reused for the line and the tooltip: it enumerates
+        // every top-level window, which is not something to do twice per repaint.
+        var videoOn = AppSettings.VideoEnabled;
+        var src = videoOn ? SelectedVideoSourceName() : "";
+        if (videoOn)
+            box.Children.Add(InputLine("", src));                  // video glyph
+        else
+            box.Children.Add(InputLine("", "Screen video off"));   // blocked glyph
+        return new Border
+        {
+            Child = box,
+            Background = new SolidColorBrush(Color.FromRgb(0xF0, 0xF0, 0xF0)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xDC, 0xDC, 0xDC)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(5),
+            Padding = new Thickness(8, 6, 8, 6),
+            Margin = new Thickness(0, 4, 0, 4),
+            ToolTip = videoOn
+                ? $"Recording mic “{mic}” and screen video from “{src}”. "
+                  + "Change these in Settings (⚙)."
+                : $"Recording mic “{mic}”. Screen video is off — enable it in Settings (⚙).",
+        };
+    }
+
+    /// <summary>One glyph + label line inside the capture-inputs summary.</summary>
+    private static UIElement InputLine(string glyph, string text)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(new TextBlock
+        {
+            Text = glyph,
+            FontFamily = new System.Windows.Media.FontFamily("Segoe MDL2 Assets"),
+            FontSize = 11,
+            Foreground = Secondary,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
+        });
+        row.Children.Add(new TextBlock
+        {
+            Text = text,
+            Foreground = Secondary,
+            FontSize = 10,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+            MaxWidth = 260,
+        });
+        return row;
+    }
+
+    /// <summary>
+    /// Display name of the chosen microphone. Falls back to "System Default" when
+    /// nothing is chosen or the saved device isn't currently connected — which is
+    /// also what capture does.
+    /// </summary>
+    private static string SelectedMicName()
+    {
+        var id = AppSettings.MicDeviceId;
+        if (string.IsNullOrEmpty(id)) return "System Default";
+        try
+        {
+            foreach (var (devId, name) in AudioCapture.ListMicDevices())
+                if (devId == id) return name;
+        }
+        catch { /* enumeration failed; the default label is still truthful */ }
+        return "System Default";
+    }
+
+    /// <summary>Display name of the chosen screen-video source.</summary>
+    private static string SelectedVideoSourceName()
+    {
+        var id = AppSettings.VideoSourceId;
+        try
+        {
+            foreach (var src in VideoCapture.ListSources())
+                if (src.Id == id)
+                    return src.DimensionsText.Length > 0
+                        ? $"{src.Name} ({src.DimensionsText})" : src.Name;
+        }
+        catch { /* enumeration failed; fall through to a generic label */ }
+        return string.IsNullOrEmpty(id) ? "Main display" : "Selected source";
     }
 
     /// <summary>
