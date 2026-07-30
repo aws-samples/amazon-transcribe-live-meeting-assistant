@@ -1,0 +1,376 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Amazon Transcribe Live Meeting Assist - Desktop Capture App (downloadable source package)
+
+# This stack packages the NATIVE desktop capture client (macOS and Windows) as
+# downloadable source zips served from the web bucket, analogous to the
+# browser-extension download.
+#
+# Why source (not a prebuilt binary): a macOS app using ScreenCaptureKit cannot
+# be cross-compiled by the Linux LMA build pipeline, and Apple's signing tools
+# are macOS-only. So CodeBuild here does NOT compile the app — it only bakes the
+# deployment's endpoint + Cognito identifiers into lma-config.json and zips the
+# source + install scripts. The user runs the included install script on their
+# own machine to build and install. (The same reasoning applies to the Windows
+# package: a WASAPI/WPF app can't be cross-compiled on Linux and Authenticode
+# signing is Windows-only.)
+
+Parameters:
+
+  LMAStackName:
+    Type: String
+    Description: LMA Stack Name
+
+  WebSocketEndpoint:
+    Type: String
+    Description: WebSocket (transcriber) endpoint the app streams audio to
+
+  CognitoUserPoolId:
+    Type: String
+    Description: Cognito User Pool Id (used by the app's SRP login)
+
+  CognitoClientId:
+    Type: String
+    Description: Cognito App Client Id (used by the app's SRP login)
+
+  Region:
+    Type: String
+    Description: AWS region of the Cognito user pool (defaults to this stack's region if blank)
+    Default: ""
+
+  CloudfrontEndpoint:
+    Type: String
+    Description: Cloudfront Endpoint for the web app
+
+  WebAppCloudFrontDistribution:
+    Type: String
+    Description: WebApp CloudFront Distribution Id (for cache invalidation)
+
+  WebAppBucket:
+    Type: String
+    Description: Web App Bucket (the zip is uploaded here for download)
+
+  SourceCodeLocation:
+    Type: String
+    Description: S3 location (bucket/key) of the desktop capture app source zip
+
+  RecordingDisclaimer:
+    Type: String
+    Description: Disclaimer shown by the app before the first recording (same default as the browser extension)
+    Default: >-
+      Important: You are responsible for complying with legal, corporate, and ethical
+      restrictions that apply to recording meetings and calls. Do not use this solution
+      to stream, record, or transcribe calls if otherwise prohibited.
+
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: The number of days log events are kept in CloudWatch Logs.
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Description: ARN of the customer managed KMS key for encryption
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of an existing IAM managed policy to use as permissions boundary for IAM roles.
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
+Resources:
+
+  DesktopCaptureAppCodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: 'Wildcards scoped by service/resource or PassedToService condition; standard CFN least-privilege pattern'
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Action: sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+      - PolicyName: S3AndLogsAccess
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Resource:
+            - !Sub "arn:aws:s3:::${SourceCodeLocation}"
+            Effect: Allow
+            Action:
+            - s3:GetObject
+          - Effect: Allow
+            Action:
+            - s3:PutObject
+            - s3:DeleteObject
+            Resource:
+            - !Sub "arn:aws:s3:::${WebAppBucket}/*"
+          - Resource:
+            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*"
+            Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          - Effect: Allow
+            Action:
+            - cloudfront:CreateInvalidation
+            Resource:
+            - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebAppCloudFrontDistribution}"
+
+  DesktopCaptureAppCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-CB4
+            reason: 'CodeBuild encryption uses AWS-managed KMS (default)'
+    Properties:
+      Description: !Sub >-
+        Packages preconfigured desktop capture app source for stack: ${AWS::StackName}
+      ServiceRole: !Ref DesktopCaptureAppCodeBuildServiceRole
+      EncryptionKey: alias/aws/s3
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+        - Name: SOURCE_CODE_LOCATION
+          Value: !Sub "${SourceCodeLocation}"
+        - Name: WEBSOCKET_ENDPOINT
+          Value: !Ref WebSocketEndpoint
+        - Name: COGNITO_USER_POOL_ID
+          Value: !Ref CognitoUserPoolId
+        - Name: COGNITO_CLIENT_ID
+          Value: !Ref CognitoClientId
+        - Name: COGNITO_REGION
+          Value: !Ref Region
+        - Name: WEB_ENDPOINT
+          Value: !Ref CloudfrontEndpoint
+        - Name: WEBAPP_BUCKET
+          Value: !Ref WebAppBucket
+        - Name: CLOUDFRONT_DISTRIBUTION_ID
+          Value: !Ref WebAppCloudFrontDistribution
+        - Name: RECORDING_DISCLAIMER
+          Value: !Ref RecordingDisclaimer
+        # Baked into lma-config.json so the app can (a) label itself with the
+        # stack it belongs to and (b) derive per-stack identifiers (bundle id,
+        # registry key, mutex, install path) — letting the apps for multiple LMA
+        # stacks coexist on one machine without colliding.
+        - Name: LMA_STACK_NAME
+          Value: !Ref LMAStackName
+        - Name: APP_VERSION
+          Value: <VERSION_TOKEN>
+      Source:
+        Location: !Sub "arn:aws:s3:::${SourceCodeLocation}"
+        Type: S3
+        BuildSpec: |
+          version: 0.2
+          phases:
+            build:
+              commands:
+                - echo Packaging LMA Desktop Capture App from s3://${SOURCE_CODE_LOCATION}
+                - echo `pwd` && ls -altr
+                # The source zip root is the stack's source/ dir with per-platform
+                # subdirs (macos/, windows/). Tolerate the older layout where the
+                # macOS sources were the zip root, so both zip shapes work.
+                # Bake the deployment config into each package so the end user only
+                # needs their LMA username/password. The app reads lma-config.json
+                # from next to its executable (see Config.swift loadConfigFile()).
+                - |
+                  MAC_DIR=.
+                  if [ -d ./source/macos ]; then MAC_DIR=./source/macos; fi
+                  if [ -d ./macos ]; then MAC_DIR=./macos; fi
+                  # JSON-escape the free-text values (may contain quotes/newlines).
+                  DISCLAIMER_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("RECORDING_DISCLAIMER","")))')
+                  STACK_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("LMA_STACK_NAME","")))')
+                  printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s",\n  "recordingDisclaimer": %s,\n  "stackName": %s,\n  "appVersion": "%s"\n}\n' \
+                    "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" "$DISCLAIMER_JSON" "$STACK_JSON" "$APP_VERSION" > "$MAC_DIR/lma-config.json"
+                  cat "$MAC_DIR/lma-config.json"
+                  # Zip the preconfigured macOS source tree (source + install
+                  # scripts + baked config), excluding any build artifacts.
+                  zipfile=lma-desktop-capture-app-macos-v<VERSION_TOKEN>.zip
+                  (cd "$MAC_DIR" && rm -rf .build build .git && zip -r "$CODEBUILD_SRC_DIR/../${zipfile}" . -x '*.build/*' -x '*/build/*')
+                  aws s3 cp ../${zipfile} s3://${WEBAPP_BUCKET}/
+                  echo Artifact Location - s3://${WEBAPP_BUCKET}/${zipfile}
+                # --- Windows package (purely additive; guarded so it is a no-op
+                # if this source tree has no Windows client, leaving the macOS
+                # behavior above completely unchanged). The Windows client is
+                # ALSO shipped as build-from-source: CodeBuild only bakes the
+                # deployment config into its lma-config.json and zips the source
+                # (a native WASAPI/WPF app cannot be cross-compiled on Linux, and
+                # Authenticode signing is Windows-only — same reasoning as macOS).
+                - |
+                  WIN_DIR=""
+                  if [ -d ./source/windows ]; then WIN_DIR=./source/windows; fi
+                  if [ -d ./windows ]; then WIN_DIR=./windows; fi
+                  if [ -n "$WIN_DIR" ]; then
+                    DISCLAIMER_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("RECORDING_DISCLAIMER","")))')
+                    STACK_JSON=$(python3 -c 'import json,os; print(json.dumps(os.environ.get("LMA_STACK_NAME","")))')
+                    printf '{\n  "wssEndpoint": "%s",\n  "webEndpoint": "%s",\n  "userPoolId": "%s",\n  "clientId": "%s",\n  "region": "%s",\n  "recordingDisclaimer": %s,\n  "stackName": %s,\n  "appVersion": "%s"\n}\n' \
+                      "$WEBSOCKET_ENDPOINT" "$WEB_ENDPOINT" "$COGNITO_USER_POOL_ID" "$COGNITO_CLIENT_ID" "$COGNITO_REGION" "$DISCLAIMER_JSON" "$STACK_JSON" "$APP_VERSION" > "$WIN_DIR/lma-config.json"
+                    cat "$WIN_DIR/lma-config.json"
+                    winzip=lma-desktop-capture-app-windows-v<VERSION_TOKEN>.zip
+                    (cd "$WIN_DIR" && rm -rf bin obj && zip -r "$OLDPWD/../${winzip}" . -x '*/bin/*' -x '*/obj/*')
+                    aws s3 cp ../${winzip} s3://${WEBAPP_BUCKET}/
+                    echo Artifact Location - s3://${WEBAPP_BUCKET}/${winzip}
+                  else
+                    echo "No Windows client in this source tree; skipping Windows package."
+                  fi
+            post_build:
+              commands:
+                - echo Invalidating CloudFront Distribution
+                - >
+                  aws cloudfront create-invalidation
+                  --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths '/*'
+                - echo Build completed on `date`
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM4
+            reason: 'AWS-managed policies used intentionally for standard Lambda execution'
+          - id: AwsSolutions-IAM5
+            reason: 'Log group wildcard is standard for Lambda execution role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+      - PolicyName: root
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: Allow
+            Action:
+            - codebuild:StartBuild
+            - codebuild:BatchGetBuilds
+            Resource: !GetAtt DesktopCaptureAppCodeBuildProject.Arn
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+            - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+
+  CodeBuildTriggerFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it scales based on demand
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime'
+    Properties:
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.12
+      Timeout: 300
+      MemorySize: 128
+      Handler: index.handler
+      Description: Kicks off the desktop-capture-app packaging CodeBuild job.
+      TracingConfig:
+        Mode: Active
+      Code:
+        ZipFile: |
+          import boto3
+          import time
+          import json
+          import cfnresponse
+
+          def handler(event, context):
+              print("Event", json.dumps(event))
+              if event['RequestType'] == 'Delete':
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              client = boto3.client('codebuild')
+              try:
+                  project_name = event['ResourceProperties']['BuildProjectName']
+                  response = client.start_build(projectName=project_name)
+                  buildId = response['build']['id']
+                  while True:
+                      build_response = client.batch_get_builds(ids=[buildId])
+                      build_status = build_response['builds'][0]['buildStatus']
+                      print(f'Build status: {build_status}')
+                      if build_status in ['SUCCEEDED', 'FAILED', 'FAULT', 'TIMED_OUT', 'STOPPED']:
+                          print(f'Build completed with status {build_status}.')
+                          break
+                      time.sleep(10)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print("Error", str(e))
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/CodeBuildTriggerFunction
+    DependsOn:
+    - CodeBuildTriggerFunctionLogGroup
+
+  CodeBuildTriggerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/CodeBuildTriggerFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  CodeBuildRun:
+    Type: Custom::CodeBuildRun
+    Properties:
+      ServiceToken: !GetAtt CodeBuildTriggerFunction.Arn
+      BuildProjectName: !Ref DesktopCaptureAppCodeBuildProject
+      # Additional properties: changing any of these triggers a rebuild on update
+      WebSocketEndpoint: !Ref WebSocketEndpoint
+      CognitoUserPoolId: !Ref CognitoUserPoolId
+      CognitoClientId: !Ref CognitoClientId
+      Region: !Ref Region
+      SourceCodeLocation: !Ref SourceCodeLocation
+
+Outputs:
+  DesktopCaptureAppDownloadLocation:
+    Description: LMA Desktop Capture App (macOS) download location
+    Value: !Sub '${CloudfrontEndpoint}lma-desktop-capture-app-macos-v<VERSION_TOKEN>.zip'
+
+  # Additive: the Windows source package the same CodeBuild job emits when a
+  # source/windows client is present. Harmless if that zip isn't produced.
+  DesktopCaptureAppWindowsDownloadLocation:
+    Description: LMA Desktop Capture App (Windows) download location
+    Value: !Sub '${CloudfrontEndpoint}lma-desktop-capture-app-windows-v<VERSION_TOKEN>.zip'

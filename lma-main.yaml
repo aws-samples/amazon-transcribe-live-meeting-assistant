@@ -2667,11 +2667,11 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
-  AUDIOCAPTUREAPPSTACK:
+  DESKTOPCAPTUREAPPSTACK:
     Type: AWS::CloudFormation::Stack
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-audio-capture-app-stack/template.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-desktop-capture-app-stack/template.yaml
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
@@ -2682,7 +2682,7 @@ Resources:
         CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
         WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
-        SourceCodeLocation: <AUDIO_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>
+        SourceCodeLocation: <DESKTOP_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
@@ -2699,9 +2699,9 @@ Outputs:
     Description: LMA Chrome Browser extension download link
     Value: !GetAtt BROWSEREXTENSIONSTACK.Outputs.ExtensionDownloadLocation
 
-  AudioCaptureAppDownloadUrl:
-    Description: LMA Native Audio Capture App (macOS) download link
-    Value: !GetAtt AUDIOCAPTUREAPPSTACK.Outputs.AudioCaptureAppDownloadLocation
+  DesktopCaptureAppDownloadUrl:
+    Description: LMA Desktop Capture App (macOS) download link
+    Value: !GetAtt DESKTOPCAPTUREAPPSTACK.Outputs.DesktopCaptureAppDownloadLocation
 
   LMAWebsocketEndpoint:
     Description: Websocket endpoint for websocket integration
