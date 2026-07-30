@@ -24,19 +24,28 @@ RUN npm prune --production
 
 # Static ffmpeg builder. Produces ONE self-contained binary with only the
 # features the mux needs, so the runtime image keeps its full security purge
-# (see the note in the runtime stage). Pinned by digest for reproducibility.
+# (see the note in the runtime stage).
+#
+# The source comes from Debian's own ffmpeg SOURCE PACKAGE via `apt-get source`,
+# NOT from ffmpeg.org. That matters: fetching from ffmpeg.org failed in
+# CodeBuild ("Failed to connect to ffmpeg.org port 443 after 131355 ms"), because
+# the build environment can reach the configured Debian mirror but not arbitrary
+# third-party hosts. Using the same mirror apt already uses keeps the build
+# self-consistent, avoids a single-host dependency, and pins the version to the
+# distro's (patched) release.
 FROM public.ecr.aws/docker/library/debian:bookworm-slim AS ffmpeg-build
-ARG FFMPEG_VERSION=6.1.1
 RUN set -eux; \
+    sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources 2>/dev/null \
+      || printf 'deb-src http://deb.debian.org/debian bookworm main\n' >> /etc/apt/sources.list; \
     apt-get update; \
     apt-get -y install --no-install-recommends \
-        build-essential curl ca-certificates xz-utils nasm pkg-config; \
-    curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o /tmp/ffmpeg.tar.xz; \
-    mkdir -p /tmp/ffmpeg && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
-    cd /tmp/ffmpeg; \
+        build-essential dpkg-dev nasm pkg-config xz-utils; \
+    mkdir -p /src && cd /src; \
+    apt-get source ffmpeg; \
+    cd "$(find /src -maxdepth 1 -type d -name 'ffmpeg-*' | head -1)"; \
     # --disable-everything, then enable ONLY what the mux uses: read fragmented
-    # MP4 + WAV, write MP4, copy H.264, encode AAC. No network protocols, no
-    # external libs, so nothing links gnutls/gcrypt.
+    # MP4 + WAV, write MP4, copy H.264, encode AAC. No network protocols and no
+    # external libs, so the binary links none of the purged gnutls/gcrypt stack.
     ./configure \
         --disable-everything \
         --disable-shared --enable-static \
@@ -53,7 +62,8 @@ RUN set -eux; \
         --disable-ffplay --disable-ffprobe; \
     make -j"$(nproc)"; \
     strip ffmpeg; \
-    ./ffmpeg -version
+    cp ffmpeg /usr/local/bin/ffmpeg; \
+    /usr/local/bin/ffmpeg -version
 
 # Now create the runtime image and copy the build artifacts into it
 FROM public.ecr.aws/docker/library/node:20-slim AS runtime
@@ -102,7 +112,7 @@ EXPOSE $SERVERPORT
 COPY --from=builder "/app/node_modules/" "/app/node_modules"
 COPY --from=builder "/app/dist" "/app/dist"
 # Static, dependency-free ffmpeg for the end-of-call video mux (see note above).
-COPY --from=ffmpeg-build /tmp/ffmpeg/ffmpeg /usr/local/bin/ffmpeg
+COPY --from=ffmpeg-build /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
 
 USER node
 ENTRYPOINT ["node", "/app/dist/index.js"]
