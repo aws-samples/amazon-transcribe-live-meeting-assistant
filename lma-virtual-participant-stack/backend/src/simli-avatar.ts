@@ -540,6 +540,69 @@ export class SimliAvatar {
           // Hand out a CLONE so the caller stopping its track never ends the
           // shared source track (independent clones; stopping one is isolated).
           const clone = videoTrack.clone();
+          // The avatar canvas is small (256x256) but callers such as the ACS
+          // calling SDK request exact 1920x1080. A track whose real size never
+          // satisfies the negotiated sender wedges after a few frames, so scale
+          // the avatar into the requested geometry before handing it over.
+          try {
+            const want = (constraints.video || {}) as MediaTrackConstraints;
+            const pick = (v: unknown): number | undefined => {
+              if (typeof v === 'number') return v;
+              const r = v as ConstrainULongRange | undefined;
+              return r ? (r.exact ?? r.ideal ?? r.min ?? r.max) : undefined;
+            };
+            const targetW = pick(want.width);
+            const targetH = pick(want.height);
+            const settings = clone.getSettings();
+            if (
+              targetW && targetH &&
+              (settings.width !== targetW || settings.height !== targetH)
+            ) {
+              const fps = pick(want.frameRate) || 15;
+              const video = document.createElement('video');
+              video.muted = true;
+              video.playsInline = true;
+              video.srcObject = new MediaStream([clone]);
+              await video.play().catch(() => undefined);
+              const canvas = document.createElement('canvas');
+              canvas.width = targetW;
+              canvas.height = targetH;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, targetW, targetH);
+                // setInterval (not requestAnimationFrame) so the draw loop keeps
+                // running when the page is backgrounded/throttled.
+                const draw = () => {
+                  try {
+                    if (!video.videoWidth) return;
+                    const scale = Math.min(targetW / video.videoWidth, targetH / video.videoHeight);
+                    const dw = video.videoWidth * scale;
+                    const dh = video.videoHeight * scale;
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(0, 0, targetW, targetH);
+                    ctx.drawImage(video, (targetW - dw) / 2, (targetH - dh) / 2, dw, dh);
+                  } catch { /* keep the loop alive */ }
+                };
+                const timer = setInterval(draw, Math.max(1000 / fps, 33));
+                const scaled = canvas.captureStream(fps);
+                const scaledTrack = scaled.getVideoTracks()[0];
+                scaledTrack.addEventListener('ended', () => clearInterval(timer));
+                console.log(
+                  `[LMA-Simli] scaling avatar ${settings.width}x${settings.height} -> ${targetW}x${targetH} @${fps}fps`,
+                );
+                if (constraints.audio) {
+                  const audioStream = await originalGetUserMedia({ audio: constraints.audio });
+                  const combined = new MediaStream([scaledTrack]);
+                  audioStream.getAudioTracks().forEach((t) => combined.addTrack(t));
+                  return combined;
+                }
+                return new MediaStream([scaledTrack]);
+              }
+            }
+          } catch (e) {
+            console.log('[LMA-Simli] scale-to-constraints failed, using raw track:', (e as Error)?.message || e);
+          }
           if (constraints.audio) {
             const audioStream = await originalGetUserMedia({ audio: constraints.audio });
             const combinedStream = new MediaStream();

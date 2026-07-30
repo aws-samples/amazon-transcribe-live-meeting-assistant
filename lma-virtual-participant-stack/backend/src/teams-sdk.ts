@@ -13,6 +13,26 @@ function endpointFromConnectionString(connectionString: string): string {
     return match[1].replace(/\/+$/, '');
 }
 
+// The invitation parser stores a numeric id + separate passcode for new-style
+// invites, but keeps the full URL as meetingId for older meetup-join links, and
+// the UI lets users paste a URL directly. ACS takes either a meetingId+passcode
+// or a meetingLink, so classify the three shapes here.
+export function resolveTeamsLocator(
+    rawMeetingId: string,
+    meetingPassword?: string,
+): { meetingId: string; meetingLink: string } {
+    const trimmed = rawMeetingId.trim();
+    if (!trimmed) return { meetingId: '', meetingLink: '' };
+    if (/^https?:\/\//i.test(trimmed)) {
+        return { meetingId: '', meetingLink: trimmed.replace(/\s/g, '') };
+    }
+    const bare = trimmed.replace(/\s/g, '').replace(/\?.*$/, '');
+    if (!bare) return { meetingId: '', meetingLink: '' };
+    if (/^\d+$/.test(bare)) return { meetingId: bare, meetingLink: '' };
+    const passcode = meetingPassword ? `?p=${encodeURIComponent(meetingPassword)}` : '';
+    return { meetingId: '', meetingLink: `https://teams.microsoft.com/meet/${bare}${passcode}` };
+}
+
 export default class TeamsSdk {
     private endRequested: Promise<ExitInfo>;
     private requestEnd: (info: ExitInfo) => void = () => {};
@@ -56,12 +76,41 @@ export default class TeamsSdk {
                 .evaluate(() => (window as any).__lmaStartCamera())
                 .catch(() => false);
             if (ok) {
-                console.log(`[teams-sdk] started video (avatar camera) attempt ${attempt}`);
+                const diag = await page.evaluate(() => (window as any).__lmaCameraDiag).catch(() => null);
+                console.log(
+                    `[teams-sdk] started video (avatar camera) attempt ${attempt} ${diag ? JSON.stringify(diag) : ''}`,
+                );
+                this.startVideoSendMonitor(page);
                 return;
             }
             await new Promise((r) => setTimeout(r, 2000));
         }
         console.warn('[teams-sdk] failed to start avatar camera after 3 attempts');
+    }
+
+    // Frames actually leaving the container is the only proof other attendees
+    // see the avatar; a published-but-empty track renders as a blank tile.
+    private startVideoSendMonitor(page: Page): void {
+        let reports = 0;
+        const timer = setInterval(async () => {
+            if (this.ended || page.isClosed() || reports >= 3) {
+                clearInterval(timer);
+                return;
+            }
+            reports += 1;
+            const stats = await page.evaluate(() => (window as any).__lmaVideoSendStats()).catch(() => null);
+            if (!stats) return;
+            const sent = (stats.outboundVideo || []).reduce(
+                (n: number, r: any) => n + (r.framesSent || r.framesEncoded || 0),
+                0,
+            );
+            console.log(`[teams-sdk] video send stats: ${JSON.stringify(stats)}`);
+            if (sent === 0) {
+                console.warn(
+                    '[teams-sdk] no video frames sent yet — remote participants will see a blank tile',
+                );
+            }
+        }, 10_000);
     }
 
     private startCameraWatchdog(page: Page): void {
@@ -98,16 +147,21 @@ export default class TeamsSdk {
                 console.log(`TeamsSDK page ${message.type()}: ${text.slice(0, 500)}`);
             }
         });
+        // Response bodies can carry tokens/identity material, so the body dump
+        // is opt-in; the join-rejection reasons we need are mapped in-page.
+        const logErrorBodies = (process.env.TEAMS_SDK_DEBUG_HTTP || '').toLowerCase() === 'true';
         page.on('response', (response) => {
             const status = response.status();
             if (status >= 400) {
                 console.log(`[teams-sdk] HTTP ${status} ← ${response.url().slice(0, 300)}`);
-                response
-                    .text()
-                    .then((body) => {
-                        if (body) console.log(`[teams-sdk] HTTP ${status} body: ${body.slice(0, 600)}`);
-                    })
-                    .catch(() => {});
+                if (logErrorBodies) {
+                    response
+                        .text()
+                        .then((body) => {
+                            if (body) console.log(`[teams-sdk] HTTP ${status} body: ${body.slice(0, 600)}`);
+                        })
+                        .catch(() => {});
+                }
             }
         });
         page.on('requestfailed', (request) => {
@@ -134,16 +188,14 @@ export default class TeamsSdk {
             throw new Error('Teams SDK method selected but ACS_CONNECTION_STRING is not set');
         }
         const endpoint = endpointFromConnectionString(connectionString);
-        const rawId = (details.invite.meetingId || '').replace(/\s/g, '').replace(/\?.*$/, '');
-        if (!rawId) {
+        const { meetingId, meetingLink } = resolveTeamsLocator(
+            details.invite.meetingId || '',
+            details.invite.meetingPassword,
+        );
+        if (!meetingId && !meetingLink) {
             throw new Error('meeting not found: meeting ID is empty');
         }
-        const isNumericId = /^\d+$/.test(rawId);
-        const meetingId = isNumericId ? rawId : '';
-        const meetingLink = isNumericId
-            ? ''
-            : `https://teams.microsoft.com/meet/${rawId}${details.invite.meetingPassword ? `?p=${encodeURIComponent(details.invite.meetingPassword)}` : ''}`;
-        if (meetingLink) console.log(`[teams-sdk] non-numeric meeting id — joining via meeting link ${meetingLink}`);
+        if (meetingLink) console.log(`[teams-sdk] joining via meeting link ${meetingLink}`);
 
         await substep('Authorizing with Azure Communication Services…');
         const identityClient = new CommunicationIdentityClient(connectionString);
@@ -152,202 +204,213 @@ export default class TeamsSdk {
         await prepareAvatar();
 
         this.server = await startTeamsSdkServer();
-        await page.addInitScript(
-            (cfg: any) => {
-                (window as any).__lmaTeamsConfig = cfg;
-            },
-            {
-                token,
-                endpoint,
-                acsUserId: user.communicationUserId,
-                displayName: details.scribeIdentity,
-                meetingId,
-                meetingLink,
-                passcode: details.invite.meetingPassword || '',
-                wantMic: voiceAssistant.isEnabled() || simliAvatar.isConnected(),
-            },
-        );
-        await substep('Loading Teams meeting client…');
-        await page.goto(`${this.server.origin}/`, { waitUntil: 'domcontentloaded' });
+        try {
+            await page.addInitScript(
+                (cfg: any) => {
+                    (window as any).__lmaTeamsConfig = cfg;
+                },
+                {
+                    token,
+                    endpoint,
+                    acsUserId: user.communicationUserId,
+                    displayName: details.scribeIdentity,
+                    meetingId,
+                    meetingLink,
+                    passcode: details.invite.meetingPassword || '',
+                    wantMic: voiceAssistant.isEnabled() || simliAvatar.isConnected(),
+                },
+            );
+            await substep('Loading Teams meeting client…');
+            await page.goto(`${this.server.origin}/`, { waitUntil: 'domcontentloaded' });
 
-        await page.waitForFunction(
-            () => (window as any).__lmaSdkReady === true || (window as any).__lmaJoinError !== null,
-            undefined,
-            { timeout: 60_000 },
-        );
-        const initError = await page.evaluate(() => (window as any).__lmaJoinError).catch(() => null);
-        if (initError) {
-            if (initError.detail) console.error(`[teams-sdk] init error detail: ${initError.detail}`);
-            throw new Error(`Teams SDK setup failed: ${initError.reason || 'unknown'}`);
-        }
-
-        await substep('Joining the meeting…');
-        await page.evaluate(() => (window as any).__lmaTeamsJoin());
-
-        const joinDeadline = Date.now() + details.waitingTimeout;
-        let joined = false;
-        let lobbyAnnounced = false;
-        while (Date.now() < joinDeadline) {
-            if (page.isClosed()) break;
-            const state = await page
-                .evaluate(() => ({
-                    call: (window as any).__lmaCallState(),
-                    error: (window as any).__lmaJoinError,
-                    endReason: (window as any).__lmaCallEndReason,
-                }))
-                .catch(() => null);
-            if (!state) break;
-            if (state.error) {
-                throw new Error(`Teams SDK join failed: ${state.error.reason || 'join failed'}`);
+            await page.waitForFunction(
+                () => (window as any).__lmaSdkReady === true || (window as any).__lmaJoinError !== null,
+                undefined,
+                { timeout: 60_000 },
+            );
+            const initError = await page.evaluate(() => (window as any).__lmaJoinError).catch(() => null);
+            if (initError) {
+                if (initError.detail) console.error(`[teams-sdk] init error detail: ${initError.detail}`);
+                throw new Error(`Teams SDK setup failed: ${initError.reason || 'unknown'}`);
             }
-            if (state.call.page === 'accessDeniedTeamsMeeting') {
-                throw new Error('Teams SDK join failed: access denied (tenant may block anonymous joins, or the meeting ID/passcode is wrong)');
-            }
-            if (state.call.callState === 'InLobby' || state.call.page === 'lobby') {
-                if (!lobbyAnnounced) {
-                    lobbyAnnounced = true;
-                    console.log('[teams-sdk] in lobby, waiting to be admitted');
-                    await substep('Waiting to be admitted from the lobby…');
+
+            await substep('Joining the meeting…');
+            await page.evaluate(() => (window as any).__lmaTeamsJoin());
+
+            const joinDeadline = Date.now() + details.waitingTimeout;
+            let joined = false;
+            let lobbyAnnounced = false;
+            while (Date.now() < joinDeadline) {
+                if (page.isClosed()) break;
+                const state = await page
+                    .evaluate(() => ({
+                        call: (window as any).__lmaCallState(),
+                        error: (window as any).__lmaJoinError,
+                        endReason: (window as any).__lmaCallEndReason,
+                    }))
+                    .catch(() => null);
+                if (!state) break;
+                if (state.error) {
+                    throw new Error(`Teams SDK join failed: ${state.error.reason || 'join failed'}`);
                 }
+                if (state.call.page === 'accessDeniedTeamsMeeting') {
+                    throw new Error('Teams SDK join failed: access denied (tenant may block anonymous joins, or the meeting ID/passcode is wrong)');
+                }
+                if (state.call.callState === 'InLobby' || state.call.page === 'lobby') {
+                    if (!lobbyAnnounced) {
+                        lobbyAnnounced = true;
+                        console.log('[teams-sdk] in lobby, waiting to be admitted');
+                        await substep('Waiting to be admitted from the lobby…');
+                    }
+                }
+                if (state.endReason) {
+                    console.log(`[teams-sdk] call ended before admission (code=${state.endReason.code} subCode=${state.endReason.subCode})`);
+                    return { reason: 'never-joined', trigger: 'acs-not-admitted' };
+                }
+                if (state.call.callState === 'Connected' && state.call.page === 'call') {
+                    joined = true;
+                    break;
+                }
+                await new Promise((r) => setTimeout(r, 1000));
             }
-            if (state.endReason) {
-                console.log(`[teams-sdk] call ended before admission (code=${state.endReason.code} subCode=${state.endReason.subCode})`);
+
+            if (!joined) {
+                console.log('[teams-sdk] never admitted before waitingTimeout');
                 return { reason: 'never-joined', trigger: 'acs-not-admitted' };
             }
-            if (state.call.callState === 'Connected' && state.call.page === 'call') {
-                joined = true;
-                break;
-            }
-            await new Promise((r) => setTimeout(r, 1000));
-        }
+            console.log('[teams-sdk] joined meeting');
 
-        if (!joined) {
-            console.log('[teams-sdk] never admitted before waitingTimeout');
-            return { reason: 'never-joined', trigger: 'acs-not-admitted' };
-        }
-        console.log('[teams-sdk] joined meeting');
+            await substep('Setting up audio and video…');
+            await this.setupInMeetingMedia(page);
+            this.startCameraWatchdog(page);
 
-        await substep('Setting up audio and video…');
-        await this.setupInMeetingMedia(page);
-        this.startCameraWatchdog(page);
-
-        await substep('In the meeting — posting introduction…');
-        await this.sendMessages(page, details.introMessages);
-        if (details.start) {
-            console.log(details.startMessages[0]);
-            await this.sendMessages(page, details.startMessages);
-            transcriptionService.startTranscription();
-        }
-
-        let lastSpeaker = '';
-        let consecutiveLonely = 0;
-        const POLLS_BEFORE_LONELY = 2;
-        let pollsSinceLonelyCheck = 0;
-        const monitorTimer = setInterval(async () => {
-            if (this.ended || page.isClosed()) return;
-            let snap: {
-                speaker: string;
-                chats: Array<{ senderName: string; text: string }>;
-                count: number;
-                call: { page: string; callState: string };
-                endReason: { code?: number; subCode?: number } | null;
-            } | null;
-            try {
-                snap = await page.evaluate(() => {
-                    const w = window as any;
-                    const chats = w.__lmaChatQueue.splice(0, w.__lmaChatQueue.length);
-                    return {
-                        speaker: w.__lmaActiveSpeaker || '',
-                        chats,
-                        count: w.__lmaParticipantCount(),
-                        call: w.__lmaCallState(),
-                        endReason: w.__lmaCallEndReason,
-                    };
-                });
-            } catch {
-                return;
-            }
-            if (!snap) return;
-
-            if (snap.call.callState === 'Disconnected' || snap.endReason) {
-                const removed = snap.call.page === 'removedFromCall';
-                const codes = snap.endReason
-                    ? `code=${snap.endReason.code} subCode=${snap.endReason.subCode}`
-                    : 'no endReason';
-                console.log(`[teams-sdk] call ended (page=${snap.call.page} ${codes})`);
-                this.requestEnd({
-                    reason: removed ? 'removed-from-meeting' : 'host-ended',
-                    trigger: `ACS_${removed ? 'REMOVED' : 'DISCONNECTED'} ${codes}`,
-                });
-                return;
+            await substep('In the meeting — posting introduction…');
+            await this.sendMessages(page, details.introMessages);
+            if (details.start) {
+                console.log(details.startMessages[0]);
+                await this.sendMessages(page, details.startMessages);
+                transcriptionService.startTranscription();
             }
 
-            if (snap.speaker && snap.speaker !== lastSpeaker) {
-                lastSpeaker = snap.speaker;
-                if (snap.speaker !== details.scribeIdentity && snap.speaker !== details.scribeName) {
-                    await transcriptionService.speakerChange(snap.speaker).catch(() => {});
-                }
-            }
-
-            for (const chat of snap.chats) {
-                const sender = chat.senderName || null;
-                const body = chat.text || '';
-                if (matchesEndCommand(body)) {
-                    console.log(`[teams-sdk] asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
-                    await this.sendMessages(page, exitMessagesFor(sender));
-                    details.start = false;
-                    this.requestEnd({ reason: 'end-command', trigger: 'chat', requestedBy: sender, matchedMessage: body });
+            let lastSpeaker = '';
+            let consecutiveLonely = 0;
+            const POLLS_BEFORE_LONELY = 2;
+            let pollsSinceLonelyCheck = 0;
+            const monitorTimer = setInterval(async () => {
+                if (this.ended || page.isClosed()) return;
+                let snap: {
+                    speaker: string;
+                    chats: Array<{ senderName: string; text: string }>;
+                    count: number;
+                    call: { page: string; callState: string };
+                    endReason: { code?: number; subCode?: number } | null;
+                } | null;
+                try {
+                    snap = await page.evaluate(() => {
+                        const w = window as any;
+                        const chats = w.__lmaChatQueue.splice(0, w.__lmaChatQueue.length);
+                        return {
+                            speaker: w.__lmaActiveSpeaker || '',
+                            chats,
+                            count: w.__lmaParticipantCount(),
+                            call: w.__lmaCallState(),
+                            endReason: w.__lmaCallEndReason,
+                        };
+                    });
+                } catch {
                     return;
                 }
-                if (details.start && body.includes(details.pauseCommand)) {
-                    details.start = false;
-                    console.log(details.pauseMessages[0]);
-                    await this.sendMessages(page, details.pauseMessages);
-                } else if (!details.start && body.includes(details.startCommand)) {
-                    details.start = true;
-                    console.log(details.startMessages[0]);
-                    await this.sendMessages(page, details.startMessages);
-                    transcriptionService.startTranscription();
-                } else if (details.start) {
-                    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-                    const formatted = `[${timestamp}] ${sender ? `${sender}: ` : ''}${body}`;
-                    details.messages.push(formatted);
-                    console.log('New message:', formatted);
-                }
-            }
+                if (!snap) return;
 
-            pollsSinceLonelyCheck += 1;
-            if (pollsSinceLonelyCheck >= 10) {
-                pollsSinceLonelyCheck = 0;
-                if (snap.count >= 0 && snap.count <= 1) {
-                    consecutiveLonely += 1;
-                    if (consecutiveLonely >= POLLS_BEFORE_LONELY) {
-                        console.log(`[teams-sdk] alone in meeting (count=${snap.count}) — leaving`);
-                        details.start = false;
-                        this.requestEnd({ reason: 'alone-in-meeting', trigger: 'acs-participants' });
+                if (snap.call.callState === 'Disconnected' || snap.endReason) {
+                    const removed = snap.call.page === 'removedFromCall';
+                    const codes = snap.endReason
+                        ? `code=${snap.endReason.code} subCode=${snap.endReason.subCode}`
+                        : 'no endReason';
+                    console.log(`[teams-sdk] call ended (page=${snap.call.page} ${codes})`);
+                    this.requestEnd({
+                        reason: removed ? 'removed-from-meeting' : 'host-ended',
+                        trigger: `ACS_${removed ? 'REMOVED' : 'DISCONNECTED'} ${codes}`,
+                    });
+                    return;
+                }
+
+                if (snap.speaker && snap.speaker !== lastSpeaker) {
+                    lastSpeaker = snap.speaker;
+                    if (snap.speaker !== details.scribeIdentity && snap.speaker !== details.scribeName) {
+                        await transcriptionService.speakerChange(snap.speaker).catch(() => {});
                     }
-                } else {
-                    consecutiveLonely = 0;
                 }
+
+                for (const chat of snap.chats) {
+                    const sender = chat.senderName || null;
+                    const body = chat.text || '';
+                    if (matchesEndCommand(body)) {
+                        console.log(`[teams-sdk] asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
+                        await this.sendMessages(page, exitMessagesFor(sender));
+                        details.start = false;
+                        this.requestEnd({ reason: 'end-command', trigger: 'chat', requestedBy: sender, matchedMessage: body });
+                        return;
+                    }
+                    if (details.start && body.includes(details.pauseCommand)) {
+                        details.start = false;
+                        console.log(details.pauseMessages[0]);
+                        await this.sendMessages(page, details.pauseMessages);
+                    } else if (!details.start && body.includes(details.startCommand)) {
+                        details.start = true;
+                        console.log(details.startMessages[0]);
+                        await this.sendMessages(page, details.startMessages);
+                        transcriptionService.startTranscription();
+                    } else if (details.start) {
+                        const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+                        const formatted = `[${timestamp}] ${sender ? `${sender}: ` : ''}${body}`;
+                        details.messages.push(formatted);
+                        console.log('New message:', formatted);
+                    }
+                }
+
+                pollsSinceLonelyCheck += 1;
+                if (pollsSinceLonelyCheck >= 10) {
+                    pollsSinceLonelyCheck = 0;
+                    if (snap.count >= 0 && snap.count <= 1) {
+                        consecutiveLonely += 1;
+                        if (consecutiveLonely >= POLLS_BEFORE_LONELY) {
+                            console.log(`[teams-sdk] alone in meeting (count=${snap.count}) — leaving`);
+                            details.start = false;
+                            this.requestEnd({ reason: 'alone-in-meeting', trigger: 'acs-participants' });
+                        }
+                    } else {
+                        consecutiveLonely = 0;
+                    }
+                }
+            }, 3000);
+
+            console.log('Waiting for meeting end.');
+            const timeoutPromise = new Promise<ExitInfo>((resolve) =>
+                setTimeout(() => resolve({ reason: 'meeting-timeout', trigger: 'meetingTimeout' }), details.meetingTimeout),
+            );
+            const exitInfo = await Promise.race([this.endRequested, timeoutPromise]);
+            clearInterval(monitorTimer);
+            details.start = false;
+
+            try {
+                if (!page.isClosed()) {
+                    const leaveResult = await Promise.race([
+                        page.evaluate(() => (window as any).__lmaLeave()),
+                        new Promise((r) => setTimeout(() => r('leave-timeout'), 8000)),
+                    ]);
+                    console.log(`[teams-sdk] left call (${leaveResult})`);
+                }
+            } catch (err) {
+                console.warn('[teams-sdk] leave failed (session may linger in the roster):', err);
             }
-        }, 3000);
 
-        console.log('Waiting for meeting end.');
-        const timeoutPromise = new Promise<ExitInfo>((resolve) =>
-            setTimeout(() => resolve({ reason: 'meeting-timeout', trigger: 'meetingTimeout' }), details.meetingTimeout),
-        );
-        const exitInfo = await Promise.race([this.endRequested, timeoutPromise]);
-        clearInterval(monitorTimer);
-        details.start = false;
-
-        try {
-            if (!page.isClosed()) await page.evaluate(() => (window as any).__lmaLeave());
-        } catch { /* noop */ }
-        try {
-            await this.server?.close();
-        } catch { /* noop */ }
-
-        console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
-        return exitInfo;
+            console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
+            return exitInfo;
+        } finally {
+            try {
+                await this.server?.close();
+            } catch { /* noop */ }
+        }
     }
 }

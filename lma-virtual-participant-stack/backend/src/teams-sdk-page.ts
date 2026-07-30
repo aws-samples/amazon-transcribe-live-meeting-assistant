@@ -19,11 +19,48 @@ function log(m: string): void {
     }
 }
 
+// Collect the SDK's peer connections so outbound video RTP can be inspected.
+w.__lmaPeerConnections = [];
+const NativeRTCPeerConnection = window.RTCPeerConnection;
+if (NativeRTCPeerConnection) {
+    const Patched = function (this: any, ...args: any[]) {
+        const pc = new (NativeRTCPeerConnection as any)(...args);
+        try {
+            w.__lmaPeerConnections.push(pc);
+        } catch { /* noop */ }
+        return pc;
+    } as unknown as typeof RTCPeerConnection;
+    Patched.prototype = NativeRTCPeerConnection.prototype;
+    window.RTCPeerConnection = Patched;
+}
+
+// The container has no real camera, so ACS's deviceManager.getCameras() returns
+// an empty list and the composite's own camera flow can never start. Advertise
+// one videoinput device; the Simli getUserMedia override answers the actual
+// capture request, keeping the composite's camera state consistent with what is
+// published (bypassing it with call.startVideo leaves the two out of sync).
+const nativeEnumerateDevices = navigator.mediaDevices?.enumerateDevices?.bind(navigator.mediaDevices);
+if (nativeEnumerateDevices) {
+    navigator.mediaDevices.enumerateDevices = async () => {
+        const devices = await nativeEnumerateDevices();
+        if (devices.some((d) => d.kind === 'videoinput')) return devices;
+        const virtual = {
+            deviceId: 'lma-avatar-camera',
+            groupId: 'lma-avatar-camera',
+            kind: 'videoinput' as MediaDeviceKind,
+            label: 'LMA Avatar Camera',
+            toJSON() {
+                return this;
+            },
+        };
+        return [...devices, virtual as MediaDeviceInfo];
+    };
+}
+
 function htmlToText(html: string): string {
     try {
-        const div = document.createElement('div');
-        div.innerHTML = html;
-        return (div.textContent || '').trim();
+        const parsed = new DOMParser().parseFromString(html, 'text/html');
+        return (parsed.body.textContent || '').trim();
     } catch {
         return html;
     }
@@ -39,7 +76,9 @@ w.__lmaChatReady = false;
 let adapter: any = null;
 let call: any = null;
 let rawCameraStarted = false;
+let rawCameraTrack: MediaStreamTrack | null = null;
 const pendingOutgoingChat: string[] = [];
+w.__lmaCameraDiag = null;
 
 function getState(): any {
     try {
@@ -83,7 +122,11 @@ w.__lmaSetMuted = (muted: boolean) => {
 };
 
 w.__lmaCameraOn = () => {
-    if (rawCameraStarted) return true;
+    if (rawCameraStarted) {
+        // A live track is the only honest signal; a stale flag would hide the
+        // avatar going dark from the watchdog.
+        return !!rawCameraTrack && rawCameraTrack.readyState === 'live' && !rawCameraTrack.muted;
+    }
     const state = getState();
     return !!(state && state.call && state.call.localVideoStreams && state.call.localVideoStreams.length > 0);
 };
@@ -91,35 +134,147 @@ w.__lmaCameraOn = () => {
 w.__lmaStartCamera = async () => {
     try {
         await adapter.startCamera();
-        if (w.__lmaCameraOn()) {
+        const state = getState();
+        if (state && state.call && state.call.localVideoStreams && state.call.localVideoStreams.length > 0) {
             log('camera started via adapter');
+            w.__lmaCameraDiag = { path: 'adapter' };
             return true;
         }
     } catch (e) {
         log(`adapter.startCamera failed: ${e}`);
     }
-    // No real camera device exists in the container; the Simli getUserMedia
-    // override answers this call with the avatar stream, which we publish
-    // through the raw media API on the underlying call.
     try {
         if (!call) throw new Error('no call handle');
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const track = stream.getVideoTracks()[0];
+        if (!track) throw new Error('getUserMedia returned no video track');
+        const settings = typeof track.getSettings === 'function' ? track.getSettings() : {};
         await call.startVideo(new LocalVideoStream(stream));
         rawCameraStarted = true;
-        log('camera started via raw media stream');
+        rawCameraTrack = track;
+        w.__lmaCameraDiag = {
+            path: 'rawMedia',
+            trackLabel: track.label,
+            readyState: track.readyState,
+            muted: track.muted,
+            enabled: track.enabled,
+            width: (settings as any).width,
+            height: (settings as any).height,
+            frameRate: (settings as any).frameRate,
+        };
+        log(`camera started via raw media stream (${JSON.stringify(w.__lmaCameraDiag)})`);
         return true;
     } catch (e) {
         log(`raw media camera failed: ${e}`);
+        w.__lmaCameraDiag = { path: 'failed', error: String(e) };
         return false;
     }
 };
 
-w.__lmaLeave = () => {
+// Outbound RTP is the ground truth for "are other participants seeing frames":
+// a published track with framesEncoded stuck at 0 renders as a blank tile.
+w.__lmaVideoSendStats = async () => {
     try {
-        if (adapter) adapter.leaveCall().catch(() => {});
+        const state = getState();
+        const streams = (state && state.call && state.call.localVideoStreams) || [];
+        const sdkTrack: MediaStreamTrack | null = (() => {
+            try {
+                const ms = streams[0] && (streams[0].mediaStreamType ? null : streams[0]);
+                const raw = rawCameraTrack || (ms && ms.getVideoTracks && ms.getVideoTracks()[0]);
+                return raw || rawCameraTrack || null;
+            } catch {
+                return rawCameraTrack;
+            }
+        })();
+        const out: any = {
+            diag: w.__lmaCameraDiag,
+            localVideoStreams: streams.length,
+            track: sdkTrack
+                ? { readyState: sdkTrack.readyState, muted: sdkTrack.muted, enabled: sdkTrack.enabled }
+                : null,
+            pageHidden: document.hidden,
+        };
+        const pcs = w.__lmaPeerConnections || [];
+        const outbound: any[] = [];
+        const sources: any[] = [];
+        const senders: any[] = [];
+        for (let i = 0; i < pcs.length; i += 1) {
+            const pc = pcs[i];
+            if (!pc || typeof pc.getStats !== 'function') continue;
+            if (pc.connectionState === 'closed') continue;
+            try {
+                for (const s of pc.getSenders()) {
+                    if (!s.track || s.track.kind !== 'video') continue;
+                    const params = typeof s.getParameters === 'function' ? s.getParameters() : ({} as any);
+                    const enc = (params.encodings && params.encodings[0]) || {};
+                    const tr = pc.getTransceivers().find((t: any) => t.sender === s);
+                    senders.push({
+                        pc: i,
+                        trackId: s.track.id.slice(0, 8),
+                        readyState: s.track.readyState,
+                        enabled: s.track.enabled,
+                        muted: s.track.muted,
+                        active: enc.active,
+                        maxBitrate: enc.maxBitrate,
+                        mid: tr && tr.mid,
+                        dir: tr && tr.currentDirection,
+                    });
+                }
+            } catch { /* noop */ }
+            const stats = await pc.getStats();
+            stats.forEach((r: any) => {
+                // media-source counts frames the CAPTURE SOURCE produced;
+                // outbound-rtp counts frames the ENCODER shipped. Report every
+                // sender (even zero-byte ones) so a stalled transceiver can't
+                // hide behind an older one that did send.
+                if (r.type === 'media-source' && r.kind === 'video') {
+                    sources.push({ pc: i, frames: r.frames, fps: r.framesPerSecond, w: r.width, h: r.height });
+                }
+                if (r.type === 'outbound-rtp' && r.kind === 'video') {
+                    outbound.push({
+                        pc: i,
+                        ssrc: r.ssrc,
+                        mid: r.mid,
+                        active: r.active,
+                        framesEncoded: r.framesEncoded,
+                        framesSent: r.framesSent,
+                        bytesSent: r.bytesSent,
+                        fps: r.framesPerSecond,
+                        w: r.frameWidth,
+                        h: r.frameHeight,
+                        keyFrames: r.keyFramesEncoded,
+                        limitedBy: r.qualityLimitationReason,
+                        pcState: pc.connectionState,
+                        iceState: pc.iceConnectionState,
+                    });
+                }
+            });
+        }
+        out.mediaSources = sources;
+        out.outboundVideo = outbound;
+        out.videoSenders = senders;
+        return out;
     } catch (e) {
-        log(`leave error: ${e}`);
+        return { error: String(e) };
     }
+};
+
+// Awaited by Node: an un-awaited leaveCall() loses the race with the browser
+// closing, leaving the ACS session stuck as a "Leaving..." ghost participant.
+w.__lmaLeave = async () => {
+    if (!adapter) return 'no-adapter';
+    try {
+        await adapter.leaveCall();
+    } catch (e) {
+        log(`leaveCall error: ${e}`);
+    }
+    for (let i = 0; i < 30; i += 1) {
+        const state = getState();
+        const callState = state && state.call && state.call.state;
+        if (!state || !state.call || callState === 'Disconnected') return 'disconnected';
+        await new Promise((r) => setTimeout(r, 200));
+    }
+    return 'timeout';
 };
 
 function participantName(identifier: any): string {

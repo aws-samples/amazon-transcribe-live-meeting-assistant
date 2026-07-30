@@ -651,6 +651,11 @@ Resources:
             version: 0.2
             phases:
               pre_build:
+                # CONTINUE (not the default ABORT) so a pre_build failure still
+                # reaches post_build's finally, which is what posts the response
+                # to CloudFormation. Aborting here would strand the stack until
+                # the 1-hour custom-resource timeout with no diagnostic.
+                on-failure: CONTINUE
                 commands:
                   - echo Logging in to Amazon ECR...
                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
@@ -662,6 +667,7 @@ Resources:
                   - echo SOCI CLI installed successfully
                   - export PASSWORD=$(aws ecr get-login-password --region ${AWS::Region})
               build:
+                on-failure: CONTINUE
                 commands:
                   - echo Build started on `date`
                   - echo `pwd`
@@ -679,6 +685,14 @@ Resources:
                   - ctr image tag docker.io/library/${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
               post_build:
                 commands:
+                  # pre_build/build use on-failure CONTINUE so the finally below
+                  # always reports to CloudFormation; skip the SOCI/deploy work
+                  # when an earlier phase already failed.
+                  - |
+                    if [ "$CODEBUILD_BUILD_SUCCEEDING" != "1" ]; then
+                      echo "Earlier phase failed — skipping SOCI index and ECS deploy."
+                      exit 1
+                    fi
                   - echo Generating SOCI index for faster startup...
                   - soci create ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
                   - echo Pushing SOCI index to ECR...
