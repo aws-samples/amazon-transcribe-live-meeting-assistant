@@ -4,6 +4,7 @@ import { CommunicationIdentityClient } from '@azure/communication-identity';
 import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startTeamsSdkServer, TeamsSdkServerHandle } from './teams-sdk-server.js';
 
@@ -40,6 +41,9 @@ export default class TeamsSdk {
     private server: TeamsSdkServerHandle | null = null;
     private acsUser: { communicationUserId: string } | null = null;
     private identityClient: CommunicationIdentityClient | null = null;
+    private lastMeetingSpeaker: string | null = null;
+    private lastReportedSpeaker: string | null = null;
+    private detachAgentSpeaking: (() => void) | null = null;
 
     constructor() {
         this.endRequested = new Promise<ExitInfo>((resolve) => {
@@ -113,6 +117,34 @@ export default class TeamsSdk {
                 );
             }
         }, 10_000);
+    }
+
+    // Speaker attribution combines two signals: ACS dominant-speaker events
+    // (who the meeting says is talking) and AgentSpeakingDetector (whether the
+    // voice agent / avatar is talking, measured on agent_output.monitor).
+    // Without the second signal the agent's speech keeps the last human's
+    // label. Mirrors the DOM Teams path.
+    private async reportSpeaker(speaker: string | null): Promise<void> {
+        if (!speaker || speaker === this.lastReportedSpeaker) return;
+        this.lastReportedSpeaker = speaker;
+        await transcriptionService.speakerChange(speaker).catch(() => {});
+    }
+
+    private startAgentSpeakingAttribution(): void {
+        if (!voiceAssistant.isEnabled()) return;
+        const onAgentStart = () => {
+            this.reportSpeaker(details.scribeIdentity).catch(() => {});
+        };
+        const onAgentStop = () => {
+            this.reportSpeaker(this.lastMeetingSpeaker).catch(() => {});
+        };
+        agentSpeakingDetector.on('started', onAgentStart);
+        agentSpeakingDetector.on('stopped', onAgentStop);
+        if (agentSpeakingDetector.isSpeaking()) onAgentStart();
+        this.detachAgentSpeaking = () => {
+            agentSpeakingDetector.off('started', onAgentStart);
+            agentSpeakingDetector.off('stopped', onAgentStop);
+        };
     }
 
     private async leaveCall(page: Page): Promise<void> {
@@ -310,6 +342,7 @@ export default class TeamsSdk {
             await substep('Setting up audio and video…');
             await this.setupInMeetingMedia(page);
             this.startCameraWatchdog(page);
+            this.startAgentSpeakingAttribution();
 
             await substep('In the meeting — posting introduction…');
             await this.sendMessages(page, details.introMessages);
@@ -365,7 +398,12 @@ export default class TeamsSdk {
                 if (snap.speaker && snap.speaker !== lastSpeaker) {
                     lastSpeaker = snap.speaker;
                     if (snap.speaker !== details.scribeIdentity && snap.speaker !== details.scribeName) {
-                        await transcriptionService.speakerChange(snap.speaker).catch(() => {});
+                        this.lastMeetingSpeaker = snap.speaker;
+                        // Don't overwrite the agent's label mid-utterance; the
+                        // detector's 'stopped' handler restores this speaker.
+                        if (!agentSpeakingDetector.isSpeaking()) {
+                            await this.reportSpeaker(snap.speaker);
+                        }
                     }
                 }
 
@@ -426,6 +464,8 @@ export default class TeamsSdk {
             // Must run on every exit path, not just a normal meeting end: the
             // lobby-timeout returns and the join throws would otherwise abandon
             // the ACS session, leaving a "Leaving..." ghost in the roster.
+            this.detachAgentSpeaking?.();
+            this.detachAgentSpeaking = null;
             await this.leaveCall(page);
             try {
                 await this.server?.close();
