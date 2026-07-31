@@ -7,7 +7,7 @@ import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startTeamsSdkServer, TeamsSdkServerHandle } from './teams-sdk-server.js';
 
-function endpointFromConnectionString(connectionString: string): string {
+export function endpointFromConnectionString(connectionString: string): string {
     const match = /endpoint=([^;]+)/i.exec(connectionString);
     if (!match) throw new Error('ACS_CONNECTION_STRING is missing an endpoint= segment');
     return match[1].replace(/\/+$/, '');

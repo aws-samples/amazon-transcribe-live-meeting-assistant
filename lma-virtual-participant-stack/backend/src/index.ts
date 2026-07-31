@@ -33,6 +33,11 @@ import {
 const WINDOW_WIDTH = 1920;
 const WINDOW_HEIGHT = 1080 - 130;
 
+const isTeamsPlatform = (platform: string): boolean => platform.toUpperCase() === 'TEAMS';
+
+const isTeamsSdkJoin = (): boolean =>
+    isTeamsPlatform(details.invite.meetingPlatform) && details.teamsMethod === 'sdk';
+
 const getCloakLaunchArgs = (fingerprintSeed: number, needWebrtcHostCandidates: boolean): string[] => [
     `--fingerprint=${fingerprintSeed}`,
     `--fingerprint-screen-width=${WINDOW_WIDTH}`,
@@ -348,10 +353,7 @@ const main = async (): Promise<void> => {
         userDataDir,
         viewport: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT },
         args: (() => {
-            const needWebrtc =
-                simliAvatar.isSimliEnabled() ||
-                ((details.invite.meetingPlatform === 'TEAMS' || details.invite.meetingPlatform === 'Teams') &&
-                    details.teamsMethod === 'sdk');
+            const needWebrtc = simliAvatar.isSimliEnabled() || isTeamsSdkJoin();
             console.log(`[browser] WebRTC host-candidate flags: ${needWebrtc ? 'ENABLED' : 'disabled'}`);
             return getCloakLaunchArgs(fingerprintSeed, needWebrtc);
         })(),
@@ -369,9 +371,7 @@ const main = async (): Promise<void> => {
     console.log('✓ Chrome launched with remote debugging on port 9222');
 
     const platform = details.invite.meetingPlatform;
-    const sdkPath =
-        (platform === 'ZOOM' && details.zoomMethod === 'sdk') ||
-        ((platform === 'TEAMS' || platform === 'Teams') && details.teamsMethod === 'sdk');
+    const sdkPath = (platform === 'ZOOM' && details.zoomMethod === 'sdk') || isTeamsSdkJoin();
     if (isFresh && !sdkPath) {
         if (statusManager) {
             await statusManager.setWarmingProfile();

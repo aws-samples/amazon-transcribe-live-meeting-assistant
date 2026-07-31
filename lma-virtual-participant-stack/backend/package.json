@@ -9,6 +9,7 @@
     "build": "tsc && npm run build:page",
     "build:page": "esbuild src/teams-sdk-page.ts --bundle --format=iife --platform=browser --minify --outfile=dist/teams-sdk-page.bundle.js",
     "start": "node dist/index.js",
+    "test": "npm run build && node --test dist/*.test.js",
     "dev": "ts-node --esm src/index.ts",
     "dev:watch": "npx nodemon --watch src --ext ts --exec 'npm run build && npm run start'"
   },

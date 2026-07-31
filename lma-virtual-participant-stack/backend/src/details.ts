@@ -131,18 +131,10 @@ class DetailsManager {
     );
 
     const zoomSdkCredsPresent = !!((process.env.ZOOM_MEETING_SDK_CLIENT_ID || '').trim() && (process.env.ZOOM_MEETING_SDK_CLIENT_SECRET || '').trim());
-    const zoomMethodOverride = (process.env.MEETING_ZOOM_METHOD || 'auto').toLowerCase();
-    const zoomMethod: 'dom' | 'sdk' =
-      zoomMethodOverride === 'sdk' ? 'sdk'
-      : zoomMethodOverride === 'dom' ? 'dom'
-      : zoomSdkCredsPresent ? 'sdk' : 'dom';
+    const zoomMethod = resolveJoinMethod(process.env.MEETING_ZOOM_METHOD, zoomSdkCredsPresent);
 
     const acsConnectionStringPresent = !!(process.env.ACS_CONNECTION_STRING || '').trim();
-    const teamsMethodOverride = (process.env.MEETING_TEAMS_METHOD || 'auto').toLowerCase();
-    const teamsMethod: 'dom' | 'sdk' =
-      teamsMethodOverride === 'sdk' ? 'sdk'
-      : teamsMethodOverride === 'dom' ? 'dom'
-      : acsConnectionStringPresent ? 'sdk' : 'dom';
+    const teamsMethod = resolveJoinMethod(process.env.MEETING_TEAMS_METHOD, acsConnectionStringPresent);
 
     this._details = {
       // Meeting Configuration
@@ -264,6 +256,13 @@ export const details = detailsManager.details;
  *   any message that quotes the command in a longer sentence (including the
  *   bot's own intro), "Hello LMA", "endpoint", "ending soon".
  */
+export function resolveJoinMethod(override: string | undefined, credentialsPresent: boolean): 'dom' | 'sdk' {
+  const mode = (override || 'auto').toLowerCase();
+  if (mode === 'sdk') return 'sdk';
+  if (mode === 'dom') return 'dom';
+  return credentialsPresent ? 'sdk' : 'dom';
+}
+
 export function matchesEndCommand(message: string): boolean {
   if (!message) return false;
   const trimmed = message.trim();
