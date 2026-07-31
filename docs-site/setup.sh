@@ -22,6 +22,20 @@ mkdir -p "$CONTENT_DOCS"
 echo ""
 echo "🔗 Creating symlinks for documentation files..."
 count=0
+# Prune symlinks whose target no longer exists. Without this, renaming or
+# deleting a file under docs/ leaves a DANGLING link here forever (the relink
+# loop below only replaces links it is about to recreate), and Astro/Starlight
+# then fails or emits a broken page — on incremental checkouts only, which makes
+# it easy to miss in CI.
+stale=0
+for link in "$CONTENT_DOCS"/*.md; do
+    if [ -L "$link" ] && [ ! -e "$link" ]; then
+        rm -f "$link"
+        stale=$((stale + 1))
+    fi
+done
+[ "$stale" -gt 0 ] && echo "   🧹 Removed $stale stale symlink(s)"
+
 for md_file in "$PROJECT_ROOT"/docs/*.md; do
     filename=$(basename "$md_file")
     # Skip README.md and INDEX.md — we have our own index.mdx landing page

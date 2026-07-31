@@ -17,7 +17,7 @@ class StackPackageType(str, Enum):
     ZIP_WITH_TOKEN_REPLACE = "zip_with_token_replace"
     # Like ZIP_WITH_TOKEN_REPLACE, but the source tree to zip lives in a separate
     # directory from the stack's template (source_dir), and the whole tree is
-    # version-tokenized. Used by lma-audio-capture-app-stack, whose downloadable
+    # version-tokenized. Used by lma-desktop-capture-app-stack, whose downloadable
     # source is the native app under experiments/, not co-located with template.
     ZIP_APP_SRC_WITH_TOKEN_REPLACE = "zip_app_src_with_token_replace"
     CFN_PACKAGE = "cfn_package"

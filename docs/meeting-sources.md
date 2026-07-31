@@ -14,7 +14,7 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 - **[Stream Audio (from Mic+Browser)](stream-audio.md)** — built-in page in the
   LMA web app that streams audio from your microphone and any Chrome tab
   (meetings, softphones, YouTube, audio/video playback).
-- **[Audio Capture App (Native)](audio-capture-app.md)** — native macOS and
+- **[Desktop Capture App](desktop-capture-app.md)** — native macOS and
   Windows app (menu bar / system tray) that captures your system (meeting) audio
   + microphone, for meetings you join from a **native desktop app** — no browser
   tab and no bot.
@@ -23,7 +23,7 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 
 ## At-a-glance comparison
 
-| Capability                                              | Chrome Extension       | Stream Audio (from Mic+Browser) | Audio Capture App (Native) | Virtual Participant |
+| Capability                                              | Chrome Extension       | Stream Audio (from Mic+Browser) | Desktop Capture App | Virtual Participant |
 | ------------------------------------------------------- | ---------------------- | ------------------------------- | -------------------------- | ------------------- |
 | One-time install required                               | Yes (Chromium only)    | No                              | Yes (build on your computer) | No                |
 | Runs inside meeting tab                                 | ✅                     | ❌ (separate LMA tab)           | ❌ (menu-bar / tray app)   | ❌ (joins as a bot) |
@@ -59,7 +59,7 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
   meeting-app metadata; it only distinguishes your microphone channel from the
   tab-audio channel).
 
-### Use the **Audio Capture App (Native)** when…
+### Use the **Desktop Capture App** when…
 
 - You join meetings from a **native desktop app** on macOS or Windows (Zoom,
   Teams, Webex, Slack, a phone bridge, …) rather than a Chrome tab — which rules
@@ -70,7 +70,7 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
   your microphone from the system/meeting-audio channel) and don't need the
   in-meeting Voice Assistant.
 - macOS and Windows are available today; mobile is on the roadmap. See
-  [Audio Capture App](audio-capture-app.md).
+  [Desktop Capture App](desktop-capture-app.md).
 
 ### Use **Virtual Participant** when…
 
@@ -87,5 +87,5 @@ speaker attribution, Meeting Assistant, summaries, knowledge base, etc.).
 
 - [Chrome Extension](browser-extension.md) — install and usage guide
 - [Stream Audio](stream-audio.md) — browser-based capture
-- [Audio Capture App (Native)](audio-capture-app.md) — native macOS / Windows app
+- [Desktop Capture App](desktop-capture-app.md) — native macOS / Windows app
 - [Virtual Participant](virtual-participant.md) — server-side bot

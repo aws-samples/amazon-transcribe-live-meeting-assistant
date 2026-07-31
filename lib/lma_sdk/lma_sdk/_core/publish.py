@@ -57,7 +57,7 @@ STACK_DEFINITIONS: list[StackDefinition] = [
         supports_change_detection=False,  # Always publish (fast)
     ),
     StackDefinition(
-        name="lma-audio-capture-app-stack",
+        name="lma-desktop-capture-app-stack",
         package_type=StackPackageType.ZIP_APP_SRC_WITH_TOKEN_REPLACE,
         template_file="template.yaml",
         # The downloadable app sources live under the stack's own source/
@@ -493,7 +493,7 @@ class Publisher:
         # Track S3 locations for main template substitution
         vp_src_s3_location = ""
         browser_ext_src_s3_location = ""
-        audio_capture_app_src_s3_location = ""
+        desktop_capture_app_src_s3_location = ""
 
         # Publish each stack
         stack_results: list[StackPublishResult] = []
@@ -552,8 +552,8 @@ class Publisher:
                     vp_src_s3_location = result["vp_src_s3_location"]
                 if stack_def.name == "lma-browser-extension-stack" and result.get("browser_ext_src_s3_location"):
                     browser_ext_src_s3_location = result["browser_ext_src_s3_location"]
-                if stack_def.name == "lma-audio-capture-app-stack" and result.get("audio_capture_app_src_s3_location"):
-                    audio_capture_app_src_s3_location = result["audio_capture_app_src_s3_location"]
+                if stack_def.name == "lma-desktop-capture-app-stack" and result.get("desktop_capture_app_src_s3_location"):
+                    desktop_capture_app_src_s3_location = result["desktop_capture_app_src_s3_location"]
 
                 duration = time.time() - stack_start
                 stack_results.append(StackPublishResult(
@@ -596,7 +596,7 @@ class Publisher:
             version=version,
             vp_src_s3_location=vp_src_s3_location,
             browser_ext_src_s3_location=browser_ext_src_s3_location,
-            audio_capture_app_src_s3_location=audio_capture_app_src_s3_location,
+            desktop_capture_app_src_s3_location=desktop_capture_app_src_s3_location,
             tmpdir=tmpdir,
         )
 
@@ -797,7 +797,7 @@ class Publisher:
     ) -> dict:
         """Zip an app source subtree (source_dir, relative to the stack dir) with
         <VERSION_TOKEN> replacement, and upload both the zip and the stack's
-        template. Used by lma-audio-capture-app-stack, whose downloadable app
+        template. Used by lma-desktop-capture-app-stack, whose downloadable app
         lives under source/macos/ (kept separate from the stack's template.yaml
         so the template isn't shipped in the download). CodeBuild later bakes the
         deployment config into the zip.
@@ -862,7 +862,7 @@ class Publisher:
         shutil.rmtree(temp_src_dir, ignore_errors=True)
 
         return {
-            "audio_capture_app_src_s3_location": src_s3_location,
+            "desktop_capture_app_src_s3_location": src_s3_location,
             "s3_template_url": https_url,
             "message": f"Zipped app source with token replacement and uploaded ({zip_filename})",
         }
@@ -989,7 +989,7 @@ class Publisher:
         version: str,
         vp_src_s3_location: str,
         browser_ext_src_s3_location: str = "",
-        audio_capture_app_src_s3_location: str = "",
+        desktop_capture_app_src_s3_location: str = "",
         tmpdir: Path = None,
     ) -> dict[str, Any]:
         """Replace tokens in lma-main.yaml, upload, and validate."""
@@ -1006,7 +1006,7 @@ class Publisher:
             "<VERSION_TOKEN>": version,
             "<REGION_TOKEN>": region,
             "<BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>": browser_ext_src_s3_location,
-            "<AUDIO_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>": audio_capture_app_src_s3_location,
+            "<DESKTOP_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>": desktop_capture_app_src_s3_location,
             "<VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>": vp_src_s3_location,
             "<BUILD_DATE_TIME_TOKEN>": build_date_time,
         }

@@ -1,19 +1,19 @@
 ---
-title: "Blog Update Proposal — Native Audio Capture Apps"
+title: "Blog Update Proposal — Native Desktop Capture Apps"
 ---
 
-# Blog Update Proposal — Adding the Native Audio Capture Apps
+# Blog Update Proposal — Adding the Native Desktop Capture Apps
 
 **Target post:** [Live Meeting Assistant with Amazon Transcribe, Amazon Bedrock, and Strands Agents](https://aws.amazon.com/blogs/machine-learning/live-meeting-assistant-with-amazon-transcribe-amazon-bedrock-and-strands-agents/)
 
 **Purpose:** the published post is built around **four** capture paths — Virtual
 Participant, Stream Audio, Browser Extension, and Upload Audio. The new native
-**Audio Capture App** (macOS and Windows) is not mentioned anywhere. This
+**Desktop Capture App** (macOS and Windows) is not mentioned anywhere. This
 document proposes the minimum set of edits to make readers aware of it, with
 drop-in prose for each location.
 
 **Editorial principle:** keep the blog prose short. Every section below defers
-detail to the docs — [Audio Capture App](audio-capture-app.md) and
+detail to the docs — [Desktop Capture App](desktop-capture-app.md) and
 [Meeting Sources](meeting-sources.md).
 
 ---
@@ -23,7 +23,7 @@ detail to the docs — [Audio Capture App](audio-capture-app.md) and
 The `Update — May 2026 (v0.3.4)` line should name the feature, since that's what
 readers skim.
 
-> …and adds the new **Audio Capture App** — a native macOS and Windows app that
+> …and adds the new **Desktop Capture App** — a native macOS and Windows app that
 > streams your system audio and microphone to LMA, so you can transcribe
 > meetings you join from a native desktop client.
 
@@ -31,7 +31,7 @@ readers skim.
 
 Insert after the Virtual Participant / avatar bullets:
 
-> - **Audio Capture App (native macOS and Windows)** — a menu-bar/system-tray
+> - **Desktop Capture App (native macOS and Windows)** — a menu-bar/system-tray
 >   app that captures your computer's system audio plus your microphone and
 >   streams them to LMA. Transcribe meetings held in native Zoom, Teams, Webex,
 >   or Slack clients (or a phone bridge) with no browser tab and no bot in the
@@ -42,7 +42,7 @@ Insert after the Virtual Participant / avatar bullets:
 The overview enumerates four ways to connect LMA to a meeting. Change the count
 and add this item between *Browser Extension* and *Upload Audio*:
 
-> 4. **Audio Capture App (native)** — a local macOS or Windows app that captures
+> 4. **Desktop Capture App (native)** — a local macOS or Windows app that captures
 >    OS-level system audio and your mic, for meetings you attend from a native
 >    desktop client.
 
@@ -51,7 +51,7 @@ and add this item between *Browser Extension* and *Upload Audio*:
 Placing it beside Virtual Participant is deliberate: they are the two "no browser
 tab" options, and readers need the contrast immediately.
 
-> ### Audio Capture App (Native)
+> ### Desktop Capture App
 >
 > A lightweight native app for **macOS and Windows** that runs in the menu bar or
 > system tray. It captures your computer's **system (meeting) audio** on one
@@ -71,7 +71,7 @@ tab" options, and readers need the contrast immediately.
 > attendance. On macOS the app needs the Screen Recording permission (that's how
 > macOS grants system-audio capture, even audio-only); on Windows loopback
 > capture needs no permission at all. See
-> [Audio Capture App](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/audio-capture-app/)
+> [Desktop Capture App](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/desktop-capture-app/)
 > for install steps and the full comparison.
 
 ## 5. Getting Started ▸ Other Ways to Capture Meeting Audio — new subsection
@@ -80,13 +80,13 @@ This is the most important edit — it's where readers go to pick a method. Add
 **after** "Use the Browser Extension" and **before** "Upload Audio", matching the
 existing ~250-word, numbered-steps format.
 
-> ### Use the Audio Capture App (macOS or Windows)
+> ### Use the Desktop Capture App (macOS or Windows)
 >
 > If you join meetings from a native desktop client instead of a browser tab, the
-> Audio Capture App streams your system audio and microphone straight from your
+> Desktop Capture App streams your system audio and microphone straight from your
 > computer — no tab sharing and no bot.
 >
-> 1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Audio Capture App
+> 1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Desktop Capture App
 >    (Native)** and download the build for your platform. The download is
 >    preconfigured for your deployment, so you sign in with your normal LMA
 >    username and password.
@@ -111,7 +111,7 @@ existing ~250-word, numbered-steps format.
 > voice assistant or video recording. Because a locally built app is unsigned,
 > macOS Gatekeeper or Windows SmartScreen may warn on first launch. Headphones
 > are recommended so speaker audio doesn't bleed into your mic. Full details:
-> [Audio Capture App](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/audio-capture-app/)
+> [Desktop Capture App](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/desktop-capture-app/)
 > and
 > [Meeting Sources](https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/meeting-sources/).
 
@@ -122,7 +122,7 @@ Also update the section's intro sentence if it says "three other ways".
 The post says the WebSocket server relays audio for Stream Audio and the browser
 extension. Extend that list rather than adding a paragraph:
 
-> The Audio Capture App uses the same path: it authenticates with Cognito, then
+> The Desktop Capture App uses the same path: it authenticates with Cognito, then
 > streams 2-channel 16-bit PCM (system audio on one channel, microphone on the
 > other) to the same WebSocket server, so no server-side changes are needed.
 
@@ -130,7 +130,7 @@ extension. Extend that list rather than adding a paragraph:
 
 Readers comparing options will care that this path skips the VP container:
 
-> The Audio Capture App runs on your own computer, so it incurs no LMA compute
+> The Desktop Capture App runs on your own computer, so it incurs no LMA compute
 > cost beyond the WebSocket transcriber, Transcribe, and Bedrock usage that all
 > capture methods share — unlike the Virtual Participant, which runs a Fargate
 > task per meeting.
@@ -186,6 +186,6 @@ trade-offs — but useful when reviewing the edits.
 
 ## See also
 
-- [Audio Capture App (Native)](audio-capture-app.md)
+- [Desktop Capture App](desktop-capture-app.md)
 - [Meeting Sources](meeting-sources.md)
 - [Virtual Participant](virtual-participant.md)

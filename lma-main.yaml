@@ -522,10 +522,14 @@ Parameters:
       - "true"
       - "false"
     Description: >-
-      Default for capturing meeting video (screen recording) by the Virtual
-      Participant, in addition to audio. This is the deployment-wide default;
-      users can override it per meeting with the "Record meeting video" toggle in
-      the LMA UI. Video recordings consume additional CPU and S3 storage.
+      Enables meeting video (screen recording) in addition to audio, for BOTH
+      video sources: the Virtual Participant and the Desktop Capture App. For the
+      Virtual Participant this is the deployment-wide default and users can
+      override it per meeting with the "Record meeting video" toggle in the LMA
+      UI; for the Desktop Capture App it is a hard on/off (users opt in per
+      machine in the app's Settings, and the server discards video when this is
+      false). Video recordings consume additional CPU, ephemeral storage, and S3
+      storage.
 
   AudioRecordingExpirationInDays:
     Type: Number
@@ -2544,6 +2548,8 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
+        EnableVideoRecording: !Ref EnableVideoRecording
+        VideoRecordingsPrefix: "lma-video-recordings/"
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
@@ -2676,11 +2682,11 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
-  AUDIOCAPTUREAPPSTACK:
+  DESKTOPCAPTUREAPPSTACK:
     Type: AWS::CloudFormation::Stack
     Properties:
       # yamllint disable rule:line-length
-      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-audio-capture-app-stack/template.yaml
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-desktop-capture-app-stack/template.yaml
       # yamllint enable rule:line-length
       Parameters:
         LMAStackName: !Ref AWS::StackName
@@ -2691,7 +2697,7 @@ Resources:
         CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
         WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
-        SourceCodeLocation: <AUDIO_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>
+        SourceCodeLocation: <DESKTOP_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
@@ -2708,9 +2714,9 @@ Outputs:
     Description: LMA Chrome Browser extension download link
     Value: !GetAtt BROWSEREXTENSIONSTACK.Outputs.ExtensionDownloadLocation
 
-  AudioCaptureAppDownloadUrl:
-    Description: LMA Native Audio Capture App (macOS) download link
-    Value: !GetAtt AUDIOCAPTUREAPPSTACK.Outputs.AudioCaptureAppDownloadLocation
+  DesktopCaptureAppDownloadUrl:
+    Description: LMA Desktop Capture App (macOS) download link
+    Value: !GetAtt DESKTOPCAPTUREAPPSTACK.Outputs.DesktopCaptureAppDownloadLocation
 
   LMAWebsocketEndpoint:
     Description: Websocket endpoint for websocket integration
