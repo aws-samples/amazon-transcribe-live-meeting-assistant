@@ -38,6 +38,8 @@ export default class TeamsSdk {
     private requestEnd: (info: ExitInfo) => void = () => {};
     private ended = false;
     private server: TeamsSdkServerHandle | null = null;
+    private acsUser: { communicationUserId: string } | null = null;
+    private identityClient: CommunicationIdentityClient | null = null;
 
     constructor() {
         this.endRequested = new Promise<ExitInfo>((resolve) => {
@@ -111,6 +113,19 @@ export default class TeamsSdk {
                 );
             }
         }, 10_000);
+    }
+
+    private async leaveCall(page: Page): Promise<void> {
+        if (page.isClosed()) return;
+        try {
+            const result = await Promise.race([
+                page.evaluate(() => (window as any).__lmaLeave?.()),
+                new Promise((r) => setTimeout(() => r('leave-timeout'), 8000)),
+            ]);
+            console.log(`[teams-sdk] left call (${result})`);
+        } catch (err) {
+            console.warn('[teams-sdk] leave failed (session may linger in the roster):', err);
+        }
     }
 
     private startCameraWatchdog(page: Page): void {
@@ -195,11 +210,20 @@ export default class TeamsSdk {
         if (!meetingId && !meetingLink) {
             throw new Error('meeting not found: meeting ID is empty');
         }
-        if (meetingLink) console.log(`[teams-sdk] joining via meeting link ${meetingLink}`);
+        // Redact the query string: the passcode rides in ?p= and this goes to CloudWatch.
+        if (meetingLink) console.log(`[teams-sdk] joining via meeting link ${meetingLink.split('?')[0]}`);
 
         await substep('Authorizing with Azure Communication Services…');
         const identityClient = new CommunicationIdentityClient(connectionString);
-        const { user, token } = await identityClient.createUserAndToken(['voip', 'chat']);
+        // Scope the token to this meeting instead of the 24h default (ACS allows
+        // 60..1440 minutes), and delete the identity on exit so tokens can't
+        // outlive the meeting and identities don't accumulate on the resource.
+        const tokenMinutes = Math.min(1440, Math.max(60, Math.ceil(details.meetingTimeout / 60_000) + 30));
+        const { user, token } = await identityClient.createUserAndToken(['voip', 'chat'], {
+            tokenExpiresInMinutes: tokenMinutes,
+        });
+        this.acsUser = user;
+        this.identityClient = identityClient;
 
         await prepareAvatar();
 
@@ -254,7 +278,10 @@ export default class TeamsSdk {
                     throw new Error(`Teams SDK join failed: ${state.error.reason || 'join failed'}`);
                 }
                 if (state.call.page === 'accessDeniedTeamsMeeting') {
-                    throw new Error('Teams SDK join failed: access denied (tenant may block anonymous joins, or the meeting ID/passcode is wrong)');
+                    // Avoid the words "password"/"passcode": index.ts classifies
+                    // failure messages by substring and would report this as
+                    // "Wrong meeting password", hiding the real diagnosis.
+                    throw new Error('Teams SDK join failed: access denied (the tenant may block anonymous joins, or the meeting ID / entry code is wrong)');
                 }
                 if (state.call.callState === 'InLobby' || state.call.page === 'lobby') {
                     if (!lobbyAnnounced) {
@@ -393,24 +420,24 @@ export default class TeamsSdk {
             clearInterval(monitorTimer);
             details.start = false;
 
-            try {
-                if (!page.isClosed()) {
-                    const leaveResult = await Promise.race([
-                        page.evaluate(() => (window as any).__lmaLeave()),
-                        new Promise((r) => setTimeout(() => r('leave-timeout'), 8000)),
-                    ]);
-                    console.log(`[teams-sdk] left call (${leaveResult})`);
-                }
-            } catch (err) {
-                console.warn('[teams-sdk] leave failed (session may linger in the roster):', err);
-            }
-
             console.log(`Meeting ended (reason=${exitInfo.reason} trigger=${exitInfo.trigger ?? 'n/a'}).`);
             return exitInfo;
         } finally {
+            // Must run on every exit path, not just a normal meeting end: the
+            // lobby-timeout returns and the join throws would otherwise abandon
+            // the ACS session, leaving a "Leaving..." ghost in the roster.
+            await this.leaveCall(page);
             try {
                 await this.server?.close();
             } catch { /* noop */ }
+            if (this.identityClient && this.acsUser) {
+                try {
+                    await this.identityClient.deleteUser(this.acsUser);
+                    console.log('[teams-sdk] revoked ACS identity');
+                } catch (err) {
+                    console.warn('[teams-sdk] failed to delete ACS identity (token expires on its own):', err);
+                }
+            }
         }
     }
 }

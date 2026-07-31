@@ -508,6 +508,12 @@ Parameters:
     Type: String
     NoEcho: true
     Default: ""
+    AllowedPattern: "^(|endpoint=https://.+;accesskey=.+)$"
+    ConstraintDescription: >-
+      Must be blank, or a full Azure Communication Services connection string of
+      the form endpoint=https://<resource>.communication.azure.com/;accesskey=<key>
+      (copy the "Connection string" field from Settings > Keys in the Azure portal —
+      not the endpoint or key on their own).
     Description: >-
       (Optional) Azure Communication Services connection string
       (endpoint=https://...;accesskey=...). When provided, the Virtual

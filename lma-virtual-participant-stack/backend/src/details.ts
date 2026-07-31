@@ -233,6 +233,13 @@ class DetailsManager {
 export const detailsManager = new DetailsManager();
 export const details = detailsManager.details;
 
+export function resolveJoinMethod(override: string | undefined, credentialsPresent: boolean): 'dom' | 'sdk' {
+  const mode = (override || 'auto').toLowerCase();
+  if (mode === 'sdk') return 'sdk';
+  if (mode === 'dom') return 'dom';
+  return credentialsPresent ? 'sdk' : 'dom';
+}
+
 /**
  * Returns true when a chat message is a direct, two-token dismissal of LMA.
  * The matcher is deliberately strict — it accepts only messages that consist
@@ -256,13 +263,6 @@ export const details = detailsManager.details;
  *   any message that quotes the command in a longer sentence (including the
  *   bot's own intro), "Hello LMA", "endpoint", "ending soon".
  */
-export function resolveJoinMethod(override: string | undefined, credentialsPresent: boolean): 'dom' | 'sdk' {
-  const mode = (override || 'auto').toLowerCase();
-  if (mode === 'sdk') return 'sdk';
-  if (mode === 'dom') return 'dom';
-  return credentialsPresent ? 'sdk' : 'dom';
-}
-
 export function matchesEndCommand(message: string): boolean {
   if (!message) return false;
   const trimmed = message.trim();
