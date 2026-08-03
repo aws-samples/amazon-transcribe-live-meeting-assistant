@@ -305,7 +305,9 @@ test-lambdas: ## Run all Lambda function unit tests (no AWS; each dir isolated)
 		[ -z "$$files" ] && continue; \
 		RAN=$$((RAN+1)); \
 		echo -e "$(CYAN)  pytest $$d$(NC)"; \
-		if ! ( cd "$$d" && $(PYTHON) -m pytest -q $$files ); then FAILED=1; fi; \
+		if ! ( cd "$$d" && AWS_DEFAULT_REGION=$${AWS_DEFAULT_REGION:-us-east-1} \
+			AWS_REGION=$${AWS_REGION:-us-east-1} \
+			$(PYTHON) -m pytest -q $$files ); then FAILED=1; fi; \
 	done; \
 	if [ $$RAN -eq 0 ]; then echo -e "$(YELLOW)  no lambda tests found$(NC)"; fi; \
 	if [ $$FAILED -ne 0 ]; then echo -e "$(RED)❌ Some Lambda tests failed$(NC)"; exit 1; fi; \
