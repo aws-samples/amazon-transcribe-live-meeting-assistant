@@ -36,6 +36,7 @@ title: "LMA Documentation"
 - [Virtual Participant](virtual-participant.md) — Headless Chrome bot that joins Zoom, Teams, Chime, Google Meet, and WebEx meetings
 - [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md) — Per-user Zoom credentials, AI-driven sign-in loop, persistent Chromium profiles, AI DOM resolver fallback
 - [Zoom Meeting SDK Join](zoom-meeting-sdk.md) — Join Zoom via the Zoom Meeting Web SDK (alternative to web-client automation), credentials, and approval requirements
+- [Teams ACS SDK Join](teams-acs-sdk.md) — Join Microsoft Teams via Azure Communication Services interop (alternative to web-client automation), ACS resource setup and connection string
 
 ### Voice Assistant & Avatar
 

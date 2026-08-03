@@ -22,6 +22,12 @@ else
   PYTHON := $(CURDIR)/$(VENV_DIR)/bin/python
   PIP := $(CURDIR)/$(VENV_DIR)/bin/pip
 endif
+# setup-python installs cfn-lint into the venv, which is not on PATH in CI.
+ifeq ($(wildcard $(VENV_DIR)/bin/cfn-lint),)
+  CFN_LINT := cfn-lint
+else
+  CFN_LINT := $(CURDIR)/$(VENV_DIR)/bin/cfn-lint
+endif
 
 # Project paths
 AI_STACK_DIR := lma-ai-stack
@@ -171,9 +177,9 @@ lint-cfn: ## Validate CloudFormation templates with cfn-lint
 	for template in $(CFN_TEMPLATES); do \
 		if [ -f "$$template" ]; then \
 			echo "  Checking $$template..."; \
-			if ! cfn-lint --non-zero-exit-code error "$$template" > /dev/null 2>&1; then \
+			if ! $(CFN_LINT) --non-zero-exit-code error "$$template" > /dev/null 2>&1; then \
 				echo -e "$(RED)  FAIL: $$template$(NC)"; \
-				cfn-lint --non-zero-exit-code error "$$template"; \
+				$(CFN_LINT) --non-zero-exit-code error "$$template"; \
 				FAILED=1; \
 			fi; \
 		else \
@@ -235,7 +241,7 @@ format: ## Format Python code with ruff
 
 lint-cicd: ## CI/CD lint — checks only, no modifications
 	@echo "Running code quality checks (CI/CD mode — no auto-fix)..."
-	@if ! cfn-lint --non-zero-exit-code error $(AI_STACK_DIR)/deployment/lma-ai-stack.yaml; then \
+	@if ! $(CFN_LINT) --non-zero-exit-code error $(AI_STACK_DIR)/deployment/lma-ai-stack.yaml; then \
 		echo -e "$(RED)ERROR: cfn-lint failed!$(NC)"; \
 		exit 1; \
 	fi
@@ -299,7 +305,9 @@ test-lambdas: ## Run all Lambda function unit tests (no AWS; each dir isolated)
 		[ -z "$$files" ] && continue; \
 		RAN=$$((RAN+1)); \
 		echo -e "$(CYAN)  pytest $$d$(NC)"; \
-		if ! ( cd "$$d" && $(PYTHON) -m pytest -q $$files ); then FAILED=1; fi; \
+		if ! ( cd "$$d" && AWS_DEFAULT_REGION=$${AWS_DEFAULT_REGION:-us-east-1} \
+			AWS_REGION=$${AWS_REGION:-us-east-1} \
+			$(PYTHON) -m pytest -q $$files ); then FAILED=1; fi; \
 	done; \
 	if [ $$RAN -eq 0 ]; then echo -e "$(YELLOW)  no lambda tests found$(NC)"; fi; \
 	if [ $$FAILED -ne 0 ]; then echo -e "$(RED)❌ Some Lambda tests failed$(NC)"; exit 1; fi; \

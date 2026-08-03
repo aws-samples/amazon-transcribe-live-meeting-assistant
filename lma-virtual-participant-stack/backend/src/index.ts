@@ -4,6 +4,7 @@ import Chime from './chime.js';
 import Zoom from './zoom.js';
 import ZoomSdk from './zoom-sdk.js';
 import Teams from './teams.js';
+import TeamsSdk from './teams-sdk.js';
 import Webex from './webex.js';
 import { details, ExitInfo, formatExitMessage, didJoinMeeting } from './details.js';
 import { transcriptionService } from './scribe.js';
@@ -32,7 +33,12 @@ import {
 const WINDOW_WIDTH = 1920;
 const WINDOW_HEIGHT = 1080 - 130;
 
-const getCloakLaunchArgs = (fingerprintSeed: number, simliEnabled: boolean): string[] => [
+const isTeamsPlatform = (platform: string): boolean => platform.toUpperCase() === 'TEAMS';
+
+const isTeamsSdkJoin = (): boolean =>
+    isTeamsPlatform(details.invite.meetingPlatform) && details.teamsMethod === 'sdk';
+
+const getCloakLaunchArgs = (fingerprintSeed: number, needWebrtcHostCandidates: boolean): string[] => [
     `--fingerprint=${fingerprintSeed}`,
     `--fingerprint-screen-width=${WINDOW_WIDTH}`,
     `--fingerprint-screen-height=${WINDOW_HEIGHT}`,
@@ -69,14 +75,16 @@ const getCloakLaunchArgs = (fingerprintSeed: number, simliEnabled: boolean): str
     '--no-first-run',
     '--no-default-browser-check',
     // CloakBrowser's compiled WebRTC IP-leak patch suppresses ALL ICE host
-    // candidates by default, which prevents the Simli avatar's page-to-page
-    // WebRTC video bridge (Simli page -> meeting page) from ever connecting
-    // (connectionState stays 'new'). Both flags are required to restore host
-    // candidate gathering; verified empirically. Only the container's private
-    // RFC1918 IP is exposed, and no proxy is in use, so this leaks nothing the
-    // TCP connection doesn't already reveal. See simli-avatar.ts bridge.
-    ...(simliEnabled ? ['--force-webrtc-ip-handling-policy=default'] : []),
-    ...(simliEnabled ? ['--webrtc-ip-handling-policy=default'] : []),
+    // candidates by default, which prevents any in-page WebRTC media from
+    // connecting: the Simli avatar's page-to-page video bridge, and the ACS
+    // calling SDK's media transport for the Teams SDK join path (the call
+    // signals fine but media setup fails and ACS drops the call with
+    // code=490 subCode=4502 while still in the lobby). Both flags are
+    // required to restore host candidate gathering; verified empirically.
+    // Only the container's private RFC1918 IP is exposed, and no proxy is in
+    // use, so this leaks nothing the TCP connection doesn't already reveal.
+    ...(needWebrtcHostCandidates ? ['--force-webrtc-ip-handling-policy=default'] : []),
+    ...(needWebrtcHostCandidates ? ['--webrtc-ip-handling-policy=default'] : []),
 ];
 
 // Global variables for graceful shutdown
@@ -344,7 +352,11 @@ const main = async (): Promise<void> => {
         humanPreset: 'default',
         userDataDir,
         viewport: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT },
-        args: getCloakLaunchArgs(fingerprintSeed, simliAvatar.isSimliEnabled()),
+        args: (() => {
+            const needWebrtc = simliAvatar.isSimliEnabled() || isTeamsSdkJoin();
+            console.log(`[browser] WebRTC host-candidate flags: ${needWebrtc ? 'ENABLED' : 'disabled'}`);
+            return getCloakLaunchArgs(fingerprintSeed, needWebrtc);
+        })(),
         launchOptions: {
             ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
         },
@@ -358,8 +370,9 @@ const main = async (): Promise<void> => {
     await new Promise(resolve => setTimeout(resolve, 2000));
     console.log('✓ Chrome launched with remote debugging on port 9222');
 
-    const zoomSdkPath = details.invite.meetingPlatform === 'ZOOM' && details.zoomMethod === 'sdk';
-    if (isFresh && !zoomSdkPath) {
+    const platform = details.invite.meetingPlatform;
+    const sdkPath = (platform === 'ZOOM' && details.zoomMethod === 'sdk') || isTeamsSdkJoin();
+    if (isFresh && !sdkPath) {
         if (statusManager) {
             await statusManager.setWarmingProfile();
         }
@@ -372,8 +385,8 @@ const main = async (): Promise<void> => {
         } catch (err) {
             console.warn('[warmup] Warmup error (non-fatal, continuing to meeting):', err);
         }
-    } else if (zoomSdkPath) {
-        console.log('[warmup] Skipping warmup (Zoom SDK path does not visit zoom.us)');
+    } else if (sdkPath) {
+        console.log('[warmup] Skipping warmup (SDK join path does not visit the meeting platform site)');
     }
 
     // Now that warmup (if any) is done, publish the VNC endpoint so the user's
@@ -584,7 +597,7 @@ const main = async (): Promise<void> => {
         return avatarPrepared;
     };
 
-    let meeting: Chime | Zoom | ZoomSdk | Teams | Webex;
+    let meeting: Chime | Zoom | ZoomSdk | Teams | TeamsSdk | Webex;
     let success = false;
     let exitInfo: ExitInfo | null = null;
 
@@ -609,7 +622,8 @@ const main = async (): Promise<void> => {
                 break;
             case 'TEAMS':
             case 'Teams':
-                meeting = new Teams();
+                meeting = details.teamsMethod === 'sdk' ? new TeamsSdk() : new Teams();
+                console.log(`Teams join method: ${details.teamsMethod}`);
                 break;
             case 'WEBEX':
                 meeting = new Webex();
