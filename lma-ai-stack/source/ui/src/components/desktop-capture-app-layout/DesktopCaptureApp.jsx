@@ -123,7 +123,7 @@ const COMPARISON = [
 // Drawn inline as SVG rather than shipping a screenshot: it stays crisp at any
 // zoom, needs no build asset, and the colors are the same ones IconFactory.Make()
 // uses in the app (idle #535B66, recording #D42A2A).
-const TrayGlyph = ({ recording }) => (
+const TrayGlyph = ({ recording = false }) => (
   <svg width="34" height="34" viewBox="0 0 32 32" role="img" aria-label={recording ? 'Recording' : 'Idle'}>
     <circle cx="16" cy="16" r="15" fill={recording ? '#D42A2A' : '#535B66'} />
     {recording ? (
@@ -137,7 +137,6 @@ const TrayGlyph = ({ recording }) => (
   </svg>
 );
 TrayGlyph.propTypes = { recording: PropTypes.bool };
-TrayGlyph.defaultProps = { recording: false };
 
 // Compact "this is the icon, in both states" strip used in the Windows steps.
 const TrayIconLegend = () => (
@@ -233,8 +232,8 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
           <li>
             <Box variant="p">
               <strong>Open the app</strong> from the <strong>Dock</strong> (the installer adds it there) or from
-              Spotlight (<strong>⌘-Space</strong>, type <strong>LMA Capture Client</strong>). An <strong>LMA</strong> icon
-              appears in the menu bar at the top-right.
+              Spotlight (<strong>⌘-Space</strong>, type <strong>LMA Capture Client</strong>). An <strong>LMA</strong>
+              {' icon appears in the menu bar at the top-right.'}
             </Box>
           </li>
           <li>
@@ -294,8 +293,9 @@ const MacInstall = ({ zipName, copyToClipboard }) => (
             the meeting alongside the audio. Off by default; reuses the Screen Recording permission you already granted.
           </li>
           <li>
-            <strong>Launch or relaunch:</strong> press <strong>⌘-Space</strong>, type <strong>LMA Capture Client</strong>,
-            and press Return &mdash; or run <code>open -a &quot;LMA Capture Client&quot;</code>.
+            <strong>Launch or relaunch:</strong> press <strong>⌘-Space</strong>, type{' '}
+            <strong>LMA Capture Client</strong>, and press Return &mdash; or run{' '}
+            <code>open -a &quot;LMA Capture Client&quot;</code>.
           </li>
         </ul>
       </SpaceBetween>
@@ -488,8 +488,9 @@ const WindowsInstall = ({ zipName, copyToClipboard }) => (
         </Box>
         <Box variant="p">
           <strong>No microphone / &quot;access denied&quot;.</strong> Enable{' '}
-          <strong>Settings &rsaquo; Privacy &amp; security &rsaquo; Microphone</strong> (both <em>Microphone access</em>{' '}
-          and <em>Let desktop apps access your microphone</em>), then restart the app. System audio is unaffected.
+          <strong>Settings &rsaquo; Privacy &amp; security &rsaquo; Microphone</strong> (both <em>Microphone access</em>
+          {' and '}
+          <em>Let desktop apps access your microphone</em>), then restart the app. System audio is unaffected.
         </Box>
         <Box variant="p">
           <strong>Unfamiliar errors scroll past during install (e.g. &quot;log4net:ERROR&quot;).</strong> If the script
@@ -728,10 +729,10 @@ const DesktopCaptureApp = () => {
             ariaLabels={{ tableLabel: 'Desktop Capture App versus Virtual Participant comparison' }}
           />
           <Box variant="small" color="text-body-secondary">
-            In short: choose the <strong>Desktop Capture App</strong> when you&apos;re attending yourself, want no visible
-            bot, need a platform the Virtual Participant doesn&apos;t support, or prefer to keep audio on your machine.
-            Choose the <Link href={`#${VIRTUAL_PARTICIPANT_PATH}`}>Virtual Participant</Link> when you need per-speaker
-            names, an in-meeting voice assistant, screen/video capture, or hands-off unattended recording.
+            In short: choose the <strong>Desktop Capture App</strong> when you&apos;re attending yourself, want no
+            visible bot, need a platform the Virtual Participant doesn&apos;t support, or prefer to keep audio on your
+            machine. Choose the <Link href={`#${VIRTUAL_PARTICIPANT_PATH}`}>Virtual Participant</Link> when you need
+            per-speaker names, an in-meeting voice assistant, screen/video capture, or hands-off unattended recording.
           </Box>
         </SpaceBetween>
       </Container>
