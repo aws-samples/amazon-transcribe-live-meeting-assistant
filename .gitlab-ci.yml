@@ -53,9 +53,10 @@ code_checks:
   before_script:
     - apt-get update -y
     - apt-get install -y make curl git
-    # Node 20 (matches .nvmrc), arch-detected tarball (runner pool may be arm64).
+    # Node 20 (>=20.19 required by vite 8 / rolldown / jsdom engines; their native
+    # bindings are optional deps that npm silently skips on an older engine).
     - NODE_ARCH=$(case "$(uname -m)" in x86_64) echo x64;; aarch64|arm64) echo arm64;; *) echo x64;; esac)
-    - curl -fsSL https://nodejs.org/dist/v20.18.1/node-v20.18.1-linux-$NODE_ARCH.tar.xz | tar -xJ -C /usr/local --strip-components=1
+    - curl -fsSL https://nodejs.org/dist/v20.19.5/node-v20.19.5-linux-$NODE_ARCH.tar.xz | tar -xJ -C /usr/local --strip-components=1
     - node --version && npm --version
     # Python venv + lint tools + SDK/CLI with test extras (used by all pytest suites).
     - make setup-python
