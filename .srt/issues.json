@@ -45542,5 +45542,46 @@
     "status": "Open",
     "firstDetectedAt": "2026-06-16T19:42:04.115Z",
     "assessmentCount": 2
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/lma_sdk/lma_sdk/models/publish.py",
+    "line": 22,
+    "issue": "Possible hardcoded password: 'zip_app_src_with_token_replace'",
+    "fix": "Remove hardcoded password strings from source code. Create a .env file named after the Python file (e.g., for script.py create script.env in the same directory) containing the ACTUAL secret values extracted from the code. Update the Python code to: 1) add 'from dotenv import load_dotenv' import if not present, 2) call load_dotenv('script.env') near the top of the file to load the environment file, 3) use os.environ.get() to read the values. Add *.env to the project root .gitignore.",
+    "check_id": "B105",
+    "priority": "High",
+    "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
+    "status": "suppressed",
+    "assessmentCount": 1,
+    "suppressionReason": "False positive - ZIP_APP_SRC_WITH_TOKEN_REPLACE is a StackPackageType enum value, not a hardcoded password. Matches the existing suppression for the adjacent ZIP_WITH_TOKEN_REPLACE member of the same enum."
+  },
+  {
+    "source": "security-matrix",
+    "path": "lma-desktop-capture-app-stack/template.yaml",
+    "resourceType": "AWS::Lambda::Function",
+    "resourceName": "CodeBuildTriggerFunction",
+    "issue": "Lambda function lacks CloudWatch alarms for monitoring",
+    "fix": "Create CloudWatch alarms for the following Lambda metrics: Errors,Throttles,Duration,Invocations,ConcurrentExecutions,DeadLetterErrors. Configure alarm actions (e.g., SNS notifications) to assign an owner who will monitor and respond to incidents.",
+    "priority": "HIGH",
+    "check_id": "LAMBDA-011",
+    "status": "suppressed",
+    "isCustomResource": false,
+    "assessmentCount": 1,
+    "suppressionReason": "CloudWatch alarms for individual Lambda functions are not provisioned by default to keep the stack cost-efficient for development deployments. Operators can add alarms via the CloudWatch console or by extending the CloudFormation templates. This is documented as a production hardening recommendation in the Well-Architected assessment."
+  },
+  {
+    "source": "security-matrix",
+    "path": "lma-desktop-capture-app-stack/template.yaml",
+    "resourceType": "AWS::Lambda::Function",
+    "resourceName": "CodeBuildTriggerFunction",
+    "issue": "Lambda function shares an IAM execution role with another function",
+    "fix": "Create a unique IAM execution role for this Lambda function instead of sharing role GetAtt:LambdaExecutionRole with . Lambda functions should have a 1:1 relationship with IAM execution roles.",
+    "priority": "HIGH",
+    "check_id": "LAMBDA-012",
+    "status": "suppressed",
+    "isCustomResource": false,
+    "assessmentCount": 1,
+    "suppressionReason": "CodeBuildTriggerFunction is the only Lambda function in this stack, so its execution role is not actually shared with another function. The role is scoped to this stack's own resources and follows the one-role-per-stack pattern used across LMA. Splitting roles per function is noted as a production hardening recommendation."
   }
 ]
