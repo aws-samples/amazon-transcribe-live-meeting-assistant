@@ -1,8 +1,8 @@
 # checkov:skip=CKV_DOCKER_2: "Health monitored by ECS target-group health check on /health/check endpoint rather than container HEALTHCHECK"
-ARG NODE_VERSION=20
+ARG NODE_VERSION=22
 
 # First, build the project
-FROM public.ecr.aws/docker/library/node:20-bookworm AS builder
+FROM public.ecr.aws/docker/library/node:${NODE_VERSION}-bookworm AS builder
 
 WORKDIR /app
 
@@ -66,7 +66,7 @@ RUN set -eux; \
     /usr/local/bin/ffmpeg -version
 
 # Now create the runtime image and copy the build artifacts into it
-FROM public.ecr.aws/docker/library/node:20-slim AS runtime
+FROM public.ecr.aws/docker/library/node:${NODE_VERSION}-slim AS runtime
 
 # Apply all pending security patches to resolve Mirador/ECR container findings.
 #
