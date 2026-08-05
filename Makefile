@@ -81,8 +81,8 @@ help: ## Show this help message
 .DEFAULT_GOAL := all
 all: lint ## Run all linting (default)
 
-# Required Node.js version (major) - must match .nvmrc
-NODE_VERSION := 20
+# Required Node.js version (major) - keep in sync with .gitlab-ci.yml
+NODE_VERSION := 22
 
 ##@ Setup
 setup: setup-node setup-python setup-cli-dev ## Set up dev environment (Node version, Python venv, CLI)

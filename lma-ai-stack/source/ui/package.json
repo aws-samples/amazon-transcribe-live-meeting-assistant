@@ -3,7 +3,7 @@
   "version": "<VERSION_TOKEN>",
   "private": true,
   "engines": {
-    "node": "^20.19.0 || >=22.12.0",
+    "node": "^22.22.2 || >=24.15.0",
     "npm": ">=10.0.0"
   },
   "type": "module",
