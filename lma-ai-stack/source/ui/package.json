@@ -3,7 +3,7 @@
   "version": "<VERSION_TOKEN>",
   "private": true,
   "engines": {
-    "node": "^20.19.0 || >=22.12.0",
+    "node": "^22.22.2 || >=24.15.0",
     "npm": ">=10.0.0"
   },
   "type": "module",
@@ -79,7 +79,7 @@
     "eslint-plugin-prettier": "^4.2.1",
     "eslint-plugin-react": "^7.37.4",
     "eslint-plugin-react-hooks": "^4.6.2",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.1",
     "prettier": "^2.8.8",
     "vite": "^8.2.0",
     "vitest": "^4.1.10"

@@ -112,7 +112,7 @@ export const writeCallEvent = async (
     const putCmd = new PutRecordCommand(putParams);
     try {
         // MUST be awaited: without it the surrounding try/catch cannot catch a
-        // rejection (e.g. ProvisionedThroughputExceededException), and Node 20's
+        // rejection (e.g. ProvisionedThroughputExceededException), and Node's
         // default unhandled-rejection behaviour then kills the whole task —
         // dropping every concurrent call.
         await kinesisClient.send(putCmd);
