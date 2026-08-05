@@ -125,6 +125,178 @@ public sealed class VideoCapture
         return outList;
     }
 
+    // MARK: - Thumbnails (Settings picker)
+
+    /// <summary>
+    /// Raw BGRA pixels of a source preview (top-down rows, 4 bytes/pixel). The
+    /// engine stays UI-framework-agnostic, so the App layer converts this to a
+    /// WPF BitmapSource (PixelFormats.Bgr32 — GDI leaves the alpha byte 0, which
+    /// Bgra32 would render fully transparent).
+    /// </summary>
+    public readonly record struct ThumbnailImage(byte[] PixelsBgra, int Width, int Height);
+
+    /// <summary>
+    /// One-shot still of a source, scaled so its longest edge is `maxPixel`, for
+    /// the picker's preview. Mirrors macOS VideoCapture.thumbnail(sourceID:).
+    ///
+    /// Best-effort by design — returns null when the source is gone (window
+    /// closed, display unplugged) or the copy fails; the picker shows the icon
+    /// placeholder instead, so a missing preview never blocks choosing a source.
+    ///
+    /// Plain GDI (CreateDC/StretchBlt for displays, PrintWindow for windows)
+    /// rather than ScreenRecorderLib: a thumbnail must not spin up the capture
+    /// pipeline (encoder session, capture thread) twelve times just to draw a
+    /// dropdown, and GDI needs no permission on Windows. PW_RENDERFULLCONTENT
+    /// makes PrintWindow include DirectComposition surfaces (Chromium, Electron,
+    /// UWP), which plain WM_PRINT misses.
+    /// </summary>
+    public static ThumbnailImage? Thumbnail(string sourceId, int maxPixel = 320)
+    {
+        try
+        {
+            if (sourceId.StartsWith("window:")
+                && long.TryParse(sourceId.AsSpan("window:".Length), out var handle))
+                return WindowThumbnail((IntPtr)handle, maxPixel);
+
+            string device = "";
+            if (sourceId.StartsWith("display:"))
+                device = sourceId.Substring("display:".Length);
+            else if (sourceId.Length == 0)
+            {
+                // Empty id = the picker default = the FIRST display (must agree
+                // with ListSources / ResolveSource).
+                var displays = Recorder.GetDisplays();
+                if (displays.Count > 0) device = displays[0].DeviceName;
+            }
+            if (device.Length == 0) return null;
+            return DisplayThumbnail(device, maxPixel);
+        }
+        catch
+        {
+            return null; // preview is optional; never let it break the picker
+        }
+    }
+
+    private static ThumbnailImage? DisplayThumbnail(string deviceName, int maxPixel)
+    {
+        var (w, h) = DisplayResolution(deviceName);
+        if (w <= 0 || h <= 0) return null;
+        // A DC for THIS display: coordinates start at (0,0) regardless of where
+        // the monitor sits in the virtual desktop (no negative-origin math).
+        var hdcSrc = CreateDC(null, deviceName, null, IntPtr.Zero);
+        if (hdcSrc == IntPtr.Zero) return null;
+        try { return ScaleAndRead(hdcSrc, 0, 0, w, h, maxPixel); }
+        finally { DeleteDC(hdcSrc); }
+    }
+
+    private static ThumbnailImage? WindowThumbnail(IntPtr hwnd, int maxPixel)
+    {
+        if (!GetWindowRect(hwnd, out var r)) return null;
+        int w = r.Right - r.Left, h = r.Bottom - r.Top;
+        if (w <= 0 || h <= 0) return null;
+
+        var hdcScreen = GetDC(IntPtr.Zero);
+        if (hdcScreen == IntPtr.Zero) return null;
+        var hdcFull = CreateCompatibleDC(hdcScreen);
+        var hbmFull = CreateCompatibleBitmap(hdcScreen, w, h);
+        var oldFull = SelectObject(hdcFull, hbmFull);
+        try
+        {
+            // Full-size render first (PrintWindow can't scale), then scale down.
+            if (!PrintWindow(hwnd, hdcFull, PW_RENDERFULLCONTENT)) return null;
+            return ScaleAndRead(hdcFull, 0, 0, w, h, maxPixel);
+        }
+        finally
+        {
+            SelectObject(hdcFull, oldFull);
+            DeleteObject(hbmFull);
+            DeleteDC(hdcFull);
+            ReleaseDC(IntPtr.Zero, hdcScreen);
+        }
+    }
+
+    /// <summary>
+    /// StretchBlt a source DC region into a thumbnail-sized bitmap (HALFTONE for
+    /// legible downscaling) and read the pixels back as top-down 32-bit BGRA.
+    /// </summary>
+    private static ThumbnailImage? ScaleAndRead(
+        IntPtr hdcSrc, int srcX, int srcY, int srcW, int srcH, int maxPixel)
+    {
+        double scale = Math.Min(1.0, (double)maxPixel / Math.Max(srcW, srcH));
+        int tw = Math.Max(1, (int)(srcW * scale));
+        int th = Math.Max(1, (int)(srcH * scale));
+
+        var hdcScreen = GetDC(IntPtr.Zero);
+        if (hdcScreen == IntPtr.Zero) return null;
+        var hdcMem = CreateCompatibleDC(hdcScreen);
+        var hbm = CreateCompatibleBitmap(hdcScreen, tw, th);
+        var old = SelectObject(hdcMem, hbm);
+        try
+        {
+            SetStretchBltMode(hdcMem, HALFTONE);
+            SetBrushOrgEx(hdcMem, 0, 0, IntPtr.Zero);
+            if (!StretchBlt(hdcMem, 0, 0, tw, th, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY))
+                return null;
+
+            var bmi = new BITMAPINFOHEADER
+            {
+                biSize = Marshal.SizeOf<BITMAPINFOHEADER>(),
+                biWidth = tw,
+                biHeight = -th,   // negative = top-down rows
+                biPlanes = 1,
+                biBitCount = 32,
+                biCompression = 0, // BI_RGB
+            };
+            var pixels = new byte[tw * th * 4];
+            // GetDIBits requires the bitmap to be unselected from its DC.
+            SelectObject(hdcMem, old);
+            if (GetDIBits(hdcMem, hbm, 0, (uint)th, pixels, ref bmi, DIB_RGB_COLORS) == 0)
+                return null;
+            return new ThumbnailImage(pixels, tw, th);
+        }
+        finally
+        {
+            SelectObject(hdcMem, old);
+            DeleteObject(hbm);
+            DeleteDC(hdcMem);
+            ReleaseDC(IntPtr.Zero, hdcScreen);
+        }
+    }
+
+    private const int HALFTONE = 4;
+    private const uint SRCCOPY_RASTER = 0x00CC0020;
+    private const int SRCCOPY = unchecked((int)SRCCOPY_RASTER);
+    private const uint PW_RENDERFULLCONTENT = 0x00000002;
+    private const uint DIB_RGB_COLORS = 0;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BITMAPINFOHEADER
+    {
+        public int biSize, biWidth, biHeight;
+        public short biPlanes, biBitCount;
+        public int biCompression, biSizeImage, biXPelsPerMeter, biYPelsPerMeter,
+                   biClrUsed, biClrImportant;
+    }
+
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateDC(string? lpszDriver, string lpszDevice, string? lpszOutput, IntPtr lpInitData);
+    [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int cx, int cy);
+    [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hdc, IntPtr h);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr ho);
+    [DllImport("gdi32.dll")] private static extern int SetStretchBltMode(IntPtr hdc, int mode);
+    [DllImport("gdi32.dll")] private static extern bool SetBrushOrgEx(IntPtr hdc, int x, int y, IntPtr lppt);
+    [DllImport("gdi32.dll")]
+    private static extern bool StretchBlt(IntPtr hdcDest, int xDest, int yDest, int wDest, int hDest,
+                                          IntPtr hdcSrc, int xSrc, int ySrc, int wSrc, int hSrc, int rop);
+    [DllImport("gdi32.dll")]
+    private static extern int GetDIBits(IntPtr hdc, IntPtr hbm, uint start, uint cLines,
+                                        byte[] lpvBits, ref BITMAPINFOHEADER lpbmi, uint usage);
+    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hwnd, IntPtr hDC, uint nFlags);
+
     // MARK: - Display/window metadata (Win32)
     //
     // These use plain user32 P/Invoke rather than ScreenRecorderLib properties so
@@ -326,7 +498,11 @@ public sealed class VideoCapture
         catch { /* best effort */ }
         finally
         {
-            try { rec.Dispose(); } catch { }
+            // Dispose on a worker: a recorder whose session never completed can
+            // BLOCK inside Dispose, and this method's caller (StopVideo) still
+            // has END_VIDEO to send — a hang here silently loses the recording
+            // server-side even though every byte was already delivered.
+            _ = Task.Run(() => { try { rec.Dispose(); } catch { } });
             _stream?.Dispose();
             _stream = null;
         }
@@ -380,35 +556,72 @@ public sealed class VideoCapture
 }
 
 /// <summary>
-/// A write-only Stream that forwards every write to a callback (the video
-/// socket send). ScreenRecorderLib writes fragmented-MP4 bytes here as they are
-/// encoded, so nothing is staged to disk on the client. Reads/seeks are not
-/// supported (the encoder only writes).
+/// A Stream that forwards appended bytes to a callback (the video socket send).
+/// ScreenRecorderLib writes fragmented-MP4 bytes here as they are encoded, so
+/// nothing is staged to disk on the client.
+///
+/// MUST claim CanSeek: the Media Foundation MPEG4 sink underneath
+/// ScreenRecorderLib checks the target stream's capabilities and, given a
+/// non-seekable stream, silently produces NOTHING — Record() reports
+/// Recording→Finishing with zero writes and no OnRecordingFailed, and the
+/// recorder never completes (Dispose then wedges, which also blocked the
+/// END_VIDEO send). Verified against ScreenRecorderLib 6.2.0.
+///
+/// Seekability creates one wrinkle: at Stop the sink seeks BACK once into the
+/// already-written header to patch the mvhd duration, then seeks forward again.
+/// Bytes already sent over the socket can't be rewritten, so only writes that
+/// extend past the high-water mark are forwarded (the tail of a partially
+/// overlapping write). Dropping the patch is safe for fragmented MP4: players
+/// take timing from the moof fragments, and a zero header duration is exactly
+/// what live fMP4 streams (including the macOS client's) look like.
 /// </summary>
 internal sealed class CallbackStream : Stream
 {
     private readonly Action<byte[]> _onWrite;
     private long _position;
+    private long _length;      // high-water mark = bytes forwarded so far
 
     public CallbackStream(Action<byte[]> onWrite) { _onWrite = onWrite; }
 
     public override bool CanRead => false;
-    public override bool CanSeek => false;
+    public override bool CanSeek => true;
     public override bool CanWrite => true;
-    public override long Length => _position;
-    public override long Position { get => _position; set { } }
+    public override long Length => _length;
+    public override long Position { get => _position; set => _position = value; }
 
     public override void Write(byte[] buffer, int offset, int count)
     {
         if (count <= 0) return;
-        var chunk = new byte[count];
-        Buffer.BlockCopy(buffer, offset, chunk, 0, count);
-        _position += count;
-        _onWrite(chunk);
+        long end = _position + count;
+        if (end > _length)
+        {
+            // Forward only the portion beyond what has already been sent. For
+            // normal appends (_position == _length) that is the whole write.
+            // Clamped: a (never-observed) seek PAST the end would make the raw
+            // difference negative and over-read the buffer.
+            int skip = (int)Math.Clamp(_length - _position, 0, count);
+            var chunk = new byte[count - skip];
+            Buffer.BlockCopy(buffer, offset + skip, chunk, 0, chunk.Length);
+            _onWrite(chunk);
+            _length = end;
+        }
+        // else: entirely inside already-sent bytes (the stop-time header patch)
+        // — drop it; the socket stream is append-only.
+        _position = end;
+    }
+
+    public override long Seek(long offset, SeekOrigin origin)
+    {
+        _position = origin switch
+        {
+            SeekOrigin.Begin => offset,
+            SeekOrigin.Current => _position + offset,
+            _ => _length + offset,
+        };
+        return _position;
     }
 
     public override void Flush() { }
     public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void SetLength(long value) { /* sink pre-sizing hint — nothing to allocate */ }
 }
