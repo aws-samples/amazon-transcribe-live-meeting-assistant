@@ -17,8 +17,8 @@
   },
   "keywords": [],
   "dependencies": {
-    "@aws-sdk/client-kinesis": "^3.1093.0",
-    "@aws-sdk/client-transcribe-streaming": "^3.1093.0",
+    "@aws-sdk/client-kinesis": "^3.1101.0",
+    "@aws-sdk/client-transcribe-streaming": "^3.1101.0",
     "amazon-cognito-srp": "^1.0.1",
     "commander": "^15.0.0",
     "dotenv": "^17.4.2",
@@ -34,7 +34,7 @@
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
-    "eslint": "^10.7.0",
+    "eslint": "^10.8.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
