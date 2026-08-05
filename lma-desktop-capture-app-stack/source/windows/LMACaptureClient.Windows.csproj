@@ -33,7 +33,21 @@
     <!-- We build the UI in code (no XAML markup) so there is no App.xaml entry
          point; Program.Main is our explicit entry point. -->
     <StartupObject>LMA.Program</StartupObject>
+    <!-- ScreenRecorderLib is a C++/CLI mixed-mode assembly: its .targets refuses
+         to build on 'AnyCPU' and picks the native DLL off $(Platform). Listing
+         x64 in Platforms is NOT enough — that only declares which platforms are
+         legal, while MSBuild still defaults the ACTIVE $(Platform) to AnyCPU
+         (set in Microsoft.Common.props, imported before this PropertyGroup), so
+         a plain `dotnet build/publish` failed with "does not work correctly on
+         'AnyCPU' platform". Set it explicitly, but leave an explicit
+         -p:Platform=... on the command line able to win.
+         AppendPlatformToOutputPath: a non-AnyCPU platform normally inserts an
+         extra "x64\" segment (bin\x64\Release\...); suppress it so the output
+         stays at bin\$(Configuration)\net8.0-windows\win-x64\ where
+         build-windows.ps1 and the README's by-hand instructions expect it. -->
     <Platforms>x64</Platforms>
+    <Platform Condition="'$(Platform)' == '' or '$(Platform)' == 'AnyCPU'">x64</Platform>
+    <AppendPlatformToOutputPath>false</AppendPlatformToOutputPath>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
   </PropertyGroup>
