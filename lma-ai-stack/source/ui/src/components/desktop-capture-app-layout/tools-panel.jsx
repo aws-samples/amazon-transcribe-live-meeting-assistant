@@ -12,10 +12,11 @@ const header = <h2>Desktop Capture App</h2>;
 const content = (
   <>
     <p>
-      The LMA Capture Client is a native application that streams your microphone, your computer&apos;s system (meeting)
-      audio, and optionally your screen to LMA. Because it captures operating-system audio rather than a browser tab, it
-      can transcribe meetings joined from native desktop apps &mdash; Zoom, Microsoft Teams, Cisco Webex, Slack huddles,
-      or phone bridges &mdash; with no bot or extra attendee.
+      The Desktop Capture App is a native application that streams your microphone, your computer&apos;s system
+      (meeting) audio, and optionally your screen to LMA. It installs as <strong>LMA Capture Client</strong>. Because it
+      captures operating-system audio rather than a browser tab, it can transcribe meetings joined from native desktop
+      apps &mdash; Zoom, Microsoft Teams, Cisco Webex, Slack huddles, or phone bridges &mdash; with no bot or extra
+      attendee.
     </p>
     <h3>Features</h3>
     <ul>

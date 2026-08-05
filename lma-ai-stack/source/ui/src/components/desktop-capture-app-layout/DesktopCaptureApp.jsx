@@ -619,10 +619,11 @@ const DesktopCaptureApp = () => {
       >
         <SpaceBetween size="m">
           <Box variant="p">
-            The LMA Desktop Capture App is a lightweight native application that streams your microphone and your
-            computer&apos;s system (meeting) audio directly to LMA. Because it captures the operating system&apos;s
-            audio &mdash; not a browser tab &mdash; it can transcribe meetings you join from a{' '}
-            <strong>native Zoom, Teams, Webex, Slack, or phone-bridge app</strong>, which the{' '}
+            The Desktop Capture App is a lightweight native application that streams your microphone and your
+            computer&apos;s system (meeting) audio directly to LMA. It installs as <strong>LMA Capture Client</strong>,
+            the name to look for in Spotlight, the Start menu, and your system permission settings. Because it captures
+            the operating system&apos;s audio &mdash; not a browser tab &mdash; it can transcribe meetings you join from
+            a <strong>native Zoom, Teams, Webex, Slack, or phone-bridge app</strong>, which the{' '}
             <Link href={`#${BROWSER_EXTENSION_PATH}`}>Chrome Extension</Link> and{' '}
             <Link href={`#${STREAM_AUDIO_PATH}`}>Stream Audio</Link> options cannot. It adds no bot or extra attendee to
             the meeting.
