@@ -60,8 +60,10 @@ export default defineConfig({
         {
           label: "Meeting Sources",
           items: [
+            { label: "Meeting Sources Overview", slug: "meeting-sources" },
             { label: "Stream Audio", slug: "stream-audio" },
             { label: "Browser Extension", slug: "browser-extension" },
+            { label: "Desktop Capture App", slug: "desktop-capture-app" },
             { label: "Virtual Participant", slug: "virtual-participant" },
           ],
         },
@@ -164,8 +166,10 @@ export default defineConfig({
           label: "New & Uncategorized",
           items: [
             { label: "Amazon Quick Desktop Integration", slug: "amazon-quick-desktop-integration" },
+            { label: "Blog Update Proposal", slug: "blog-update-proposal" },
             { label: "Cloudformation Service Role", slug: "cloudformation-service-role" },
-            { label: "Meeting Sources", slug: "meeting-sources" },
+            { label: "Dependency Upgrade Validation Runbook", slug: "dependency-upgrade-validation-runbook" },
+            { label: "Teams Acs Sdk", slug: "teams-acs-sdk" },
             { label: "Upload Audio", slug: "upload-audio" },
             { label: "Virtual Participant Local Dev", slug: "virtual-participant-local-dev" },
             { label: "Zoom Credentials And Join Reliability", slug: "zoom-credentials-and-join-reliability" },

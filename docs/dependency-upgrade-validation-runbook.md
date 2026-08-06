@@ -1,3 +1,7 @@
+---
+title: "Dependency Upgrade Validation Runbook (PR #400)"
+---
+
 # Dependency Upgrade Validation Runbook (PR #400)
 
 This runbook validates the consolidated Dependabot batch (PR #400) beyond the
